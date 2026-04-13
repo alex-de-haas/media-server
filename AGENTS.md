@@ -1,8 +1,5 @@
 # AGENTS.md instructions for Media Server project
 
-## Notion Instructions
-- Use "Media Server Tasks" page for tracking and managing tasks.
-
 ## Documentation Instructions
 - Update `docs/specification.md` with any new features or changes.
 - Use `mermaid` diagrams where applicable to illustrate complex concepts.
