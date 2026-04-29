@@ -8,3 +8,8 @@
 ## Architecture Overview
 - The Media Server consists of a Next.js frontend and an ASP.NET backend.
 - The frontend communicates with the backend via REST APIs and SignalR for real-time updates.
+
+## Unit Testing
+- Use `xUnit` for backend unit tests.
+- Use `Imposter` for mocking dependencies in tests.
+- Ensure all new features have corresponding unit tests.

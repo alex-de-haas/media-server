@@ -3,22 +3,26 @@
 ## 1. Overview
 
 The Media Server is a self-hosted application for managing files, torrents, and media libraries (movies and TV series).  
-It provides a web-based UI built with **Next.js (TypeScript)** with **Tailwind** and **ShadCN components**. A backend built with **ASP.NET 10 Minimal API**. Using **SignalR** for real-time updates and background task progress reporting.
+It provides a web-based UI built with **Next.js (TypeScript)** with **Tailwind** and **ShadCN components**. The backend is built with **ASP.NET Core** and exposes its REST API through **Minimal API** endpoint definitions. The distributed application is orchestrated with **.NET Aspire**, using an Aspire AppHost as the code-first application model for the backend, frontend, and supporting infrastructure. The system uses **SignalR** for real-time updates and background task progress reporting.
 
-The system is designed to work on home servers using **Docker** and supports multiple physical storage roots for media files. It integrates with **TMDb API** for rich metadata about movies and TV series.
+The system is designed to work on home servers using **Docker** and supports multiple physical storage roots for media files. Build and deployment artifacts are published as Docker images to **GitHub Container Registry (GHCR)** by GitHub Actions. It integrates with **TMDb API** for rich metadata about movies and TV series.
 
 ## 2. High-Level Architecture
 
 ```mermaid
 flowchart TB
+	AH[".NET Aspire AppHost<br/>(Application Model)"]
 	FE["Next.js Frontend<br/>(TypeScript)"]
-	BE["ASP.NET 10 Backend API<br/>(Minimal API)"]
+	BE["ASP.NET Core Backend<br/>(Minimal API)"]
 	SR["SignalR Hub"]
 	BG["Background Services<br/>- Torrent Engine<br/>- Media Scanner<br/>- Metadata Fetcher"]
 	DB["SQLite Database"]
 	ST["Physical Storage<br/>(Multiple Roots)"]
 	TMDB["TMDb API"]
 
+	AH -.orchestrates.-> FE
+	AH -.orchestrates.-> BE
+	AH -.configures.-> DB
 	FE <-->|REST HTTPS| BE
 	FE <-->|WebSocket SignalR| SR
 	SR --- BE
@@ -40,13 +44,21 @@ flowchart TB
 - REST API consumption via fetch/axios
 
 ### Backend
-- ASP.NET 10
-- Minimal API
+- ASP.NET Core
+- Minimal API endpoint definitions
 - SignalR
 - MonoTorrent (torrent engine)
 - BackgroundServices / HostedServices
 - SQLite
 - TMDb API integration
+
+### Orchestration & Deployment
+- .NET Aspire AppHost
+- Aspire service defaults for shared telemetry, health checks, and service discovery
+- Aspire Docker hosting integration for Docker Compose artifact generation
+- Docker / Docker Compose for local and self-hosted deployment
+- GitHub Actions for CI/CD
+- GitHub Container Registry (GHCR) for published container images
 
 ## 4. Core Features
 
@@ -314,7 +326,70 @@ TORRENT_MAX_DOWNLOAD_SPEED
 TORRENT_MAX_UPLOAD_SPEED
 ```
 
-## 13. Future Enhancements
+## 13. Build, Packaging & Deployment
+
+### 13.1 .NET Aspire Application Model
+
+The project must include a .NET Aspire AppHost that acts as the single source of truth for the distributed application topology.
+
+The AppHost must model:
+- ASP.NET Core Minimal API backend
+- Next.js web frontend
+- Supporting infrastructure services, such as database, cache, reverse proxy, or observability components when added
+- Service references between frontend and backend
+- Environment variables required for local development and containerized deployment
+
+The AppHost should be used for local orchestration and for producing deployment artifacts. Production containers should run the actual application services, not the AppHost itself.
+
+### 13.2 Containerization Strategy
+
+The backend and frontend should be packaged as separate Docker images:
+- Backend image: ASP.NET Core application exposing Minimal API endpoints.
+- Frontend image: Next.js application running with the production Next.js server unless the frontend is later converted to a fully static export.
+
+Docker Compose should be the primary self-hosted deployment format. Generated or maintained Compose files must make service dependencies explicit and configure backend/frontend networking so that the frontend can reach the backend API and SignalR hub.
+
+### 13.3 GitHub Actions CI/CD
+
+A GitHub Actions workflow must be created to build and publish container artifacts.
+
+The workflow must:
+- Run on pushes to the main branch and on pull requests where validation is required.
+- Restore and build the .NET solution.
+- Install frontend dependencies and build the Next.js application.
+- Run backend unit tests with xUnit.
+- Build Docker images for the backend and frontend.
+- Publish Docker images to GitHub Container Registry (GHCR).
+- Tag images with at least the Git commit SHA and optionally `latest` for the main branch.
+- Use `GITHUB_TOKEN` with `packages: write` permissions for GHCR publishing.
+
+Example target image names:
+- `ghcr.io/<owner>/<repository>/media-server-api:<sha>`
+- `ghcr.io/<owner>/<repository>/media-server-web:<sha>`
+
+### 13.4 Deployment Flow
+
+```mermaid
+flowchart LR
+	DEV["Developer Push"]
+	GHA["GitHub Actions"]
+	TEST["Build & Test<br/>.NET + Next.js"]
+	IMG["Build Docker Images"]
+	GHCR["GitHub Container Registry"]
+	HOST["Docker Host"]
+	DC["docker compose pull && docker compose up -d"]
+
+	DEV --> GHA
+	GHA --> TEST
+	TEST --> IMG
+	IMG --> GHCR
+	GHCR --> HOST
+	HOST --> DC
+```
+
+The deployment host should pull the published images from GHCR and run them using Docker Compose. Secrets and environment-specific values must be provided through Compose environment files or host-level secret management, not baked into images.
+
+## 14. Future Enhancements
 - Media streaming (HLS/DASH)
 - Transcoding pipeline
 - User profiles
@@ -322,12 +397,12 @@ TORRENT_MAX_UPLOAD_SPEED
 - Subtitle management
 - Plugin system
 
-## 14. Non-Goals
+## 15. Non-Goals
 - Public torrent indexing
 - DRM-protected content playback
 - Cloud-only storage (initial version)
 
-## 15. Summary
+## 16. Summary
 
 This Media Server provides a modular, scalable foundation for:
 - File and directory management
@@ -335,4 +410,4 @@ This Media Server provides a modular, scalable foundation for:
 - Rich media libraries powered by TMDb
 - Real-time progress tracking via SignalR
 
-The architecture cleanly separates UI, API, and background processing, ensuring long-term maintainability and extensibility.
+The architecture cleanly separates UI, API, background processing, and deployment orchestration, ensuring long-term maintainability and extensibility.
