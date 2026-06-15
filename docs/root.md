@@ -2,115 +2,160 @@
 
 ## Overview
 
-Media Server is a self-hosted application for managing files, torrents, and
-media libraries for movies and TV series. It provides a web UI built with
-Next.js, TypeScript, Tailwind, and ShadCN components. The backend is built with
-ASP.NET Core Minimal APIs, SignalR, background services, SQLite, MonoTorrent,
-and TMDb integration.
+Media Server is a self-hosted, automation-first application for acquiring,
+organizing, and streaming movie and TV libraries. The defining goal is **maximum
+automation**: an operator adds a torrent and picks a destination catalog, and the
+system downloads it, organizes it into a clean library layout, identifies it,
+fetches metadata, probes media streams, and publishes it for playback — without
+further manual steps. The content then becomes available to clients such as
+Infuse over a Jellyfin-compatible API.
 
-The distributed application is containerized and run locally through the Docker
-Host Dev Model. The production runtime is distributed as a Docker Host module
-with strict `schemaVersion: "0.2"` metadata. Docker images are published to
-GitHub Container Registry by GitHub Actions.
+Media Server is built and distributed as a **Hosty runtime app** with manifest
+`schemaVersion: "app.0.1"`. It runs under Hosty Core-managed lifecycle, locally
+through the `localCommand` runtime profile and (later) as Docker images through
+the `docker` runtime profile. Hosty Core owns Host user authentication, app
+access assignment, app identity issuance, and app data backups.
+
+> This documentation supersedes the earlier "Docker Host module"
+> (`schemaVersion: "0.2"`) design. That gateway/module contract is retired; the
+> current target is the Hosty runtime app `app.0.1` contract.
+
+## Primary Use Case
+
+```mermaid
+flowchart LR
+  U["Operator"] -->|add .torrent/magnet + pick catalog| INTAKE
+  subgraph PROC["Processing pipeline (v1)"]
+    INTAKE["Intake"] --> DL["Download"] --> ORG["Organize (hardlink)"]
+    ORG --> ID["Identify (TMDb)"] --> PROBE["Probe (ffprobe)"] --> PUB["Publish"]
+  end
+  PUB --> AVAIL["Available in library"]
+  AVAIL --> INFUSE["Infuse / Jellyfin client"]
+```
 
 ## High-Level Architecture
 
 ```mermaid
 flowchart TB
-    DH["Docker Host Dev Model<br/>(Local Runtime)"]
-    FE["Next.js Frontend<br/>(TypeScript)"]
-    BE["ASP.NET Core Backend<br/>(Minimal API)"]
-    SR["SignalR Hub"]
-    BG["Background Services<br/>- Torrent Engine<br/>- Media Scanner<br/>- Metadata Fetcher"]
-    DB["SQLite Database"]
-    ST["Physical Storage<br/>(Multiple Roots)"]
-    TMDB["TMDb API"]
+  subgraph Hosty
+    CORE["Hosty Core<br/>users · app-code · identity · backups"]
+    SHELL["Shell (sandboxed iframe)"]
+  end
+  subgraph App["Media Server runtime app (com.haas.media-server)"]
+    WEB["web service (Next.js)<br/>UI + BFF + app session"]
+    subgraph API["api service (.NET)"]
+      ORCH["Automation Orchestrator"]
+      TOR["Torrent Engine (MonoTorrent)"]
+      ORG["Organizer (hardlink)"]
+      CAT["Catalog / Items"]
+      META["Metadata providers"]
+      PROBE["Media Probe (ffprobe)"]
+      JELLY["Jellyfin Compatibility API"]
+      JOBS["Jobs + SignalR hub"]
+    end
+  end
+  INFUSE["Infuse / Jellyfin client"]
+  TMDB["TMDb"]
+  DB[("SQLite + caches<br/>HOSTY_APP_DATA_DIR")]
+  CATFS[("Catalog roots<br/>files/ + library/")]
 
-    DH -.runs.-> FE
-    DH -.runs.-> BE
-    DH -.configures.-> DB
-    FE <-->|REST HTTPS| BE
-    FE <-->|WebSocket SignalR| SR
-    SR --- BE
-    BE --> BG
-    BG --> ST
-    BE --> DB
-    BG <--> TMDB
+  SHELL <-->|app-code launch, iframe| WEB
+  WEB <-->|HOSTY_DEPENDENCY_API_URL| API
+  WEB -.identity revalidate.- CORE
+  INFUSE <-->|MediaBrowser token + Range| JELLY
+  META <--> TMDB
+  ORCH --- TOR & ORG & META & PROBE & CAT
+  API --> DB
+  TOR --> CATFS
+  ORG --> CATFS
+  JELLY --> CATFS
 ```
 
 ## Technology Stack
 
-Frontend:
+Backend (`api` service):
 
-- Next.js App Router
-- TypeScript
-- React Server Components where applicable
-- ShadCN UI components
-- Tailwind CSS
-- SignalR JavaScript client
-- REST API consumption through `fetch` or `axios`
+- ASP.NET Core Minimal API.
+- EF Core over SQLite (single embedded database file, JSON columns for flexible
+  provider blobs).
+- MonoTorrent torrent engine as a hosted service.
+- FFprobe for media probing (FFmpeg only later, if transcoding is ever added).
+- SignalR for real-time job and download progress.
+- An extensible automation pipeline (the orchestrator).
 
-Backend:
+Frontend (`web` service):
 
-- ASP.NET Core
-- Minimal API endpoint definitions
-- SignalR
-- MonoTorrent
-- BackgroundServices and HostedServices
-- SQLite
-- TMDb API integration
+- Next.js App Router, TypeScript, Tailwind, ShadCN UI.
+- Acts as a backend-for-frontend: holds the Hosty app-origin session and proxies
+  REST/SignalR to `api`, so the browser stays same-origin and iframe-safe.
+- SignalR JavaScript client, SWR or React Query for client cache.
 
-Local runtime and deployment:
+Runtime and delivery:
 
-- Docker Host Dev Model for local running and Host-facing validation
-- Docker Host module metadata as the primary install contract
-- Docker Host shell app and gateway integration
-- Docker and Docker Compose for image builds, service wiring, or non-Host deployment
-- GitHub Actions
-- GitHub Container Registry
+- Hosty runtime app manifest (`apps/media-server/manifest.json`,
+  `schemaVersion: "app.0.1"`).
+- `dev` (`localCommand`) runtime profile for local development — default target
+  for v1.
+- `docker` runtime profile with images published to GitHub Container Registry —
+  introduced once external host-path mounts are available.
+- GitHub Actions for build, test, and image publishing.
 
 ## Feature Documentation
 
+- [Hosty runtime app](features/hosty-runtime-app.md)
+- [Catalogs](features/catalogs.md)
+- [Automation pipeline](features/automation-pipeline.md)
+- [Domain model](features/domain-model.md)
+- [Torrents and organizer](features/torrents-and-organizer.md)
+- [Metadata](features/metadata.md)
+- [Storage and data](features/storage-and-data.md)
+- [Jellyfin compatibility](features/jellyfin-compatibility.md)
 - [File and directory management](features/file-directory-management.md)
-- [Torrent management](features/torrent-management.md)
-- [Media libraries](features/media-libraries.md)
 - [Background tasks and progress](features/background-tasks.md)
-- [Jellyfin-compatible streaming](features/jellyfin-compatible-streaming.md)
 - [Frontend application](features/frontend-application.md)
-- [Host shell iframe compatibility](features/host-shell-iframe.md)
-- [Security and configuration](features/security-configuration.md)
-- [Build, packaging, and deployment](features/build-packaging-deployment.md)
-- [Docker Host module](features/docker-host-module.md)
+- [Security](features/security.md)
+- [Build and deployment](features/build-and-deployment.md)
+- [Watchlist and discovery](features/watchlist-and-discovery.md)
 
 ## Testing Expectations
 
 Backend unit tests must use xUnit. Dependencies should be mocked with Imposter.
 New features should include corresponding unit tests scoped to the behavior they
-introduce.
+introduce. Hosty integration concerns (identity, Shell embedding, SignalR,
+public endpoints) must be validated through Core-managed runtime profiles, not
+by forging tokens. Feature-specific testing requirements are documented in the
+relevant feature files.
 
-Feature-specific testing requirements are documented in the relevant feature
-files.
+## Roadmap
 
-## Future Enhancements
-
-- DASH playback.
-- Advanced transcoding profiles and hardware acceleration presets.
-- User profiles.
-- Watch history.
-- Subtitle management.
-- Plugin system.
+- **M0 — Scaffold.** `app.0.1` manifest, `api` + `web` services, `dev` + `docker`
+  profiles, Hosty app-code session in `web`, health checks, this documentation.
+- **M1 — Ingest happy path.** Torrent add + catalog → download → organize → scan
+  → TMDb → probe → catalog. Live activity in the UI. Closes the primary use case
+  on the server side.
+- **M2 — Jellyfin Direct Play.** System/Users/UserViews/Items/Images,
+  `PlaybackInfo`, and range-based direct streaming. Infuse connects, browses, and
+  plays.
+- **M3 — Playback state.** `Sessions/Playing*`, user data, resume, watched
+  threshold, season/series aggregates.
+- **M4 — Automation polish.** Reconciler, retries, review queue, manual match
+  override, scheduled scans, metadata refresh, app-data backups.
+- **M5 — Watchlist and discovery (future).** Custom content-source providers,
+  watchlist, release calendar.
+- **M6 — MCP / AI (future).** Use cases exposed as MCP tools for an AI agent.
 
 ## Non-Goals
 
+- Media conversion and transcoding (Direct Play / Direct Stream only).
 - Public torrent indexing.
 - DRM-protected content playback.
-- Cloud-only storage for the initial version.
+- Full Jellyfin server replacement (only the subset Infuse needs).
+- DLNA, live TV, music, photos, and books.
 
 ## Summary
 
-Media Server provides a modular foundation for file management, torrent-based
-content acquisition, TMDb-powered media libraries, Jellyfin-compatible playback,
-and real-time progress tracking. The architecture separates UI, API, background
-processing, storage, and deployment concerns so the application can run cleanly
-through the Docker Host Dev Model locally and as a Docker Host module in
-production.
+Media Server is an automation-first Hosty runtime app: a `.NET` `api` service and
+a Next.js `web` service under Hosty Core lifecycle. Its center of gravity is the
+automation pipeline that turns an added torrent into a clean, identified,
+metadata-rich, directly-playable library item with no manual steps, exposed to
+Infuse through a Jellyfin-compatible API.
