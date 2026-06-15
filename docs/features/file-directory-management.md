@@ -2,69 +2,42 @@
 
 ## Description
 
-Media Server manages files and directories across one or more configured
-storage roots. Every file operation must remain constrained to those roots and
-must reject directory traversal attempts.
+Media Server manages files and directories across configured catalog roots. Every
+file operation must stay constrained to those roots and reject directory
+traversal. This supports the organizer and operator file management; it is not a
+general filesystem browser.
 
-## Storage Roots
+## Sandbox
 
-Media Server supports attaching multiple physical directories as storage roots.
-Each root has:
+All file access is sandboxed to configured catalog roots (see
+[Catalogs](catalogs.md) and [Storage and data](storage-and-data.md)).
 
-- Unique ID.
-- Display name.
-- Absolute physical path.
-- Read and write permissions.
-- Free and total space.
-
-Example storage root:
-
-```json
-{
-  "id": "{uuid}",
-  "name": "Movies Disk",
-  "path": "/mnt/media/movies"
-}
-```
+- Resolve and normalize every path, then verify it is contained within a
+  configured root before any operation.
+- Reject symlink escapes and `..` traversal.
+- The UI cannot select arbitrary host directories; catalog roots are configured
+  through app settings, and (under `docker`) through Hosty-owned mounts.
 
 ## File Operations
 
-Supported operations:
-
-- Upload files.
-- Copy files.
-- Move files.
-- Delete files.
-- Rename files.
-
-Constraints:
-
-- Operations are restricted to attached storage roots.
-- Atomic operations should be used where the operating system supports them.
-- Large files must be handled with streams.
-- Multiple-file operations should be supported where practical.
+- Upload, copy, move, delete, rename.
+- Operations restricted to catalog roots.
+- Use atomic operations where the OS supports them; hardlink creation for the
+  organizer is atomic.
+- Stream large files; support multi-file operations where practical.
 
 ## Directory Operations
 
-Supported operations:
-
-- Create directory.
-- Copy directory recursively.
-- Move directory.
-- Delete directory recursively.
-- Rename directory.
-
-Additional behavior:
-
+- Create, copy (recursive), move, delete (recursive), rename.
 - Long operations report progress through SignalR.
-- All paths are validated against directory traversal attacks.
+- All paths validated against traversal.
 
 ## API Endpoints
 
-Example internal endpoints:
+Internal endpoints (under `/api`, behind Host identity):
 
 ```text
-GET    /api/files?path=/movies
+GET    /api/files?catalogId={id}&path=/library
 POST   /api/files/upload
 POST   /api/files/copy
 POST   /api/files/move
@@ -72,13 +45,13 @@ DELETE /api/files
 POST   /api/directories
 ```
 
+Paths are expressed relative to a catalog root, never as absolute host paths.
+
 ## Testing Expectations
 
-Backend tests should use xUnit and Imposter.
+Backend tests should use xUnit and Imposter. Required coverage:
 
-Required coverage:
-
-- Storage root resolution.
-- Path sandboxing and traversal rejection.
-- Copy, move, delete, rename, and create-directory behavior.
+- Catalog root resolution and containment checks.
+- Path sandboxing, traversal, and symlink-escape rejection.
+- Copy, move, delete, rename, create-directory behavior.
 - Long-running operation progress reporting.
