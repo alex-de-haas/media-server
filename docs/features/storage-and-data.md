@@ -37,12 +37,23 @@ Everything Hosty should back up lives under `HOSTY_APP_DATA_DIR`:
 
 ### Backup Consistency
 
-Because Hosty performs a directory-level backup, ensure the SQLite file is
-consistent at backup time:
+Hosty backups are **directory-level copies** of the primary `data/` directory,
+created by Core/Shell/CLI (`manual`, `scheduled`, `pre-update`, `pre-restore`,
+`pre-runtime-switch`); restore runs against a **stopped** app. Hosty does not
+expose an app-facing pre-backup flush hook, so a `manual` or `scheduled` backup
+can run while the app is writing. The app must therefore keep the data directory
+continuously backup-safe on its own:
 
-- Run SQLite in WAL mode and checkpoint before a backup, or
-- Use the SQLite Online Backup API to write a consistent snapshot that the
-  directory backup then captures.
+- Run SQLite in WAL mode so a hot copy of `*.db` + `*.db-wal` + `*.db-shm` is
+  recoverable, and checkpoint periodically.
+- Additionally maintain a periodic consistent snapshot via the SQLite Online
+  Backup API (for example `media-server.snapshot.db`) inside the data directory,
+  so any directory copy always contains a known-good database even if the live
+  file is mid-write.
+- Validate restore by stopping the app, restoring the directory, and starting it.
+
+If Hosty later adds an app-facing pre-backup lifecycle hook, the app can use it to
+checkpoint on demand; until then the app cannot assume one exists.
 
 The image cache is regenerable; if backup size matters, it can be excluded from
 backup in a later refinement, but the default is to keep all app data in one

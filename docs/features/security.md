@@ -14,8 +14,9 @@ Media Server-owned credentials for Jellyfin clients.
   [Hosty runtime app](hosty-runtime-app.md)).
 - `api` trusts a forwarded Host identity only after validating it against Core
   (`/api/auth/apps/revalidate`).
-- Never trust unsigned `X-Docker-Host-*`, `Forwarded`, `X-Forwarded-*`, or
-  trusted-proxy headers as identity.
+- Never trust client-supplied forwarding or proxy headers (for example
+  `Forwarded` / `X-Forwarded-*`) or any unsigned, client-set identity header. The
+  only trusted identity is the Host identity token validated against Core above.
 - Authorization is per operation (catalogs, files, torrents, playback, settings).
 
 ## Jellyfin Credentials (app-owned)
@@ -31,8 +32,11 @@ mandatory:
 - Rate-limit `/Users/AuthenticateByName` per IP and per username.
 - **Temporary lockout** after 10 consecutive failed attempts (with a growing
   window).
-- **Permanent lockout** after 100 cumulative failed attempts; cleared only by
+- **Permanent lockout** after 100 consecutive failed attempts; cleared only by
   regenerating the credential.
+- A successful login resets the failed-attempt counter. Counting consecutive (not
+  cumulative) failures prevents an attacker from slowly drip-feeding failures to
+  permanently lock out a legitimate user (a denial-of-service).
 - Recommend a minimum of 6 digits and allow longer PINs.
 - Tokens, PINs, and query-string tokens are redacted from logs and metrics.
 

@@ -81,11 +81,19 @@ Two independent auth domains.
 2. `web` exchanges it at `POST {HOSTY_CORE_ORIGIN}/api/auth/apps/token`.
 3. `web` stores the returned app identity token in an app-origin HttpOnly cookie.
    Derive cookie attributes from the effective protocol: `SameSite=None; Secure`
-   over https, `SameSite=Lax` without `Secure` on plain http.
+   over https, `SameSite=Lax` without `Secure` on plain http. Because the app is
+   embedded in a cross-site Shell iframe, browser privacy controls (Safari ITP,
+   third-party cookie deprecation) may block this cookie. The session must
+   therefore also support a header-based fallback: the browser keeps the identity
+   token in memory / `sessionStorage` and sends it as `Authorization: Bearer` on
+   requests to `web`. Partitioned cookies (CHIPS) may be used where supported, but
+   the header fallback is the robust cross-browser path.
 4. `web` revalidates via `POST {HOSTY_CORE_ORIGIN}/api/auth/apps/revalidate` with
    `Authorization: Bearer <HOSTY_APP_SERVICE_TOKEN>` before extending trust.
-5. `web` forwards the Host user identity to `api` (Bearer / `X-Docker-Host-Identity`);
-   `api` validates it against Core and never trusts unsigned headers or cookies.
+5. `web` forwards the validated Host user identity to `api` as a bearer token that
+   `api` re-validates against Core. (Hosty Core also accepts this identity as the
+   `X-Docker-Host-Identity` header.) `api` never trusts unsigned or client-set
+   headers or cookies.
 
 Page-to-page navigation inside the open app uses the app-origin session cookie,
 so the app does not re-exchange a code on every Shell click.

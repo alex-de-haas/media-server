@@ -225,6 +225,7 @@ enum MediaKind { Movie, Series, Season, Episode, Video }
 enum DownloadState { Queued, Downloading, Completed, Seeding, StoppedSeeding, Stopped, Error }
 enum IngestStage { Intake, Download, Organize, Identify, Probe, Enrich, Publish }
 enum IngestStatus { Pending, Running, NeedsReview, Failed, Done }
+enum PipelinePhase { Acquisition, Processing }
 enum StreamType { Video, Audio, Subtitle }
 enum ImageType { Primary, Backdrop, Logo }
 ```
@@ -239,7 +240,8 @@ without changing existing ones.
 public interface IPipelineStage
 {
     string Key { get; }            // "download", "organize", "identify", ...
-    IngestStage Stage { get; }     // ordered position
+    PipelinePhase Phase { get; }   // Processing (v1) | Acquisition (M5)
+    int Order { get; }             // global order; acquisition stages sort before Intake
 
     // Idempotency guard: false if already satisfied (skip without side effects).
     bool ShouldRun(IngestContext ctx);
@@ -269,6 +271,14 @@ public abstract record StageResult
 The orchestrator advances `IngestItem.Stage`/`Status`, records `StagesCompleted`,
 applies backoff on `Deferred`/retryable `Failed`, and parks `NeedsReview` items
 for manual match override.
+
+`IngestStage` enumerates the v1 **processing** stages and is the persisted
+`IngestItem.Stage`. Acquisition stages (M5) implement the same `IPipelineStage`
+contract but are ordered before `Intake` via `Order` and operate on
+watchlist/release entities — they do not extend `IngestStage`, because an
+`IngestItem` only exists once acquisition hands a torrent to `Intake`. Stage
+ordering therefore lives on the stage (`Phase` + `Order`), not in the
+processing-only `IngestStage` enum.
 
 ## Contract: IMetadataProvider
 
@@ -339,6 +349,9 @@ public interface ITorrentEngine          // MonoTorrent wrapper
     Task ResumeAsync(Guid id, CancellationToken ct);
     Task StopSeedingAsync(Guid id, CancellationToken ct);
     Task RemoveAsync(Guid id, bool deleteFiles, CancellationToken ct);
+    // deleteFiles removes the files/ seed copy only; library/ hardlinks (and
+    // thus published items and disk usage) persist until the library item is
+    // deleted separately — see torrents-and-organizer Removal Semantics.
     IObservable<DownloadUpdate> Updates { get; }   // → SignalR
 }
 

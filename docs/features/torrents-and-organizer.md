@@ -68,6 +68,23 @@ a catalog root (validated on configuration).
 > Cross-volume catalogs (a future Docker concern, where `files/` and `library/`
 > could be different mounts) would require copying; v1 forbids that configuration.
 
+## Removal Semantics
+
+Because `files/` and `library/` are hardlinks to the same data, deletion is two
+distinct actions:
+
+- **Remove download** (`DELETE /api/torrents/{id}`, the `deleteFiles` option):
+  stops the torrent and removes its `files/` entry (the seed copy). The published
+  library item is unaffected — its `library/` hardlink keeps the data alive — so
+  **disk space is not freed**, because the data is still referenced by `library/`.
+- **Delete library item** (a catalog action, not a torrent action): removes the
+  `library/` entry. Space is freed only once the **last** hardlink to the data is
+  gone (both `files/` and `library/` removed).
+
+So removing a download never deletes watchable content, and freeing disk space
+requires removing the library item too. The UI must make this distinction explicit
+to avoid the counter-intuitive expectation that removing a torrent frees space.
+
 ## API Endpoints
 
 Internal endpoints (under `/api`, behind Host identity):
