@@ -243,14 +243,15 @@ rate limiting, and temporary/permanent lockout (already specced in
 - *Confidence note:* may belong in the app rather than the platform; raise only if
   the pattern recurs across apps.
 
-## 8. Raw L4 (TCP/UDP) port allocation and forwarding declaration — Planned (2026-06-17)
+## 8. Raw L4 (TCP/UDP) port allocation and forwarding declaration — Implemented (2026-06-17)
 
-**Status.** Approved as a minimal opt-in per-port extension (`expose: host` +
-`transport: ["tcp", "udp"]` on a manifest port), injected as `HOSTY_PORT_{KEY}`;
-being implemented in the `docker-host` repo. media-server declares a pinned
-`torrent` port and reads `HOSTY_PORT_TORRENT`. Router port-forwarding stays the
-operator's responsibility (no Core-managed UPnP). M4 docker delivery depends on
-this landing.
+**Status.** Implemented in `docker-host` as a minimal opt-in per-port extension
+(`expose: host` + `transport: ["tcp", "udp"]` on a manifest port); `expose: host`
+requires a pinned `hostPort`. Core publishes `0.0.0.0:host:container/proto` and
+injects `HOSTY_PORT_{KEY}` once. media-server declares a pinned `torrent` port and
+reads `HOSTY_PORT_TORRENT`. Router port-forwarding stays the operator's
+responsibility (no Core-managed UPnP). The currently installed `0.4.0` release
+predates this merge, so M4 docker delivery needs a Core build that includes it.
 
 **Problem.** The torrent engine needs a stable raw listen port for peer
 connectivity and DHT, ideally with router port mapping. Hosty only manages and

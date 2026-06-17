@@ -86,8 +86,15 @@ export async function revalidateIdentity(token: string): Promise<HostSession | n
     return null;
   }
 
-  const data = (await response.json()) as RevalidateResponse;
-  if (!data.active || data.appId !== env.appId) {
+  let data: RevalidateResponse;
+  try {
+    data = (await response.json()) as RevalidateResponse;
+  } catch {
+    // A non-JSON / truncated body means the session is unverifiable, not a server error.
+    return null;
+  }
+
+  if (!data || !data.active || !data.userId || data.appId !== env.appId) {
     return null;
   }
 

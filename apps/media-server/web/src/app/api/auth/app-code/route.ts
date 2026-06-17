@@ -28,18 +28,36 @@ export async function POST(request: NextRequest) {
   }
 
   const env = hostyServerEnv();
-  const exchange = await fetch(`${env.coreOrigin}/api/auth/apps/token`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code }),
-    cache: "no-store",
-  });
+
+  let exchange: Response;
+  try {
+    exchange = await fetch(`${env.coreOrigin}/api/auth/apps/token`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+      cache: "no-store",
+    });
+  } catch {
+    // Core unreachable (network/DNS) — a transient platform issue, not a client error.
+    return NextResponse.json({ error: "core_unreachable" }, { status: 502 });
+  }
 
   if (!exchange.ok) {
     return NextResponse.json({ error: "exchange_failed" }, { status: 401 });
   }
 
-  const token = (await exchange.json()) as TokenResponse;
+  let token: TokenResponse;
+  try {
+    token = (await exchange.json()) as TokenResponse;
+  } catch {
+    return NextResponse.json({ error: "invalid_core_response" }, { status: 502 });
+  }
+
+  if (typeof token?.accessToken !== "string" || token.accessToken.length === 0 ||
+    typeof token?.expiresInSeconds !== "number" || token.expiresInSeconds <= 0) {
+    return NextResponse.json({ error: "invalid_core_response" }, { status: 502 });
+  }
+
   const response = NextResponse.json({
     accessToken: token.accessToken,
     expiresInSeconds: token.expiresInSeconds,
