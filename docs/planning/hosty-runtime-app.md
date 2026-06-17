@@ -37,13 +37,16 @@ Two services with stable keys across runtime profiles:
 
 ## Runtime Profiles
 
-- `dev` (`localCommand`) — manifest default for development and for v1, because a host
-  process can read operator-configured catalog paths directly without volume
-  mounts. Omit `localPort` / `hostPort`; Core assigns loopback ports and injects
-  `HOSTY_PORT_{KEY}` (and `PORT` for single-port services).
-- `docker` — production images from GitHub Container Registry. Deferred until
-  Hosty provides the external host-path mount model needed by catalog roots (see
-  [Storage and data](storage-and-data.md)).
+- `dev` (`localCommand`) — the primary local development loop; a host process can
+  read operator-configured catalog paths directly. Omit `localPort` / `hostPort`;
+  Core assigns loopback ports and injects `HOSTY_PORT_{KEY}` (and `PORT` for
+  single-port services).
+- `docker` — production images from GitHub Container Registry; the **v1 delivery
+  target** (`defaultRuntime: docker`). Unblocked now that Hosty Core provides the
+  external host-path mount model for catalog roots (`externalMounts`, injected as
+  `HOSTY_MOUNT_{KEY}`) and Cloudflare-tunnel ingress (see
+  [Storage and data](storage-and-data.md) and
+  [Implementation plan](implementation-plan.md)).
 
 Keep the same service keys, endpoint keys, setting keys, data semantics, and UI
 navigation across profiles so switching runtime is reviewable and reversible.
@@ -58,10 +61,11 @@ navigation across profiles so switching runtime is reviewable and reversible.
 The internal `api` port is not exposed as a public endpoint; only `web` reaches
 it, through the injected dependency URL.
 
-The torrent engine's `TORRENT_LISTEN_PORT` is a raw TCP/UDP listener for peer
-connectivity and DHT, not an HTTP endpoint that Hosty proxies or assigns. The
-operator forwards it at the network level (see
-[Torrents and organizer](torrents-and-organizer.md)).
+The torrent engine's listen port is a raw TCP/UDP listener for peer connectivity
+and DHT, not an HTTP endpoint that Hosty proxies. The manifest declares a pinned
+`torrent` port with `expose: host` + `transport: ["tcp", "udp"]`; Core publishes
+it on all interfaces and injects it as `HOSTY_PORT_TORRENT`. The operator forwards
+it at the network level (see [Torrents and organizer](torrents-and-organizer.md)).
 
 ## Runtime Environment
 
@@ -141,17 +145,19 @@ App-owned configuration declared in the manifest (`key`, `type`, `default`,
 | `TORRENT_MAX_DOWNLOAD_SPEED` | number | 0 = unlimited. |
 | `TORRENT_MAX_UPLOAD_SPEED` | number | 0 = unlimited. |
 | `FFPROBE_PATH` | string | Path to the `ffprobe` binary on the host (dev profile). |
-| `TORRENT_LISTEN_PORT` | number | Fixed TCP/UDP listen port for the torrent engine. |
-| `TORRENT_ENABLE_PORT_MAPPING` | boolean | UPnP / NAT-PMP automatic port mapping (default on). |
+| `TORRENT_ENABLE_PORT_MAPPING` | boolean | App-side UPnP / NAT-PMP mapping of the injected `HOSTY_PORT_TORRENT` (default on). |
 | `TORRENT_BIND_ADDRESS` | string | Optional bind address/interface for VPN setups. |
 
 Public endpoint origins are configured after install through Core-managed
 `HOSTY_PUBLIC_ORIGIN_{ENDPOINT_KEY}` settings (`HOSTY_PUBLIC_ORIGIN_UI`,
 `HOSTY_PUBLIC_ORIGIN_JELLYFIN`); empty means use the local `localhost` endpoint.
 
-## Sample Manifest (illustrative)
+## Sample Manifest
 
-Exact field names follow the `app.0.1` schema; this shows the intended shape.
+The authoritative, schema-correct manifest lives in
+[Implementation plan §4](implementation-plan.md). The real `app.0.1` schema uses
+**arrays** (not objects) for `services` and `endpoints`, a top-level
+`runtimeProfiles` list, and per-service `runtimes` keyed by profile key:
 
 ```jsonc
 {
@@ -159,46 +165,44 @@ Exact field names follow the `app.0.1` schema; this shows the intended shape.
   "id": "com.haas.media-server",
   "version": "0.1.0",
   "name": "Media Server",
-  "services": {
-    "api": {
-      "ports": { "internal": {}, "jellyfin": {} },
-      "runtime": {
-        "dev": { "command": "dotnet run --project api" },
-        "docker": { "image": "ghcr.io/<owner>/media-server-api" }
+  "runtimeProfiles": [
+    { "key": "docker", "type": "docker", "default": true },
+    { "key": "dev",    "type": "localCommand" }
+  ],
+  "defaultRuntime": "docker",
+  "services": [
+    {
+      "key": "api",
+      "runtimes": {
+        "docker": { "type": "docker", "image": { "repository": "ghcr.io/<owner>/media-server-api", "tag": "latest" }, "ports": [ /* internal; jellyfin (public); torrent (expose: host, transport tcp+udp) */ ] },
+        "dev":    { "type": "localCommand", "command": "dotnet run --project MediaServer.Api", "ports": [ /* same keys */ ] }
       }
     },
-    "web": {
+    {
+      "key": "web",
       "dependsOn": ["api"],
-      "ports": { "http": {} },
-      "runtime": {
-        "dev": { "command": "npm run start --prefix web" },
-        "docker": { "image": "ghcr.io/<owner>/media-server-web" }
+      "runtimes": {
+        "docker": { "type": "docker", "image": { "repository": "ghcr.io/<owner>/media-server-web", "tag": "latest" }, "ports": [ { "key": "http", "containerPort": 3000, "public": true } ] },
+        "dev":    { "type": "localCommand", "command": "pnpm dev", "ports": [ { "key": "http", "containerPort": 3000, "public": true } ] }
       }
     }
-  },
-  "endpoints": {
-    "ui":       { "service": "web", "port": "http",     "public": true, "entrypoint": { "path": "/" } },
-    "jellyfin": { "service": "api", "port": "jellyfin", "public": true }
-  },
-  "data": { "enabled": true },
-  "settings": [
-    { "key": "TMDB_API_KEY",                "type": "string",  "secret": true, "required": true },
-    { "key": "SUPPORTED_LANGUAGES",         "type": "string",  "default": "en-US" },
-    { "key": "JELLYFIN_SERVER_NAME",        "type": "string",  "default": "Media Server" },
-    { "key": "JELLYFIN_DISCOVERY_ENABLED",  "type": "boolean", "default": false },
-    { "key": "FFPROBE_PATH",                "type": "string" },
-    { "key": "TORRENT_LISTEN_PORT",         "type": "number" },
-    { "key": "TORRENT_ENABLE_PORT_MAPPING", "type": "boolean", "default": true },
-    { "key": "TORRENT_BIND_ADDRESS",        "type": "string" },
-    { "key": "TORRENT_MAX_DOWNLOAD_SPEED",  "type": "number",  "default": 0 },
-    { "key": "TORRENT_MAX_UPLOAD_SPEED",    "type": "number",  "default": 0 }
   ],
+  "endpoints": [
+    { "key": "ui",       "service": "web", "port": "http",     "public": true },
+    { "key": "jellyfin", "service": "api", "port": "jellyfin", "public": true }
+  ],
+  "data": { "enabled": true },
+  "externalMounts": {
+    "catalogRoots": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "api", "required": true }
+  },
+  "settings": [ /* TMDB_API_KEY (secret, required), SUPPORTED_LANGUAGES, JELLYFIN_*, FFPROBE_PATH, TORRENT_* — see §4 */ ],
   "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
 }
 ```
 
-The default install runs the `dev` profile; the `docker` runtime stanza is shown
-for completeness but is deferred (see [Runtime Profiles](#runtime-profiles)).
+The default install runs the `docker` profile; use `--runtime dev` for local
+development. See [Implementation plan §4](implementation-plan.md) for the full,
+non-abbreviated manifest (including every port and setting).
 
 ## Storage And Backups
 

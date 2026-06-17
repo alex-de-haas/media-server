@@ -27,14 +27,18 @@ Priority:
 
 ---
 
-## 1. External host-path mount model for catalog roots — Blocking
+## 1. External host-path mount model for catalog roots — Implemented (2026-06-17)
 
-**Problem.** Catalog roots are large media folders that must live outside app data,
-be configured by the operator after install, survive app update/restart/remove/
-runtime-switch, and never be backed up or deleted by Hosty. Each root must be a
-single filesystem (the organizer hardlinks between `files/` and `library/` under
-one root). The `docker` runtime profile is deferred solely because this mount model
-does not exist.
+**Status.** Implemented in Hosty Core as `externalMounts` (`kind: host-path`,
+`multiple`, `mode`, `service`, `required`); configured paths are injected as
+`HOSTY_MOUNT_{KEY}` (docker → `/mnt/{key}/{label}` binds, dev → host paths). This
+unblocks the `docker` runtime profile, now the v1 delivery target.
+
+**Problem (historical).** Catalog roots are large media folders that must live
+outside app data, be configured by the operator after install, survive app
+update/restart/remove/runtime-switch, and never be backed up or deleted by Hosty.
+Each root must be a single filesystem (the organizer hardlinks between `files/`
+and `library/` under one root).
 
 **Proposed contract.** A manifest-declared external-mount capability plus a
 Core-managed, operator-configured set of host-path → container-path binds:
@@ -64,9 +68,15 @@ blocks `docker` delivery.
 - Read-write; each bind is one mount point (so hardlinks work within it).
 - Active binds injected under a stable env/contract.
 
-## 2. External ingress with managed TLS for public endpoints — Blocking
+## 2. External ingress with managed TLS for public endpoints — Implemented (2026-06-17)
 
-**Problem.** Native clients (Infuse) hit the public `jellyfin` endpoint directly,
+**Status.** Implemented via `HOSTY_INGRESS_PROVIDER=cloudflared`: Core derives a
+public origin per public endpoint and injects `HOSTY_PUBLIC_ORIGIN_{KEY}`
+(`https://{subdomain}.{baseDomain}`, TLS terminated by Cloudflare; subdomain
+overridable via `HOSTY_INGRESS_SUBDOMAIN`). The operator reverse-proxy workaround
+is no longer needed.
+
+**Problem (historical).** Native clients (Infuse) hit the public `jellyfin` endpoint directly,
 and Hosty provides no external ingress, so the operator must run their own reverse
 proxy and TLS. TLS also matters for the UI app-origin cookie (`SameSite=None;
 Secure` needs HTTPS) inside the cross-site Shell iframe.
@@ -90,9 +100,14 @@ disappears.
 - HTTP `Range`/`206` streaming preserved and not whole-response buffered
   (`jellyfin`).
 
-## 3. App-callable on-demand backup API — High
+## 3. App-callable on-demand backup API — Implemented (2026-06-17)
 
-**Problem.** Before applying EF Core migrations on startup, the app wants a
+**Status.** Implemented: `POST /api/internal/apps/{appId}/backups` (bearer
+`HOSTY_APP_SERVICE_TOKEN`, optional `{ "note" }`) returns `201` completed / `200`
+empty. The app calls it before applying EF Core migrations. There is still no
+pre-backup quiesce hook (see #4), so the app must flush/checkpoint itself first.
+
+**Problem (historical).** Before applying EF Core migrations on startup, the app wants a
 recoverable snapshot. Today backups are only `manual`/`scheduled`/`pre-update`/
 `pre-restore`/`pre-runtime-switch`, none app-initiated.
 
@@ -144,9 +159,14 @@ the data directory, so any copy contains a known-good database.
 - Bounded timeout; backup proceeds on ACK or timeout.
 - Documented request/response contract and authentication.
 
-## 5. Operator notification/alert API — High
+## 5. Operator notification/alert API — Implemented (2026-06-17)
 
-**Problem.** The app needs to surface actionable conditions to the operator even
+**Status.** Implemented: `POST /api/internal/apps/{appId}/notifications`
+(`target`, `audience`, `level` ∈ info/success/warning/error, `title`, `body`,
+`link`, `dedupeKey`; apps may not target the `host-admin` audience). Replaces the
+in-app-banner-only workaround.
+
+**Problem (historical).** The app needs to surface actionable conditions to the operator even
 when they are not currently in the app: migration failure ("restore app data"),
 a magnet that will not fit free space, a catalog gone offline.
 
@@ -223,7 +243,14 @@ rate limiting, and temporary/permanent lockout (already specced in
 - *Confidence note:* may belong in the app rather than the platform; raise only if
   the pattern recurs across apps.
 
-## 8. Raw L4 (TCP/UDP) port allocation and forwarding declaration — Medium
+## 8. Raw L4 (TCP/UDP) port allocation and forwarding declaration — Planned (2026-06-17)
+
+**Status.** Approved as a minimal opt-in per-port extension (`expose: host` +
+`transport: ["tcp", "udp"]` on a manifest port), injected as `HOSTY_PORT_{KEY}`;
+being implemented in the `docker-host` repo. media-server declares a pinned
+`torrent` port and reads `HOSTY_PORT_TORRENT`. Router port-forwarding stays the
+operator's responsibility (no Core-managed UPnP). M4 docker delivery depends on
+this landing.
 
 **Problem.** The torrent engine needs a stable raw listen port for peer
 connectivity and DHT, ideally with router port mapping. Hosty only manages and
@@ -243,8 +270,8 @@ requests host-level UPnP/NAT-PMP mapping.
 **How Media Server uses it.** Binds the injected port; relies on Core for mapping
 instead of app-side UPnP.
 
-**Workaround.** `TORRENT_LISTEN_PORT` setting + operator port-forward + app-side
-UPnP/NAT-PMP.
+**Workaround (pre-extension).** A fixed app-setting listen port + operator
+port-forward + app-side UPnP/NAT-PMP.
 
 **Acceptance criteria.**
 - Stable raw port injected and persistent across restart.

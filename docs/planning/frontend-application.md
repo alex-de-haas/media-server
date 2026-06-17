@@ -42,7 +42,7 @@ iframe-safe.
   `user` role.
 - Server data loads through the BFF REST proxy to `api`.
 - Real-time updates use the SignalR client (proxied through `web`).
-- Optional client cache via SWR or React Query.
+- Client cache and mutations via TanStack React Query.
 
 ## Iframe Safety
 

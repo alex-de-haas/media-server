@@ -284,14 +284,17 @@ remains future.
 5. **HS256 identity tokens** — no local verification; revalidate against Core with
    a short cache TTL.
 
-## 8. Documentation Reconciliation (follow-up)
+## 8. Documentation Reconciliation (done in this PR)
 
-- `hosty-platform-requests.md`: mark #1, #2, #3, #5 **Implemented**; keep #4, #6,
-  #8, #10, #11 as outstanding.
-- Drop the operator reverse-proxy and "no app-callable backup" workarounds where
-  superseded.
-- Fix stale references: retired `X-Docker-Host-Identity` header → JWT forward +
-  revalidate; align CLI commands and the manifest shape to the real `app.0.1`
-  schema and `demo-app` example.
-- `root.md`: confirm `docker` is a v1 target (no longer deferred) and pin stack
-  versions (§1).
+- `hosty-platform-requests.md`: #1, #2, #3, #5 marked **Implemented**; #8 marked
+  **Planned** (raw-port extension); #4, #6, #10, #11 remain outstanding.
+- `hosty-runtime-app.md`, `build-and-deployment.md`, `root.md`: `docker` is the v1
+  delivery target (no longer deferred); the sample manifest uses the array-based
+  `services`/`endpoints` shape of the real `app.0.1` schema; React Query pinned.
+- **Torrent listen port — single source of truth:** the Hosty-injected
+  `HOSTY_PORT_TORRENT` (from the manifest's pinned `torrent` port). The old
+  `TORRENT_LISTEN_PORT` app setting is removed across the docs.
+
+Still open (handled when the code is written, not a doc bug): the retired
+`X-Docker-Host-Identity` header reference becomes JWT-forward + revalidate during
+M0/M2 auth work.

@@ -37,11 +37,14 @@ picks a destination (see [Catalogs](catalogs.md)).
 ## Networking
 
 The torrent engine needs inbound connectivity for good peer performance and for
-fetching magnet metadata via DHT. This is configured by the operator, not by
-Hosty port assignment, because it is a raw TCP/UDP listener and not an HTTP
-endpoint that Hosty proxies (see [Hosty runtime app](hosty-runtime-app.md)).
+fetching magnet metadata via DHT. It is a raw TCP/UDP listener, not an HTTP
+endpoint that Hosty proxies, so the manifest declares a pinned `torrent` port with
+`expose: host` + `transport: ["tcp", "udp"]`; Core publishes it on all interfaces
+and injects it as `HOSTY_PORT_TORRENT` (see
+[Hosty runtime app](hosty-runtime-app.md)). Router port-forwarding remains the
+operator's responsibility.
 
-- Fixed listen port from `TORRENT_LISTEN_PORT` (TCP + UDP).
+- Fixed listen port from the injected `HOSTY_PORT_TORRENT` (TCP + UDP).
 - **DHT** enabled (required to fetch metadata for magnet links without trackers),
   plus **PEX** and **LSD** for peer discovery.
 - **Protocol encryption (MSE/PE)** enabled to reduce ISP throttling.

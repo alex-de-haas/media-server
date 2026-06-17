@@ -15,10 +15,11 @@ playback without further manual steps. The content then becomes available to
 clients such as Infuse over a Jellyfin-compatible API.
 
 Media Server will be built and distributed as a **Hosty runtime app** with
-manifest `schemaVersion: "app.0.1"`. The v1 implementation runs under Hosty
-Core-managed lifecycle through the `dev` / `localCommand` runtime profile.
-Docker delivery is deferred until Hosty supports the catalog-root mount model
-needed by this app. Hosty Core owns Host user authentication, app access
+manifest `schemaVersion: "app.0.1"`. It runs under Hosty Core-managed lifecycle
+and supports both runtime profiles: `dev` (`localCommand`) is the primary local
+development loop, and `docker` is the v1 delivery target — unblocked now that
+Hosty Core provides the external host-path mount model for catalog roots and
+Cloudflare-tunnel ingress. Hosty Core owns Host user authentication, app access
 assignment, app identity issuance, and app data backups.
 
 > This documentation supersedes the earlier "Docker Host module"
@@ -93,16 +94,17 @@ Frontend (`web` service):
 - Next.js App Router, TypeScript, Tailwind, ShadCN UI.
 - Acts as a backend-for-frontend: holds the Hosty app-origin session and proxies
   REST/SignalR to `api`, so the browser stays same-origin and iframe-safe.
-- SignalR JavaScript client, SWR or React Query for client cache.
+- SignalR JavaScript client, TanStack React Query for client cache.
 
 Runtime and delivery:
 
 - Hosty runtime app manifest (`apps/media-server/manifest.json`,
   `schemaVersion: "app.0.1"`).
-- `dev` (`localCommand`) runtime profile for local development — default target
-  for v1.
+- `dev` (`localCommand`) runtime profile for local development.
 - `docker` runtime profile with images published to GitHub Container Registry —
-  introduced once external host-path mounts are available.
+  the v1 delivery target, unblocked by Hosty Core's external host-path mounts and
+  Cloudflare-tunnel ingress (`defaultRuntime: docker`; install `--runtime dev`
+  for local work).
 - GitHub Actions for build, test, and image publishing.
 
 ## Ideas
