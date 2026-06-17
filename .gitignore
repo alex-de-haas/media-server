@@ -1,0 +1,42 @@
+# --- .NET (api) ---
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+*.user
+*.suo
+project.lock.json
+artifacts/
+.vs/
+
+# --- Node / Next.js (web) ---
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+.pnpm-store/
+
+# --- Test / coverage ---
+[Tt]est[Rr]esults/
+coverage/
+*.trx
+playwright-report/
+.playwright/
+
+# --- App runtime data (never commit) ---
+.hosty-dev/
+.hosty-dev-smoke/
+**/data/*.db
+**/data/*.db-wal
+**/data/*.db-shm
+
+# --- Environment / secrets ---
+.env
+.env.local
+.env.*.local
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.log
