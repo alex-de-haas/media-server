@@ -1,5 +1,9 @@
 # Jellyfin Compatibility
 
+Status: Draft
+Created: 2026-06-15
+Updated: 2026-06-15
+
 ## Description
 
 Media Server exposes a Jellyfin-compatible HTTP API subset so clients such as
@@ -46,7 +50,8 @@ needed, because Jellyfin endpoints are protected by Media Server-owned tokens.
 ## Authentication Model
 
 Infuse cannot perform the Hosty app-code flow, so the Jellyfin surface uses
-**Media Server-owned credentials**, bound to Host users.
+**Media Server-owned credentials**, bound to internal Media Server users that are
+linked to Hosty users.
 
 ### Media Access Credential
 
@@ -55,9 +60,10 @@ creates an Infuse access credential:
 
 ```jsonc
 {
-  "hostyUserId": "{host user sub}",
+  "appUserId": "{internal media server user id}",
+  "hostyUserId": "{current host user sub}",
   "username": "alex@example.com",   // shown as the Hosty email for familiarity
-  "pinHash": "{hashed}",            // 4–8 digit PIN, user-set or generated
+  "pinHash": "{hashed}",            // 6–8 digit PIN, user-set or generated
   "createdAt": "...",
   "lastUsedAt": "...",
   "revoked": false
@@ -71,6 +77,10 @@ creates an Infuse access credential:
   the PIN exposure window is a single request.
 - Tokens are opaque, hashed at rest, scoped to a user and device, revocable via
   `/Sessions/Logout`, and redacted from logs.
+- The server does not call Hosty Core on every Jellyfin request. Core assignment
+  is checked when the credential is created, when the token is issued, and during
+  token refresh or session validation. Tokens for users no longer assigned to the
+  app are rejected or revoked at those validation points.
 
 The server accepts:
 
@@ -95,43 +105,106 @@ attempts, permanent lockout after 100 (cleared by regenerating the credential).
 
 ## Required Endpoints
 
-Discovery/health: `GET /System/Ping`, `GET /System/Info/Public`, `GET /System/Info`.
+The first Jellyfin baseline should be the endpoint set already proven by the
+previous Haas.Media implementation, adapted from the old `/jellyfin` route group
+to the new public Jellyfin endpoint.
 
-Auth/sessions: `POST /Users/AuthenticateByName`, `GET /Users/Me`,
-`POST /Sessions/Logout`, `POST /Sessions/Capabilities`,
-`POST /Sessions/Capabilities/Full`.
+Anonymous discovery/auth:
 
-Browsing: `GET /UserViews`, `GET /Items`, `GET /Items/{itemId}`,
-`GET /Items/Latest`, `GET /Items/Counts`, `GET /Search/Hints`.
+- `POST /Users/AuthenticateByName`
+- `GET /System/Info/Public`
+- `GET /System/Ping`
+- `GET /Users/Public`
+- `GET /Branding/Configuration`
 
-Artwork: `GET|HEAD /Items/{itemId}/Images/{imageType}`,
-`GET /Items/{itemId}/Images/{imageType}/{imageIndex}`.
+Authenticated system/user/session:
 
-Playback negotiation and streaming: `GET|POST /Items/{itemId}/PlaybackInfo`,
-`GET|HEAD /Videos/{itemId}/stream`, `GET|HEAD /Videos/{itemId}/stream.{container}`,
-`GET /Videos/{itemId}/master.m3u8`, `GET /Videos/{itemId}/main.m3u8`,
-`GET /Videos/{itemId}/hls/{playlistId}/...`,
-`GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}`.
+- `GET /System/Info`
+- `GET /Users`
+- `GET /Users/Me`
+- `GET /Users/{userId}`
+- `GET /Sessions`
+- `POST /Sessions/Logout` (new token revocation requirement)
 
-Playback state: `POST /Sessions/Playing`, `POST /Sessions/Playing/Progress`,
-`POST /Sessions/Playing/Stopped`, `GET|POST /UserItems/{itemId}/UserData`,
-`POST|DELETE /UserPlayedItems/{itemId}`, `POST|DELETE /UserFavoriteItems/{itemId}`,
-`POST|DELETE /UserItems/{itemId}/Rating`.
+Library and browsing:
+
+- `GET /Library/MediaFolders`
+- `GET /Library/VirtualFolders`
+- `GET /Users/{userId}/Views`
+- `GET /Items`
+- `GET /Items/{itemId}`
+- `GET /Users/{userId}/Items`
+- `GET /Users/{userId}/Items/{itemId}`
+- `GET /Users/{userId}/Items/Latest`
+- `GET /Users/{userId}/Items/Resume`
+- `GET /Shows/{seriesId}/Seasons`
+- `GET /Shows/{seriesId}/Episodes`
+- `GET /Shows/NextUp`
+- `GET /Users/{userId}/GroupingOptions`
+- `GET|POST /DisplayPreferences/{displayPreferencesId}`
+
+Artwork:
+
+- `GET|HEAD /Items/{itemId}/Images/{imageType}`
+
+Playback negotiation and streaming:
+
+- `GET|POST /Items/{itemId}/PlaybackInfo`
+- `GET|HEAD /Videos/{itemId}/stream`
+- `GET|HEAD /Videos/{itemId}/stream.{container}`
+
+Playback state:
+
+- `POST /Sessions/Playing`
+- `POST /Sessions/Playing/Progress`
+- `POST /Sessions/Playing/Stopped`
+- `POST|DELETE /Users/{userId}/PlayedItems/{itemId}`
+- `POST|DELETE /Users/{userId}/FavoriteItems/{itemId}`
+
+Deferred compatibility endpoints:
+
+- `POST /Sessions/Capabilities`
+- `POST /Sessions/Capabilities/Full`
+- `GET /Items/Counts`
+- `GET /Search/Hints`
+- `GET|POST /UserItems/{itemId}/UserData`
+- `POST|DELETE /UserItems/{itemId}/Rating`
+- `GET /Videos/{itemId}/master.m3u8`
+- `GET /Videos/{itemId}/main.m3u8`
+- `GET /Videos/{itemId}/hls/{playlistId}/...`
+- `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}`
 
 ## Media Model Mapping
 
 - Catalog (`movie`) → `CollectionFolder` with `CollectionType = movies`.
 - Catalog (`series`) → `CollectionFolder` with `CollectionType = tvshows`.
-- Movie → `Movie`; Series → `Series`; Season → `Season`; Episode → `Episode`;
-  unmatched file → `Video`.
-- Public item IDs are stable across rescans, independent of physical path,
-  provider id, and database row id.
+- Movie → `Movie`; Series → `Series`; Season → `Season`; Episode → `Episode`.
+  Unmatched files are represented internally as `Video` but are **not exposed to
+  Jellyfin clients** until they have a canonical identity.
+- A single file holding two consecutive episodes maps to one `Episode` with
+  `IndexNumber` and `IndexNumberEnd` set; playback opens the one file and watched
+  state applies to the whole range.
+- Public item IDs are stable across rescans and based on the catalog plus the
+  canonical provider identity, not on physical path or database row id. The
+  internal item id (and the `UserData` keyed to it) is preserved when an item is
+  first identified, so the only time a client-visible id changes is an operator
+  remap to a different title; clients re-sync user data from the server on refresh.
 
 `BaseItemDto` should include at least `Id`, `Name`, `Type`, `ServerId`, parent
 links, `ProductionYear`/`PremiereDate`/`RunTimeTicks`, `Overview`/`Genres`/
 `OfficialRating`/`CommunityRating`, image tags, `UserData`
 (`PlaybackPositionTicks`, `Played`, `IsFavorite`, `PlayedPercentage`), and
 `MediaSources` when requested with `fields=MediaSources`.
+
+## Item IDs and Server Version
+
+- Client-facing item ids (`BaseItemDto.Id`) are emitted as 32-character lowercase
+  hex (Jellyfin's `Guid` shape) derived deterministically from the canonical
+  identity key, so they satisfy strict clients while staying stable across rescans.
+- `System/Info` reports a recent **stable Jellyfin server version** that Infuse is
+  known to support (Infuse 8.3 ↔ Jellyfin 10.11). Treat the reported version as a
+  tested constant, bumped deliberately after verifying against Infuse — some
+  clients gate features on it.
 
 ## Media Probing
 
@@ -150,6 +223,9 @@ available. This builds accurate `MediaSourceInfo` / `MediaStream` objects.
 - Respect `EnableDirectPlay` / `EnableDirectStream` request flags.
 - Include media stream indexes for audio/subtitle selection.
 - Never return raw host paths; address media by item id and HTTP URLs.
+- When a title has multiple versions, return all of them in `MediaSources` and
+  **honor an explicit `MediaSourceId`** on the stream request. Do not always serve
+  the first/highest-resolution source — Infuse can otherwise play the wrong version.
 - Return a compatible error when an item is unavailable, still in the pipeline, or
   outside policy.
 
@@ -165,13 +241,17 @@ design and are not planned for the initial milestones.
 
 ## Subtitles
 
-- External `.srt` / `.vtt` files, and embedded text subtitles converted to WebVTT
-  on demand.
-- Subtitle stream metadata in `MediaSources[].MediaStreams`.
+- v1 relies on **Direct Play**: embedded subtitles are played by the client
+  (Infuse) directly from the container. Media Server does not extract or convert
+  embedded subtitles (no FFmpeg in v1 — see [root](../root.md)).
+- External sidecar `.srt` / `.vtt` files alongside the media are surfaced as
+  external subtitle streams.
+- Subtitle stream metadata is reported in `MediaSources[].MediaStreams` from
+  `ffprobe`.
 
 ## Playback Progress and User Data
 
-- Store progress per Host user and item.
+- Store progress per internal Media Server user and item.
 - Mark played past a configurable threshold (e.g. 90%) or on explicit mark.
 - Reset progress when marked watched; preserve progress when stopped earlier.
 - Apply season/series aggregate watched state from episode state.
@@ -179,6 +259,9 @@ design and are not planned for the initial milestones.
 ## Security and Abuse Controls
 
 - Every endpoint except public system info and ping requires authentication.
+- Authenticated requests validate the opaque Media Server token locally. Core is
+  consulted during login/token issuance and session validation, not on every
+  stream or image request.
 - Stream URLs never bypass catalog authorization; access is by item id, so path
   traversal is impossible.
 - Query-string tokens are redacted in logs/metrics.
@@ -187,13 +270,14 @@ design and are not planned for the initial milestones.
 
 ## Implementation Milestones
 
-1. Connect, browse, Direct Play: system endpoints, credential auth + token store,
-   `/UserViews` `/Items` images search, `PlaybackInfo` with direct sources, range
-   streaming. Tests for auth, mapping, authorization, range handling.
-2. Playback state sync: `Sessions/Playing*`, user data, resume, favorites,
-   ratings. Tests for thresholds and progress persistence.
-3. Subtitles and multi-version playback: external/embedded text subtitles,
-   multiple media sources. Tests for stream selection and subtitle authorization.
+1. Connect, browse, Direct Play: anonymous discovery, credential auth + token
+   store, users/views/items, images, `PlaybackInfo`, and range streaming. Tests
+   for auth, mapping, authorization, and range handling.
+2. Playback state sync: `Sessions/Playing*`, played/unplayed, favorites, resume,
+   latest, and next-up. Tests for thresholds and progress persistence.
+3. Additional compatibility: capabilities, item counts, search hints, ratings,
+   subtitles, and multi-version playback. Tests for stream selection and subtitle
+   authorization.
 
 ## Testing Expectations
 

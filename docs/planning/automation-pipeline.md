@@ -1,12 +1,17 @@
 # Automation Pipeline
 
+Status: Draft
+Created: 2026-06-15
+Updated: 2026-06-15
+
 ## Description
 
 The automation pipeline is the center of Media Server. Its purpose is **maximum
-automation**: after the single manual step of adding a torrent and choosing a
-catalog, the system carries the content all the way to "available for playback"
-on its own. Manual intervention is an exception (a review queue), not a step in
-the normal flow. This is the key difference from earlier, manual-step systems.
+automation**: after the manual step of adding a torrent and choosing a catalog,
+the system parses the torrent name/file list, suggests metadata matches, and then
+carries the content all the way to "available for playback" on its own. Manual
+intervention is an exception (a review queue), not a step in the normal flow.
+This is the key difference from earlier, manual-step systems.
 
 The pipeline is an **ordered, extensible set of stages** operating on an ingest
 item. It is split into two phases:
@@ -23,25 +28,38 @@ flowchart LR
     CAL["Release calendar"] --> WISH["Watchlist"] --> SRCH["Source search"] --> GRAB["Grab release"]
   end
   subgraph PROC["Processing (v1)"]
-    INTAKE["Intake"] --> DL["Download"] --> ORG["Organize"] --> ID["Identify"]
-    ID --> PROBE["Probe"] --> ENRICH["Enrich metadata"] --> PUB["Publish"]
+    INTAKE["Intake"] --> ID["Identify / map files"] --> DL["Download"]
+    DL --> ORG["Organize"] --> PROBE["Probe"] --> ENRICH["Enrich metadata"] --> PUB["Publish"]
   end
   GRAB --> INTAKE
   ID -. low confidence .-> REVIEW["Review queue"]
-  REVIEW -. operator match .-> PROBE
+  REVIEW -. operator match .-> DL
 ```
 
 ## Stages (PROC, v1)
 
 | Stage | Input | Output / effect |
 | --- | --- | --- |
-| `Intake` | torrent + chosen catalog | creates an ingest item; resolves catalog paths, naming, seeding policy |
+| `Intake` | torrent + chosen catalog | creates an ingest item; resolves catalog paths, naming, seeding policy; reads torrent metadata/file list where available |
+| `Identify` | torrent name/file list + catalog type | suggests or confirms provider identities; maps playable source files to movies or episodes |
 | `Download` | torrent | file(s) in `<catalog.root>/files/`; progress events |
 | `Organize` | completed files | hardlinks main media into `<catalog.root>/library/` clean names; applies seeding policy |
-| `Identify` | parsed name | matches against a metadata provider; high confidence auto-matches, low confidence → review queue |
 | `Probe` | library file | `ffprobe` → media sources and streams |
 | `Enrich` | matched id | fetches and caches metadata in all supported languages |
 | `Publish` | enriched item | item becomes browsable and playable; emits availability event |
+
+Identify is **two-phase** so magnet links are never blocked on metadata:
+
+- **`.torrent` files** expose the file list immediately, so name- and file-level
+  matching can run at intake.
+- **Magnet links** have no file list until torrent metadata is fetched. Phase 1
+  matches on the torrent name and **Download starts immediately**; Phase 2 maps
+  the playable files once the engine has the file list (during or after download).
+
+If confidence is high, matching is automatic; if candidates are ambiguous, the
+item enters `NeedsReview`. Download can continue while metadata is unresolved, but
+organize/publish waits for each playable file to be assigned to a movie or
+episode.
 
 ## Design Principles
 
@@ -51,8 +69,8 @@ flowchart LR
   key and a shared `IngestContext`. The acquisition phase is built from the same
   contract; new `ACQ` stages prepend without touching `PROC`.
 - **Idempotent.** Every stage can be safely re-run. Re-processing never creates
-  duplicate items; it reconciles against the stable public ID and the catalog
-  layout.
+  duplicate items; it reconciles against source-file assignments, the stable
+  public ID, and the catalog layout.
 - **Resilient.** A reconciler periodically re-drives items stuck in a
   non-terminal state (after a crash, restart, or transient provider error), with
   bounded retries and backoff.
@@ -60,14 +78,21 @@ flowchart LR
   does not block other items in the pipeline.
 - **Observable.** Each stage emits background job events (see
   [Background tasks](background-tasks.md)) consumed by the UI activity view.
+- **Database is source of truth.** Publish writes items to the database; the
+  catalog scan only reconciles `library/` against it (see [Catalogs](catalogs.md)).
 
 ## Ingest Item State
 
 ```text
-INTAKE → DOWNLOADING → DOWNLOADED → ORGANIZING → IDENTIFYING
+INTAKE → IDENTIFYING → DOWNLOADING → DOWNLOADED → ORGANIZING
        → PROBING → ENRICHING → PUBLISHED → AVAILABLE
-                              ↘ NEEDS_REVIEW        ↘ FAILED
+              ↘ NEEDS_REVIEW                    ↘ FAILED
 ```
+
+For magnet sources, `DOWNLOADING` may begin before `IDENTIFYING` completes (the
+file-level mapping resumes once the file list is known), so the orchestrator
+tracks progress through `StagesCompleted` rather than assuming a strict linear
+order.
 
 Each item stores: id, catalog id, source torrent reference, current stage,
 status, attempt count, last error, and timestamps. The set of stages it has
@@ -75,9 +100,12 @@ passed is recorded so re-entry resumes at the correct point.
 
 ## Manual Override
 
-- `NEEDS_REVIEW` items appear in the UI with parsed guesses and provider
-  candidates. The operator confirms a match (manual match override), which
-  resumes the pipeline.
+- `NEEDS_REVIEW` items appear in the UI with parsed guesses, provider candidates,
+  and the relevant playable source files. The operator confirms the movie or the
+  series/season/episode mapping, which resumes the pipeline.
+- The operator can remap an already published source file to another movie or
+  episode. Remap rebuilds the clean hardlink path and re-runs probe/enrich/publish
+  where needed.
 - The operator can re-run identify/enrich/probe for any item.
 
 ## Extension Points (future)
@@ -93,8 +121,10 @@ passed is recorded so re-entry resumes at the correct point.
 Backend tests should use xUnit and Imposter. Required coverage:
 
 - Stage transitions and the full happy-path sequence.
+- Intake-time match suggestions for movies, single episodes, and season packs.
 - Idempotency: re-running a stage produces no duplicates.
 - Reconciler re-drives stuck items with bounded retries/backoff.
 - Low-confidence identify routes to review without blocking other items.
-- Manual match override resumes the pipeline at the correct stage.
+- Manual match override and post-publish remap resume the pipeline at the correct
+  stage.
 - Event emission for each stage.

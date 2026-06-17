@@ -1,0 +1,344 @@
+# Hosty Platform Requests
+
+Status: Draft
+Created: 2026-06-15
+Updated: 2026-06-15
+
+## Description
+
+Capabilities Media Server needs that Hosty Core does not (yet) provide. Each entry
+is a small spec: the **problem** it solves for Media Server, a **proposed
+contract** (illustrative — exact shapes follow the `app.0.1` schema and existing
+Core conventions), **how the app uses it**, the **current workaround** and its
+limits, and **acceptance criteria**. These are *platform* feature requests, kept
+separate from the app's own backlog so the dependency on Hosty is explicit.
+
+Contract sketches reuse existing Core conventions: app-authenticated calls go to
+`{HOSTY_CORE_ORIGIN}/api/internal/apps/{appId}/...` with
+`Authorization: Bearer <HOSTY_APP_SERVICE_TOKEN>`; runtime values are injected as
+`HOSTY_*` env vars; per-app config is declared in the manifest.
+
+Priority:
+
+- **Blocking** — a milestone cannot ship as intended without it.
+- **High** — strong correctness/operability win; the workaround is fragile.
+- **Medium** — removes per-app boilerplate or a manual operator step.
+- **Low** — convenience.
+
+---
+
+## 1. External host-path mount model for catalog roots — Blocking
+
+**Problem.** Catalog roots are large media folders that must live outside app data,
+be configured by the operator after install, survive app update/restart/remove/
+runtime-switch, and never be backed up or deleted by Hosty. Each root must be a
+single filesystem (the organizer hardlinks between `files/` and `library/` under
+one root). The `docker` runtime profile is deferred solely because this mount model
+does not exist.
+
+**Proposed contract.** A manifest-declared external-mount capability plus a
+Core-managed, operator-configured set of host-path → container-path binds:
+
+```jsonc
+// manifest
+"externalMounts": {
+  "catalogRoots": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "api" }
+}
+```
+
+Core injects the active binds at runtime, e.g.
+`HOSTY_MOUNT_CATALOGROOTS=/srv/movies-4k,/srv/anime` (under `docker` these are bind
+mounts; under `dev` they are the configured host paths read directly).
+
+**How Media Server uses it.** Reads the injected roots, validates each is a single
+filesystem (`st_dev`), and uses `files/` + `library/` under each for download and
+hardlink organize.
+
+**Workaround.** `dev`/`localCommand` only, reading operator host paths directly —
+blocks `docker` delivery.
+
+**Acceptance criteria.**
+- Operator can add/edit/remove catalog-root binds after install.
+- Binds persist across update, restart, and runtime-switch.
+- App removal leaves external media intact.
+- Read-write; each bind is one mount point (so hardlinks work within it).
+- Active binds injected under a stable env/contract.
+
+## 2. External ingress with managed TLS for public endpoints — Blocking
+
+**Problem.** Native clients (Infuse) hit the public `jellyfin` endpoint directly,
+and Hosty provides no external ingress, so the operator must run their own reverse
+proxy and TLS. TLS also matters for the UI app-origin cookie (`SameSite=None;
+Secure` needs HTTPS) inside the cross-site Shell iframe.
+
+**Proposed contract.** A Core-managed public ingress that terminates TLS
+(ACME-issued or operator-supplied cert), routes an external hostname to a declared
+`public` endpoint, and sets `HOSTY_PUBLIC_ORIGIN_{ENDPOINT_KEY}` automatically. The
+manifest already declares the public endpoints (`ui`, `jellyfin`).
+
+**How Media Server uses it.** No change to app code — it already reads
+`HOSTY_PUBLIC_ORIGIN_UI` / `HOSTY_PUBLIC_ORIGIN_JELLYFIN`. The manual reverse proxy
+disappears.
+
+**Workaround.** Operator-run reverse proxy + manually set `HOSTY_PUBLIC_ORIGIN_*`.
+
+**Acceptance criteria.**
+- Each `public` endpoint gets a stable external HTTPS origin, injected as
+  `HOSTY_PUBLIC_ORIGIN_*`.
+- TLS auto-provisioned and renewed.
+- WebSocket/SSE pass-through preserved (SignalR on `ui`).
+- HTTP `Range`/`206` streaming preserved and not whole-response buffered
+  (`jellyfin`).
+
+## 3. App-callable on-demand backup API — High
+
+**Problem.** Before applying EF Core migrations on startup, the app wants a
+recoverable snapshot. Today backups are only `manual`/`scheduled`/`pre-update`/
+`pre-restore`/`pre-runtime-switch`, none app-initiated.
+
+**Proposed contract.**
+
+```text
+POST {HOSTY_CORE_ORIGIN}/api/internal/apps/{appId}/backups
+Authorization: Bearer <HOSTY_APP_SERVICE_TOKEN>
+{ "reason": "pre-migration" }
+→ 201 { "backupId": "...", "status": "completed" }   // or a poll/await handle
+```
+
+**How Media Server uses it.** On startup, if migrations are pending, call this,
+await success, then run `Database.Migrate()`.
+
+**Workaround.** None — apply migrations with no pre-migration backup, relying on
+Hosty's `pre-update` backup (covers the update path, not migrations applied outside
+an update).
+
+**Acceptance criteria.**
+- App can trigger a backup with its service token.
+- Caller can await completion (sync result or pollable status).
+- Resulting backup appears in the normal backup list and is restorable.
+- Failures are reported distinctly so the app can refuse to migrate.
+
+## 4. App-facing pre-backup quiesce/flush hook — High
+
+**Problem.** A `manual`/`scheduled` backup copies the data directory while the app
+is mid-write; the live SQLite file may be inconsistent at copy time. There is no
+chance for the app to checkpoint/quiesce.
+
+**Proposed contract.** A pre-backup lifecycle callback declared in the manifest and
+invoked by Core before any backup:
+
+```jsonc
+"hooks": { "preBackup": { "service": "api", "path": "/internal/hooks/pre-backup" } }
+```
+
+Core calls it, waits for an ACK up to a bounded timeout, then proceeds.
+
+**How Media Server uses it.** The handler runs `PRAGMA wal_checkpoint(TRUNCATE)` /
+an online-backup snapshot and returns `200`.
+
+**Workaround.** WAL mode + a periodic SQLite Online Backup snapshot file kept inside
+the data directory, so any copy contains a known-good database.
+
+**Acceptance criteria.**
+- Hook invoked before `manual`/`scheduled`/`pre-*` backups.
+- Bounded timeout; backup proceeds on ACK or timeout.
+- Documented request/response contract and authentication.
+
+## 5. Operator notification/alert API — High
+
+**Problem.** The app needs to surface actionable conditions to the operator even
+when they are not currently in the app: migration failure ("restore app data"),
+a magnet that will not fit free space, a catalog gone offline.
+
+**Proposed contract.**
+
+```text
+POST {HOSTY_CORE_ORIGIN}/api/internal/apps/{appId}/notifications
+Authorization: Bearer <HOSTY_APP_SERVICE_TOKEN>
+{ "level": "error", "title": "...", "body": "...", "dedupeKey": "...", "actionPath": "/activity" }
+```
+
+Shown in the Shell notification surface; `dedupeKey` collapses repeats and supports
+resolve/clear.
+
+**How Media Server uses it.** Posts alerts on the conditions above and resolves them
+when the condition clears.
+
+**Workaround.** In-app UI banners only — visible only while the operator is in the
+app.
+
+**Acceptance criteria.**
+- App posts with its service token.
+- Levels `info`/`warn`/`error`; dedupe + resolve.
+- Surfaced in the Shell; optional deep-link back into the app
+  (`ui.entrypoint.path` + `actionPath`).
+
+## 6. User-directory change push/webhooks — High
+
+**Problem.** The app maps Hosty users to internal users and issues Jellyfin tokens.
+When a user is unassigned, disabled, or changes email, tokens should be revoked
+promptly; today the app only learns this by polling the scoped directory and
+revalidating at login/issuance.
+
+**Proposed contract.** A subscription to directory-change events for the app, with
+Core POSTing signed events to a declared endpoint:
+
+```jsonc
+"hooks": { "directoryEvents": { "service": "api", "path": "/internal/hooks/directory" } }
+// events: user.assigned | user.unassigned | user.disabled | user.updated{email}
+```
+
+**How Media Server uses it.** On `unassigned`/`disabled`, revoke that user's Jellyfin
+tokens and disable the `AppUser`; on `updated`, re-link by unique email.
+
+**Workaround.** Poll directory + revalidate only at login/issuance → tokens stay
+valid until the next validation point.
+
+**Acceptance criteria.**
+- Signed events authenticated as Core.
+- At-least-once delivery with a poll/reconcile fallback for missed events.
+- Covers assign / unassign / disable / email-change.
+
+## 7. Reusable native-client auth primitive — Medium
+
+**Problem.** Clients that cannot perform the app-code flow (Infuse) force every app
+to hand-roll credential storage, opaque tokens, brute-force protection, and lockout.
+
+**Proposed contract.** A Hosty primitive for native-client pairing bound to a Hosty
+user — e.g. short-lived pairing codes or per-device tokens issued by Core, with
+built-in rate limiting and temporary/permanent lockout — that the app exchanges for
+its own session.
+
+**How Media Server uses it.** Delegate PIN/lockout to the primitive instead of
+maintaining argon2id PINs and failure counters locally.
+
+**Workaround.** App-owned credential + token store with local argon2id hashing,
+rate limiting, and temporary/permanent lockout (already specced in
+[Security](security.md)).
+
+**Acceptance criteria.**
+- Per-user/per-device credentials with revocation.
+- Configurable lockout (temporary + permanent) shared across apps.
+- Tokens hashed at rest.
+- *Confidence note:* may belong in the app rather than the platform; raise only if
+  the pattern recurs across apps.
+
+## 8. Raw L4 (TCP/UDP) port allocation and forwarding declaration — Medium
+
+**Problem.** The torrent engine needs a stable raw listen port for peer
+connectivity and DHT, ideally with router port mapping. Hosty only manages and
+proxies HTTP endpoints.
+
+**Proposed contract.**
+
+```jsonc
+"rawPorts": {
+  "torrent": { "service": "api", "protocol": ["tcp", "udp"], "public": true, "portMapping": "upnp" }
+}
+```
+
+Core allocates/pins the port, injects `HOSTY_RAWPORT_TORRENT`, and optionally
+requests host-level UPnP/NAT-PMP mapping.
+
+**How Media Server uses it.** Binds the injected port; relies on Core for mapping
+instead of app-side UPnP.
+
+**Workaround.** `TORRENT_LISTEN_PORT` setting + operator port-forward + app-side
+UPnP/NAT-PMP.
+
+**Acceptance criteria.**
+- Stable raw port injected and persistent across restart.
+- Optional host-managed port mapping.
+- Documented as a non-HTTP listener, distinct from proxied endpoints.
+
+## 9. First-class embedded-app session for cross-site iframes — Medium
+
+**Problem.** In the cross-site Shell iframe, browser privacy controls (Safari ITP,
+third-party cookie deprecation) can block the app-origin cookie, forcing each app to
+build a bearer-header fallback — fragile and duplicated per app.
+
+**Proposed contract.** A documented standard Hosty session mechanism for embedded
+apps: baked-in partitioned-cookie (CHIPS) issuance, or a standard Shell↔app token
+handshake (e.g. `postMessage`) that yields a reliable session without per-app cookie
+hacks.
+
+**How Media Server uses it.** Uses the standard mechanism instead of the bespoke
+cookie-when-allowed + in-memory bearer fallback.
+
+**Workaround.** HttpOnly cookie when browser policy allows + in-memory/`sessionStorage`
+bearer-token fallback (already designed).
+
+**Acceptance criteria.**
+- Works under Safari ITP and with third-party cookies disabled.
+- No top-level redirects or popups.
+- Documented and consistent across apps.
+
+## 10. Restore-time external-mount path remapping — Medium
+
+**Problem.** Restoring app data on a different host means catalog root paths differ,
+so every catalog goes offline until reconfigured.
+
+**Proposed contract.** On restore (especially cross-host), Core detects the
+declared external mounts (see #1) and prompts the operator to remap them to new host
+paths before the app starts, then injects the corrected binds.
+
+**How Media Server uses it.** Starts with corrected roots; no offline storm.
+
+**Workaround.** App marks unreachable roots Offline; operator re-points paths and
+rescans (see [Catalogs](catalogs.md)).
+
+**Acceptance criteria.**
+- Restore flow surfaces declared external mounts for remapping.
+- App receives corrected paths at first start after restore.
+- Depends on #1.
+
+## 11. LAN service advertisement / UDP discovery — Low
+
+**Problem.** Jellyfin clients can auto-discover servers on `7359/udp`, which does
+not map onto Core port assignment.
+
+**Proposed contract.** A Core mechanism to advertise a discoverable service on the
+LAN (a broadcast responder) tied to a public endpoint, or permission for the app to
+bind the discovery UDP port.
+
+**How Media Server uses it.** Enables Infuse auto-discovery of the `jellyfin`
+endpoint instead of manual URL entry.
+
+**Workaround.** Manual server URL entry in Infuse.
+
+**Acceptance criteria.**
+- Optional, off by default.
+- Advertises the `jellyfin` endpoint's external origin on the LAN.
+
+## 12. Secret rotation surface + change notification — Low
+
+**Problem.** Secret settings (e.g. `TMDB_API_KEY`) have no rotation flow or change
+event, so the app cannot react to a rotated secret without a restart.
+
+**Proposed contract.** A Core change event/webhook when a setting (including a
+secret) changes, optionally with a rotation UI.
+
+**How Media Server uses it.** Reloads the affected secret live on change.
+
+**Workaround.** Re-read settings on restart.
+
+**Acceptance criteria.**
+- Change event delivered to the app (reusing the hook pattern of #6).
+- Secret values remain injected securely and redacted from logs.
+
+## 13. Host resource/disk info and quotas — Low
+
+**Problem.** The app can only see the catalog volume's own free space; it cannot
+reason about overall host disk/CPU or per-app quotas.
+
+**Proposed contract.** A read-only Core endpoint or injected env exposing host
+resource info, and/or a per-app quota declaration in the manifest.
+
+**How Media Server uses it.** Capacity planning and surfacing warnings beyond a
+single catalog volume.
+
+**Workaround.** Read catalog-volume free space directly.
+
+**Acceptance criteria.**
+- Read-only host disk/CPU info available to the app.
+- Optional quota declaration honored by Core.

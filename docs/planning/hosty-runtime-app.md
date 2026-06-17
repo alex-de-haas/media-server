@@ -1,5 +1,9 @@
 # Hosty Runtime App
 
+Status: Draft
+Created: 2026-06-15
+Updated: 2026-06-15
+
 ## Description
 
 Media Server is a Hosty runtime app described by `apps/media-server/manifest.json`
@@ -33,15 +37,13 @@ Two services with stable keys across runtime profiles:
 
 ## Runtime Profiles
 
-- `dev` (`localCommand`) — default for development and for v1, because a host
+- `dev` (`localCommand`) — manifest default for development and for v1, because a host
   process can read operator-configured catalog paths directly without volume
   mounts. Omit `localPort` / `hostPort`; Core assigns loopback ports and injects
   `HOSTY_PORT_{KEY}` (and `PORT` for single-port services).
-- `docker` — production images from GitHub Container Registry. Introduced once
-  external host-path mounts for catalog roots are available (see
-  [Storage and data](storage-and-data.md)). `docker` is declared as the
-  manifest default for parity with the platform default, but v1 installs and runs
-  under `dev`.
+- `docker` — production images from GitHub Container Registry. Deferred until
+  Hosty provides the external host-path mount model needed by catalog roots (see
+  [Storage and data](storage-and-data.md)).
 
 Keep the same service keys, endpoint keys, setting keys, data semantics, and UI
 navigation across profiles so switching runtime is reviewable and reversible.
@@ -55,6 +57,11 @@ navigation across profiles so switching runtime is reviewable and reversible.
 
 The internal `api` port is not exposed as a public endpoint; only `web` reaches
 it, through the injected dependency URL.
+
+The torrent engine's `TORRENT_LISTEN_PORT` is a raw TCP/UDP listener for peer
+connectivity and DHT, not an HTTP endpoint that Hosty proxies or assigns. The
+operator forwards it at the network level (see
+[Torrents and organizer](torrents-and-organizer.md)).
 
 ## Runtime Environment
 
@@ -98,6 +105,11 @@ Two independent auth domains.
 Page-to-page navigation inside the open app uses the app-origin session cookie,
 so the app does not re-exchange a code on every Shell click.
 
+After validation, Media Server upserts an internal app user in SQLite. Hosty
+admins map to Media Server `admin`; other assigned Hosty users map to Media
+Server `user`. The app stores the Hosty user id and email on the internal user
+row so it can re-link by unique email if Hosty user ids change.
+
 **Jellyfin clients (app-owned).** Infuse cannot perform the app-code flow, so the
 `jellyfin` endpoint uses Media Server-owned credentials and opaque access tokens.
 See [Jellyfin compatibility](jellyfin-compatibility.md) and [Security](security.md).
@@ -128,10 +140,65 @@ App-owned configuration declared in the manifest (`key`, `type`, `default`,
 | `JELLYFIN_DISCOVERY_ENABLED` | boolean | Optional UDP discovery (default off). |
 | `TORRENT_MAX_DOWNLOAD_SPEED` | number | 0 = unlimited. |
 | `TORRENT_MAX_UPLOAD_SPEED` | number | 0 = unlimited. |
+| `FFPROBE_PATH` | string | Path to the `ffprobe` binary on the host (dev profile). |
+| `TORRENT_LISTEN_PORT` | number | Fixed TCP/UDP listen port for the torrent engine. |
+| `TORRENT_ENABLE_PORT_MAPPING` | boolean | UPnP / NAT-PMP automatic port mapping (default on). |
+| `TORRENT_BIND_ADDRESS` | string | Optional bind address/interface for VPN setups. |
 
 Public endpoint origins are configured after install through Core-managed
 `HOSTY_PUBLIC_ORIGIN_{ENDPOINT_KEY}` settings (`HOSTY_PUBLIC_ORIGIN_UI`,
 `HOSTY_PUBLIC_ORIGIN_JELLYFIN`); empty means use the local `localhost` endpoint.
+
+## Sample Manifest (illustrative)
+
+Exact field names follow the `app.0.1` schema; this shows the intended shape.
+
+```jsonc
+{
+  "schemaVersion": "app.0.1",
+  "id": "com.haas.media-server",
+  "version": "0.1.0",
+  "name": "Media Server",
+  "services": {
+    "api": {
+      "ports": { "internal": {}, "jellyfin": {} },
+      "runtime": {
+        "dev": { "command": "dotnet run --project api" },
+        "docker": { "image": "ghcr.io/<owner>/media-server-api" }
+      }
+    },
+    "web": {
+      "dependsOn": ["api"],
+      "ports": { "http": {} },
+      "runtime": {
+        "dev": { "command": "npm run start --prefix web" },
+        "docker": { "image": "ghcr.io/<owner>/media-server-web" }
+      }
+    }
+  },
+  "endpoints": {
+    "ui":       { "service": "web", "port": "http",     "public": true, "entrypoint": { "path": "/" } },
+    "jellyfin": { "service": "api", "port": "jellyfin", "public": true }
+  },
+  "data": { "enabled": true },
+  "settings": [
+    { "key": "TMDB_API_KEY",                "type": "string",  "secret": true, "required": true },
+    { "key": "SUPPORTED_LANGUAGES",         "type": "string",  "default": "en-US" },
+    { "key": "JELLYFIN_SERVER_NAME",        "type": "string",  "default": "Media Server" },
+    { "key": "JELLYFIN_DISCOVERY_ENABLED",  "type": "boolean", "default": false },
+    { "key": "FFPROBE_PATH",                "type": "string" },
+    { "key": "TORRENT_LISTEN_PORT",         "type": "number" },
+    { "key": "TORRENT_ENABLE_PORT_MAPPING", "type": "boolean", "default": true },
+    { "key": "TORRENT_BIND_ADDRESS",        "type": "string" },
+    { "key": "TORRENT_MAX_DOWNLOAD_SPEED",  "type": "number",  "default": 0 },
+    { "key": "TORRENT_MAX_UPLOAD_SPEED",    "type": "number",  "default": 0 }
+  ],
+  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
+}
+```
+
+The default install runs the `dev` profile; the `docker` runtime stanza is shown
+for completeness but is deferred (see [Runtime Profiles](#runtime-profiles)).
 
 ## Storage And Backups
 
@@ -140,6 +207,10 @@ Public endpoint origins are configured after install through Core-managed
   all live under this directory so Hosty backup/restore covers them.
 - Catalog roots (the actual large media folders) are configured separately and
   are not part of app data or backups.
+- On schema upgrade, the app prefers to request an on-demand backup from Core
+  before applying EF Core migrations; if Core does not expose an app-callable
+  backup endpoint, the app applies migrations without a pre-migration backup (see
+  [Storage and data](storage-and-data.md)).
 
 Details in [Storage and data](storage-and-data.md).
 

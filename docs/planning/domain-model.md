@@ -1,5 +1,9 @@
 # Domain Model
 
+Status: Draft
+Created: 2026-06-15
+Updated: 2026-06-15
+
 ## Description
 
 This document specifies the persistent entities (EF Core over SQLite) and the
@@ -11,6 +15,13 @@ Conventions:
 
 - Internal keys are `Guid`. The Jellyfin-facing identifier is a separate stable
   string (`PublicId`) so client IDs survive rescans.
+- Matched media identity is based on a catalog plus a canonical provider
+  reference, not on the library path. For movies this is
+  `CatalogId + provider movie ref`; for episodes this is
+  `CatalogId + provider series ref + season + episode`.
+- Hosty users are represented by internal `AppUser` rows. Application data links
+  to `AppUser.Id`; Hosty user id and email are external identity attributes that
+  can be refreshed or re-linked.
 - Flexible/provider-shaped data is stored in **JSON columns** (SQLite JSON1 /
   EF Core JSON mapping), not in a document database (see
   [Storage and data](storage-and-data.md)).
@@ -30,8 +41,15 @@ erDiagram
   MediaItem ||--o{ ImageAsset : "artwork"
   MediaItem ||--o{ UserData : "per user"
   Download ||--o| IngestItem : "drives"
+  Download ||--o{ SourceFile : "contains"
+  SourceFile }o--o| MediaItem : "assigned to"
+  SourceFile ||--o| MediaSource : "published as"
   IngestItem }o--|| Catalog : "into"
   IngestItem }o--o| MediaItem : "publishes"
+  AppUser ||--o{ UserData : "owns"
+  AppUser ||--o{ MediaAccessCredential : "creates"
+  AppUser ||--o{ AccessToken : "uses"
+  AppUser ||--o{ PlaybackSession : "plays"
   WatchlistItem }o--|| Catalog : "into (future)"
 ```
 
@@ -43,7 +61,7 @@ erDiagram
 | --- | --- | --- |
 | Id | Guid | PK |
 | Name | string | "Movies 4K", "Anime" |
-| Type | CatalogType | Movie \| Series |
+| Type | CatalogType | Movie \| Series \| Anime |
 | Root | string | host path; contains `files/` + `library/` (one filesystem) |
 | NamingTemplate | string | e.g. `{Title} ({Year})` |
 | DefaultKeepSeeding | bool | default seeding policy |
@@ -63,13 +81,38 @@ erDiagram
 | Title / OriginalTitle | string | |
 | OriginalLanguage | string? | always stored, language-independent |
 | Year | int? | |
-| IndexNumber / ParentIndexNumber | int? | episode/season numbering |
+| IndexNumber / IndexNumberEnd / ParentIndexNumber | int? | episode/season numbering; `IndexNumberEnd` set when one file holds two consecutive episodes |
 | LibraryPath | string? | relative to catalog root; null for Series/Season containers |
+| IdentityProvider | string? | canonical provider, e.g. `tmdb` |
+| IdentityProviderId | string? | movie id or series/show id from the canonical provider |
+| IdentitySeasonNumber / IdentityEpisodeNumber | int? | only for episode identity |
 | Providers | JSON | `{ "tmdb": "27205" }` provider dictionary |
 | AddedAt / UpdatedAt | DateTime | |
 
-`PublicId` is assigned once and re-resolved on rescan by `(CatalogId, relative
-library path, Kind)`; the value persists even if the row id changes.
+`PublicId` is generated from the stable identity key once a media item is matched:
+
+- Movie: `CatalogId + IdentityProvider + IdentityProviderId`.
+- Episode: `CatalogId + IdentityProvider + IdentityProviderId + season + episode`.
+- Series and season containers derive from the same provider series identity.
+- Unmatched videos use a temporary source-file fingerprint/path identity until
+  the operator assigns a provider match.
+
+The client-facing Jellyfin `Id` is a 32-character lowercase hex rendering derived
+deterministically from the canonical identity key (Jellyfin's `Guid` shape), so
+strict clients accept it while it stays stable across rescans.
+
+Additional providers are stored as aliases in `Providers` and do not change the
+canonical identity automatically. If a user explicitly remaps a file from one
+movie/episode to another, the media source moves to the target item and the
+Jellyfin item id changes only when the canonical target identity changes.
+
+Unmatched videos are not exposed to Jellyfin clients — their temporary identity
+stays internal to the review queue and admin UI — so a client-visible `PublicId`
+is assigned once, at publish, and is stable thereafter. First identification fills
+identity on the **same** `MediaItem` row, so the internal `Id` (and the `UserData`
+keyed to it) survives the `PublicId` change. The client-visible id therefore
+changes only on an operator remap to a *different* canonical title, where the
+change is intended; clients re-sync `UserData` from the server on refresh.
 
 **MediaSource** (per playable item, from probe)
 
@@ -77,6 +120,7 @@ library path, Kind)`; the value persists even if the row id changes.
 | --- | --- |
 | Id | Guid (PK) |
 | MediaItemId | Guid (FK) |
+| SourceFileId | Guid? (FK) |
 | Container / Path | string |
 | SizeBytes / Bitrate | long / int? |
 | DurationTicks | long |
@@ -130,12 +174,34 @@ library path, Kind)`; the value persists even if the row id changes.
 | InfoHash / Name | string | |
 | CatalogId | Guid | FK |
 | SourceType | enum | Magnet \| File |
-| State | DownloadState | see enums |
-| Progress / DownloadSpeed / UploadSpeed / Ratio | numeric | |
-| EtaSeconds | int? | |
+| State | DownloadState | persisted; transitions trigger pipeline actions |
 | KeepSeeding | bool | per-torrent override of catalog default |
 | SavePath | string | under `<catalog.root>/files/` |
 | AddedAt / CompletedAt | DateTime / DateTime? | |
+
+Live progress, download/upload speed, ratio, and ETA are **not persisted**. The
+torrent engine reports them in memory and broadcasts them over SignalR; only
+state transitions are written to the database, and a transition (e.g. Completed)
+is what triggers downstream pipeline actions. See
+[Storage and data](storage-and-data.md) and [Background tasks](background-tasks.md).
+
+**SourceFile** (one playable candidate inside a torrent)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| Id | Guid | PK |
+| DownloadId | Guid | FK |
+| RelativePath | string | under the download's `files/` directory |
+| TorrentFileIndex | int? | index in the torrent file list, when available |
+| SizeBytes | long | |
+| ContentHash | string? | optional fingerprint for unmatched identity/reconciliation |
+| MediaItemId | Guid? | assigned movie or episode |
+| AssignmentStatus | enum | Unassigned \| Suggested \| Confirmed \| NeedsReview |
+| CreatedAt / UpdatedAt | DateTime | |
+
+Each playable media file eventually maps to exactly one movie or one episode.
+Remapping changes the `SourceFile -> MediaItem` assignment and rebuilds the
+clean hardlink path without requiring direct filesystem rename operations.
 
 **IngestItem** (pipeline state machine — see [Automation pipeline](automation-pipeline.md))
 
@@ -149,6 +215,8 @@ library path, Kind)`; the value persists even if the row id changes.
 | Status | IngestStatus | Pending \| Running \| NeedsReview \| Failed \| Done |
 | AttemptCount | int | for retry/backoff |
 | StagesCompleted | JSON | resume point on re-entry |
+| LeaseOwner / LeaseUntil | string? / DateTime? | single-flight claim so only one worker drives an item at a time |
+| RowVersion | byte[] | optimistic concurrency token |
 | ReviewCandidates | JSON? | provider candidates when NeedsReview |
 | LastError | string? | |
 | CreatedAt / UpdatedAt | DateTime | |
@@ -166,14 +234,31 @@ library path, Kind)`; the value persists even if the row id changes.
 
 ## Entities — Users & Playback
 
-**MediaAccessCredential** (Infuse login, bound to a Host user)
+**AppUser** (internal user linked to Hosty)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| Id | Guid | PK; used by Media Server data |
+| HostyUserId | string | current Hosty user id from Core |
+| Email | string? | normalized email for display and possible re-linking |
+| DisplayName | string | |
+| Role | UserRole | Admin \| User |
+| Enabled | bool | false when Core no longer assigns/allows the user |
+| CreatedAt / UpdatedAt / LastSeenAt | DateTime | |
+
+On UI login, Media Server upserts an `AppUser` by `HostyUserId`. If no row is
+found and the email uniquely matches an existing row, the app may re-link that
+row to the new Hosty id. This mirrors the Host-backed user pattern already used
+by other Hosty runtime apps.
+
+**MediaAccessCredential** (Infuse login, bound to an internal app user)
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | Id | Guid | PK |
-| HostyUserId | string | from scoped directory |
+| AppUserId | Guid | internal user |
 | Username | string | Hosty email |
-| PinHash | string | hashed 4–8 digit PIN |
+| PinHash | string | hashed 6–8 digit PIN |
 | FailedAttempts | int | lockout counter |
 | LockedUntil | DateTime? | temporary lockout (after 10) |
 | PermanentlyLocked | bool | after 100; cleared by regenerating |
@@ -186,15 +271,15 @@ library path, Kind)`; the value persists even if the row id changes.
 | --- | --- |
 | Id | Guid (PK) |
 | TokenHash | string (unique) |
-| HostyUserId / Client / Device / DeviceId | string |
+| AppUserId / Client / Device / DeviceId | Guid / string |
 | Revoked | bool |
 | CreatedAt / LastUsedAt | DateTime / DateTime? |
 
-**UserData** — composite PK `(HostyUserId, MediaItemId)`
+**UserData** — composite PK `(AppUserId, MediaItemId)`
 
 | Field | Type |
 | --- | --- |
-| HostyUserId / MediaItemId | string / Guid (PK) |
+| AppUserId / MediaItemId | Guid / Guid (PK) |
 | PlaybackPositionTicks | long |
 | Played / IsFavorite | bool |
 | PlayCount | int |
@@ -206,7 +291,7 @@ library path, Kind)`; the value persists even if the row id changes.
 | Field | Type |
 | --- | --- |
 | Id / PlaySessionId | Guid / string |
-| HostyUserId / DeviceId | string |
+| AppUserId / DeviceId | Guid / string |
 | MediaItemId / MediaSourceId | Guid / Guid? |
 | PositionTicks | long |
 | StartedAt / LastProgressAt | DateTime |
@@ -215,19 +300,22 @@ library path, Kind)`; the value persists even if the row id changes.
 
 **WatchlistItem**: Id, Providers (JSON), Type, CatalogId (FK), Monitored,
 Quality (JSON preferences), CreatedAt.
-**ContentSourceConfig**: Id, Name, Type, Config (JSON incl. secrets), Enabled.
+**ContentSourceConfig**: Id, Name, Type, Config (JSON without raw secrets),
+SecretRefs (JSON references to Hosty-managed secrets), Enabled.
 
 ## Enums
 
 ```csharp
-enum CatalogType { Movie, Series }
+enum CatalogType { Movie, Series, Anime }
 enum MediaKind { Movie, Series, Season, Episode, Video }
 enum DownloadState { Queued, Downloading, Completed, Seeding, StoppedSeeding, Stopped, Error }
-enum IngestStage { Intake, Download, Organize, Identify, Probe, Enrich, Publish }
+enum IngestStage { Intake, Identify, Download, Organize, Probe, Enrich, Publish }
 enum IngestStatus { Pending, Running, NeedsReview, Failed, Done }
 enum PipelinePhase { Acquisition, Processing }
 enum StreamType { Video, Audio, Subtitle }
 enum ImageType { Primary, Backdrop, Logo }
+enum SourceFileAssignmentStatus { Unassigned, Suggested, Confirmed, NeedsReview }
+enum UserRole { Admin, User }
 ```
 
 ## Contract: IPipelineStage
@@ -239,7 +327,7 @@ without changing existing ones.
 ```csharp
 public interface IPipelineStage
 {
-    string Key { get; }            // "download", "organize", "identify", ...
+    string Key { get; }            // "intake", "identify", "download", ...
     PipelinePhase Phase { get; }   // Processing (v1) | Acquisition (M5)
     int Order { get; }             // global order; acquisition stages sort before Intake
 
@@ -254,6 +342,7 @@ public sealed class IngestContext
     public IngestItem Item { get; init; }
     public Catalog Catalog { get; init; }
     public Download? Download { get; init; }
+    public IReadOnlyList<SourceFile> SourceFiles { get; init; }
     public CatalogPaths Paths { get; init; }        // resolved files/ and library/
     public IServiceProvider Services { get; init; } // resolve IOrganizer, probe, providers
     public IProgressReporter Progress { get; init; }// emits Job events
@@ -270,7 +359,9 @@ public abstract record StageResult
 
 The orchestrator advances `IngestItem.Stage`/`Status`, records `StagesCompleted`,
 applies backoff on `Deferred`/retryable `Failed`, and parks `NeedsReview` items
-for manual match override.
+for manual match override. It claims an item via `LeaseOwner`/`LeaseUntil` and
+uses the `RowVersion` token to detect concurrent edits, so the reconciler and
+operator actions never double-drive the same item.
 
 `IngestStage` enumerates the v1 **processing** stages and is the persisted
 `IngestItem.Stage`. Acquisition stages (M5) implement the same `IPipelineStage`
@@ -358,7 +449,11 @@ public interface ITorrentEngine          // MonoTorrent wrapper
 public interface IOrganizer
 {
     // Hardlink selected media from files/ into library/ (see torrents-and-organizer).
-    Task<IReadOnlyList<OrganizedFile>> OrganizeAsync(Download download, Catalog catalog, CancellationToken ct);
+    Task<IReadOnlyList<OrganizedFile>> OrganizeAsync(
+        Download download,
+        IReadOnlyList<SourceFile> sourceFiles,
+        Catalog catalog,
+        CancellationToken ct);
     Task UnlinkSeedCopyAsync(Download download, CancellationToken ct);  // stop-seeding cleanup
 }
 
@@ -390,7 +485,11 @@ Backend tests use xUnit and Imposter. Required coverage:
 
 - EF Core mapping for relational entities, JSON columns, composite keys, and the
   `MediaItem` self-hierarchy.
-- `PublicId` stability across simulated rescans.
+- `PublicId` stability from canonical provider identity across simulated rescans.
+- Internal `AppUser` upsert, Hosty id refresh, unique email re-linking, and role
+  mapping from Hosty admin/user status.
+- Source-file assignment and remapping for movies, single episodes, and season
+  packs.
 - `IPipelineStage` orchestration: ordering, `ShouldRun` idempotency, `StageResult`
   handling (Completed/NeedsReview/Deferred/Failed), backoff, and resume from
   `StagesCompleted`.

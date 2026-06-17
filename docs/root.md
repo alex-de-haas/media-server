@@ -2,19 +2,24 @@
 
 ## Overview
 
-Media Server is a self-hosted, automation-first application for acquiring,
-organizing, and streaming movie and TV libraries. The defining goal is **maximum
-automation**: an operator adds a torrent and picks a destination catalog, and the
-system downloads it, organizes it into a clean library layout, identifies it,
-fetches metadata, probes media streams, and publishes it for playback — without
-further manual steps. The content then becomes available to clients such as
-Infuse over a Jellyfin-compatible API.
+This documentation is the draft implementation plan for Media Server. The
+application has not been implemented yet, so current behavior must not be
+documented under `docs/features/` until the corresponding implementation exists.
 
-Media Server is built and distributed as a **Hosty runtime app** with manifest
-`schemaVersion: "app.0.1"`. It runs under Hosty Core-managed lifecycle, locally
-through the `localCommand` runtime profile and (later) as Docker images through
-the `docker` runtime profile. Hosty Core owns Host user authentication, app
-access assignment, app identity issuance, and app data backups.
+Media Server is planned as a self-hosted, automation-first application for
+acquiring, organizing, and streaming movie and TV libraries. The defining goal is
+**maximum automation**: an operator adds a torrent and picks a destination
+catalog, and the system downloads it, organizes it into a clean library layout,
+identifies it, fetches metadata, probes media streams, and publishes it for
+playback without further manual steps. The content then becomes available to
+clients such as Infuse over a Jellyfin-compatible API.
+
+Media Server will be built and distributed as a **Hosty runtime app** with
+manifest `schemaVersion: "app.0.1"`. The v1 implementation runs under Hosty
+Core-managed lifecycle through the `dev` / `localCommand` runtime profile.
+Docker delivery is deferred until Hosty supports the catalog-root mount model
+needed by this app. Hosty Core owns Host user authentication, app access
+assignment, app identity issuance, and app data backups.
 
 > This documentation supersedes the earlier "Docker Host module"
 > (`schemaVersion: "0.2"`) design. That gateway/module contract is retired; the
@@ -100,22 +105,32 @@ Runtime and delivery:
   introduced once external host-path mounts are available.
 - GitHub Actions for build, test, and image publishing.
 
-## Feature Documentation
+## Ideas
 
-- [Hosty runtime app](features/hosty-runtime-app.md)
-- [Catalogs](features/catalogs.md)
-- [Automation pipeline](features/automation-pipeline.md)
-- [Domain model](features/domain-model.md)
-- [Torrents and organizer](features/torrents-and-organizer.md)
-- [Metadata](features/metadata.md)
-- [Storage and data](features/storage-and-data.md)
-- [Jellyfin compatibility](features/jellyfin-compatibility.md)
-- [File and directory management](features/file-directory-management.md)
-- [Background tasks and progress](features/background-tasks.md)
-- [Frontend application](features/frontend-application.md)
-- [Security](features/security.md)
-- [Build and deployment](features/build-and-deployment.md)
-- [Watchlist and discovery](features/watchlist-and-discovery.md)
+No idea documents yet.
+
+## Planning
+
+- [Implementation plan](planning/implementation-plan.md)
+- [Hosty runtime app](planning/hosty-runtime-app.md)
+- [Catalogs](planning/catalogs.md)
+- [Automation pipeline](planning/automation-pipeline.md)
+- [Domain model](planning/domain-model.md)
+- [Torrents and organizer](planning/torrents-and-organizer.md)
+- [Metadata](planning/metadata.md)
+- [Storage and data](planning/storage-and-data.md)
+- [Jellyfin compatibility](planning/jellyfin-compatibility.md)
+- [File and directory management](planning/file-directory-management.md)
+- [Background tasks and progress](planning/background-tasks.md)
+- [Frontend application](planning/frontend-application.md)
+- [Security](planning/security.md)
+- [Build and deployment](planning/build-and-deployment.md)
+- [Watchlist and discovery](planning/watchlist-and-discovery.md)
+- [Hosty platform requests](planning/hosty-platform-requests.md)
+
+## Features
+
+No implemented feature documentation yet.
 
 ## Testing Expectations
 
@@ -124,7 +139,7 @@ New features should include corresponding unit tests scoped to the behavior they
 introduce. Hosty integration concerns (identity, Shell embedding, SignalR,
 public endpoints) must be validated through Core-managed runtime profiles, not
 by forging tokens. Feature-specific testing requirements are documented in the
-relevant feature files.
+relevant planning files until implementation is complete.
 
 ## Roadmap
 
@@ -154,8 +169,8 @@ relevant feature files.
 
 ## Summary
 
-Media Server is an automation-first Hosty runtime app: a `.NET` `api` service and
-a Next.js `web` service under Hosty Core lifecycle. Its center of gravity is the
-automation pipeline that turns an added torrent into a clean, identified,
-metadata-rich, directly-playable library item with no manual steps, exposed to
-Infuse through a Jellyfin-compatible API.
+Media Server is planned as an automation-first Hosty runtime app: a `.NET` `api`
+service and a Next.js `web` service under Hosty Core lifecycle. Its center of
+gravity is the automation pipeline that turns an added torrent into a clean,
+identified, metadata-rich, directly-playable library item with no manual steps,
+exposed to Infuse through a Jellyfin-compatible API.
