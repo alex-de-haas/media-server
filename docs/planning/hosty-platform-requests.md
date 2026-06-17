@@ -2,7 +2,7 @@
 
 Status: Draft
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-06-17
 
 ## Description
 
@@ -243,14 +243,15 @@ rate limiting, and temporary/permanent lockout (already specced in
 - *Confidence note:* may belong in the app rather than the platform; raise only if
   the pattern recurs across apps.
 
-## 8. Raw L4 (TCP/UDP) port allocation and forwarding declaration — Planned (2026-06-17)
+## 8. Raw L4 (TCP/UDP) port allocation and forwarding declaration — Implemented (2026-06-17)
 
-**Status.** Approved as a minimal opt-in per-port extension (`expose: host` +
-`transport: ["tcp", "udp"]` on a manifest port), injected as `HOSTY_PORT_{KEY}`;
-being implemented in the `docker-host` repo. media-server declares a pinned
-`torrent` port and reads `HOSTY_PORT_TORRENT`. Router port-forwarding stays the
-operator's responsibility (no Core-managed UPnP). M4 docker delivery depends on
-this landing.
+**Status.** Implemented in `docker-host` as a minimal opt-in per-port extension
+(`expose: host` + `transport: ["tcp", "udp"]` on a manifest port); `expose: host`
+requires a pinned `hostPort`. Core publishes `0.0.0.0:host:container/proto` and
+injects `HOSTY_PORT_{KEY}` once. media-server declares a pinned `torrent` port and
+reads `HOSTY_PORT_TORRENT`. Router port-forwarding stays the operator's
+responsibility (no Core-managed UPnP). The currently installed `0.4.0` release
+predates this merge, so M4 docker delivery needs a Core build that includes it.
 
 **Problem.** The torrent engine needs a stable raw listen port for peer
 connectivity and DHT, ideally with router port mapping. Hosty only manages and
@@ -369,3 +370,95 @@ single catalog volume.
 **Acceptance criteria.**
 - Read-only host disk/CPU info available to the app.
 - Optional quota declaration honored by Core.
+
+## 14. Intra-app service-to-service URL discovery — Planned (2026-06-17)
+
+**Status.** Implemented in Hosty Core (`docker-host`, working tree): `dependsOn` now drives
+both startup ordering **and** intra-app discovery. Core injects `HOSTY_SERVICE_{KEY}_URL` with
+the depended-on sibling's **internal** base URL — distinct from the cross-app
+`HOSTY_DEPENDENCY_{KEY}_URL` namespace. Entries accept the string form (`"api"`) or the object
+form (`{ "service": "api", "port": "internal" }`); the target port is the named port, else the
+sibling's first non-`public` port. Under `docker`, siblings join a per-app user network and
+resolve by service-name DNS at the container port (e.g. `http://api:3000`, internal port not
+host-published); under `dev`/`localCommand`, over loopback at the assigned port. Media Server's
+`web` reads `HOSTY_SERVICE_API_URL` and proxies REST + SignalR to `api`'s internal port — no
+public exposure of the management API, no app-side port pinning, no `host.docker.internal`
+detour. Unblocks the `docker` M4 delivery target.
+
+**Problem (historical).** Media Server is one app with two services: `web` (the Next.js BFF)
+must reach `api`'s **internal** (non-public) port to proxy REST and SignalR. Core
+already has two dependency mechanisms, and they are easy to conflate — but
+**neither** wires this intra-app hop:
+
+- **Service-level `dependsOn`** (`services[].dependsOn`) governs **startup order
+  only.** Core topologically sorts services so a dependency boots first; it
+  injects no environment variable. `web`'s `dependsOn: ["api"]` guarantees `api`
+  starts before `web` and nothing more.
+- **App-level `dependencies`** (the manifest-root array) is the **only** source of
+  `HOSTY_DEPENDENCY_{KEY}_URL`. Core resolves each entry against a *different
+  installed app* by `appId` and returns that app's **public endpoint** URL. It is
+  cross-app, not intra-app, and resolves only to declared endpoints — the internal
+  `api` port is intentionally not an endpoint.
+
+Why the `web → api` hop has no channel today:
+- `HOSTY_PORT_{KEY}` is injected only into the service that *owns* the port, so
+  `web` never receives `api`'s port.
+- App containers run on the default Docker bridge with no shared user network, so
+  there is no service-name DNS between siblings (only `host.docker.internal` is
+  mapped).
+
+So there is no Core-provided way for `web` to learn `api`'s internal address. This
+is the same gap tracked as Open Risk #2 in the
+[implementation plan](implementation-plan.md). It blocks a clean `web → api` proxy;
+the `docker` profile (the v1 delivery target) cannot ship it without the security
+regression below.
+
+**Proposed contract.** Keep the two concerns **separate** — do *not* overload the
+cross-app `dependencies` array (different lifecycle: `appId`, versioning,
+optional/required, resolves to *public* endpoints). Instead reuse the declaration
+the app already makes for ordering: when service B lists service A in `dependsOn`,
+Core *additionally* injects A's **internal** base URL into B under a distinct env
+name. One declaration drives both ordering and discovery; the namespaces never
+collide.
+
+```jsonc
+// manifest — same declaration, richer effect
+{ "key": "web", "dependsOn": ["api"] }
+// optional explicit port form when a service exposes several ports:
+{ "key": "web", "dependsOn": [{ "service": "api", "port": "internal" }] }
+```
+
+```text
+# injected into web at runtime (distinct prefix, NOT HOSTY_DEPENDENCY_*)
+HOSTY_SERVICE_API_URL=http://<api-internal-host>:<port>
+```
+
+- Distinct prefix `HOSTY_SERVICE_{KEY}_URL` keeps the intra-app and cross-app
+  (`HOSTY_DEPENDENCY_{KEY}_URL`) namespaces legible and collision-free.
+- Resolves to the depended-on service's internal port (its first non-public port,
+  or a named port) on a network the dependent service can actually reach: under
+  `docker`, a shared per-app user network with service-name DNS; under `dev`, the
+  assigned loopback host/port.
+- `dependsOn` keeps its existing ordering guarantee unchanged — URL injection is
+  purely additive.
+
+**How Media Server uses it.** `web` reads `HOSTY_SERVICE_API_URL` and proxies REST
+and SignalR to `api`'s internal port. No public exposure of the management API, no
+app-side port pinning, no `host.docker.internal` detour.
+
+**Workaround.** Pin `api`'s internal port (manifest `localPort`/`hostPort` or a
+`HOSTY_PORT_INTERNAL` setting) and have `web` build the URL itself. Under `dev` this
+reaches `api` on `127.0.0.1:{pinned}`. Under `docker` it is insufficient unless the
+internal port is also marked `expose: host` (reachable via
+`host.docker.internal:{pinned}`) — which publishes the internal management API on
+all host interfaces, a security regression.
+
+**Acceptance criteria.**
+- A service that `dependsOn` a sibling receives the sibling's internal base URL
+  under a stable, documented env var, distinct from `HOSTY_DEPENDENCY_*`.
+- The URL targets the sibling's internal (non-public) port and is reachable from
+  the dependent service under both `docker` and `dev`.
+- No need to expose internal ports publicly or pin ports app-side.
+- Cross-app `dependencies` semantics are unchanged; the two mechanisms remain
+  documented as separate concerns (ordering + intra-app discovery vs cross-app
+  endpoint resolution).

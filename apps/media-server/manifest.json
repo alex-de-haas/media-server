@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "app.0.1",
+  "id": "com.haas.media-server",
+  "name": "Media Server",
+  "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
+  "version": "0.1.0",
+  "runtimeProfiles": [
+    { "key": "docker", "type": "docker", "default": true },
+    { "key": "dev", "type": "localCommand" }
+  ],
+  "defaultRuntime": "docker",
+  "services": [
+    {
+      "key": "api",
+      "runtimes": {
+        "docker": {
+          "type": "docker",
+          "image": { "repository": "ghcr.io/alex-de-haas/media-server-api", "tag": "latest", "pullPolicy": "always" },
+          "ports": [
+            { "key": "internal", "containerPort": 8080, "protocol": "http" },
+            { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true },
+            { "key": "torrent", "containerPort": 6881, "hostPort": 6881, "expose": "host", "transport": ["tcp", "udp"] }
+          ]
+        },
+        "dev": {
+          "type": "localCommand",
+          "workingDirectory": "apps/media-server/api",
+          "command": "dotnet run --project MediaServer.Api",
+          "ports": [
+            { "key": "internal", "containerPort": 8080, "protocol": "http" },
+            { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true },
+            { "key": "torrent", "containerPort": 6881, "hostPort": 6881, "expose": "host", "transport": ["tcp", "udp"] }
+          ]
+        }
+      }
+    },
+    {
+      "key": "web",
+      "dependsOn": ["api"],
+      "runtimes": {
+        "docker": {
+          "type": "docker",
+          "image": { "repository": "ghcr.io/alex-de-haas/media-server-web", "tag": "latest", "pullPolicy": "always" },
+          "ports": [
+            { "key": "http", "containerPort": 3000, "protocol": "http", "public": true }
+          ]
+        },
+        "dev": {
+          "type": "localCommand",
+          "workingDirectory": "apps/media-server/web",
+          "command": "pnpm dev",
+          "ports": [
+            { "key": "http", "containerPort": 3000, "protocol": "http", "public": true }
+          ]
+        }
+      }
+    }
+  ],
+  "endpoints": [
+    { "key": "ui", "service": "web", "port": "http", "protocol": "http", "public": true },
+    { "key": "jellyfin", "service": "api", "port": "jellyfin", "protocol": "http", "public": true }
+  ],
+  "ui": {
+    "entrypoint": { "endpoint": "ui", "path": "/" },
+    "navigation": [
+      { "label": "Overview", "path": "/" }
+    ]
+  },
+  "data": {
+    "enabled": true,
+    "targets": [
+      { "runtime": "docker", "service": "api", "containerPath": "/app/data", "environment": "HOSTY_APP_DATA_DIR" },
+      { "runtime": "dev", "environment": "HOSTY_APP_DATA_DIR" }
+    ]
+  },
+  "externalMounts": {
+    "catalogRoots": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "api", "required": true }
+  },
+  "settings": [
+    { "key": "TMDB_API_KEY", "type": "string", "secret": true, "required": true },
+    { "key": "SUPPORTED_LANGUAGES", "type": "string", "default": "en-US" },
+    { "key": "JELLYFIN_SERVER_NAME", "type": "string", "default": "Media Server" },
+    { "key": "JELLYFIN_DISCOVERY_ENABLED", "type": "boolean", "default": "false" },
+    { "key": "FFPROBE_PATH", "type": "string" },
+    { "key": "TORRENT_ENABLE_PORT_MAPPING", "type": "boolean", "default": "true" },
+    { "key": "TORRENT_BIND_ADDRESS", "type": "string" },
+    { "key": "TORRENT_MAX_DOWNLOAD_SPEED", "type": "number", "default": "0" },
+    { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0" }
+  ],
+  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
+}

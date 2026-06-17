@@ -61,12 +61,13 @@ capabilities. Most blockers are now implemented. This table is authoritative;
 | Operator notifications (#5) | **Implemented** | `POST /api/internal/apps/{appId}/notifications` `{ target, audience, level, title, body, link, dedupeKey }`; levels info/success/warning/error; app may **not** use `host-admin` audience. | Use for migration failure, low disk, catalog offline. |
 | App identity / session | **Implemented** | `POST /api/auth/apps/token {code}` → JWT (HS256, 24h); `POST /api/auth/apps/revalidate` (bearer service token). | JWT is **symmetric** — app cannot verify locally; must revalidate (cache with TTL). |
 | Scoped user directory | **Implemented** | `GET /api/internal/apps/{appId}/directory/users` → assigned, enabled users only. | Map Host users → app users; poll for changes. |
+| Intra-app service discovery (#14) | **Implemented** (Core source, merged 2026-06-17) | `dependsOn: ["api"]` makes Core inject `HOSTY_SERVICE_API_URL` into `web` → `api`'s first non-public port. docker: `http://api:8080` over a per-app user network (no host publish); dev: `http://localhost:{assigned}`. **Caveat:** the installed `0.4.0` release predates this — run Core from source (`hosty core start --project …/Haas.Hosty.Core.csproj`) until a release ships it. | `web` BFF reads `HOSTY_SERVICE_API_URL`; no port pinning, no public internal port. Distinct from cross-app `HOSTY_DEPENDENCY_*`. Verified end-to-end in M0. |
 | Directory-change webhooks (#6) | **Absent** | — | Keep polling `directory/users`; revoke Jellyfin tokens on unassign/disable by diff. |
 | Pre-backup quiesce hook (#4) | **Absent** | — | Keep WAL + periodic SQLite online-backup snapshot for scheduled/manual backups. |
-| Raw TCP/UDP port (#8) | **Planned** | Minimal opt-in extension being added to Core: per-port `expose: host` + `transport: [tcp, udp]` (approved 2026-06-17; tracked in `docker-host`). | media-server declares a pinned `torrent` port; operator forwards it on the router (no UPnP in Core). |
+| Raw TCP/UDP port (#8) | **Implemented** (Core source, verified 2026-06-17) | Per-port `expose: host` + `transport: [tcp, udp]`; `expose: host` requires a pinned `hostPort`. Publishes `0.0.0.0:host:container/proto`; injects `HOSTY_PORT_{KEY}` once. (Same release caveat as #14.) | media-server declares a pinned `torrent` port; operator forwards it on the router (no UPnP in Core). |
 | Restore-time mount remap (#10), LAN discovery (#11) | **Absent** | — | App marks unreachable roots offline + rescan; manual server URL in Infuse. |
 
-CLI (actual): `hosty apps install <dir> --runtime <key>`, `hosty apps start|stop|restart|health|logs|remove <id>`, `hosty apps open <id> --user <email>`, `hosty apps configure <id> <key> <value>`, `hosty apps mounts set <id> --mount <key>=<label>=<host-path>`.
+CLI (actual, verified against 0.4.0): `hosty apps install <dir> [--runtime <key>]`, `hosty apps start|stop|restart|health|logs|remove|backup|restore|update-plan|update <id>`, `hosty apps open <id> --user <email>`, `hosty apps identity <id> --user <email> [--format token|header|env|json]`, `hosty apps list`, `hosty users list [--app <id>]`. **No** `apps configure` / `apps mounts` subcommands exist in 0.4.0 — app **settings** and **external mounts** are configured post-install through the Shell UI (and are not enforced by Core at `start`).
 
 ## 3. Repository Scaffold (M0)
 
@@ -174,12 +175,17 @@ the internal management surface from the public Jellyfin surface.
 }
 ```
 
-> ⚠️ Verify in M0: how `web` discovers the **internal** `api` URL. `demo-app`
-> reaches its backend through a *public* endpoint, and the top-level
-> `dependencies` / `HOSTY_DEPENDENCY_*_URL` mechanism is only partially
-> implemented in Core. If `HOSTY_DEPENDENCY_API_URL` is not injected from
-> `dependsOn`, choose a fallback (declare `internal` as a non-public endpoint and
-> read its injected port, or wire the top-level `dependencies` array).
+> ✅ Resolved in M0 (verified against `docker-host` 2026-06-17): `web` discovers
+> the **internal** `api` URL via Core's intra-app service discovery
+> ([platform request #14](hosty-platform-requests.md)). Because `web` declares
+> `dependsOn: ["api"]`, Core injects `HOSTY_SERVICE_API_URL` into `web`, resolving
+> to `api`'s first non-public port (`internal`). Under `docker` this is
+> `http://api:8080` over a per-app user network (service-name DNS; the internal
+> port is **not** host-published); under `dev` it is `http://localhost:{assigned}`
+> over loopback. This is distinct from cross-app `HOSTY_DEPENDENCY_{KEY}_URL`
+> (which resolves to another *app's* public endpoint). `web` reads
+> `HOSTY_SERVICE_API_URL` for its BFF proxy — no port pinning, no public exposure
+> of the management API.
 
 ## 5. Milestones
 
@@ -193,11 +199,11 @@ the internal management surface from the public Jellyfin surface.
   iframe), revalidate via service token, BFF proxy to `api`, React Query +
   SignalR client wired.
 - CI: restore/build/test .NET (xUnit), build web, validate manifest + dev commands.
-- **Integration verification (de-risk early):** (a) `HOSTY_DEPENDENCY_API_URL`
-  vs fallback; (b) `HOSTY_MOUNT_CATALOGROOTS` injection; (c)
-  `HOSTY_PUBLIC_ORIGIN_*` from cloudflared.
+- **Integration verification (de-risk early):** (a) `HOSTY_SERVICE_API_URL`
+  injected into `web` from `dependsOn` (intra-app discovery, #14); (b)
+  `HOSTY_MOUNT_CATALOGROOTS` injection; (c) `HOSTY_PUBLIC_ORIGIN_*` from cloudflared.
 
-**Acceptance:** `hosty apps install . --runtime dev` → `start` → `open --user …`
+**Acceptance (met 2026-06-17):** `hosty apps install apps/media-server --runtime dev` → `start` → `open --user …`
 loads the UI inside the Shell; identity validates; `/health` green; CI passes.
 
 ### M1 — Ingest happy path (primary use case)
@@ -277,7 +283,10 @@ remains future.
    the `docker-host` repo. media-server declares a pinned `torrent` port (§4) and
    reads `HOSTY_PORT_TORRENT`; the operator forwards it on the router (no UPnP in
    Core). Dependency: the Core change must land before M4 docker delivery.
-2. **`web` → `api` internal URL** — verify the dependency mechanism in M0 (§4 note).
+2. **`web` → `api` internal URL — resolved (2026-06-17).** Core injects
+   `HOSTY_SERVICE_API_URL` into `web` from its `dependsOn: ["api"]` (intra-app
+   service discovery, [request #14](hosty-platform-requests.md)); verified against
+   `docker-host`. No fallback needed.
 3. **Backup consistency without a quiesce hook** — WAL + periodic online-backup snapshot.
 4. **Cloudflare tunnel for `jellyfin` Range streaming** — validate throughput and
    `206` pass-through for large files with Infuse during M2.

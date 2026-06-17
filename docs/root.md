@@ -66,7 +66,7 @@ flowchart TB
   CATFS[("Catalog roots<br/>files/ + library/")]
 
   SHELL <-->|app-code launch, iframe| WEB
-  WEB <-->|HOSTY_DEPENDENCY_API_URL| API
+  WEB <-->|HOSTY_SERVICE_API_URL| API
   WEB -.identity revalidate.- CORE
   INFUSE <-->|MediaBrowser token + Range| JELLY
   META <--> TMDB

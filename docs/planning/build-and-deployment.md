@@ -25,14 +25,17 @@ docs/                      # this documentation
 ## Local Development (`dev` profile)
 
 ```bash
+# Run from the repository root; the app directory holding manifest.json is apps/media-server.
 hosty core start
-hosty apps install . --runtime dev
+hosty apps install apps/media-server --runtime dev
 hosty apps start com.haas.media-server
+hosty apps open com.haas.media-server --user <you@example.com>
 hosty apps logs com.haas.media-server
 ```
 
 - `api` and `web` run as local command services; Core assigns loopback ports and
-  injects `HOSTY_PORT_{KEY}`, `PORT`, and `HOSTY_DEPENDENCY_API_URL`.
+  injects `HOSTY_PORT_{KEY}`, `PORT`, and (because `web` `dependsOn` `api`)
+  `HOSTY_SERVICE_API_URL` for the `web` → `api` BFF hop.
 - `ffprobe` must be available on the host; its path is provided via the
   `FFPROBE_PATH` app setting at install time.
 - Validate identity, Shell embedding, SignalR, and public endpoints through this

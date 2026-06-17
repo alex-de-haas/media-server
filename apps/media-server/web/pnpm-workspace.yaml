@@ -1,0 +1,6 @@
+# Approve the native build scripts so `pnpm install` is deterministic and prompt-free.
+# sharp powers Next.js image optimization; unrs-resolver is the native ESLint import resolver.
+# Both ship prebuilt binaries.
+allowBuilds:
+  sharp: true
+  unrs-resolver: true
