@@ -1,5 +1,9 @@
 # Storage and Data
 
+Status: Draft
+Created: 2026-06-15
+Updated: 2026-06-15
+
 ## Description
 
 Media Server separates two kinds of storage: small **app data** that Hosty backs
@@ -25,6 +29,42 @@ over a document database for two decisive reasons:
 Document-style flexibility is obtained with **JSON columns** (SQLite JSON1 /
 EF Core JSON mapping) for provider-specific and multi-language metadata blobs, so
 there is no need for a document database.
+
+## Schema Migrations
+
+The schema evolves with standard **EF Core migrations**. Applied migrations are
+tracked in `__EFMigrationsHistory` inside the database file, so a Hosty backup
+captures migration history with the data, and after a restore the app applies
+only newer migrations.
+
+On startup `api` checks for pending migrations. If any exist:
+
+1. Request an on-demand backup from Hosty Core (preferred). This depends on Core
+   exposing an app-callable backup endpoint; if it is not available, the app
+   applies migrations without a pre-migration backup (no local-copy fallback),
+   relying on Hosty's `pre-update` backup taken before the new version starts.
+2. Apply the migrations.
+3. On failure, surface a clear notification recommending the operator restore the
+   Media Server app data from Hosty, and refuse to start against a half-migrated
+   database.
+
+Because `api` is a single instance, there is no migration race between instances.
+
+## Write Concurrency
+
+SQLite is single-writer, so the app minimizes and serializes writes:
+
+- Run in **WAL** mode (also required for backup consistency below) and set a
+  `busy_timeout` (5–10 s) so transient lock contention retries instead of failing.
+- **Torrent progress, speed, ratio, and ETA are never written to the database.**
+  The torrent engine tracks them in memory and broadcasts them over SignalR; only
+  **state transitions** (e.g. Completed) are persisted, and a transition is what
+  triggers downstream pipeline actions (hardlink, probe, enrich, publish).
+- The orchestrator claims an ingest item with a lease (`LeaseOwner`/`LeaseUntil`)
+  and uses an optimistic-concurrency token, so the reconciler and operator actions
+  never double-drive the same item (see [Domain model](domain-model.md)).
+- No write transaction is held open across I/O (ffprobe, provider HTTP): do the
+  long operation first, then a short write.
 
 ## App Data Directory
 
@@ -70,7 +110,8 @@ operator owns that media and its own backups).
   process accesses them directly, with no volume mounts. Path access is sandboxed
   to configured roots (see [File and directory management](file-directory-management.md)).
 - **Future (`docker`):** each catalog root becomes an external host-path bind
-  mount. Removing the app must never delete external media.
+  mount once Hosty supports the required mount model. Removing the app must never
+  delete external media.
 
 ## Hardlink Constraint
 
@@ -79,6 +120,14 @@ both to be on the same filesystem. Catalog configuration validates this
 (compare `st_dev`) and rejects cross-filesystem roots. This is also why a single
 `catalog.root` (rather than two unrelated paths) is the configuration unit.
 
+## Open Questions
+
+- What Hosty mount/bind model should replace plain host paths for Docker
+  runtime?
+  Recommendation: keep v1 on `dev` / `localCommand` with explicit configured
+  host paths, then design Hosty-owned external catalog mounts separately before
+  enabling Docker as the default runtime.
+
 ## Testing Expectations
 
 Backend tests should use xUnit and Imposter. Required coverage:
@@ -86,5 +135,9 @@ Backend tests should use xUnit and Imposter. Required coverage:
 - EF Core mapping for relational entities and JSON columns.
 - App data paths resolved from `HOSTY_APP_DATA_DIR`.
 - Same-filesystem validation for catalog roots.
+- Migration apply on startup and correct migration history after a simulated
+  restore; failure path refuses to start half-migrated.
+- Progress is not persisted; only state transitions are written and trigger
+  downstream actions.
 - Backup-consistency procedure (checkpoint / online backup) produces a readable
   database snapshot.

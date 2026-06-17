@@ -1,12 +1,16 @@
 # Build and Deployment
 
+Status: Draft
+Created: 2026-06-15
+Updated: 2026-06-15
+
 ## Description
 
-Media Server is developed and delivered as a Hosty runtime app. Local development
-runs through the `dev` (`localCommand`) runtime profile under Core lifecycle.
-Production images are built and published to GitHub Container Registry and run
-through the `docker` runtime profile once external host-path mounts for catalog
-roots are available.
+Media Server is developed and delivered as a Hosty runtime app. `dev`
+(`localCommand`) is the primary local development loop; `docker` is the v1
+delivery target (`defaultRuntime: docker`), unblocked now that Hosty Core
+provides external host-path mounts for catalog roots and Cloudflare-tunnel
+ingress.
 
 ## Repository Layout
 
@@ -29,24 +33,33 @@ hosty apps logs com.haas.media-server
 
 - `api` and `web` run as local command services; Core assigns loopback ports and
   injects `HOSTY_PORT_{KEY}`, `PORT`, and `HOSTY_DEPENDENCY_API_URL`.
+- `ffprobe` must be available on the host; its path is provided via the
+  `FFPROBE_PATH` app setting at install time.
 - Validate identity, Shell embedding, SignalR, and public endpoints through this
   Core-managed lifecycle — not by forging tokens.
 
-## Production Images (`docker` profile)
+## Production Images (`docker` profile, v1 delivery target)
 
-- `api` image: ASP.NET Core app exposing internal `/api` + SignalR and the public
-  `jellyfin` surface, with `ffprobe` available in the image.
+- `api` image: ASP.NET Core app exposing internal `/api` + SignalR, the public
+  `jellyfin` surface, and the raw `torrent` listener, with `ffprobe` available in
+  the image.
 - `web` image: Next.js production server (or static export if later converted).
-- The `docker` profile is the manifest default, but v1 installs run under `dev`
-  until catalog-root mounts are defined (see [Storage and data](storage-and-data.md)).
+- `docker` is the default install profile; `dev` is used for local development.
+  Catalog roots are bound through Hosty external host-path mounts (see
+  [Storage and data](storage-and-data.md)). Image build/publish lands in M4 (see
+  [Implementation plan](implementation-plan.md)).
 
 ## GitHub Actions CI/CD
 
-The workflow must:
+The v1 workflow must:
 
 - Run on pushes to the main branch and on PRs requiring validation.
 - Restore and build the .NET solution; run backend unit tests (xUnit).
 - Install frontend dependencies and build the Next.js app.
+- Validate the Hosty manifest and `dev` runtime commands.
+
+Image build and GHCR publish land with M4 (Docker delivery); the workflow then also:
+
 - Build `api` and `web` Docker images.
 - Publish to GHCR, tagged with at least the commit SHA and optionally `latest`.
 - Use `GITHUB_TOKEN` with `packages: write`.
@@ -67,12 +80,12 @@ ports/endpoints, settings, app data layout, UI navigation, and dependencies.
 
 - Restore/build the .NET solution; run backend unit tests.
 - Build the Next.js app.
-- Build `api` and `web` Docker images.
 - Run through the `dev` profile under Core for Host-facing behavior.
-- Install via the `docker` profile for container networking, mounts, and
-  lifecycle once mounts are defined.
+- Build `api` and `web` Docker images (M4).
+- Install via the `docker` profile for container networking, external host-path
+  mounts, and lifecycle.
 
 ## Testing Expectations
 
 Backend tests use xUnit and Imposter. CI must build both services and run the
-backend test suite before publishing images.
+backend test suite. Image build and GHCR publish land with M4 (Docker delivery).
