@@ -43,6 +43,14 @@ public sealed class HostyOptions
     /// <summary>True only when Core has provisioned a service token, i.e. we run under Core.</summary>
     public bool IsCoreManaged => !string.IsNullOrWhiteSpace(ServiceToken);
 
+    /// <summary>
+    /// Server URL to enter in a Jellyfin client (e.g. Infuse). Prefers the public ingress origin;
+    /// falls back to the local loopback Jellyfin surface (dev profile) so same-machine clients have
+    /// a usable URL even without ingress. Null only when neither is available.
+    /// </summary>
+    public string? JellyfinServerUrl =>
+        JellyfinPublicOrigin ?? (JellyfinPort is { } port ? $"http://localhost:{port}" : null);
+
     public string DatabasePath => Path.Combine(AppDataDir, "media-server.db");
 
     public static HostyOptions FromConfiguration(IConfiguration configuration, string contentRoot)

@@ -33,6 +33,20 @@ public sealed class HostyOptionsTests
         Assert.True(options.IsCoreManaged);
         Assert.False(options.RunningInContainer);
         Assert.Equal(Path.Combine("/data/app", "media-server.db"), options.DatabasePath);
+        // No public ingress origin → server URL falls back to the local loopback Jellyfin surface.
+        Assert.Equal("http://localhost:41002", options.JellyfinServerUrl);
+    }
+
+    [Fact]
+    public void Jellyfin_server_url_prefers_public_origin_over_loopback()
+    {
+        var options = Build(new Dictionary<string, string?>
+        {
+            ["HOSTY_PUBLIC_ORIGIN_JELLYFIN"] = "https://media.example.com",
+            ["HOSTY_PORT_JELLYFIN"] = "41002",
+        });
+
+        Assert.Equal("https://media.example.com", options.JellyfinServerUrl);
     }
 
     [Fact]
@@ -46,6 +60,7 @@ public sealed class HostyOptionsTests
         Assert.Null(options.InternalPort);
         Assert.Null(options.JellyfinPort);
         Assert.False(options.IsCoreManaged);
+        Assert.Null(options.JellyfinServerUrl);
     }
 
     [Fact]
