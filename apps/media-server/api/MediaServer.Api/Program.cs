@@ -1,6 +1,18 @@
 using System.Security.Claims;
+using MediaServer.Api.Catalogs;
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
+using MediaServer.Api.IO;
+using MediaServer.Api.Metadata;
+using MediaServer.Api.Jobs;
+using MediaServer.Api.Library;
+using MediaServer.Api.Organizer;
+using MediaServer.Api.Pipeline;
+using MediaServer.Api.Pipeline.Stages;
+using MediaServer.Api.Probe;
+using MediaServer.Api.Realtime;
+using MediaServer.Api.Torrents;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -12,10 +24,63 @@ var hosty = HostyOptions.FromConfiguration(builder.Configuration, builder.Enviro
 builder.Services.AddSingleton(hosty);
 HostyKestrel.ConfigureUrls(builder.WebHost, hosty);
 
+// Manifest settings (TMDb key, languages, ffprobe, torrent tunables) + catalog-root mounts.
+var settings = MediaServerSettings.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(settings);
+
+// Filesystem primitives + catalog management.
+builder.Services.AddSingleton<IHardLinker, HardLinker>();
+builder.Services.AddSingleton<IFilesystemInspector, FilesystemInspector>();
+builder.Services.AddSingleton<ICatalogPathSandbox, CatalogPathSandbox>();
+builder.Services.AddScoped<CatalogService>();
+builder.Services.AddScoped<IOrganizer, OrganizerService>();
+
+// Real-time hub + in-process pipeline queue.
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<IRealtimeNotifier, SignalRRealtimeNotifier>();
+builder.Services.AddSingleton<IPipelineQueue, PipelineQueue>();
+
+// Torrent engine (hosted) + coordinator that bridges it to persistence and the pipeline.
+builder.Services.AddSingleton<MonoTorrentEngine>();
+builder.Services.AddSingleton<ITorrentEngine>(serviceProvider => serviceProvider.GetRequiredService<MonoTorrentEngine>());
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MonoTorrentEngine>());
+builder.Services.AddHostedService<TorrentCoordinator>();
+builder.Services.AddScoped<TorrentService>();
+builder.Services.AddScoped<DownloadFileService>();
+
+// Identify / probe / enrich building blocks.
+builder.Services.AddSingleton<INameParser, NameParser>();
+builder.Services.AddSingleton<IMediaProbe, FfprobeMediaProbe>();
+builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
+{
+    client.BaseAddress = new Uri("https://api.themoviedb.org/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
+
+// Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
+builder.Services.AddScoped<IdentifyService>();
+builder.Services.AddScoped<EnrichService>();
+builder.Services.AddScoped<JobService>();
+builder.Services.AddScoped<IPipelineStage, IntakeStage>();
+builder.Services.AddScoped<IPipelineStage, DownloadStage>();
+builder.Services.AddScoped<IPipelineStage, IdentifyStage>();
+builder.Services.AddScoped<IPipelineStage, OrganizeStage>();
+builder.Services.AddScoped<IPipelineStage, ProbeStage>();
+builder.Services.AddScoped<IPipelineStage, EnrichStage>();
+builder.Services.AddScoped<IPipelineStage, PublishStage>();
+builder.Services.AddSingleton<IngestOrchestrator>();
+builder.Services.AddScoped<IngestService>();
+builder.Services.AddHostedService<PipelineWorker>();
+builder.Services.AddHostedService<ReconcilerWorker>();
+
 // EF Core + SQLite live under the app data directory so Hosty backup/restore covers them.
 Directory.CreateDirectory(hosty.AppDataDir);
-builder.Services.AddDbContext<MediaServerDbContext>(options =>
-    options.UseSqlite($"Data Source={hosty.DatabasePath}"));
+builder.Services.AddSingleton<SqlitePragmaInterceptor>();
+builder.Services.AddDbContext<MediaServerDbContext>((serviceProvider, options) =>
+    options
+        .UseSqlite($"Data Source={hosty.DatabasePath}")
+        .AddInterceptors(serviceProvider.GetRequiredService<SqlitePragmaInterceptor>()));
 
 // Identity validation against Core, with a short-TTL positive cache.
 builder.Services.AddMemoryCache();
@@ -50,6 +115,12 @@ app.UseAuthorization();
 
 // Liveness/readiness probe on the internal surface.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapCatalogEndpoints();
+app.MapTorrentEndpoints();
+app.MapIngestEndpoints();
+app.MapLibraryEndpoints();
+app.MapHub<ActivityHub>(ActivityHub.Path);
 
 // Placeholder root so the public `jellyfin` port responds during M0; the real
 // Jellyfin-compatible surface lands in M2.
