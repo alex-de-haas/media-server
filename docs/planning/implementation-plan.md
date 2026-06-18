@@ -277,6 +277,29 @@ manual step.
 **Acceptance:** progress reported by Infuse persists; resume and watched flags
 behave; series/season rollups correct.
 
+**Status (implemented 2026-06-18):** backend complete and unit-tested (xUnit, 85
+tests green, Release) on branch `feat/m3-playback-state`. Adds: M3 EF schema +
+migration (`UserItemData`, unique on `(AppUserId, MediaItemId)`, keyed to the
+**internal** `MediaItem.Id` so it survives rescans/public-id remaps); a
+`UserDataService` that (a) projects `UserItemData` into `UserItemDataDto` for item
+batches — movies/episodes carry their own row (resume ticks, play count, watched,
+favorite, `PlayedPercentage`); season/series folders carry a rollup computed on
+read from descendant episodes (`Played` when all children played, `UnplayedItemCount`,
+watched `PlayedPercentage`, max child `LastPlayedDate`, own-row favorite) — and (b)
+applies the resume/watched policy on `Sessions/Playing*`: crossing 90% of runtime
+marks watched + clears the resume point and bumps `PlayCount` (once per watch),
+stops below 5% discard the resume point, opening a watched item from `0` keeps it
+watched, and a fresh in-progress position clears the watched flag. Endpoints:
+`POST /Sessions/Playing[/Progress|/Stopped]`, `POST|DELETE
+/Users/{userId}/{PlayedItems,FavoriteItems}/{itemId}` (returns updated user data;
+folder mark-played recurses to episodes), and the previously-empty
+`/Users/{userId}/Items/Resume` (in-progress, newest first) + `/Shows/NextUp` (first
+unwatched episode of each started series) wired to real data. Every browsing DTO now
+carries the caller's `UserData` (the library service threads the authenticated app
+user id; `/Users/{userId}/…` routes resolve the acting user, admins may act on
+others). End-to-end validation against Infuse over the public origin remains a manual
+step.
+
 ### M4 — Automation polish & Docker delivery
 **Goal:** robustness + production container delivery. Depends on M1–M3.
 - Reconciler, retries, review queue, manual match override, scheduled scans,
