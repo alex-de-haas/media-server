@@ -98,7 +98,7 @@ Frontend (`web` service):
 
 Runtime and delivery:
 
-- Hosty runtime app manifest (`apps/media-server/manifest.json`,
+- Hosty runtime app manifest (`manifest.json` at the repo root,
   `schemaVersion: "app.0.1"`).
 - `dev` (`localCommand`) runtime profile for local development.
 - `docker` runtime profile with images published to GitHub Container Registry —

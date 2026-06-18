@@ -25,10 +25,10 @@ jobs:
         include:
           - service: api
             image: media-server-api
-            context: apps/media-server/api
+            context: src/api
           - service: web
             image: media-server-web
-            context: apps/media-server/web
+            context: src/web
     steps:
       - uses: actions/checkout@v4
 

@@ -11,11 +11,13 @@ are in [`docs/planning/implementation-plan.md`](docs/planning/implementation-pla
 ## Repository layout
 
 ```text
-apps/media-server/
-  manifest.json            # Hosty app manifest (app.0.1)
+manifest.json              # Hosty app manifest (app.0.1)
+src/
   api/                     # .NET 10 backend (api service): Minimal API, EF Core + SQLite
   web/                     # Next.js 16 frontend + BFF (web service): App Router, Tailwind, shadcn/ui
-  scripts/validate-manifest.sh
+scripts/
+  dev.sh                   # one-shot dev launch via Hosty Core
+  validate-manifest.sh
 .github/workflows/ci.yml   # build + test both services, validate manifest
 docs/                      # planning documentation
 ```
@@ -51,7 +53,7 @@ script wraps the explicit lifecycle:
 ```bash
 # From the repository root:
 hosty core start
-hosty apps install apps/media-server --runtime dev
+hosty apps install . --runtime dev
 hosty apps start com.haas.media-server
 hosty apps open com.haas.media-server --user <you@example.com>   # launches the UI in the Shell
 hosty apps logs com.haas.media-server
@@ -65,10 +67,10 @@ app never hard-codes ports, origins, or paths.
 
 ```bash
 # api
-cd apps/media-server/api && dotnet test && dotnet run --project MediaServer.Api
+cd src/api && dotnet test && dotnet run --project MediaServer.Api
 
 # web
-cd apps/media-server/web && pnpm install && pnpm test && pnpm dev
+cd src/web && pnpm install && pnpm test && pnpm dev
 ```
 
 ## Status

@@ -72,8 +72,8 @@ CLI (actual, verified against 0.4.0): `hosty apps install <dir> [--runtime <key>
 ## 3. Repository Scaffold (M0)
 
 ```text
-apps/media-server/
-  manifest.json            # schemaVersion app.0.1
+manifest.json              # schemaVersion app.0.1 (repo root)
+src/
   api/                     # .NET 10 solution (api service)
     MediaServer.Api/
     MediaServer.Api.Tests/ # xUnit + Imposter
@@ -117,7 +117,7 @@ the internal management surface from the public Jellyfin surface.
         },
         "dev": {
           "type": "localCommand",
-          "workingDirectory": "apps/media-server/api",
+          "workingDirectory": "src/api",
           "command": "dotnet run --project MediaServer.Api",
           "ports": [
             { "key": "internal", "containerPort": 8080, "protocol": "http" },
@@ -138,7 +138,7 @@ the internal management surface from the public Jellyfin surface.
         },
         "dev": {
           "type": "localCommand",
-          "workingDirectory": "apps/media-server/web",
+          "workingDirectory": "src/web",
           "command": "pnpm dev",
           "ports": [ { "key": "http", "containerPort": 3000, "protocol": "http", "public": true } ]
         }
@@ -203,7 +203,7 @@ the internal management surface from the public Jellyfin surface.
   injected into `web` from `dependsOn` (intra-app discovery, #14); (b)
   `HOSTY_MOUNT_CATALOGROOTS` injection; (c) `HOSTY_PUBLIC_ORIGIN_*` from cloudflared.
 
-**Acceptance (met 2026-06-17):** `hosty apps install apps/media-server --runtime dev` → `start` → `open --user …`
+**Acceptance (met 2026-06-17):** `hosty apps install . --runtime dev` → `start` → `open --user …`
 loads the UI inside the Shell; identity validates; `/health` green; CI passes.
 
 ### M1 — Ingest happy path (primary use case)

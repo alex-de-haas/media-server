@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Build context: apps/media-server/web (self-contained pnpm project for the `web` service).
+# Build context: src/web (self-contained pnpm project for the `web` service).
 
 FROM node:22-bookworm-slim AS base
 WORKDIR /app

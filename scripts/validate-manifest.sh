@@ -5,9 +5,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"        # apps/media-server
-REPO_ROOT="$(cd "$APP_DIR/../.." && pwd)"       # repo root
-MANIFEST="$APP_DIR/manifest.json"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"       # repo root (manifest.json lives here)
+MANIFEST="$REPO_ROOT/manifest.json"
 
 fail() { echo "manifest validation FAILED: $*" >&2; exit 1; }
 
@@ -34,8 +33,8 @@ while IFS= read -r working_dir; do
 done < <(jq -r '.services[].runtimes.dev | select(.type == "localCommand") | .workingDirectory // empty' "$MANIFEST")
 
 # 5. Build targets the dev commands rely on.
-[ -f "$REPO_ROOT/apps/media-server/api/MediaServer.Api/MediaServer.Api.csproj" ] || fail "api project missing"
-[ -f "$REPO_ROOT/apps/media-server/web/package.json" ] || fail "web package.json missing"
+[ -f "$REPO_ROOT/src/api/MediaServer.Api/MediaServer.Api.csproj" ] || fail "api project missing"
+[ -f "$REPO_ROOT/src/web/package.json" ] || fail "web package.json missing"
 
 # 6. Public endpoints declared.
 jq -e '.endpoints[] | select(.key == "ui")' "$MANIFEST" >/dev/null || fail "missing 'ui' endpoint"
