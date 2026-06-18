@@ -66,9 +66,13 @@ public sealed class OrganizerService(
         return organized;
     }
 
-    public Task UnlinkSeedCopyAsync(Download download, CancellationToken cancellationToken)
+    public async Task UnlinkSeedCopyAsync(Download download, CancellationToken cancellationToken)
     {
-        foreach (var sourceFile in database.SourceFiles.Where(file => file.DownloadId == download.Id))
+        var sourceFiles = await database.SourceFiles
+            .Where(file => file.DownloadId == download.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var sourceFile in sourceFiles)
         {
             var absolute = Path.Combine(download.SavePath, sourceFile.RelativePath.Replace('/', Path.DirectorySeparatorChar));
             try
@@ -83,8 +87,6 @@ public sealed class OrganizerService(
                 logger.LogWarning(exception, "Failed to unlink seed copy {Path}", absolute);
             }
         }
-
-        return Task.CompletedTask;
     }
 
     private async Task<string> BuildLibraryPathAsync(Catalog catalog, MediaItem item, string extension, CancellationToken cancellationToken)

@@ -80,6 +80,12 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
             {
                 result = await stage.RunAsync(context, cancellationToken);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Shutdown, not a failure: leave the item Running with its lease; the reconciler
+                // re-drives it after the lease expires on the next start.
+                throw;
+            }
             catch (Exception exception)
             {
                 logger.LogError(exception, "Stage {Stage} threw for ingest {IngestItem}.", stage.Key, item.Id);

@@ -77,7 +77,7 @@ public sealed partial class HardLinker : IHardLinker
         {
             File.Delete(path);
         }
-        catch (IOException)
+        catch (Exception)
         {
             // Best effort: probe artifacts are tiny and harmless if a transient error leaves one behind.
         }

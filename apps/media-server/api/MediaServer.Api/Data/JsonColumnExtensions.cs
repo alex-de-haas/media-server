@@ -22,9 +22,9 @@ public static class JsonColumnExtensions
             json => Deserialize<List<string>>(json) ?? new List<string>());
 
         var comparer = new ValueComparer<List<string>>(
-            (left, right) => left!.SequenceEqual(right!),
-            value => value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
-            value => value.ToList());
+            (left, right) => left == null ? right == null : right != null && left.SequenceEqual(right),
+            value => value == null ? 0 : value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
+            value => value == null ? null! : value.ToList());
 
         builder.HasConversion(converter, comparer).HasColumnType("TEXT");
         return builder;
@@ -38,9 +38,9 @@ public static class JsonColumnExtensions
             json => Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>());
 
         var comparer = new ValueComparer<Dictionary<string, string>>(
-            (left, right) => left!.Count == right!.Count && !left.Except(right).Any(),
-            value => value.Aggregate(0, (hash, pair) => HashCode.Combine(hash, pair.Key.GetHashCode(), pair.Value.GetHashCode())),
-            value => new Dictionary<string, string>(value));
+            (left, right) => left == null ? right == null : right != null && left.Count == right.Count && !left.Except(right).Any(),
+            value => value == null ? 0 : value.Aggregate(0, (hash, pair) => HashCode.Combine(hash, pair.Key.GetHashCode(), pair.Value.GetHashCode())),
+            value => value == null ? null! : new Dictionary<string, string>(value));
 
         builder.HasConversion(converter, comparer).HasColumnType("TEXT");
         return builder;

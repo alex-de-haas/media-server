@@ -36,7 +36,17 @@ public sealed class FfprobeMediaProbe(MediaServerSettings settings) : IMediaProb
         process.Start();
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Don't leave an orphaned ffprobe running when the drive is cancelled.
+            TryKill(process);
+            throw;
+        }
 
         var stdout = await stdoutTask;
         if (process.ExitCode != 0)
@@ -48,6 +58,21 @@ public sealed class FfprobeMediaProbe(MediaServerSettings settings) : IMediaProb
         return Parse(stdout, absolutePath);
     }
 
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception)
+        {
+            // Best effort: the process may have already exited or be unkillable.
+        }
+    }
+
     internal static ProbeResult Parse(string json, string absolutePath)
     {
         using var document = JsonDocument.Parse(json);
@@ -55,7 +80,7 @@ public sealed class FfprobeMediaProbe(MediaServerSettings settings) : IMediaProb
 
         var format = root.TryGetProperty("format", out var formatElement) ? formatElement : default;
         var container = GetString(format, "format_name") ?? Path.GetExtension(absolutePath).TrimStart('.');
-        var durationTicks = (long)(GetDouble(format, "duration") ?? 0) * TimeSpan.TicksPerSecond;
+        var durationTicks = (long)((GetDouble(format, "duration") ?? 0) * TimeSpan.TicksPerSecond);
         var bitrate = (int?)GetLong(format, "bit_rate");
         var size = GetLong(format, "size") ?? SafeFileSize(absolutePath);
 

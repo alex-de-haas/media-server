@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using MediaServer.Api.Realtime;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 
@@ -78,8 +79,8 @@ public sealed class HostyAuthenticationHandler(
         }
 
         // WebSocket handshakes cannot set custom headers, so SignalR passes the bearer as a query
-        // parameter on hub connections. Only honor it for the real-time hub paths.
-        if (request.Path.StartsWithSegments("/hubs", StringComparison.OrdinalIgnoreCase) &&
+        // parameter on hub connections. Only honor it for the specific real-time hub path.
+        if (request.Path.StartsWithSegments(ActivityHub.Path, StringComparison.OrdinalIgnoreCase) &&
             request.Query.TryGetValue("access_token", out var queryToken) && !string.IsNullOrWhiteSpace(queryToken))
         {
             return queryToken.ToString().Trim();

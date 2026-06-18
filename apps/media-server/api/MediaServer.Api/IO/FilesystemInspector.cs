@@ -13,6 +13,10 @@ public interface IFilesystemInspector
 
 public sealed class FilesystemInspector(IHardLinker hardLinker) : IFilesystemInspector
 {
+    // Windows paths are case-insensitive; POSIX paths are not.
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     public bool DirectoryExists(string path) => Directory.Exists(path);
 
     public bool AreSameFilesystem(string directoryA, string directoryB) =>
@@ -25,7 +29,7 @@ public sealed class FilesystemInspector(IHardLinker hardLinker) : IFilesystemIns
         // DriveInfo is keyed by mount point; pick the longest mount-point prefix of the path.
         var drive = DriveInfo.GetDrives()
             .Where(candidate => candidate.IsReady)
-            .Where(candidate => full.StartsWith(NormalizeMount(candidate.RootDirectory.FullName), StringComparison.Ordinal))
+            .Where(candidate => full.StartsWith(NormalizeMount(candidate.RootDirectory.FullName), PathComparison))
             .OrderByDescending(candidate => candidate.RootDirectory.FullName.Length)
             .FirstOrDefault();
 

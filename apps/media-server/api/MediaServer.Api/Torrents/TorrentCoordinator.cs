@@ -68,8 +68,15 @@ public sealed class TorrentCoordinator(
             {
                 try
                 {
+                    var source = ResolveResumeSource(download.SourceUri!);
+                    if (source is null)
+                    {
+                        logger.LogWarning("Cannot resume download {InfoHash}: source {SourceUri} is unavailable.", download.InfoHash, download.SourceUri);
+                        continue;
+                    }
+
                     var limits = new TorrentLimits(settings.TorrentMaxDownloadSpeed, settings.TorrentMaxUploadSpeed);
-                    await engine.AddAsync(new TorrentSource.Magnet(download.SourceUri!), download.SavePath, limits, autoStart: true, cancellationToken);
+                    await engine.AddAsync(source, download.SavePath, limits, autoStart: true, cancellationToken);
                 }
                 catch (Exception exception)
                 {
@@ -81,6 +88,18 @@ public sealed class TorrentCoordinator(
         {
             logger.LogError(exception, "Error resuming downloads after restart.");
         }
+    }
+
+    /// <summary>Rebuilds the torrent source from the persisted handle: a magnet URI, or a stored
+    /// .torrent file. Returns null when the stored file is missing.</summary>
+    private static TorrentSource? ResolveResumeSource(string sourceUri)
+    {
+        if (sourceUri.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TorrentSource.Magnet(sourceUri);
+        }
+
+        return File.Exists(sourceUri) ? new TorrentSource.File(File.ReadAllBytes(sourceUri), Path.GetFileName(sourceUri)) : null;
     }
 
     private async Task BroadcastProgressAsync(CancellationToken cancellationToken)

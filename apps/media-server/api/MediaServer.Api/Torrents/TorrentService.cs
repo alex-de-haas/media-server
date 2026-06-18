@@ -1,6 +1,7 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Pipeline;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ public sealed class TorrentService(
     ITorrentEngine engine,
     IFilesystemInspector filesystem,
     MediaServerSettings settings,
+    HostyOptions hosty,
     IPipelineQueue pipelineQueue,
     ILogger<TorrentService> logger)
 {
@@ -27,7 +29,15 @@ public sealed class TorrentService(
         var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == request.CatalogId, cancellationToken)
             ?? throw new TorrentRequestException("Catalog not found.");
 
-        var descriptor = engine.Inspect(source);
+        TorrentDescriptor descriptor;
+        try
+        {
+            descriptor = engine.Inspect(source);
+        }
+        catch (Exception exception) when (exception is not TorrentRequestException)
+        {
+            throw new TorrentRequestException($"Could not parse the torrent source: {exception.Message}");
+        }
 
         if (await database.Downloads.AnyAsync(candidate => candidate.InfoHash == descriptor.InfoHash, cancellationToken))
         {
@@ -49,6 +59,9 @@ public sealed class TorrentService(
         var limits = new TorrentLimits(settings.TorrentMaxDownloadSpeed, settings.TorrentMaxUploadSpeed);
         var added = await engine.AddAsync(source, paths.FilesDir, limits, autoStart: true, cancellationToken);
 
+        // Persist enough to re-add the torrent after a restart: the magnet URI, or the stored .torrent path.
+        var sourceUri = PersistSource(source, added.InfoHash);
+
         var now = DateTimeOffset.UtcNow;
         var download = new Download
         {
@@ -60,7 +73,7 @@ public sealed class TorrentService(
             State = DownloadState.Downloading,
             KeepSeeding = keepSeeding,
             SavePath = paths.FilesDir,
-            SourceUri = (source as TorrentSource.Magnet)?.Uri,
+            SourceUri = sourceUri,
             AddedAt = now,
         };
         database.Downloads.Add(download);
@@ -150,6 +163,22 @@ public sealed class TorrentService(
         database.Downloads.Remove(download);
         await database.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>Returns a durable handle for restart-resume: the magnet URI, or the path to the stored
+    /// .torrent file (written under the app data dir so it survives restarts).</summary>
+    private string PersistSource(TorrentSource source, string infoHash)
+    {
+        if (source is TorrentSource.Magnet magnet)
+        {
+            return magnet.Uri;
+        }
+
+        var directory = Path.Combine(hosty.AppDataDir, "torrents");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"{infoHash}.torrent");
+        File.WriteAllBytes(path, ((TorrentSource.File)source).Content);
+        return path;
     }
 
     private static TorrentSource ResolveSource(AddTorrentRequest request)
