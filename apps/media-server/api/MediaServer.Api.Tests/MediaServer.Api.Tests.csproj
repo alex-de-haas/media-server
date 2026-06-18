@@ -23,4 +23,9 @@
     <ProjectReference Include="..\MediaServer.Api\MediaServer.Api.csproj" />
   </ItemGroup>
 
+  <!-- Needed to execute IResult/HTTP results (range streaming) against a DefaultHttpContext in tests. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>
