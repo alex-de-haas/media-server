@@ -57,6 +57,14 @@ public sealed class JellyfinStreamingTests : IDisposable
     }
 
     [Fact]
+    public async Task Unsupported_container_is_not_streamable()
+    {
+        var (publicId, _) = SeedExtra("clip.exe");
+
+        Assert.Null(await _resolver.ResolveAsync(publicId, null, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_full_request_returns_the_whole_file_with_accept_ranges()
     {
         var response = await ExecuteAsync("GET", range: null);
@@ -136,6 +144,22 @@ public sealed class JellyfinStreamingTests : IDisposable
         context.MediaItems.Add(movie);
         context.MediaSources.AddRange(primary, alternate);
         context.SaveChanges();
+    }
+
+    private (string PublicId, Guid SourceId) SeedExtra(string fileName)
+    {
+        var paths = CatalogPaths.For(Path.Combine(_root, "catalog"));
+        File.WriteAllBytes(Path.Combine(paths.LibraryDir, fileName), new byte[FileSize]);
+
+        var now = DateTimeOffset.UtcNow;
+        using var context = _db.Create();
+        var catalog = context.Catalogs.First();
+        var movie = new MediaItem { Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Extra", AddedAt = now, UpdatedAt = now };
+        var source = new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "x", Path = $"library/{fileName}", SizeBytes = FileSize, DurationTicks = 0, CreatedAt = now };
+        context.MediaItems.Add(movie);
+        context.MediaSources.Add(source);
+        context.SaveChanges();
+        return (movie.PublicId!, source.Id);
     }
 
     public void Dispose()

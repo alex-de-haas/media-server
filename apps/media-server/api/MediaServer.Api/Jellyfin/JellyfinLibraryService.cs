@@ -208,8 +208,11 @@ public sealed class JellyfinLibraryService(
 
         if (!string.IsNullOrWhiteSpace(query.SearchTerm))
         {
-            var term = query.SearchTerm.Trim();
-            source = source.Where(item => EF.Functions.Like(item.Title, $"%{term}%"));
+            var term = $"%{query.SearchTerm.Trim()}%";
+            // Match the raw title or any localized metadata title.
+            source = source.Where(item =>
+                EF.Functions.Like(item.Title, term) ||
+                database.MetadataRecords.Any(meta => meta.MediaItemId == item.Id && meta.Title != null && EF.Functions.Like(meta.Title, term)));
         }
 
         return await source
@@ -369,8 +372,9 @@ public sealed class JellyfinLibraryService(
     private MetadataRecord PickLanguage(List<MetadataRecord> records)
     {
         var preferred = PreferredLanguage;
+        var prefix = preferred.Length >= 2 ? preferred[..2] : preferred;
         return records.FirstOrDefault(record => string.Equals(record.Language, preferred, StringComparison.OrdinalIgnoreCase))
-            ?? records.FirstOrDefault(record => record.Language.StartsWith(preferred[..2], StringComparison.OrdinalIgnoreCase))
+            ?? records.FirstOrDefault(record => record.Language.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             ?? records[0];
     }
 }

@@ -211,7 +211,7 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
 
         // Jellyfin keys are capitalized (e.g. "Tmdb").
         return item.Providers.ToDictionary(
-            pair => char.ToUpperInvariant(pair.Key[0]) + pair.Key[1..],
+            pair => string.IsNullOrEmpty(pair.Key) ? pair.Key : char.ToUpperInvariant(pair.Key[0]) + pair.Key[1..],
             pair => pair.Value);
     }
 

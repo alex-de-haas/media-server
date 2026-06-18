@@ -63,8 +63,16 @@ public sealed class JellyfinImageService(MediaServerDbContext database, IHttpCli
         {
             var directory = Path.Combine(hosty.AppDataDir, "images");
             Directory.CreateDirectory(directory);
-            var extension = Path.GetExtension(new Uri(asset.RemotePath).AbsolutePath);
-            extension = string.IsNullOrEmpty(extension) ? ".jpg" : extension;
+            var extension = ".jpg";
+            if (Uri.TryCreate(asset.RemotePath, UriKind.Absolute, out var uri))
+            {
+                var parsed = Path.GetExtension(uri.AbsolutePath);
+                if (!string.IsNullOrEmpty(parsed))
+                {
+                    extension = parsed;
+                }
+            }
+
             var path = Path.Combine(directory, asset.Tag + extension);
             await File.WriteAllBytesAsync(path, bytes, cancellationToken);
 

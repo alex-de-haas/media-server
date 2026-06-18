@@ -101,7 +101,12 @@ internal static class JellyfinUserEndpoints
 
     private static async Task<AppUser?> ResolveUserAsync(string jellyfinUserId, MediaServerDbContext database, CancellationToken cancellationToken)
     {
-        var users = await database.AppUsers.AsNoTracking().ToListAsync(cancellationToken);
-        return users.FirstOrDefault(user => JellyfinIds.User(user.Id) == jellyfinUserId);
+        // The Jellyfin user id is a one-way hash of the int id, so resolve over ids only and fetch the
+        // single matching row rather than materializing every user.
+        var ids = await database.AppUsers.AsNoTracking().Select(user => user.Id).ToListAsync(cancellationToken);
+        var matchId = ids.FirstOrDefault(id => JellyfinIds.User(id) == jellyfinUserId);
+        return matchId == 0
+            ? null
+            : await database.AppUsers.AsNoTracking().FirstOrDefaultAsync(user => user.Id == matchId, cancellationToken);
     }
 }

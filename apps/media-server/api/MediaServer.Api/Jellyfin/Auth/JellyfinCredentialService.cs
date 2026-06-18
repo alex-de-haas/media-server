@@ -46,6 +46,11 @@ public sealed class JellyfinCredentialService(MediaServerDbContext database, IPi
     internal const int TemporaryLockThreshold = 10;
     internal const int PermanentLockThreshold = 100;
     private static readonly TimeSpan MaxLockWindow = TimeSpan.FromHours(1);
+    private static readonly TimeSpan SessionActivityWriteThreshold = TimeSpan.FromMinutes(5);
+
+    // A well-formed dummy hash so a missing/revoked username still pays the argon2id verification
+    // cost — otherwise response timing would distinguish unknown usernames (enumeration oracle).
+    private static readonly Lazy<string> DummyPinHash = new(() => new Argon2idPinHasher().Hash("timing-equalizer"));
 
     public async Task<IssuedCredential> CreateOrRegenerateAsync(AppUser user, string? requestedPin, CancellationToken cancellationToken)
     {
@@ -62,7 +67,7 @@ public sealed class JellyfinCredentialService(MediaServerDbContext database, IPi
             pin = requestedPin;
         }
 
-        var username = (user.Email ?? user.HostUserId).Trim();
+        var username = (string.IsNullOrWhiteSpace(user.Email) ? user.HostUserId : user.Email).Trim();
         if (string.IsNullOrEmpty(username))
         {
             throw new JellyfinCredentialValidationException("The user has no email to use as a Jellyfin username.");
@@ -111,9 +116,11 @@ public sealed class JellyfinCredentialService(MediaServerDbContext database, IPi
         var credential = await database.JellyfinCredentials
             .FirstOrDefaultAsync(candidate => candidate.Username == normalized, cancellationToken);
 
-        // Do not reveal whether the username exists.
+        // Do not reveal whether the username exists; run a dummy verification first so the timing
+        // of a missing/revoked username matches that of a wrong PIN.
         if (credential is null || credential.Revoked)
         {
+            pinHasher.Verify(pin ?? string.Empty, DummyPinHash.Value);
             throw new JellyfinAuthException(credential is null ? JellyfinAuthFailure.InvalidCredentials : JellyfinAuthFailure.Revoked);
         }
 
@@ -174,15 +181,23 @@ public sealed class JellyfinCredentialService(MediaServerDbContext database, IPi
         var hash = AccessTokens.Hash(rawToken.Trim());
         var token = await database.JellyfinAccessTokens
             .Include(entity => entity.Credential)
+            .Include(entity => entity.AppUser)
             .FirstOrDefaultAsync(entity => entity.TokenHash == hash && !entity.Revoked, cancellationToken);
 
-        if (token is null || token.Credential is null || token.Credential.Revoked || token.Credential.PermanentlyLocked)
+        if (token is null || token.Credential is null || token.Credential.Revoked || token.Credential.PermanentlyLocked || token.AppUser is null)
         {
             return null;
         }
 
-        var user = await database.AppUsers.FirstOrDefaultAsync(candidate => candidate.Id == token.AppUserId, cancellationToken);
-        return user is null ? null : new ValidatedToken(token, user);
+        // Record session activity, but throttle the write so it does not run on every request.
+        var now = time.GetUtcNow();
+        if (now - token.LastSeenAt > SessionActivityWriteThreshold)
+        {
+            token.LastSeenAt = now;
+            await database.SaveChangesAsync(cancellationToken);
+        }
+
+        return new ValidatedToken(token, token.AppUser);
     }
 
     /// <summary>Revokes a single session token (Jellyfin <c>POST /Sessions/Logout</c>).</summary>

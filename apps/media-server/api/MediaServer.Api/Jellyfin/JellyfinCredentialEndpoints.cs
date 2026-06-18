@@ -34,6 +34,7 @@ public static class JellyfinCredentialEndpoints
             JellyfinCredentialService credentials,
             MediaServerDbContext database,
             HostyOptions hosty,
+            TimeProvider time,
             CancellationToken cancellationToken) =>
         {
             var user = await ResolveUserAsync(principal, database, cancellationToken);
@@ -43,7 +44,7 @@ public static class JellyfinCredentialEndpoints
             }
 
             var credential = await credentials.GetCredentialAsync(user.Id, cancellationToken);
-            var locked = credential is { LockedUntil: { } until } && until > DateTimeOffset.UtcNow;
+            var locked = credential is { LockedUntil: { } until } && until > time.GetUtcNow();
             return Results.Ok(new JellyfinCredentialStatusResponse(
                 HasCredential: credential is { Revoked: false },
                 Username: credential is { Revoked: false } ? credential.Username : null,

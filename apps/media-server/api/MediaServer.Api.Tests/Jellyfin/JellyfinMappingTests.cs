@@ -85,6 +85,17 @@ public sealed class JellyfinMappingTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_matches_localized_metadata_titles()
+    {
+        // "Inception" is the localized title; the raw item title is "Inception (folder)".
+        var result = await _library.ListItemsAsync(
+            new JellyfinItemsQuery { ParentId = JellyfinIds.Catalog(_movieCatalogId), SearchTerm = "Inception" },
+            CancellationToken.None);
+
+        Assert.Single(result.Items);
+    }
+
+    [Fact]
     public async Task Series_hierarchy_resolves_parent_links_and_child_counts()
     {
         var seasons = await _library.GetSeasonsAsync(_seriesPublicId, CancellationToken.None);
@@ -123,7 +134,7 @@ public sealed class JellyfinMappingTests : IDisposable
             PublicId = Guid.NewGuid().ToString("N"),
             CatalogId = movieCatalog.Id,
             Kind = MediaKind.Movie,
-            Title = "Inception (folder)",
+            Title = "Untitled.2010.1080p.BluRay", // raw title without the localized token
             Year = 2010,
             IdentityProvider = "tmdb",
             IdentityProviderId = "27205",

@@ -33,8 +33,15 @@ public sealed class JellyfinStreamResolver(JellyfinLibraryService library, ICata
             return null;
         }
 
+        // Only Direct Play the containers we explicitly support (no conversion).
+        var extension = Path.GetExtension(absolute);
+        if (!DirectPlay.IsSupported(extension))
+        {
+            return null;
+        }
+
         var info = new FileInfo(absolute);
-        var contentType = DirectPlay.ContentType(Path.GetExtension(absolute));
+        var contentType = DirectPlay.ContentType(extension);
         var etag = new EntityTagHeaderValue($"\"{source.Id:N}-{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}\"");
         return new ResolvedStream(absolute, contentType, etag, info.LastWriteTimeUtc, info.Length);
     }
