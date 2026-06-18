@@ -16,6 +16,8 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<SourceFile> SourceFiles => Set<SourceFile>();
     public DbSet<IngestItem> IngestItems => Set<IngestItem>();
     public DbSet<Job> Jobs => Set<Job>();
+    public DbSet<JellyfinCredential> JellyfinCredentials => Set<JellyfinCredential>();
+    public DbSet<JellyfinAccessToken> JellyfinAccessTokens => Set<JellyfinAccessToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -29,6 +31,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureSourceFile(modelBuilder);
         ConfigureIngestItem(modelBuilder);
         ConfigureJob(modelBuilder);
+        ConfigureJellyfinCredential(modelBuilder);
     }
 
     /// <summary>
@@ -204,5 +207,38 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         job.Property(entity => entity.Type).IsRequired();
         job.Property(entity => entity.Status).HasConversion<int>();
         job.HasIndex(entity => new { entity.RelatedType, entity.RelatedId });
+    }
+
+    private static void ConfigureJellyfinCredential(ModelBuilder modelBuilder)
+    {
+        var credential = modelBuilder.Entity<JellyfinCredential>();
+        credential.HasKey(entity => entity.Id);
+        credential.Property(entity => entity.HostUserId).IsRequired();
+        credential.Property(entity => entity.Username).IsRequired();
+        credential.Property(entity => entity.PinHash).IsRequired();
+        // One credential per internal user; the username (Hosty email) is the login handle.
+        credential.HasIndex(entity => entity.AppUserId).IsUnique();
+        credential.HasIndex(entity => entity.Username).IsUnique();
+
+        credential.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var token = modelBuilder.Entity<JellyfinAccessToken>();
+        token.HasKey(entity => entity.Id);
+        token.Property(entity => entity.TokenHash).IsRequired();
+        token.HasIndex(entity => entity.TokenHash).IsUnique();
+        token.HasIndex(entity => entity.AppUserId);
+
+        token.HasOne(entity => entity.Credential)
+            .WithMany(entity => entity.Tokens)
+            .HasForeignKey(entity => entity.CredentialId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        token.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

@@ -21,6 +21,13 @@ public sealed class HostyOptions
     /// <summary>Browser-facing Core origin; only relevant to the web service, kept for parity.</summary>
     public string? CorePublicOrigin { get; init; }
 
+    /// <summary>
+    /// Public origin for the Jellyfin endpoint (cloudflared), injected as
+    /// <c>HOSTY_PUBLIC_ORIGIN_JELLYFIN</c>. Surfaced to the UI as the server URL to enter in Infuse;
+    /// null under standalone local runs without ingress.
+    /// </summary>
+    public string? JellyfinPublicOrigin { get; init; }
+
     /// <summary>Primary app data directory; the SQLite DB and caches live under it.</summary>
     public required string AppDataDir { get; init; }
 
@@ -52,6 +59,7 @@ public sealed class HostyOptions
             ServiceToken = Read("HOSTY_APP_SERVICE_TOKEN"),
             CoreOrigin = Read("HOSTY_CORE_ORIGIN") ?? "http://localhost:3001",
             CorePublicOrigin = Read("HOSTY_CORE_PUBLIC_ORIGIN"),
+            JellyfinPublicOrigin = Read("HOSTY_PUBLIC_ORIGIN_JELLYFIN"),
             AppDataDir = Read("HOSTY_APP_DATA_DIR") ?? Path.Combine(contentRoot, "data"),
             InternalPort = ReadPort("HOSTY_PORT_INTERNAL"),
             JellyfinPort = ReadPort("HOSTY_PORT_JELLYFIN"),
