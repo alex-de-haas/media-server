@@ -223,6 +223,20 @@ Depends on M0. Specs: [automation-pipeline](automation-pipeline.md),
 **Acceptance:** a single operator action yields an identified, probed, published
 library item; pipeline survives restart (resume).
 
+**Status (implemented 2026-06-17):** backend complete and unit-tested (xUnit, 36
+tests green): EF Core M1 schema + migration (WAL/busy_timeout, JSON columns,
+`IngestItem` concurrency token); catalog CRUD with `st_dev`/hardlink-probe
+same-filesystem validation, path sandbox, free space; MonoTorrent engine
+(DHT/PEX/LSD/MSE, `HOSTY_PORT_TORRENT`) + coordinator (progress broadcast, state
+transitions, restart resume); hardlink organizer; TMDb provider + scoring,
+Emby-style/AnitomySharp name parsing, ffprobe; the seven `IPipelineStage`
+processing stages + orchestrator (lease, `StagesCompleted` resume, backoff,
+`NeedsReview`) + reconciler + jobs + SignalR `ActivityHub`; REST under
+`/api/{catalogs,torrents,ingest,library}`. Web dashboard (React Query, polling)
+covers catalogs, add-torrent, live downloads, pipeline activity + review match,
+and the published library. Live UI uses React Query polling for v1; validating
+SignalR transport through the BFF/Shell embed is deferred to a follow-up.
+
 ### M2 — Jellyfin Direct Play
 **Goal:** Infuse connects, browses, plays. Depends on M1.
 Specs: [jellyfin-compatibility](jellyfin-compatibility.md), [security](security.md).
