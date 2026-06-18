@@ -27,7 +27,8 @@ public sealed class JellyfinMappingTests : IDisposable
             AppDataDir = Path.GetTempPath(),
         };
         var server = new JellyfinServerContext(hosty, _settings);
-        _library = new JellyfinLibraryService(_db.Create(), new JellyfinItemMapper(server), _settings);
+        _library = new JellyfinLibraryService(
+            _db.Create(), new JellyfinItemMapper(server), new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
 
@@ -46,7 +47,7 @@ public sealed class JellyfinMappingTests : IDisposable
     public async Task Lists_a_movie_with_localized_metadata_images_and_provider_ids()
     {
         var result = await _library.ListItemsAsync(
-            new JellyfinItemsQuery { ParentId = JellyfinIds.Catalog(_movieCatalogId) }, CancellationToken.None);
+            new JellyfinItemsQuery { ParentId = JellyfinIds.Catalog(_movieCatalogId) }, appUserId: null, CancellationToken.None);
 
         var movie = Assert.Single(result.Items);
         Assert.Equal("Inception", movie.Name);
@@ -63,7 +64,7 @@ public sealed class JellyfinMappingTests : IDisposable
     [Fact]
     public async Task Movie_detail_maps_media_sources_and_streams()
     {
-        var movie = await _library.GetItemAsync(_moviePublicId, includeMediaSources: true, CancellationToken.None);
+        var movie = await _library.GetItemAsync(_moviePublicId, includeMediaSources: true, appUserId: null, CancellationToken.None);
 
         Assert.NotNull(movie);
         var source = Assert.Single(movie!.MediaSources!);
@@ -90,7 +91,7 @@ public sealed class JellyfinMappingTests : IDisposable
         // "Inception" is the localized title; the raw item title is "Inception (folder)".
         var result = await _library.ListItemsAsync(
             new JellyfinItemsQuery { ParentId = JellyfinIds.Catalog(_movieCatalogId), SearchTerm = "Inception" },
-            CancellationToken.None);
+            appUserId: null, CancellationToken.None);
 
         Assert.Single(result.Items);
     }
@@ -98,14 +99,14 @@ public sealed class JellyfinMappingTests : IDisposable
     [Fact]
     public async Task Series_hierarchy_resolves_parent_links_and_child_counts()
     {
-        var seasons = await _library.GetSeasonsAsync(_seriesPublicId, CancellationToken.None);
+        var seasons = await _library.GetSeasonsAsync(_seriesPublicId, appUserId: null, CancellationToken.None);
         var season = Assert.Single(seasons.Items);
         Assert.Equal("Season", season.Type);
         Assert.Equal(_seriesPublicId, season.SeriesId);
         Assert.Equal(_seriesPublicId, season.ParentId);
         Assert.Equal(1, season.ChildCount);
 
-        var episodes = await _library.GetEpisodesAsync(_seriesPublicId, null, null, CancellationToken.None);
+        var episodes = await _library.GetEpisodesAsync(_seriesPublicId, null, null, appUserId: null, CancellationToken.None);
         var episode = Assert.Single(episodes.Items);
         Assert.Equal("Episode", episode.Type);
         Assert.Equal(_seriesPublicId, episode.SeriesId);
