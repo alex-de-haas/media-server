@@ -44,6 +44,8 @@ builder.Services.AddSingleton<IHardLinker, HardLinker>();
 builder.Services.AddSingleton<IFilesystemInspector, FilesystemInspector>();
 builder.Services.AddSingleton<ICatalogPathSandbox, CatalogPathSandbox>();
 builder.Services.AddScoped<CatalogService>();
+builder.Services.AddScoped<CatalogHealthService>();
+builder.Services.AddHostedService<CatalogHealthWorker>();
 builder.Services.AddScoped<IOrganizer, OrganizerService>();
 
 // Real-time hub + in-process pipeline queue.
@@ -58,6 +60,7 @@ builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequired
 builder.Services.AddHostedService<TorrentCoordinator>();
 builder.Services.AddScoped<TorrentService>();
 builder.Services.AddScoped<DownloadFileService>();
+builder.Services.AddScoped<DownloadDeletionService>();
 
 // Identify / probe / enrich building blocks.
 builder.Services.AddSingleton<INameParser, NameParser>();
@@ -93,10 +96,19 @@ builder.Services.AddDbContext<MediaServerDbContext>((serviceProvider, options) =
         .UseSqlite($"Data Source={hosty.DatabasePath}")
         .AddInterceptors(serviceProvider.GetRequiredService<SqlitePragmaInterceptor>()));
 
+// Periodic online-backup snapshot so scheduled host backups capture a consistent DB copy (no quiesce hook).
+builder.Services.AddSingleton<SqliteSnapshotService>();
+builder.Services.AddHostedService<DatabaseSnapshotWorker>();
+
 // Internal UI-facing read layer for the `/api` (camelCase) surface — projects the domain into UI DTOs.
 // Surface-neutral: it shares the domain + UserDataService with Jellyfin but never the Jellyfin DTOs.
 builder.Services.AddScoped<LibraryReadService>();
+builder.Services.AddSingleton<LibraryFileEraser>();
 builder.Services.AddScoped<LibraryDeleteService>();
+
+// Scheduled scans (missing-file drift) + on-demand metadata refresh.
+builder.Services.AddScoped<LibraryMaintenanceService>();
+builder.Services.AddHostedService<LibraryScanWorker>();
 
 // Jellyfin-compatible surface (M2): credentials/tokens, DTO mapping, browsing, images, streaming.
 builder.Services.AddSingleton(TimeProvider.System);
@@ -133,6 +145,13 @@ builder.Services.AddSingleton<IHostyIdentityValidator>(serviceProvider => new Ca
     serviceProvider.GetRequiredService<IMemoryCache>(),
     TimeSpan.FromSeconds(30)));
 
+// Talks to Core's internal app APIs (backups, notifications, directory) with the service token bearer.
+builder.Services.AddSingleton<IHostyCoreClient, HostyCoreClient>();
+
+// Polls Core's scoped directory (no webhooks): upserts assigned users, revokes Jellyfin access on unassign/disable.
+builder.Services.AddScoped<DirectoryReconcileService>();
+builder.Services.AddHostedService<DirectoryReconcileWorker>();
+
 builder.Services
     .AddAuthentication(HostyAuthenticationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, HostyAuthenticationHandler>(HostyAuthenticationHandler.SchemeName, null)
@@ -157,12 +176,48 @@ builder.Services.AddAuthorization(options =>
 
 var app = builder.Build();
 
-// Apply schema migrations on startup. M4 will wrap this in an on-demand Core backup
-// (POST /api/internal/apps/{appId}/backups) before migrating.
+// Apply schema migrations on startup, wrapped in an on-demand Core backup so a failed migration is
+// recoverable (POST /api/internal/apps/{appId}/backups). The backup is requested only when there is
+// actually pending schema work, so ordinary restarts don't accumulate snapshots; on migration failure
+// we raise an operator notification and rethrow (the app must not run against a half-migrated schema).
 using (var scope = app.Services.CreateScope())
 {
-    var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
-    database.Database.Migrate();
+    var services = scope.ServiceProvider;
+    var database = services.GetRequiredService<MediaServerDbContext>();
+    var core = services.GetRequiredService<IHostyCoreClient>();
+    var startupLogger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup.Migrations");
+
+    var pending = (await database.Database.GetPendingMigrationsAsync()).ToList();
+    if (pending.Count > 0)
+    {
+        startupLogger.LogInformation("Applying {Count} pending migration(s): {Migrations}.", pending.Count, string.Join(", ", pending));
+
+        if (core.IsEnabled)
+        {
+            var backup = await core.CreateBackupAsync($"Before applying {pending.Count} Media Server migration(s)", CancellationToken.None);
+            if (backup is null)
+            {
+                startupLogger.LogWarning("Pre-migration Core backup could not be created; proceeding with migration.");
+            }
+        }
+
+        try
+        {
+            await database.Database.MigrateAsync();
+        }
+        catch (Exception exception)
+        {
+            startupLogger.LogError(exception, "Database migration failed.");
+            await core.PublishNotificationAsync(
+                CoreNotificationLevel.Error,
+                "Media Server: database migration failed",
+                "Applying database schema migrations failed on startup. The previous data was backed up; the app may not function until this is resolved.",
+                link: null,
+                dedupeKey: "media-server:migration-failed",
+                cancellationToken: CancellationToken.None);
+            throw;
+        }
+    }
 }
 
 app.UseAuthentication();

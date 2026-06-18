@@ -74,12 +74,14 @@ export interface IngestItem {
   id: string;
   catalogId: string;
   downloadId: string | null;
+  downloadName: string | null;
   mediaItemId: string | null;
   stage: string;
   status: string;
   attemptCount: number;
   stagesCompleted: string[];
   lastError: string | null;
+  nextAttemptAt: string | null;
   reviewCandidates: MetadataCandidate[];
   sourceFiles: IngestSourceFile[];
   createdAt: string;
@@ -95,6 +97,12 @@ export interface MatchInput {
   year?: number | null;
   season?: number | null;
   episode?: number | null;
+}
+
+export interface MetadataSearchInput {
+  title: string;
+  year?: number | null;
+  kind?: "Movie" | "Series" | "Season" | "Episode" | "Video" | null;
 }
 
 // Surface-neutral per-user playback state carried by every library DTO (mirrors the api UserItemDataDto).
@@ -218,6 +226,13 @@ export interface JellyfinCredentialSecret {
   serverUrl: string | null;
 }
 
+export interface LibraryScanReport {
+  catalogsScanned: number;
+  sourcesChecked: number;
+  missingFiles: number;
+  missingPaths: string[];
+}
+
 async function send(path: string, method: string, body?: unknown): Promise<void> {
   await apiFetch(`${BASE}${path}`, {
     method,
@@ -252,6 +267,13 @@ export const mediaServer = {
   listIngest: () => apiJson<IngestItem[]>(`${BASE}/ingest`),
   retryIngest: (id: string) => send(`/ingest/${id}/retry`, "POST"),
   matchIngest: (id: string, input: MatchInput) => send(`/ingest/${id}/match`, "POST", input),
+  searchIngest: (id: string, input: MetadataSearchInput) =>
+    apiJson<MetadataCandidate[]>(`${BASE}/ingest/${id}/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  deleteIngest: (id: string) => send(`/ingest/${id}`, "DELETE"),
 
   listLibrary: () => apiJson<LibraryItem[]>(`${BASE}/library`),
   getLibraryDetail: (id: string) => apiJson<LibraryDetail>(`${BASE}/library/${id}`),
@@ -266,6 +288,8 @@ export const mediaServer = {
     apiJson<UserItemData>(`${BASE}/library/${id}/favorite`, { method: favorite ? "POST" : "DELETE" }),
   deleteLibraryItem: (id: string, deleteFiles: boolean) =>
     send(`/library/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
+  refreshMetadata: (id: string) => send(`/library/${id}/refresh`, "POST"),
+  scanLibrary: () => apiJson<LibraryScanReport>(`${BASE}/library/scan`, { method: "POST" }),
 
   getJellyfinCredential: () => apiJson<JellyfinCredentialStatus>(`${BASE}/jellyfin/credential`),
   createJellyfinCredential: (pin?: string) =>

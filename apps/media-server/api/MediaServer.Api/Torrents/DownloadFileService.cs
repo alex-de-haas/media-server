@@ -14,6 +14,14 @@ public sealed class DownloadFileService(MediaServerDbContext database)
     public async Task<IReadOnlyList<SourceFile>> UpsertSourceFilesAsync(
         Guid downloadId, IReadOnlyList<TorrentFileInfo> files, CancellationToken cancellationToken)
     {
+        // De-duplicate the incoming list by relative path defensively (an engine file list shouldn't
+        // repeat a path, but the upsert must never create two rows for one file).
+        var playable = files
+            .Where(file => MediaFormats.IsPlayableMedia(file.RelativePath, file.Length))
+            .GroupBy(file => file.RelativePath, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToList();
+
         var existing = await database.SourceFiles
             .Where(file => file.DownloadId == downloadId)
             .ToListAsync(cancellationToken);
@@ -21,8 +29,9 @@ public sealed class DownloadFileService(MediaServerDbContext database)
         var byPath = existing.ToDictionary(file => file.RelativePath, StringComparer.Ordinal);
         var now = DateTimeOffset.UtcNow;
         var result = new List<SourceFile>();
+        var added = new List<SourceFile>();
 
-        foreach (var file in files.Where(file => MediaFormats.IsPlayableMedia(file.RelativePath, file.Length)))
+        foreach (var file in playable)
         {
             if (byPath.TryGetValue(file.RelativePath, out var current))
             {
@@ -45,11 +54,29 @@ public sealed class DownloadFileService(MediaServerDbContext database)
                     UpdatedAt = now,
                 };
                 database.SourceFiles.Add(created);
+                added.Add(created);
                 result.Add(created);
             }
         }
 
-        await database.SaveChangesAsync(cancellationToken);
-        return result;
+        try
+        {
+            await database.SaveChangesAsync(cancellationToken);
+            return result;
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent coordinator handler (metadata vs. completion) inserted the same
+            // (DownloadId, RelativePath) first and the unique index rejected our insert. Drop our pending
+            // inserts and return the rows that won the race, so the caller keeps working.
+            foreach (var created in added)
+            {
+                database.Entry(created).State = EntityState.Detached;
+            }
+
+            return await database.SourceFiles
+                .Where(file => file.DownloadId == downloadId)
+                .ToListAsync(cancellationToken);
+        }
     }
 }

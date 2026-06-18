@@ -416,6 +416,36 @@ launch today, the documented sandbox open-risk).
 **Acceptance:** install/run under `docker` profile end-to-end (catalog mounts,
 public origins, backups, notifications) matches the `dev` behavior.
 
+**Status (implemented 2026-06-18, branch `feat/m4-automation-docker`):** all seven
+slices done; api 130 xUnit tests green (Release), web lint/tsc/vitest + 8 Playwright
+e2e green, manifest validates, both docker images build and boot. Adds: (1) a typed
+`IHostyCoreClient` over Core's internal app APIs (`/backups`, `/notifications`,
+`/directory/users`) with the service-token bearer, no-op when not Core managed;
+contracts verified against `docker-host`. (2) On-demand Core backup before EF
+migrations (only when migrations are pending) + a periodic SQLite online-backup
+snapshot (`SqliteSnapshotService`/`DatabaseSnapshotWorker`, atomic `.snapshot`
+beside the DB) so quiesce-less host backups capture a consistent copy; migration
+failure raises an operator notification and rethrows. (3) `CatalogHealthService`/
+`CatalogHealthWorker` persists `Catalog.OfflineSince`/`LowDiskSince` (migration
+`M4CatalogHealth`) and emits deduped operator notifications on the offline→online
+and low-disk transitions (broadcast, audience `user`; apps can't target
+host-admin). (4) `DirectoryReconcileService`/`DirectoryReconcileWorker` polls the
+scoped directory (no webhooks), upserts `AppUser`s (host.admin→Admin) and revokes
+the Jellyfin credential+tokens of any app user no longer assigned/enabled. (5)
+Re-search by corrected title: `POST /api/ingest/{id}/search` exposes
+`IMetadataProvider.SearchAsync` (kind defaults from the catalog), wired into the
+review panel's existing pick-to-`/match` flow (metadata search only). (6)
+`LibraryMaintenanceService` — scheduled scan for missing library files (skips
+offline catalogs, deduped notification) via `POST /api/library/scan` +
+`LibraryScanWorker`, and on-demand metadata refresh `POST /api/library/{id}/refresh`
+(admin), surfaced as a "Refresh metadata" button on the detail page. (7) Docker
+delivery: multi-stage Dockerfiles for `api` (.NET 10 runtime + ffprobe; binds both
+ports via `ASPNETCORE_URLS`) and `web` (pnpm + gated Next standalone output, off by
+default so `next start`/e2e stay clean), `.dockerignore`s, and a `publish.yml` GHCR
+workflow (push to main → `:latest`, tags → `:vX.Y.Z`). End-to-end install under the
+`docker` profile via Core (mounts/ingress/torrent port) remains a manual on-device
+step.
+
 ### M5 — Watchlist & discovery (future)
 Per [watchlist-and-discovery](watchlist-and-discovery.md); deferred. M6 (MCP/AI)
 remains future.

@@ -1,4 +1,3 @@
-using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,8 +11,7 @@ namespace MediaServer.Api.Library;
 /// </summary>
 public sealed class LibraryDeleteService(
     MediaServerDbContext database,
-    ICatalogPathSandbox sandbox,
-    ILogger<LibraryDeleteService> logger)
+    LibraryFileEraser fileEraser)
 {
     /// <summary>Returns false if no such item exists.</summary>
     public async Task<bool> DeleteAsync(Guid id, bool deleteFiles, CancellationToken cancellationToken)
@@ -62,7 +60,7 @@ public sealed class LibraryDeleteService(
 
         foreach (var (catalog, relativePath) in files)
         {
-            DeleteLibraryFile(catalog, relativePath);
+            fileEraser.Erase(catalog, relativePath);
         }
 
         return true;
@@ -106,63 +104,4 @@ public sealed class LibraryDeleteService(
             .Select(source => (catalogs[source.CatalogId], source.Path))
             .ToList();
     }
-
-    private void DeleteLibraryFile(Catalog catalog, string relativePath)
-    {
-        if (!sandbox.TryResolve(catalog, relativePath, out var absolute))
-        {
-            logger.LogWarning("Skipping delete of unresolved library path {Path} in catalog {Catalog}", relativePath, catalog.Id);
-            return;
-        }
-
-        // Defense in depth: only ever delete inside library/, never files/ or elsewhere under the root.
-        var libraryDir = EnsureTrailingSeparator(CatalogPaths.For(catalog).LibraryDir);
-        if (!absolute.StartsWith(libraryDir, StringComparison.Ordinal))
-        {
-            logger.LogWarning("Refusing to delete {Path}: outside the library/ subtree", absolute);
-            return;
-        }
-
-        try
-        {
-            if (File.Exists(absolute))
-            {
-                File.Delete(absolute);
-                CleanEmptyParents(Path.GetDirectoryName(absolute), CatalogPaths.For(catalog).LibraryDir);
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(exception, "Failed to delete library file {Path}", absolute);
-        }
-    }
-
-    private static void CleanEmptyParents(string? directory, string libraryDir)
-    {
-        // Compare with a trailing separator so a sibling like "library-other" can't match "library".
-        var stop = EnsureTrailingSeparator(Path.GetFullPath(libraryDir));
-        var current = directory is null ? null : Path.GetFullPath(directory);
-        while (!string.IsNullOrEmpty(current) &&
-               EnsureTrailingSeparator(current).StartsWith(stop, StringComparison.Ordinal) &&
-               !EnsureTrailingSeparator(current).Equals(stop, StringComparison.Ordinal))
-        {
-            try
-            {
-                if (!Directory.Exists(current) || Directory.EnumerateFileSystemEntries(current).Any())
-                {
-                    break;
-                }
-
-                Directory.Delete(current);
-                current = Path.GetDirectoryName(current);
-            }
-            catch (IOException)
-            {
-                break;
-            }
-        }
-    }
-
-    private static string EnsureTrailingSeparator(string path) =>
-        path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
 }

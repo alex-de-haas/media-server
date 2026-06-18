@@ -199,7 +199,7 @@ public sealed class LibraryReadServiceTests : IDisposable
     public async Task Delete_movie_removes_its_db_rows()
     {
         SeedUserData(_movieId, played: true);
-        var service = new LibraryDeleteService(_context, new CatalogPathSandbox(), NullLogger<LibraryDeleteService>.Instance);
+        var service = new LibraryDeleteService(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
         var deleted = await service.DeleteAsync(_movieId, deleteFiles: false, CancellationToken.None);
 
@@ -213,7 +213,7 @@ public sealed class LibraryReadServiceTests : IDisposable
     [Fact]
     public async Task Delete_series_cascades_to_its_seasons_and_episodes()
     {
-        var service = new LibraryDeleteService(_context, new CatalogPathSandbox(), NullLogger<LibraryDeleteService>.Instance);
+        var service = new LibraryDeleteService(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
         var deleted = await service.DeleteAsync(_seriesId, deleteFiles: false, CancellationToken.None);
 
@@ -261,7 +261,7 @@ public sealed class LibraryReadServiceTests : IDisposable
 
         try
         {
-            var service = new LibraryDeleteService(_context, new CatalogPathSandbox(), NullLogger<LibraryDeleteService>.Instance);
+            var service = new LibraryDeleteService(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
             var deleted = await service.DeleteAsync(movieId, deleteFiles: true, CancellationToken.None);
 

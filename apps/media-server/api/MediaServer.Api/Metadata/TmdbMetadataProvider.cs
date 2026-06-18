@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -196,15 +197,38 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
             throw new InvalidOperationException("TMDB_API_KEY is not configured.");
         }
 
-        var client = httpClientFactory.CreateClient(HttpClientName);
-        var separator = pathWithQuery.Contains('?') ? '&' : '?';
-        var requestUri = $"3/{pathWithQuery}{separator}api_key={settings.TmdbApiKey}";
+        var key = settings.TmdbApiKey;
+        // TMDb accepts either a v3 API key (sent as the api_key query parameter) or a v4 API Read Access
+        // Token — a JWT — sent as a Bearer header. Detect which the operator configured so pasting either
+        // works; a v4 token sent as api_key would be rejected with 401 (and vice-versa).
+        var useBearer = key.Contains('.');
 
-        using var response = await client.GetAsync(requestUri, cancellationToken);
+        var client = httpClientFactory.CreateClient(HttpClientName);
+        var requestUri = useBearer
+            ? $"3/{pathWithQuery}"
+            : $"3/{pathWithQuery}{(pathWithQuery.Contains('?') ? '&' : '?')}api_key={key}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        if (useBearer)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        }
+
+        using var response = await client.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            // Log only the api_key-free path, never the full request URI.
-            logger.LogDebug("TMDb request {Path} returned {StatusCode}.", pathWithQuery, (int)response.StatusCode);
+            // 401 almost always means a mis-configured credential — surface that at warning level so it
+            // is diagnosable, while never logging the api_key query value or the token itself.
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                logger.LogWarning(
+                    "TMDb rejected the configured TMDB_API_KEY (HTTP 401). Provide a valid v3 API key or v4 API Read Access Token.");
+            }
+            else
+            {
+                logger.LogDebug("TMDb request {Path} returned {StatusCode}.", pathWithQuery, (int)response.StatusCode);
+            }
+
             return null;
         }
 

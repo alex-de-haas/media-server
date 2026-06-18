@@ -1,3 +1,5 @@
+using MediaServer.Api.Hosty;
+
 namespace MediaServer.Api.Pipeline;
 
 /// <summary>Internal pipeline/review endpoints under <c>/api/ingest</c>, behind Host identity.</summary>
@@ -19,7 +21,24 @@ public static class IngestEndpoints
         group.MapPost("/{id:guid}/retry", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
             await service.RetryAsync(id, cancellationToken) ? Results.Accepted() : Results.NotFound());
 
+        group.MapPost("/{id:guid}/search", async (Guid id, MetadataSearchRequest request, IngestService service, CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Title))
+            {
+                return Results.BadRequest(new { error = "A title is required to re-search." });
+            }
+
+            var candidates = await service.SearchAsync(id, request, cancellationToken);
+            return candidates is null ? Results.NotFound() : Results.Ok(candidates);
+        });
+
         group.MapPost("/{id:guid}/match", async (Guid id, MatchRequest request, IngestService service, CancellationToken cancellationToken) =>
             await service.MatchAsync(id, request, cancellationToken) ? Results.Accepted() : Results.NotFound());
+
+        // Operator safety valve: remove a single pipeline tracking row (e.g. an orphaned/stuck entry).
+        // Admin-only and destructive-by-intent, though it only deletes the ingest row itself.
+        group.MapDelete("/{id:guid}", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
+            await service.DeleteAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound())
+            .RequireAuthorization(AppRoles.AdminPolicy);
     }
 }

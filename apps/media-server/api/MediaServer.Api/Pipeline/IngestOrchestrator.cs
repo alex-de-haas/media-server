@@ -49,9 +49,19 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
         var download = item.DownloadId is { } downloadId
             ? await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == downloadId, cancellationToken)
             : null;
-        var sourceFiles = download is null
-            ? new List<SourceFile>()
-            : await database.SourceFiles.Where(file => file.DownloadId == download.Id).ToListAsync(cancellationToken);
+
+        // Every ingest item is download-backed today. A null download means the source torrent was removed
+        // after this item started (its DownloadId is set null on delete, its source files cascade away) —
+        // a terminal condition, not a transient one. Fail it with a clear reason instead of letting the
+        // Identify stage defer on an empty file list forever. See docs/planning/torrents-and-organizer.md.
+        if (download is null)
+        {
+            await FinishAsync(database, notifier, item, IngestStatus.Failed,
+                "The source download was removed before processing finished. Re-add the torrent to ingest it again.", cancellationToken);
+            return;
+        }
+
+        var sourceFiles = await database.SourceFiles.Where(file => file.DownloadId == download.Id).ToListAsync(cancellationToken);
 
         var context = new IngestContext
         {

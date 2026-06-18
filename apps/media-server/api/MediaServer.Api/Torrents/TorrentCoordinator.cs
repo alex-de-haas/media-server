@@ -137,6 +137,14 @@ public sealed class TorrentCoordinator(
                 snapshot.Peers,
                 snapshot.SizeBytes,
                 eta), cancellationToken);
+
+            // Self-heal a missed completion: the engine reports the torrent complete but our persisted
+            // state never caught up (e.g. a re-added, already-complete torrent that finished hashing). Drive
+            // the completion transition now — idempotent, and only while the state is still non-terminal.
+            if (snapshot.Complete && download.State is DownloadState.Queued or DownloadState.Downloading)
+            {
+                await HandleCompletedAsync(snapshot.InfoHash);
+            }
         }
     }
 

@@ -96,6 +96,18 @@ public static class LibraryEndpoints
             var deleted = await deleteService.DeleteAsync(id, deleteFiles ?? false, cancellationToken);
             return deleted ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Re-fetch provider metadata + images for one item (admin only).
+        group.MapPost("/{id:guid}/refresh", async (Guid id, LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
+        {
+            var refreshed = await maintenance.RefreshMetadataAsync(id, cancellationToken);
+            return refreshed ? Results.Accepted() : Results.NotFound();
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Scan all online catalogs for missing library files (admin only); also runs on a timer.
+        group.MapPost("/scan", async (LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
+            Results.Ok(await maintenance.ScanAsync(cancellationToken)))
+            .RequireAuthorization(AppRoles.AdminPolicy);
     }
 
     private static MediaKind? ParseKind(string? kind) =>
