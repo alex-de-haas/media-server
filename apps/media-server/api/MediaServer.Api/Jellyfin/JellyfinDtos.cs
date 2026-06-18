@@ -195,4 +195,15 @@ public sealed record PlaybackInfoRequest(
 
 public sealed record AuthenticateByNameRequest(string? Username, string? Pw, string? Password);
 
+/// <summary>
+/// Shared body for the <c>Sessions/Playing*</c> reports (start, progress, stopped). Only the fields the
+/// resume/watched policy needs are modeled; clients may also pass them on the query string.
+/// </summary>
+public sealed record PlaybackReportBody(
+    string? ItemId,
+    long? PositionTicks,
+    string? MediaSourceId,
+    string? PlaySessionId,
+    bool? IsPaused);
+
 public sealed record SpecialViewOptionDto(string Name, string Id);

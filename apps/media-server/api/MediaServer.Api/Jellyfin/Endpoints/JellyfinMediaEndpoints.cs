@@ -54,7 +54,8 @@ internal static class JellyfinMediaEndpoints
     private static async Task<IResult> BuildPlaybackInfoAsync(
         string itemId, string? mediaSourceId, JellyfinLibraryService library, CancellationToken cancellationToken)
     {
-        var item = await library.GetItemAsync(itemId, includeMediaSources: true, cancellationToken);
+        // Playback negotiation only needs media sources, not per-user data.
+        var item = await library.GetItemAsync(itemId, includeMediaSources: true, appUserId: null, cancellationToken);
         var sources = item?.MediaSources ?? [];
 
         if (!string.IsNullOrEmpty(mediaSourceId))
