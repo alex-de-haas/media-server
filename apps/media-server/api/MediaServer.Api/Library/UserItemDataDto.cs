@@ -14,4 +14,7 @@ public sealed record UserItemDataDto(
     bool Played = false,
     double? PlayedPercentage = null,
     DateTimeOffset? LastPlayedDate = null,
-    int? UnplayedItemCount = null);
+    int? UnplayedItemCount = null,
+    // Jellyfin's UserData carries the item id too; set only by the Jellyfin mapper (Infuse decodes it as
+    // a required field). Left null for the internal /api surface, which keys off the item itself.
+    string? ItemId = null);

@@ -13,9 +13,27 @@ internal static class JellyfinItemsEndpoints
         secured.MapGet("/Items", async (HttpRequest request, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
             JellyfinJson.Ok(await library.ListItemsAsync(ParseQuery(request), JellyfinPrincipal.AppUserId(principal), cancellationToken)));
 
+        // Newer Jellyfin route Infuse calls to fill a library row: /Items/Latest?userId=…&parentId=…
+        // (the per-user path form lives below). Literal segment wins over /Items/{itemId} in routing.
+        secured.MapGet("/Items/Latest", async (HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        {
+            var actingUserId = await ResolveQueryUserAsync(request, principal, database, cancellationToken);
+            if (actingUserId is null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var parentId = request.Query["ParentId"].ToString();
+            var limit = ParseInt(request.Query["Limit"]) ?? 20;
+            var latest = await library.GetLatestAsync(string.IsNullOrEmpty(parentId) ? null : parentId, limit, actingUserId, cancellationToken);
+            return JellyfinJson.Ok(latest.Items);
+        });
+
         secured.MapGet("/Items/{itemId}", async (string itemId, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            var item = await library.GetItemAsync(itemId, includeMediaSources: true, JellyfinPrincipal.AppUserId(principal), cancellationToken);
+            // A library (collection folder) resolves as a view; everything else as a media item.
+            var item = await library.GetItemAsync(itemId, includeMediaSources: true, JellyfinPrincipal.AppUserId(principal), cancellationToken)
+                ?? await library.GetViewAsync(itemId, cancellationToken);
             return item is null ? Results.NotFound() : JellyfinJson.Ok(item);
         });
 
@@ -59,13 +77,25 @@ internal static class JellyfinItemsEndpoints
                 actingUserId.Value, string.IsNullOrEmpty(parentId) ? null : parentId, limit, cancellationToken));
         });
 
+        // Newer Jellyfin route Infuse calls instead of /Users/{userId}/Items/Resume.
+        secured.MapGet("/UserItems/Resume", async (HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        {
+            var actingUserId = await ResolveQueryUserAsync(request, principal, database, cancellationToken);
+            if (actingUserId is null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var parentId = request.Query["ParentId"].ToString();
+            var limit = ParseInt(request.Query["Limit"]) ?? 20;
+            return JellyfinJson.Ok(await library.GetResumeAsync(
+                actingUserId.Value, string.IsNullOrEmpty(parentId) ? null : parentId, limit, cancellationToken));
+        });
+
         secured.MapGet("/Shows/NextUp", async (HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
             // NextUp targets the caller unless an explicit (authorized) UserId is supplied.
-            var requestedUserId = request.Query["UserId"].ToString();
-            var actingUserId = string.IsNullOrEmpty(requestedUserId)
-                ? JellyfinPrincipal.AppUserId(principal)
-                : await JellyfinPrincipal.ResolveActingUserIdAsync(principal, requestedUserId, database, cancellationToken);
+            var actingUserId = await ResolveQueryUserAsync(request, principal, database, cancellationToken);
             if (actingUserId is null)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -100,6 +130,20 @@ internal static class JellyfinItemsEndpoints
                 seriesId, string.IsNullOrEmpty(seasonId) ? null : seasonId, seasonNumber,
                 JellyfinPrincipal.AppUserId(principal), cancellationToken));
         });
+    }
+
+    /// <summary>
+    /// Resolves the acting app-user for a query-string route: the explicit (authorized) <c>UserId</c>
+    /// query parameter, or the authenticated caller when it is absent. Null means the caller may not act
+    /// as the requested user.
+    /// </summary>
+    private static async Task<int?> ResolveQueryUserAsync(
+        HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
+    {
+        var requestedUserId = request.Query["UserId"].ToString();
+        return string.IsNullOrEmpty(requestedUserId)
+            ? JellyfinPrincipal.AppUserId(principal)
+            : await JellyfinPrincipal.ResolveActingUserIdAsync(principal, requestedUserId, database, cancellationToken);
     }
 
     private static JellyfinItemsQuery ParseQuery(HttpRequest request)

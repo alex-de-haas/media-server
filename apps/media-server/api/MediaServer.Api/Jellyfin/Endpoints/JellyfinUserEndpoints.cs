@@ -52,7 +52,24 @@ internal static class JellyfinUserEndpoints
             return JellyfinJson.Ok(new QueryResult<BaseItemDto>(views, views.Count));
         });
 
+        // Newer Jellyfin route Infuse actually calls: /UserViews?userId=… (the per-user path form above
+        // is the legacy alias). Views are the global catalogs, so the user only gates authorization.
+        secured.MapGet("/UserViews", async (string? userId, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        {
+            if (!string.IsNullOrEmpty(userId) && !JellyfinPrincipal.CanActAs(principal, userId))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var views = await library.GetViewsAsync(cancellationToken);
+            return JellyfinJson.Ok(new QueryResult<BaseItemDto>(views, views.Count));
+        });
+
         secured.MapGet("/Users/{userId}/GroupingOptions", (string userId) =>
+            JellyfinJson.Ok(Array.Empty<SpecialViewOptionDto>()));
+
+        // /UserViews counterpart Infuse calls (query userId); we expose no special grouping views.
+        secured.MapGet("/UserViews/GroupingOptions", (string? userId) =>
             JellyfinJson.Ok(Array.Empty<SpecialViewOptionDto>()));
 
         secured.MapGet("/Library/MediaFolders", async (JellyfinLibraryService library, CancellationToken cancellationToken) =>

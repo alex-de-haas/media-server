@@ -106,6 +106,8 @@ public sealed record BaseItemDto
     public double? CommunityRating { get; init; }
     public string LocationType { get; init; } = "FileSystem";
     public string? Container { get; init; }
+    public string? Path { get; init; }
+    public string? Etag { get; init; }
     public DateTimeOffset? DateCreated { get; init; }
     public int? ChildCount { get; init; }
     public int? RecursiveItemCount { get; init; }
@@ -121,6 +123,8 @@ public sealed record MediaSourceInfo
 {
     public string Protocol { get; init; } = "File";
     public required string Id { get; init; }
+    // Jellyfin always emits the source Path; Infuse requires it to build a playable media source.
+    public required string Path { get; init; }
     public string? Name { get; init; }
     public required string Container { get; init; }
     public long Size { get; init; }
@@ -134,6 +138,14 @@ public sealed record MediaSourceInfo
     public bool RequiresClosing { get; init; }
     public bool RequiresLooping { get; init; }
     public bool SupportsProbing { get; init; } = true;
+    // Non-nullable flags Jellyfin always emits; Infuse decodes them as required.
+    public bool ReadAtNativeFramerate { get; init; }
+    public bool IgnoreDts { get; init; }
+    public bool IgnoreIndex { get; init; }
+    public bool GenPtsInput { get; init; }
+    public bool UseMostCompatibleTranscodingProfile { get; init; }
+    public bool HasSegments { get; init; }
+    public string TranscodingSubProtocol { get; init; } = "http";
     public string? VideoType { get; init; } = "VideoFile";
     public string Type { get; init; } = "Default";
     public int? Bitrate { get; init; }
@@ -167,7 +179,12 @@ public sealed record MediaStreamDto
     public int? Channels { get; init; }
     public int? SampleRate { get; init; }
     public string? ChannelLayout { get; init; }
-    public bool? IsTextSubtitleStream { get; init; }
+    // Non-nullable flags/enums Jellyfin always emits; Infuse decodes them as required.
+    public bool IsInterlaced { get; init; }
+    public bool IsHearingImpaired { get; init; }
+    public bool IsTextSubtitleStream { get; init; }
+    public string VideoRangeType { get; init; } = "Unknown";
+    public string AudioSpatialFormat { get; init; } = "None";
     public bool SupportsExternalStream { get; init; }
     public string? DeliveryMethod { get; init; }
 }

@@ -88,6 +88,11 @@ internal static class JellyfinSystemEndpoints
             return JellyfinJson.Ok(new[] { session });
         });
 
+        // Infuse posts its device capabilities right after connecting; we don't track live sessions
+        // server-side, so accept and acknowledge (Jellyfin returns 204 No Content here).
+        secured.MapPost("/Sessions/Capabilities/Full", () => Results.NoContent());
+        secured.MapPost("/Sessions/Capabilities", () => Results.NoContent());
+
         secured.MapPost("/Sessions/Logout", async (
             System.Security.Claims.ClaimsPrincipal principal,
             JellyfinCredentialService credentials,
