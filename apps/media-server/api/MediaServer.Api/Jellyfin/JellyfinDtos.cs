@@ -1,3 +1,5 @@
+using MediaServer.Api.Library;
+
 namespace MediaServer.Api.Jellyfin;
 
 /// <summary>
@@ -75,16 +77,6 @@ public sealed record SessionInfoDto(
     string? DeviceId,
     string? ApplicationVersion,
     string ServerId);
-
-public sealed record UserItemDataDto(
-    string Key,
-    long PlaybackPositionTicks = 0,
-    int PlayCount = 0,
-    bool IsFavorite = false,
-    bool Played = false,
-    double? PlayedPercentage = null,
-    DateTimeOffset? LastPlayedDate = null,
-    int? UnplayedItemCount = null);
 
 public sealed record BaseItemDto
 {

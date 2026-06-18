@@ -23,6 +23,7 @@ coverage/
 *.trx
 playwright-report/
 .playwright/
+test-results/
 
 # --- App runtime data (never commit) ---
 .hosty-dev/

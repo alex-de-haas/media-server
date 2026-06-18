@@ -3,6 +3,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
+using MediaServer.Api.Library;
 using MediaServer.Api.Jellyfin.Streaming;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;

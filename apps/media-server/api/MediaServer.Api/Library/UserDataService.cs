@@ -1,7 +1,7 @@
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
-namespace MediaServer.Api.Jellyfin;
+namespace MediaServer.Api.Library;
 
 /// <summary>
 /// Per-user playback state for the Jellyfin surface (M3): resume position, watched flag, play count and
@@ -129,11 +129,19 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         await database.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>Marks an item played/unplayed (recursively for season/series folders); returns the updated user data.</summary>
+    /// <summary>Marks an item played/unplayed (recursively for season/series folders) by public id (Jellyfin).</summary>
     public async Task<UserItemDataDto?> SetPlayedAsync(
-        int appUserId, string itemPublicId, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken)
+        int appUserId, string itemPublicId, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken) =>
+        await SetPlayedCoreAsync(appUserId, await FindItemAsync(itemPublicId, cancellationToken), played, playedAt, cancellationToken);
+
+    /// <summary>Same, keyed by the internal item id (UI surface).</summary>
+    public async Task<UserItemDataDto?> SetPlayedAsync(
+        int appUserId, Guid mediaItemId, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken) =>
+        await SetPlayedCoreAsync(appUserId, await FindItemByIdAsync(mediaItemId, cancellationToken), played, playedAt, cancellationToken);
+
+    private async Task<UserItemDataDto?> SetPlayedCoreAsync(
+        int appUserId, MediaItem? item, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken)
     {
-        var item = await FindItemAsync(itemPublicId, cancellationToken);
         if (item is null)
         {
             return null;
@@ -154,11 +162,19 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         return await LoadOneAsync(appUserId, item, cancellationToken);
     }
 
-    /// <summary>Sets or clears the favorite flag on any item (leaf or folder); returns the updated user data.</summary>
+    /// <summary>Sets or clears the favorite flag on any item (leaf or folder) by public id (Jellyfin).</summary>
     public async Task<UserItemDataDto?> SetFavoriteAsync(
-        int appUserId, string itemPublicId, bool favorite, CancellationToken cancellationToken)
+        int appUserId, string itemPublicId, bool favorite, CancellationToken cancellationToken) =>
+        await SetFavoriteCoreAsync(appUserId, await FindItemAsync(itemPublicId, cancellationToken), favorite, cancellationToken);
+
+    /// <summary>Same, keyed by the internal item id (UI surface).</summary>
+    public async Task<UserItemDataDto?> SetFavoriteAsync(
+        int appUserId, Guid mediaItemId, bool favorite, CancellationToken cancellationToken) =>
+        await SetFavoriteCoreAsync(appUserId, await FindItemByIdAsync(mediaItemId, cancellationToken), favorite, cancellationToken);
+
+    private async Task<UserItemDataDto?> SetFavoriteCoreAsync(
+        int appUserId, MediaItem? item, bool favorite, CancellationToken cancellationToken)
     {
-        var item = await FindItemAsync(itemPublicId, cancellationToken);
         if (item is null)
         {
             return null;
@@ -262,6 +278,9 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         string.IsNullOrEmpty(publicId)
             ? null
             : await database.MediaItems.AsNoTracking().FirstOrDefaultAsync(item => item.PublicId == publicId, cancellationToken);
+
+    private async Task<MediaItem?> FindItemByIdAsync(Guid id, CancellationToken cancellationToken) =>
+        await database.MediaItems.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id && item.PublicId != null, cancellationToken);
 
     private async Task<Dictionary<Guid, long>> RuntimeTicksAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
     {

@@ -19,6 +19,17 @@ export function formatPercent(value: number | null | undefined): string {
   return value == null ? "—" : `${value.toFixed(1)}%`;
 }
 
+// .NET runtime ticks (100ns units) → "1h 56m" / "42m". Null when unknown.
+export function formatRuntime(ticks: number | null | undefined): string | null {
+  if (!ticks || ticks <= 0) {
+    return null;
+  }
+  const totalMinutes = Math.round(ticks / 600_000_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
 export function formatEta(seconds: number | null | undefined): string {
   if (seconds == null || seconds <= 0 || !Number.isFinite(seconds)) {
     return "—";

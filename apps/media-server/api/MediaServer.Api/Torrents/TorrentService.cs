@@ -107,7 +107,9 @@ public sealed class TorrentService(
             .OrderByDescending(download => download.AddedAt)
             .ToListAsync(cancellationToken);
 
-        return downloads.Select(download => DownloadResponse.From(download, engine.GetSnapshot(download.InfoHash))).ToList();
+        return downloads
+            .Select(download => DownloadResponse.From(download, engine.GetSnapshot(download.InfoHash)))
+            .ToList();
     }
 
     public async Task<bool> PauseAsync(Guid id, CancellationToken cancellationToken)

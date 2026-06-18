@@ -46,11 +46,7 @@ public sealed class CatalogService(
 
         var root = Path.GetFullPath(request.Root);
         ValidateWithinMountRoots(root);
-
-        if (!filesystem.DirectoryExists(root))
-        {
-            throw new CatalogValidationException($"Catalog root does not exist or is not reachable: {root}");
-        }
+        EnsureRootReachable(root);
 
         if (await database.Catalogs.AnyAsync(candidate => candidate.Root == root, cancellationToken))
         {
@@ -141,6 +137,25 @@ public sealed class CatalogService(
         database.Catalogs.Remove(catalog);
         await database.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// A missing root is created (its <c>files/</c> + <c>library/</c> subtrees follow), so several
+    /// catalogs can live as sibling subfolders of one mount. Creation only happens when the parent is
+    /// reachable — a missing parent means a typo or an unmounted volume, which stays a hard error.
+    /// </summary>
+    private void EnsureRootReachable(string root)
+    {
+        if (filesystem.DirectoryExists(root))
+        {
+            return;
+        }
+
+        var parent = Path.GetDirectoryName(root);
+        if (string.IsNullOrEmpty(parent) || !filesystem.DirectoryExists(parent))
+        {
+            throw new CatalogValidationException($"Catalog root does not exist or is not reachable: {root}");
+        }
     }
 
     /// <summary>

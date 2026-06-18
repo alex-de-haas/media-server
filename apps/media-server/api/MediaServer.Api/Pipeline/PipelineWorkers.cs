@@ -64,6 +64,8 @@ public sealed class ReconcilerWorker(IServiceScopeFactory scopeFactory, IPipelin
             var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
             var now = DateTimeOffset.UtcNow;
 
+            // Status filter and due-time comparison both run in SQL: the DateTimeOffset value converter
+            // stores a sortable UTC string, so SQLite can compare NextAttemptAt/LeaseUntil directly.
             var dueIds = await database.IngestItems
                 .Where(item => (item.Status == IngestStatus.Pending || item.Status == IngestStatus.Running)
                                && (item.NextAttemptAt == null || item.NextAttemptAt <= now)

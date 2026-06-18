@@ -2,6 +2,7 @@ using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
+using MediaServer.Api.Library;
 
 namespace MediaServer.Api.Tests.Jellyfin;
 

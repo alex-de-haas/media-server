@@ -20,6 +20,17 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<JellyfinAccessToken> JellyfinAccessTokens => Set<JellyfinAccessToken>();
     public DbSet<UserItemData> UserItemData => Set<UserItemData>();
 
+    /// <summary>
+    /// Registers <see cref="UtcDateTimeOffsetConverter"/> for every <see cref="DateTimeOffset"/> and
+    /// <see cref="Nullable{DateTimeOffset}"/> property. This is the permanent guardrail that lets SQLite
+    /// order and compare timestamps in SQL — without it the provider throws on <c>ORDER BY</c>/<c>WHERE</c>
+    /// over a <see cref="DateTimeOffset"/> column. A value-type registration also covers its nullable form.
+    /// </summary>
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        configurationBuilder.Properties<DateTimeOffset>().HaveConversion<UtcDateTimeOffsetConverter>();
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ConfigureAppUser(modelBuilder);

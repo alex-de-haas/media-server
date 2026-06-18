@@ -1,5 +1,6 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Library;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Jellyfin;
@@ -131,7 +132,10 @@ public sealed class JellyfinLibraryService(
             }
         }
 
-        var items = await query.OrderByDescending(item => item.AddedAt).Take(limit).ToListAsync(cancellationToken);
+        var items = await query
+            .OrderByDescending(item => item.AddedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
         var dtos = await MapManyAsync(items, includeMediaSources: false, appUserId, cancellationToken);
         return new QueryResult<BaseItemDto>(dtos, dtos.Count);
     }

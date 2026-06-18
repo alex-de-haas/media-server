@@ -143,4 +143,22 @@ public sealed class IngestPipelineTests
         var ingest = await database.IngestItems.SingleAsync(item => item.Id == ingestId);
         Assert.Equal(IngestStatus.Done, ingest.Status);
     }
+
+    [Fact]
+    public async Task Ingest_list_orders_by_created_at_without_sqlite_translation_error()
+    {
+        using var harness = new PipelineTestHarness();
+
+        // Two ingest items (one per seeded download); listing orders them by CreatedAt. Ordering a
+        // DateTimeOffset in SQL throws on SQLite, so this would 500 if it didn't order client-side.
+        await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "First.2001", "First.2001/movie.mkv");
+        await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Second.2002", "Second.2002/movie.mkv");
+
+        using var scope = harness.CreateScope();
+        var ingestService = scope.ServiceProvider.GetRequiredService<IngestService>();
+
+        var items = await ingestService.ListAsync(CancellationToken.None);
+
+        Assert.Equal(2, items.Count);
+    }
 }

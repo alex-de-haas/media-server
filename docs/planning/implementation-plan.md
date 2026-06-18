@@ -300,10 +300,109 @@ user id; `/Users/{userId}/…` routes resolve the acting user, admins may act on
 others). End-to-end validation against Infuse over the public origin remains a manual
 step.
 
+### M3.5 — App shell & UI redesign
+**Goal:** turn the single-page functional dashboard into a navigable, themed,
+multi-page application with real browse/detail pages. Depends on M1–M3;
+independent of and parallelizable with M4. Specs:
+[frontend-application](frontend-application.md). Design decisions recorded
+2026-06-18.
+
+**Architecture principle (decided 2026-06-18):** the `web` UI consumes **only** the
+internal `/api` surface (camelCase, Hosty identity) through the BFF. The Jellyfin
+surface is a **content-provider adapter** for external native players (Infuse) that
+sits *beside* the UI, not beneath it — it may be swapped for another protocol later,
+so nothing in `web` may couple to Jellyfin DTOs or endpoints. Both surfaces project
+from a shared, surface-neutral domain/read layer (the EF domain + the playback-state
+service); they are siblings, not a dependency chain. Concretely: relocate the
+playback-state service (`UserDataService`) and its DTO out of the `Jellyfin`
+namespace into a neutral location, and add a UI-facing library/detail read service
+that returns UI DTOs — `JellyfinLibraryService` stays the Jellyfin adapter and the
+UI never touches it.
+
+- **Shell skeleton (no new features):** light + dark shadcn token sets in
+  `globals.css`; port the Hosty Shell theme bridge (initial `hosty_theme` URL params
+  + `hosty:shell-theme` postMessage, contract verified against `docker-host`); top
+  tab bar (Home/Movies/Series/Downloads/Activity + a right-aligned admin menu for
+  Catalogs/Settings); App Router routes compatible with `ui.entrypoint.path: "/"`
+  surviving refresh/direct nav; split the current `components/dashboard.tsx` into
+  per-page components (straight move, behavior unchanged).
+- **`/api` for the UI (backend):** expand the internal surface beyond the slim
+  `LibraryItemResponse` — movie/series detail, season/episode listings, media streams
+  (resolution/codec/audio), and per-user playback state (resume/watched/favorite) —
+  projected from the domain via the shared read layer, **not** from Jellyfin DTOs.
+- **Visual language & typography (before detail pages):** decide and implement the
+  visual language — font family + type scale, radius/density, spacing rhythm,
+  iconography conventions (lucide), and a component-styling baseline on the shadcn
+  `base-nova` tokens. The Shell theme bridge inherits **colors only** (light/dark),
+  **not fonts**, so typography is the app's own decision. (The scaffold's `--font-sans`
+  self-reference is already fixed so Geist Sans applies; the deliberate font choice is
+  made here.) Detail pages build on top of this, not before it.
+- **Browse + detail pages:** Movies/Series grids (infinite scroll) → detail pages
+  (backdrop hero, media info, watched/favorite toggles, source-file remap, delete);
+  Home rails (Continue Watching / Next Up / Recently Added) + an admin-only ops strip
+  (active downloads, items needing review, catalog warnings). **No in-browser
+  player** — Play deep-links to an Infuse/Jellyfin client.
+- **Polish & tests:** empty/loading/error states; role-gating for admin surfaces;
+  Vitest + Playwright for routing (refresh/direct nav), role gating, and the
+  Shell-iframe embed, per the spec's testing expectations.
+
+**Acceptance:** the app navigates as a multi-page UI inside the Shell, follows the
+host light/dark theme, renders movie/series detail and Home rails from the internal
+`/api` only (zero coupling to the Jellyfin surface), and Play opens an external
+client.
+
+**Open risk:** Infuse deep-link from the Shell iframe — the embed sandbox is
+`allow-scripts allow-same-origin allow-forms allow-popups allow-downloads` (no
+`allow-top-navigation`), so the deep link must go through a popup; validate, with a
+"show server URL / item" fallback.
+
+**Status (in progress 2026-06-18, branch `feat/m3.5-app-shell`):** slice 1 (app
+shell — light/dark tokens, Hosty theme bridge, top-tab routing, `dashboard.tsx` split
+into per-page components; web build/lint/vitest green) and slice 2 (backend `/api`
+read layer) are done. Slice 2 moved `UserDataService` + `UserItemDataDto` into the
+surface-neutral `MediaServer.Api.Library`, added `LibraryReadService` + UI DTOs, and
+expanded `/api/library` with detail (`GET /{id}`), episodes (`GET /{id}/episodes`),
+media streams, and per-user playback state — projected from the shared domain with
+**zero coupling to the Jellyfin DTOs** (the Jellyfin surface stays a sibling adapter).
+api: 92 xUnit tests green (Release). Slice 3 (visual language) is done: Inter (UI) +
+Fraunces serif (media titles) + Geist Mono, a single amber "projector" brand accent
+(`--brand`, used for resume/progress/active-nav/favorites) over the inherited neutral
+theme, lucide icons + a brand active-tab underline, and serif card titles with an amber
+resume bar / watched badge — "content speaks serif, the app speaks sans". Slice 4
+(detail pages + Home rails) is done: `/movies/[id]` & `/series/[id]` detail (backdrop
+hero with the serif title + amber resume, watched/favorite toggles, Play→Infuse, media
+streams, per-season episodes), Home rails (Continue Watching / Next Up / Recently
+Added) + an admin ops strip, and `/api` rails (recent/resume/nextup) + id-keyed
+played/favorite mutations (also fixed a SQLite `DateTimeOffset` ORDER BY crash latent
+in the Jellyfin "Latest" path). api: 96 xUnit tests green; web build/lint/tsc/vitest
+green. Slice 5 (polish) in progress: empty/loading/error states (a shared `QueryState`)
+across the library grid, downloads, activity, and catalogs, plus real role-gating — an
+`Admin` authorization policy (`AppRoles.AdminPolicy`) guards catalog writes server-side
+and the Catalogs page/tab is admin-only (`AdminOnly`) — are done, as is admin-gated
+**delete** from the detail page (`LibraryDeleteService` + `DELETE /api/library/{id}`;
+two modes — remove-from-library vs delete + remove the `library/` hardlinks, with the
+download/`files/` left untouched; an in-app confirm since the Shell sandbox blocks
+`window.confirm`). api 105 xUnit tests green; web build/lint/tsc green. **Playwright
+e2e is done** too: a mocked-BFF suite in `web/e2e/` (8 specs — shell routing/refresh,
+admin-vs-user gating, empty/error states, detail navigation + the watched mutation)
+wired into a CI `web-e2e` job. Still open (deferred, agreed): source-file **remap** and
+the **precise Infuse deep-link** (validate on-device — Play is a best-effort `infuse://`
+launch today, the documented sandbox open-risk).
+
 ### M4 — Automation polish & Docker delivery
 **Goal:** robustness + production container delivery. Depends on M1–M3.
 - Reconciler, retries, review queue, manual match override, scheduled scans,
   metadata refresh.
+  - **Re-search by corrected title (gap noted 2026-06-18, deferred here from M3.5):**
+    when Identify returns **zero candidates** or the auto-parsed name is wrong (e.g.
+    `Project.Hail.Mary.rus.LostFilm.TV.avi`), the review panel can today only `Retry`
+    the same filename — a dead end. Add an inline metadata re-search: an operator types
+    a corrected title (+ optional year) in the `NeedsReview` panel, we expose the
+    existing `IMetadataProvider.SearchAsync` (new `/api/ingest/{id}/search` or
+    `/api/metadata/search`), render the returned `MetadataCandidate`s with the same
+    pick-to-`/match` flow already in `ReviewPanel`. **Scope:** metadata search only —
+    the `library/` filename keeps deriving from the chosen metadata; no manual
+    file-name/path override.
 - Backups: on-demand backup before EF migrations (`POST …/backups`); WAL +
   periodic online-backup snapshot for scheduled/manual (no quiesce hook).
 - Notifications (`POST …/notifications`) for migration failure / low disk /
