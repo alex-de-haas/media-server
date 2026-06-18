@@ -187,34 +187,41 @@ public sealed class JellyfinLibraryService(
     public async Task<QueryResult<BaseItemDto>> GetNextUpAsync(
         int appUserId, string? seriesPublicId, int limit, CancellationToken cancellationToken)
     {
-        var rows = await database.UserItemData.AsNoTracking()
-            .Where(data => data.AppUserId == appUserId)
-            .Select(data => new { data.MediaItemId, data.Played, data.LastPlayedDate })
+        // Played episodes joined to their series with a single server-side join — no aggregate (SQLite
+        // can't MAX over DateTimeOffset) and, crucially, no large id list passed to SQL as parameters.
+        // Grouping/Max run client-side over the bounded result.
+        var played = await database.UserItemData.AsNoTracking()
+            .Where(data => data.AppUserId == appUserId && data.Played)
+            .Join(
+                database.MediaItems.AsNoTracking().Where(episode => episode.Kind == MediaKind.Episode && episode.SeriesId != null),
+                data => data.MediaItemId,
+                episode => episode.Id,
+                (data, episode) => new { EpisodeId = episode.Id, SeriesId = episode.SeriesId!.Value, data.LastPlayedDate })
             .ToListAsync(cancellationToken);
-        var playedItemIds = rows.Where(row => row.Played).Select(row => row.MediaItemId).ToHashSet();
-        if (playedItemIds.Count == 0)
+        if (played.Count == 0)
         {
             return new QueryResult<BaseItemDto>([], 0);
         }
 
-        var lastPlayedByItem = rows
-            .Where(row => row.LastPlayedDate.HasValue)
-            .ToDictionary(row => row.MediaItemId, row => row.LastPlayedDate!.Value);
-
-        // Series that have at least one watched episode.
-        var startedSeriesIds = await database.MediaItems.AsNoTracking()
-            .Where(episode => episode.Kind == MediaKind.Episode && episode.SeriesId != null &&
-                playedItemIds.Contains(episode.Id))
-            .Select(episode => episode.SeriesId!.Value)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
+        Guid? onlySeriesId = null;
         if (!string.IsNullOrEmpty(seriesPublicId))
         {
             var series = await FindByPublicIdAsync(seriesPublicId, cancellationToken);
-            startedSeriesIds = series is null ? [] : startedSeriesIds.Where(id => id == series.Id).ToList();
+            if (series is null)
+            {
+                return new QueryResult<BaseItemDto>([], 0);
+            }
+
+            onlySeriesId = series.Id;
         }
 
+        var playedItemIds = played.Select(entry => entry.EpisodeId).ToHashSet();
+        var lastPlayedBySeries = played
+            .Where(entry => onlySeriesId is null || entry.SeriesId == onlySeriesId)
+            .GroupBy(entry => entry.SeriesId)
+            .ToDictionary(group => group.Key, group => group.Max(entry => entry.LastPlayedDate) ?? DateTimeOffset.MinValue);
+
+        var startedSeriesIds = lastPlayedBySeries.Keys.ToList();
         if (startedSeriesIds.Count == 0)
         {
             return new QueryResult<BaseItemDto>([], 0);
@@ -228,23 +235,16 @@ public sealed class JellyfinLibraryService(
         var nextUp = new List<(MediaItem Episode, DateTimeOffset LastPlayed)>();
         foreach (var group in episodes.GroupBy(episode => episode.SeriesId!.Value))
         {
-            var ordered = group
+            var next = group
                 .OrderBy(episode => episode.ParentIndexNumber ?? 0)
                 .ThenBy(episode => episode.IndexNumber ?? 0)
-                .ToList();
-
-            var next = ordered.FirstOrDefault(episode => !playedItemIds.Contains(episode.Id));
+                .FirstOrDefault(episode => !playedItemIds.Contains(episode.Id));
             if (next is null)
             {
                 continue; // Series fully watched.
             }
 
-            var lastPlayed = ordered
-                .Where(episode => playedItemIds.Contains(episode.Id) && lastPlayedByItem.ContainsKey(episode.Id))
-                .Select(episode => lastPlayedByItem[episode.Id])
-                .DefaultIfEmpty(DateTimeOffset.MinValue)
-                .Max();
-            nextUp.Add((next, lastPlayed));
+            nextUp.Add((next, lastPlayedBySeries.GetValueOrDefault(group.Key, DateTimeOffset.MinValue)));
         }
 
         var nextEpisodes = nextUp

@@ -113,10 +113,11 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
             // Opening from the start (common for an already-watched item): no resume point, keep Played as-is.
             row.PlaybackPositionTicks = 0;
         }
-        else if (isStopped && runtime > 0 && fraction < MinResumeThreshold)
+        else if (runtime > 0 && fraction < MinResumeThreshold)
         {
-            // Stopped almost immediately — discard the noise rather than offer a near-zero resume.
-            row.PlaybackPositionTicks = 0;
+            // Below the minimum resume point: discard it on stop, otherwise keep the live position — but
+            // never treat such a brief view as a re-watch, so an already-watched item stays watched.
+            row.PlaybackPositionTicks = isStopped ? 0 : positionTicks;
         }
         else
         {
@@ -224,10 +225,24 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
     {
         var row = await database.UserItemData
             .FirstOrDefaultAsync(data => data.AppUserId == appUserId && data.MediaItemId == mediaItemId, cancellationToken);
-        if (row is null)
+        if (row is not null)
         {
-            row = new UserItemData { Id = Guid.NewGuid(), AppUserId = appUserId, MediaItemId = mediaItemId };
-            database.UserItemData.Add(row);
+            return row;
+        }
+
+        // Insert eagerly so a concurrent report for the same (user, item) can't both reach the caller's
+        // SaveChanges and trip the unique index. If we lose that race, fall back to the persisted row.
+        row = new UserItemData { Id = Guid.NewGuid(), AppUserId = appUserId, MediaItemId = mediaItemId };
+        database.UserItemData.Add(row);
+        try
+        {
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            database.Entry(row).State = EntityState.Detached;
+            row = await database.UserItemData
+                .FirstAsync(data => data.AppUserId == appUserId && data.MediaItemId == mediaItemId, cancellationToken);
         }
 
         return row;
@@ -265,11 +280,10 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
 
     private async Task<long> RuntimeTicksAsync(Guid itemId, CancellationToken cancellationToken)
     {
-        var fromSource = await database.MediaSources.AsNoTracking()
+        var ticks = await database.MediaSources.AsNoTracking()
             .Where(source => source.MediaItemId == itemId)
             .Select(source => (long?)source.DurationTicks)
-            .ToListAsync(cancellationToken);
-        var ticks = fromSource.Where(value => value is > 0).Select(value => value!.Value).DefaultIfEmpty(0).Max();
+            .MaxAsync(cancellationToken) ?? 0;
         if (ticks > 0)
         {
             return ticks;
@@ -312,16 +326,10 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         var playedCount = childIds.Count(id => rowByItem.TryGetValue(id, out var data) && data.Played);
         var unplayed = total - playedCount;
 
+        // Max() over DateTimeOffset? ignores nulls and yields null for an empty/all-null sequence.
         DateTimeOffset? lastPlayed = childIds
             .Select(id => rowByItem.TryGetValue(id, out var data) ? data.LastPlayedDate : null)
-            .Where(date => date.HasValue)
-            .Select(date => date!.Value)
-            .DefaultIfEmpty()
             .Max();
-        if (lastPlayed == default(DateTimeOffset))
-        {
-            lastPlayed = null;
-        }
 
         var own = rowByItem.GetValueOrDefault(folder.Id);
         return new UserItemDataDto(

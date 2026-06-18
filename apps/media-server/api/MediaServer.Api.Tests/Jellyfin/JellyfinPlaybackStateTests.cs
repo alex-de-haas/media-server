@@ -91,6 +91,20 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
     }
 
     [Fact]
+    public async Task Briefly_opening_a_watched_item_below_the_resume_floor_keeps_it_watched()
+    {
+        await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
+
+        // A few seconds of accidental playback, well under MinResumeThreshold, then a stop.
+        await _userData.ReportPlaybackAsync(_userId, _moviePublicId, (long)(MovieRuntime * 0.02), isStopped: false, CancellationToken.None);
+        await _userData.ReportPlaybackAsync(_userId, _moviePublicId, (long)(MovieRuntime * 0.02), isStopped: true, CancellationToken.None);
+
+        var data = await DataForAsync(_movieId);
+        Assert.True(data.Played);
+        Assert.Equal(0, data.PlaybackPositionTicks);
+    }
+
+    [Fact]
     public async Task Re_watching_clears_the_watched_flag_when_a_new_resume_point_appears()
     {
         await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);

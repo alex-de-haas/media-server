@@ -76,8 +76,10 @@ internal static class JellyfinPrincipal
         }
 
         // Admin acting on another user: the route id is the one-way hash of the int id, so scan ids only.
+        // Project to int? so a "no match" result is null rather than the magic value 0.
         var ids = await database.AppUsers.AsNoTracking().Select(user => user.Id).ToListAsync(cancellationToken);
-        var match = ids.FirstOrDefault(id => string.Equals(JellyfinIds.User(id), routeUserId, StringComparison.OrdinalIgnoreCase));
-        return match == 0 ? null : match;
+        return ids
+            .Select(id => (int?)id)
+            .FirstOrDefault(id => string.Equals(JellyfinIds.User(id!.Value), routeUserId, StringComparison.OrdinalIgnoreCase));
     }
 }
