@@ -25,6 +25,7 @@ public sealed record JellyfinItemsQuery
 public sealed class JellyfinLibraryService(
     MediaServerDbContext database,
     JellyfinItemMapper mapper,
+    UserDataService userData,
     MediaServerSettings settings)
 {
     private string PreferredLanguage => settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
@@ -35,7 +36,8 @@ public sealed class JellyfinLibraryService(
         return catalogs.Select(mapper.MapCollectionFolder).ToList();
     }
 
-    public async Task<BaseItemDto?> GetItemAsync(string publicId, bool includeMediaSources, CancellationToken cancellationToken)
+    public async Task<BaseItemDto?> GetItemAsync(
+        string publicId, bool includeMediaSources, int? appUserId, CancellationToken cancellationToken)
     {
         var item = await database.MediaItems.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.PublicId == publicId, cancellationToken);
@@ -44,11 +46,12 @@ public sealed class JellyfinLibraryService(
             return null;
         }
 
-        var dtos = await MapManyAsync([item], includeMediaSources, cancellationToken);
+        var dtos = await MapManyAsync([item], includeMediaSources, appUserId, cancellationToken);
         return dtos.FirstOrDefault();
     }
 
-    public async Task<QueryResult<BaseItemDto>> ListItemsAsync(JellyfinItemsQuery query, CancellationToken cancellationToken)
+    public async Task<QueryResult<BaseItemDto>> ListItemsAsync(
+        JellyfinItemsQuery query, int? appUserId, CancellationToken cancellationToken)
     {
         var items = await ResolveItemsAsync(query, cancellationToken);
 
@@ -60,11 +63,12 @@ public sealed class JellyfinLibraryService(
             page = page.Take(limit);
         }
 
-        var dtos = await MapManyAsync(page.ToList(), query.IncludeMediaSources, cancellationToken);
+        var dtos = await MapManyAsync(page.ToList(), query.IncludeMediaSources, appUserId, cancellationToken);
         return new QueryResult<BaseItemDto>(dtos, total, start);
     }
 
-    public async Task<QueryResult<BaseItemDto>> GetSeasonsAsync(string seriesPublicId, CancellationToken cancellationToken)
+    public async Task<QueryResult<BaseItemDto>> GetSeasonsAsync(
+        string seriesPublicId, int? appUserId, CancellationToken cancellationToken)
     {
         var series = await FindByPublicIdAsync(seriesPublicId, cancellationToken);
         if (series is null || series.Kind != MediaKind.Series)
@@ -76,12 +80,12 @@ public sealed class JellyfinLibraryService(
             .OrderBy(item => item.IndexNumber)
             .ToListAsync(cancellationToken);
 
-        var dtos = await MapManyAsync(seasons, includeMediaSources: false, cancellationToken);
+        var dtos = await MapManyAsync(seasons, includeMediaSources: false, appUserId, cancellationToken);
         return new QueryResult<BaseItemDto>(dtos, dtos.Count);
     }
 
     public async Task<QueryResult<BaseItemDto>> GetEpisodesAsync(
-        string seriesPublicId, string? seasonPublicId, int? seasonNumber, CancellationToken cancellationToken)
+        string seriesPublicId, string? seasonPublicId, int? seasonNumber, int? appUserId, CancellationToken cancellationToken)
     {
         var series = await FindByPublicIdAsync(seriesPublicId, cancellationToken);
         if (series is null || series.Kind != MediaKind.Series)
@@ -110,11 +114,12 @@ public sealed class JellyfinLibraryService(
             .ThenBy(item => item.IndexNumber)
             .ToListAsync(cancellationToken);
 
-        var dtos = await MapManyAsync(episodes, includeMediaSources: false, cancellationToken);
+        var dtos = await MapManyAsync(episodes, includeMediaSources: false, appUserId, cancellationToken);
         return new QueryResult<BaseItemDto>(dtos, dtos.Count);
     }
 
-    public async Task<QueryResult<BaseItemDto>> GetLatestAsync(string? parentPublicId, int limit, CancellationToken cancellationToken)
+    public async Task<QueryResult<BaseItemDto>> GetLatestAsync(
+        string? parentPublicId, int limit, int? appUserId, CancellationToken cancellationToken)
     {
         var query = TopLevelItems();
         if (!string.IsNullOrEmpty(parentPublicId))
@@ -127,7 +132,128 @@ public sealed class JellyfinLibraryService(
         }
 
         var items = await query.OrderByDescending(item => item.AddedAt).Take(limit).ToListAsync(cancellationToken);
-        var dtos = await MapManyAsync(items, includeMediaSources: false, cancellationToken);
+        var dtos = await MapManyAsync(items, includeMediaSources: false, appUserId, cancellationToken);
+        return new QueryResult<BaseItemDto>(dtos, dtos.Count);
+    }
+
+    /// <summary>
+    /// In-progress items (resume points) for a user, most recently played first. Optionally scoped to a
+    /// catalog via <paramref name="parentPublicId"/>. Episodes and movies only — folders are not resumable.
+    /// </summary>
+    public async Task<QueryResult<BaseItemDto>> GetResumeAsync(
+        int appUserId, string? parentPublicId, int limit, CancellationToken cancellationToken)
+    {
+        var resumable = await database.UserItemData.AsNoTracking()
+            .Where(data => data.AppUserId == appUserId && !data.Played && data.PlaybackPositionTicks > 0)
+            .Select(data => new { data.MediaItemId, data.LastPlayedDate })
+            .ToListAsync(cancellationToken);
+        if (resumable.Count == 0)
+        {
+            return new QueryResult<BaseItemDto>([], 0);
+        }
+
+        var lastPlayedByItem = resumable.ToDictionary(
+            entry => entry.MediaItemId, entry => entry.LastPlayedDate ?? DateTimeOffset.MinValue);
+        var itemIds = lastPlayedByItem.Keys.ToList();
+
+        var query = database.MediaItems.AsNoTracking().Where(item =>
+            itemIds.Contains(item.Id) && item.PublicId != null &&
+            (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Episode));
+
+        if (!string.IsNullOrEmpty(parentPublicId))
+        {
+            var catalogId = await ResolveCatalogIdAsync(parentPublicId, cancellationToken);
+            if (catalogId is { } id)
+            {
+                query = query.Where(item => item.CatalogId == id);
+            }
+        }
+
+        var items = await query.ToListAsync(cancellationToken);
+        var ordered = items
+            .OrderByDescending(item => lastPlayedByItem[item.Id])
+            .Take(limit)
+            .ToList();
+
+        var dtos = await MapManyAsync(ordered, includeMediaSources: false, appUserId, cancellationToken);
+        return new QueryResult<BaseItemDto>(dtos, dtos.Count);
+    }
+
+    /// <summary>
+    /// The next unwatched episode for each series the user has started watching, most recently played
+    /// series first. A series is "started" once any of its episodes is played; a fully-watched series is
+    /// dropped. Optionally scoped to a single series via <paramref name="seriesPublicId"/>.
+    /// </summary>
+    public async Task<QueryResult<BaseItemDto>> GetNextUpAsync(
+        int appUserId, string? seriesPublicId, int limit, CancellationToken cancellationToken)
+    {
+        // Played episodes joined to their series with a single server-side join — no aggregate (SQLite
+        // can't MAX over DateTimeOffset) and, crucially, no large id list passed to SQL as parameters.
+        // Grouping/Max run client-side over the bounded result.
+        var played = await database.UserItemData.AsNoTracking()
+            .Where(data => data.AppUserId == appUserId && data.Played)
+            .Join(
+                database.MediaItems.AsNoTracking().Where(episode => episode.Kind == MediaKind.Episode && episode.SeriesId != null),
+                data => data.MediaItemId,
+                episode => episode.Id,
+                (data, episode) => new { EpisodeId = episode.Id, SeriesId = episode.SeriesId!.Value, data.LastPlayedDate })
+            .ToListAsync(cancellationToken);
+        if (played.Count == 0)
+        {
+            return new QueryResult<BaseItemDto>([], 0);
+        }
+
+        Guid? onlySeriesId = null;
+        if (!string.IsNullOrEmpty(seriesPublicId))
+        {
+            var series = await FindByPublicIdAsync(seriesPublicId, cancellationToken);
+            if (series is null)
+            {
+                return new QueryResult<BaseItemDto>([], 0);
+            }
+
+            onlySeriesId = series.Id;
+        }
+
+        var playedItemIds = played.Select(entry => entry.EpisodeId).ToHashSet();
+        var lastPlayedBySeries = played
+            .Where(entry => onlySeriesId is null || entry.SeriesId == onlySeriesId)
+            .GroupBy(entry => entry.SeriesId)
+            .ToDictionary(group => group.Key, group => group.Max(entry => entry.LastPlayedDate) ?? DateTimeOffset.MinValue);
+
+        var startedSeriesIds = lastPlayedBySeries.Keys.ToList();
+        if (startedSeriesIds.Count == 0)
+        {
+            return new QueryResult<BaseItemDto>([], 0);
+        }
+
+        var episodes = await database.MediaItems.AsNoTracking()
+            .Where(episode => episode.Kind == MediaKind.Episode && episode.PublicId != null &&
+                episode.SeriesId != null && startedSeriesIds.Contains(episode.SeriesId.Value))
+            .ToListAsync(cancellationToken);
+
+        var nextUp = new List<(MediaItem Episode, DateTimeOffset LastPlayed)>();
+        foreach (var group in episodes.GroupBy(episode => episode.SeriesId!.Value))
+        {
+            var next = group
+                .OrderBy(episode => episode.ParentIndexNumber ?? 0)
+                .ThenBy(episode => episode.IndexNumber ?? 0)
+                .FirstOrDefault(episode => !playedItemIds.Contains(episode.Id));
+            if (next is null)
+            {
+                continue; // Series fully watched.
+            }
+
+            nextUp.Add((next, lastPlayedBySeries.GetValueOrDefault(group.Key, DateTimeOffset.MinValue)));
+        }
+
+        var nextEpisodes = nextUp
+            .OrderByDescending(entry => entry.LastPlayed)
+            .Take(limit)
+            .Select(entry => entry.Episode)
+            .ToList();
+
+        var dtos = await MapManyAsync(nextEpisodes, includeMediaSources: false, appUserId, cancellationToken);
         return new QueryResult<BaseItemDto>(dtos, dtos.Count);
     }
 
@@ -254,7 +380,7 @@ public sealed class JellyfinLibraryService(
     }
 
     private async Task<IReadOnlyList<BaseItemDto>> MapManyAsync(
-        IReadOnlyList<MediaItem> items, bool includeMediaSources, CancellationToken cancellationToken)
+        IReadOnlyList<MediaItem> items, bool includeMediaSources, int? appUserId, CancellationToken cancellationToken)
     {
         if (items.Count == 0)
         {
@@ -288,18 +414,18 @@ public sealed class JellyfinLibraryService(
 
         var parents = await LoadParentsAsync(items, cancellationToken);
         var childCounts = await LoadChildCountsAsync(items, cancellationToken);
+        var userDataByItem = await userData.LoadAsync(appUserId, items, cancellationToken);
 
         var result = new List<BaseItemDto>(items.Count);
         foreach (var item in items)
         {
             var sources = sourcesByItem.GetValueOrDefault(item.Id, []);
-            var userData = new UserItemDataDto(Key: item.PublicId!);
             result.Add(mapper.MapItem(
                 item,
                 metadataByItem.GetValueOrDefault(item.Id),
                 imagesByItem.GetValueOrDefault(item.Id, []),
                 sources,
-                userData,
+                userDataByItem.GetValueOrDefault(item.Id, new UserItemDataDto(Key: item.PublicId!)),
                 BuildParents(item, parents),
                 includeMediaSources,
                 childCounts.GetValueOrDefault(item.Id)));

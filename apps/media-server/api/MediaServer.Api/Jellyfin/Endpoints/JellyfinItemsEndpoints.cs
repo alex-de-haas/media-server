@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using MediaServer.Api.Data;
 
 namespace MediaServer.Api.Jellyfin.Endpoints;
 
@@ -9,67 +10,95 @@ internal static class JellyfinItemsEndpoints
     {
         var secured = routes.MapGroup(string.Empty).RequireJellyfin();
 
-        secured.MapGet("/Items", async (HttpRequest request, JellyfinLibraryService library, CancellationToken cancellationToken) =>
-            JellyfinJson.Ok(await library.ListItemsAsync(ParseQuery(request), cancellationToken)));
+        secured.MapGet("/Items", async (HttpRequest request, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+            JellyfinJson.Ok(await library.ListItemsAsync(ParseQuery(request), JellyfinPrincipal.AppUserId(principal), cancellationToken)));
 
-        secured.MapGet("/Items/{itemId}", async (string itemId, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        secured.MapGet("/Items/{itemId}", async (string itemId, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            var item = await library.GetItemAsync(itemId, includeMediaSources: true, cancellationToken);
+            var item = await library.GetItemAsync(itemId, includeMediaSources: true, JellyfinPrincipal.AppUserId(principal), cancellationToken);
             return item is null ? Results.NotFound() : JellyfinJson.Ok(item);
         });
 
-        secured.MapGet("/Users/{userId}/Items", async (string userId, HttpRequest request, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        secured.MapGet("/Users/{userId}/Items", async (string userId, HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            if (!JellyfinPrincipal.CanActAs(principal, userId))
+            var actingUserId = await JellyfinPrincipal.ResolveActingUserIdAsync(principal, userId, database, cancellationToken);
+            if (actingUserId is null)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            return JellyfinJson.Ok(await library.ListItemsAsync(ParseQuery(request), cancellationToken));
+            return JellyfinJson.Ok(await library.ListItemsAsync(ParseQuery(request), actingUserId, cancellationToken));
         });
 
-        secured.MapGet("/Users/{userId}/Items/Latest", async (string userId, HttpRequest request, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        secured.MapGet("/Users/{userId}/Items/Latest", async (string userId, HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            if (!JellyfinPrincipal.CanActAs(principal, userId))
+            var actingUserId = await JellyfinPrincipal.ResolveActingUserIdAsync(principal, userId, database, cancellationToken);
+            if (actingUserId is null)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
             var parentId = request.Query["ParentId"].ToString();
             var limit = ParseInt(request.Query["Limit"]) ?? 20;
-            var latest = await library.GetLatestAsync(string.IsNullOrEmpty(parentId) ? null : parentId, limit, cancellationToken);
+            var latest = await library.GetLatestAsync(string.IsNullOrEmpty(parentId) ? null : parentId, limit, actingUserId, cancellationToken);
             // Jellyfin returns a bare array for Latest.
             return JellyfinJson.Ok(latest.Items);
         });
 
-        // Resume (M2: no playback state yet) and Next Up are empty until M3 persists user data.
-        secured.MapGet("/Users/{userId}/Items/Resume", (string userId, ClaimsPrincipal principal) =>
-            JellyfinPrincipal.CanActAs(principal, userId)
-                ? JellyfinJson.Ok(new QueryResult<BaseItemDto>([], 0))
-                : Results.StatusCode(StatusCodes.Status403Forbidden));
-
-        secured.MapGet("/Shows/NextUp", () => JellyfinJson.Ok(new QueryResult<BaseItemDto>([], 0)));
-
-        secured.MapGet("/Users/{userId}/Items/{itemId}", async (string userId, string itemId, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        secured.MapGet("/Users/{userId}/Items/Resume", async (string userId, HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            if (!JellyfinPrincipal.CanActAs(principal, userId))
+            var actingUserId = await JellyfinPrincipal.ResolveActingUserIdAsync(principal, userId, database, cancellationToken);
+            if (actingUserId is null)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var item = await library.GetItemAsync(itemId, includeMediaSources: true, cancellationToken);
+            var parentId = request.Query["ParentId"].ToString();
+            var limit = ParseInt(request.Query["Limit"]) ?? 20;
+            return JellyfinJson.Ok(await library.GetResumeAsync(
+                actingUserId.Value, string.IsNullOrEmpty(parentId) ? null : parentId, limit, cancellationToken));
+        });
+
+        secured.MapGet("/Shows/NextUp", async (HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        {
+            // NextUp targets the caller unless an explicit (authorized) UserId is supplied.
+            var requestedUserId = request.Query["UserId"].ToString();
+            var actingUserId = string.IsNullOrEmpty(requestedUserId)
+                ? JellyfinPrincipal.AppUserId(principal)
+                : await JellyfinPrincipal.ResolveActingUserIdAsync(principal, requestedUserId, database, cancellationToken);
+            if (actingUserId is null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var seriesId = request.Query["SeriesId"].ToString();
+            var limit = ParseInt(request.Query["Limit"]) ?? 20;
+            return JellyfinJson.Ok(await library.GetNextUpAsync(
+                actingUserId.Value, string.IsNullOrEmpty(seriesId) ? null : seriesId, limit, cancellationToken));
+        });
+
+        secured.MapGet("/Users/{userId}/Items/{itemId}", async (string userId, string itemId, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        {
+            var actingUserId = await JellyfinPrincipal.ResolveActingUserIdAsync(principal, userId, database, cancellationToken);
+            if (actingUserId is null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var item = await library.GetItemAsync(itemId, includeMediaSources: true, actingUserId, cancellationToken);
             return item is null ? Results.NotFound() : JellyfinJson.Ok(item);
         });
 
-        secured.MapGet("/Shows/{seriesId}/Seasons", async (string seriesId, JellyfinLibraryService library, CancellationToken cancellationToken) =>
-            JellyfinJson.Ok(await library.GetSeasonsAsync(seriesId, cancellationToken)));
+        secured.MapGet("/Shows/{seriesId}/Seasons", async (string seriesId, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+            JellyfinJson.Ok(await library.GetSeasonsAsync(seriesId, JellyfinPrincipal.AppUserId(principal), cancellationToken)));
 
-        secured.MapGet("/Shows/{seriesId}/Episodes", async (string seriesId, HttpRequest request, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        secured.MapGet("/Shows/{seriesId}/Episodes", async (string seriesId, HttpRequest request, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
             var seasonId = request.Query["SeasonId"].ToString();
             var seasonNumber = ParseInt(request.Query["Season"]);
             return JellyfinJson.Ok(await library.GetEpisodesAsync(
-                seriesId, string.IsNullOrEmpty(seasonId) ? null : seasonId, seasonNumber, cancellationToken));
+                seriesId, string.IsNullOrEmpty(seasonId) ? null : seasonId, seasonNumber,
+                JellyfinPrincipal.AppUserId(principal), cancellationToken));
         });
     }
 

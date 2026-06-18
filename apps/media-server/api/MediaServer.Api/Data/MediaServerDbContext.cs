@@ -18,6 +18,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<JellyfinCredential> JellyfinCredentials => Set<JellyfinCredential>();
     public DbSet<JellyfinAccessToken> JellyfinAccessTokens => Set<JellyfinAccessToken>();
+    public DbSet<UserItemData> UserItemData => Set<UserItemData>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -32,6 +33,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureIngestItem(modelBuilder);
         ConfigureJob(modelBuilder);
         ConfigureJellyfinCredential(modelBuilder);
+        ConfigureUserItemData(modelBuilder);
     }
 
     /// <summary>
@@ -239,6 +241,24 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         token.HasOne(entity => entity.AppUser)
             .WithMany()
             .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureUserItemData(ModelBuilder modelBuilder)
+    {
+        var userData = modelBuilder.Entity<UserItemData>();
+        userData.HasKey(entity => entity.Id);
+        // One row per (user, item); the read path looks data up on this pair.
+        userData.HasIndex(entity => new { entity.AppUserId, entity.MediaItemId }).IsUnique();
+
+        userData.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        userData.HasOne(entity => entity.MediaItem)
+            .WithMany()
+            .HasForeignKey(entity => entity.MediaItemId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
