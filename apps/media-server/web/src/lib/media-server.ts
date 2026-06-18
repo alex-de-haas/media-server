@@ -108,6 +108,23 @@ export interface LibraryItem {
   posterUrl: string | null;
 }
 
+// Jellyfin/Infuse access credential (managed by the signed-in user).
+export interface JellyfinCredentialStatus {
+  hasCredential: boolean;
+  username: string | null;
+  createdAt: string | null;
+  lastUsedAt: string | null;
+  locked: boolean;
+  permanentlyLocked: boolean;
+  serverUrl: string | null;
+}
+
+export interface JellyfinCredentialSecret {
+  username: string;
+  pin: string | null;
+  serverUrl: string | null;
+}
+
 async function send(path: string, method: string, body?: unknown): Promise<void> {
   await apiFetch(`${BASE}${path}`, {
     method,
@@ -144,4 +161,13 @@ export const mediaServer = {
   matchIngest: (id: string, input: MatchInput) => send(`/ingest/${id}/match`, "POST", input),
 
   listLibrary: () => apiJson<LibraryItem[]>(`${BASE}/library`),
+
+  getJellyfinCredential: () => apiJson<JellyfinCredentialStatus>(`${BASE}/jellyfin/credential`),
+  createJellyfinCredential: (pin?: string) =>
+    apiJson<JellyfinCredentialSecret>(`${BASE}/jellyfin/credential`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pin: pin && pin.length > 0 ? pin : null }),
+    }),
+  revokeJellyfinCredential: () => send(`/jellyfin/credential`, "DELETE"),
 };
