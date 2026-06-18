@@ -77,6 +77,14 @@ public sealed class HostyAuthenticationHandler(
             return cookie;
         }
 
+        // WebSocket handshakes cannot set custom headers, so SignalR passes the bearer as a query
+        // parameter on hub connections. Only honor it for the real-time hub paths.
+        if (request.Path.StartsWithSegments("/hubs", StringComparison.OrdinalIgnoreCase) &&
+            request.Query.TryGetValue("access_token", out var queryToken) && !string.IsNullOrWhiteSpace(queryToken))
+        {
+            return queryToken.ToString().Trim();
+        }
+
         return null;
     }
 }
