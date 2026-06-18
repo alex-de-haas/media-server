@@ -1,0 +1,79 @@
+using System.Text;
+using MediaServer.Api.Catalogs;
+using MediaServer.Api.Data;
+
+namespace MediaServer.Api.Organizer;
+
+/// <summary>
+/// Builds clean <c>library/</c>-relative paths from confirmed identity, preserving the original
+/// extension (the container is never changed — playback is Direct Play/Stream only). Movies use the
+/// catalog naming template; series/anime use the Jellyfin <c>Show/Season NN/Show SxxEyy</c> layout
+/// (see <c>docs/planning/catalogs.md</c>).
+/// </summary>
+public static class LibraryNaming
+{
+    /// <summary>Builds the library path (relative to the catalog root) for a movie file.</summary>
+    public static string ForMovie(Catalog catalog, MediaItem movie, string extension)
+    {
+        var baseName = RenderTemplate(catalog.NamingTemplate, movie.Title, movie.Year);
+        var folder = Sanitize(baseName);
+        return CombineLibrary(folder, Sanitize(baseName) + NormalizeExtension(extension));
+    }
+
+    /// <summary>Builds the library path for an episode file, given the owning series.</summary>
+    public static string ForEpisode(MediaItem series, MediaItem episode, string extension)
+    {
+        var showFolder = Sanitize(series.Year is { } year ? $"{series.Title} ({year})" : series.Title);
+        var season = episode.ParentIndexNumber ?? 1;
+        var episodeNumber = episode.IndexNumber ?? 0;
+
+        var episodeToken = episode.IndexNumberEnd is { } end && end > episodeNumber
+            ? $"E{episodeNumber:D2}-E{end:D2}"
+            : $"E{episodeNumber:D2}";
+
+        var fileName = Sanitize($"{series.Title} S{season:D2}{episodeToken}") + NormalizeExtension(extension);
+        return CombineLibrary(showFolder, $"Season {season:D2}", fileName);
+    }
+
+    /// <summary>Renders the movie naming template; tokens: <c>{Title}</c>, <c>{Year}</c>.</summary>
+    internal static string RenderTemplate(string template, string title, int? year)
+    {
+        var rendered = template
+            .Replace("{Title}", title, StringComparison.OrdinalIgnoreCase)
+            .Replace("{Year}", year?.ToString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        // Drop an empty "( )" left when there is no year, and collapse whitespace.
+        rendered = rendered.Replace("()", string.Empty).Trim();
+        return string.Join(' ', rendered.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static string CombineLibrary(params string[] segments) =>
+        string.Join('/', new[] { CatalogPaths.LibraryDirName }.Concat(segments));
+
+    private static string NormalizeExtension(string extension)
+    {
+        if (string.IsNullOrEmpty(extension))
+        {
+            return string.Empty;
+        }
+
+        return extension.StartsWith('.') ? extension.ToLowerInvariant() : "." + extension.ToLowerInvariant();
+    }
+
+    private static string Sanitize(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            builder.Append(character switch
+            {
+                '/' or '\\' or ':' or '*' or '?' or '"' or '<' or '>' or '|' => ' ',
+                _ when char.IsControl(character) => ' ',
+                _ => character,
+            });
+        }
+
+        var sanitized = builder.ToString().Trim().TrimEnd('.');
+        return string.Join(' ', sanitized.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+}
