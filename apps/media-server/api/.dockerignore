@@ -1,0 +1,13 @@
+# Build outputs and local state — never copy into the image build context.
+**/bin/
+**/obj/
+**/*.user
+Dockerfile
+.dockerignore
+
+# Local SQLite data / snapshots if a dev run wrote them under the tree.
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db.snapshot

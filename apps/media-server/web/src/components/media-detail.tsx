@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Play, Star, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Play, RefreshCw, Star, Trash2 } from "lucide-react";
 import { mediaServer, type Episode, type LibraryDetail, type LibraryMediaSource } from "@/lib/media-server";
 import { formatBytes, formatRuntime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -35,12 +35,12 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
       <Hero item={item} />
       {item.overview && <p className="max-w-2xl text-sm leading-relaxed">{item.overview}</p>}
       {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo sources={item.mediaSources} />}
-      <DeleteControls id={item.id} backHref={backHref} />
+      <AdminControls id={item.id} backHref={backHref} />
     </div>
   );
 }
 
-function DeleteControls({ id, backHref }: { id: string; backHref: string }) {
+function AdminControls({ id, backHref }: { id: string; backHref: string }) {
   const { role } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -56,13 +56,22 @@ function DeleteControls({ id, backHref }: { id: string; backHref: string }) {
     },
   });
 
+  const refresh = useMutation({
+    mutationFn: () => mediaServer.refreshMetadata(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["library-detail", id] }),
+  });
+
   if (role !== "admin") {
     return null;
   }
 
   if (!confirming) {
     return (
-      <div className="border-t pt-4">
+      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+        <Button variant="ghost" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+          <RefreshCw className={cn("size-4", refresh.isPending && "animate-spin")} aria-hidden />{" "}
+          {refresh.isSuccess ? "Metadata refreshed" : "Refresh metadata"}
+        </Button>
         <Button variant="ghost" className="text-destructive" onClick={() => setConfirming(true)}>
           <Trash2 className="size-4" aria-hidden /> Delete…
         </Button>

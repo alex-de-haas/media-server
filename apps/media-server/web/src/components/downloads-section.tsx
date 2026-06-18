@@ -7,6 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { QueryState } from "@/components/states";
+import { useSession } from "@/components/app-shell";
+
+// Persisted states where the content is fully downloaded (the file is usable / library-ready).
+const COMPLETED_STATES = ["Completed", "Seeding", "StoppedSeeding"];
 
 export function DownloadsSection() {
   const queryClient = useQueryClient();
@@ -29,7 +33,9 @@ export function DownloadsSection() {
     <Card>
       <CardHeader>
         <CardTitle>Downloads</CardTitle>
-        <CardDescription>Live torrent progress. Removing a download never deletes published library items.</CardDescription>
+        <CardDescription>
+          Live torrent progress. &ldquo;Remove (keep files)&rdquo; leaves your library intact; &ldquo;Delete + remove files&rdquo; also removes the published item.
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2 text-sm">
         <QueryState query={downloads} empty="No active downloads.">
@@ -64,6 +70,8 @@ function DownloadRow({
   onStopSeeding: () => void;
   onRemove: (deleteFiles: boolean) => void;
 }) {
+  const { role } = useSession();
+  const completed = COMPLETED_STATES.includes(download.state);
   const percent = download.percentComplete ?? 0;
   const eta =
     download.downloadRateBytesPerSecond && download.sizeBytes
@@ -91,8 +99,16 @@ function DownloadRow({
         <Button variant="outline" size="sm" onClick={onResume}>Resume</Button>
         <Button variant="outline" size="sm" onClick={onPause}>Pause</Button>
         <Button variant="outline" size="sm" onClick={onStopSeeding}>Stop seeding</Button>
-        <Button variant="ghost" size="sm" onClick={() => onRemove(false)}>Remove</Button>
-        <Button variant="ghost" size="sm" onClick={() => onRemove(true)}>Remove + delete files</Button>
+        {role === "admin" &&
+          (completed ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => onRemove(false)}>Remove (keep files)</Button>
+              <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onRemove(true)}>Delete + remove files</Button>
+            </>
+          ) : (
+            // While unfinished, the only file on disk is a partial; never offer a keep-files removal.
+            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onRemove(true)}>Delete (removes files)</Button>
+          ))}
       </div>
     </div>
   );

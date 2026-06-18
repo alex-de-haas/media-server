@@ -181,6 +181,11 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         sourceFile.Property(entity => entity.RelativePath).IsRequired();
         sourceFile.Property(entity => entity.AssignmentStatus).HasConversion<int>();
 
+        // A download cannot have two rows for the same file. Concurrent coordinator handlers
+        // (metadata + completion for a re-added, already-complete torrent) once raced and inserted
+        // duplicates; the unique index makes the loser's insert fail so the upsert falls back to update.
+        sourceFile.HasIndex(entity => new { entity.DownloadId, entity.RelativePath }).IsUnique();
+
         sourceFile.HasOne(entity => entity.Download)
             .WithMany(entity => entity.SourceFiles)
             .HasForeignKey(entity => entity.DownloadId)

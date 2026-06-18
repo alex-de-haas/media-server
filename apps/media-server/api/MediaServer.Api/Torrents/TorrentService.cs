@@ -57,17 +57,16 @@ public sealed class TorrentService(
 
         var keepSeeding = request.KeepSeeding ?? catalog.DefaultKeepSeeding;
         var limits = new TorrentLimits(settings.TorrentMaxDownloadSpeed, settings.TorrentMaxUploadSpeed);
-        var added = await engine.AddAsync(source, paths.FilesDir, limits, autoStart: true, cancellationToken);
 
         // Persist enough to re-add the torrent after a restart: the magnet URI, or the stored .torrent path.
-        var sourceUri = PersistSource(source, added.InfoHash);
+        var sourceUri = PersistSource(source, descriptor.InfoHash);
 
         var now = DateTimeOffset.UtcNow;
         var download = new Download
         {
             Id = Guid.NewGuid(),
-            InfoHash = added.InfoHash,
-            Name = added.Name,
+            InfoHash = descriptor.InfoHash,
+            Name = descriptor.Name,
             CatalogId = catalog.Id,
             SourceType = source is TorrentSource.Magnet ? TorrentSourceType.Magnet : TorrentSourceType.File,
             State = DownloadState.Downloading,
@@ -91,7 +90,25 @@ public sealed class TorrentService(
         };
         database.IngestItems.Add(ingest);
 
+        // Commit BEFORE starting the engine. A re-added, already-complete torrent finishes hashing and
+        // fires MetadataReceived/DownloadCompleted almost immediately; the coordinator resolves the
+        // download by info hash, so if the row isn't committed yet those handlers no-op and the item is
+        // stranded in "download" while the engine seeds. Persisting first closes that race.
         await database.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await engine.AddAsync(source, paths.FilesDir, limits, autoStart: true, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not TorrentRequestException)
+        {
+            // Roll back the just-created rows so a failed start never leaves an orphaned download/ingest.
+            database.IngestItems.Remove(ingest);
+            database.Downloads.Remove(download);
+            await database.SaveChangesAsync(cancellationToken);
+            throw new TorrentRequestException($"Could not start the torrent: {exception.Message}");
+        }
+
         pipelineQueue.Enqueue(ingest.Id);
 
         logger.LogInformation("Added torrent {InfoHash} to catalog {Catalog}; ingest {IngestItem} queued.",
@@ -146,23 +163,6 @@ public sealed class TorrentService(
 
         await engine.StopAsync(download.InfoHash, cancellationToken);
         download.State = DownloadState.StoppedSeeding;
-        await database.SaveChangesAsync(cancellationToken);
-        return true;
-    }
-
-    public async Task<bool> RemoveAsync(Guid id, bool deleteFiles, CancellationToken cancellationToken)
-    {
-        var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
-        if (download is null)
-        {
-            return false;
-        }
-
-        await engine.RemoveAsync(download.InfoHash, deleteFiles, cancellationToken);
-
-        // Removing the download drops its rows; any published library item keeps its own hardlink and
-        // is unaffected (see torrents-and-organizer Removal Semantics).
-        database.Downloads.Remove(download);
         await database.SaveChangesAsync(cancellationToken);
         return true;
     }

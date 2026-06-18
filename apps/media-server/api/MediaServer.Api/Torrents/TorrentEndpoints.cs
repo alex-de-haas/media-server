@@ -1,3 +1,5 @@
+using MediaServer.Api.Hosty;
+
 namespace MediaServer.Api.Torrents;
 
 /// <summary>Internal torrent endpoints under <c>/api/torrents</c>, behind Host identity.</summary>
@@ -32,7 +34,9 @@ public static class TorrentEndpoints
         group.MapPost("/{id:guid}/stop-seeding", async (Guid id, TorrentService service, CancellationToken cancellationToken) =>
             await service.StopSeedingAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound());
 
-        group.MapDelete("/{id:guid}", async (Guid id, bool? deleteFiles, TorrentService service, CancellationToken cancellationToken) =>
-            await service.RemoveAsync(id, deleteFiles ?? false, cancellationToken) ? Results.NoContent() : Results.NotFound());
+        // Destructive: can purge produced library items + files, so it is admin-only (matching library delete).
+        group.MapDelete("/{id:guid}", async (Guid id, bool? deleteFiles, DownloadDeletionService deletion, CancellationToken cancellationToken) =>
+            await deletion.DeleteAsync(id, deleteFiles ?? false, cancellationToken) ? Results.NoContent() : Results.NotFound())
+            .RequireAuthorization(AppRoles.AdminPolicy);
     }
 }

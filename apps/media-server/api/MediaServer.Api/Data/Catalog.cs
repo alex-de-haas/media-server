@@ -25,6 +25,16 @@ public sealed class Catalog
     /// <summary>Optional override of the global <c>SUPPORTED_LANGUAGES</c> default.</summary>
     public string? MetadataLanguage { get; set; }
 
+    /// <summary>
+    /// Set when the health monitor first observes the root as unreachable; cleared when it returns.
+    /// Used to notify the operator (and trigger a rescan) only on the offline→online transition, not
+    /// on every check. Null means the root was reachable at the last check.
+    /// </summary>
+    public DateTimeOffset? OfflineSince { get; set; }
+
+    /// <summary>Set when free space first crosses below the low-disk threshold; cleared when it recovers.</summary>
+    public DateTimeOffset? LowDiskSince { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
