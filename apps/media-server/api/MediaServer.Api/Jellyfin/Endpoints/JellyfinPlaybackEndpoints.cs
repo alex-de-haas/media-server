@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using MediaServer.Api.Data;
+using MediaServer.Api.Library;
 
 namespace MediaServer.Api.Jellyfin.Endpoints;
 

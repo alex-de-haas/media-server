@@ -1,6 +1,11 @@
+using MediaServer.Api.Hosty;
+
 namespace MediaServer.Api.Catalogs;
 
-/// <summary>Internal catalog management endpoints under <c>/api/catalogs</c>, behind Host identity.</summary>
+/// <summary>
+/// Internal catalog management endpoints under <c>/api/catalogs</c>. Reads are open to any Host user
+/// (the add-torrent flow needs the catalog list); writes require the admin role.
+/// </summary>
 public static class CatalogEndpoints
 {
     public static void MapCatalogEndpoints(this IEndpointRouteBuilder routes)
@@ -27,7 +32,7 @@ public static class CatalogEndpoints
             {
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status400BadRequest);
             }
-        });
+        }).RequireAuthorization(AppRoles.AdminPolicy);
 
         group.MapPatch("/{id:guid}", async (Guid id, UpdateCatalogRequest request, CatalogService service, CancellationToken cancellationToken) =>
         {
@@ -40,12 +45,12 @@ public static class CatalogEndpoints
             {
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status400BadRequest);
             }
-        });
+        }).RequireAuthorization(AppRoles.AdminPolicy);
 
         group.MapDelete("/{id:guid}", async (Guid id, CatalogService service, CancellationToken cancellationToken) =>
         {
             var deleted = await service.DeleteAsync(id, cancellationToken);
             return deleted ? Results.NoContent() : Results.NotFound();
-        });
+        }).RequireAuthorization(AppRoles.AdminPolicy);
     }
 }

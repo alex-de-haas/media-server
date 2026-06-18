@@ -1,4 +1,5 @@
 using MediaServer.Api.Data;
+using MediaServer.Api.Library;
 using MediaServer.Api.Jellyfin.Streaming;
 
 namespace MediaServer.Api.Jellyfin;

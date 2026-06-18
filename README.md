@@ -34,6 +34,20 @@ Two services run under Hosty Core:
 
 Requires the [Hosty CLI](../docker-host), .NET 10 SDK, Node 24, and pnpm 11.
 
+The app runs **only** under Hosty Core — it needs Core for identity, catalog mounts,
+and `web`→`api` discovery. Do not run `next dev` / `dotnet run` standalone (Core
+manages both as child processes) and do not point a generic dev-server/preview tool at
+the app.
+
+Quickest, from the repository root:
+
+```bash
+scripts/dev.sh <you@example.com>   # ensures Core + the app are up, prints a fresh authenticated URL
+```
+
+The printed URL carries a single-use `?code=`; re-run for a new browser session. The
+script wraps the explicit lifecycle:
+
 ```bash
 # From the repository root:
 hosty core start

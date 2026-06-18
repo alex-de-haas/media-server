@@ -55,12 +55,26 @@ public sealed class CatalogServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Rejects_missing_root()
+    public async Task Creates_missing_root_when_parent_is_reachable()
     {
         var service = CreateService();
-        var missing = Path.Combine(_tempRoot, "does-not-exist");
+        var root = Path.Combine(_tempRoot, "movies");
 
-        await Assert.ThrowsAsync<CatalogValidationException>(() => service.CreateAsync(Request(missing), CancellationToken.None));
+        var catalog = await service.CreateAsync(Request(root), CancellationToken.None);
+
+        Assert.True(catalog.Online);
+        Assert.True(Directory.Exists(root));
+        Assert.True(Directory.Exists(Path.Combine(root, "files")));
+        Assert.True(Directory.Exists(Path.Combine(root, "library")));
+    }
+
+    [Fact]
+    public async Task Rejects_root_whose_parent_is_unreachable()
+    {
+        var service = CreateService();
+        var unreachable = Path.Combine(_tempRoot, "does-not-exist", "movies");
+
+        await Assert.ThrowsAsync<CatalogValidationException>(() => service.CreateAsync(Request(unreachable), CancellationToken.None));
     }
 
     [Fact]

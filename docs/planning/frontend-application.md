@@ -2,7 +2,7 @@
 
 Status: Draft
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-06-18
 
 ## Description
 
@@ -15,20 +15,32 @@ iframe-safe.
 
 ## Pages
 
-- **Dashboard** — status and recent activity.
-- **Catalogs** — configured catalogs (with free space and offline state), scan
-  triggers, browse `library/`.
-- **Downloads** — torrent list with live progress, ratio, and seeding status;
-  add (with catalog + `keepSeeding`, showing each catalog's free space and
-  refusing oversized `.torrent` downloads), review suggested metadata/file
-  mappings, pause, resume, stop seeding, delete.
-- **Activity** — the live automation pipeline per ingest item, including the
-  review queue for low-confidence matches, source-file assignments, and manual
-  match/remap override.
-- **Movies / Series** — media grids with posters and detail pages.
-- **Settings** — app-owned settings, Infuse access credentials (email + PIN),
-  supported languages.
-- **Watchlist** — (future) monitored titles and release calendar.
+Navigation is a **top tab bar**: primary tabs available to all users, with
+admin-only surfaces behind a right-aligned admin menu. Detail pages are push
+routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
+`implementation-plan.md`.)
+
+- **Home** (`/`) — overview rails built from playback state: Continue Watching
+  (resume), Next Up, and Recently Added, plus an admin-only ops strip (active
+  downloads, items needing review, catalog warnings).
+- **Movies / Series** (`/movies`, `/series`) — poster grids (infinite scroll) with
+  detail pages (`/movies/[id]`, `/series/[id]`): backdrop hero, overview, media
+  info (resolution/codec/audio), watched/favorite toggles, season/episode listing
+  with resume, source-file remap, and delete. **Playback is not in-browser** — Play
+  deep-links to an Infuse/Jellyfin client.
+- **Downloads** (`/downloads`) — torrent list with live progress, ratio, and
+  seeding status; add (with catalog + `keepSeeding`, showing each catalog's free
+  space and refusing oversized `.torrent` downloads), pause, resume, stop seeding,
+  delete.
+- **Activity** (`/activity`) — the live automation pipeline per ingest item,
+  including the review queue for low-confidence matches, source-file assignments,
+  and manual match/remap override.
+- **Catalogs** (`/catalogs`, admin) — configured catalogs (with free space and
+  offline state), scan triggers, browse `library/`.
+- **Settings** (`/settings`) — admin app-owned settings (TMDb key, supported
+  languages, server name, torrent limits) and, **per signed-in user**, Infuse
+  access credentials (username + PIN).
+- **Watchlist** — (future, M5) monitored titles and release calendar.
 
 ## Session and Data
 
@@ -43,6 +55,18 @@ iframe-safe.
 - Server data loads through the BFF REST proxy to `api`.
 - Real-time updates use the SignalR client (proxied through `web`).
 - Client cache and mutations via TanStack React Query.
+
+## Architecture Boundaries
+
+- The UI consumes **only** the internal `/api` surface (camelCase, Hosty identity)
+  through the BFF proxy. It must **never** couple to the Jellyfin surface.
+- The Jellyfin surface is a **content-provider adapter** for external native
+  players (e.g. Infuse) that sits *beside* the UI, not beneath it, and may be
+  swapped for another protocol later. Both surfaces project from a shared,
+  surface-neutral domain/read layer — they are siblings, not a dependency chain.
+- The app **inherits the Hosty Shell theme** (light/dark) via the Shell theme
+  bridge (initial `hosty_theme` URL params + `hosty:shell-theme` postMessage); it
+  ships both token sets and does not present its own theme toggle.
 
 ## Iframe Safety
 

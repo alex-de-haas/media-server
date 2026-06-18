@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -28,6 +29,11 @@ var builder = WebApplication.CreateBuilder(args);
 var hosty = HostyOptions.FromConfiguration(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddSingleton(hosty);
 HostyKestrel.ConfigureUrls(builder.WebHost, hosty);
+
+// Internal /api surface serializes enums by name (the web client uses string enum values like
+// "Movie"); the Jellyfin surface keeps its own options in JellyfinJson.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // Manifest settings (TMDb key, languages, ffprobe, torrent tunables) + catalog-root mounts.
 var settings = MediaServerSettings.FromConfiguration(builder.Configuration);
@@ -87,6 +93,11 @@ builder.Services.AddDbContext<MediaServerDbContext>((serviceProvider, options) =
         .UseSqlite($"Data Source={hosty.DatabasePath}")
         .AddInterceptors(serviceProvider.GetRequiredService<SqlitePragmaInterceptor>()));
 
+// Internal UI-facing read layer for the `/api` (camelCase) surface — projects the domain into UI DTOs.
+// Surface-neutral: it shares the domain + UserDataService with Jellyfin but never the Jellyfin DTOs.
+builder.Services.AddScoped<LibraryReadService>();
+builder.Services.AddScoped<LibraryDeleteService>();
+
 // Jellyfin-compatible surface (M2): credentials/tokens, DTO mapping, browsing, images, streaming.
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IPinHasher, Argon2idPinHasher>();
@@ -133,6 +144,14 @@ builder.Services.AddAuthorization(options =>
     {
         policy.AddAuthenticationSchemes(JellyfinAuthenticationHandler.SchemeName);
         policy.RequireAuthenticatedUser();
+    });
+
+    // Admin-only management surfaces (e.g. catalog configuration) on the Host-identity scheme.
+    options.AddPolicy(AppRoles.AdminPolicy, policy =>
+    {
+        policy.AddAuthenticationSchemes(HostyAuthenticationHandler.SchemeName);
+        policy.RequireAuthenticatedUser();
+        policy.RequireRole(AppRoles.Admin);
     });
 });
 

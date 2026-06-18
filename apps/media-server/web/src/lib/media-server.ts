@@ -97,6 +97,18 @@ export interface MatchInput {
   episode?: number | null;
 }
 
+// Surface-neutral per-user playback state carried by every library DTO (mirrors the api UserItemDataDto).
+export interface UserItemData {
+  key: string;
+  playbackPositionTicks: number;
+  playCount: number;
+  isFavorite: boolean;
+  played: boolean;
+  playedPercentage: number | null;
+  lastPlayedDate: string | null;
+  unplayedItemCount: number | null;
+}
+
 export interface LibraryItem {
   id: string;
   publicId: string | null;
@@ -104,8 +116,89 @@ export interface LibraryItem {
   kind: string;
   title: string;
   year: number | null;
-  libraryPath: string | null;
   posterUrl: string | null;
+  userData: UserItemData | null;
+}
+
+export interface MediaStream {
+  type: string;
+  index: number;
+  codec: string | null;
+  language: string | null;
+  displayTitle: string | null;
+  width: number | null;
+  height: number | null;
+  hdrFormat: string | null;
+  channels: number | null;
+  isDefault: boolean;
+  isForced: boolean;
+  isExternal: boolean;
+}
+
+export interface LibraryMediaSource {
+  id: string;
+  container: string;
+  sizeBytes: number;
+  bitrate: number | null;
+  durationTicks: number;
+  streams: MediaStream[];
+}
+
+export interface SeasonSummary {
+  id: string;
+  publicId: string | null;
+  seasonNumber: number | null;
+  title: string;
+  episodeCount: number;
+  userData: UserItemData | null;
+}
+
+export interface LibraryDetail {
+  id: string;
+  publicId: string | null;
+  catalogId: string;
+  kind: string;
+  title: string;
+  originalTitle: string | null;
+  year: number | null;
+  overview: string | null;
+  tagline: string | null;
+  genres: string[];
+  officialRating: string | null;
+  communityRating: number | null;
+  runtimeTicks: number | null;
+  indexNumber: number | null;
+  parentIndexNumber: number | null;
+  posterUrl: string | null;
+  backdropUrl: string | null;
+  libraryPath: string | null;
+  userData: UserItemData | null;
+  mediaSources: LibraryMediaSource[];
+  seasons: SeasonSummary[] | null;
+}
+
+export interface Episode {
+  id: string;
+  publicId: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  title: string;
+  overview: string | null;
+  runtimeTicks: number | null;
+  posterUrl: string | null;
+  userData: UserItemData | null;
+}
+
+// A Home-rail leaf (movie/episode) with its detail-page navigation target resolved.
+export interface LibraryRailItem {
+  id: string;
+  kind: string;
+  navId: string;
+  navKind: string;
+  title: string;
+  subtitle: string | null;
+  posterUrl: string | null;
+  userData: UserItemData | null;
 }
 
 // Jellyfin/Infuse access credential (managed by the signed-in user).
@@ -161,6 +254,18 @@ export const mediaServer = {
   matchIngest: (id: string, input: MatchInput) => send(`/ingest/${id}/match`, "POST", input),
 
   listLibrary: () => apiJson<LibraryItem[]>(`${BASE}/library`),
+  getLibraryDetail: (id: string) => apiJson<LibraryDetail>(`${BASE}/library/${id}`),
+  listEpisodes: (seriesId: string, seasonId?: string) =>
+    apiJson<Episode[]>(`${BASE}/library/${seriesId}/episodes${seasonId ? `?seasonId=${seasonId}` : ""}`),
+  listRecent: () => apiJson<LibraryItem[]>(`${BASE}/library/recent`),
+  listResume: () => apiJson<LibraryRailItem[]>(`${BASE}/library/resume`),
+  listNextUp: () => apiJson<LibraryRailItem[]>(`${BASE}/library/nextup`),
+  setPlayed: (id: string, played: boolean) =>
+    apiJson<UserItemData>(`${BASE}/library/${id}/played`, { method: played ? "POST" : "DELETE" }),
+  setFavorite: (id: string, favorite: boolean) =>
+    apiJson<UserItemData>(`${BASE}/library/${id}/favorite`, { method: favorite ? "POST" : "DELETE" }),
+  deleteLibraryItem: (id: string, deleteFiles: boolean) =>
+    send(`/library/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
 
   getJellyfinCredential: () => apiJson<JellyfinCredentialStatus>(`${BASE}/jellyfin/credential`),
   createJellyfinCredential: (pin?: string) =>
