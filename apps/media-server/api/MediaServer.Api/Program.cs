@@ -13,6 +13,11 @@ using MediaServer.Api.Pipeline.Stages;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Realtime;
 using MediaServer.Api.Torrents;
+using MediaServer.Api.Jellyfin;
+using MediaServer.Api.Jellyfin.Auth;
+using MediaServer.Api.Jellyfin.Endpoints;
+using MediaServer.Api.Jellyfin.Streaming;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -82,6 +87,27 @@ builder.Services.AddDbContext<MediaServerDbContext>((serviceProvider, options) =
         .UseSqlite($"Data Source={hosty.DatabasePath}")
         .AddInterceptors(serviceProvider.GetRequiredService<SqlitePragmaInterceptor>()));
 
+// Jellyfin-compatible surface (M2): credentials/tokens, DTO mapping, browsing, images, streaming.
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IPinHasher, Argon2idPinHasher>();
+builder.Services.AddSingleton<JellyfinServerContext>();
+builder.Services.AddSingleton<JellyfinItemMapper>();
+builder.Services.AddScoped<JellyfinCredentialService>();
+builder.Services.AddScoped<JellyfinLibraryService>();
+builder.Services.AddScoped<JellyfinImageService>();
+builder.Services.AddScoped<JellyfinStreamResolver>();
+builder.Services.AddHttpClient(JellyfinImageService.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
+
+// Throttle PIN logins per source IP; the per-username dimension is handled by credential lockout.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(JellyfinSystemEndpoints.AuthRateLimitPolicy, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromSeconds(30), QueueLimit = 0 }));
+});
+
 // Identity validation against Core, with a short-TTL positive cache.
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient(CoreIdentityValidator.HttpClientName, client =>
@@ -97,8 +123,17 @@ builder.Services.AddSingleton<IHostyIdentityValidator>(serviceProvider => new Ca
 
 builder.Services
     .AddAuthentication(HostyAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, HostyAuthenticationHandler>(HostyAuthenticationHandler.SchemeName, null);
-builder.Services.AddAuthorization();
+    .AddScheme<AuthenticationSchemeOptions, HostyAuthenticationHandler>(HostyAuthenticationHandler.SchemeName, null)
+    .AddScheme<AuthenticationSchemeOptions, JellyfinAuthenticationHandler>(JellyfinAuthenticationHandler.SchemeName, null);
+builder.Services.AddAuthorization(options =>
+{
+    // The Jellyfin surface authenticates only with Media Server-owned tokens, never Host identity.
+    options.AddPolicy(JellyfinAuthenticationHandler.PolicyName, policy =>
+    {
+        policy.AddAuthenticationSchemes(JellyfinAuthenticationHandler.SchemeName);
+        policy.RequireAuthenticatedUser();
+    });
+});
 
 var app = builder.Build();
 
@@ -112,6 +147,7 @@ using (var scope = app.Services.CreateScope())
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 // Liveness/readiness probe on the internal surface.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
@@ -120,10 +156,13 @@ app.MapCatalogEndpoints();
 app.MapTorrentEndpoints();
 app.MapIngestEndpoints();
 app.MapLibraryEndpoints();
+app.MapJellyfinCredentialEndpoints();
 app.MapHub<ActivityHub>(ActivityHub.Path);
 
-// Placeholder root so the public `jellyfin` port responds during M0; the real
-// Jellyfin-compatible surface lands in M2.
+// Jellyfin-compatible surface served on the public `jellyfin` endpoint.
+app.MapJellyfinEndpoints();
+
+// Root marker so the public `jellyfin` port responds to a bare probe.
 app.MapGet("/", () => Results.Ok(new { service = "media-server", status = "ok" }));
 
 // Returns the validated Host identity and upserts the internal app user (admin/user mapping).

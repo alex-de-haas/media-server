@@ -248,6 +248,27 @@ Specs: [jellyfin-compatibility](jellyfin-compatibility.md), [security](security.
 **Acceptance:** Infuse pairs, browses the library, and Direct Plays over the
 public origin with working seek (range requests).
 
+**Status (implemented 2026-06-18):** backend complete and unit-tested (xUnit, 70
+tests green) on branch `feat/m2-jellyfin`. Adds: M2 EF schema + migration
+(`JellyfinCredentials`, `JellyfinAccessTokens`); app-owned native-client auth —
+argon2id PIN hashing (Konscious), opaque SHA-256-at-rest tokens, consecutive-failure
+lockout (temporary at 10 with a growing window, permanent at 100), per-IP rate
+limit on `AuthenticateByName`; a second ASP.NET auth scheme (`Jellyfin`) validating
+tokens locally from the `MediaBrowser`/`Emby` header, `X-Emby-Token`, or (media/image
+only) `api_key` query; PascalCase DTO serialization isolated from the camelCase
+`/api`; `JellyfinItemMapper` + `JellyfinLibraryService` (collection folders, movies,
+series/season/episode hierarchy with resolved parent links/child counts, localized
+metadata, image tags, provider ids, `MediaSourceInfo`/`MediaStream`, user-data keys);
+image proxy/cache; range-based (`206`/`HEAD`/`If-Range`/`416`) direct streaming
+confined to catalog roots via the sandbox; the System/Users/Sessions/Library/Views/
+Items/Shows/Images/PlaybackInfo/Videos endpoint set; internal `/api/jellyfin/credential`
+UI endpoints + a minimal dashboard "Infuse access" card. Reads
+`HOSTY_PUBLIC_ORIGIN_JELLYFIN` as the server URL. Playback state (`Sessions/Playing*`,
+Resume/NextUp) is deferred to M3 — those routes return empty results for now. The
+internal `/api` and Jellyfin surfaces are separated by auth scheme (both reachable on
+both ports); end-to-end validation against Infuse over the public origin remains a
+manual step.
+
 ### M3 — Playback state
 **Goal:** resume & watched state. Depends on M2.
 - `Sessions/Playing*`, per-user data, resume position, watched threshold,
