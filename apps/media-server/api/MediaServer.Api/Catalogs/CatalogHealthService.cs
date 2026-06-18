@@ -142,7 +142,7 @@ public sealed class CatalogHealthWorker(IServiceScopeFactory scopeFactory, ILogg
             var service = scope.ServiceProvider.GetRequiredService<CatalogHealthService>();
             await service.CheckAsync(cancellationToken);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(exception, "Catalog health check failed.");
         }

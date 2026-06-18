@@ -166,9 +166,12 @@ public sealed class HostyCoreClient(
         {
             response = await client.SendAsync(request, cancellationToken);
         }
-        catch (HttpRequestException exception)
+        // Treat any failure as "skip" (network error, HttpClient timeout — which surfaces as a
+        // TaskCanceledException — etc.) so a Core hiccup never crashes the caller (e.g. startup migration).
+        // Genuine caller-requested cancellation still propagates.
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            logger.LogWarning(exception, "Core call to {Action} failed (network).", action);
+            logger.LogWarning(exception, "Core call to {Action} failed.", action);
             return null;
         }
 

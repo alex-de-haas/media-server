@@ -73,8 +73,18 @@ public sealed class DownloadDeletionService(
             await transaction.CommitAsync(cancellationToken);
         }
 
-        // Filesystem side effects only after the database is consistent.
-        await engine.RemoveAsync(infoHash, purgeFiles, cancellationToken);
+        // Filesystem side effects only after the database is consistent. The DB rows are already gone and
+        // can't be retried, so a torrent-engine failure here must not surface as a request error — log it
+        // and continue erasing files (the engine drops its own state on the next restart resume pass).
+        try
+        {
+            await engine.RemoveAsync(infoHash, purgeFiles, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning(exception, "Engine removal for download {DownloadId} failed after its rows were deleted.", downloadId);
+        }
+
         foreach (var (catalog, relativePath) in libraryFiles)
         {
             fileEraser.Erase(catalog, relativePath);
@@ -124,17 +134,17 @@ public sealed class DownloadDeletionService(
                 continue;
             }
 
+            // No episodes remain under this series, so the whole series goes — including any season that
+            // never had episodes (and so isn't a leaf), which would otherwise be left orphaned.
+            empty.Add(seriesId);
             var seasonsUnderSeries = await database.MediaItems
                 .Where(item => item.ParentId == seriesId && item.Kind == MediaKind.Season)
                 .Select(item => item.Id)
                 .ToListAsync(cancellationToken);
-            if (seasonsUnderSeries.All(empty.Contains))
-            {
-                empty.Add(seriesId);
-            }
+            empty.AddRange(seasonsUnderSeries);
         }
 
-        return empty;
+        return empty.Distinct().ToList();
     }
 
     private async Task PurgeMediaRowsAsync(List<Guid> leafIds, List<Guid> containerIds, CancellationToken cancellationToken)

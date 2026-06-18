@@ -52,14 +52,14 @@ public sealed class SqliteSnapshotService(HostyOptions options, ILogger<SqliteSn
         {
             DataSource = temporaryPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
+            // No pooling on the throwaway temp file, so its handle is fully released on dispose and the
+            // move below cannot race a pooled handle on Windows — without disturbing the main DB's pool.
+            Pooling = false,
         }.ToString()))
         {
             await destination.OpenAsync(cancellationToken);
             source.BackupDatabase(destination); // Online backup: consistent even under concurrent writers.
         }
-
-        // Drop SQLite's pooled handle on the temp file so the move cannot race an open handle on Windows.
-        SqliteConnection.ClearAllPools();
 
         File.Move(temporaryPath, snapshotPath, overwrite: true);
         logger.LogDebug("Wrote database snapshot to {SnapshotPath}.", snapshotPath);
@@ -106,7 +106,7 @@ public sealed class DatabaseSnapshotWorker(SqliteSnapshotService snapshots, ILog
         {
             await snapshots.CreateSnapshotAsync(cancellationToken);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(exception, "Scheduled database snapshot failed.");
         }

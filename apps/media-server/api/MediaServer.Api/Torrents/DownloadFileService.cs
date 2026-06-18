@@ -29,7 +29,6 @@ public sealed class DownloadFileService(MediaServerDbContext database)
         var byPath = existing.ToDictionary(file => file.RelativePath, StringComparer.Ordinal);
         var now = DateTimeOffset.UtcNow;
         var result = new List<SourceFile>();
-        var added = new List<SourceFile>();
 
         foreach (var file in playable)
         {
@@ -54,7 +53,6 @@ public sealed class DownloadFileService(MediaServerDbContext database)
                     UpdatedAt = now,
                 };
                 database.SourceFiles.Add(created);
-                added.Add(created);
                 result.Add(created);
             }
         }
@@ -67,14 +65,16 @@ public sealed class DownloadFileService(MediaServerDbContext database)
         catch (DbUpdateException)
         {
             // A concurrent coordinator handler (metadata vs. completion) inserted the same
-            // (DownloadId, RelativePath) first and the unique index rejected our insert. Drop our pending
-            // inserts and return the rows that won the race, so the caller keeps working.
-            foreach (var created in added)
+            // (DownloadId, RelativePath) first and the unique index rejected our insert. Drop *all* of our
+            // tracked SourceFile changes — pending inserts and in-place updates alike — so a later
+            // SaveChanges by the caller can't replay them, then return the rows that won the race.
+            foreach (var entry in database.ChangeTracker.Entries<SourceFile>().ToList())
             {
-                database.Entry(created).State = EntityState.Detached;
+                entry.State = EntityState.Detached;
             }
 
             return await database.SourceFiles
+                .AsNoTracking()
                 .Where(file => file.DownloadId == downloadId)
                 .ToListAsync(cancellationToken);
         }

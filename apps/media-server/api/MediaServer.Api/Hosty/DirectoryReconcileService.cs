@@ -128,7 +128,7 @@ public sealed class DirectoryReconcileWorker(IServiceScopeFactory scopeFactory, 
             var service = scope.ServiceProvider.GetRequiredService<DirectoryReconcileService>();
             await service.ReconcileAsync(cancellationToken);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(exception, "Directory reconcile pass failed.");
         }

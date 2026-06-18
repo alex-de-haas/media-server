@@ -43,7 +43,8 @@ export function formatTimeAgo(iso: string | null | undefined): string | null {
   if (seconds < 45) {
     return "just now";
   }
-  const minutes = Math.floor(seconds / 60);
+  // Below 60s we already returned "just now"; clamp so 45–59s reads "1m ago", never "0m ago".
+  const minutes = Math.max(1, Math.floor(seconds / 60));
   if (minutes < 60) {
     return `${minutes}m ago`;
   }

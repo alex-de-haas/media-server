@@ -133,7 +133,7 @@ public sealed class LibraryScanWorker(IServiceScopeFactory scopeFactory, ILogger
                 "Library scan: {Sources} source(s) across {Catalogs} catalog(s), {Missing} missing.",
                 report.SourcesChecked, report.CatalogsScanned, report.MissingFiles);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(exception, "Scheduled library scan failed.");
         }
