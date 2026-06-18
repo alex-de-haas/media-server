@@ -19,7 +19,9 @@
 set -euo pipefail
 
 APP_ID="com.haas.media-server"
-APP_DIR="."   # manifest.json lives at the repo root; run this script from there
+# manifest.json lives at the repo root (one level up from this script), resolved
+# from the script's own location so the script works from any working directory.
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USER_EMAIL="${1:-${HOSTY_DEV_USER:-$(git config user.email 2>/dev/null || true)}}"
 
 if [[ -z "${USER_EMAIL}" ]]; then
