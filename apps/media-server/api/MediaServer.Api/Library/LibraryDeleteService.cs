@@ -18,8 +18,11 @@ public sealed class LibraryDeleteService(
     /// <summary>Returns false if no such item exists.</summary>
     public async Task<bool> DeleteAsync(Guid id, bool deleteFiles, CancellationToken cancellationToken)
     {
+        // Only published top-level movies/series are deletable — never episodes/seasons or unpublished rows.
         var item = await database.MediaItems.AsNoTracking()
-            .FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.PublicId != null &&
+                candidate.ParentId == null &&
+                (candidate.Kind == MediaKind.Movie || candidate.Kind == MediaKind.Series), cancellationToken);
         if (item is null)
         {
             return false;
@@ -128,7 +131,7 @@ public sealed class LibraryDeleteService(
                 CleanEmptyParents(Path.GetDirectoryName(absolute), CatalogPaths.For(catalog).LibraryDir);
             }
         }
-        catch (IOException exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             logger.LogWarning(exception, "Failed to delete library file {Path}", absolute);
         }
@@ -136,11 +139,12 @@ public sealed class LibraryDeleteService(
 
     private static void CleanEmptyParents(string? directory, string libraryDir)
     {
-        var stop = Path.GetFullPath(libraryDir);
+        // Compare with a trailing separator so a sibling like "library-other" can't match "library".
+        var stop = EnsureTrailingSeparator(Path.GetFullPath(libraryDir));
         var current = directory is null ? null : Path.GetFullPath(directory);
         while (!string.IsNullOrEmpty(current) &&
-               current.StartsWith(stop, StringComparison.Ordinal) &&
-               !current.Equals(stop, StringComparison.Ordinal))
+               EnsureTrailingSeparator(current).StartsWith(stop, StringComparison.Ordinal) &&
+               !EnsureTrailingSeparator(current).Equals(stop, StringComparison.Ordinal))
         {
             try
             {

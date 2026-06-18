@@ -28,8 +28,8 @@ export function useSession(): Session {
 
 /**
  * App-wide chrome: resolves the session once, gates rendering on it, and renders the top tab bar
- * around the active page. Catalogs is admin-only; Settings is available to every user (it holds the
- * per-user Infuse credential). Full role enforcement and tests land in a later M3.5 slice.
+ * around the active page. Catalogs is admin-only (gated here and enforced server-side via
+ * `AppRoles.AdminPolicy`); Settings is available to every user (it holds the per-user Infuse credential).
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const session = useQuery({

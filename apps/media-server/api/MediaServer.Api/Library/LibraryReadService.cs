@@ -52,23 +52,21 @@ public sealed class LibraryReadService(
     /// <summary>In-progress leaves (movies/episodes) for the Continue Watching rail, most recently played first.</summary>
     public async Task<IReadOnlyList<LibraryRailItemDto>> GetResumeAsync(int appUserId, int limit, CancellationToken cancellationToken)
     {
-        var resumable = await database.UserItemData.AsNoTracking()
+        // Server-side join + order/limit so the IN-list never grows (avoids SQLite's 999-parameter limit);
+        // the DateTimeOffset converter makes the LastPlayedDate ordering translatable.
+        var leaves = await database.UserItemData.AsNoTracking()
             .Where(data => data.AppUserId == appUserId && !data.Played && data.PlaybackPositionTicks > 0)
-            .Select(data => new { data.MediaItemId, data.LastPlayedDate })
+            .Join(
+                database.MediaItems.AsNoTracking().Where(item => item.PublicId != null &&
+                    (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Episode)),
+                data => data.MediaItemId,
+                item => item.Id,
+                (data, item) => new { Item = item, data.LastPlayedDate })
+            .OrderByDescending(entry => entry.LastPlayedDate)
+            .Take(limit)
+            .Select(entry => entry.Item)
             .ToListAsync(cancellationToken);
-        if (resumable.Count == 0)
-        {
-            return [];
-        }
-
-        var lastById = resumable.ToDictionary(entry => entry.MediaItemId, entry => entry.LastPlayedDate ?? DateTimeOffset.MinValue);
-        var ids = lastById.Keys.ToList();
-        var leaves = await database.MediaItems.AsNoTracking()
-            .Where(item => ids.Contains(item.Id) && item.PublicId != null &&
-                (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Episode))
-            .ToListAsync(cancellationToken);
-        var ordered = leaves.OrderByDescending(item => lastById[item.Id]).Take(limit).ToList();
-        return await ProjectRailAsync(ordered, appUserId, cancellationToken);
+        return await ProjectRailAsync(leaves, appUserId, cancellationToken);
     }
 
     /// <summary>The next unwatched episode of each started series (most recently played first) — the Next Up rail.</summary>
@@ -90,11 +88,21 @@ public sealed class LibraryReadService(
         var playedIds = played.Select(entry => entry.EpisodeId).ToHashSet();
         var lastBySeries = played.GroupBy(entry => entry.SeriesId)
             .ToDictionary(group => group.Key, group => group.Max(entry => entry.LastPlayedDate) ?? DateTimeOffset.MinValue);
-        var startedSeries = lastBySeries.Keys.ToList();
+
+        // Join episodes to the started-series set in SQL (vs a large IN list) to stay under the
+        // 999-parameter limit; "next unwatched per series" is then chosen over the bounded result.
+        var startedSeriesIds = database.UserItemData.AsNoTracking()
+            .Where(data => data.AppUserId == appUserId && data.Played)
+            .Join(
+                database.MediaItems.AsNoTracking().Where(episode => episode.Kind == MediaKind.Episode && episode.SeriesId != null),
+                data => data.MediaItemId,
+                episode => episode.Id,
+                (data, episode) => episode.SeriesId!.Value)
+            .Distinct();
 
         var episodes = await database.MediaItems.AsNoTracking()
-            .Where(episode => episode.Kind == MediaKind.Episode && episode.PublicId != null &&
-                episode.SeriesId != null && startedSeries.Contains(episode.SeriesId.Value))
+            .Where(episode => episode.Kind == MediaKind.Episode && episode.PublicId != null && episode.SeriesId != null)
+            .Join(startedSeriesIds, episode => episode.SeriesId!.Value, seriesId => seriesId, (episode, _) => episode)
             .ToListAsync(cancellationToken);
 
         var nextUp = new List<(MediaItem Episode, DateTimeOffset LastPlayed)>();
@@ -334,26 +342,39 @@ public sealed class LibraryReadService(
             userDataBySeason.GetValueOrDefault(season.Id))).ToList();
     }
 
+    // Chunked so a large library (itemIds > 999) never exceeds SQLite's parameter limit in the IN-list.
     private async Task<Dictionary<Guid, string>> PostersAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
     {
-        var posters = await database.ImageAssets.AsNoTracking()
-            .Where(image => itemIds.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
-            .GroupBy(image => image.MediaItemId)
-            .Select(group => new
+        var posters = new Dictionary<Guid, string>();
+        foreach (var chunk in itemIds.Chunk(500))
+        {
+            var rows = await database.ImageAssets.AsNoTracking()
+                .Where(image => chunk.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
+                .GroupBy(image => image.MediaItemId)
+                .Select(group => new
+                {
+                    MediaItemId = group.Key,
+                    Url = group.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First(),
+                })
+                .ToListAsync(cancellationToken);
+            foreach (var row in rows)
             {
-                MediaItemId = group.Key,
-                Url = group.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First(),
-            })
-            .ToListAsync(cancellationToken);
-        return posters.ToDictionary(poster => poster.MediaItemId, poster => poster.Url);
+                posters[row.MediaItemId] = row.Url;
+            }
+        }
+        return posters;
     }
 
     private async Task<Dictionary<Guid, MetadataRecord>> MetadataByItemAsync(
         IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
     {
-        var records = await database.MetadataRecords.AsNoTracking()
-            .Where(record => itemIds.Contains(record.MediaItemId))
-            .ToListAsync(cancellationToken);
+        var records = new List<MetadataRecord>();
+        foreach (var chunk in itemIds.Chunk(500))
+        {
+            records.AddRange(await database.MetadataRecords.AsNoTracking()
+                .Where(record => chunk.Contains(record.MediaItemId))
+                .ToListAsync(cancellationToken));
+        }
         return records.GroupBy(record => record.MediaItemId)
             .ToDictionary(group => group.Key, group => PickLanguage(group.ToList()));
     }
