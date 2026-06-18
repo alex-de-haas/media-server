@@ -45,11 +45,15 @@ public sealed class HostyOptions
 
     /// <summary>
     /// Server URL to enter in a Jellyfin client (e.g. Infuse). Prefers the public ingress origin;
-    /// falls back to the local loopback Jellyfin surface (dev profile) so same-machine clients have
-    /// a usable URL even without ingress. Null only when neither is available.
+    /// for non-container (dev localCommand) runs without ingress, falls back to the local loopback
+    /// Jellyfin surface so same-machine clients have a usable URL. Null otherwise — including
+    /// container runs without a public origin, where <c>HOSTY_PORT_JELLYFIN</c> is the published
+    /// host port and <c>localhost</c> would be misleading for non-host clients.
     /// </summary>
     public string? JellyfinServerUrl =>
-        JellyfinPublicOrigin ?? (JellyfinPort is { } port ? $"http://localhost:{port}" : null);
+        !string.IsNullOrWhiteSpace(JellyfinPublicOrigin)
+            ? JellyfinPublicOrigin
+            : (!RunningInContainer && JellyfinPort is { } port ? $"http://localhost:{port}" : null);
 
     public string DatabasePath => Path.Combine(AppDataDir, "media-server.db");
 

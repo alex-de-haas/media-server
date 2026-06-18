@@ -50,6 +50,32 @@ public sealed class HostyOptionsTests
     }
 
     [Fact]
+    public void Jellyfin_server_url_ignores_blank_public_origin()
+    {
+        var options = Build(new Dictionary<string, string?>
+        {
+            ["HOSTY_PUBLIC_ORIGIN_JELLYFIN"] = "   ",
+            ["HOSTY_PORT_JELLYFIN"] = "41002",
+        });
+
+        // A blank origin is not a usable URL → fall back to the local loopback surface.
+        Assert.Equal("http://localhost:41002", options.JellyfinServerUrl);
+    }
+
+    [Fact]
+    public void Jellyfin_server_url_is_null_in_container_without_public_origin()
+    {
+        var options = Build(new Dictionary<string, string?>
+        {
+            ["DOTNET_RUNNING_IN_CONTAINER"] = "true",
+            ["HOSTY_PORT_JELLYFIN"] = "41002",
+        });
+
+        // In docker, HOSTY_PORT_JELLYFIN is the published host port — localhost would be misleading.
+        Assert.Null(options.JellyfinServerUrl);
+    }
+
+    [Fact]
     public void Falls_back_to_defaults_when_run_standalone()
     {
         var options = Build(new Dictionary<string, string?>());
