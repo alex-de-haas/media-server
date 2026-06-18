@@ -13,7 +13,9 @@ namespace MediaServer.Api.Diagnostics;
 public sealed class RequestLoggingMiddleware(
     RequestDelegate next, ILogger<RequestLoggingMiddleware> logger, string logFilePath)
 {
-    private static readonly object Gate = new();
+    // The middleware is a singleton; serialize writes with an async gate so concurrent requests don't
+    // block thread-pool threads on file I/O (which a lock + synchronous AppendAllText would).
+    private static readonly SemaphoreSlim Gate = new(1, 1);
 
     public async Task Invoke(HttpContext context)
     {
@@ -33,14 +35,20 @@ public sealed class RequestLoggingMiddleware(
 
             try
             {
-                lock (Gate)
+                await Gate.WaitAsync(context.RequestAborted);
+                try
                 {
-                    File.AppendAllText(logFilePath, line + Environment.NewLine);
+                    await File.AppendAllTextAsync(logFilePath, line + Environment.NewLine, context.RequestAborted);
+                }
+                finally
+                {
+                    Gate.Release();
                 }
             }
-            catch (Exception exception)
+            // Never let request logging break a request; surface the failure to stdout instead — but let a
+            // genuine caller-requested cancellation propagate rather than swallowing it.
+            catch (Exception exception) when (exception is not OperationCanceledException || !context.RequestAborted.IsCancellationRequested)
             {
-                // Never let request logging break a request; surface the failure to stdout instead.
                 logger.LogWarning(exception, "Failed to write request log line to {Path}.", logFilePath);
             }
         }

@@ -53,7 +53,9 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             OriginalTitle = item.OriginalTitle,
             SortName = name,
             Etag = item.UpdatedAt.UtcTicks.ToString(),
-            Path = sources.Count > 0 ? sources[0].Path : null,
+            // Source path when sources are loaded; otherwise the item's library path so list-style
+            // endpoints (which don't eager-load sources) still populate Path consistently.
+            Path = sources.Count > 0 ? sources[0].Path : item.LibraryPath,
             Type = type,
             MediaType = mediaType,
             IsFolder = isFolder,
