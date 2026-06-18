@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Diagnostics;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
@@ -218,6 +219,20 @@ using (var scope = app.Services.CreateScope())
             throw;
         }
     }
+}
+
+// Diagnostic: append every incoming request (incl. 404s) to a dedicated file next to the Hosty logs,
+// so we can see exactly which routes clients like Infuse call. Outermost so it records the final status.
+if (app.Environment.IsDevelopment())
+{
+    var appRoot = Path.GetDirectoryName(hosty.AppDataDir);
+    var logsDir = appRoot is not null && Directory.Exists(Path.Combine(appRoot, "logs"))
+        ? Path.Combine(appRoot, "logs")
+        : hosty.AppDataDir;
+    Directory.CreateDirectory(logsDir);
+    var requestLogPath = Path.Combine(logsDir, "requests.log");
+    app.UseMiddleware<RequestLoggingMiddleware>(requestLogPath);
+    app.Logger.LogInformation("Request logging enabled -> {Path}", requestLogPath);
 }
 
 app.UseAuthentication();

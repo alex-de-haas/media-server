@@ -37,6 +37,13 @@ public sealed class JellyfinLibraryService(
         return catalogs.Select(mapper.MapCollectionFolder).ToList();
     }
 
+    /// <summary>A single library/view (collection folder) by its public id, or null if it is not a catalog.</summary>
+    public async Task<BaseItemDto?> GetViewAsync(string publicId, CancellationToken cancellationToken)
+    {
+        var (catalog, _) = await ResolveParentAsync(publicId, cancellationToken);
+        return catalog is null ? null : mapper.MapCollectionFolder(catalog);
+    }
+
     public async Task<BaseItemDto?> GetItemAsync(
         string publicId, bool includeMediaSources, int? appUserId, CancellationToken cancellationToken)
     {

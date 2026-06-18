@@ -51,6 +51,9 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             ServerId = server.ServerId,
             Name = name,
             OriginalTitle = item.OriginalTitle,
+            SortName = name,
+            Etag = item.UpdatedAt.UtcTicks.ToString(),
+            Path = sources.Count > 0 ? sources[0].Path : null,
             Type = type,
             MediaType = mediaType,
             IsFolder = isFolder,
@@ -76,7 +79,7 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             ImageTags = PrimaryImageTags(images),
             BackdropImageTags = BackdropTags(images),
             ProviderIds = ProviderIds(item),
-            UserData = userData,
+            UserData = userData with { ItemId = item.PublicId },
             MediaSources = includeMediaSources && sources.Count > 0
                 ? sources.Select(source => MapMediaSource(item, source)).ToList()
                 : null,
@@ -99,6 +102,7 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         return new MediaSourceInfo
         {
             Id = JellyfinIds.MediaSource(source.Id),
+            Path = source.Path,
             Name = item.Title,
             Container = container,
             Size = source.SizeBytes,
@@ -138,11 +142,12 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             RealFrameRate = stream.FrameRate,
             BitDepth = stream.BitDepth,
             VideoRange = stream.StreamType == StreamType.Video ? VideoRange(stream.HdrFormat) : null,
+            VideoRangeType = stream.StreamType == StreamType.Video ? VideoRangeType(stream.HdrFormat) : "Unknown",
             AspectRatio = AspectRatio(stream),
             Channels = stream.Channels,
             SampleRate = stream.SampleRate,
             ChannelLayout = ChannelLayout(stream.Channels),
-            IsTextSubtitleStream = stream.StreamType == StreamType.Subtitle ? IsTextSubtitle(stream.Codec) : null,
+            IsTextSubtitleStream = stream.StreamType == StreamType.Subtitle && IsTextSubtitle(stream.Codec),
             SupportsExternalStream = stream.StreamType == StreamType.Subtitle,
             DeliveryMethod = stream.StreamType == StreamType.Subtitle ? (stream.IsExternal ? "External" : "Embed") : null,
         };
@@ -251,8 +256,13 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         return parts.Count > 0 ? string.Join(" - ", parts) : null;
     }
 
-    private static string VideoRange(string? hdrFormat) =>
-        string.IsNullOrEmpty(hdrFormat) || hdrFormat.Equals("SDR", StringComparison.OrdinalIgnoreCase) ? "SDR" : "HDR";
+    private static bool IsSdr(string? hdrFormat) =>
+        string.IsNullOrEmpty(hdrFormat) || hdrFormat.Equals("SDR", StringComparison.OrdinalIgnoreCase);
+
+    private static string VideoRange(string? hdrFormat) => IsSdr(hdrFormat) ? "SDR" : "HDR";
+
+    // VideoRangeType is a finer enum than VideoRange ("HDR" is not a member); collapse non-SDR to HDR10.
+    private static string VideoRangeType(string? hdrFormat) => IsSdr(hdrFormat) ? "SDR" : "HDR10";
 
     private static string? AspectRatio(MediaStream stream)
     {
