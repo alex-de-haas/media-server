@@ -57,6 +57,7 @@ export function InfuseAccessSection() {
             <span>
               Signed in as <span className="font-medium">{status.username}</span>
             </span>
+            <Badge variant="secondary">PIN set</Badge>
             {status.locked && <Badge variant="destructive">temporarily locked</Badge>}
             {status.permanentlyLocked && <Badge variant="destructive">locked — regenerate</Badge>}
           </div>

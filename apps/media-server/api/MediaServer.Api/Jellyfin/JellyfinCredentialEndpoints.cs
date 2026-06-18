@@ -52,7 +52,7 @@ public static class JellyfinCredentialEndpoints
                 LastUsedAt: credential?.LastUsedAt,
                 Locked: locked,
                 PermanentlyLocked: credential?.PermanentlyLocked ?? false,
-                ServerUrl: hosty.JellyfinPublicOrigin));
+                ServerUrl: hosty.JellyfinServerUrl));
         });
 
         group.MapPost("/credential", async (
@@ -72,7 +72,7 @@ public static class JellyfinCredentialEndpoints
             try
             {
                 var issued = await credentials.CreateOrRegenerateAsync(user, request?.Pin, cancellationToken);
-                return Results.Ok(new JellyfinCredentialSecretResponse(issued.Username, issued.GeneratedPin, hosty.JellyfinPublicOrigin));
+                return Results.Ok(new JellyfinCredentialSecretResponse(issued.Username, issued.GeneratedPin, hosty.JellyfinServerUrl));
             }
             catch (JellyfinCredentialValidationException exception)
             {

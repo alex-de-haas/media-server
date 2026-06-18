@@ -33,6 +33,46 @@ public sealed class HostyOptionsTests
         Assert.True(options.IsCoreManaged);
         Assert.False(options.RunningInContainer);
         Assert.Equal(Path.Combine("/data/app", "media-server.db"), options.DatabasePath);
+        // No public ingress origin → server URL falls back to the local loopback Jellyfin surface.
+        Assert.Equal("http://localhost:41002", options.JellyfinServerUrl);
+    }
+
+    [Fact]
+    public void Jellyfin_server_url_prefers_public_origin_over_loopback()
+    {
+        var options = Build(new Dictionary<string, string?>
+        {
+            ["HOSTY_PUBLIC_ORIGIN_JELLYFIN"] = "https://media.example.com",
+            ["HOSTY_PORT_JELLYFIN"] = "41002",
+        });
+
+        Assert.Equal("https://media.example.com", options.JellyfinServerUrl);
+    }
+
+    [Fact]
+    public void Jellyfin_server_url_ignores_blank_public_origin()
+    {
+        var options = Build(new Dictionary<string, string?>
+        {
+            ["HOSTY_PUBLIC_ORIGIN_JELLYFIN"] = "   ",
+            ["HOSTY_PORT_JELLYFIN"] = "41002",
+        });
+
+        // A blank origin is not a usable URL → fall back to the local loopback surface.
+        Assert.Equal("http://localhost:41002", options.JellyfinServerUrl);
+    }
+
+    [Fact]
+    public void Jellyfin_server_url_is_null_in_container_without_public_origin()
+    {
+        var options = Build(new Dictionary<string, string?>
+        {
+            ["DOTNET_RUNNING_IN_CONTAINER"] = "true",
+            ["HOSTY_PORT_JELLYFIN"] = "41002",
+        });
+
+        // In docker, HOSTY_PORT_JELLYFIN is the published host port — localhost would be misleading.
+        Assert.Null(options.JellyfinServerUrl);
     }
 
     [Fact]
@@ -46,6 +86,7 @@ public sealed class HostyOptionsTests
         Assert.Null(options.InternalPort);
         Assert.Null(options.JellyfinPort);
         Assert.False(options.IsCoreManaged);
+        Assert.Null(options.JellyfinServerUrl);
     }
 
     [Fact]
