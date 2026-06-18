@@ -19,7 +19,7 @@
 set -euo pipefail
 
 APP_ID="com.haas.media-server"
-APP_DIR="apps/media-server"
+APP_DIR="."   # manifest.json lives at the repo root; run this script from there
 USER_EMAIL="${1:-${HOSTY_DEV_USER:-$(git config user.email 2>/dev/null || true)}}"
 
 if [[ -z "${USER_EMAIL}" ]]; then

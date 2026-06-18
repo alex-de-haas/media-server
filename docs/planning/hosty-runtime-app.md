@@ -6,7 +6,7 @@ Updated: 2026-06-15
 
 ## Description
 
-Media Server is a Hosty runtime app described by `apps/media-server/manifest.json`
+Media Server is a Hosty runtime app described by `manifest.json` at the repo root
 with `schemaVersion: "app.0.1"`. Hosty Core installs the app from a local app
 directory or a manifest URL, manages its lifecycle, injects runtime environment,
 issues app identity, exposes a scoped user directory, and backs up the app data

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Build context: apps/media-server/api (the self-contained .NET solution for the `api` service).
+# Build context: src/api (the self-contained .NET solution for the `api` service).
 
 # ---- build ----
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build

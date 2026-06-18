@@ -24,7 +24,7 @@
         },
         "dev": {
           "type": "localCommand",
-          "workingDirectory": "apps/media-server/api",
+          "workingDirectory": "src/api",
           "command": "dotnet run --project MediaServer.Api",
           "ports": [
             { "key": "internal", "containerPort": 8080, "protocol": "http" },
@@ -47,7 +47,7 @@
         },
         "dev": {
           "type": "localCommand",
-          "workingDirectory": "apps/media-server/web",
+          "workingDirectory": "src/web",
           "command": "pnpm dev",
           "ports": [
             { "key": "http", "containerPort": 3000, "protocol": "http", "public": true }

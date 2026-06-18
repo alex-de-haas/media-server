@@ -15,8 +15,8 @@ ingress.
 ## Repository Layout
 
 ```text
-apps/media-server/
-  manifest.json            # schemaVersion app.0.1
+manifest.json              # schemaVersion app.0.1 (repo root)
+src/
   api/                     # .NET solution (api service)
   web/                     # Next.js app (web service)
 docs/                      # this documentation
@@ -25,9 +25,9 @@ docs/                      # this documentation
 ## Local Development (`dev` profile)
 
 ```bash
-# Run from the repository root; the app directory holding manifest.json is apps/media-server.
+# Run from the repository root; manifest.json lives at the repo root.
 hosty core start
-hosty apps install apps/media-server --runtime dev
+hosty apps install . --runtime dev
 hosty apps start com.haas.media-server
 hosty apps open com.haas.media-server --user <you@example.com>
 hosty apps logs com.haas.media-server
