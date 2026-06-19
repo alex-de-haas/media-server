@@ -2,14 +2,24 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Play, RefreshCw, Star, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowLeft, Check, MoreVertical, Play, RefreshCw, Star, Trash2 } from "lucide-react";
+import { toast } from "@/lib/toast";
 import { mediaServer, type Episode, type LibraryDetail, type LibraryMediaSource } from "@/lib/media-server";
 import { formatBytes, formatRuntime } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
 
@@ -33,20 +43,22 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
   const item = detail.data;
   return (
     <div className="flex flex-col gap-6">
-      <BackLink href={backHref} label={backLabel} />
+      <div className="flex items-center justify-between gap-2">
+        <BackLink href={backHref} label={backLabel} />
+        <AdminControls id={item.id} title={item.title} backHref={backHref} />
+      </div>
       <Hero item={item} />
       {item.overview && <p className="max-w-2xl text-sm leading-relaxed">{item.overview}</p>}
       {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo sources={item.mediaSources} />}
-      <AdminControls id={item.id} backHref={backHref} />
     </div>
   );
 }
 
-function AdminControls({ id, backHref }: { id: string; backHref: string }) {
+function AdminControls({ id, title, backHref }: { id: string; title: string; backHref: string }) {
   const { role } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [confirming, setConfirming] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const remove = useMutation({
     mutationFn: (deleteFiles: boolean) => mediaServer.deleteLibraryItem(id, deleteFiles),
@@ -73,33 +85,98 @@ function AdminControls({ id, backHref }: { id: string; backHref: string }) {
     return null;
   }
 
-  if (!confirming) {
-    return (
-      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-        <Button variant="ghost" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
-          <RefreshCw className={cn("size-4", refresh.isPending && "animate-spin")} aria-hidden />{" "}
-          {refresh.isSuccess ? "Metadata refreshed" : "Refresh metadata"}
-        </Button>
-        <Button variant="ghost" className="text-destructive" onClick={() => setConfirming(true)}>
-          <Trash2 className="size-4" aria-hidden /> Delete…
-        </Button>
-      </div>
-    );
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button variant="ghost" size="icon-sm" aria-label="More actions">
+              <MoreVertical />
+            </Button>
+          }
+        />
+        <DropdownMenuContent>
+          <DropdownMenuItem disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+            <RefreshCw className={cn(refresh.isPending && "animate-spin")} aria-hidden />
+            Refresh metadata
+          </DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
+            <Trash2 />
+            Delete…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DeleteItemDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={title}
+        onConfirm={(deleteFiles) => {
+          remove.mutate(deleteFiles);
+          setConfirmOpen(false);
+        }}
+      />
+    </>
+  );
+}
+
+function DeleteItemDialog({
+  open,
+  onOpenChange,
+  title,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  onConfirm: (deleteFiles: boolean) => void;
+}) {
+  // Default to keeping files: deleting a published item shouldn't silently remove the media on disk.
+  const [deleteFiles, setDeleteFiles] = useState(false);
+  const deleteFilesId = useId();
+
+  // Re-apply the default every time the dialog (re)opens so a prior toggle (then cancel) doesn't carry over.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setDeleteFiles(false);
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-      <span className="text-muted-foreground text-sm">Delete this item?</span>
-      <Button variant="outline" disabled={remove.isPending} onClick={() => remove.mutate(false)}>
-        Remove from library
-      </Button>
-      <Button variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate(true)}>
-        Delete + remove files
-      </Button>
-      <Button variant="ghost" disabled={remove.isPending} onClick={() => setConfirming(false)}>
-        Cancel
-      </Button>
-    </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete item?</DialogTitle>
+          <DialogDescription>
+            Remove <span className="text-foreground font-medium">{title}</span> from the library.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
+          <Checkbox
+            id={deleteFilesId}
+            className="mt-0.5"
+            checked={deleteFiles}
+            onCheckedChange={(checked) => setDeleteFiles(checked === true)}
+          />
+          <label htmlFor={deleteFilesId} className="cursor-pointer">
+            Delete files from disk
+            <span className="text-muted-foreground block text-xs">
+              Also removes the media files from disk. Otherwise only the library entry is removed.
+            </span>
+          </label>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="button" variant="destructive" size="sm" onClick={() => onConfirm(deleteFiles)}>
+            {deleteFiles ? "Delete + remove files" : "Remove from library"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

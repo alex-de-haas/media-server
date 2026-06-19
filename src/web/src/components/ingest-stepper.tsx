@@ -1,9 +1,11 @@
 import { AlertTriangle, Check, Loader2, Pause } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// The canonical pipeline order, mirroring the server's `IngestStage` enum
-// (Intake → Identify → Download → Organize → Probe → Enrich → Publish).
-const STAGES = ["Intake", "Identify", "Download", "Organize", "Probe", "Enrich", "Publish"] as const;
+// The canonical pipeline order, mirroring the server's stage execution order (by `IPipelineStage.Order`):
+// Intake → Download → Identify → Organize → Probe → Enrich → Publish. Note this differs from the
+// `IngestStage` enum's declaration order (Identify before Download); the orchestrator runs stages by
+// `Order`, so the stepper follows that to mark prior steps done correctly.
+const STAGES = ["Intake", "Download", "Identify", "Organize", "Probe", "Enrich", "Publish"] as const;
 
 // What the active step is doing, when the caller knows more than the coarse ingest `status`
 // (e.g. the Download stage maps to a torrent that may be actively transferring or paused).

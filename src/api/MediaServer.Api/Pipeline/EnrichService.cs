@@ -24,7 +24,7 @@ public sealed class EnrichService(MediaServerDbContext database, IMetadataProvid
         var reference = new ProviderRef(item.IdentityProvider, item.IdentityProviderId);
         var languages = ResolveLanguages(catalog);
 
-        var records = await provider.FetchAsync(reference, languages, cancellationToken);
+        var records = await provider.FetchAsync(reference, item.Kind, languages, cancellationToken);
         var existing = await database.MetadataRecords
             .Where(record => record.MediaItemId == item.Id && record.Provider == reference.Provider)
             .ToListAsync(cancellationToken);
@@ -70,7 +70,7 @@ public sealed class EnrichService(MediaServerDbContext database, IMetadataProvid
 
     private async Task UpsertImagesAsync(MediaItem item, ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken)
     {
-        var images = await provider.GetImagesAsync(reference, languages, cancellationToken);
+        var images = await provider.GetImagesAsync(reference, item.Kind, languages, cancellationToken);
         if (images.Count == 0)
         {
             return;

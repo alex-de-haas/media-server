@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreVertical, Pause, Play, Square, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { mediaServer, type Download } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";

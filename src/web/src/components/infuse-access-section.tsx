@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { mediaServer } from "@/lib/media-server";
 import { inputClass, errorMessage } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Search } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type MetadataCandidate } from "@/lib/media-server";
 import { inputClass, errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
