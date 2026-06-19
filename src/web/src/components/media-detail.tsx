@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, MoreVertical, Play, RefreshCw, Star, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
@@ -133,6 +133,7 @@ function DeleteItemDialog({
 }) {
   // Default to keeping files: deleting a published item shouldn't silently remove the media on disk.
   const [deleteFiles, setDeleteFiles] = useState(false);
+  const deleteFilesId = useId();
 
   // Re-apply the default every time the dialog (re)opens so a prior toggle (then cancel) doesn't carry over.
   const [wasOpen, setWasOpen] = useState(open);
@@ -151,19 +152,20 @@ function DeleteItemDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+        <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
           <Checkbox
+            id={deleteFilesId}
             className="mt-0.5"
             checked={deleteFiles}
             onCheckedChange={(checked) => setDeleteFiles(checked === true)}
           />
-          <span>
+          <label htmlFor={deleteFilesId} className="cursor-pointer">
             Delete files from disk
             <span className="text-muted-foreground block text-xs">
               Also removes the media files from disk. Otherwise only the library entry is removed.
             </span>
-          </span>
-        </label>
+          </label>
+        </div>
 
         <DialogFooter>
           <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
