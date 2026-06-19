@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { mediaServer } from "@/lib/media-server";
 import { inputClass, errorMessage } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
@@ -21,14 +22,18 @@ export function InfuseAccessSection() {
       setSecret(result);
       setPin("");
       invalidate();
+      toast.success("Credential created");
     },
+    onError: (error) => toast.error("Couldn’t create credential", { description: errorMessage(error) }),
   });
   const revoke = useMutation({
     mutationFn: () => mediaServer.revokeJellyfinCredential(),
     onSuccess: () => {
       setSecret(null);
       invalidate();
+      toast.success("Credential revoked");
     },
+    onError: (error) => toast.error("Couldn’t revoke credential", { description: errorMessage(error) }),
   });
 
   const status = credential.data;
@@ -99,7 +104,6 @@ export function InfuseAccessSection() {
             </Button>
           )}
         </div>
-        {create.isError && <p className="text-destructive">{errorMessage(create.error)}</p>}
       </CardContent>
     </Card>
   );

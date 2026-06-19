@@ -9,6 +9,12 @@ public interface IFilesystemInspector
 
     /// <summary>Bytes available to a non-privileged user on the volume that holds <paramref name="path"/>.</summary>
     long GetAvailableFreeBytes(string path);
+
+    /// <summary>
+    /// A stable key identifying the volume that holds <paramref name="path"/> (its mount point), so
+    /// catalogs on the same volume can be grouped under one free/total figure. Empty when unknown.
+    /// </summary>
+    string GetVolumeKey(string path);
 }
 
 public sealed class FilesystemInspector(IHardLinker hardLinker) : IFilesystemInspector
@@ -22,18 +28,20 @@ public sealed class FilesystemInspector(IHardLinker hardLinker) : IFilesystemIns
     public bool AreSameFilesystem(string directoryA, string directoryB) =>
         hardLinker.AreSameFilesystem(directoryA, directoryB);
 
-    public long GetAvailableFreeBytes(string path)
+    public long GetAvailableFreeBytes(string path) => ResolveDrive(path)?.AvailableFreeSpace ?? 0;
+
+    public string GetVolumeKey(string path) => ResolveDrive(path)?.RootDirectory.FullName ?? string.Empty;
+
+    // DriveInfo is keyed by mount point; pick the longest mount-point prefix of the path so a path on
+    // a nested mount resolves to that mount rather than the root volume.
+    private static DriveInfo? ResolveDrive(string path)
     {
         var full = Path.GetFullPath(path);
-
-        // DriveInfo is keyed by mount point; pick the longest mount-point prefix of the path.
-        var drive = DriveInfo.GetDrives()
+        return DriveInfo.GetDrives()
             .Where(candidate => candidate.IsReady)
             .Where(candidate => full.StartsWith(NormalizeMount(candidate.RootDirectory.FullName), PathComparison))
             .OrderByDescending(candidate => candidate.RootDirectory.FullName.Length)
             .FirstOrDefault();
-
-        return drive?.AvailableFreeSpace ?? 0;
     }
 
     private static string NormalizeMount(string mount) =>

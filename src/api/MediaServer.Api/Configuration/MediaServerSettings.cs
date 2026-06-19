@@ -68,10 +68,11 @@ public sealed class MediaServerSettings
     }
 
     /// <summary>
-    /// Parses the catalog-root mount injection. The exact delimiter is not yet pinned in the Core
-    /// contract, so this accepts the common shapes defensively: newline-, <c>os.PathSeparator</c>-,
-    /// or semicolon-separated, with optional <c>label=path</c> pairs. Comma is intentionally not a
-    /// separator because POSIX paths may legitimately contain commas.
+    /// Parses the catalog-root mount injection. Core joins multiple mount paths with a comma into
+    /// <c>HOSTY_MOUNT_{KEY}</c> and rejects mount host paths containing a comma (or ':'), so comma is
+    /// the canonical separator here — splitting on it is safe and required for multi-mount setups.
+    /// Newline, ';', and <c>os.PathSeparator</c> are also accepted defensively, as are optional
+    /// <c>label=path</c> pairs.
     /// </summary>
     internal static IReadOnlyList<string> ParseMountRoots(string? raw)
     {
@@ -80,7 +81,7 @@ public sealed class MediaServerSettings
             return [];
         }
 
-        var separators = new[] { '\n', '\r', ';', Path.PathSeparator };
+        var separators = new[] { ',', '\n', '\r', ';', Path.PathSeparator };
         return raw
             .Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(entry =>

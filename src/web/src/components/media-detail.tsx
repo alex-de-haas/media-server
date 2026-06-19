@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, Play, RefreshCw, Star, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { mediaServer, type Episode, type LibraryDetail, type LibraryMediaSource } from "@/lib/media-server";
 import { formatBytes, formatRuntime } from "@/lib/format";
+import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
@@ -53,12 +55,18 @@ function AdminControls({ id, backHref }: { id: string; backHref: string }) {
         queryClient.invalidateQueries({ queryKey: key });
       }
       router.push(backHref);
+      toast.success("Item deleted");
     },
+    onError: (error) => toast.error("Couldn’t delete item", { description: errorMessage(error) }),
   });
 
   const refresh = useMutation({
     mutationFn: () => mediaServer.refreshMetadata(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["library-detail", id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
+      toast.success("Metadata refreshed");
+    },
+    onError: (error) => toast.error("Couldn’t refresh metadata", { description: errorMessage(error) }),
   });
 
   if (role !== "admin") {

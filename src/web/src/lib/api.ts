@@ -46,10 +46,26 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
 
   const response = await fetch(path, { ...init, headers, credentials: "include" });
   if (!response.ok) {
-    const body = await response.text().catch(() => response.statusText);
-    throw new ApiError(response.status, body);
+    const body = await response.text().catch(() => "");
+    throw new ApiError(response.status, problemMessage(body) || response.statusText);
   }
   return response;
+}
+
+// ASP.NET errors come back as RFC 9457 problem+json (`{ title, detail, status }`); surface the
+// human-readable `detail`/`title` instead of the raw JSON blob. Falls back to the raw text.
+function problemMessage(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed.startsWith("{")) {
+    return trimmed;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as { detail?: unknown; title?: unknown };
+    const message = typeof parsed.detail === "string" ? parsed.detail : parsed.title;
+    return typeof message === "string" && message.length > 0 ? message : trimmed;
+  } catch {
+    return trimmed;
+  }
 }
 
 export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {

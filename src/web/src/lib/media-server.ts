@@ -21,6 +21,29 @@ export interface Catalog {
   updatedAt: string;
 }
 
+// A catalog-root mount the operator may place catalogs under. `path` is the absolute base the
+// backend sees (a container path under docker, the host path under the dev runtime); `label` is a
+// friendly name derived from it for the mount picker.
+export interface CatalogMount {
+  label: string;
+  path: string;
+}
+
+// One catalog's footprint within a volume (`usedBytes` ≈ sum of tracked media sizes; approximate).
+export interface CatalogUsageEntry {
+  id: string;
+  name: string;
+  type: CatalogType;
+  usedBytes: number;
+}
+
+// Per-volume storage usage: each catalog's footprint + free space. The bar scales to Σ(used) + free.
+export interface CatalogVolumeUsage {
+  label: string;
+  freeBytes: number;
+  catalogs: CatalogUsageEntry[];
+}
+
 export interface CreateCatalogInput {
   name: string;
   type: CatalogType;
@@ -243,6 +266,8 @@ async function send(path: string, method: string, body?: unknown): Promise<void>
 
 export const mediaServer = {
   listCatalogs: () => apiJson<Catalog[]>(`${BASE}/catalogs`),
+  listCatalogMounts: () => apiJson<CatalogMount[]>(`${BASE}/catalogs/mounts`),
+  listCatalogUsage: () => apiJson<CatalogVolumeUsage[]>(`${BASE}/catalogs/usage`),
   createCatalog: (input: CreateCatalogInput) =>
     apiJson<Catalog>(`${BASE}/catalogs`, {
       method: "POST",
