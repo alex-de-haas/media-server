@@ -20,10 +20,12 @@ import {
 const CATALOG_TYPES: CatalogType[] = ["Movie", "Series", "Anime"];
 
 // Joins a mount base with the operator-typed sub-path into the absolute root the backend validates.
+// Preserves the base (incl. a root like "/") when no sub-path is given, rather than trimming it away.
 function joinRoot(base: string, relative: string) {
   const cleaned = relative.trim().replace(/^[\\/]+|[\\/]+$/g, "");
-  const trimmedBase = base.replace(/[\\/]+$/, "");
-  return cleaned ? `${trimmedBase}/${cleaned}` : trimmedBase;
+  if (!cleaned) return base;
+  const baseWithSeparator = base.endsWith("/") || base.endsWith("\\") ? base : `${base}/`;
+  return `${baseWithSeparator}${cleaned}`;
 }
 
 export function AddCatalogDialog() {

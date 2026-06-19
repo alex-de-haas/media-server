@@ -61,7 +61,13 @@ public sealed class CatalogService(
             .ToDictionaryAsync(entry => entry.CatalogId, entry => entry.Used, cancellationToken);
 
         return catalogs
-            .GroupBy(catalog => filesystem.GetVolumeKey(catalog.Root))
+            // Group by the resolved volume; when it can't be resolved (offline/unmounted), fall back to
+            // the catalog's own path so unrelated "unknown" catalogs aren't merged into one bogus group.
+            .GroupBy(catalog =>
+            {
+                var key = filesystem.GetVolumeKey(catalog.Root);
+                return string.IsNullOrEmpty(key) ? Path.GetFullPath(catalog.Root) : key;
+            })
             .Select(group =>
             {
                 var sampleRoot = group.First().Root;
@@ -70,8 +76,7 @@ public sealed class CatalogService(
                     .Select(catalog => new CatalogUsageEntry(
                         catalog.Id, catalog.Name, catalog.Type, usedByCatalog.GetValueOrDefault(catalog.Id)))
                     .ToList();
-                var label = string.IsNullOrEmpty(group.Key) ? sampleRoot : group.Key;
-                return new CatalogVolumeUsageResponse(label, free, entries);
+                return new CatalogVolumeUsageResponse(group.Key, free, entries);
             })
             .OrderBy(volume => volume.Label, StringComparer.Ordinal)
             .ToList();

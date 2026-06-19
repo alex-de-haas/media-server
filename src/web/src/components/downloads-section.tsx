@@ -199,6 +199,14 @@ function RemoveDownloadDialog({
   // completed one the library item is published from these files, so default to keeping them.
   const [deleteFiles, setDeleteFiles] = useState(!completed);
 
+  // Re-apply that default every time the dialog (re)opens, so a prior toggle (then cancel) doesn't
+  // carry over to the next open. Adjusting during render avoids an effect's cascading re-render.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setDeleteFiles(!completed);
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">

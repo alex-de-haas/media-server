@@ -36,7 +36,9 @@ public sealed class FilesystemInspector(IHardLinker hardLinker) : IFilesystemIns
     // a nested mount resolves to that mount rather than the root volume.
     private static DriveInfo? ResolveDrive(string path)
     {
-        var full = Path.GetFullPath(path);
+        // Normalize both sides with a trailing separator so a path that is exactly the mount point
+        // (e.g. "/mnt/media") still matches its drive — mount points don't carry a trailing slash.
+        var full = NormalizeMount(Path.GetFullPath(path));
         return DriveInfo.GetDrives()
             .Where(candidate => candidate.IsReady)
             .Where(candidate => full.StartsWith(NormalizeMount(candidate.RootDirectory.FullName), PathComparison))

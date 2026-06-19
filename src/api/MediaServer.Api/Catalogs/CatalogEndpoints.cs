@@ -18,7 +18,7 @@ public static class CatalogEndpoints
         // The catalog-root mounts a catalog may live under, for the UI's mount picker.
         group.MapGet("/mounts", (CatalogService service) => Results.Ok(service.ListMounts()));
 
-        // Per-volume storage usage (free/total + each catalog's footprint) for the storage bars.
+        // Per-volume storage usage (free space + each catalog's footprint) for the storage bars.
         group.MapGet("/usage", async (CatalogService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListUsageAsync(cancellationToken)));
 
