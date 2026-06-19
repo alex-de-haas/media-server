@@ -86,6 +86,60 @@ public sealed class CatalogServiceTests : IDisposable
         await Assert.ThrowsAsync<CatalogValidationException>(() => service.CreateAsync(Request(_tempRoot), CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Delete_removes_metadata_but_keeps_physical_files()
+    {
+        var service = CreateService();
+        var catalog = await service.CreateAsync(Request(_tempRoot), CancellationToken.None);
+
+        // A published item whose library file exists on disk.
+        var now = DateTimeOffset.UtcNow;
+        var item = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Inception", Year = 2010, AddedAt = now, UpdatedAt = now };
+        var source = new MediaSource { Id = Guid.NewGuid(), MediaItemId = item.Id, Container = "mkv", Path = "Inception (2010)/Inception.mkv", SizeBytes = 5, DurationTicks = 0, CreatedAt = now };
+        _database.AddRange(item, source);
+        await _database.SaveChangesAsync();
+
+        var libraryFile = Path.Combine(_tempRoot, "library", "Inception (2010)", "Inception.mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(libraryFile)!);
+        await File.WriteAllTextAsync(libraryFile, "movie");
+
+        var deleted = await service.DeleteAsync(catalog.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        // DB metadata is gone (catalog + cascade-deleted media rows)…
+        Assert.Empty(await _database.Catalogs.ToListAsync());
+        Assert.Empty(await _database.MediaItems.ToListAsync());
+        Assert.Empty(await _database.MediaSources.ToListAsync());
+        // …but the physical files (and the catalog directory) are left untouched on disk.
+        Assert.True(File.Exists(libraryFile));
+        Assert.True(Directory.Exists(_tempRoot));
+    }
+
+    [Fact]
+    public async Task Delete_is_blocked_while_a_download_references_the_catalog()
+    {
+        var service = CreateService();
+        var catalog = await service.CreateAsync(Request(_tempRoot), CancellationToken.None);
+
+        var now = DateTimeOffset.UtcNow;
+        _database.Downloads.Add(new Download
+        {
+            Id = Guid.NewGuid(),
+            InfoHash = "hash-1",
+            CatalogId = catalog.Id,
+            State = DownloadState.Downloading,
+            SavePath = _tempRoot,
+            AddedAt = now,
+        });
+        await _database.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<CatalogInUseException>(() => service.DeleteAsync(catalog.Id, CancellationToken.None));
+
+        // The catalog (and its directory) survive the rejected delete.
+        Assert.Single(await _database.Catalogs.ToListAsync());
+        Assert.True(Directory.Exists(_tempRoot));
+    }
+
     public void Dispose()
     {
         _database.Dispose();

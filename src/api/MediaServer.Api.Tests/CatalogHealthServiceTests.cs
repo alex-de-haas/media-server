@@ -112,6 +112,7 @@ public sealed class CatalogHealthServiceTests : IDisposable
         public bool DirectoryExists(string path) => Reachable;
         public bool AreSameFilesystem(string directoryA, string directoryB) => true;
         public long GetAvailableFreeBytes(string path) => FreeBytes;
+        public string GetVolumeKey(string path) => "/";
     }
 
     private sealed class RecordingCoreClient : IHostyCoreClient

@@ -9,6 +9,12 @@ public interface IFilesystemInspector
 
     /// <summary>Bytes available to a non-privileged user on the volume that holds <paramref name="path"/>.</summary>
     long GetAvailableFreeBytes(string path);
+
+    /// <summary>
+    /// A stable key identifying the volume that holds <paramref name="path"/> (its mount point), so
+    /// catalogs on the same volume can be grouped under one free/total figure. Empty when unknown.
+    /// </summary>
+    string GetVolumeKey(string path);
 }
 
 public sealed class FilesystemInspector(IHardLinker hardLinker) : IFilesystemInspector
@@ -22,18 +28,22 @@ public sealed class FilesystemInspector(IHardLinker hardLinker) : IFilesystemIns
     public bool AreSameFilesystem(string directoryA, string directoryB) =>
         hardLinker.AreSameFilesystem(directoryA, directoryB);
 
-    public long GetAvailableFreeBytes(string path)
-    {
-        var full = Path.GetFullPath(path);
+    public long GetAvailableFreeBytes(string path) => ResolveDrive(path)?.AvailableFreeSpace ?? 0;
 
-        // DriveInfo is keyed by mount point; pick the longest mount-point prefix of the path.
-        var drive = DriveInfo.GetDrives()
+    public string GetVolumeKey(string path) => ResolveDrive(path)?.RootDirectory.FullName ?? string.Empty;
+
+    // DriveInfo is keyed by mount point; pick the longest mount-point prefix of the path so a path on
+    // a nested mount resolves to that mount rather than the root volume.
+    private static DriveInfo? ResolveDrive(string path)
+    {
+        // Normalize both sides with a trailing separator so a path that is exactly the mount point
+        // (e.g. "/mnt/media") still matches its drive — mount points don't carry a trailing slash.
+        var full = NormalizeMount(Path.GetFullPath(path));
+        return DriveInfo.GetDrives()
             .Where(candidate => candidate.IsReady)
             .Where(candidate => full.StartsWith(NormalizeMount(candidate.RootDirectory.FullName), PathComparison))
             .OrderByDescending(candidate => candidate.RootDirectory.FullName.Length)
             .FirstOrDefault();
-
-        return drive?.AvailableFreeSpace ?? 0;
     }
 
     private static string NormalizeMount(string mount) =>

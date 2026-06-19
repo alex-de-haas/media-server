@@ -63,7 +63,13 @@
   "ui": {
     "entrypoint": { "endpoint": "ui", "path": "/" },
     "navigation": [
-      { "label": "Overview", "path": "/" }
+      { "label": "Home", "path": "/" },
+      { "label": "Movies", "path": "/movies" },
+      { "label": "Series", "path": "/series" },
+      { "label": "Downloads", "path": "/downloads" },
+      { "label": "Activity", "path": "/activity" },
+      { "label": "Catalogs", "path": "/catalogs" },
+      { "label": "Settings", "path": "/settings" }
     ]
   },
   "data": {

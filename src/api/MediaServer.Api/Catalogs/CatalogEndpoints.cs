@@ -15,6 +15,13 @@ public static class CatalogEndpoints
         group.MapGet("/", async (CatalogService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListAsync(cancellationToken)));
 
+        // The catalog-root mounts a catalog may live under, for the UI's mount picker.
+        group.MapGet("/mounts", (CatalogService service) => Results.Ok(service.ListMounts()));
+
+        // Per-volume storage usage (free space + each catalog's footprint) for the storage bars.
+        group.MapGet("/usage", async (CatalogService service, CancellationToken cancellationToken) =>
+            Results.Ok(await service.ListUsageAsync(cancellationToken)));
+
         group.MapGet("/{id:guid}", async (Guid id, CatalogService service, CancellationToken cancellationToken) =>
         {
             var catalog = await service.GetAsync(id, cancellationToken);
@@ -49,8 +56,15 @@ public static class CatalogEndpoints
 
         group.MapDelete("/{id:guid}", async (Guid id, CatalogService service, CancellationToken cancellationToken) =>
         {
-            var deleted = await service.DeleteAsync(id, cancellationToken);
-            return deleted ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var deleted = await service.DeleteAsync(id, cancellationToken);
+                return deleted ? Results.NoContent() : Results.NotFound();
+            }
+            catch (CatalogInUseException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status409Conflict);
+            }
         }).RequireAuthorization(AppRoles.AdminPolicy);
     }
 }

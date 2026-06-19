@@ -3,6 +3,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { setBearerToken } from "@/lib/api";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/sonner";
 
 /**
  * On first load inside the Shell iframe the URL carries a one-time `?code`. Exchange it for an
@@ -72,5 +74,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
   const ready = useAppCodeExchange();
 
-  return <QueryClientProvider client={queryClient}>{ready ? children : null}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>{ready ? children : null}</TooltipProvider>
+      <Toaster />
+    </QueryClientProvider>
+  );
 }
