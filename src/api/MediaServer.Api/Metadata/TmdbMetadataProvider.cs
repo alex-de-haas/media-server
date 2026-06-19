@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -17,9 +16,6 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
 {
     public const string HttpClientName = "tmdb";
     private const string ImageBaseUrl = "https://image.tmdb.org/t/p/original";
-
-    // The provider is a singleton; cache movie-vs-tv resolution so enrich + images don't re-probe.
-    private readonly ConcurrentDictionary<string, string> _resolvedTypes = new(StringComparer.Ordinal);
 
     public string Key => "tmdb";
 
@@ -57,14 +53,13 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
     }
 
     public async Task<IReadOnlyList<ProviderMetadata>> FetchAsync(
-        ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken)
+        ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken)
     {
-        // The canonical kind is encoded by which endpoint resolves; movies and series share the shape.
-        var type = await ResolveTypeAsync(reference, cancellationToken);
-        if (type is null)
-        {
-            return [];
-        }
+        // TMDb has separate id spaces for movies and tv, so the same numeric id can be valid in both
+        // (e.g. tv 95480 "Slow Horses" vs movie 95480 "Flesh, TX"). The caller knows the kind from the
+        // matched MediaItem, so pick the endpoint from it instead of probing — probing movie-first would
+        // silently fetch an unrelated title whenever a tv id collides with a movie id.
+        var type = TmdbType(kind);
 
         var records = new List<ProviderMetadata>(languages.Count);
         foreach (var language in languages)
@@ -82,14 +77,9 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
     }
 
     public async Task<IReadOnlyList<RemoteImage>> GetImagesAsync(
-        ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken)
+        ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken)
     {
-        var type = await ResolveTypeAsync(reference, cancellationToken);
-        if (type is null)
-        {
-            return [];
-        }
-
+        var type = TmdbType(kind);
         var imageLanguages = string.Join(',', languages.Select(language => language.Split('-')[0]).Distinct().Append("null"));
         var document = await GetAsync($"{type}/{reference.Id}/images?include_image_language={imageLanguages}", cancellationToken);
         if (document is null)
@@ -164,27 +154,6 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
                     return minutes * TimeSpan.TicksPerMinute;
                 }
             }
-        }
-
-        return null;
-    }
-
-    /// <summary>Probes whether a reference id is a movie or tv id (the parsed kind is not always trusted).</summary>
-    private async Task<string?> ResolveTypeAsync(ProviderRef reference, CancellationToken cancellationToken)
-    {
-        if (_resolvedTypes.TryGetValue(reference.Id, out var cached))
-        {
-            return cached;
-        }
-
-        if (await GetAsync($"movie/{reference.Id}?language=en-US", cancellationToken) is not null)
-        {
-            return _resolvedTypes[reference.Id] = "movie";
-        }
-
-        if (await GetAsync($"tv/{reference.Id}?language=en-US", cancellationToken) is not null)
-        {
-            return _resolvedTypes[reference.Id] = "tv";
         }
 
         return null;

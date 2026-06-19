@@ -38,7 +38,7 @@ public interface IMetadataProvider
 
     Task<IReadOnlyList<MetadataCandidate>> SearchAsync(MediaQuery query, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<ProviderMetadata>> FetchAsync(ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken);
+    Task<IReadOnlyList<ProviderMetadata>> FetchAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<RemoteImage>> GetImagesAsync(ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken);
+    Task<IReadOnlyList<RemoteImage>> GetImagesAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken);
 }

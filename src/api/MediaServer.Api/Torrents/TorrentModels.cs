@@ -27,22 +27,33 @@ public sealed record DownloadResponse(
     int? Peers,
     long? SizeBytes)
 {
-    public static DownloadResponse From(Download download, TorrentSnapshot? snapshot) => new(
-        download.Id,
-        download.InfoHash,
-        download.Name,
-        download.CatalogId,
-        download.State.ToString(),
-        download.KeepSeeding,
-        download.AddedAt,
-        download.CompletedAt,
-        snapshot?.EngineState,
-        snapshot?.PercentComplete,
-        snapshot?.DownloadRateBytesPerSecond,
-        snapshot?.UploadRateBytesPerSecond,
-        snapshot?.Ratio,
-        snapshot?.Peers,
-        snapshot?.SizeBytes);
+    public static DownloadResponse From(Download download, TorrentSnapshot? snapshot)
+    {
+        // Once a download reaches a state where the content is fully on disk and library-ready, it is
+        // 100% complete by definition. The live engine progress is unreliable here: a no-seed organize
+        // stops the manager and unlinks its seed copy, so manager.Progress reports a stale sub-100 value
+        // (and after a restart there is no manager at all). Pin progress to 100 so a published download
+        // never shows as unfinished.
+        var contentComplete = download.State
+            is DownloadState.Completed or DownloadState.Seeding or DownloadState.StoppedSeeding;
+
+        return new(
+            download.Id,
+            download.InfoHash,
+            download.Name,
+            download.CatalogId,
+            download.State.ToString(),
+            download.KeepSeeding,
+            download.AddedAt,
+            download.CompletedAt,
+            snapshot?.EngineState,
+            contentComplete ? 100 : snapshot?.PercentComplete,
+            snapshot?.DownloadRateBytesPerSecond,
+            snapshot?.UploadRateBytesPerSecond,
+            snapshot?.Ratio,
+            snapshot?.Peers,
+            snapshot?.SizeBytes);
+    }
 }
 
 /// <summary>Raised for invalid add requests (bad source, missing catalog, insufficient space).</summary>

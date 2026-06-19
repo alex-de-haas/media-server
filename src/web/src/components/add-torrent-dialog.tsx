@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { mediaServer } from "@/lib/media-server";
 import { formatBytes } from "@/lib/format";
 import { inputClass, errorMessage } from "@/lib/ui";

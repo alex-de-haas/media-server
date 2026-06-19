@@ -16,7 +16,7 @@ public sealed class FakeMetadataProvider : IMetadataProvider
     public Task<IReadOnlyList<MetadataCandidate>> SearchAsync(MediaQuery query, CancellationToken cancellationToken) =>
         Task.FromResult(OnSearch(query));
 
-    public Task<IReadOnlyList<ProviderMetadata>> FetchAsync(ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<ProviderMetadata>> FetchAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken)
     {
         var records = languages.Select(language => new ProviderMetadata(
             reference, language, $"Title {language}", "Original Title", "en",
@@ -24,7 +24,7 @@ public sealed class FakeMetadataProvider : IMetadataProvider
         return Task.FromResult<IReadOnlyList<ProviderMetadata>>(records);
     }
 
-    public Task<IReadOnlyList<RemoteImage>> GetImagesAsync(ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken) =>
+    public Task<IReadOnlyList<RemoteImage>> GetImagesAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<RemoteImage>>([new RemoteImage(ImageType.Primary, "en", "https://image/poster.jpg", 0)]);
 }
 
