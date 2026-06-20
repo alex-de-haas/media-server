@@ -52,6 +52,7 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddSingleton<IPipelineQueue, PipelineQueue>();
 
         services.AddScoped<IOrganizer, OrganizerService>();
+        services.AddScoped<DownloadCleanupService>();
         services.AddScoped<IdentifyService>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
@@ -84,7 +85,7 @@ public sealed class PipelineTestHarness : IDisposable
     /// <summary>Sets up a catalog with files/ and library/, a completed download, a source file on disk,
     /// and a pending ingest item. Returns the ingest item id.</summary>
     public async Task<(Guid IngestId, Guid CatalogId, Guid DownloadId)> SeedCompletedDownloadAsync(
-        CatalogType type, string torrentName, string sourceRelativePath, Guid? catalogId = null)
+        CatalogType type, string torrentName, string sourceRelativePath, Guid? catalogId = null, bool keepSeeding = false)
     {
         using var scope = _provider.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
@@ -110,7 +111,7 @@ public sealed class PipelineTestHarness : IDisposable
             CatalogId = catalog.Id,
             SourceType = TorrentSourceType.Magnet,
             State = DownloadState.Completed,
-            KeepSeeding = false,
+            KeepSeeding = keepSeeding,
             SavePath = paths.FilesDir,
             AddedAt = now,
             CompletedAt = now,

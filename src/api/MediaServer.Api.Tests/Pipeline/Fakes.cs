@@ -1,5 +1,6 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.Organizer;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Realtime;
 using MediaServer.Api.Torrents;
@@ -56,6 +57,16 @@ public sealed class FakeTorrentEngine : ITorrentEngine
     public TorrentSnapshot? GetSnapshot(string infoHash) => null;
     public IReadOnlyList<TorrentSnapshot> GetAllSnapshots() => [];
     public IReadOnlyList<TorrentFileInfo> GetFiles(string infoHash) => [];
+}
+
+/// <summary>No-op organizer for tests that construct services needing IOrganizer but never organize.</summary>
+public sealed class FakeOrganizer : IOrganizer
+{
+    public Task<IReadOnlyList<OrganizedFile>> OrganizeAsync(
+        Download download, IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<OrganizedFile>>([]);
+
+    public Task UnlinkSeedCopyAsync(Download download, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 /// <summary>Swallows realtime broadcasts.</summary>

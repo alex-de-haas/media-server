@@ -16,6 +16,7 @@ public sealed record IngestItemResponse(
     Guid CatalogId,
     Guid? DownloadId,
     string? DownloadName,
+    string? MediaTitle,
     Guid? MediaItemId,
     string Stage,
     string Status,
@@ -28,7 +29,8 @@ public sealed record IngestItemResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt)
 {
-    public static IngestItemResponse From(IngestItem item, IReadOnlyList<SourceFile> sourceFiles, string? downloadName)
+    public static IngestItemResponse From(
+        IngestItem item, IReadOnlyList<SourceFile> sourceFiles, string? downloadName, string? mediaTitle)
     {
         var candidates = string.IsNullOrEmpty(item.ReviewCandidates)
             ? []
@@ -39,6 +41,7 @@ public sealed record IngestItemResponse(
             item.CatalogId,
             item.DownloadId,
             downloadName,
+            mediaTitle,
             item.MediaItemId,
             item.Stage.ToString(),
             item.Status.ToString(),

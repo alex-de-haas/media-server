@@ -62,6 +62,7 @@ builder.Services.AddHostedService<TorrentCoordinator>();
 builder.Services.AddScoped<TorrentService>();
 builder.Services.AddScoped<DownloadFileService>();
 builder.Services.AddScoped<DownloadDeletionService>();
+builder.Services.AddScoped<DownloadCleanupService>();
 
 // Identify / probe / enrich building blocks.
 builder.Services.AddSingleton<INameParser, NameParser>();

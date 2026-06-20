@@ -20,6 +20,7 @@ public sealed class TorrentService(
     MediaServerSettings settings,
     HostyOptions hosty,
     IPipelineQueue pipelineQueue,
+    DownloadCleanupService cleanup,
     ILogger<TorrentService> logger)
 {
     public async Task<DownloadResponse> AddAsync(AddTorrentRequest request, CancellationToken cancellationToken)
@@ -153,6 +154,13 @@ public sealed class TorrentService(
         return true;
     }
 
+    /// <summary>
+    /// Stops seeding a torrent. Seeding is a terminal, one-way choice: there is no resume. If the ingest
+    /// has already published (the common case — seeding only begins after publish), the whole download
+    /// backing is torn down now (files/ seed copy reclaimed, Download + SourceFiles removed, library kept).
+    /// If the pipeline is still running, the torrent is just marked not-seeding and the orchestrator's Done
+    /// step performs the teardown.
+    /// </summary>
     public async Task<bool> StopSeedingAsync(Guid id, CancellationToken cancellationToken)
     {
         var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
@@ -162,8 +170,17 @@ public sealed class TorrentService(
         }
 
         await engine.StopAsync(download.InfoHash, cancellationToken);
-        download.State = DownloadState.StoppedSeeding;
+        download.State = DownloadState.Completed;
+        download.KeepSeeding = false;
         await database.SaveChangesAsync(cancellationToken);
+
+        var published = await database.IngestItems
+            .AnyAsync(item => item.DownloadId == id && item.Status == IngestStatus.Done, cancellationToken);
+        if (published)
+        {
+            await cleanup.TeardownAsync(id, cancellationToken);
+        }
+
         return true;
     }
 

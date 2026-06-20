@@ -77,7 +77,7 @@ function OpsStrip() {
 
   return (
     <div className="grid grid-cols-3 gap-3">
-      <OpStat href="/downloads" icon={Download} label="Downloading" value={active} />
+      <OpStat href="/activity" icon={Download} label="Downloading" value={active} />
       <OpStat href="/activity" icon={AlertTriangle} label="Needs review" value={review} warn={review > 0} />
       <OpStat href="/catalogs" icon={FolderTree} label="Catalogs offline" value={offline} warn={offline > 0} />
     </div>
