@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, MoreVertical, Play, RefreshCw, Star, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Link2, MoreVertical, Play, RefreshCw, Star, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Episode, type LibraryDetail, type LibraryMediaSource } from "@/lib/media-server";
+import { infuseDeepLink, openInfuse } from "@/lib/infuse";
+import { RemapDialog } from "@/components/remap-dialog";
 import { formatBytes, formatRuntime } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
@@ -45,7 +47,7 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-2">
         <BackLink href={backHref} label={backLabel} />
-        <AdminControls id={item.id} title={item.title} backHref={backHref} />
+        <AdminControls id={item.id} title={item.title} kind={item.kind} backHref={backHref} />
       </div>
       <Hero item={item} />
       {item.overview && <p className="max-w-2xl text-sm leading-relaxed">{item.overview}</p>}
@@ -54,11 +56,12 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
   );
 }
 
-function AdminControls({ id, title, backHref }: { id: string; title: string; backHref: string }) {
+function AdminControls({ id, title, kind, backHref }: { id: string; title: string; kind: string; backHref: string }) {
   const { role } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [remapOpen, setRemapOpen] = useState(false);
 
   const remove = useMutation({
     mutationFn: (deleteFiles: boolean) => mediaServer.deleteLibraryItem(id, deleteFiles),
@@ -100,6 +103,13 @@ function AdminControls({ id, title, backHref }: { id: string; title: string; bac
             <RefreshCw className={cn(refresh.isPending && "animate-spin")} aria-hidden />
             Refresh metadata
           </DropdownMenuItem>
+          {/* Series are corrected per episode (in the episode list), not at the series level. */}
+          {kind !== "Series" && (
+            <DropdownMenuItem onClick={() => setRemapOpen(true)}>
+              <Wand2 />
+              Fix match…
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
             <Trash2 />
             Delete…
@@ -114,6 +124,26 @@ function AdminControls({ id, title, backHref }: { id: string; title: string; bac
         onConfirm={(deleteFiles) => {
           remove.mutate(deleteFiles);
           setConfirmOpen(false);
+        }}
+      />
+
+      <RemapDialog
+        itemId={id}
+        mode="movie"
+        currentTitle={title}
+        open={remapOpen}
+        onOpenChange={setRemapOpen}
+        onRemapped={(targetId) => {
+          setRemapOpen(false);
+          for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
+            queryClient.invalidateQueries({ queryKey: key });
+          }
+          // The corrected movie is a different item — navigate to its detail page.
+          if (targetId !== id) {
+            router.replace(`${backHref}/${targetId}`);
+          } else {
+            queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
+          }
         }}
       />
     </>
@@ -238,9 +268,7 @@ function Hero({ item }: { item: LibraryDetail }) {
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => window.open("infuse://", "_blank")}>
-              <Play className="size-4" aria-hidden /> Play in Infuse
-            </Button>
+            <InfuseLaunch item={item} />
             <Button
               variant="outline"
               onClick={() => played.mutate(!isPlayed)}
@@ -263,6 +291,43 @@ function Hero({ item }: { item: LibraryDetail }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Launches Infuse for the item via a TMDb library deep link (movies auto-play; series open to the show),
+ * with a copy-link fallback for when the popup is blocked or Infuse isn't installed. Renders nothing when
+ * the item has no TMDb id to deep-link to.
+ */
+function InfuseLaunch({ item }: { item: LibraryDetail }) {
+  const isSeries = item.kind === "Series";
+  const deepLink = isSeries
+    ? infuseDeepLink({ kind: "series", tmdbId: item.tmdbId })
+    : infuseDeepLink({ kind: "movie", tmdbId: item.tmdbId }, { play: true });
+
+  if (!deepLink) {
+    return null;
+  }
+
+  return (
+    <>
+      <Button onClick={() => openInfuse(deepLink)}>
+        <Play className="size-4" aria-hidden /> {isSeries ? "Open in Infuse" : "Play in Infuse"}
+      </Button>
+      <Button variant="outline" size="icon" aria-label="Copy Infuse link" onClick={() => copyInfuseLink(deepLink)}>
+        <Link2 className="size-4" aria-hidden />
+      </Button>
+    </>
+  );
+}
+
+async function copyInfuseLink(deepLink: string) {
+  try {
+    await navigator.clipboard.writeText(deepLink);
+    toast.success("Infuse link copied");
+  } catch {
+    // Clipboard can be denied; show the link so the operator can copy it by hand.
+    toast.error("Couldn’t copy the link", { description: deepLink });
+  }
 }
 
 function MediaInfo({ sources }: { sources: LibraryMediaSource[] }) {
@@ -331,20 +396,29 @@ function SeriesEpisodes({ seriesId }: { seriesId: string }) {
 }
 
 function EpisodeRow({ episode, seriesId }: { episode: Episode; seriesId: string }) {
+  const { role } = useSession();
   const queryClient = useQueryClient();
+  const [remapOpen, setRemapOpen] = useState(false);
+
+  const invalidate = () => {
+    for (const key of [["episodes", seriesId], ["library-detail", seriesId], ["library"], ["nextup"], ["resume"], ["recent"]]) {
+      queryClient.invalidateQueries({ queryKey: key });
+    }
+  };
+
   const played = useMutation({
     mutationFn: (value: boolean) => mediaServer.setPlayed(episode.id, value),
-    onSuccess: () => {
-      for (const key of [["episodes", seriesId], ["library-detail", seriesId], ["nextup"], ["resume"]]) {
-        queryClient.invalidateQueries({ queryKey: key });
-      }
-    },
+    onSuccess: invalidate,
   });
 
   const isPlayed = episode.userData?.played ?? false;
   const resume = !isPlayed && episode.userData?.playedPercentage ? Math.min(episode.userData.playedPercentage, 100) : null;
   const runtime = formatRuntime(episode.runtimeTicks);
   const label = `S${String(episode.seasonNumber ?? 0).padStart(2, "0")}E${String(episode.episodeNumber ?? 0).padStart(2, "0")}`;
+  const deepLink = infuseDeepLink(
+    { kind: "episode", seriesTmdbId: episode.seriesTmdbId, season: episode.seasonNumber, episode: episode.episodeNumber },
+    { play: true },
+  );
 
   return (
     <li className="flex items-center gap-3 p-3 text-sm">
@@ -370,6 +444,31 @@ function EpisodeRow({ episode, seriesId }: { episode: Episode; seriesId: string 
         )}
       </div>
       {runtime && <span className="text-muted-foreground shrink-0 text-xs">{runtime}</span>}
+      {deepLink && (
+        <Button variant="ghost" size="icon-sm" aria-label="Play in Infuse" onClick={() => openInfuse(deepLink)}>
+          <Play />
+        </Button>
+      )}
+      {role === "admin" && (
+        <Button variant="ghost" size="icon-sm" aria-label="Fix match" onClick={() => setRemapOpen(true)}>
+          <Wand2 />
+        </Button>
+      )}
+      {role === "admin" && (
+        <RemapDialog
+          itemId={episode.id}
+          mode="episode"
+          currentTitle={`${label} · ${episode.title}`}
+          defaultSeason={episode.seasonNumber ?? 1}
+          defaultEpisode={episode.episodeNumber ?? 1}
+          open={remapOpen}
+          onOpenChange={setRemapOpen}
+          onRemapped={() => {
+            setRemapOpen(false);
+            invalidate();
+          }}
+        />
+      )}
     </li>
   );
 }

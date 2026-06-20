@@ -28,7 +28,9 @@ Confirmed for v1 (changes require updating this section and `docs/root.md`).
   JSON columns for flexible provider blobs.
 - **MonoTorrent** as a hosted service (torrent engine).
 - **ffprobe** for media probing (no transcoding in v1).
-- **SignalR** for real-time job/download progress.
+- **Server-Sent Events** for real-time job/download progress (server→client only; rides
+  the same-origin BFF as a streaming HTTP response — no WebSocket upgrade, which the
+  Next.js route-handler BFF can't proxy). Superseded the initial SignalR choice (2026-06-20).
 - **xUnit + Imposter** for unit tests (per `AGENTS.md`).
 
 ### Frontend — `web` service
@@ -36,8 +38,9 @@ Confirmed for v1 (changes require updating this section and `docs/root.md`).
 - **TanStack React Query** as the client data layer (chosen over SWR: the app is
   mutation- and event-driven — pipeline actions, review queue, manual match,
   delete — and React Query's `useMutation` + `invalidateQueries`/`setQueryData`
-  integrate cleanly with SignalR push updates).
-- **SignalR JavaScript client**.
+  integrate cleanly with SSE push updates).
+- **Server-Sent Events** client (a `fetch` + `ReadableStream` reader, so the identity
+  bearer can be attached — `EventSource` can't set headers).
 - **pnpm** as the package manager.
 - **Vitest** (unit) + **Playwright** (e2e) for frontend tests.
 
@@ -231,11 +234,17 @@ same-filesystem validation, path sandbox, free space; MonoTorrent engine
 transitions, restart resume); hardlink organizer; TMDb provider + scoring,
 Emby-style/AnitomySharp name parsing, ffprobe; the seven `IPipelineStage`
 processing stages + orchestrator (lease, `StagesCompleted` resume, backoff,
-`NeedsReview`) + reconciler + jobs + SignalR `ActivityHub`; REST under
-`/api/{catalogs,torrents,ingest,library}`. Web dashboard (React Query, polling)
-covers catalogs, add-torrent, live downloads, pipeline activity + review match,
-and the published library. Live UI uses React Query polling for v1; validating
-SignalR transport through the BFF/Shell embed is deferred to a follow-up.
+`NeedsReview`) + reconciler + jobs + realtime notifier; REST under
+`/api/{catalogs,torrents,ingest,library}`. Web dashboard (React Query) covers
+catalogs, add-torrent, live downloads, pipeline activity + review match, and the
+published library. **Realtime transport (resolved 2026-06-20):** the initial SignalR
+hub was replaced with **Server-Sent Events** — a single `GET /api/events` stream behind
+Host identity, fanned out by `SseRealtimeNotifier` (behind the unchanged
+`IRealtimeNotifier` seam), consumed by a `fetch`-stream client (`RealtimeBridge`) that
+patches `downloadProgress` into the `downloads` cache and invalidates on coarser
+transitions. This rides the same-origin BFF cleanly (the route-handler BFF can't proxy a
+WebSocket upgrade, so SignalR would have degraded to SSE/long-poll there anyway); React
+Query keeps slow `refetchInterval`s only as a reconnect fallback.
 
 ### M2 — Jellyfin Direct Play
 **Goal:** Infuse connects, browses, plays. Depends on M1.
@@ -351,10 +360,11 @@ host light/dark theme, renders movie/series detail and Home rails from the inter
 `/api` only (zero coupling to the Jellyfin surface), and Play opens an external
 client.
 
-**Open risk:** Infuse deep-link from the Shell iframe — the embed sandbox is
-`allow-scripts allow-same-origin allow-forms allow-popups allow-downloads` (no
-`allow-top-navigation`), so the deep link must go through a popup; validate, with a
-"show server URL / item" fallback.
+**Open risk (resolved 2026-06-20):** Infuse deep-link from the Shell iframe — the embed
+sandbox is `allow-scripts allow-same-origin allow-forms allow-popups allow-downloads` (no
+`allow-top-navigation`), so the deep link is launched via `window.open` (the granted
+`allow-popups`), with a copy-link fallback. Implemented with Infuse's TMDb library deep
+links; end-to-end behaviour on a device with Infuse installed remains a manual check.
 
 **Status (in progress 2026-06-18, branch `feat/m3.5-app-shell`):** slice 1 (app
 shell — light/dark tokens, Hosty theme bridge, top-tab routing, `dashboard.tsx` split
@@ -385,9 +395,23 @@ download/`files/` left untouched; an in-app confirm since the Shell sandbox bloc
 `window.confirm`). api 105 xUnit tests green; web build/lint/tsc green. **Playwright
 e2e is done** too: a mocked-BFF suite in `web/e2e/` (8 specs — shell routing/refresh,
 admin-vs-user gating, empty/error states, detail navigation + the watched mutation)
-wired into a CI `web-e2e` job. Still open (deferred, agreed): source-file **remap** and
-the **precise Infuse deep-link** (validate on-device — Play is a best-effort `infuse://`
-launch today, the documented sandbox open-risk).
+wired into a CI `web-e2e` job. **Source-file remap is now done** (2026-06-20): an admin
+corrects a misidentified published leaf from the detail page — "Fix match…" on a movie,
+a per-row affordance on an episode — by searching a corrected identity
+(`POST /api/metadata/search`) and picking it; the backend `RemapService`
+(`POST /api/library/{id}/remap`) reassigns the `MediaSource`, rebuilds the clean
+`library/` hardlink **from the surviving library file** (the `files/` seed copy + the
+`SourceFile` rows are already reclaimed once published, so the link is rebuilt from the
+existing inode, not from `files/`), re-enriches + mints the public id of the corrected
+target, and prunes the orphaned old item plus any emptied season/series. **The precise
+Infuse deep-link is also done** (2026-06-20): Play uses Infuse's TMDb library deep links
+(`infuse://movie/{id}` auto-play, `infuse://series/{id}`, `infuse://series/{id}-{s}-{e}?play`
+per episode), so Infuse resolves the item against the user's connected Jellyfin source —
+no token or direct stream URL needed. The id is exposed via `LibraryDetailDto.TmdbId` /
+`EpisodeDto.SeriesTmdbId`; the launch goes through `window.open` (the Shell sandbox grants
+`allow-popups` but not `allow-top-navigation`) with a copy-link fallback when the popup is
+blocked or Infuse is absent. api 173 xUnit tests green; web lint/tsc/vitest + 10 Playwright
+e2e green. M3.5 is now fully closed — no deferred items remain.
 
 ### M4 — Automation polish & Docker delivery
 **Goal:** robustness + production container delivery. Depends on M1–M3.

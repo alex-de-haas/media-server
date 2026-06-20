@@ -242,7 +242,7 @@ public sealed class PublishStage(MediaServerDbContext database) : IPipelineStage
 
         foreach (var item in graph.All)
         {
-            item.PublicId ??= BuildPublicId(item);
+            item.PublicId ??= PublicIdFactory.ForItem(item);
             item.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -255,21 +255,5 @@ public sealed class PublishStage(MediaServerDbContext database) : IPipelineStage
 
         await database.SaveChangesAsync(cancellationToken);
         return StageResult.Done;
-    }
-
-    private static string BuildPublicId(MediaItem item)
-    {
-        var provider = item.IdentityProvider ?? "local";
-        var providerId = item.IdentityProviderId ?? item.Id.ToString("N");
-
-        return item.Kind switch
-        {
-            MediaKind.Movie or MediaKind.Video => PublicIdFactory.ForMovie(item.CatalogId, provider, providerId),
-            MediaKind.Series => PublicIdFactory.ForSeries(item.CatalogId, provider, providerId),
-            MediaKind.Season => PublicIdFactory.ForSeason(item.CatalogId, provider, providerId, item.IdentitySeasonNumber ?? item.IndexNumber ?? 1),
-            MediaKind.Episode => PublicIdFactory.ForEpisode(item.CatalogId, provider, providerId,
-                item.IdentitySeasonNumber ?? item.ParentIndexNumber ?? 1, item.IdentityEpisodeNumber ?? item.IndexNumber ?? 0),
-            _ => PublicIdFactory.ForMovie(item.CatalogId, provider, providerId),
-        };
     }
 }

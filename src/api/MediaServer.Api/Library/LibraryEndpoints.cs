@@ -104,6 +104,20 @@ public static class LibraryEndpoints
             return refreshed ? Results.Accepted() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Reassign a misidentified leaf (movie/episode) to a corrected identity and rebuild its hardlink (admin only).
+        group.MapPost("/{id:guid}/remap", async (Guid id, RemapRequest request, RemapService remap, CancellationToken cancellationToken) =>
+        {
+            var result = await remap.RemapAsync(id, request, cancellationToken);
+            return result.Status switch
+            {
+                RemapResult.Kind.Ok => Results.Ok(new { id = result.TargetId }),
+                RemapResult.Kind.Unsupported => Results.BadRequest(new { error = "Only movies and episodes can be remapped." }),
+                RemapResult.Kind.NoSource => Results.BadRequest(new { error = "This item has no media file to remap." }),
+                RemapResult.Kind.MissingFile => Results.Conflict(new { error = "The media file is missing on disk." }),
+                _ => Results.NotFound(),
+            };
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         // Scan all online catalogs for missing library files (admin only); also runs on a timer.
         group.MapPost("/scan", async (LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
             Results.Ok(await maintenance.ScanAsync(cancellationToken)))

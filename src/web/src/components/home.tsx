@@ -67,8 +67,9 @@ function RailRow({ title, items }: { title: string; items: LibraryRailItem[] }) 
 }
 
 function OpsStrip() {
-  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 5000 });
-  const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 5000 });
+  // SSE (RealtimeBridge) keeps these fresh; the slow interval is only a reconnect fallback.
+  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 20000 });
+  const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 20000 });
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
 
   const active = downloads.data?.filter((download) => (download.percentComplete ?? 0) < 100).length ?? 0;

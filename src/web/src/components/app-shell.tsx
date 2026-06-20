@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, Film, FolderTree, Home, Settings, Tv, type LucideIcon } from "lucide-react";
 import { apiJson, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { RealtimeBridge } from "@/components/realtime-bridge";
 
 export interface Session {
   userId: string;
@@ -55,6 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <SessionContext.Provider value={session.data}>
+      <RealtimeBridge />
       <div className="flex min-h-full flex-col">
         <TabBar isAdmin={session.data.role === "admin"} />
         <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">{children}</main>

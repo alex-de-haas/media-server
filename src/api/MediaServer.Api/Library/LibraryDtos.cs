@@ -21,6 +21,8 @@ public sealed record LibraryItemDto(
 public sealed record LibraryDetailDto(
     Guid Id,
     string? PublicId,
+    // TMDb id (movie id for a movie, series id for a series) — lets the UI build an Infuse library deep link.
+    string? TmdbId,
     Guid CatalogId,
     string Kind,
     string Title,
@@ -75,6 +77,8 @@ public sealed record SeasonSummaryDto(
 public sealed record EpisodeDto(
     Guid Id,
     string? PublicId,
+    // The owning series' TMDb id — an episode carries its series identity; used for the Infuse deep link.
+    string? SeriesTmdbId,
     int? SeasonNumber,
     int? EpisodeNumber,
     string Title,

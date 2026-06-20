@@ -28,7 +28,7 @@ Two services run under Hosty Core:
   (`internal` port), a public Jellyfin surface (`jellyfin` port, M2), and a raw
   `torrent` listener (M1). Validates every request's Host identity against Core.
 - **`web`** — Next.js App Router app and backend-for-frontend. Holds the Hosty
-  app-origin session and proxies REST/SignalR to `api`, so the browser stays
+  app-origin session and proxies REST + the SSE stream to `api`, so the browser stays
   same-origin and iframe-safe. Reaches `api` via the Core-injected
   `HOSTY_SERVICE_API_URL` (intra-app service discovery; `web` `dependsOn` `api`).
 

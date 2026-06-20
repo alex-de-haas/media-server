@@ -11,7 +11,7 @@ namespace MediaServer.Api.Torrents;
 /// <summary>
 /// Operator-facing torrent commands: add (with the pre-download free-space check and pipeline kick-off),
 /// pause/resume, stop seeding, and remove. Persists only durable facts and state transitions — live
-/// progress stays in the engine and is broadcast over SignalR.
+/// progress stays in the engine and is broadcast over the realtime stream (SSE).
 /// </summary>
 public sealed class TorrentService(
     MediaServerDbContext database,

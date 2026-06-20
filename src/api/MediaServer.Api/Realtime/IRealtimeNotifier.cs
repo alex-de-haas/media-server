@@ -1,8 +1,8 @@
 namespace MediaServer.Api.Realtime;
 
 /// <summary>
-/// Abstraction over the SignalR hub so lower layers (torrent engine, orchestrator, jobs) can
-/// broadcast without depending on SignalR types directly — and so tests can capture events.
+/// Abstraction over the realtime transport so lower layers (torrent engine, orchestrator, jobs) can
+/// broadcast without depending on the transport (SSE) directly — and so tests can capture events.
 /// </summary>
 public interface IRealtimeNotifier
 {
