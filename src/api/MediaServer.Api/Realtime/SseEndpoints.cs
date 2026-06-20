@@ -19,7 +19,7 @@ public static class SseEndpoints
     private static async Task StreamAsync(HttpContext context, SseRealtimeNotifier notifier)
     {
         var response = context.Response;
-        response.Headers.ContentType = "text/event-stream";
+        response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
         // Ask any reverse proxy (nginx/cloudflared) not to buffer the stream.
         response.Headers["X-Accel-Buffering"] = "no";

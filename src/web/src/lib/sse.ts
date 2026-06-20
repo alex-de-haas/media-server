@@ -15,6 +15,7 @@ export function openEventStream(path: string, handlers: SseHandlers): () => void
   let closed = false;
   let controller: AbortController | null = null;
   let attempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   async function connect(): Promise<void> {
     if (closed) {
@@ -45,44 +46,55 @@ export function openEventStream(path: string, handlers: SseHandlers): () => void
       // Network error, non-2xx, or the stream ended — fall through to reconnect.
     }
 
-    handlers.onStatus?.(false);
-    if (!closed) {
-      attempt = Math.min(attempt + 1, 6);
-      const delay = Math.min(1000 * 2 ** attempt, 30_000);
-      setTimeout(() => void connect(), delay);
+    // Don't fire callbacks or schedule a reconnect once disposed (e.g. React effect cleanup aborted us).
+    if (closed) {
+      return;
     }
+
+    handlers.onStatus?.(false);
+    attempt = Math.min(attempt + 1, 6);
+    const delay = Math.min(1000 * 2 ** attempt, 30_000);
+    reconnectTimer = setTimeout(() => void connect(), delay);
   }
 
   void connect();
 
   return () => {
     closed = true;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+    }
     controller?.abort();
   };
 }
 
 async function pump(body: ReadableStream<Uint8Array>, onEvent: (event: string, data: unknown) => void): Promise<void> {
   const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  try {
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
 
-    buffer += decoder.decode(value, { stream: true });
-    let separator: number;
-    // Frames are separated by a blank line; tolerate both \n\n and \r\n\r\n.
-    while ((separator = indexOfFrameBreak(buffer)) !== -1) {
-      const frame = buffer.slice(0, separator);
-      buffer = buffer.slice(separator + frameBreakLength(buffer, separator));
-      const parsed = parseSseFrame(frame);
-      if (parsed) {
-        onEvent(parsed.event, parsed.data);
+      buffer += decoder.decode(value, { stream: true });
+      let separator: number;
+      // Frames are separated by a blank line; tolerate both \n\n and \r\n\r\n.
+      while ((separator = indexOfFrameBreak(buffer)) !== -1) {
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + frameBreakLength(buffer, separator));
+        const parsed = parseSseFrame(frame);
+        if (parsed) {
+          onEvent(parsed.event, parsed.data);
+        }
       }
     }
+  } finally {
+    // Always release the lock so the stream can be GC'd / re-read on reconnect.
+    reader.releaseLock();
   }
 }
 

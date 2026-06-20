@@ -28,6 +28,12 @@ public sealed class RemapService(
     LibraryFileEraser fileEraser,
     ILogger<RemapService> logger)
 {
+    // Path equality follows the filesystem: case-insensitive on Windows and default macOS, ordinal elsewhere.
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
     public async Task<RemapResult> RemapAsync(Guid itemId, RemapRequest request, CancellationToken cancellationToken)
     {
         var current = await database.MediaItems.FirstOrDefaultAsync(item => item.Id == itemId, cancellationToken);
@@ -72,6 +78,12 @@ public sealed class RemapService(
             }
         }
 
+        // Wrap the DB writes so a mid-remap failure (a file op or a later delete) rolls back rather than
+        // leaving a half-created target. Compose with an ambient transaction if one already exists.
+        await using var transaction = database.Database.CurrentTransaction is null
+            ? await database.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
         var candidate = new MetadataCandidate(new ProviderRef(request.Provider, request.ProviderId), request.Title, request.Year, 1.0);
         var target = request.Kind == MediaKind.Episode
             ? await identifyService.ResolveEpisodeAsync(catalog, candidate,
@@ -107,7 +119,11 @@ public sealed class RemapService(
                 return RemapResult.NoSource;
             }
 
-            if (!string.Equals(source.Path, newRelative, StringComparison.Ordinal))
+            // Compare the *resolved* absolute paths case-insensitively on case-insensitive filesystems
+            // (Windows, default macOS): a case-only path change maps to the same inode, so deleting the
+            // "destination" would delete the source itself and the relink would then fail — data loss.
+            var sameFile = string.Equals(oldAbsolute, newAbsolute, PathComparison);
+            if (!sameFile)
             {
                 if (!File.Exists(oldAbsolute))
                 {
@@ -157,7 +173,13 @@ public sealed class RemapService(
         //    is persisted so the set-based deletes don't catch the moved sources.
         await CleanupOrphanAsync(current, cancellationToken);
 
-        // 4. Erase the old library files last — the content is already linked under the new path.
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        // 4. Erase the old library files last — content is already linked under the new path and the DB
+        //    is committed, so a failed erase only leaves a stray file (logged), never data loss.
         foreach (var relative in oldFiles)
         {
             fileEraser.Erase(catalog, relative);

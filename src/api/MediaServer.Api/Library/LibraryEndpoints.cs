@@ -111,7 +111,7 @@ public static class LibraryEndpoints
             return result.Status switch
             {
                 RemapResult.Kind.Ok => Results.Ok(new { id = result.TargetId }),
-                RemapResult.Kind.Unsupported => Results.BadRequest(new { error = "Only movies and episodes can be remapped." }),
+                RemapResult.Kind.Unsupported => Results.BadRequest(new { error = "Only a movie, video, or episode can be remapped." }),
                 RemapResult.Kind.NoSource => Results.BadRequest(new { error = "This item has no media file to remap." }),
                 RemapResult.Kind.MissingFile => Results.Conflict(new { error = "The media file is missing on disk." }),
                 _ => Results.NotFound(),
