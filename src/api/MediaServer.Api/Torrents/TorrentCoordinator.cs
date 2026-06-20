@@ -215,10 +215,10 @@ public sealed class TorrentCoordinator(
         }
 
         // MonoTorrent auto-seeds the instant a torrent completes. When the operator opted out of seeding,
-        // stop uploading now instead of waiting for the Organize stage: an item parked before Organize
-        // (e.g. Identify → NeedsReview) would otherwise keep seeding indefinitely. The files/ seed copy
-        // must stay on disk for Organize to hardlink from, so only the active transfer is stopped here —
-        // the copy itself is reclaimed later in OrganizeStage once the item reaches it.
+        // stop uploading now instead of leaving it running: an item parked before Organize (e.g. Identify →
+        // NeedsReview) would otherwise keep seeding indefinitely. Only the active transfer is stopped here;
+        // the files/ seed copy stays on disk (Organize still hardlinks from it) and the whole download
+        // backing is reclaimed once the item reaches Done (see DownloadCleanupService).
         if (!download.KeepSeeding && download.State == DownloadState.Completed)
         {
             await engine.StopAsync(infoHash, CancellationToken.None);

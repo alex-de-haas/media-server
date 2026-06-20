@@ -189,7 +189,7 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
             await scope.ServiceProvider.GetRequiredService<DownloadCleanupService>()
                 .TeardownAsync(downloadId, cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             // Best-effort housekeeping: the item is already published and detached. A failure leaves an
             // orphaned download row / files/ seed copy (reclaimable later) — never un-publish over it.

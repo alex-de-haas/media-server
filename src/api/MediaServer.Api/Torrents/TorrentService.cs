@@ -169,6 +169,13 @@ public sealed class TorrentService(
             return false;
         }
 
+        // Only a seeding torrent can stop seeding. Ignore the request for any other state (e.g. one still
+        // downloading) so a partial download is never mis-marked Completed and advanced on partial files.
+        if (download.State != DownloadState.Seeding)
+        {
+            return true;
+        }
+
         await engine.StopAsync(download.InfoHash, cancellationToken);
         download.State = DownloadState.Completed;
         download.KeepSeeding = false;

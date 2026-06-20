@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, MoreVertical, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
@@ -117,13 +117,14 @@ export function ActivitySection() {
 
 function TabBar({ tab, counts, onChange }: { tab: TabKey; counts: Record<TabKey, number>; onChange: (tab: TabKey) => void }) {
   return (
-    <div className="flex items-center gap-1 border-b">
+    <div role="tablist" className="flex items-center gap-1 border-b">
       {TABS.map(({ key, label }) => (
         <button
           key={key}
           type="button"
+          role="tab"
+          aria-selected={tab === key}
           onClick={() => onChange(key)}
-          aria-current={tab === key ? "page" : undefined}
           className={cn(
             "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
             tab === key
@@ -451,6 +452,7 @@ function RemoveDialog({
   published: boolean;
   onConfirm: (deleteFiles: boolean) => void;
 }) {
+  const checkboxId = useId();
   // Default to keeping the published library item; the checkbox only appears once there is one to keep.
   const [deleteFiles, setDeleteFiles] = useState(false);
 
@@ -473,15 +475,20 @@ function RemoveDialog({
         </DialogHeader>
 
         {published && (
-          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-            <Checkbox className="mt-0.5" checked={deleteFiles} onCheckedChange={(checked) => setDeleteFiles(checked === true)} />
-            <span>
+          <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
+            <Checkbox
+              id={checkboxId}
+              className="mt-0.5"
+              checked={deleteFiles}
+              onCheckedChange={(checked) => setDeleteFiles(checked === true)}
+            />
+            <label htmlFor={checkboxId} className="cursor-pointer select-none">
               Delete media files from disk
               <span className="text-muted-foreground block text-xs">
                 Also removes the published library item and its files. Otherwise it stays in your library.
               </span>
-            </span>
-          </label>
+            </label>
+          </div>
         )}
 
         <DialogFooter>

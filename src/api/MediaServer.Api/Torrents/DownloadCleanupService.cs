@@ -37,7 +37,7 @@ public sealed class DownloadCleanupService(
         {
             await engine.RemoveAsync(download.InfoHash, deleteFiles: false, cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             logger.LogWarning(exception, "Engine removal during teardown of download {DownloadId} failed.", downloadId);
         }
@@ -47,14 +47,23 @@ public sealed class DownloadCleanupService(
         await organizer.UnlinkSeedCopyAsync(download, cancellationToken);
 
         // Set-based deletes in one transaction (FK-safe order: detach ingest, drop source files, drop the
-        // download), bypassing the change tracker so this composes with a caller that tracks the item.
-        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
-        await database.IngestItems
-            .Where(item => item.DownloadId == downloadId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.DownloadId, (Guid?)null), cancellationToken);
-        await database.SourceFiles.Where(file => file.DownloadId == downloadId).ExecuteDeleteAsync(cancellationToken);
-        await database.Downloads.Where(item => item.Id == downloadId).ExecuteDeleteAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        // download), bypassing the change tracker so this composes with a caller that tracks the item. Only
+        // open a transaction when the caller isn't already in one (a nested BeginTransaction would throw).
+        var transaction = database.Database.CurrentTransaction is null
+            ? await database.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        await using (transaction)
+        {
+            await database.IngestItems
+                .Where(item => item.DownloadId == downloadId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.DownloadId, (Guid?)null), cancellationToken);
+            await database.SourceFiles.Where(file => file.DownloadId == downloadId).ExecuteDeleteAsync(cancellationToken);
+            await database.Downloads.Where(item => item.Id == downloadId).ExecuteDeleteAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+        }
 
         logger.LogInformation("Tore down download backing {DownloadId}; library content preserved.", downloadId);
     }
