@@ -131,6 +131,19 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Detail_and_episodes_expose_the_tmdb_id_for_infuse_deep_links()
+    {
+        var movie = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+        Assert.Equal("27205", movie!.TmdbId);
+
+        var series = await _library.GetDetailAsync(_seriesId, appUserId: null, CancellationToken.None);
+        Assert.Equal("1396", series!.TmdbId);
+
+        var episodes = await _library.GetEpisodesAsync(_seriesId, seasonId: null, appUserId: null, CancellationToken.None);
+        Assert.Equal("1396", episodes[0].SeriesTmdbId); // an episode carries its series identity
+    }
+
+    [Fact]
     public async Task Recent_returns_published_top_level_items()
     {
         var recent = await _library.GetRecentAsync(limit: 10, appUserId: null, CancellationToken.None);
@@ -318,6 +331,8 @@ public sealed class LibraryReadServiceTests : IDisposable
             Kind = MediaKind.Movie,
             Title = "Untitled.2010.1080p.BluRay", // raw title; the localized metadata title is "Inception"
             Year = 2010,
+            IdentityProvider = "tmdb",
+            IdentityProviderId = "27205",
             AddedAt = now,
             UpdatedAt = now,
         };
@@ -358,7 +373,7 @@ public sealed class LibraryReadServiceTests : IDisposable
             new MediaStream { Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Subtitle, Index = 2, Codec = "subrip", Language = "eng" });
 
         // ---- Series → Season → Episode ----
-        var series = new MediaItem { Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = seriesCatalog.Id, Kind = MediaKind.Series, Title = "Breaking Bad", Year = 2008, AddedAt = now, UpdatedAt = now };
+        var series = new MediaItem { Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = seriesCatalog.Id, Kind = MediaKind.Series, Title = "Breaking Bad", Year = 2008, IdentityProvider = "tmdb", IdentityProviderId = "1396", AddedAt = now, UpdatedAt = now };
         var season = new MediaItem { Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = seriesCatalog.Id, Kind = MediaKind.Season, Title = "Season 1", ParentId = series.Id, SeriesId = series.Id, IndexNumber = 1, AddedAt = now, UpdatedAt = now };
         var episode = new MediaItem
         {
@@ -372,6 +387,10 @@ public sealed class LibraryReadServiceTests : IDisposable
             SeasonId = season.Id,
             ParentIndexNumber = 1,
             IndexNumber = 1,
+            IdentityProvider = "tmdb",
+            IdentityProviderId = "1396",
+            IdentitySeasonNumber = 1,
+            IdentityEpisodeNumber = 1,
             LibraryPath = "library/Breaking Bad/Season 1/S01E01.mkv",
             AddedAt = now,
             UpdatedAt = now,

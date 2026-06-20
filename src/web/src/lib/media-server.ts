@@ -129,6 +129,19 @@ export interface MetadataSearchInput {
   kind?: "Movie" | "Series" | "Season" | "Episode" | "Video" | null;
 }
 
+// Reassigns an already-published leaf (movie/episode) to a corrected identity; the backend rebuilds the
+// library hardlink and prunes the orphaned old item. For episodes, the identity is the owning *series*
+// plus season/episode numbers (same shape the ingest match uses).
+export interface RemapInput {
+  kind: "Movie" | "Episode";
+  provider: string;
+  providerId: string;
+  title: string;
+  year?: number | null;
+  season?: number | null;
+  episode?: number | null;
+}
+
 // Surface-neutral per-user playback state carried by every library DTO (mirrors the api UserItemDataDto).
 export interface UserItemData {
   key: string;
@@ -188,6 +201,7 @@ export interface SeasonSummary {
 export interface LibraryDetail {
   id: string;
   publicId: string | null;
+  tmdbId: string | null;
   catalogId: string;
   kind: string;
   title: string;
@@ -212,6 +226,7 @@ export interface LibraryDetail {
 export interface Episode {
   id: string;
   publicId: string | null;
+  seriesTmdbId: string | null;
   seasonNumber: number | null;
   episodeNumber: number | null;
   title: string;
@@ -315,7 +330,20 @@ export const mediaServer = {
   deleteLibraryItem: (id: string, deleteFiles: boolean) =>
     send(`/library/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
   refreshMetadata: (id: string) => send(`/library/${id}/refresh`, "POST"),
+  remapLibraryItem: (id: string, input: RemapInput) =>
+    apiJson<{ id: string }>(`${BASE}/library/${id}/remap`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
   scanLibrary: () => apiJson<LibraryScanReport>(`${BASE}/library/scan`, { method: "POST" }),
+
+  searchMetadata: (input: MetadataSearchInput) =>
+    apiJson<MetadataCandidate[]>(`${BASE}/metadata/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
 
   getJellyfinCredential: () => apiJson<JellyfinCredentialStatus>(`${BASE}/jellyfin/credential`),
   createJellyfinCredential: (pin?: string) =>

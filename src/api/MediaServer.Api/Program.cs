@@ -49,9 +49,9 @@ builder.Services.AddScoped<CatalogHealthService>();
 builder.Services.AddHostedService<CatalogHealthWorker>();
 builder.Services.AddScoped<IOrganizer, OrganizerService>();
 
-// Real-time hub + in-process pipeline queue.
-builder.Services.AddSignalR();
-builder.Services.AddSingleton<IRealtimeNotifier, SignalRRealtimeNotifier>();
+// Real-time SSE notifier + in-process pipeline queue.
+builder.Services.AddSingleton<SseRealtimeNotifier>();
+builder.Services.AddSingleton<IRealtimeNotifier>(serviceProvider => serviceProvider.GetRequiredService<SseRealtimeNotifier>());
 builder.Services.AddSingleton<IPipelineQueue, PipelineQueue>();
 
 // Torrent engine (hosted) + coordinator that bridges it to persistence and the pipeline.
@@ -107,6 +107,7 @@ builder.Services.AddHostedService<DatabaseSnapshotWorker>();
 builder.Services.AddScoped<LibraryReadService>();
 builder.Services.AddSingleton<LibraryFileEraser>();
 builder.Services.AddScoped<LibraryDeleteService>();
+builder.Services.AddScoped<RemapService>();
 
 // Scheduled scans (missing-file drift) + on-demand metadata refresh.
 builder.Services.AddScoped<LibraryMaintenanceService>();
@@ -247,8 +248,9 @@ app.MapCatalogEndpoints();
 app.MapTorrentEndpoints();
 app.MapIngestEndpoints();
 app.MapLibraryEndpoints();
+app.MapMetadataEndpoints();
 app.MapJellyfinCredentialEndpoints();
-app.MapHub<ActivityHub>(ActivityHub.Path);
+app.MapRealtimeEndpoints();
 
 // Jellyfin-compatible surface served on the public `jellyfin` endpoint.
 app.MapJellyfinEndpoints();

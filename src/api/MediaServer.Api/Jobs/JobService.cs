@@ -4,7 +4,7 @@ using MediaServer.Api.Realtime;
 namespace MediaServer.Api.Jobs;
 
 /// <summary>
-/// Persists observable <see cref="Job"/> rows and broadcasts their lifecycle over SignalR so the UI
+/// Persists observable <see cref="Job"/> rows and broadcasts their lifecycle over the realtime stream so the UI
 /// activity view can follow background work. See <c>docs/planning/background-tasks.md</c>.
 /// </summary>
 public sealed class JobService(MediaServerDbContext database, IRealtimeNotifier notifier)

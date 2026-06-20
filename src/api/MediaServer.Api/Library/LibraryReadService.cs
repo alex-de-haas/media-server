@@ -240,6 +240,7 @@ public sealed class LibraryReadService(
         return new LibraryDetailDto(
             item.Id,
             item.PublicId,
+            TmdbId(item),
             item.CatalogId,
             item.Kind.ToString(),
             TitleFor(meta, item.Title),
@@ -299,6 +300,7 @@ public sealed class LibraryReadService(
             return new EpisodeDto(
                 episode.Id,
                 episode.PublicId,
+                TmdbId(episode),
                 episode.ParentIndexNumber,
                 episode.IndexNumber,
                 TitleFor(meta, episode.Title),
@@ -395,6 +397,12 @@ public sealed class LibraryReadService(
             ?? records.FirstOrDefault(record => record.Language.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             ?? records[0];
     }
+
+    /// <summary>The item's TMDb id (for episodes/seasons this is the series id, which is how they're identified).</summary>
+    private static string? TmdbId(MediaItem item) =>
+        string.Equals(item.IdentityProvider, "tmdb", StringComparison.OrdinalIgnoreCase)
+            ? item.IdentityProviderId
+            : item.Providers.GetValueOrDefault("tmdb");
 
     private static string TitleFor(MetadataRecord? meta, string fallback) =>
         !string.IsNullOrWhiteSpace(meta?.Title) ? meta!.Title! : fallback;

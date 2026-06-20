@@ -59,10 +59,11 @@ function tabOf(item: IngestItem, download: Download | undefined): TabKey {
 
 export function ActivitySection() {
   const [tab, setTab] = useState<TabKey>("active");
-  const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 3000 });
+  // Realtime is pushed over SSE (see RealtimeBridge); these slow intervals are only a reconnect fallback.
+  const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 20000 });
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
-  // Live torrent progress/state, joined onto each download-backed ingest item by id.
-  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 2000 });
+  // Live torrent progress/state is patched into this cache by SSE; the interval is a fallback only.
+  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 20000 });
 
   const catalogsById = useMemo(
     () => new Map((catalogs.data ?? []).map((catalog) => [catalog.id, catalog])),

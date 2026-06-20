@@ -2,7 +2,7 @@ namespace MediaServer.Api.Data;
 
 /// <summary>
 /// A torrent download. Only the durable facts and <see cref="State"/> transitions are persisted;
-/// live progress/speed/ratio/ETA are in-memory engine values broadcast over SignalR.
+/// live progress/speed/ratio/ETA are in-memory engine values broadcast over the realtime stream (SSE).
 /// </summary>
 public sealed class Download
 {

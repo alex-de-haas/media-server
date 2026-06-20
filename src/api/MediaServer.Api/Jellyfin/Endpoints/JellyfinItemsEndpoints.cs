@@ -119,6 +119,14 @@ internal static class JellyfinItemsEndpoints
             return item is null ? Results.NotFound() : JellyfinJson.Ok(item);
         });
 
+        // Endpoints Infuse probes that we have no data for. They must return an empty result, not 404 —
+        // Infuse's search fans out to /Persons first and treats its 404 as a hard failure ("Nothing
+        // Found"), so a movie that IS in the library never surfaces. LocalTrailers/MediaSegments are
+        // detail/playback probes that likewise must answer rather than 404.
+        secured.MapGet("/Persons", () => JellyfinJson.Ok(new QueryResult<BaseItemDto>([], 0)));
+        secured.MapGet("/Items/{itemId}/LocalTrailers", (string itemId) => JellyfinJson.Ok(Array.Empty<BaseItemDto>()));
+        secured.MapGet("/MediaSegments/{itemId}", (string itemId) => JellyfinJson.Ok(new QueryResult<object>([], 0)));
+
         secured.MapGet("/Shows/{seriesId}/Seasons", async (string seriesId, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
             JellyfinJson.Ok(await library.GetSeasonsAsync(seriesId, JellyfinPrincipal.AppUserId(principal), cancellationToken)));
 

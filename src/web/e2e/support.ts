@@ -31,6 +31,8 @@ export interface AppMock {
   resume?: unknown[];
   nextup?: unknown[];
   detail?: Record<string, unknown>;
+  metadataSearch?: unknown[];
+  remapTargetId?: string; // id returned by POST /library/{id}/remap
 }
 
 export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
@@ -58,6 +60,9 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path.endsWith("/played")) return route.fulfill({ json: userData({ played: method === "POST" }) });
     if (path.endsWith("/favorite")) return route.fulfill({ json: userData({ isFavorite: method === "POST" }) });
 
+    if (path === "/metadata/search") return route.fulfill({ json: mock.metadataSearch ?? [] });
+    if (/^\/library\/[^/]+\/remap$/.test(path)) return route.fulfill({ json: { id: mock.remapTargetId ?? "remapped" } });
+
     const detailId = path.match(/^\/library\/([^/]+)$/)?.[1];
     if (detailId && mock.detail?.[detailId]) return route.fulfill({ json: mock.detail[detailId] });
     if (/^\/library\/[^/]+\/episodes$/.test(path)) return route.fulfill({ json: [] });
@@ -78,9 +83,10 @@ export const aMovie = (id: string, title: string) => ({
   userData: null,
 });
 
-export const movieDetail = (id: string, title: string) => ({
+export const movieDetail = (id: string, title: string, tmdbId: string | null = null) => ({
   id,
   publicId: id,
+  tmdbId,
   catalogId: "c1",
   kind: "Movie",
   title,

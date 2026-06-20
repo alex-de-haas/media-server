@@ -1,6 +1,6 @@
 namespace MediaServer.Api.Realtime;
 
-/// <summary>Names of the SignalR client methods the hub invokes. Kept in one place so the web client stays in sync.</summary>
+/// <summary>SSE event names the notifier emits. Kept in one place so the web client stays in sync.</summary>
 public static class RealtimeEvents
 {
     public const string JobStarted = "jobStarted";

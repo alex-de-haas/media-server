@@ -57,7 +57,7 @@ flowchart TB
       META["Metadata providers"]
       PROBE["Media Probe (ffprobe)"]
       JELLY["Jellyfin Compatibility API"]
-      JOBS["Jobs + SignalR hub"]
+      JOBS["Jobs + SSE notifier"]
     end
   end
   INFUSE["Infuse / Jellyfin client"]
@@ -86,15 +86,15 @@ Backend (`api` service):
   provider blobs).
 - MonoTorrent torrent engine as a hosted service.
 - FFprobe for media probing (FFmpeg only later, if transcoding is ever added).
-- SignalR for real-time job and download progress.
+- Server-Sent Events for real-time job and download progress (server→client only).
 - An extensible automation pipeline (the orchestrator).
 
 Frontend (`web` service):
 
 - Next.js App Router, TypeScript, Tailwind, ShadCN UI.
 - Acts as a backend-for-frontend: holds the Hosty app-origin session and proxies
-  REST/SignalR to `api`, so the browser stays same-origin and iframe-safe.
-- SignalR JavaScript client, TanStack React Query for client cache.
+  REST + the SSE stream to `api`, so the browser stays same-origin and iframe-safe.
+- Server-Sent Events client (fetch-stream), TanStack React Query for client cache.
 
 Runtime and delivery:
 
@@ -138,7 +138,7 @@ No implemented feature documentation yet.
 
 Backend unit tests must use xUnit. Dependencies should be mocked with Imposter.
 New features should include corresponding unit tests scoped to the behavior they
-introduce. Hosty integration concerns (identity, Shell embedding, SignalR,
+introduce. Hosty integration concerns (identity, Shell embedding, the SSE stream,
 public endpoints) must be validated through Core-managed runtime profiles, not
 by forging tokens. Feature-specific testing requirements are documented in the
 relevant planning files until implementation is complete.
