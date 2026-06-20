@@ -1,15 +1,18 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, MoreVertical, RotateCw, SearchCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, MoreVertical, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile } from "@/lib/media-server";
-import { formatTimeAgo } from "@/lib/format";
+import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
+import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -23,12 +26,44 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { QueryState } from "@/components/states";
 import { IngestStepper, type StepActivity } from "@/components/ingest-stepper";
 import { IngestReviewDialog } from "@/components/ingest-review-dialog";
+import { AddTorrentDialog } from "@/components/add-torrent-dialog";
+
+// Download states where the torrent is no longer actively transferring (content is on disk).
+const DOWNLOAD_DONE_STATES = ["Completed", "Seeding", "StoppedSeeding"];
+
+type TabKey = "active" | "seeding" | "done";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "active", label: "Active" },
+  { key: "seeding", label: "Seeding" },
+  { key: "done", label: "Done" },
+];
+
+const EMPTY: Record<TabKey, string> = {
+  active: "Nothing in the pipeline right now.",
+  seeding: "No torrents are seeding.",
+  done: "No completed items yet.",
+};
+
+function isDownloadPaused(download: Download): boolean {
+  return /paus/i.test(download.engineState ?? download.state);
+}
+
+// Which tab an item belongs to: still running the pipeline (active), published and seeding, or settled.
+// A seeding item is one whose pipeline finished while its torrent kept uploading; a done item has had its
+// download torn down (or never seeded).
+function tabOf(item: IngestItem, download: Download | undefined): TabKey {
+  if (item.status !== "Done") return "active";
+  return download?.state === "Seeding" ? "seeding" : "done";
+}
 
 export function ActivitySection() {
+  const [tab, setTab] = useState<TabKey>("active");
   const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 3000 });
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
-  // Shares the downloads cache with the Downloads page; lets the Download step show live transfer/pause state.
-  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 3000 });
+  // Live torrent progress/state, joined onto each download-backed ingest item by id.
+  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 2000 });
+
   const catalogsById = useMemo(
     () => new Map((catalogs.data ?? []).map((catalog) => [catalog.id, catalog])),
     [catalogs.data],
@@ -38,40 +73,76 @@ export function ActivitySection() {
     [downloads.data],
   );
 
+  const downloadFor = (item: IngestItem) => (item.downloadId ? downloadsById.get(item.downloadId) : undefined);
+
+  const counts = useMemo(() => {
+    const tally: Record<TabKey, number> = { active: 0, seeding: 0, done: 0 };
+    for (const item of ingest.data ?? []) {
+      tally[tabOf(item, item.downloadId ? downloadsById.get(item.downloadId) : undefined)] += 1;
+    }
+    return tally;
+  }, [ingest.data, downloadsById]);
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Pipeline activity</CardTitle>
-        <CardDescription>Each torrent runs through the ingest pipeline. Progress shows on every item.</CardDescription>
+        <CardTitle>Activity</CardTitle>
+        <CardDescription>Torrents from download through the ingest pipeline into your library.</CardDescription>
+        <CardAction>
+          <AddTorrentDialog />
+        </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2 text-sm">
-        <QueryState query={ingest} empty="Nothing in the pipeline.">
-          {(items) =>
-            items.map((item) => (
+      <CardContent className="flex flex-col gap-3 text-sm">
+        <TabBar tab={tab} counts={counts} onChange={setTab} />
+        <QueryState query={ingest} empty="Nothing here yet. Add a torrent to get started.">
+          {(items) => {
+            const visible = items.filter((item) => tabOf(item, downloadFor(item)) === tab);
+            if (visible.length === 0) {
+              return <p className="text-muted-foreground text-sm">{EMPTY[tab]}</p>;
+            }
+            return visible.map((item) => (
               <IngestRow
                 key={item.id}
                 item={item}
                 catalog={catalogsById.get(item.catalogId)}
-                download={item.downloadId ? downloadsById.get(item.downloadId) : undefined}
+                download={downloadFor(item)}
               />
-            ))
-          }
+            ));
+          }}
         </QueryState>
       </CardContent>
     </Card>
   );
 }
 
-// Download states where the torrent is no longer actively transferring (content is on disk).
-const DOWNLOAD_DONE_STATES = ["Completed", "Seeding", "StoppedSeeding"];
-
-function isDownloadPaused(download: Download): boolean {
-  return /paus/i.test(download.engineState ?? download.state);
+function TabBar({ tab, counts, onChange }: { tab: TabKey; counts: Record<TabKey, number>; onChange: (tab: TabKey) => void }) {
+  return (
+    <div role="tablist" className="flex items-center gap-1 border-b">
+      {TABS.map(({ key, label }) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={tab === key}
+          onClick={() => onChange(key)}
+          className={cn(
+            "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+            tab === key
+              ? "border-brand text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {label}
+          {counts[key] > 0 && <span className="text-muted-foreground ml-1.5 text-xs">{counts[key]}</span>}
+        </button>
+      ))}
+    </div>
+  );
 }
 
-// The Download step maps to a torrent; reflect its live transfer/pause state on that step so the
-// stepper shows a spinner while downloading and a pause glyph when the torrent is paused. Other
-// stages fall back to the coarse ingest `status` (Running → spinner) inside the stepper itself.
+// The Download step maps to a torrent; reflect its live transfer/pause state on that step so the stepper
+// shows a spinner while downloading and a pause glyph when paused. Other stages fall back to the coarse
+// ingest `status` inside the stepper itself.
 function downloadActivity(item: IngestItem, download: Download | undefined): StepActivity | undefined {
   if (item.stage !== "Download" || !download) return undefined;
   if (isDownloadPaused(download)) return "paused";
@@ -79,8 +150,8 @@ function downloadActivity(item: IngestItem, download: Download | undefined): Ste
   return undefined;
 }
 
-// A human explanation of why an item sits where it does — especially the "Pending with no error"
-// states that otherwise look identical and inert. Mirrors the pipeline stage semantics on the server.
+// A human explanation of why an item sits where it does — especially the "Pending with no error" states
+// that otherwise look identical and inert. Mirrors the pipeline stage semantics on the server.
 function stateHint(item: IngestItem, download: Download | undefined): string | null {
   if (item.status !== "Pending") return null;
   if (item.lastError) return null; // surfaced through the warning icon instead.
@@ -99,45 +170,95 @@ function warningText(item: IngestItem): string | null {
   return null;
 }
 
+// Routes a card removal to the right backend operation. Non-published items have no library copy to keep,
+// so their files are always purged; published items respect the operator's "delete files" choice.
+async function removeItem(item: IngestItem, download: Download | undefined, deleteFiles: boolean): Promise<void> {
+  const published = item.status === "Done" && item.mediaItemId != null;
+
+  if (download) {
+    // DownloadDeletionService stops the torrent and reconciles everything it produced.
+    await mediaServer.removeDownload(download.id, published ? deleteFiles : true);
+    if (published && !deleteFiles) {
+      // Keep-files detaches (but keeps) the published ingest row — drop it so the card disappears.
+      await mediaServer.deleteIngest(item.id);
+    }
+    return;
+  }
+
+  if (item.mediaItemId) {
+    // Download already torn down: act on the published library item, then remove the tracking row.
+    if (deleteFiles) {
+      await mediaServer.deleteLibraryItem(item.mediaItemId, true);
+    }
+    await mediaServer.deleteIngest(item.id);
+    return;
+  }
+
+  await mediaServer.deleteIngest(item.id);
+}
+
 function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Catalog | undefined; download: Download | undefined }) {
   const { role } = useSession();
   const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["ingest"] });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["ingest"] });
+    queryClient.invalidateQueries({ queryKey: ["downloads"] });
+  };
+  const onError = (action: string) => (error: unknown) => toast.error(`Couldn’t ${action}`, { description: errorMessage(error) });
+
   const retry = useMutation({
     mutationFn: () => mediaServer.retryIngest(item.id),
     onSuccess: () => {
       invalidate();
       toast.success("Retry queued");
     },
-    onError: (error) => toast.error("Couldn’t retry", { description: errorMessage(error) }),
+    onError: onError("retry"),
   });
-  const remove = useMutation({
-    mutationFn: () => mediaServer.deleteIngest(item.id),
+  const pause = useMutation({ mutationFn: (id: string) => mediaServer.pauseDownload(id), onSuccess: invalidate, onError: onError("pause download") });
+  const resume = useMutation({ mutationFn: (id: string) => mediaServer.resumeDownload(id), onSuccess: invalidate, onError: onError("resume download") });
+  const stopSeeding = useMutation({
+    mutationFn: (id: string) => mediaServer.stopSeeding(id),
     onSuccess: () => {
       invalidate();
-      toast.success("Removed from pipeline");
+      toast.success("Stopped seeding");
     },
-    onError: (error) => toast.error("Couldn’t remove item", { description: errorMessage(error) }),
+    onError: onError("stop seeding"),
+  });
+  const remove = useMutation({
+    mutationFn: (deleteFiles: boolean) => removeItem(item, download, deleteFiles),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Removed");
+    },
+    onError: onError("remove item"),
   });
 
   const [reviewOpen, setReviewOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const title = item.downloadName ?? item.sourceFiles[0]?.relativePath ?? "Untitled item";
+  const category = tabOf(item, download);
+  const title = item.mediaTitle ?? item.downloadName ?? item.sourceFiles[0]?.relativePath ?? "Untitled item";
   const age = formatTimeAgo(item.createdAt);
   const hint = stateHint(item, download);
   const warning = warningText(item);
-  const activity = downloadActivity(item, download);
+  const published = item.status === "Done" && item.mediaItemId != null;
 
   const meta = [catalog?.name, age && `added ${age}`, item.attemptCount > 0 && `attempt ${item.attemptCount}/5`]
     .filter(Boolean)
     .join(" · ");
 
-  const retryable = item.status === "Failed" || item.status === "NeedsReview";
+  const transferring = download !== undefined && !DOWNLOAD_DONE_STATES.includes(download.state);
 
   return (
     <div className="flex flex-col gap-3 rounded-md border p-3">
-      <IngestStepper stage={item.stage} stagesCompleted={item.stagesCompleted} status={item.status} activity={activity} />
+      {category === "active" && (
+        <IngestStepper
+          stage={item.stage}
+          stagesCompleted={item.stagesCompleted}
+          status={item.status}
+          activity={downloadActivity(item, download)}
+        />
+      )}
 
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-1">
@@ -145,6 +266,7 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
             <p className="truncate font-medium" title={title}>
               {title}
             </p>
+            {category === "seeding" && <Badge variant="secondary">Seeding</Badge>}
             {warning && (
               <Tooltip>
                 <TooltipTrigger
@@ -163,19 +285,30 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
             )}
           </div>
           {meta && <p className="text-muted-foreground text-xs">{meta}</p>}
-          {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
-          {item.status !== "NeedsReview" && item.sourceFiles.length > 0 && <FileSummary files={item.sourceFiles} />}
+          {category === "active" && hint && <p className="text-muted-foreground text-xs">{hint}</p>}
+          {category === "active" && item.status !== "NeedsReview" && item.sourceFiles.length > 0 && (
+            <FileSummary files={item.sourceFiles} />
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          {transferring && download && (
+            isDownloadPaused(download) ? (
+              <IconAction label="Resume" icon={<Play />} onClick={() => resume.mutate(download.id)} />
+            ) : (
+              <IconAction label="Pause" icon={<Pause />} onClick={() => pause.mutate(download.id)} />
+            )
+          )}
+          {category === "seeding" && download && (
+            <IconAction label="Stop seeding" icon={<Square />} onClick={() => stopSeeding.mutate(download.id)} />
+          )}
           {item.status === "NeedsReview" && (
             <IconAction label="Resolve match" icon={<SearchCheck />} onClick={() => setReviewOpen(true)} />
           )}
           {item.status === "Failed" && (
             <IconAction label="Retry" icon={<RotateCw />} onClick={() => retry.mutate()} disabled={retry.isPending} />
           )}
-
-          {(role === "admin" || (retryable && item.status !== "Failed")) && (
+          {role === "admin" && (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -185,23 +318,24 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
                 }
               />
               <DropdownMenuContent>
-                {retryable && item.status !== "Failed" && (
+                {item.status === "NeedsReview" && (
                   <DropdownMenuItem onClick={() => retry.mutate()} disabled={retry.isPending}>
                     <RotateCw />
                     Retry
                   </DropdownMenuItem>
                 )}
-                {role === "admin" && (
-                  <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
-                    <Trash2 />
-                    Remove
-                  </DropdownMenuItem>
-                )}
+                <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
+                  <Trash2 />
+                  Remove
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
         </div>
       </div>
+
+      {category === "active" && transferring && download && item.stage === "Download" && <DownloadProgress download={download} />}
+      {category === "seeding" && download && <SeedingStats download={download} />}
 
       {item.status === "NeedsReview" && (
         <IngestReviewDialog
@@ -216,15 +350,47 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
         />
       )}
 
-      <RemoveIngestDialog
+      <RemoveDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title={title}
-        onConfirm={() => {
-          remove.mutate();
+        published={published}
+        onConfirm={(deleteFiles) => {
+          remove.mutate(deleteFiles);
           setConfirmOpen(false);
         }}
       />
+    </div>
+  );
+}
+
+function DownloadProgress({ download }: { download: Download }) {
+  const percent = download.percentComplete ?? 0;
+  const eta =
+    download.downloadRateBytesPerSecond && download.sizeBytes
+      ? (download.sizeBytes * (1 - percent / 100)) / download.downloadRateBytesPerSecond
+      : null;
+
+  return (
+    <div>
+      <div className="bg-secondary h-2 w-full overflow-hidden rounded-full">
+        <div className="bg-primary h-full transition-[width] duration-500" style={{ width: `${Math.min(percent, 100)}%` }} />
+      </div>
+      <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        <span>{formatPercent(download.percentComplete)}</span>
+        <span>↓ {formatSpeed(download.downloadRateBytesPerSecond)}</span>
+        <span>ETA {formatEta(eta)}</span>
+      </div>
+    </div>
+  );
+}
+
+function SeedingStats({ download }: { download: Download }) {
+  return (
+    <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+      <span>↑ {formatSpeed(download.uploadRateBytesPerSecond)}</span>
+      <span>ratio {download.ratio?.toFixed(2) ?? "—"}</span>
+      <span>{download.peers ?? 0} peers</span>
     </div>
   );
 }
@@ -273,33 +439,64 @@ function IconAction({
   );
 }
 
-function RemoveIngestDialog({
+function RemoveDialog({
   open,
   onOpenChange,
   title,
+  published,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
-  onConfirm: () => void;
+  published: boolean;
+  onConfirm: (deleteFiles: boolean) => void;
 }) {
+  const checkboxId = useId();
+  // Default to keeping the published library item; the checkbox only appears once there is one to keep.
+  const [deleteFiles, setDeleteFiles] = useState(false);
+
+  // Re-apply the default each time the dialog (re)opens so a prior toggle (then cancel) doesn't carry over.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setDeleteFiles(false);
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Remove from pipeline?</DialogTitle>
+          <DialogTitle>Remove item?</DialogTitle>
           <DialogDescription>
-            Remove <span className="text-foreground font-medium">{title}</span> from the ingest pipeline. The download and
-            any published library item are left untouched.
+            Remove <span className="text-foreground font-medium">{title}</span>
+            {published ? " from the list." : " and its download."}
           </DialogDescription>
         </DialogHeader>
+
+        {published && (
+          <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
+            <Checkbox
+              id={checkboxId}
+              className="mt-0.5"
+              checked={deleteFiles}
+              onCheckedChange={(checked) => setDeleteFiles(checked === true)}
+            />
+            <label htmlFor={checkboxId} className="cursor-pointer select-none">
+              Delete media files from disk
+              <span className="text-muted-foreground block text-xs">
+                Also removes the published library item and its files. Otherwise it stays in your library.
+              </span>
+            </label>
+          </div>
+        )}
+
         <DialogFooter>
           <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" size="sm" onClick={onConfirm}>
-            Remove
+          <Button type="button" variant="destructive" size="sm" onClick={() => onConfirm(deleteFiles)}>
+            {deleteFiles ? "Remove + delete files" : "Remove"}
           </Button>
         </DialogFooter>
       </DialogContent>

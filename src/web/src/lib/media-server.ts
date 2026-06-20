@@ -98,6 +98,7 @@ export interface IngestItem {
   catalogId: string;
   downloadId: string | null;
   downloadName: string | null;
+  mediaTitle: string | null;
   mediaItemId: string | null;
   stage: string;
   status: string;

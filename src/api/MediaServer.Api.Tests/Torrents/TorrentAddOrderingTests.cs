@@ -3,6 +3,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Pipeline;
+using MediaServer.Api.Tests.Pipeline;
 using MediaServer.Api.Torrents;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -45,7 +46,9 @@ public sealed class TorrentAddOrderingTests : IDisposable
         var service = new TorrentService(
             _database, engine, new FilesystemInspector(new HardLinker()), new MediaServerSettings(),
             new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root },
-            new PipelineQueue(), NullLogger<TorrentService>.Instance);
+            new PipelineQueue(),
+            new DownloadCleanupService(_database, engine, new FakeOrganizer(), NullLogger<DownloadCleanupService>.Instance),
+            NullLogger<TorrentService>.Instance);
 
         await service.AddAsync(new AddTorrentRequest(catalog.Id, "magnet:?xt=urn:btih:feedface", null, null), CancellationToken.None);
 

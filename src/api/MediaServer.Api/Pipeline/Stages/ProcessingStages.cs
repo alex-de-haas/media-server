@@ -96,16 +96,19 @@ public sealed class OrganizeStage(
 
         await organizer.OrganizeAsync(context.Download, context.SourceFiles, context.Catalog, cancellationToken);
 
-        // Seeding policy: keep seeding from files/, or stop and unlink the seed copy (library/ persists).
+        // Seeding policy. Keep seeding from files/, or ensure the torrent is not seeding. The files/ seed
+        // copy and the Download row are intentionally NOT torn down here — that happens once the item
+        // reaches Done, so a stall before publish (e.g. NeedsReview) never strands a torn-down item that
+        // still needs its source files. See DownloadCleanupService.
         if (context.Download.KeepSeeding)
         {
             context.Download.State = DownloadState.Seeding;
         }
         else
         {
+            // Belt-and-suspenders: the coordinator already stops the engine on completion when seeding is
+            // off. Leave State = Completed so the Done teardown recognises this download as not-seeding.
             await engine.StopAsync(context.Download.InfoHash, cancellationToken);
-            await organizer.UnlinkSeedCopyAsync(context.Download, cancellationToken);
-            context.Download.State = DownloadState.StoppedSeeding;
         }
 
         await database.SaveChangesAsync(cancellationToken);

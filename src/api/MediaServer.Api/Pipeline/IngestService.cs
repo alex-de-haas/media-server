@@ -21,8 +21,10 @@ public sealed class IngestService(
 
         var sourceFilesByDownload = await LoadSourceFilesAsync(items, cancellationToken);
         var downloadNames = await LoadDownloadNamesAsync(items, cancellationToken);
+        var mediaTitles = await LoadMediaTitlesAsync(items, cancellationToken);
         return items
-            .Select(item => IngestItemResponse.From(item, SourceFilesFor(item, sourceFilesByDownload), DownloadNameFor(item, downloadNames)))
+            .Select(item => IngestItemResponse.From(
+                item, SourceFilesFor(item, sourceFilesByDownload), DownloadNameFor(item, downloadNames), MediaTitleFor(item, mediaTitles)))
             .ToList();
     }
 
@@ -40,7 +42,10 @@ public sealed class IngestService(
         var downloadName = item.DownloadId is { } id2
             ? await database.Downloads.AsNoTracking().Where(download => download.Id == id2).Select(download => download.Name).FirstOrDefaultAsync(cancellationToken)
             : null;
-        return IngestItemResponse.From(item, sourceFiles, downloadName);
+        var mediaTitle = item.MediaItemId is { } mediaId
+            ? await database.MediaItems.AsNoTracking().Where(media => media.Id == mediaId).Select(media => media.Title).FirstOrDefaultAsync(cancellationToken)
+            : null;
+        return IngestItemResponse.From(item, sourceFiles, downloadName, mediaTitle);
     }
 
     public async Task<bool> RetryAsync(Guid id, CancellationToken cancellationToken)
@@ -186,4 +191,21 @@ public sealed class IngestService(
 
     private static string? DownloadNameFor(IngestItem item, Dictionary<Guid, string?> byDownload) =>
         item.DownloadId is { } downloadId && byDownload.TryGetValue(downloadId, out var name) ? name : null;
+
+    private async Task<Dictionary<Guid, string>> LoadMediaTitlesAsync(
+        IReadOnlyList<IngestItem> items, CancellationToken cancellationToken)
+    {
+        var mediaItemIds = items.Select(item => item.MediaItemId).OfType<Guid>().Distinct().ToList();
+        if (mediaItemIds.Count == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        return await database.MediaItems.AsNoTracking()
+            .Where(media => mediaItemIds.Contains(media.Id))
+            .ToDictionaryAsync(media => media.Id, media => media.Title, cancellationToken);
+    }
+
+    private static string? MediaTitleFor(IngestItem item, Dictionary<Guid, string> byMediaItem) =>
+        item.MediaItemId is { } mediaItemId && byMediaItem.TryGetValue(mediaItemId, out var title) ? title : null;
 }

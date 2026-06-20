@@ -3,6 +3,7 @@ using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Realtime;
+using MediaServer.Api.Torrents;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Pipeline;
@@ -144,7 +145,56 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
             }
         }
 
+        // All processing stages succeeded. The download backing is now disposable unless the torrent is
+        // still seeding: reclaim the files/ seed copy and drop the Download + SourceFiles, leaving only the
+        // published library item. A fresh read guards against a concurrent stop-seeding flipping the state.
+        var teardownId = await ResolveTeardownAsync(database, download, cancellationToken);
+        if (teardownId is not null)
+        {
+            item.DownloadId = null; // Detach the published record; FinishAsync persists it before teardown.
+        }
+
         await FinishAsync(database, notifier, item, IngestStatus.Done, null, cancellationToken);
+
+        if (teardownId is { } downloadToTeardown)
+        {
+            await TeardownDownloadBackingAsync(downloadToTeardown, cancellationToken);
+        }
+    }
+
+    /// <summary>Returns the download id whose backing should be torn down now (content published and the
+    /// torrent not seeding), or null to keep it. Reads the state fresh to catch a stop-seeding that flipped
+    /// it after this drive began.</summary>
+    private static async Task<Guid?> ResolveTeardownAsync(
+        MediaServerDbContext database, Download? download, CancellationToken cancellationToken)
+    {
+        if (download is null)
+        {
+            return null;
+        }
+
+        var state = await database.Downloads.AsNoTracking()
+            .Where(candidate => candidate.Id == download.Id)
+            .Select(candidate => (DownloadState?)candidate.State)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return state is null or DownloadState.Seeding ? null : download.Id;
+    }
+
+    private async Task TeardownDownloadBackingAsync(Guid downloadId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<DownloadCleanupService>()
+                .TeardownAsync(downloadId, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // Best-effort housekeeping: the item is already published and detached. A failure leaves an
+            // orphaned download row / files/ seed copy (reclaimable later) — never un-publish over it.
+            logger.LogError(exception, "Failed to tear down download backing {DownloadId} after publish.", downloadId);
+        }
     }
 
     private async Task<bool> TryClaimAsync(MediaServerDbContext database, IngestItem item, CancellationToken cancellationToken)
