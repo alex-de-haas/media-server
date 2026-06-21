@@ -121,6 +121,7 @@ builder.Services.AddSingleton<JellyfinServerContext>();
 builder.Services.AddSingleton<JellyfinItemMapper>();
 builder.Services.AddScoped<JellyfinCredentialService>();
 builder.Services.AddScoped<UserDataService>();
+builder.Services.AddScoped<JellyfinCatalogArtwork>();
 builder.Services.AddScoped<JellyfinLibraryService>();
 builder.Services.AddScoped<JellyfinImageService>();
 builder.Services.AddScoped<JellyfinStreamResolver>();

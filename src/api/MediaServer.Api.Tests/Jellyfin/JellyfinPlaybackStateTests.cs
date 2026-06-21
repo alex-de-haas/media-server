@@ -41,7 +41,8 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         // The user-data service and the library share one scoped context, mirroring the request pipeline.
         _context = _db.Create();
         _userData = new UserDataService(_context, _time);
-        _library = new JellyfinLibraryService(_context, new JellyfinItemMapper(server), _userData, settings);
+        _library = new JellyfinLibraryService(
+            _context, new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_context), _userData, settings);
         Seed();
     }
 

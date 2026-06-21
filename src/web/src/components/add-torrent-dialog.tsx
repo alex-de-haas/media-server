@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer } from "@/lib/media-server";
+import { buildAddTorrentTasks, type TorrentFile } from "@/lib/add-torrent";
 import { formatBytes } from "@/lib/format";
 import { inputClass, errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
@@ -25,41 +26,61 @@ export function AddTorrentDialog() {
   const [catalogId, setCatalogId] = useState("");
   const [magnet, setMagnet] = useState("");
   const [keepSeeding, setKeepSeeding] = useState(false);
-  const [torrentFileBase64, setTorrentFileBase64] = useState<string | undefined>(undefined);
+  const [files, setFiles] = useState<TorrentFile[]>([]);
 
   const selectedCatalog = catalogs.data?.find((catalog) => catalog.id === catalogId);
+  const sourceCount = (magnet.trim() ? 1 : 0) + files.length;
 
+  // Each source is its own request (the backend takes one per call); run them sequentially so adds of the
+  // same info hash don't race, and report a partial-success summary rather than failing the whole batch.
   const add = useMutation({
-    mutationFn: () =>
-      mediaServer.addTorrent({
-        catalogId,
-        magnet: magnet.trim() || undefined,
-        torrentFileBase64,
-        keepSeeding,
-      }),
-    onSuccess: () => {
-      setMagnet("");
-      setTorrentFileBase64(undefined);
-      setOpen(false);
+    mutationFn: async () => {
+      const tasks = buildAddTorrentTasks({ catalogId, magnet, files, keepSeeding });
+      let added = 0;
+      const failures: string[] = [];
+      for (const task of tasks) {
+        try {
+          await mediaServer.addTorrent(task.input);
+          added += 1;
+        } catch (error) {
+          failures.push(`${task.label}: ${errorMessage(error)}`);
+        }
+      }
+      return { added, failures };
+    },
+    onSuccess: ({ added, failures }) => {
       queryClient.invalidateQueries({ queryKey: ["downloads"] });
       queryClient.invalidateQueries({ queryKey: ["ingest"] });
-      toast.success("Torrent added");
+
+      if (added > 0) {
+        setMagnet("");
+        setFiles([]);
+        setOpen(false);
+        const suffix = failures.length > 0 ? `, ${failures.length} failed` : "";
+        toast.success(`Added ${added} torrent${added === 1 ? "" : "s"}${suffix}`);
+      } else {
+        toast.error("Couldn’t add torrent", { description: failures.join("\n") });
+      }
     },
     onError: (error) => toast.error("Couldn’t add torrent", { description: errorMessage(error) }),
   });
 
-  async function onFile(file: File | undefined) {
-    if (!file) {
-      setTorrentFileBase64(undefined);
+  async function onFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) {
       return;
     }
-    const buffer = await file.arrayBuffer();
-    let binary = "";
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.length; i += 1) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    setTorrentFileBase64(btoa(binary));
+    const picked = await Promise.all(
+      Array.from(fileList).map(async (file) => ({ name: file.name, size: file.size, base64: await toBase64(file) })),
+    );
+    // Skip files already selected (same name + size) so re-picking doesn't duplicate them.
+    setFiles((current) => {
+      const seen = new Set(current.map((file) => `${file.name}:${file.size}`));
+      return [...current, ...picked.filter((file) => !seen.has(`${file.name}:${file.size}`))];
+    });
+  }
+
+  function removeFile(index: number) {
+    setFiles((current) => current.filter((_, i) => i !== index));
   }
 
   return (
@@ -72,14 +93,14 @@ export function AddTorrentDialog() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add torrent</DialogTitle>
-            <DialogDescription>Magnet link or .torrent file, into a chosen catalog.</DialogDescription>
+            <DialogDescription>Magnet link or .torrent files, into a chosen catalog.</DialogDescription>
           </DialogHeader>
 
           <form
             className="flex flex-col gap-3 text-sm"
             onSubmit={(e) => {
               e.preventDefault();
-              if (catalogId && (magnet.trim() || torrentFileBase64)) add.mutate();
+              if (catalogId && sourceCount > 0) add.mutate();
             }}
           >
             <label className="flex flex-col gap-1">
@@ -110,14 +131,44 @@ export function AddTorrentDialog() {
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-xs">…or a .torrent file</span>
+              <span className="text-muted-foreground text-xs">…or one or more .torrent files</span>
               <input
                 type="file"
                 accept=".torrent"
-                onChange={(e) => onFile(e.target.files?.[0])}
+                multiple
+                onChange={(e) => {
+                  void onFiles(e.target.files);
+                  e.target.value = ""; // allow re-picking a file after it was removed
+                }}
                 className="text-muted-foreground file:bg-secondary file:text-secondary-foreground file:mr-3 file:rounded-md file:border-0 file:px-2.5 file:py-1 file:text-xs text-xs"
               />
             </label>
+
+            {files.length > 0 && (
+              <ul className="flex flex-col gap-1">
+                {files.map((file, index) => (
+                  <li
+                    key={`${file.name}:${file.size}`}
+                    className="flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-xs"
+                  >
+                    <span className="truncate" title={file.name}>
+                      {file.name}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="text-muted-foreground">{formatBytes(file.size)}</span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${file.name}`}
+                        className="text-muted-foreground hover:text-foreground rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => removeFile(index)}
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
 
             <label className="flex items-center gap-2">
               <Checkbox checked={keepSeeding} onCheckedChange={(checked) => setKeepSeeding(checked === true)} />
@@ -128,8 +179,8 @@ export function AddTorrentDialog() {
               <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" size="sm" disabled={add.isPending || !catalogId || (!magnet.trim() && !torrentFileBase64)}>
-                {add.isPending ? "Adding…" : "Add torrent"}
+              <Button type="submit" size="sm" disabled={add.isPending || !catalogId || sourceCount === 0}>
+                {add.isPending ? "Adding…" : sourceCount > 1 ? `Add ${sourceCount} torrents` : "Add torrent"}
               </Button>
             </DialogFooter>
           </form>
@@ -137,4 +188,18 @@ export function AddTorrentDialog() {
       </Dialog>
     </>
   );
+}
+
+// FileReader does the base64 encoding natively (non-blocking), unlike a per-character JS loop which
+// freezes the UI on larger .torrent files. readAsDataURL yields "data:...;base64,XXXX" — strip the prefix.
+function toBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
 }
