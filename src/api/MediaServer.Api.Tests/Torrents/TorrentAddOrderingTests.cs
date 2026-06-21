@@ -47,6 +47,7 @@ public sealed class TorrentAddOrderingTests : IDisposable
             _database, engine, new FilesystemInspector(), new MediaServerSettings(),
             new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root },
             new PipelineQueue(),
+            new DownloadDeletionService(_database, engine, NullLogger<DownloadDeletionService>.Instance),
             NullLogger<TorrentService>.Instance);
 
         await service.AddAsync(new AddTorrentRequest(catalog.Id, "magnet:?xt=urn:btih:feedface", null, null), CancellationToken.None);

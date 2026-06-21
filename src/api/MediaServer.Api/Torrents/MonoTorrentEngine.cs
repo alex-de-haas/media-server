@@ -200,6 +200,9 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         var engine = RequireEngine();
         if (!_managers.TryGetValue(infoHash, out var manager))
         {
+            // Not loaded (e.g. a completed download that was not resumed after restart) — still clear any
+            // persisted fast-resume so a re-added torrent re-checks instead of trusting stale "complete" data.
+            DeleteResumeData(infoHash);
             return;
         }
 
@@ -228,6 +231,34 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         _managers.TryRemove(infoHash, out _);
         manager.TorrentStateChanged -= OnTorrentStateChanged;
         _completionRaised.TryRemove(infoHash, out _);
+
+        DeleteResumeData(infoHash); // Belt-and-suspenders on top of CacheDataOnly.
+    }
+
+    /// <summary>Deletes the persisted fast-resume file for an info hash, if present. The on-disk name is the
+    /// info-hash hex; matched case-insensitively. Safe to call whether or not the torrent is loaded.</summary>
+    private void DeleteResumeData(string infoHash)
+    {
+        try
+        {
+            var fastResumeDir = Path.Combine(_hosty.AppDataDir, "torrent-engine", "fastresume");
+            if (!Directory.Exists(fastResumeDir))
+            {
+                return;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(fastResumeDir, "*.fresume"))
+            {
+                if (string.Equals(Path.GetFileNameWithoutExtension(file), infoHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(file);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "Failed to clear fast-resume for {InfoHash}.", infoHash);
+        }
     }
 
     public TorrentSnapshot? GetSnapshot(string infoHash) =>

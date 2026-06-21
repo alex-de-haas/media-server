@@ -20,6 +20,7 @@ public sealed class TorrentService(
     MediaServerSettings settings,
     HostyOptions hosty,
     IPipelineQueue pipelineQueue,
+    DownloadDeletionService downloadDeletion,
     ILogger<TorrentService> logger)
 {
     public async Task<DownloadResponse> AddAsync(AddTorrentRequest request, CancellationToken cancellationToken)
@@ -39,9 +40,20 @@ public sealed class TorrentService(
             throw new TorrentRequestException($"Could not parse the torrent source: {exception.Message}");
         }
 
-        if (await database.Downloads.AnyAsync(candidate => candidate.InfoHash == descriptor.InfoHash, cancellationToken))
+        // Block only an actively-managed torrent. A stale download for this info hash — orphaned (no ingest),
+        // or whose only ingest(s) failed (e.g. a phantom completion the operator is re-adding) — is reclaimed:
+        // drop it along with its staging and engine resume state, then add fresh below.
+        var existing = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.InfoHash == descriptor.InfoHash, cancellationToken);
+        if (existing is not null)
         {
-            throw new TorrentRequestException("This torrent is already being managed.");
+            var managed = await database.IngestItems
+                .AnyAsync(item => item.DownloadId == existing.Id && item.Status != IngestStatus.Failed, cancellationToken);
+            if (managed)
+            {
+                throw new TorrentRequestException("This torrent is already being managed.");
+            }
+
+            await downloadDeletion.DeleteAsync(existing.Id, deleteFiles: true, cancellationToken);
         }
 
         var paths = CatalogPaths.For(catalog);
