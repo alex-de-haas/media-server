@@ -15,21 +15,59 @@ public sealed record ParsedName(MediaKind Kind, string Title, int? Year, int? Se
 /// </summary>
 public interface INameParser
 {
-    ParsedName Parse(string name, CatalogType catalogType);
+    /// <param name="releaseGroups">
+    /// Operator-configured release-group tokens to strip from the name before parsing (case-insensitive,
+    /// whole-word). Null or empty leaves the name untouched. See <c>AppSettings.CustomReleaseGroups</c>.
+    /// </param>
+    ParsedName Parse(string name, CatalogType catalogType, IReadOnlyCollection<string>? releaseGroups = null);
 }
 
 public sealed partial class NameParser : INameParser
 {
-    public ParsedName Parse(string name, CatalogType catalogType)
+    public ParsedName Parse(string name, CatalogType catalogType, IReadOnlyCollection<string>? releaseGroups = null)
     {
-        var cleaned = Clean(StripExtension(name));
+        // Strip configured release groups from the raw name first, so both the cleaned form (movie/series
+        // regex) and the AnitomySharp input (anime) are free of them.
+        var stripped = StripReleaseGroups(name, releaseGroups);
+        var cleaned = Clean(StripExtension(stripped));
 
         return catalogType switch
         {
-            CatalogType.Anime => ParseAnime(name, cleaned),
+            CatalogType.Anime => ParseAnime(stripped, cleaned),
             CatalogType.Series => ParseSeries(cleaned),
             _ => ParseMovie(cleaned),
         };
+    }
+
+    /// <summary>
+    /// Removes each configured release group from the raw name before normalization, so groups never leak
+    /// into a parsed title — whether it comes from the movie/series regex on the cleaned name or from
+    /// AnitomySharp on the raw name. A group's words may be separated by any common delimiter
+    /// (<c>.</c>, <c>_</c>, <c>-</c>, space) in the file name, and the whole token is bounded by
+    /// non-alphanumeric characters (or the string ends). That makes the match whole-word and
+    /// case-insensitive — it never clips a real title word (or one in another script) — and handles
+    /// bracket/dash-wrapped groups like <c>[Group]</c> that a <c>\b</c> boundary would miss.
+    /// </summary>
+    private static string StripReleaseGroups(string name, IReadOnlyCollection<string>? releaseGroups)
+    {
+        if (releaseGroups is null || releaseGroups.Count == 0)
+        {
+            return name;
+        }
+
+        foreach (var group in releaseGroups)
+        {
+            var words = Clean(group).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length == 0)
+            {
+                continue;
+            }
+
+            var token = string.Join(@"[\s._+\-]+", words.Select(Regex.Escape));
+            name = Regex.Replace(name, $@"(?<![\p{{L}}\p{{N}}]){token}(?![\p{{L}}\p{{N}}])", " ", RegexOptions.IgnoreCase);
+        }
+
+        return name;
     }
 
     private static ParsedName ParseMovie(string cleaned)

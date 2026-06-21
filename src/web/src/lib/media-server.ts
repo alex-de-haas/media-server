@@ -84,6 +84,13 @@ export interface IngestSourceFile {
   sizeBytes: number;
   assignmentStatus: string;
   mediaItemId: string | null;
+  // Name-parsed hints from the backend (computed from relativePath) used to pre-fill the review dialog:
+  // the corrected title to search, and per-file season/episode. season/episode are null for movies or
+  // when the filename has no SxxEyy pattern.
+  parsedTitle: string;
+  parsedYear: number | null;
+  parsedSeason: number | null;
+  parsedEpisode: number | null;
 }
 
 export interface MetadataCandidate {
@@ -127,6 +134,12 @@ export interface MetadataSearchInput {
   title: string;
   year?: number | null;
   kind?: "Movie" | "Series" | "Season" | "Episode" | "Video" | null;
+}
+
+// Operator-editable application settings (persisted server-side, distinct from manifest config).
+export interface AppSettings {
+  // Release-group / tag tokens stripped from a file name before metadata identification.
+  customReleaseGroups: string[];
 }
 
 // Reassigns an already-published leaf (movie/episode) to a corrected identity; the backend rebuilds the
@@ -323,6 +336,14 @@ export const mediaServer = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
     }),
+  getSettings: () => apiJson<AppSettings>(`${BASE}/settings`),
+  updateSettings: (input: AppSettings) =>
+    apiJson<AppSettings>(`${BASE}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+
   deleteIngest: (id: string) => send(`/ingest/${id}`, "DELETE"),
   deleteDoneIngest: async () =>
     (await apiJson<{ removed: number }>(`${BASE}/ingest/done`, { method: "DELETE" })).removed,

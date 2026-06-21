@@ -36,7 +36,7 @@ public sealed class RemapServiceTests : IDisposable
         var sandbox = new CatalogPathSandbox();
         _remap = new RemapService(
             _database,
-            new IdentifyService(_database, new NameParser(), provider, NullLogger<IdentifyService>.Instance),
+            new IdentifyService(_database, new NameParser(), provider, new AppSettingsService(_database), NullLogger<IdentifyService>.Instance),
             new EnrichService(_database, provider, settings),
             sandbox,
             NullLogger<RemapService>.Instance);

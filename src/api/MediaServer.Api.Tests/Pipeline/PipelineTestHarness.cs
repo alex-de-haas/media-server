@@ -50,6 +50,7 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddSingleton<IRealtimeNotifier, NullRealtimeNotifier>();
         services.AddSingleton<IPipelineQueue, PipelineQueue>();
 
+        services.AddScoped<AppSettingsService>();
         services.AddScoped<IOrganizer, OrganizerService>();
         services.AddScoped<IdentifyService>();
         services.AddScoped<EnrichService>();

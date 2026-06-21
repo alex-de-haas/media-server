@@ -40,6 +40,9 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var settings = MediaServerSettings.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(settings);
 
+// Operator-editable settings persisted in the DB (e.g. custom release groups stripped before identify).
+builder.Services.AddScoped<AppSettingsService>();
+
 // Filesystem primitives + catalog management.
 builder.Services.AddSingleton<IFilesystemInspector, FilesystemInspector>();
 builder.Services.AddSingleton<ICatalogPathSandbox, CatalogPathSandbox>();
@@ -251,6 +254,7 @@ app.MapTorrentEndpoints();
 app.MapIngestEndpoints();
 app.MapLibraryEndpoints();
 app.MapMetadataEndpoints();
+app.MapSettingsEndpoints();
 app.MapJellyfinCredentialEndpoints();
 app.MapRealtimeEndpoints();
 

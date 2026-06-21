@@ -52,6 +52,48 @@ public sealed class NameParserTests
         Assert.Contains("Some Anime", parsed.Title);
         Assert.Equal(12, parsed.Episode);
     }
+
+    [Fact]
+    public void Strips_custom_release_group_from_a_movie_title()
+    {
+        // The dotted group is normalized the same way as the name, so "LostFilm.TV" matches "LostFilm TV".
+        var parsed = _parser.Parse("Project.Hail.Mary.LostFilm.TV.avi", CatalogType.Movie, ["LostFilm.TV"]);
+
+        Assert.Equal("Project Hail Mary", parsed.Title);
+    }
+
+    [Fact]
+    public void Strips_custom_release_group_but_keeps_season_and_episode()
+    {
+        var parsed = _parser.Parse("[NewStudio] The Show S02E03 1080p.mkv", CatalogType.Series, ["NewStudio"]);
+
+        Assert.Equal("The Show", parsed.Title);
+        Assert.Equal(2, parsed.Season);
+        Assert.Equal(3, parsed.Episode);
+    }
+
+    [Fact]
+    public void Strips_bracket_wrapped_group_configured_without_brackets()
+    {
+        // A group configured as "HorribleSubs" is stripped even when the file wraps it in brackets — the
+        // non-word-character boundary matches where a plain \b boundary would not.
+        var parsed = _parser.Parse("[HorribleSubs] The Show S01E05.mkv", CatalogType.Series, ["HorribleSubs"]);
+
+        Assert.Equal("The Show", parsed.Title);
+        Assert.Equal(1, parsed.Season);
+        Assert.Equal(5, parsed.Episode);
+    }
+
+    [Fact]
+    public void Release_group_match_is_whole_word_and_case_insensitive()
+    {
+        // "yts" strips "YTS" despite the case difference, while "Mov" is left alone because it is only a
+        // substring of "Movie" (whole-word matching never clips a real title word).
+        var parsed = _parser.Parse("Mystery.Movie.2021.YTS.mp4", CatalogType.Movie, ["yts", "Mov"]);
+
+        Assert.Equal("Mystery Movie", parsed.Title);
+        Assert.Equal(2021, parsed.Year);
+    }
 }
 
 public sealed class TitleScoringTests
