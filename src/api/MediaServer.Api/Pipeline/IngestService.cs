@@ -1,4 +1,5 @@
 using MediaServer.Api.Catalogs;
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Torrents;
@@ -15,6 +16,8 @@ public sealed class IngestService(
     MediaServerDbContext database,
     IdentifyService identifyService,
     IMetadataProvider metadataProvider,
+    INameParser nameParser,
+    AppSettingsService appSettings,
     IPipelineQueue queue,
     DownloadDeletionService downloadDeletion,
     ICatalogPathSandbox sandbox,
@@ -30,9 +33,12 @@ public sealed class IngestService(
         var sourceFilesByDownload = await LoadSourceFilesAsync(items, cancellationToken);
         var downloadNames = await LoadDownloadNamesAsync(items, cancellationToken);
         var mediaTitles = await LoadMediaTitlesAsync(items, cancellationToken);
+        var catalogTypes = await LoadCatalogTypesAsync(items, cancellationToken);
+        var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
         return items
             .Select(item => IngestItemResponse.From(
-                item, SourceFilesFor(item, sourceFilesByDownload), DownloadNameFor(item, downloadNames), MediaTitleFor(item, mediaTitles)))
+                item, SourceFilesFor(item, sourceFilesByDownload), DownloadNameFor(item, downloadNames), MediaTitleFor(item, mediaTitles),
+                nameParser, CatalogTypeFor(item, catalogTypes), releaseGroups))
             .ToList();
     }
 
@@ -50,7 +56,10 @@ public sealed class IngestService(
             ? await database.Downloads.AsNoTracking().Where(download => download.Id == id2).Select(download => download.Name).FirstOrDefaultAsync(cancellationToken)
             : null;
         var mediaTitle = await ResolveMediaTitleAsync(item.MediaItemId, cancellationToken);
-        return IngestItemResponse.From(item, sourceFiles, downloadName, mediaTitle);
+        var catalogType = await database.Catalogs.AsNoTracking()
+            .Where(catalog => catalog.Id == item.CatalogId).Select(catalog => catalog.Type).FirstOrDefaultAsync(cancellationToken);
+        var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
+        return IngestItemResponse.From(item, sourceFiles, downloadName, mediaTitle, nameParser, catalogType, releaseGroups);
     }
 
     public async Task<bool> RetryAsync(Guid id, CancellationToken cancellationToken)
@@ -322,6 +331,23 @@ public sealed class IngestService(
 
     private static string? DownloadNameFor(IngestItem item, Dictionary<Guid, string?> byDownload) =>
         item.DownloadId is { } downloadId && byDownload.TryGetValue(downloadId, out var name) ? name : null;
+
+    private async Task<Dictionary<Guid, CatalogType>> LoadCatalogTypesAsync(
+        IReadOnlyList<IngestItem> items, CancellationToken cancellationToken)
+    {
+        var catalogIds = items.Select(item => item.CatalogId).Distinct().ToList();
+        if (catalogIds.Count == 0)
+        {
+            return new Dictionary<Guid, CatalogType>();
+        }
+
+        return await database.Catalogs.AsNoTracking()
+            .Where(catalog => catalogIds.Contains(catalog.Id))
+            .ToDictionaryAsync(catalog => catalog.Id, catalog => catalog.Type, cancellationToken);
+    }
+
+    private static CatalogType CatalogTypeFor(IngestItem item, Dictionary<Guid, CatalogType> byCatalog) =>
+        byCatalog.TryGetValue(item.CatalogId, out var type) ? type : CatalogType.Movie;
 
     private async Task<Dictionary<Guid, string>> LoadMediaTitlesAsync(
         IReadOnlyList<IngestItem> items, CancellationToken cancellationToken)

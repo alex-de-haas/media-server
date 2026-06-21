@@ -9,7 +9,14 @@ public sealed record IngestSourceFileResponse(
     string RelativePath,
     long SizeBytes,
     string AssignmentStatus,
-    Guid? MediaItemId);
+    Guid? MediaItemId,
+    // Name-parsed hints surfaced to the review UI so it can pre-fill the corrected title and the
+    // per-file season/episode without the operator retyping them. Computed on read from RelativePath
+    // (no persisted column); null season/episode for movie catalogs or when the name has no SxxEyy.
+    string ParsedTitle,
+    int? ParsedYear,
+    int? ParsedSeason,
+    int? ParsedEpisode);
 
 public sealed record IngestItemResponse(
     Guid Id,
@@ -30,7 +37,8 @@ public sealed record IngestItemResponse(
     DateTimeOffset UpdatedAt)
 {
     public static IngestItemResponse From(
-        IngestItem item, IReadOnlyList<SourceFile> sourceFiles, string? downloadName, string? mediaTitle)
+        IngestItem item, IReadOnlyList<SourceFile> sourceFiles, string? downloadName, string? mediaTitle,
+        INameParser parser, CatalogType catalogType, IReadOnlyCollection<string> releaseGroups)
     {
         var candidates = string.IsNullOrEmpty(item.ReviewCandidates)
             ? []
@@ -50,8 +58,19 @@ public sealed record IngestItemResponse(
             item.LastError,
             item.NextAttemptAt,
             candidates,
-            sourceFiles.Select(file => new IngestSourceFileResponse(
-                file.Id, file.RelativePath, file.SizeBytes, file.AssignmentStatus.ToString(), file.MediaItemId)).ToList(),
+            sourceFiles.Select(file =>
+            {
+                var name = Path.GetFileName(file.RelativePath);
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    name = downloadName ?? file.RelativePath;
+                }
+
+                var parsed = parser.Parse(name, catalogType, releaseGroups);
+                return new IngestSourceFileResponse(
+                    file.Id, file.RelativePath, file.SizeBytes, file.AssignmentStatus.ToString(), file.MediaItemId,
+                    parsed.Title, parsed.Year, parsed.Season, parsed.Episode);
+            }).ToList(),
             item.CreatedAt,
             item.UpdatedAt);
     }

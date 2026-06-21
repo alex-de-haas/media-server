@@ -35,8 +35,14 @@ additional sources can be added without schema churn.
 - The pipeline's identify stage parses the torrent name and available file list
   before download where possible, then queries the provider. If a magnet link has
   no file list yet, file-level matching runs after torrent metadata is fetched.
+- Before parsing, operator-configured **custom release groups** (Settings page,
+  persisted in the `AppSettings` row) are stripped from the name as whole words,
+  case-insensitively — e.g. `LostFilm.TV`, `RARBG`. This keeps group/tag tokens out
+  of the parsed title so a name like `Project.Hail.Mary.LostFilm.TV` matches cleanly.
 - High-confidence matches auto-apply. Low-confidence matches route to the review
-  queue, where the operator confirms a candidate (manual match override).
+  queue, where the operator confirms a candidate (manual match override). The review
+  dialog pre-fills the parsed title and each file's `SxxEyy`, and auto-searches on
+  open so the operator usually just picks a candidate.
 - Each playable source file must ultimately map to a movie or an episode.
 - Match results are cached against the stable public item ID and the source-file
   assignment, so a later remap can rebuild clean paths and downstream metadata.

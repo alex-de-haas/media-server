@@ -19,6 +19,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<JellyfinCredential> JellyfinCredentials => Set<JellyfinCredential>();
     public DbSet<JellyfinAccessToken> JellyfinAccessTokens => Set<JellyfinAccessToken>();
     public DbSet<UserItemData> UserItemData => Set<UserItemData>();
+    public DbSet<AppSettings> AppSettings => Set<AppSettings>();
 
     /// <summary>
     /// Registers <see cref="UtcDateTimeOffsetConverter"/> for every <see cref="DateTimeOffset"/> and
@@ -45,6 +46,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureJob(modelBuilder);
         ConfigureJellyfinCredential(modelBuilder);
         ConfigureUserItemData(modelBuilder);
+        ConfigureAppSettings(modelBuilder);
     }
 
     /// <summary>
@@ -266,6 +268,15 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
             .WithMany()
             .HasForeignKey(entity => entity.AppUserId)
             .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureAppSettings(ModelBuilder modelBuilder)
+    {
+        var appSettings = modelBuilder.Entity<AppSettings>();
+        appSettings.HasKey(entity => entity.Id);
+        // Single fixed-id row; never auto-generate the key so the upsert always targets row 1.
+        appSettings.Property(entity => entity.Id).ValueGeneratedNever();
+        appSettings.Property(entity => entity.CustomReleaseGroups).HasJsonListConversion();
     }
 
     private static void ConfigureUserItemData(ModelBuilder modelBuilder)

@@ -1,3 +1,4 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
 using MediaServer.Api.Metadata;
@@ -12,13 +13,15 @@ public sealed record IdentifyOutcome(bool AllResolved, string? ReviewReason, IRe
 /// candidates, and on a high-confidence hit creates/reuses the canonical <see cref="MediaItem"/>
 /// hierarchy and assigns the file. Idempotent — re-identifying reuses existing items by identity.
 /// </summary>
-public sealed class IdentifyService(MediaServerDbContext database, INameParser parser, IMetadataProvider provider, ILogger<IdentifyService> logger)
+public sealed class IdentifyService(
+    MediaServerDbContext database, INameParser parser, IMetadataProvider provider, AppSettingsService appSettings, ILogger<IdentifyService> logger)
 {
     public async Task<IdentifyOutcome> IdentifyAsync(
         Catalog catalog, IReadOnlyList<SourceFile> sourceFiles, string? fallbackName, CancellationToken cancellationToken)
     {
         var unresolved = new List<MetadataCandidate>();
         var reviewReasons = new List<string>();
+        var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
 
         foreach (var sourceFile in sourceFiles)
         {
@@ -28,7 +31,7 @@ public sealed class IdentifyService(MediaServerDbContext database, INameParser p
             }
 
             var name = DeriveName(sourceFile.RelativePath, fallbackName);
-            var parsed = parser.Parse(name, catalog.Type);
+            var parsed = parser.Parse(name, catalog.Type, releaseGroups);
             var query = new MediaQuery(parsed.Kind, parsed.Title, parsed.Year, parsed.Season, parsed.Episode);
 
             var candidates = await provider.SearchAsync(query, cancellationToken);

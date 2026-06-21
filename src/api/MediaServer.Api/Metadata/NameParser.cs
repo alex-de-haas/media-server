@@ -15,14 +15,18 @@ public sealed record ParsedName(MediaKind Kind, string Title, int? Year, int? Se
 /// </summary>
 public interface INameParser
 {
-    ParsedName Parse(string name, CatalogType catalogType);
+    /// <param name="releaseGroups">
+    /// Operator-configured release-group tokens to strip from the name before parsing (case-insensitive,
+    /// whole-word). Null or empty leaves the name untouched. See <c>AppSettings.CustomReleaseGroups</c>.
+    /// </param>
+    ParsedName Parse(string name, CatalogType catalogType, IReadOnlyCollection<string>? releaseGroups = null);
 }
 
 public sealed partial class NameParser : INameParser
 {
-    public ParsedName Parse(string name, CatalogType catalogType)
+    public ParsedName Parse(string name, CatalogType catalogType, IReadOnlyCollection<string>? releaseGroups = null)
     {
-        var cleaned = Clean(StripExtension(name));
+        var cleaned = StripReleaseGroups(Clean(StripExtension(name)), releaseGroups);
 
         return catalogType switch
         {
@@ -30,6 +34,32 @@ public sealed partial class NameParser : INameParser
             CatalogType.Series => ParseSeries(cleaned),
             _ => ParseMovie(cleaned),
         };
+    }
+
+    /// <summary>
+    /// Removes each configured release group from the already-normalized name. Groups are normalized the
+    /// same way (dots/underscores → spaces) so an entry like <c>LostFilm.TV</c> matches the cleaned token
+    /// "LostFilm TV". Whole-word and case-insensitive so a group never clips a real title substring.
+    /// </summary>
+    private static string StripReleaseGroups(string cleaned, IReadOnlyCollection<string>? releaseGroups)
+    {
+        if (releaseGroups is null || releaseGroups.Count == 0)
+        {
+            return cleaned;
+        }
+
+        foreach (var group in releaseGroups)
+        {
+            var normalized = Clean(group);
+            if (normalized.Length == 0)
+            {
+                continue;
+            }
+
+            cleaned = Regex.Replace(cleaned, $@"\b{Regex.Escape(normalized)}\b", " ", RegexOptions.IgnoreCase);
+        }
+
+        return CollapseSpaces(cleaned).Trim();
     }
 
     private static ParsedName ParseMovie(string cleaned)
