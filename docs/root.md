@@ -32,8 +32,8 @@ assignment, app identity issuance, and app data backups.
 flowchart LR
   U["Operator"] -->|add .torrent/magnet + pick catalog| INTAKE
   subgraph PROC["Processing pipeline (v1)"]
-    INTAKE["Intake"] --> DL["Download"] --> ORG["Organize (hardlink)"]
-    ORG --> ID["Identify (TMDb)"] --> PROBE["Probe (ffprobe)"] --> PUB["Publish"]
+    INTAKE["Intake"] --> DL["Download"] --> ID["Identify (TMDb)"]
+    ID --> ORG["Organize (move)"] --> PROBE["Probe (ffprobe)"] --> PUB["Publish"]
   end
   PUB --> AVAIL["Available in library"]
   AVAIL --> INFUSE["Infuse / Jellyfin client"]
@@ -52,7 +52,7 @@ flowchart TB
     subgraph API["api service (.NET)"]
       ORCH["Automation Orchestrator"]
       TOR["Torrent Engine (MonoTorrent)"]
-      ORG["Organizer (hardlink)"]
+      ORG["Organizer (move)"]
       CAT["Catalog / Items"]
       META["Metadata providers"]
       PROBE["Media Probe (ffprobe)"]
@@ -63,7 +63,7 @@ flowchart TB
   INFUSE["Infuse / Jellyfin client"]
   TMDB["TMDb"]
   DB[("SQLite + caches<br/>HOSTY_APP_DATA_DIR")]
-  CATFS[("Catalog roots<br/>files/ + library/")]
+  CATFS[("Catalog roots<br/>.incoming/ + canonical")]
 
   SHELL <-->|app-code launch, iframe| WEB
   WEB <-->|HOSTY_SERVICE_API_URL| API
@@ -113,22 +113,22 @@ No idea documents yet.
 
 ## Planning
 
-- [Implementation plan](planning/implementation-plan.md)
-- [Hosty runtime app](planning/hosty-runtime-app.md)
-- [Catalogs](planning/catalogs.md)
-- [Automation pipeline](planning/automation-pipeline.md)
-- [Domain model](planning/domain-model.md)
-- [Torrents and organizer](planning/torrents-and-organizer.md)
-- [Metadata](planning/metadata.md)
-- [Storage and data](planning/storage-and-data.md)
-- [Jellyfin compatibility](planning/jellyfin-compatibility.md)
-- [File and directory management](planning/file-directory-management.md)
-- [Background tasks and progress](planning/background-tasks.md)
-- [Frontend application](planning/frontend-application.md)
-- [Security](planning/security.md)
-- [Build and deployment](planning/build-and-deployment.md)
-- [Watchlist and discovery](planning/watchlist-and-discovery.md)
-- [Hosty platform requests](planning/hosty-platform-requests.md)
+- [Implementation plan](features/implementation-plan.md)
+- [Hosty runtime app](features/hosty-runtime-app.md)
+- [Catalogs](features/catalogs.md)
+- [Automation pipeline](features/automation-pipeline.md)
+- [Domain model](features/domain-model.md)
+- [Torrents and organizer](features/torrents-and-organizer.md)
+- [Metadata](features/metadata.md)
+- [Storage and data](features/storage-and-data.md)
+- [Jellyfin compatibility](features/jellyfin-compatibility.md)
+- [File and directory management](features/file-directory-management.md)
+- [Background tasks and progress](features/background-tasks.md)
+- [Frontend application](features/frontend-application.md)
+- [Security](features/security.md)
+- [Build and deployment](features/build-and-deployment.md)
+- [Watchlist and discovery](features/watchlist-and-discovery.md)
+- [Hosty platform requests](features/hosty-platform-requests.md)
 
 ## Features
 

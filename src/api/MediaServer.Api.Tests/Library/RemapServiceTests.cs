@@ -1,7 +1,6 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
-using MediaServer.Api.IO;
 using MediaServer.Api.Library;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Pipeline;
@@ -14,8 +13,8 @@ namespace MediaServer.Api.Tests.Library;
 
 /// <summary>
 /// Coverage for the operator remap (<see cref="RemapService"/>): a published leaf is reassigned to a
-/// corrected identity, its <c>library/</c> hardlink is rebuilt from the surviving file (not <c>files/</c>),
-/// and the orphaned old item — plus any emptied season/series — is pruned.
+/// corrected identity, its canonical file is moved to match the new naming, and the orphaned old item —
+/// plus any emptied season/series — is pruned.
 /// </summary>
 public sealed class RemapServiceTests : IDisposable
 {
@@ -40,8 +39,6 @@ public sealed class RemapServiceTests : IDisposable
             new IdentifyService(_database, new NameParser(), provider, NullLogger<IdentifyService>.Instance),
             new EnrichService(_database, provider, settings),
             sandbox,
-            new HardLinker(),
-            new LibraryFileEraser(sandbox, NullLogger<LibraryFileEraser>.Instance),
             NullLogger<RemapService>.Instance);
     }
 
@@ -63,7 +60,7 @@ public sealed class RemapServiceTests : IDisposable
         Assert.Equal("Correct Movie", target.Title);
         Assert.Equal("222", target.IdentityProviderId);
         Assert.NotNull(target.PublicId);
-        Assert.Equal("library/Correct Movie (2021)/Correct Movie (2021).mkv", target.LibraryPath);
+        Assert.Equal("Correct Movie (2021)/Correct Movie (2021).mkv", target.LibraryPath);
 
         // The source row followed the file to the new item and the bytes survived the relink.
         var source = Assert.Single(await _database.MediaSources.ToListAsync());
@@ -112,7 +109,7 @@ public sealed class RemapServiceTests : IDisposable
         // A fresh series/season/episode exist for the corrected identity and the file moved.
         var target = await _database.MediaItems.SingleAsync(item => item.Id == result.TargetId);
         Assert.Equal(MediaKind.Episode, target.Kind);
-        Assert.Equal("library/New Show (2022)/Season 02/New Show S02E05.mkv", target.LibraryPath);
+        Assert.Equal("New Show (2022)/Season 02/New Show S02E05.mkv", target.LibraryPath);
         Assert.True(await _database.MediaItems.AnyAsync(item => item.Kind == MediaKind.Series && item.IdentityProviderId == "901"));
 
         var newAbsolute = Path.Combine(_root, target.LibraryPath!.Replace('/', Path.DirectorySeparatorChar));
@@ -155,7 +152,7 @@ public sealed class RemapServiceTests : IDisposable
         Catalog catalog, string title, int year, string provider, string providerId, string content)
     {
         var now = DateTimeOffset.UtcNow;
-        var relative = $"library/{title} ({year})/{title} ({year}).mkv";
+        var relative = $"{title} ({year})/{title} ({year}).mkv";
         var movie = new MediaItem
         {
             Id = Guid.NewGuid(),
@@ -219,7 +216,7 @@ public sealed class RemapServiceTests : IDisposable
             AddedAt = now,
             UpdatedAt = now,
         };
-        var relative = $"library/{seriesTitle}/Season {season:D2}/{seriesTitle} S{season:D2}E{number:D2}.mkv";
+        var relative = $"{seriesTitle}/Season {season:D2}/{seriesTitle} S{season:D2}E{number:D2}.mkv";
         var episode = new MediaItem
         {
             Id = Guid.NewGuid(),

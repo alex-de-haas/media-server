@@ -9,7 +9,7 @@ namespace MediaServer.Api.Metadata;
 /// <summary>
 /// TMDb implementation of <see cref="IMetadataProvider"/> for all catalog types in v1. Searches and
 /// scores candidates, fetches localized details for every supported language, and lists language-tagged
-/// images. The API key is sent as a query parameter and never logged (see <c>docs/planning/security.md</c>).
+/// images. The API key is sent as a query parameter and never logged (see <c>docs/features/security.md</c>).
 /// </summary>
 public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, MediaServerSettings settings, ILogger<TmdbMetadataProvider> logger)
     : IMetadataProvider

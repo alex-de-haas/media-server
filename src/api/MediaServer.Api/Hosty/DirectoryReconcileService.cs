@@ -15,7 +15,7 @@ public sealed record DirectoryReconcileResult(bool Skipped, int UsersUpserted, i
 /// no directory-change webhooks (verified against <c>docker-host</c>), so this polls: it upserts the
 /// assigned, enabled users (mapping <c>host.admin</c> → <see cref="AppUserRole.Admin"/>) and revokes
 /// the app-owned Jellyfin credential + tokens of any app user who is no longer assigned or has been
-/// disabled — that user has vanished from the directory listing. See <c>docs/planning/security.md</c>.
+/// disabled — that user has vanished from the directory listing. See <c>docs/features/security.md</c>.
 /// </summary>
 public sealed class DirectoryReconcileService(
     MediaServerDbContext database,

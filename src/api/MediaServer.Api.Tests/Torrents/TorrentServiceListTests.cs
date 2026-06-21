@@ -34,11 +34,10 @@ public sealed class TorrentServiceListTests : IDisposable
     private TorrentService CreateService() => new(
         _database,
         new FakeTorrentEngine(),
-        new FilesystemInspector(new HardLinker()),
+        new FilesystemInspector(),
         new MediaServerSettings(),
         new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _tempRoot },
         new PipelineQueue(),
-        new DownloadCleanupService(_database, new FakeTorrentEngine(), new FakeOrganizer(), NullLogger<DownloadCleanupService>.Instance),
         NullLogger<TorrentService>.Instance);
 
     [Fact]

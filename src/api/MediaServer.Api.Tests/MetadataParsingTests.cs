@@ -89,7 +89,7 @@ public sealed class LibraryNamingTests
 
         var path = LibraryNaming.ForMovie(catalog, movie, ".mkv");
 
-        Assert.Equal("library/Inception (2010)/Inception (2010).mkv", path);
+        Assert.Equal("Inception (2010)/Inception (2010).mkv", path);
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public sealed class LibraryNamingTests
 
         var path = LibraryNaming.ForMovie(catalog, movie, ".mp4");
 
-        Assert.Equal("library/Untitled/Untitled.mp4", path);
+        Assert.Equal("Untitled/Untitled.mp4", path);
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public sealed class LibraryNamingTests
 
         var path = LibraryNaming.ForEpisode(series, episode, ".mkv");
 
-        Assert.Equal("library/The Show (2015)/Season 01/The Show S01E02.mkv", path);
+        Assert.Equal("The Show (2015)/Season 01/The Show S01E02.mkv", path);
     }
 }
 

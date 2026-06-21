@@ -5,7 +5,7 @@ namespace MediaServer.Api.Data;
 /// <see cref="AppUser"/>, used by Jellyfin clients such as Infuse that cannot perform the Hosty
 /// app-code flow. The PIN is verified only at login (argon2id hash); brute-force protection lives on
 /// this row as consecutive-failure counters plus temporary/permanent lockout. See
-/// <c>docs/planning/security.md</c> and <c>docs/planning/jellyfin-compatibility.md</c>.
+/// <c>docs/features/security.md</c> and <c>docs/features/jellyfin-compatibility.md</c>.
 /// </summary>
 public sealed class JellyfinCredential
 {

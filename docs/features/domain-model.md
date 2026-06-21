@@ -1,8 +1,8 @@
 # Domain Model
 
-Status: Draft
+Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-06-21
 
 ## Description
 
@@ -40,8 +40,8 @@ erDiagram
   MediaItem ||--o{ MetadataRecord : "cached per provider+language"
   MediaItem ||--o{ ImageAsset : "artwork"
   MediaItem ||--o{ UserData : "per user"
-  Download ||--o| IngestItem : "drives"
-  Download ||--o{ SourceFile : "contains"
+  Download ||--o| IngestItem : "drives (transient)"
+  IngestItem ||--o{ SourceFile : "owns"
   SourceFile }o--o| MediaItem : "assigned to"
   SourceFile ||--o| MediaSource : "published as"
   IngestItem }o--|| Catalog : "into"
@@ -62,7 +62,7 @@ erDiagram
 | Id | Guid | PK |
 | Name | string | "Movies 4K", "Anime" |
 | Type | CatalogType | Movie \| Series \| Anime |
-| Root | string | host path; contains `files/` + `library/` (one filesystem) |
+| Root | string | host path; holds `.incoming/` + canonical media (one filesystem) |
 | NamingTemplate | string | e.g. `{Title} ({Year})` |
 | DefaultKeepSeeding | bool | default seeding policy |
 | MetadataLanguage | string? | optional override of `SUPPORTED_LANGUAGES` |
@@ -176,22 +176,25 @@ change is intended; clients re-sync `UserData` from the server on refresh.
 | SourceType | enum | Magnet \| File |
 | State | DownloadState | persisted; transitions trigger pipeline actions |
 | KeepSeeding | bool | per-torrent override of catalog default |
-| SavePath | string | under `<catalog.root>/files/` |
+| SavePath | string | transient staging dir, `<catalog.root>/.incoming/<downloadId>/` |
 | AddedAt / CompletedAt | DateTime / DateTime? | |
 
-Live progress, download/upload speed, ratio, and ETA are **not persisted**. The
-torrent engine reports them in memory and broadcasts them over SignalR; only
-state transitions are written to the database, and a transition (e.g. Completed)
-is what triggers downstream pipeline actions. See
+A `Download` is **transient**: it backs a torrent ingest only until the
+download→identify hand-off drops it. Live progress, download/upload speed, ratio,
+and ETA are **not persisted**. The torrent engine reports them in memory and
+broadcasts them over the realtime stream; only state transitions are written to
+the database, and a transition (e.g. Completed) is what triggers downstream
+pipeline actions. See
 [Storage and data](storage-and-data.md) and [Background tasks](background-tasks.md).
 
-**SourceFile** (one playable candidate inside a torrent)
+**SourceFile** (one playable file flowing through an ingest)
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | Id | Guid | PK |
-| DownloadId | Guid | FK |
-| RelativePath | string | under the download's `files/` directory |
+| IngestItemId | Guid | FK — durable owner for the file's whole lifetime |
+| DownloadId | Guid? | transient torrent; null for scan files and after the hand-off |
+| RelativePath | string | catalog-root-relative current path (`.incoming/<id>/…` then canonical) |
 | TorrentFileIndex | int? | index in the torrent file list, when available |
 | SizeBytes | long | |
 | ContentHash | string? | optional fingerprint for unmatched identity/reconciliation |
@@ -200,8 +203,8 @@ is what triggers downstream pipeline actions. See
 | CreatedAt / UpdatedAt | DateTime | |
 
 Each playable media file eventually maps to exactly one movie or one episode.
-Remapping changes the `SourceFile -> MediaItem` assignment and rebuilds the
-clean hardlink path without requiring direct filesystem rename operations.
+Remapping changes the `SourceFile -> MediaItem` assignment and **moves** the
+canonical file to the new naming (an atomic rename, no hardlink rebuild).
 
 **IngestItem** (pipeline state machine — see [Automation pipeline](automation-pipeline.md))
 
@@ -209,7 +212,7 @@ clean hardlink path without requiring direct filesystem rename operations.
 | --- | --- | --- |
 | Id | Guid | PK |
 | CatalogId | Guid | FK |
-| DownloadId | Guid? | null for future ACQ-originated items |
+| DownloadId | Guid? | transient; null for scan-imported items and after the download→identify hand-off |
 | MediaItemId | Guid? | set on publish |
 | Stage | IngestStage | current stage |
 | Status | IngestStatus | Pending \| Running \| NeedsReview \| Failed \| Done |
@@ -343,7 +346,7 @@ public sealed class IngestContext
     public Catalog Catalog { get; init; }
     public Download? Download { get; init; }
     public IReadOnlyList<SourceFile> SourceFiles { get; init; }
-    public CatalogPaths Paths { get; init; }        // resolved files/ and library/
+    public CatalogPaths Paths { get; init; }        // resolved root + .incoming/ staging
     public IServiceProvider Services { get; init; } // resolve IOrganizer, probe, providers
     public IProgressReporter Progress { get; init; }// emits Job events
 }
@@ -440,21 +443,21 @@ public interface ITorrentEngine          // MonoTorrent wrapper
     Task ResumeAsync(Guid id, CancellationToken ct);
     Task StopSeedingAsync(Guid id, CancellationToken ct);
     Task RemoveAsync(Guid id, bool deleteFiles, CancellationToken ct);
-    // deleteFiles removes the files/ seed copy only; library/ hardlinks (and
-    // thus published items and disk usage) persist until the library item is
-    // deleted separately — see torrents-and-organizer Removal Semantics.
-    IObservable<DownloadUpdate> Updates { get; }   // → SignalR
+    // Removes an in-flight download (before the hand-off): drops the torrent and
+    // its .incoming/ staging data. Published items have no download — their
+    // removal is a library concern. See torrents-and-organizer Removal Semantics.
+    IObservable<DownloadUpdate> Updates { get; }   // → realtime stream
 }
 
 public interface IOrganizer
 {
-    // Hardlink selected media from files/ into library/ (see torrents-and-organizer).
+    // Move confirmed media from .incoming/ (or wherever a scanned file sits) into
+    // the canonical layout at the catalog root — an atomic rename, no hardlinks
+    // (see torrents-and-organizer).
     Task<IReadOnlyList<OrganizedFile>> OrganizeAsync(
-        Download download,
         IReadOnlyList<SourceFile> sourceFiles,
         Catalog catalog,
         CancellationToken ct);
-    Task UnlinkSeedCopyAsync(Download download, CancellationToken ct);  // stop-seeding cleanup
 }
 
 public interface IMediaProbe

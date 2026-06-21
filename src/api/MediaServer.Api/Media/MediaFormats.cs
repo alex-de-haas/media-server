@@ -1,6 +1,6 @@
 namespace MediaServer.Api.Media;
 
-/// <summary>Supported playable container extensions (see <c>docs/planning/catalogs.md</c>).</summary>
+/// <summary>Supported playable container extensions (see <c>docs/features/catalogs.md</c>).</summary>
 public static class MediaFormats
 {
     public static readonly IReadOnlySet<string> VideoExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

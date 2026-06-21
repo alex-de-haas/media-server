@@ -44,10 +44,9 @@ public sealed class TorrentAddOrderingTests : IDisposable
             return probe.Downloads.Any(download => download.InfoHash == "feedface");
         });
         var service = new TorrentService(
-            _database, engine, new FilesystemInspector(new HardLinker()), new MediaServerSettings(),
+            _database, engine, new FilesystemInspector(), new MediaServerSettings(),
             new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root },
             new PipelineQueue(),
-            new DownloadCleanupService(_database, engine, new FakeOrganizer(), NullLogger<DownloadCleanupService>.Instance),
             NullLogger<TorrentService>.Instance);
 
         await service.AddAsync(new AddTorrentRequest(catalog.Id, "magnet:?xt=urn:btih:feedface", null, null), CancellationToken.None);

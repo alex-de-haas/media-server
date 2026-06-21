@@ -198,16 +198,36 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     public async Task RemoveAsync(string infoHash, bool deleteFiles, CancellationToken cancellationToken)
     {
         var engine = RequireEngine();
-        if (_managers.TryRemove(infoHash, out var manager))
+        if (!_managers.TryGetValue(infoHash, out var manager))
         {
-            manager.TorrentStateChanged -= OnTorrentStateChanged;
-            _completionRaised.TryRemove(infoHash, out _);
-
-            // DownloadedDataOnly unlinks the files/ seed copy; any library/ hardlink keeps the data
-            // alive (see torrents-and-organizer Removal Semantics). KeepAllData leaves files/ in place.
-            var mode = deleteFiles ? RemoveMode.DownloadedDataOnly : RemoveMode.KeepAllData;
-            await engine.RemoveAsync(manager, mode);
+            return;
         }
+
+        // A manager must be stopped before it can be unregistered. Stop it first (idempotent: a manager
+        // already stopped/stopping or errored just falls through), then remove. Doing the bookkeeping only
+        // after a successful removal avoids leaking a half-removed manager if stop/remove throws.
+        try
+        {
+            if (manager.State is not (TorrentState.Stopped or TorrentState.Stopping or TorrentState.Error))
+            {
+                await manager.StopAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+        catch (TorrentException exception)
+        {
+            _logger.LogWarning(exception, "Stopping torrent {InfoHash} before removal failed; removing anyway.", infoHash);
+        }
+
+        // DownloadedDataOnly deletes the downloaded files; KeepAllData leaves them on disk (the move-based
+        // organizer takes ownership of the playable file). CacheDataOnly is always set so the fast-resume
+        // cache is cleared too — otherwise a re-added torrent trusts stale "complete" resume data and skips
+        // re-downloading even though the files are gone. See torrents-and-organizer Removal Semantics.
+        var mode = (deleteFiles ? RemoveMode.DownloadedDataOnly : RemoveMode.KeepAllData) | RemoveMode.CacheDataOnly;
+        await engine.RemoveAsync(manager, mode);
+
+        _managers.TryRemove(infoHash, out _);
+        manager.TorrentStateChanged -= OnTorrentStateChanged;
+        _completionRaised.TryRemove(infoHash, out _);
     }
 
     public TorrentSnapshot? GetSnapshot(string infoHash) =>

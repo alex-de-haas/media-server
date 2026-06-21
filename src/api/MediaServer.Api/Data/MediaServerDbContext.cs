@@ -181,15 +181,23 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         sourceFile.Property(entity => entity.RelativePath).IsRequired();
         sourceFile.Property(entity => entity.AssignmentStatus).HasConversion<int>();
 
-        // A download cannot have two rows for the same file. Concurrent coordinator handlers
+        // An ingest cannot have two rows for the same file. Concurrent coordinator handlers
         // (metadata + completion for a re-added, already-complete torrent) once raced and inserted
         // duplicates; the unique index makes the loser's insert fail so the upsert falls back to update.
-        sourceFile.HasIndex(entity => new { entity.DownloadId, entity.RelativePath }).IsUnique();
+        sourceFile.HasIndex(entity => new { entity.IngestItemId, entity.RelativePath }).IsUnique();
 
+        // Owned by the ingest item for its whole lifetime (deleting the ingest removes its source files).
+        sourceFile.HasOne(entity => entity.IngestItem)
+            .WithMany(entity => entity.SourceFiles)
+            .HasForeignKey(entity => entity.IngestItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // The download is transient: deleting it at the download→identify hand-off leaves the file owned
+        // by the ingest with a null DownloadId.
         sourceFile.HasOne(entity => entity.Download)
             .WithMany(entity => entity.SourceFiles)
             .HasForeignKey(entity => entity.DownloadId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.SetNull);
 
         sourceFile.HasOne(entity => entity.MediaItem)
             .WithMany()

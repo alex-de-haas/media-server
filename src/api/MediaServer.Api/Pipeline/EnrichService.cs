@@ -10,7 +10,7 @@ namespace MediaServer.Api.Pipeline;
 /// <summary>
 /// Fetches and caches provider metadata for every supported language and the item's images, keyed by
 /// <c>provider + language</c>. Idempotent: re-enriching refreshes existing records in place. See
-/// <c>docs/planning/metadata.md</c>.
+/// <c>docs/features/metadata.md</c>.
 /// </summary>
 public sealed class EnrichService(MediaServerDbContext database, IMetadataProvider provider, MediaServerSettings settings)
 {

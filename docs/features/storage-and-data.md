@@ -1,8 +1,8 @@
 # Storage and Data
 
-Status: Draft
+Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-06-21
 
 ## Description
 
@@ -57,9 +57,10 @@ SQLite is single-writer, so the app minimizes and serializes writes:
 - Run in **WAL** mode (also required for backup consistency below) and set a
   `busy_timeout` (5–10 s) so transient lock contention retries instead of failing.
 - **Torrent progress, speed, ratio, and ETA are never written to the database.**
-  The torrent engine tracks them in memory and broadcasts them over SignalR; only
-  **state transitions** (e.g. Completed) are persisted, and a transition is what
-  triggers downstream pipeline actions (hardlink, probe, enrich, publish).
+  The torrent engine tracks them in memory and broadcasts them over the realtime
+  stream; only **state transitions** (e.g. Completed) are persisted, and a
+  transition is what triggers downstream pipeline actions (identify, move/organize,
+  probe, enrich, publish).
 - The orchestrator claims an ingest item with a lease (`LeaseOwner`/`LeaseUntil`)
   and uses an optimistic-concurrency token, so the reconciler and operator actions
   never double-drive the same item (see [Domain model](domain-model.md)).
@@ -104,8 +105,9 @@ backed-up directory.
 Catalog media folders are **not** app data and are not backed up by Hosty (the
 operator owns that media and its own backups).
 
-- Each catalog root is a host directory on a single filesystem containing
-  `files/` and `library/` (see [Catalogs](catalogs.md)).
+- Each catalog root is a host directory on a single filesystem holding a transient
+  `.incoming/` staging area plus the canonical published media at the root (see
+  [Catalogs](catalogs.md)).
 - **v1 (`localCommand`):** roots are operator-configured host paths; the host
   process accesses them directly, with no volume mounts. Path access is sandboxed
   to configured roots (see [File and directory management](file-directory-management.md)).
@@ -113,12 +115,12 @@ operator owns that media and its own backups).
   mount once Hosty supports the required mount model. Removing the app must never
   delete external media.
 
-## Hardlink Constraint
+## Single-Filesystem Constraint
 
-The organizer relies on hardlinks between `files/` and `library/`, which requires
-both to be on the same filesystem. Catalog configuration validates this
-(compare `st_dev`) and rejects cross-filesystem roots. This is also why a single
-`catalog.root` (rather than two unrelated paths) is the configuration unit.
+A completed file is **moved** (not hardlinked) from `.incoming/` into the
+canonical tree. Because both live under one `catalog.root` on one filesystem, the
+move is atomic and copies no bytes. This is why a single `catalog.root` (rather
+than two unrelated paths) is the configuration unit.
 
 ## Open Questions
 
@@ -134,7 +136,6 @@ Backend tests should use xUnit and Imposter. Required coverage:
 
 - EF Core mapping for relational entities and JSON columns.
 - App data paths resolved from `HOSTY_APP_DATA_DIR`.
-- Same-filesystem validation for catalog roots.
 - Migration apply on startup and correct migration history after a simulated
   restore; failure path refuses to start half-migrated.
 - Progress is not persisted; only state transitions are written and trigger

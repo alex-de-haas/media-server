@@ -6,7 +6,7 @@ namespace MediaServer.Api.Data;
 /// <summary>
 /// Applies the SQLite pragmas the storage model requires on every opened connection: WAL journaling
 /// (so a hot directory copy is recoverable) and a busy timeout (so transient single-writer lock
-/// contention retries instead of throwing). See <c>docs/planning/storage-and-data.md</c>.
+/// contention retries instead of throwing). See <c>docs/features/storage-and-data.md</c>.
 /// </summary>
 public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
 {

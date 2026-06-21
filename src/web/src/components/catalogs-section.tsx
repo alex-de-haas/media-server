@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { FolderSearch, MoreVertical, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type CatalogVolumeUsage } from "@/lib/media-server";
 import { formatBytes } from "@/lib/format";
@@ -18,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { QueryState } from "@/components/states";
 import { AddCatalogDialog } from "@/components/add-catalog-dialog";
@@ -175,6 +176,22 @@ function CatalogRow({
     onError: (error) => toast.error("Couldn’t remove catalog", { description: errorMessage(error) }),
   });
 
+  // Scan the catalog root for media files placed outside the app (a hand-copied collection) and ingest
+  // them from the identify stage. Confident matches publish automatically; the rest land in review.
+  const scan = useMutation({
+    mutationFn: () => mediaServer.scanCatalog(catalog.id),
+    onSuccess: (report) => {
+      queryClient.invalidateQueries({ queryKey: ["ingest"] });
+      toast.success(
+        report.imported > 0
+          ? `Importing ${report.imported} file${report.imported === 1 ? "" : "s"} — track it on Activity`
+          : "No new media files found",
+        { description: report.skipped > 0 ? `${report.skipped} already in the library` : undefined },
+      );
+    },
+    onError: (error) => toast.error("Couldn’t scan catalog", { description: errorMessage(error) }),
+  });
+
   return (
     <li className="flex items-center justify-between gap-3 rounded-md border p-2">
       <div className="min-w-0">
@@ -196,16 +213,25 @@ function CatalogRow({
         <span className="text-muted-foreground">
           {usedBytes !== undefined ? `${formatBytes(usedBytes)} used` : `${formatBytes(catalog.freeBytes)} free`}
         </span>
-        <Tooltip>
-          <TooltipTrigger
+        <DropdownMenu>
+          <DropdownMenuTrigger
             render={
-              <Button variant="ghost" size="icon-sm" aria-label="Remove catalog" onClick={() => setConfirmOpen(true)}>
-                <Trash2 />
+              <Button variant="ghost" size="icon-sm" aria-label="Catalog actions">
+                <MoreVertical />
               </Button>
             }
           />
-          <TooltipContent>Remove</TooltipContent>
-        </Tooltip>
+          <DropdownMenuContent>
+            <DropdownMenuItem onClick={() => scan.mutate()} disabled={scan.isPending || !catalog.online}>
+              <FolderSearch />
+              {scan.isPending ? "Scanning…" : "Scan for media"}
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
+              <Trash2 />
+              Remove
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <RemoveCatalogDialog

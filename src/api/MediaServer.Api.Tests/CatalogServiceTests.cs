@@ -24,7 +24,7 @@ public sealed class CatalogServiceTests : IDisposable
 
     private CatalogService CreateService(MediaServerSettings? settings = null)
     {
-        var filesystem = new FilesystemInspector(new HardLinker());
+        var filesystem = new FilesystemInspector();
         return new CatalogService(_database, filesystem, settings ?? new MediaServerSettings());
     }
 
@@ -32,7 +32,7 @@ public sealed class CatalogServiceTests : IDisposable
         new("Movies", CatalogType.Movie, root, null, false, null);
 
     [Fact]
-    public async Task Creates_catalog_with_files_and_library_subtrees()
+    public async Task Creates_catalog_with_incoming_staging_dir()
     {
         var service = CreateService();
 
@@ -41,8 +41,7 @@ public sealed class CatalogServiceTests : IDisposable
         Assert.Equal("Movies", catalog.Name);
         Assert.True(catalog.Online);
         Assert.True(catalog.FreeBytes > 0);
-        Assert.True(Directory.Exists(Path.Combine(_tempRoot, "files")));
-        Assert.True(Directory.Exists(Path.Combine(_tempRoot, "library")));
+        Assert.True(Directory.Exists(Path.Combine(_tempRoot, ".incoming")));
     }
 
     [Fact]
@@ -64,8 +63,7 @@ public sealed class CatalogServiceTests : IDisposable
 
         Assert.True(catalog.Online);
         Assert.True(Directory.Exists(root));
-        Assert.True(Directory.Exists(Path.Combine(root, "files")));
-        Assert.True(Directory.Exists(Path.Combine(root, "library")));
+        Assert.True(Directory.Exists(Path.Combine(root, ".incoming")));
     }
 
     [Fact]

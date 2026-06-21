@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Pipeline.Stages;
 
-/// <summary>Resolves the catalog layout and seeding policy for a freshly added download.</summary>
+/// <summary>Resolves the catalog layout for a freshly added download (torrent entry only).</summary>
 public sealed class IntakeStage : IPipelineStage
 {
     public string Key => "intake";
@@ -23,8 +23,13 @@ public sealed class IntakeStage : IPipelineStage
     }
 }
 
-/// <summary>Waits for the torrent to finish; the engine started downloading the moment it was added.</summary>
-public sealed class DownloadStage : IPipelineStage
+/// <summary>
+/// Waits for the torrent, then performs the download→identify hand-off: a completed, non-seeding download
+/// is dropped (its files stay in <c>.incoming/</c>, now owned by the ingest) so the rest of the pipeline
+/// runs torrent-free. While <c>keepSeeding</c> is on the item parks here until the operator stops seeding.
+/// Scan-originated items have no download and skip straight through.
+/// </summary>
+public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine engine, ILogger<DownloadStage> logger) : IPipelineStage
 {
     public string Key => "download";
     public PipelinePhase Phase => PipelinePhase.Processing;
@@ -33,19 +38,62 @@ public sealed class DownloadStage : IPipelineStage
 
     public bool ShouldRun(IngestContext context) => !context.Item.StagesCompleted.Contains(Key);
 
-    public Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
+    public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        if (context.Download is null)
+        // Scan import enters the pipeline at identify; there is no download to wait for.
+        if (context.Download is not { } download)
         {
-            return Task.FromResult<StageResult>(new StageResult.Failed("Ingest item has no download.", Retryable: false));
+            return StageResult.Done;
         }
 
-        return Task.FromResult<StageResult>(context.Download.State switch
+        switch (download.State)
         {
-            DownloadState.Completed or DownloadState.Seeding or DownloadState.StoppedSeeding => StageResult.Done,
-            DownloadState.Error => new StageResult.Failed("Torrent entered an error state.", Retryable: false),
-            _ => new StageResult.Deferred(TimeSpan.FromSeconds(30)),
-        });
+            case DownloadState.Error:
+                return new StageResult.Failed("Torrent entered an error state.", Retryable: false);
+            case DownloadState.Queued or DownloadState.Downloading:
+                return new StageResult.Deferred(TimeSpan.FromSeconds(30));
+            case DownloadState.Seeding:
+                // keepSeeding: the file stays seedable in .incoming/ and the item parks here until the
+                // operator stops seeding (TorrentService.StopSeedingAsync flips the state and re-drives).
+                return new StageResult.Deferred(TimeSpan.FromSeconds(30));
+        }
+
+        // Completed / StoppedSeeding: the transfer reports done. Guard against a phantom completion before
+        // the irreversible hand-off: a torrent can report complete from stale resume data with nothing on
+        // the new save path, and handing off would drop the Download and strand a file-less ingest.
+        if (context.SourceFiles.Count == 0)
+        {
+            // File list not in yet; wait for the coordinator to upsert it.
+            return new StageResult.Deferred(TimeSpan.FromSeconds(15));
+        }
+
+        var anyFileOnDisk = context.SourceFiles.Any(file =>
+            File.Exists(Path.Combine(context.Catalog.Root, file.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
+        if (!anyFileOnDisk)
+        {
+            return new StageResult.Failed(
+                "The torrent reports complete but its files are missing on disk (likely stale resume data). " +
+                "Remove it and add it again to download.", Retryable: false);
+        }
+
+        // Hand off — stop the engine torrent (keep its files in .incoming/) and drop the Download row. The
+        // SourceFile/IngestItem download FKs are SET NULL, so the file stays owned by the ingest. Done once,
+        // even if a later stage re-drives.
+        await engine.RemoveAsync(download.InfoHash, deleteFiles: false, cancellationToken);
+
+        foreach (var sourceFile in context.SourceFiles)
+        {
+            sourceFile.DownloadId = null;
+        }
+
+        context.Item.DownloadId = null;
+        database.Downloads.Remove(download);
+        await database.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Handed off download {DownloadId} to ingest {Ingest}: row removed, files kept in .incoming/.",
+            download.Id, context.Item.Id);
+        return StageResult.Done;
     }
 }
 
@@ -63,7 +111,7 @@ public sealed class IdentifyStage(IdentifyService identifyService) : IPipelineSt
     {
         if (context.SourceFiles.Count == 0)
         {
-            // Magnet metadata not in yet; the coordinator re-drives once the file list arrives.
+            // Torrent metadata not in yet; the coordinator re-drives once the file list arrives.
             return new StageResult.Deferred(TimeSpan.FromSeconds(15));
         }
 
@@ -76,9 +124,8 @@ public sealed class IdentifyStage(IdentifyService identifyService) : IPipelineSt
     }
 }
 
-/// <summary>Hardlinks confirmed files into the clean library layout and applies the seeding policy.</summary>
-public sealed class OrganizeStage(
-    IOrganizer organizer, MediaServerDbContext database, ITorrentEngine engine) : IPipelineStage
+/// <summary>Moves confirmed files into the canonical catalog layout (rename in place — no copy/hardlink).</summary>
+public sealed class OrganizeStage(IOrganizer organizer) : IPipelineStage
 {
     public string Key => "organize";
     public PipelinePhase Phase => PipelinePhase.Processing;
@@ -89,29 +136,7 @@ public sealed class OrganizeStage(
 
     public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        if (context.Download is null)
-        {
-            return new StageResult.Failed("Ingest item has no download.", Retryable: false);
-        }
-
-        await organizer.OrganizeAsync(context.Download, context.SourceFiles, context.Catalog, cancellationToken);
-
-        // Seeding policy. Keep seeding from files/, or ensure the torrent is not seeding. The files/ seed
-        // copy and the Download row are intentionally NOT torn down here — that happens once the item
-        // reaches Done, so a stall before publish (e.g. NeedsReview) never strands a torn-down item that
-        // still needs its source files. See DownloadCleanupService.
-        if (context.Download.KeepSeeding)
-        {
-            context.Download.State = DownloadState.Seeding;
-        }
-        else
-        {
-            // Belt-and-suspenders: the coordinator already stops the engine on completion when seeding is
-            // off. Leave State = Completed so the Done teardown recognises this download as not-seeding.
-            await engine.StopAsync(context.Download.InfoHash, cancellationToken);
-        }
-
-        await database.SaveChangesAsync(cancellationToken);
+        await organizer.OrganizeAsync(context.SourceFiles, context.Catalog, cancellationToken);
         return StageResult.Done;
     }
 }
@@ -128,12 +153,7 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
 
     public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        if (context.Download is null)
-        {
-            return new StageResult.Failed("Ingest item has no download.", Retryable: false);
-        }
-
-        var graph = await IngestGraph.LoadAsync(database, context.Download.Id, cancellationToken);
+        var graph = await IngestGraph.LoadAsync(database, context.Item.Id, cancellationToken);
 
         foreach (var item in graph.Leaves.Where(item => item.LibraryPath is not null))
         {
@@ -205,12 +225,7 @@ public sealed class EnrichStage(EnrichService enrichService, MediaServerDbContex
 
     public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        if (context.Download is null)
-        {
-            return new StageResult.Failed("Ingest item has no download.", Retryable: false);
-        }
-
-        var graph = await IngestGraph.LoadAsync(database, context.Download.Id, cancellationToken);
+        var graph = await IngestGraph.LoadAsync(database, context.Item.Id, cancellationToken);
 
         foreach (var item in graph.All.Where(item => item.Kind is MediaKind.Movie or MediaKind.Series))
         {
@@ -233,12 +248,7 @@ public sealed class PublishStage(MediaServerDbContext database) : IPipelineStage
 
     public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        if (context.Download is null)
-        {
-            return new StageResult.Failed("Ingest item has no download.", Retryable: false);
-        }
-
-        var graph = await IngestGraph.LoadAsync(database, context.Download.Id, cancellationToken);
+        var graph = await IngestGraph.LoadAsync(database, context.Item.Id, cancellationToken);
 
         foreach (var item in graph.All)
         {

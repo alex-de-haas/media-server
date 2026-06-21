@@ -1,8 +1,8 @@
 # Hosty Platform Requests
 
-Status: Draft
+Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-17
+Updated: 2026-06-21
 
 ## Description
 
@@ -37,8 +37,8 @@ unblocks the `docker` runtime profile, now the v1 delivery target.
 **Problem (historical).** Catalog roots are large media folders that must live
 outside app data, be configured by the operator after install, survive app
 update/restart/remove/runtime-switch, and never be backed up or deleted by Hosty.
-Each root must be a single filesystem (the organizer hardlinks between `files/`
-and `library/` under one root).
+Each root must be a single filesystem (a completed file is moved into the
+canonical tree within the one root, an atomic zero-copy move).
 
 **Proposed contract.** A manifest-declared external-mount capability plus a
 Core-managed, operator-configured set of host-path → container-path binds:
@@ -54,9 +54,9 @@ Core injects the active binds at runtime, e.g.
 `HOSTY_MOUNT_CATALOGROOTS=/srv/movies-4k,/srv/anime` (under `docker` these are bind
 mounts; under `dev` they are the configured host paths read directly).
 
-**How Media Server uses it.** Reads the injected roots, validates each is a single
-filesystem (`st_dev`), and uses `files/` + `library/` under each for download and
-hardlink organize.
+**How Media Server uses it.** Reads the injected roots and uses a transient
+`.incoming/` staging dir plus the canonical media tree under each for download and
+move/organize (one filesystem, so the move is atomic).
 
 **Workaround.** `dev`/`localCommand` only, reading operator host paths directly —
 blocks `docker` delivery.
@@ -65,7 +65,7 @@ blocks `docker` delivery.
 - Operator can add/edit/remove catalog-root binds after install.
 - Binds persist across update, restart, and runtime-switch.
 - App removal leaves external media intact.
-- Read-write; each bind is one mount point (so hardlinks work within it).
+- Read-write; each bind is one mount point (so an atomic move works within it).
 - Active binds injected under a stable env/contract.
 
 ## 2. External ingress with managed TLS for public endpoints — Implemented (2026-06-17)

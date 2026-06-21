@@ -4,7 +4,7 @@ namespace MediaServer.Api.Data;
 /// Per-user playback state for a single <see cref="MediaItem"/> (Jellyfin <c>UserItemData</c>): resume
 /// position, watched flag, play count, and favorite. Keyed to the internal <see cref="MediaItem.Id"/>
 /// (not the client-facing public id) so it survives rescans and public-id remaps — see
-/// <c>docs/planning/jellyfin-compatibility.md</c>. Folder rollups (season/series watched aggregates) are
+/// <c>docs/features/jellyfin-compatibility.md</c>. Folder rollups (season/series watched aggregates) are
 /// computed on read from the descendant episode rows, never stored here.
 /// </summary>
 public sealed class UserItemData

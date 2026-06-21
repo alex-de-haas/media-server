@@ -1,8 +1,8 @@
 # Watchlist and Discovery
 
-Status: Draft
+Status: Planned
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-06-21
 
 > Future scope (M5). This draft documents the design seams reserved now; the
 > implementation is deferred. Custom content-source providers are preferred over

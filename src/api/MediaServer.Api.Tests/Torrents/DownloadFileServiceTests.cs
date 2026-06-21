@@ -20,7 +20,9 @@ public sealed class DownloadFileServiceTests : IDisposable
 
         var catalogId = Guid.NewGuid();
         _database.Catalogs.Add(new Catalog { Id = catalogId, Name = "Movies", Type = CatalogType.Movie, Root = "/tmp/x", CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
-        _database.Downloads.Add(new Download { Id = _downloadId, InfoHash = "h", Name = "n", CatalogId = catalogId, SourceType = TorrentSourceType.Magnet, State = DownloadState.Completed, SavePath = "/tmp/x/files", AddedAt = DateTimeOffset.UtcNow });
+        _database.Downloads.Add(new Download { Id = _downloadId, InfoHash = "h", Name = "n", CatalogId = catalogId, SourceType = TorrentSourceType.Magnet, State = DownloadState.Completed, SavePath = "/tmp/x/.incoming", AddedAt = DateTimeOffset.UtcNow });
+        // Source files are owned by the ingest; the upsert resolves it from the download id.
+        _database.IngestItems.Add(new IngestItem { Id = Guid.NewGuid(), CatalogId = catalogId, DownloadId = _downloadId, Stage = IngestStage.Download, Status = IngestStatus.Pending, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
         _database.SaveChanges();
     }
 

@@ -129,8 +129,8 @@ public sealed class JellyfinStreamingTests : IDisposable
     {
         var paths = CatalogPaths.For(Path.Combine(_root, "catalog"));
         paths.EnsureCreated();
-        File.WriteAllBytes(Path.Combine(paths.LibraryDir, "movie.mkv"), new byte[FileSize]);
-        File.WriteAllBytes(Path.Combine(paths.LibraryDir, "alt.mkv"), new byte[FileSize]);
+        File.WriteAllBytes(Path.Combine(paths.Root, "movie.mkv"), new byte[FileSize]);
+        File.WriteAllBytes(Path.Combine(paths.Root, "alt.mkv"), new byte[FileSize]);
 
         var now = DateTimeOffset.UtcNow;
         using var context = _db.Create();
@@ -138,8 +138,8 @@ public sealed class JellyfinStreamingTests : IDisposable
         var movie = new MediaItem { Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Movie", Year = 2020, AddedAt = now, UpdatedAt = now };
         _moviePublicId = movie.PublicId!;
 
-        var primary = new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "matroska", Path = "library/movie.mkv", SizeBytes = FileSize, DurationTicks = TimeSpan.FromMinutes(90).Ticks, CreatedAt = now };
-        var alternate = new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "matroska", Path = "library/alt.mkv", SizeBytes = FileSize, DurationTicks = TimeSpan.FromMinutes(90).Ticks, CreatedAt = now };
+        var primary = new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "matroska", Path = "movie.mkv", SizeBytes = FileSize, DurationTicks = TimeSpan.FromMinutes(90).Ticks, CreatedAt = now };
+        var alternate = new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "matroska", Path = "alt.mkv", SizeBytes = FileSize, DurationTicks = TimeSpan.FromMinutes(90).Ticks, CreatedAt = now };
         _secondSourceId = JellyfinIds.MediaSource(alternate.Id);
 
         context.Catalogs.Add(catalog);
@@ -151,13 +151,13 @@ public sealed class JellyfinStreamingTests : IDisposable
     private (string PublicId, Guid SourceId) SeedExtra(string fileName)
     {
         var paths = CatalogPaths.For(Path.Combine(_root, "catalog"));
-        File.WriteAllBytes(Path.Combine(paths.LibraryDir, fileName), new byte[FileSize]);
+        File.WriteAllBytes(Path.Combine(paths.Root, fileName), new byte[FileSize]);
 
         var now = DateTimeOffset.UtcNow;
         using var context = _db.Create();
         var catalog = context.Catalogs.First();
         var movie = new MediaItem { Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Extra", AddedAt = now, UpdatedAt = now };
-        var source = new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "x", Path = $"library/{fileName}", SizeBytes = FileSize, DurationTicks = 0, CreatedAt = now };
+        var source = new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "x", Path = fileName, SizeBytes = FileSize, DurationTicks = 0, CreatedAt = now };
         context.MediaItems.Add(movie);
         context.MediaSources.Add(source);
         context.SaveChanges();

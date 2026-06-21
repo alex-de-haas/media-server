@@ -10,7 +10,7 @@ namespace MediaServer.Api.Jellyfin;
 /// <summary>
 /// Wires the Jellyfin-compatible surface served on the public <c>jellyfin</c> endpoint. Anonymous
 /// discovery/auth routes are open; everything else requires a Media Server-owned token validated by the
-/// <see cref="JellyfinAuthenticationHandler"/> scheme. See <c>docs/planning/jellyfin-compatibility.md</c>.
+/// <see cref="JellyfinAuthenticationHandler"/> scheme. See <c>docs/features/jellyfin-compatibility.md</c>.
 /// </summary>
 public static class JellyfinEndpoints
 {

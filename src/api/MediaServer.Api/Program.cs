@@ -41,7 +41,6 @@ var settings = MediaServerSettings.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(settings);
 
 // Filesystem primitives + catalog management.
-builder.Services.AddSingleton<IHardLinker, HardLinker>();
 builder.Services.AddSingleton<IFilesystemInspector, FilesystemInspector>();
 builder.Services.AddSingleton<ICatalogPathSandbox, CatalogPathSandbox>();
 builder.Services.AddScoped<CatalogService>();
@@ -62,7 +61,6 @@ builder.Services.AddHostedService<TorrentCoordinator>();
 builder.Services.AddScoped<TorrentService>();
 builder.Services.AddScoped<DownloadFileService>();
 builder.Services.AddScoped<DownloadDeletionService>();
-builder.Services.AddScoped<DownloadCleanupService>();
 
 // Identify / probe / enrich building blocks.
 builder.Services.AddSingleton<INameParser, NameParser>();
@@ -112,6 +110,9 @@ builder.Services.AddScoped<RemapService>();
 // Scheduled scans (missing-file drift) + on-demand metadata refresh.
 builder.Services.AddScoped<LibraryMaintenanceService>();
 builder.Services.AddHostedService<LibraryScanWorker>();
+
+// Library import: scan a catalog root for orphan media files and ingest them from the identify stage.
+builder.Services.AddScoped<LibraryImportService>();
 
 // Jellyfin-compatible surface (M2): credentials/tokens, DTO mapping, browsing, images, streaming.
 builder.Services.AddSingleton(TimeProvider.System);

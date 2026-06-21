@@ -1,5 +1,7 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.Torrents;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Pipeline;
@@ -10,7 +12,13 @@ namespace MediaServer.Api.Pipeline;
 /// the orchestrator resumes it at the correct stage.
 /// </summary>
 public sealed class IngestService(
-    MediaServerDbContext database, IdentifyService identifyService, IMetadataProvider metadataProvider, IPipelineQueue queue)
+    MediaServerDbContext database,
+    IdentifyService identifyService,
+    IMetadataProvider metadataProvider,
+    IPipelineQueue queue,
+    DownloadDeletionService downloadDeletion,
+    ICatalogPathSandbox sandbox,
+    ILogger<IngestService> logger)
 {
     public async Task<IReadOnlyList<IngestItemResponse>> ListAsync(CancellationToken cancellationToken)
     {
@@ -36,9 +44,8 @@ public sealed class IngestService(
             return null;
         }
 
-        var sourceFiles = item.DownloadId is { } downloadId
-            ? await database.SourceFiles.AsNoTracking().Where(file => file.DownloadId == downloadId).ToListAsync(cancellationToken)
-            : [];
+        var sourceFiles = await database.SourceFiles.AsNoTracking()
+            .Where(file => file.IngestItemId == item.Id).ToListAsync(cancellationToken);
         var downloadName = item.DownloadId is { } id2
             ? await database.Downloads.AsNoTracking().Where(download => download.Id == id2).Select(download => download.Name).FirstOrDefaultAsync(cancellationToken)
             : null;
@@ -139,9 +146,11 @@ public sealed class IngestService(
     }
 
     /// <summary>
-    /// Removes a single ingest tracking row (operator safety valve, e.g. for an orphaned/stuck entry).
-    /// Only the <see cref="IngestItem"/> is deleted — nothing references it, so downloads, source files,
-    /// and any published library item are untouched. Returns false if it no longer exists.
+    /// Removes an ingest. The operator is never asked about physical files — deletion is automatic by where
+    /// the file sits: an in-flight item delegates to download removal (stops the torrent, clears its
+    /// <c>.incoming/</c> staging and the engine's resume cache, drops the download + this ingest); a
+    /// post-hand-off item erases any <c>.incoming/</c> staging it still owns; a published item just drops the
+    /// tracking row, leaving its canonical library file. Returns false if it no longer exists.
     /// </summary>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
@@ -151,29 +160,84 @@ public sealed class IngestService(
             return false;
         }
 
-        database.IngestItems.Remove(item);
+        // In-flight: download removal stops the torrent, clears its .incoming/ staging + engine resume
+        // cache, and drops the download together with this ingest.
+        if (item.DownloadId is { } downloadId)
+        {
+            await downloadDeletion.DeleteAsync(downloadId, deleteFiles: true, cancellationToken);
+            return true;
+        }
+
+        // No download (scan import, or after the hand-off). Note any .incoming/ staging folders this ingest
+        // owns so they can be erased once the rows are gone; canonical (published) files are left untouched.
+        var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == item.CatalogId, cancellationToken);
+        var stagingDirs = (await database.SourceFiles
+                .Where(file => file.IngestItemId == id)
+                .Select(file => file.RelativePath)
+                .ToListAsync(cancellationToken))
+            .Where(CatalogPaths.IsIncoming)
+            .Select(StagingRootOf)
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        database.IngestItems.Remove(item); // SourceFile rows cascade away with it.
         await database.SaveChangesAsync(cancellationToken);
+
+        if (catalog is not null)
+        {
+            foreach (var staging in stagingDirs)
+            {
+                if (sandbox.TryResolve(catalog, staging, out var absolute))
+                {
+                    TryDeleteDirectory(absolute);
+                }
+            }
+        }
+
         return true;
+    }
+
+    /// <summary>The <c>.incoming/&lt;downloadId&gt;</c> staging root of a path, or null if it is not staged.</summary>
+    private static string? StagingRootOf(string relativePath)
+    {
+        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 2 ? $"{segments[0]}/{segments[1]}" : null;
+    }
+
+    private void TryDeleteDirectory(string absolute)
+    {
+        try
+        {
+            if (Directory.Exists(absolute))
+            {
+                Directory.Delete(absolute, recursive: true);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(exception, "Failed to remove staging folder {Path}", absolute);
+        }
     }
 
     private async Task<Dictionary<Guid, List<SourceFile>>> LoadSourceFilesAsync(
         IReadOnlyList<IngestItem> items, CancellationToken cancellationToken)
     {
-        var downloadIds = items.Select(item => item.DownloadId).OfType<Guid>().Distinct().ToList();
-        if (downloadIds.Count == 0)
+        var ingestIds = items.Select(item => item.Id).ToList();
+        if (ingestIds.Count == 0)
         {
             return new Dictionary<Guid, List<SourceFile>>();
         }
 
         var files = await database.SourceFiles.AsNoTracking()
-            .Where(file => downloadIds.Contains(file.DownloadId))
+            .Where(file => ingestIds.Contains(file.IngestItemId))
             .ToListAsync(cancellationToken);
 
-        return files.GroupBy(file => file.DownloadId).ToDictionary(group => group.Key, group => group.ToList());
+        return files.GroupBy(file => file.IngestItemId).ToDictionary(group => group.Key, group => group.ToList());
     }
 
-    private static IReadOnlyList<SourceFile> SourceFilesFor(IngestItem item, Dictionary<Guid, List<SourceFile>> byDownload) =>
-        item.DownloadId is { } downloadId && byDownload.TryGetValue(downloadId, out var files) ? files : [];
+    private static IReadOnlyList<SourceFile> SourceFilesFor(IngestItem item, Dictionary<Guid, List<SourceFile>> byIngest) =>
+        byIngest.TryGetValue(item.Id, out var files) ? files : [];
 
     private async Task<Dictionary<Guid, string?>> LoadDownloadNamesAsync(
         IReadOnlyList<IngestItem> items, CancellationToken cancellationToken)

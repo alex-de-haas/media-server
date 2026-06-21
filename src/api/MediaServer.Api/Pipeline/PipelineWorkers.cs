@@ -30,7 +30,7 @@ public sealed class PipelineWorker(IPipelineQueue queue, IngestOrchestrator orch
 /// <summary>
 /// Re-drives non-terminal ingest items: enqueues everything outstanding on startup (resume) and, on a
 /// timer, re-enqueues items whose backoff has elapsed or whose lease has expired after a crash. See
-/// <c>docs/planning/background-tasks.md</c>.
+/// <c>docs/features/background-tasks.md</c>.
 /// </summary>
 public sealed class ReconcilerWorker(IServiceScopeFactory scopeFactory, IPipelineQueue queue, ILogger<ReconcilerWorker> logger)
     : BackgroundService
