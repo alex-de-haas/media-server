@@ -44,24 +44,27 @@ public static class EditionLabeler
     /// </summary>
     public static IReadOnlyList<string> Label(IReadOnlyList<string> relativePaths)
     {
-        var tokenSets = relativePaths
+        // Keep each filename's tokens in their original order — string hashing is randomized per process,
+        // so a HashSet's iteration order (and any label/filename built from it) would drift across restarts.
+        var tokenLists = relativePaths
             .Select(path => Tokenize(Path.GetFileNameWithoutExtension(path)))
             .ToList();
 
-        var common = tokenSets
+        // A set only for the "is this token shared by every file?" lookup; it never drives output order.
+        var common = tokenLists
             .Skip(1)
             .Aggregate(
-                new HashSet<string>(tokenSets[0], StringComparer.OrdinalIgnoreCase),
-                (accumulator, set) =>
+                new HashSet<string>(tokenLists[0], StringComparer.OrdinalIgnoreCase),
+                (accumulator, tokens) =>
                 {
-                    accumulator.IntersectWith(set);
+                    accumulator.IntersectWith(tokens);
                     return accumulator;
                 });
 
-        var labels = tokenSets
-            .Select(set => string.Join(
+        var labels = tokenLists
+            .Select(tokens => string.Join(
                 " ",
-                set.Where(token => !common.Contains(token))
+                tokens.Where(token => !common.Contains(token))
                     .Select(token => Known.GetValueOrDefault(token))
                     .OfType<string>()
                     .Distinct()))
@@ -84,8 +87,8 @@ public static class EditionLabeler
         return Enumerable.Range(1, relativePaths.Count).Select(number => $"Version {number}").ToList();
     }
 
-    private static HashSet<string> Tokenize(string name) =>
-        new(name.Split(Separators, StringSplitOptions.RemoveEmptyEntries), StringComparer.OrdinalIgnoreCase);
+    private static string[] Tokenize(string name) =>
+        name.Split(Separators, StringSplitOptions.RemoveEmptyEntries);
 
     private static bool AreDistinct(IReadOnlyList<string> labels) =>
         labels.Distinct(StringComparer.OrdinalIgnoreCase).Count() == labels.Count;

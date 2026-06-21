@@ -41,8 +41,8 @@ public sealed class OrganizerService(
                 continue;
             }
 
-            // Stable order so the "primary" version (no edition suffix is preferred for the item's
-            // LibraryPath) and any ordinal fallback labels are deterministic across re-runs.
+            // Stable order so the primary version chosen for the item's LibraryPath and any ordinal
+            // fallback labels are deterministic across re-runs.
             var filesInGroup = group
                 .OrderBy(file => file.TorrentFileIndex ?? int.MaxValue)
                 .ThenBy(file => file.RelativePath, StringComparer.Ordinal)
@@ -53,6 +53,7 @@ public sealed class OrganizerService(
                 ? EditionLabeler.Label(filesInGroup.Select(file => file.RelativePath).ToList())
                 : null;
 
+            var libraryPathSet = false;
             for (var index = 0; index < filesInGroup.Count; index++)
             {
                 var sourceFile = filesInGroup[index];
@@ -102,12 +103,13 @@ public sealed class OrganizerService(
                 sourceFile.Edition = edition;
                 sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
 
-                // The item's LibraryPath tracks the primary (first) version; the per-file MediaSource rows
-                // probed next are the real source of truth for every version.
-                if (index == 0)
+                // The item's LibraryPath tracks the primary (first successfully organized) version; the
+                // per-file MediaSource rows probed next are the real source of truth for every version.
+                if (!libraryPathSet)
                 {
                     item.LibraryPath = canonicalRelative;
                     item.UpdatedAt = DateTimeOffset.UtcNow;
+                    libraryPathSet = true;
                 }
 
                 organized.Add(new OrganizedFile(sourceFile.Id, item.Id, canonicalRelative, canonicalAbsolute));

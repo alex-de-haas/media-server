@@ -208,6 +208,11 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
     /// </summary>
     private static void DiscardPendingChanges(MediaServerDbContext database)
     {
+        // Surface mutations a stage made but didn't save: ChangeTracker.Entries() reads cached state and
+        // won't reflect them on its own, so without this an unsaved edit would slip through and be
+        // persisted by the failure-path SaveChangesAsync (which runs DetectChanges itself).
+        database.ChangeTracker.DetectChanges();
+
         foreach (var entry in database.ChangeTracker.Entries().ToList())
         {
             if (entry.Entity is IngestItem or Job)
