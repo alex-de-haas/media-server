@@ -1,5 +1,6 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
+using MediaServer.Api.Media;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Torrents;
@@ -162,18 +163,23 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
 
     public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        var graph = await IngestGraph.LoadAsync(database, context.Item.Id, cancellationToken);
+        // One MediaSource per organized file. An item with several files (e.g. a black-and-white and a
+        // regular cut of one episode) becomes a multi-version item: every source is probed and exposed,
+        // and clients render a version picker keyed by MediaSourceId.
+        var assignedFiles = context.SourceFiles
+            .Where(file => file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes));
 
-        foreach (var item in graph.Leaves.Where(item => item.LibraryPath is not null))
+        foreach (var sourceFile in assignedFiles)
         {
-            var absolute = Path.Combine(context.Catalog.Root, item.LibraryPath!.Replace('/', Path.DirectorySeparatorChar));
+            var mediaItemId = sourceFile.MediaItemId!.Value;
+            var absolute = Path.Combine(context.Catalog.Root, sourceFile.RelativePath.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(absolute))
             {
                 continue;
             }
 
             var alreadyProbed = await database.MediaSources.AnyAsync(
-                source => source.MediaItemId == item.Id && source.Path == item.LibraryPath, cancellationToken);
+                source => source.MediaItemId == mediaItemId && source.Path == sourceFile.RelativePath, cancellationToken);
             if (alreadyProbed)
             {
                 continue;
@@ -183,9 +189,11 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
             var source = new MediaSource
             {
                 Id = Guid.NewGuid(),
-                MediaItemId = item.Id,
+                MediaItemId = mediaItemId,
+                SourceFileId = sourceFile.Id,
+                VersionName = sourceFile.Edition,
                 Container = result.Container,
-                Path = item.LibraryPath!,
+                Path = sourceFile.RelativePath,
                 SizeBytes = result.SizeBytes,
                 Bitrate = result.Bitrate,
                 DurationTicks = result.DurationTicks,

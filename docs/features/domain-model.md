@@ -114,13 +114,14 @@ keyed to it) survives the `PublicId` change. The client-visible id therefore
 changes only on an operator remap to a *different* canonical title, where the
 change is intended; clients re-sync `UserData` from the server on refresh.
 
-**MediaSource** (per playable item, from probe)
+**MediaSource** (one per playable file, from probe; an item with alternate versions has several)
 
 | Field | Type |
 | --- | --- |
 | Id | Guid (PK) |
 | MediaItemId | Guid (FK) |
 | SourceFileId | Guid? (FK) |
+| VersionName | string? (version-picker label, e.g. "Black & White"; null for single-source items) |
 | Container / Path | string |
 | SizeBytes / Bitrate | long / int? |
 | DurationTicks | long |
@@ -196,6 +197,7 @@ pipeline actions. See
 | DownloadId | Guid? | transient torrent; null for scan files and after the hand-off |
 | RelativePath | string | catalog-root-relative current path (`.incoming/<id>/…` then canonical) |
 | TorrentFileIndex | int? | index in the torrent file list, when available |
+| Edition | string? | version label when several files map to one item (e.g. "Black & White"); null otherwise. Set by organize, carried to `MediaSource.VersionName` |
 | SizeBytes | long | |
 | ContentHash | string? | optional fingerprint for unmatched identity/reconciliation |
 | MediaItemId | Guid? | assigned movie or episode |

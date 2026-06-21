@@ -25,6 +25,11 @@ public sealed class SourceFile
     /// <summary>Index in the torrent file list, when available.</summary>
     public int? TorrentFileIndex { get; set; }
 
+    /// <summary>Human label distinguishing this file from siblings that map to the same movie/episode
+    /// (e.g. "Black &amp; White", "HDR", "Version 2"). Null when the item has a single file. Set by Organize
+    /// from the original filename and carried onto the probed <c>MediaSource</c> as its version name.</summary>
+    public string? Edition { get; set; }
+
     public long SizeBytes { get; set; }
 
     /// <summary>Optional fingerprint for unmatched identity/reconciliation.</summary>

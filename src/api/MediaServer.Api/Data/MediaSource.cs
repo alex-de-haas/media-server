@@ -9,6 +9,10 @@ public sealed class MediaSource
 
     public Guid? SourceFileId { get; set; }
 
+    /// <summary>Label shown in the client's version picker when a movie/episode has more than one source
+    /// (e.g. "Black &amp; White", "HDR"). Null for single-source items, which fall back to the item title.</summary>
+    public string? VersionName { get; set; }
+
     public required string Container { get; set; }
 
     /// <summary>Absolute or catalog-relative path to the library file.</summary>

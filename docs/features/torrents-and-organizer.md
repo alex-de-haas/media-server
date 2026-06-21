@@ -106,8 +106,8 @@ Stages (skipped individually via `IngestItem.StagesCompleted` for resume):
 | `intake` | ✓ | – | Ensure catalog layout exists. |
 | `download` | ✓ | – | Wait for the torrent. While `keepSeeding`, the item **parks here** (file stays seedable in `.incoming/`) until the operator stops seeding. |
 | `identify` | ✓ | ✓ (entry) | Parse name → provider search → create/reuse `MediaItem`. Low-confidence → `NeedsReview`. |
-| `organize` | ✓ | ✓ | **Move** the file from its current path to the canonical root path derived from the confirmed metadata (rename in place — no copy, no hardlink). |
-| `probe` | ✓ | ✓ | ffprobe the file in place → `MediaSource` + `MediaStream`s. |
+| `organize` | ✓ | ✓ | **Move** each file from its current path to the canonical root path derived from the confirmed metadata (rename in place — no copy, no hardlink). Several files mapped to one item (e.g. a black-and-white and a regular cut of an episode) get distinct version-tagged names. |
+| `probe` | ✓ | ✓ | ffprobe each file in place → one `MediaSource` (+ `MediaStream`s) per file; multiple sources surface as selectable versions. |
 | `enrich` | ✓ | ✓ | Fetch/cache provider metadata + images. |
 | `publish` | ✓ | ✓ | Assign the stable public id; the item becomes browsable/playable. |
 
@@ -178,11 +178,12 @@ idempotent (re-derives the same path; replace if needed).
 
 ## Removal Semantics
 
-With one tree, deletion is simple — one file backs one item:
+With one tree, deletion is simple — every file backs exactly one item (an item may
+have more than one file when it carries alternate versions):
 
 - **Remove from library** (`DELETE /api/library/{id}`, `deleteFiles` option):
   removes the DB rows. With `deleteFiles = true` it also deletes the canonical
-  file from disk (freeing space). With `deleteFiles = false` the file stays on disk
+  file(s) from disk (freeing space). With `deleteFiles = false` the file stays on disk
   (orphaned) and a later **scan** can re-import it.
 - **Remove download** (`DELETE /api/torrents/{id}`) only applies while a download
   exists (download/seeding stage). It stops the torrent and clears its
@@ -190,8 +191,8 @@ With one tree, deletion is simple — one file backs one item:
   there is no download to remove — the item is governed by library removal.
 
 There is no more "removing a torrent leaves watchable content via the other
-hardlink" subtlety: once published there is exactly one file, and library removal
-governs it.
+hardlink" subtlety: once published the canonical file(s) are governed by library
+removal.
 
 ## Remapping
 

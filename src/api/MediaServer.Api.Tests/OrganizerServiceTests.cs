@@ -87,6 +87,64 @@ public sealed class OrganizerServiceTests : IDisposable
         Assert.Equal("movie", await File.ReadAllTextAsync(absolute));
     }
 
+    [Fact]
+    public async Task Organize_gives_two_files_for_one_episode_distinct_versioned_paths()
+    {
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var now = DateTimeOffset.UtcNow;
+        var downloadId = Guid.NewGuid();
+
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Series", Type = CatalogType.Series, Root = _root, NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now };
+        var series = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Series, Title = "Spider-Noir", AddedAt = now, UpdatedAt = now };
+        var episode = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Episode, Title = "Episode 4", SeriesId = series.Id, ParentIndexNumber = 1, IndexNumber = 4, AddedAt = now, UpdatedAt = now };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Stage = IngestStage.Organize, Status = IngestStatus.Running, CreatedAt = now, UpdatedAt = now };
+
+        // The same episode shipped as a regular cut (file 0) and a black-and-white cut (file 1).
+        var regular = MakeSource(ingest.Id, episode.Id, $"{CatalogPaths.IncomingRelative(downloadId)}/Spider-Noir.S01E04.1080p.rus.LostFilm.TV.mkv", torrentIndex: 0, now);
+        var blackWhite = MakeSource(ingest.Id, episode.Id, $"{CatalogPaths.IncomingRelative(downloadId)}/Spider-Noir.BW.S01E04.1080p.rus.LostFilm.TV.mkv", torrentIndex: 1, now);
+
+        _database.AddRange(catalog, series, episode, ingest, regular, blackWhite);
+        await _database.SaveChangesAsync();
+        await WriteStagingFileAsync(regular.RelativePath);
+        await WriteStagingFileAsync(blackWhite.RelativePath);
+
+        var organized = await organizer.OrganizeAsync([regular, blackWhite], catalog, CancellationToken.None);
+
+        // Both files organized to distinct, version-tagged canonical paths under the same season folder.
+        Assert.Equal(2, organized.Count);
+        Assert.Equal("Spider-Noir/Season 01/Spider-Noir S01E04 - Standard.mkv", regular.RelativePath);
+        Assert.Equal("Spider-Noir/Season 01/Spider-Noir S01E04 - Black & White.mkv", blackWhite.RelativePath);
+        Assert.Equal("Standard", regular.Edition);
+        Assert.Equal("Black & White", blackWhite.Edition);
+
+        // Both land on disk; neither overwrote the other.
+        Assert.True(File.Exists(Path.Combine(_root, regular.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
+        Assert.True(File.Exists(Path.Combine(_root, blackWhite.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
+
+        // The episode's LibraryPath tracks the primary (lowest torrent index) version.
+        Assert.Equal(regular.RelativePath, episode.LibraryPath);
+    }
+
+    private static SourceFile MakeSource(Guid ingestId, Guid mediaItemId, string relativePath, int torrentIndex, DateTimeOffset now) => new()
+    {
+        Id = Guid.NewGuid(),
+        IngestItemId = ingestId,
+        RelativePath = relativePath,
+        TorrentFileIndex = torrentIndex,
+        SizeBytes = 5,
+        MediaItemId = mediaItemId,
+        AssignmentStatus = SourceFileAssignmentStatus.Confirmed,
+        CreatedAt = now,
+        UpdatedAt = now,
+    };
+
+    private async Task WriteStagingFileAsync(string relativePath)
+    {
+        var absolute = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        await File.WriteAllTextAsync(absolute, "video");
+    }
+
     public void Dispose()
     {
         _database.Dispose();

@@ -113,7 +113,8 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         {
             Id = JellyfinIds.MediaSource(source.Id),
             Path = source.Path,
-            Name = item.Title,
+            // The version label drives the client's version picker; single-source items fall back to the title.
+            Name = string.IsNullOrWhiteSpace(source.VersionName) ? item.Title : source.VersionName,
             Container = container,
             Size = source.SizeBytes,
             RunTimeTicks = source.DurationTicks,

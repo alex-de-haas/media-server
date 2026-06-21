@@ -26,69 +26,94 @@ public sealed class OrganizerService(
         var organized = new List<OrganizedFile>();
         var stagingToClean = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var sourceFile in sourceFiles)
+        // Group by assigned media item so that when several files map to one movie/episode (e.g. a
+        // black-and-white and a regular cut of the same episode) each gets a distinct canonical path —
+        // alternate versions of one item — instead of colliding on the (item, path) unique index.
+        var groups = sourceFiles
+            .Where(file => file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes))
+            .GroupBy(file => file.MediaItemId!.Value);
+
+        foreach (var group in groups)
         {
-            if (sourceFile.MediaItemId is not { } mediaItemId)
-            {
-                continue; // Unassigned files cannot be organized until matched.
-            }
-
-            if (!MediaFormats.IsPlayableMedia(sourceFile.RelativePath, sourceFile.SizeBytes))
-            {
-                continue;
-            }
-
-            var item = await database.MediaItems.FirstOrDefaultAsync(media => media.Id == mediaItemId, cancellationToken);
+            var item = await database.MediaItems.FirstOrDefaultAsync(media => media.Id == group.Key, cancellationToken);
             if (item is null)
             {
                 continue;
             }
 
-            if (!sandbox.TryResolve(catalog, sourceFile.RelativePath, out var sourceAbsolute))
-            {
-                logger.LogWarning("Refusing to organize unresolved source path {Path}", sourceFile.RelativePath);
-                continue;
-            }
+            // Stable order so the primary version chosen for the item's LibraryPath and any ordinal
+            // fallback labels are deterministic across re-runs.
+            var filesInGroup = group
+                .OrderBy(file => file.TorrentFileIndex ?? int.MaxValue)
+                .ThenBy(file => file.RelativePath, StringComparer.Ordinal)
+                .ToList();
 
-            var extension = Path.GetExtension(sourceFile.RelativePath);
-            var canonicalRelative = await BuildLibraryPathAsync(catalog, item, extension, cancellationToken);
+            // Only a multi-file item needs version labels; a lone file keeps its plain canonical name.
+            var editions = filesInGroup.Count > 1
+                ? EditionLabeler.Label(filesInGroup.Select(file => file.RelativePath).ToList())
+                : null;
 
-            if (!sandbox.TryResolve(catalog, canonicalRelative, out var canonicalAbsolute))
+            var libraryPathSet = false;
+            for (var index = 0; index < filesInGroup.Count; index++)
             {
-                logger.LogWarning("Refusing to organize outside catalog root: {Path}", canonicalRelative);
-                continue;
-            }
+                var sourceFile = filesInGroup[index];
+                var edition = editions?[index];
 
-            // Remember the staging folder so it can be removed once its file(s) move out.
-            if (StagingRootOf(sourceFile.RelativePath) is { } stagingRoot &&
-                sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
-            {
-                stagingToClean.Add(stagingAbsolute);
-            }
-
-            // A case-only path change on a case-insensitive filesystem maps to the same file — skip the move.
-            if (!string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison))
-            {
-                if (!File.Exists(sourceAbsolute))
+                if (!sandbox.TryResolve(catalog, sourceFile.RelativePath, out var sourceAbsolute))
                 {
-                    logger.LogWarning("Source file missing for organize: {Path}", sourceAbsolute);
+                    logger.LogWarning("Refusing to organize unresolved source path {Path}", sourceFile.RelativePath);
                     continue;
                 }
 
-                Directory.CreateDirectory(Path.GetDirectoryName(canonicalAbsolute)!);
-                if (File.Exists(canonicalAbsolute))
+                var extension = Path.GetExtension(sourceFile.RelativePath);
+                var canonicalRelative = await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
+
+                if (!sandbox.TryResolve(catalog, canonicalRelative, out var canonicalAbsolute))
                 {
-                    File.Delete(canonicalAbsolute); // Idempotent re-run: replace any stale file at the destination.
+                    logger.LogWarning("Refusing to organize outside catalog root: {Path}", canonicalRelative);
+                    continue;
                 }
 
-                File.Move(sourceAbsolute, canonicalAbsolute);
-            }
+                // Remember the staging folder so it can be removed once its file(s) move out.
+                if (StagingRootOf(sourceFile.RelativePath) is { } stagingRoot &&
+                    sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
+                {
+                    stagingToClean.Add(stagingAbsolute);
+                }
 
-            sourceFile.RelativePath = canonicalRelative;
-            sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
-            item.LibraryPath = canonicalRelative;
-            item.UpdatedAt = DateTimeOffset.UtcNow;
-            organized.Add(new OrganizedFile(sourceFile.Id, item.Id, canonicalRelative, canonicalAbsolute));
+                // A case-only path change on a case-insensitive filesystem maps to the same file — skip the move.
+                if (!string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison))
+                {
+                    if (!File.Exists(sourceAbsolute))
+                    {
+                        logger.LogWarning("Source file missing for organize: {Path}", sourceAbsolute);
+                        continue;
+                    }
+
+                    Directory.CreateDirectory(Path.GetDirectoryName(canonicalAbsolute)!);
+                    if (File.Exists(canonicalAbsolute))
+                    {
+                        File.Delete(canonicalAbsolute); // Idempotent re-run: replace any stale file at the destination.
+                    }
+
+                    File.Move(sourceAbsolute, canonicalAbsolute);
+                }
+
+                sourceFile.RelativePath = canonicalRelative;
+                sourceFile.Edition = edition;
+                sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+
+                // The item's LibraryPath tracks the primary (first successfully organized) version; the
+                // per-file MediaSource rows probed next are the real source of truth for every version.
+                if (!libraryPathSet)
+                {
+                    item.LibraryPath = canonicalRelative;
+                    item.UpdatedAt = DateTimeOffset.UtcNow;
+                    libraryPathSet = true;
+                }
+
+                organized.Add(new OrganizedFile(sourceFile.Id, item.Id, canonicalRelative, canonicalAbsolute));
+            }
         }
 
         await database.SaveChangesAsync(cancellationToken);
@@ -129,7 +154,8 @@ public sealed class OrganizerService(
         }
     }
 
-    private async Task<string> BuildLibraryPathAsync(Catalog catalog, MediaItem item, string extension, CancellationToken cancellationToken)
+    private async Task<string> BuildLibraryPathAsync(
+        Catalog catalog, MediaItem item, string extension, string? edition, CancellationToken cancellationToken)
     {
         if (item.Kind == MediaKind.Episode)
         {
@@ -139,9 +165,9 @@ public sealed class OrganizerService(
 
             // Fall back to the episode's own title if the series row is missing.
             series ??= item;
-            return LibraryNaming.ForEpisode(series, item, extension);
+            return LibraryNaming.ForEpisode(series, item, extension, edition);
         }
 
-        return LibraryNaming.ForMovie(catalog, item, extension);
+        return LibraryNaming.ForMovie(catalog, item, extension, edition);
     }
 }

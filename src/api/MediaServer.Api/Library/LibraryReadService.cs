@@ -413,6 +413,7 @@ public sealed class LibraryReadService(
 
     private static MediaSourceDto MapSource(MediaSource source) => new(
         source.Id,
+        source.VersionName,
         source.Container,
         source.SizeBytes,
         source.Bitrate,
