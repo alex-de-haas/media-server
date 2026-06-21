@@ -103,4 +103,66 @@ public sealed class IngestDeletionTests
         var service = scope.ServiceProvider.GetRequiredService<IngestService>();
         Assert.False(await service.DeleteAsync(Guid.NewGuid(), CancellationToken.None));
     }
+
+    [Fact]
+    public async Task DeleteCompletedAsync_removes_only_done_items_and_clears_their_staging()
+    {
+        using var harness = new PipelineTestHarness();
+
+        // Two published (Done) items sharing a catalog, plus one still-pending item that must survive.
+        var (doneA, catalogId, downloadA) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "A.mkv", "A.mkv");
+        var (doneB, _, downloadB) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "B.mkv", "B.mkv", catalogId);
+        var (pending, _, downloadC) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "C.mkv", "C.mkv", catalogId);
+
+        // Mark the two as published: Done with the download already handed off (DownloadId null).
+        using (var scope = harness.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            foreach (var item in await db.IngestItems.Where(i => i.Id == doneA || i.Id == doneB).ToListAsync())
+            {
+                item.Status = IngestStatus.Done;
+                item.DownloadId = null;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var root = await StagingCatalogRootAsync(harness, catalogId);
+        string Staging(Guid downloadId, string file) => Path.Combine(
+            root, CatalogPaths.IncomingRelative(downloadId).Replace('/', Path.DirectorySeparatorChar), file);
+        Assert.True(File.Exists(Staging(downloadA, "A.mkv"))); // seeded on disk
+        Assert.True(File.Exists(Staging(downloadB, "B.mkv")));
+
+        int removed;
+        using (var scope = harness.CreateScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+            removed = await service.DeleteCompletedAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(2, removed);
+
+        using var verify = harness.CreateScope();
+        var db2 = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        // Only the Done rows (and their cascading source files) are gone; the pending item is untouched.
+        Assert.False(await db2.IngestItems.AnyAsync(i => i.Id == doneA));
+        Assert.False(await db2.IngestItems.AnyAsync(i => i.Id == doneB));
+        Assert.False(await db2.SourceFiles.AnyAsync(f => f.IngestItemId == doneA || f.IngestItemId == doneB));
+        Assert.True(await db2.IngestItems.AnyAsync(i => i.Id == pending));
+        // The Done items' .incoming/ staging is erased, matching DeleteAsync; the pending item's stays.
+        Assert.False(File.Exists(Staging(downloadA, "A.mkv")));
+        Assert.False(File.Exists(Staging(downloadB, "B.mkv")));
+        Assert.True(File.Exists(Staging(downloadC, "C.mkv")));
+    }
+
+    [Fact]
+    public async Task DeleteCompletedAsync_returns_zero_when_nothing_is_done()
+    {
+        using var harness = new PipelineTestHarness();
+        // A single pending item, never marked Done.
+        await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Movie.mkv", "Movie.mkv");
+
+        using var scope = harness.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+        Assert.Equal(0, await service.DeleteCompletedAsync(CancellationToken.None));
+    }
 }
