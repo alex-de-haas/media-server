@@ -27,7 +27,8 @@ public sealed class JellyfinStreamingTests : IDisposable
         var hosty = new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = _root };
         var server = new JellyfinServerContext(hosty, settings);
         var library = new JellyfinLibraryService(
-            _db.Create(), new JellyfinItemMapper(server), new UserDataService(_db.Create(), TimeProvider.System), settings);
+            _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
+            new UserDataService(_db.Create(), TimeProvider.System), settings);
         _resolver = new JellyfinStreamResolver(library, new CatalogPathSandbox());
         Seed();
     }

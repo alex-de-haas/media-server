@@ -11,28 +11,15 @@ public sealed record ImagePayload(byte[] Content, string ContentType, string Tag
 /// fetches and caches the binary under the app data directory, subsequent requests serve the cached copy.
 /// The client addresses images by item id + image type, never by path.
 /// </summary>
-public sealed class JellyfinImageService(MediaServerDbContext database, IHttpClientFactory httpFactory, HostyOptions hosty)
+public sealed class JellyfinImageService(
+    MediaServerDbContext database, JellyfinCatalogArtwork catalogArtwork, IHttpClientFactory httpFactory, HostyOptions hosty)
 {
     public const string HttpClientName = "jellyfin-images";
 
     public async Task<ImagePayload?> GetImageAsync(
         string itemPublicId, ImageType type, string? tag, int index, CancellationToken cancellationToken)
     {
-        var item = await database.MediaItems.AsNoTracking()
-            .FirstOrDefaultAsync(candidate => candidate.PublicId == itemPublicId, cancellationToken);
-        if (item is null)
-        {
-            return null;
-        }
-
-        var candidates = await database.ImageAssets
-            .Where(image => image.MediaItemId == item.Id && image.ImageType == type)
-            .OrderBy(image => image.SortOrder)
-            .ToListAsync(cancellationToken);
-
-        var asset = tag is { Length: > 0 }
-            ? candidates.FirstOrDefault(image => image.Tag == tag)
-            : candidates.Skip(index).FirstOrDefault() ?? candidates.FirstOrDefault();
+        var asset = await ResolveAssetAsync(itemPublicId, type, tag, index, cancellationToken);
         if (asset is null)
         {
             return null;
@@ -45,6 +32,33 @@ public sealed class JellyfinImageService(MediaServerDbContext database, IHttpCli
         }
 
         return await FetchAndCacheAsync(asset, cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves the artwork to serve. A media-item id selects one of its own images by tag/index; an id
+    /// that is not a media item is treated as a catalog (collection folder), which has no images of its
+    /// own and instead borrows the backdrop of its latest title regardless of the requested type.
+    /// </summary>
+    private async Task<ImageAsset?> ResolveAssetAsync(
+        string itemPublicId, ImageType type, string? tag, int index, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.PublicId == itemPublicId, cancellationToken);
+        if (item is null)
+        {
+            return await catalogArtwork.ResolveCatalogIdAsync(itemPublicId, cancellationToken) is { } catalogId
+                ? await catalogArtwork.GetLatestBackdropAsync(catalogId, cancellationToken)
+                : null;
+        }
+
+        var candidates = await database.ImageAssets
+            .Where(image => image.MediaItemId == item.Id && image.ImageType == type)
+            .OrderBy(image => image.SortOrder)
+            .ToListAsync(cancellationToken);
+
+        return tag is { Length: > 0 }
+            ? candidates.FirstOrDefault(image => image.Tag == tag)
+            : candidates.Skip(index).FirstOrDefault() ?? candidates.FirstOrDefault();
     }
 
     private async Task<ImagePayload?> FetchAndCacheAsync(ImageAsset asset, CancellationToken cancellationToken)

@@ -19,7 +19,13 @@ public sealed record ItemParents(
 /// </summary>
 public sealed class JellyfinItemMapper(JellyfinServerContext server)
 {
-    public BaseItemDto MapCollectionFolder(Catalog catalog) => new()
+    /// <summary>
+    /// Projects a catalog as a Jellyfin collection folder (view). Catalogs have no artwork of their own,
+    /// so <paramref name="backdropTag"/> (the latest title's backdrop) is advertised as both the Primary
+    /// and Backdrop image so Infuse shows a tile instead of a blank placeholder; the image endpoint serves
+    /// the backdrop bytes for either request. Null when the catalog has no usable backdrop.
+    /// </summary>
+    public BaseItemDto MapCollectionFolder(Catalog catalog, string? backdropTag = null) => new()
     {
         Id = JellyfinIds.Catalog(catalog.Id),
         ServerId = server.ServerId,
@@ -28,6 +34,8 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         CollectionType = CollectionType(catalog.Type),
         IsFolder = true,
         DateCreated = catalog.CreatedAt,
+        ImageTags = backdropTag is { Length: > 0 } tag ? new Dictionary<string, string> { ["Primary"] = tag } : null,
+        BackdropImageTags = backdropTag is { Length: > 0 } backdrop ? [backdrop] : null,
     };
 
     public BaseItemDto MapItem(

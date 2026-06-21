@@ -49,9 +49,7 @@ public sealed class IngestService(
         var downloadName = item.DownloadId is { } id2
             ? await database.Downloads.AsNoTracking().Where(download => download.Id == id2).Select(download => download.Name).FirstOrDefaultAsync(cancellationToken)
             : null;
-        var mediaTitle = item.MediaItemId is { } mediaId
-            ? await database.MediaItems.AsNoTracking().Where(media => media.Id == mediaId).Select(media => media.Title).FirstOrDefaultAsync(cancellationToken)
-            : null;
+        var mediaTitle = await ResolveMediaTitleAsync(item.MediaItemId, cancellationToken);
         return IngestItemResponse.From(item, sourceFiles, downloadName, mediaTitle);
     }
 
@@ -334,11 +332,74 @@ public sealed class IngestService(
             return new Dictionary<Guid, string>();
         }
 
-        return await database.MediaItems.AsNoTracking()
-            .Where(media => mediaItemIds.Contains(media.Id))
-            .ToDictionaryAsync(media => media.Id, media => media.Title, cancellationToken);
+        var media = await database.MediaItems.AsNoTracking()
+            .Where(item => mediaItemIds.Contains(item.Id))
+            .Select(item => new MediaTitleParts(
+                item.Id, item.Kind, item.Title, item.SeriesId, item.ParentIndexNumber, item.IndexNumber))
+            .ToListAsync(cancellationToken);
+
+        // Published episodes carry a generic "Episode N" title; resolve the parent series name so the
+        // ingest list shows e.g. "Breaking Bad · S01E05" instead of a context-free "Episode 5".
+        var seriesIds = media
+            .Where(item => item.Kind == MediaKind.Episode)
+            .Select(item => item.SeriesId)
+            .OfType<Guid>()
+            .Distinct()
+            .ToList();
+        var seriesTitles = seriesIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await database.MediaItems.AsNoTracking()
+                .Where(item => seriesIds.Contains(item.Id))
+                .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
+
+        return media.ToDictionary(
+            item => item.Id,
+            item => item.Kind == MediaKind.Episode
+                ? FormatEpisodeTitle(
+                    item.SeriesId is { } seriesId ? seriesTitles.GetValueOrDefault(seriesId) : null,
+                    item.ParentIndexNumber, item.IndexNumber, item.Title)
+                : item.Title);
+    }
+
+    private async Task<string?> ResolveMediaTitleAsync(Guid? mediaItemId, CancellationToken cancellationToken)
+    {
+        if (mediaItemId is not { } id)
+        {
+            return null;
+        }
+
+        var media = await database.MediaItems.AsNoTracking()
+            .Where(item => item.Id == id)
+            .Select(item => new MediaTitleParts(
+                item.Id, item.Kind, item.Title, item.SeriesId, item.ParentIndexNumber, item.IndexNumber))
+            .FirstOrDefaultAsync(cancellationToken);
+        if (media is null)
+        {
+            return null;
+        }
+
+        if (media.Kind != MediaKind.Episode)
+        {
+            return media.Title;
+        }
+
+        var seriesTitle = media.SeriesId is { } seriesId
+            ? await database.MediaItems.AsNoTracking()
+                .Where(item => item.Id == seriesId).Select(item => item.Title).FirstOrDefaultAsync(cancellationToken)
+            : null;
+        return FormatEpisodeTitle(seriesTitle, media.ParentIndexNumber, media.IndexNumber, media.Title);
+    }
+
+    /// <summary>"Breaking Bad · S01E05", falling back to the series name or "Episode N" when parts are missing.</summary>
+    private static string FormatEpisodeTitle(string? seriesTitle, int? season, int? episode, string fallback)
+    {
+        var episodeLabel = season is { } s && episode is { } e ? $"S{s:00}E{e:00}" : fallback;
+        return string.IsNullOrWhiteSpace(seriesTitle) ? episodeLabel : $"{seriesTitle} · {episodeLabel}";
     }
 
     private static string? MediaTitleFor(IngestItem item, Dictionary<Guid, string> byMediaItem) =>
         item.MediaItemId is { } mediaItemId && byMediaItem.TryGetValue(mediaItemId, out var title) ? title : null;
+
+    private sealed record MediaTitleParts(
+        Guid Id, MediaKind Kind, string Title, Guid? SeriesId, int? ParentIndexNumber, int? IndexNumber);
 }

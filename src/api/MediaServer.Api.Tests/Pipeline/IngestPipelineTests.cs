@@ -145,6 +145,32 @@ public sealed class IngestPipelineTests
     }
 
     [Fact]
+    public async Task Ingest_list_shows_series_name_and_season_for_episodes()
+    {
+        using var harness = new PipelineTestHarness();
+        StrongMatch(harness, id: "1399");
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "Some.Show.S01E02.1080p", "Some.Show.S01E02.1080p/Some.Show.S01E02.mkv");
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var ingestService = scope.ServiceProvider.GetRequiredService<IngestService>();
+
+        var seriesTitle = await database.MediaItems
+            .Where(item => item.Kind == MediaKind.Series).Select(item => item.Title).SingleAsync();
+
+        var listed = await ingestService.ListAsync(CancellationToken.None);
+        Assert.Equal($"{seriesTitle} · S01E02", Assert.Single(listed).MediaTitle);
+
+        // The single-item GetAsync path composes the same title.
+        var fetched = await ingestService.GetAsync(ingestId, CancellationToken.None);
+        Assert.Equal($"{seriesTitle} · S01E02", fetched!.MediaTitle);
+    }
+
+    [Fact]
     public async Task Ingest_list_orders_by_created_at_without_sqlite_translation_error()
     {
         using var harness = new PipelineTestHarness();

@@ -29,7 +29,8 @@ public sealed class JellyfinMappingTests : IDisposable
         };
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
-            _db.Create(), new JellyfinItemMapper(server), new UserDataService(_db.Create(), TimeProvider.System), _settings);
+            _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
+            new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
 
@@ -42,6 +43,22 @@ public sealed class JellyfinMappingTests : IDisposable
         Assert.All(views, view => Assert.Equal("CollectionFolder", view.Type));
         Assert.Contains(views, view => view.Id == JellyfinIds.Catalog(_movieCatalogId) && view.CollectionType == "movies");
         Assert.Contains(views, view => view.Id == JellyfinIds.Catalog(_seriesCatalogId) && view.CollectionType == "tvshows");
+    }
+
+    [Fact]
+    public async Task View_borrows_latest_titles_backdrop_so_infuse_shows_a_tile()
+    {
+        var views = await _library.GetViewsAsync(CancellationToken.None);
+
+        // The movie catalog's only title has a backdrop; the view advertises it as both Primary and Backdrop.
+        var moviesView = Assert.Single(views, view => view.Id == JellyfinIds.Catalog(_movieCatalogId));
+        Assert.Equal("backdroptag00001", moviesView.ImageTags?["Primary"]);
+        Assert.Equal(["backdroptag00001"], moviesView.BackdropImageTags);
+
+        // The series catalog has no backdrop, so its view advertises no artwork.
+        var showsView = Assert.Single(views, view => view.Id == JellyfinIds.Catalog(_seriesCatalogId));
+        Assert.Null(showsView.ImageTags);
+        Assert.Null(showsView.BackdropImageTags);
     }
 
     [Fact]
