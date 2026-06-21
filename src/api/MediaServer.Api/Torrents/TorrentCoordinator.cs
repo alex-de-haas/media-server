@@ -127,9 +127,12 @@ public sealed class TorrentCoordinator(
                 ? (long)(snapshot.SizeBytes * (1 - snapshot.PercentComplete / 100.0) / snapshot.DownloadRateBytesPerSecond)
                 : null;
 
+            // Send the live engine state (e.g. Paused/Downloading), not the persisted DownloadState — the
+            // UI derives the pause/resume affordance from it, and the DB state never reflects a pause. Coarse
+            // DB transitions ride the separate downloadStateChanged event.
             await notifier.DownloadProgressAsync(new DownloadProgress(
                 download.Id,
-                download.State.ToString(),
+                snapshot.EngineState,
                 snapshot.PercentComplete,
                 snapshot.DownloadRateBytesPerSecond,
                 snapshot.UploadRateBytesPerSecond,
