@@ -201,8 +201,10 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         if (!_managers.TryGetValue(infoHash, out var manager))
         {
             // Not loaded (e.g. a completed download that was not resumed after restart) — still clear any
-            // persisted fast-resume so a re-added torrent re-checks instead of trusting stale "complete" data.
+            // persisted fast-resume and completion bookkeeping so a re-added torrent re-checks instead of
+            // trusting stale "complete" data.
             DeleteResumeData(infoHash);
+            _completionRaised.TryRemove(infoHash, out _);
             return;
         }
 

@@ -20,6 +20,12 @@ public sealed record LibraryImportReport(int FilesScanned, int Imported, int Ski
 public sealed class LibraryImportService(
     MediaServerDbContext database, IPipelineQueue queue, ILogger<LibraryImportService> logger)
 {
+    // Path matching follows the filesystem: case-insensitive on Windows and default macOS, ordinal elsewhere.
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    private static readonly StringComparer PathComparer =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
     /// <summary>Scans the catalog root and queues an ingest for each orphan media file. Null if no catalog.</summary>
     public async Task<LibraryImportReport?> ImportAsync(Guid catalogId, CancellationToken cancellationToken)
     {
@@ -42,7 +48,7 @@ public sealed class LibraryImportService(
             .Where(file => file.IngestItem!.CatalogId == catalogId)
             .Select(file => file.RelativePath)
             .ToListAsync(cancellationToken);
-        var known = new HashSet<string>(publishedPaths.Concat(queuedPaths), StringComparer.Ordinal);
+        var known = new HashSet<string>(publishedPaths.Concat(queuedPaths), PathComparer);
 
         var scanned = 0;
         var skipped = 0;
@@ -51,7 +57,18 @@ public sealed class LibraryImportService(
 
         foreach (var absolute in EnumerateMediaFiles(paths))
         {
-            var size = new FileInfo(absolute).Length;
+            long size;
+            try
+            {
+                size = new FileInfo(absolute).Length;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A file that moved/was deleted/became unreadable mid-scan shouldn't fail the whole import.
+                logger.LogWarning(exception, "Skipping unreadable file during import scan: {Path}", absolute);
+                continue;
+            }
+
             var relative = ToRelative(paths.Root, absolute);
 
             // Skip non-playable junk (samples) the same way the torrent path does.
@@ -118,7 +135,7 @@ public sealed class LibraryImportService(
         var incoming = Path.GetFullPath(paths.IncomingDir) + Path.DirectorySeparatorChar;
         return Directory.EnumerateFiles(paths.Root, "*", SearchOption.AllDirectories)
             .Where(MediaFormats.IsVideo)
-            .Where(file => !Path.GetFullPath(file).StartsWith(incoming, StringComparison.Ordinal));
+            .Where(file => !Path.GetFullPath(file).StartsWith(incoming, PathComparison));
     }
 
     private static string ToRelative(string root, string absolute) =>

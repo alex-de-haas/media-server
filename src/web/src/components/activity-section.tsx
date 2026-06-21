@@ -222,7 +222,7 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
   const title =
     item.mediaTitle ??
     item.downloadName ??
-    (item.sourceFiles[0] ? displayPath(item.sourceFiles[0].relativePath) : undefined) ??
+    (item.sourceFiles?.[0]?.relativePath ? displayPath(item.sourceFiles[0].relativePath) : undefined) ??
     "Untitled item";
   const age = formatTimeAgo(item.createdAt);
   const hint = stateHint(item, download);

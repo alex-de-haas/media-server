@@ -174,7 +174,7 @@ public sealed class RemapService(
         // 4. Remove any directories the moves emptied (best effort; the file already lives at its new path).
         foreach (var directory in emptiedDirs)
         {
-            TryRemoveEmptyDirectory(directory);
+            TryRemoveEmptyDirectories(directory, catalog.Root);
         }
 
         logger.LogInformation("Remapped {Old} → {Kind} '{Title}' ({Provider}:{Id}).",
@@ -182,20 +182,41 @@ public sealed class RemapService(
         return RemapResult.Ok(target.Id);
     }
 
-    private void TryRemoveEmptyDirectory(string directory)
+    // Walk up from the emptied directory, deleting each now-empty directory until a non-empty one (or the
+    // catalog root) is reached, so remapping out of a season/series folder leaves no empty parents behind.
+    private void TryRemoveEmptyDirectories(string directory, string root)
     {
-        try
+        var stop = EnsureTrailingSeparator(Path.GetFullPath(root));
+        var current = Path.GetFullPath(directory);
+        while (EnsureTrailingSeparator(current).StartsWith(stop, PathComparison) &&
+               !EnsureTrailingSeparator(current).Equals(stop, PathComparison))
         {
-            if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+            try
             {
-                Directory.Delete(directory);
+                if (!Directory.Exists(current) || Directory.EnumerateFileSystemEntries(current).Any())
+                {
+                    break;
+                }
+
+                Directory.Delete(current);
+                var parent = Path.GetDirectoryName(current);
+                if (string.IsNullOrEmpty(parent))
+                {
+                    break;
+                }
+
+                current = parent;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(exception, "Failed to remove emptied directory {Path}", current);
+                break;
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(exception, "Failed to remove emptied directory {Path}", directory);
-        }
     }
+
+    private static string EnsureTrailingSeparator(string path) =>
+        path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
 
     private static void AssignPublicId(MediaItem item) => item.PublicId ??= PublicIdFactory.ForItem(item);
 

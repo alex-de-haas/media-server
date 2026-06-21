@@ -1,3 +1,4 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.Probe;
@@ -29,7 +30,7 @@ public sealed class IntakeStage : IPipelineStage
 /// runs torrent-free. While <c>keepSeeding</c> is on the item parks here until the operator stops seeding.
 /// Scan-originated items have no download and skip straight through.
 /// </summary>
-public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine engine, ILogger<DownloadStage> logger) : IPipelineStage
+public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine engine, ICatalogPathSandbox sandbox, ILogger<DownloadStage> logger) : IPipelineStage
 {
     public string Key => "download";
     public PipelinePhase Phase => PipelinePhase.Processing;
@@ -68,7 +69,7 @@ public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine 
         }
 
         var anyFileOnDisk = context.SourceFiles.Any(file =>
-            File.Exists(Path.Combine(context.Catalog.Root, file.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
+            sandbox.TryResolve(context.Catalog, file.RelativePath, out var absolute) && File.Exists(absolute));
         if (!anyFileOnDisk)
         {
             return new StageResult.Failed(
@@ -76,11 +77,10 @@ public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine 
                 "Remove it and add it again to download.", Retryable: false);
         }
 
-        // Hand off — stop the engine torrent (keep its files in .incoming/) and drop the Download row. The
-        // SourceFile/IngestItem download FKs are SET NULL, so the file stays owned by the ingest. Done once,
-        // even if a later stage re-drives.
-        await engine.RemoveAsync(download.InfoHash, deleteFiles: false, cancellationToken);
-
+        // Hand off — drop the Download row first (re-parent its source files + the ingest item), then do a
+        // best-effort engine removal. The files stay in .incoming/, owned by the ingest (the download FKs are
+        // SET NULL). Persisting the DB change before the engine call means a transient engine error can't
+        // strand the pipeline with a half-applied hand-off. Done once, even if a later stage re-drives.
         foreach (var sourceFile in context.SourceFiles)
         {
             sourceFile.DownloadId = null;
@@ -89,6 +89,15 @@ public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine 
         context.Item.DownloadId = null;
         database.Downloads.Remove(download);
         await database.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await engine.RemoveAsync(download.InfoHash, deleteFiles: false, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "Engine removal during hand-off of download {DownloadId} failed; files kept in .incoming/.", download.Id);
+        }
 
         logger.LogInformation(
             "Handed off download {DownloadId} to ingest {Ingest}: row removed, files kept in .incoming/.",
