@@ -94,15 +94,16 @@ public sealed class RemapService(
             ? await database.MediaItems.FirstOrDefaultAsync(item => item.Id == seriesId, cancellationToken)
             : null;
 
-        // 1. Move every source file to the target's clean path, reassigning the MediaSource rows.
+        // 1. Move every source file to the target's clean path, reassigning the MediaSource rows. A
+        //    multi-version item keeps each source's version label so the rebuilt paths stay distinct.
         var emptiedDirs = new List<string>();
         string? targetLibraryPath = null;
         foreach (var source in sources)
         {
             var extension = Path.GetExtension(source.Path);
             var newRelative = target.Kind == MediaKind.Episode
-                ? LibraryNaming.ForEpisode(targetSeries ?? target, target, extension)
-                : LibraryNaming.ForMovie(catalog, target, extension);
+                ? LibraryNaming.ForEpisode(targetSeries ?? target, target, extension, source.VersionName)
+                : LibraryNaming.ForMovie(catalog, target, extension, source.VersionName);
 
             if (!sandbox.TryResolve(catalog, source.Path, out var oldAbsolute) ||
                 !sandbox.TryResolve(catalog, newRelative, out var newAbsolute))

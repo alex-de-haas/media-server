@@ -145,6 +145,39 @@ public sealed class IngestPipelineTests
     }
 
     [Fact]
+    public async Task Two_files_for_one_episode_publish_as_alternate_versions()
+    {
+        using var harness = new PipelineTestHarness();
+        StrongMatch(harness, id: "1399");
+
+        // A release that ships both a regular and a black-and-white cut of the same episode.
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "Spider-Noir.S01E04.1080p",
+            "Spider-Noir.S01E04.1080p/Spider-Noir.S01E04.1080p.rus.LostFilm.TV.mkv",
+            additionalSourceRelativePaths: ["Spider-Noir.S01E04.1080p/Spider-Noir.BW.S01E04.1080p.rus.LostFilm.TV.mkv"]);
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+
+        // The two files collapse onto one episode...
+        var episode = await database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Episode);
+        Assert.False(string.IsNullOrEmpty(episode.PublicId));
+
+        // ...exposed as two distinct, labelled, on-disk versions linked back to their source files.
+        var sources = await database.MediaSources.Where(source => source.MediaItemId == episode.Id).ToListAsync();
+        Assert.Equal(2, sources.Count);
+        Assert.Contains(sources, source => source.VersionName == "Black & White");
+        Assert.Contains(sources, source => source.VersionName == "Standard");
+        Assert.Equal(2, sources.Select(source => source.Path).Distinct().Count());
+        Assert.All(sources, source => Assert.NotNull(source.SourceFileId));
+
+        var ingest = await database.IngestItems.SingleAsync(item => item.Id == ingestId);
+        Assert.Equal(IngestStatus.Done, ingest.Status);
+    }
+
+    [Fact]
     public async Task Ingest_list_shows_series_name_and_season_for_episodes()
     {
         using var harness = new PipelineTestHarness();

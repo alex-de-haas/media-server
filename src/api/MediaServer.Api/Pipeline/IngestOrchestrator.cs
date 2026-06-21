@@ -121,6 +121,11 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
                     return;
 
                 case StageResult.Failed failed:
+                    // A stage that threw mid-save (e.g. a unique-index violation) leaves its rejected
+                    // changes tracked on this shared context; left in place, the very next SaveChangesAsync
+                    // — recording the failure — would replay and re-throw them, turning a recoverable stage
+                    // failure into an unhandled crash that re-drives forever. Drop them first.
+                    DiscardPendingChanges(database);
                     item.AttemptCount++;
                     await jobService.FailAsync(job, failed.Error, cancellationToken);
 
@@ -193,6 +198,34 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
         if (status == IngestStatus.Done)
         {
             logger.LogInformation("Ingest item {IngestItem} published as media item {MediaItem}.", item.Id, item.MediaItemId);
+        }
+    }
+
+    /// <summary>
+    /// Rolls back every tracked change except the ingest item and its job — the two rows the failure path
+    /// is about to write deliberately. Added rows are detached; modified/deleted rows are reverted to their
+    /// loaded values, so a stage's rejected writes can't ride along on the next SaveChangesAsync.
+    /// </summary>
+    private static void DiscardPendingChanges(MediaServerDbContext database)
+    {
+        foreach (var entry in database.ChangeTracker.Entries().ToList())
+        {
+            if (entry.Entity is IngestItem or Job)
+            {
+                continue;
+            }
+
+            switch (entry.State)
+            {
+                case EntityState.Added:
+                    entry.State = EntityState.Detached;
+                    break;
+                case EntityState.Modified:
+                case EntityState.Deleted:
+                    entry.CurrentValues.SetValues(entry.OriginalValues);
+                    entry.State = EntityState.Unchanged;
+                    break;
+            }
         }
     }
 

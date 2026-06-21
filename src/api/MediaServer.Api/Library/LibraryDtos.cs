@@ -45,6 +45,7 @@ public sealed record LibraryDetailDto(
 
 public sealed record MediaSourceDto(
     Guid Id,
+    string? VersionName,
     string Container,
     long SizeBytes,
     int? Bitrate,

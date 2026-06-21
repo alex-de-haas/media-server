@@ -82,9 +82,12 @@ public sealed class PipelineTestHarness : IDisposable
     public T GetService<T>() where T : notnull => _provider.GetRequiredService<T>();
 
     /// <summary>Sets up a catalog, a completed download whose file sits under <c>.incoming/&lt;id&gt;/</c>,
-    /// the owning source file, and a pending ingest item. Returns the ingest item id.</summary>
+    /// the owning source file, and a pending ingest item. Returns the ingest item id. Pass
+    /// <paramref name="additionalSourceRelativePaths"/> to stage extra files under the same download (a
+    /// multi-file torrent, e.g. two cuts of one episode).</summary>
     public async Task<(Guid IngestId, Guid CatalogId, Guid DownloadId)> SeedCompletedDownloadAsync(
-        CatalogType type, string torrentName, string sourceRelativePath, Guid? catalogId = null, bool keepSeeding = false)
+        CatalogType type, string torrentName, string sourceRelativePath, Guid? catalogId = null, bool keepSeeding = false,
+        IReadOnlyList<string>? additionalSourceRelativePaths = null)
     {
         using var scope = _provider.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
@@ -126,11 +129,36 @@ public sealed class PipelineTestHarness : IDisposable
             IngestItemId = ingestId,
             DownloadId = downloadId,
             RelativePath = stagingRelative,
+            TorrentFileIndex = 0,
             SizeBytes = 1024,
             AssignmentStatus = SourceFileAssignmentStatus.Unassigned,
             CreatedAt = now,
             UpdatedAt = now,
         };
+
+        // Extra files in the same torrent (each staged under the same .incoming/<downloadId>/ folder).
+        var additionalFiles = new List<SourceFile>();
+        foreach (var (relative, index) in (additionalSourceRelativePaths ?? []).Select((path, index) => (path, index)))
+        {
+            var extraStagingRelative = $"{CatalogPaths.IncomingRelative(downloadId)}/{relative}";
+            var extraAbsolute = Path.Combine(catalog.Root, extraStagingRelative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(extraAbsolute)!);
+            await File.WriteAllBytesAsync(extraAbsolute, new byte[1024]);
+
+            additionalFiles.Add(new SourceFile
+            {
+                Id = Guid.NewGuid(),
+                IngestItemId = ingestId,
+                DownloadId = downloadId,
+                RelativePath = extraStagingRelative,
+                TorrentFileIndex = index + 1,
+                SizeBytes = 1024,
+                AssignmentStatus = SourceFileAssignmentStatus.Unassigned,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+
         var ingest = new IngestItem
         {
             Id = ingestId,
@@ -149,6 +177,7 @@ public sealed class PipelineTestHarness : IDisposable
 
         database.Downloads.Add(download);
         database.SourceFiles.Add(sourceFile);
+        database.SourceFiles.AddRange(additionalFiles);
         database.IngestItems.Add(ingest);
         await database.SaveChangesAsync();
 

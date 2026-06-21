@@ -340,6 +340,7 @@ function MediaInfo({ sources }: { sources: LibraryMediaSource[] }) {
       <h2 className="text-lg font-semibold tracking-tight">Media</h2>
       {sources.map((source) => (
         <div key={source.id} className="rounded-md border p-3 text-sm">
+          {source.versionName ? <p className="font-medium">{source.versionName}</p> : null}
           <p className="text-muted-foreground font-mono text-xs">
             {source.container} · {formatBytes(source.sizeBytes)}
           </p>

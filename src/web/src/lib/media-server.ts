@@ -182,6 +182,7 @@ export interface MediaStream {
 
 export interface LibraryMediaSource {
   id: string;
+  versionName: string | null;
   container: string;
   sizeBytes: number;
   bitrate: number | null;
