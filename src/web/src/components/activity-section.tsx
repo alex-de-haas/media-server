@@ -365,6 +365,7 @@ function DownloadProgress({ download }: { download: Download }) {
       <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono">
         <span>{formatPercent(download.percentComplete)}</span>
         <span>↓ {formatSpeed(download.downloadRateBytesPerSecond)}</span>
+        <span>↑ {formatSpeed(download.uploadRateBytesPerSecond)}</span>
         <span>ETA {formatEta(eta)}</span>
       </div>
     </div>
