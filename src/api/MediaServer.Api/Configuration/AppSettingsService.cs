@@ -20,7 +20,7 @@ public sealed class AppSettingsService(MediaServerDbContext database)
 
     /// <summary>Replaces the custom release groups with the normalized form of <paramref name="groups"/>.</summary>
     public async Task<IReadOnlyList<string>> UpdateCustomReleaseGroupsAsync(
-        IEnumerable<string> groups, CancellationToken cancellationToken)
+        IEnumerable<string>? groups, CancellationToken cancellationToken)
     {
         var normalized = Normalize(groups);
 
@@ -38,11 +38,11 @@ public sealed class AppSettingsService(MediaServerDbContext database)
         return normalized;
     }
 
-    /// <summary>Trims entries, drops blanks, and de-duplicates case-insensitively while keeping order.</summary>
-    internal static List<string> Normalize(IEnumerable<string> groups) =>
-        groups
+    /// <summary>Trims entries, drops null/blank ones, and de-duplicates case-insensitively while keeping order.</summary>
+    internal static List<string> Normalize(IEnumerable<string>? groups) =>
+        (groups ?? [])
+            .Where(group => !string.IsNullOrWhiteSpace(group))
             .Select(group => group.Trim())
-            .Where(group => group.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 }

@@ -73,6 +73,18 @@ public sealed class NameParserTests
     }
 
     [Fact]
+    public void Strips_bracket_wrapped_group_configured_without_brackets()
+    {
+        // A group configured as "HorribleSubs" is stripped even when the file wraps it in brackets — the
+        // non-word-character boundary matches where a plain \b boundary would not.
+        var parsed = _parser.Parse("[HorribleSubs] The Show S01E05.mkv", CatalogType.Series, ["HorribleSubs"]);
+
+        Assert.Equal("The Show", parsed.Title);
+        Assert.Equal(1, parsed.Season);
+        Assert.Equal(5, parsed.Episode);
+    }
+
+    [Fact]
     public void Release_group_match_is_whole_word_and_case_insensitive()
     {
         // "yts" strips "YTS" despite the case difference, while "Mov" is left alone because it is only a

@@ -19,9 +19,9 @@ public static class SettingsEndpoints
             Results.Ok(new AppSettingsResponse(await settings.GetCustomReleaseGroupsAsync(cancellationToken))));
 
         // Mutating the parser configuration is an admin-only management action.
-        group.MapPut("/", async (UpdateAppSettingsRequest request, AppSettingsService settings, CancellationToken cancellationToken) =>
+        group.MapPut("/", async (UpdateAppSettingsRequest? request, AppSettingsService settings, CancellationToken cancellationToken) =>
         {
-            var saved = await settings.UpdateCustomReleaseGroupsAsync(request.CustomReleaseGroups ?? [], cancellationToken);
+            var saved = await settings.UpdateCustomReleaseGroupsAsync(request?.CustomReleaseGroups, cancellationToken);
             return Results.Ok(new AppSettingsResponse(saved));
         }).RequireAuthorization(AppRoles.AdminPolicy);
     }

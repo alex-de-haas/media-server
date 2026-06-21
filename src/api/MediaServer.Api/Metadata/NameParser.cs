@@ -26,40 +26,48 @@ public sealed partial class NameParser : INameParser
 {
     public ParsedName Parse(string name, CatalogType catalogType, IReadOnlyCollection<string>? releaseGroups = null)
     {
-        var cleaned = StripReleaseGroups(Clean(StripExtension(name)), releaseGroups);
+        // Strip configured release groups from the raw name first, so both the cleaned form (movie/series
+        // regex) and the AnitomySharp input (anime) are free of them.
+        var stripped = StripReleaseGroups(name, releaseGroups);
+        var cleaned = Clean(StripExtension(stripped));
 
         return catalogType switch
         {
-            CatalogType.Anime => ParseAnime(name, cleaned),
+            CatalogType.Anime => ParseAnime(stripped, cleaned),
             CatalogType.Series => ParseSeries(cleaned),
             _ => ParseMovie(cleaned),
         };
     }
 
     /// <summary>
-    /// Removes each configured release group from the already-normalized name. Groups are normalized the
-    /// same way (dots/underscores → spaces) so an entry like <c>LostFilm.TV</c> matches the cleaned token
-    /// "LostFilm TV". Whole-word and case-insensitive so a group never clips a real title substring.
+    /// Removes each configured release group from the raw name before normalization, so groups never leak
+    /// into a parsed title — whether it comes from the movie/series regex on the cleaned name or from
+    /// AnitomySharp on the raw name. A group's words may be separated by any common delimiter
+    /// (<c>.</c>, <c>_</c>, <c>-</c>, space) in the file name, and the whole token is bounded by
+    /// non-alphanumeric characters (or the string ends). That makes the match whole-word and
+    /// case-insensitive — it never clips a real title word (or one in another script) — and handles
+    /// bracket/dash-wrapped groups like <c>[Group]</c> that a <c>\b</c> boundary would miss.
     /// </summary>
-    private static string StripReleaseGroups(string cleaned, IReadOnlyCollection<string>? releaseGroups)
+    private static string StripReleaseGroups(string name, IReadOnlyCollection<string>? releaseGroups)
     {
         if (releaseGroups is null || releaseGroups.Count == 0)
         {
-            return cleaned;
+            return name;
         }
 
         foreach (var group in releaseGroups)
         {
-            var normalized = Clean(group);
-            if (normalized.Length == 0)
+            var words = Clean(group).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length == 0)
             {
                 continue;
             }
 
-            cleaned = Regex.Replace(cleaned, $@"\b{Regex.Escape(normalized)}\b", " ", RegexOptions.IgnoreCase);
+            var token = string.Join(@"[\s._+\-]+", words.Select(Regex.Escape));
+            name = Regex.Replace(name, $@"(?<![\p{{L}}\p{{N}}]){token}(?![\p{{L}}\p{{N}}])", " ", RegexOptions.IgnoreCase);
         }
 
-        return CollapseSpaces(cleaned).Trim();
+        return name;
     }
 
     private static ParsedName ParseMovie(string cleaned)
