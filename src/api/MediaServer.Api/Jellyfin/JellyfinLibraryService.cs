@@ -35,13 +35,11 @@ public sealed class JellyfinLibraryService(
     public async Task<IReadOnlyList<BaseItemDto>> GetViewsAsync(CancellationToken cancellationToken)
     {
         var catalogs = await database.Catalogs.AsNoTracking().OrderBy(catalog => catalog.Name).ToListAsync(cancellationToken);
-        var views = new List<BaseItemDto>(catalogs.Count);
-        foreach (var catalog in catalogs)
-        {
-            views.Add(mapper.MapCollectionFolder(catalog, await BackdropTagAsync(catalog.Id, cancellationToken)));
-        }
-
-        return views;
+        var backdropTags = await catalogArtwork.GetLatestBackdropTagsAsync(
+            catalogs.Select(catalog => catalog.Id).ToList(), cancellationToken);
+        return catalogs
+            .Select(catalog => mapper.MapCollectionFolder(catalog, backdropTags.GetValueOrDefault(catalog.Id)))
+            .ToList();
     }
 
     /// <summary>A single library/view (collection folder) by its public id, or null if it is not a catalog.</summary>

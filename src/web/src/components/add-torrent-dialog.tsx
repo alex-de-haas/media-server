@@ -190,11 +190,16 @@ export function AddTorrentDialog() {
   );
 }
 
-async function toBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+// FileReader does the base64 encoding natively (non-blocking), unlike a per-character JS loop which
+// freezes the UI on larger .torrent files. readAsDataURL yields "data:...;base64,XXXX" — strip the prefix.
+function toBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
 }

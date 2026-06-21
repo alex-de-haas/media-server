@@ -332,33 +332,19 @@ public sealed class IngestService(
             return new Dictionary<Guid, string>();
         }
 
+        // Published episodes carry a generic "Episode N" title; pull the parent series name in the same
+        // query (a correlated subquery) so the ingest list shows e.g. "Breaking Bad · S01E05" instead of a
+        // context-free "Episode 5", without a second round-trip.
         var media = await database.MediaItems.AsNoTracking()
             .Where(item => mediaItemIds.Contains(item.Id))
             .Select(item => new MediaTitleParts(
-                item.Id, item.Kind, item.Title, item.SeriesId, item.ParentIndexNumber, item.IndexNumber))
+                item.Id, item.Kind, item.Title, item.ParentIndexNumber, item.IndexNumber,
+                item.SeriesId == null
+                    ? null
+                    : database.MediaItems.Where(series => series.Id == item.SeriesId).Select(series => series.Title).FirstOrDefault()))
             .ToListAsync(cancellationToken);
 
-        // Published episodes carry a generic "Episode N" title; resolve the parent series name so the
-        // ingest list shows e.g. "Breaking Bad · S01E05" instead of a context-free "Episode 5".
-        var seriesIds = media
-            .Where(item => item.Kind == MediaKind.Episode)
-            .Select(item => item.SeriesId)
-            .OfType<Guid>()
-            .Distinct()
-            .ToList();
-        var seriesTitles = seriesIds.Count == 0
-            ? new Dictionary<Guid, string>()
-            : await database.MediaItems.AsNoTracking()
-                .Where(item => seriesIds.Contains(item.Id))
-                .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
-
-        return media.ToDictionary(
-            item => item.Id,
-            item => item.Kind == MediaKind.Episode
-                ? FormatEpisodeTitle(
-                    item.SeriesId is { } seriesId ? seriesTitles.GetValueOrDefault(seriesId) : null,
-                    item.ParentIndexNumber, item.IndexNumber, item.Title)
-                : item.Title);
+        return media.ToDictionary(item => item.Id, ComposeTitle);
     }
 
     private async Task<string?> ResolveMediaTitleAsync(Guid? mediaItemId, CancellationToken cancellationToken)
@@ -371,26 +357,23 @@ public sealed class IngestService(
         var media = await database.MediaItems.AsNoTracking()
             .Where(item => item.Id == id)
             .Select(item => new MediaTitleParts(
-                item.Id, item.Kind, item.Title, item.SeriesId, item.ParentIndexNumber, item.IndexNumber))
+                item.Id, item.Kind, item.Title, item.ParentIndexNumber, item.IndexNumber,
+                item.SeriesId == null
+                    ? null
+                    : database.MediaItems.Where(series => series.Id == item.SeriesId).Select(series => series.Title).FirstOrDefault()))
             .FirstOrDefaultAsync(cancellationToken);
-        if (media is null)
-        {
-            return null;
-        }
-
-        if (media.Kind != MediaKind.Episode)
-        {
-            return media.Title;
-        }
-
-        var seriesTitle = media.SeriesId is { } seriesId
-            ? await database.MediaItems.AsNoTracking()
-                .Where(item => item.Id == seriesId).Select(item => item.Title).FirstOrDefaultAsync(cancellationToken)
-            : null;
-        return FormatEpisodeTitle(seriesTitle, media.ParentIndexNumber, media.IndexNumber, media.Title);
+        return media is null ? null : ComposeTitle(media);
     }
 
-    /// <summary>"Breaking Bad · S01E05", falling back to the series name or "Episode N" when parts are missing.</summary>
+    private static string ComposeTitle(MediaTitleParts media) => media.Kind == MediaKind.Episode
+        ? FormatEpisodeTitle(media.SeriesTitle, media.ParentIndexNumber, media.IndexNumber, media.Title)
+        : media.Title;
+
+    /// <summary>
+    /// "Breaking Bad · S01E05". When the season/episode numbers are missing the episode's own title is used
+    /// in their place ("Breaking Bad · Episode 5"); when the series can't be resolved either, just the
+    /// episode title remains. Published episodes always carry both numbers, so the latter paths are fallbacks.
+    /// </summary>
     private static string FormatEpisodeTitle(string? seriesTitle, int? season, int? episode, string fallback)
     {
         var episodeLabel = season is { } s && episode is { } e ? $"S{s:00}E{e:00}" : fallback;
@@ -401,5 +384,5 @@ public sealed class IngestService(
         item.MediaItemId is { } mediaItemId && byMediaItem.TryGetValue(mediaItemId, out var title) ? title : null;
 
     private sealed record MediaTitleParts(
-        Guid Id, MediaKind Kind, string Title, Guid? SeriesId, int? ParentIndexNumber, int? IndexNumber);
+        Guid Id, MediaKind Kind, string Title, int? ParentIndexNumber, int? IndexNumber, string? SeriesTitle);
 }

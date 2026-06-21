@@ -43,4 +43,40 @@ public sealed class JellyfinCatalogArtwork(MediaServerDbContext database)
             .OrderByDescending(image => image.MediaItem!.AddedAt)
             .ThenBy(image => image.SortOrder)
             .FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>
+    /// The latest-title backdrop tag for each catalog, in one round-trip — for projecting the whole view
+    /// list without an N+1. Catalogs whose titles have no backdrop are simply absent from the result.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, string>> GetLatestBackdropTagsAsync(
+        IReadOnlyCollection<Guid> catalogIds, CancellationToken cancellationToken)
+    {
+        if (catalogIds.Count == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        // Project only the columns needed to pick the winner per catalog, then group in memory — this keeps
+        // the SQL trivially translatable (no GroupBy/First-per-group) while staying a single query.
+        var candidates = await database.ImageAssets.AsNoTracking()
+            .Where(image => image.ImageType == ImageType.Backdrop
+                && catalogIds.Contains(image.MediaItem!.CatalogId)
+                && image.MediaItem.PublicId != null
+                && image.MediaItem.ParentId == null
+                && (image.MediaItem.Kind == MediaKind.Movie || image.MediaItem.Kind == MediaKind.Series))
+            .Select(image => new
+            {
+                image.MediaItem!.CatalogId,
+                image.MediaItem.AddedAt,
+                image.SortOrder,
+                image.Tag,
+            })
+            .ToListAsync(cancellationToken);
+
+        return candidates
+            .GroupBy(candidate => candidate.CatalogId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(c => c.AddedAt).ThenBy(c => c.SortOrder).First().Tag);
+    }
 }
