@@ -680,7 +680,10 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("DownloadId")
+                    b.Property<Guid?>("DownloadId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("IngestItemId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("MediaItemId")
@@ -702,9 +705,11 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DownloadId");
+
                     b.HasIndex("MediaItemId");
 
-                    b.HasIndex("DownloadId", "RelativePath")
+                    b.HasIndex("IngestItemId", "RelativePath")
                         .IsUnique();
 
                     b.ToTable("SourceFiles");
@@ -871,6 +876,11 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasOne("MediaServer.Api.Data.Download", "Download")
                         .WithMany("SourceFiles")
                         .HasForeignKey("DownloadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("MediaServer.Api.Data.IngestItem", "IngestItem")
+                        .WithMany("SourceFiles")
+                        .HasForeignKey("IngestItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -880,6 +890,8 @@ namespace MediaServer.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Download");
+
+                    b.Navigation("IngestItem");
 
                     b.Navigation("MediaItem");
                 });
@@ -904,6 +916,11 @@ namespace MediaServer.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.Download", b =>
+                {
+                    b.Navigation("SourceFiles");
+                });
+
+            modelBuilder.Entity("MediaServer.Api.Data.IngestItem", b =>
                 {
                     b.Navigation("SourceFiles");
                 });

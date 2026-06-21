@@ -34,11 +34,11 @@ public sealed class TorrentServiceListTests : IDisposable
     private TorrentService CreateService() => new(
         _database,
         new FakeTorrentEngine(),
-        new FilesystemInspector(new HardLinker()),
+        new FilesystemInspector(),
         new MediaServerSettings(),
         new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _tempRoot },
         new PipelineQueue(),
-        new DownloadCleanupService(_database, new FakeTorrentEngine(), new FakeOrganizer(), NullLogger<DownloadCleanupService>.Instance),
+        new DownloadDeletionService(_database, new FakeTorrentEngine(), NullLogger<DownloadDeletionService>.Instance),
         NullLogger<TorrentService>.Instance);
 
     [Fact]
@@ -64,6 +64,28 @@ public sealed class TorrentServiceListTests : IDisposable
         var downloads = await CreateService().ListAsync(CancellationToken.None);
 
         Assert.Equal(["newer", "older"], downloads.Select(download => download.Name));
+    }
+
+    [Fact]
+    public async Task AddAsync_reclaims_a_stale_download_for_the_same_info_hash()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _tempRoot, CreatedAt = now, UpdatedAt = now };
+        // An orphaned (no ingest), completed download for the info hash FakeTorrentEngine.Inspect returns.
+        var stale = new Download
+        {
+            Id = Guid.NewGuid(), InfoHash = "hash", Name = "old", CatalogId = catalog.Id, SourceType = TorrentSourceType.Magnet,
+            State = DownloadState.Completed, SavePath = Path.Combine(_tempRoot, ".incoming", "old"), AddedAt = now.AddMinutes(-5),
+        };
+        _database.AddRange(catalog, stale);
+        await _database.SaveChangesAsync();
+
+        // Re-adding the same torrent must not error — it reclaims the stale row and adds a fresh download.
+        await CreateService().AddAsync(new AddTorrentRequest(catalog.Id, "magnet:?xt=urn:btih:hash", null, null), CancellationToken.None);
+
+        Assert.False(await _database.Downloads.AnyAsync(download => download.Id == stale.Id)); // stale reclaimed
+        var fresh = await _database.Downloads.SingleAsync(download => download.InfoHash == "hash");
+        Assert.NotEqual(stale.Id, fresh.Id); // a brand-new download row
     }
 
     private Download NewDownload(Guid catalogId, string name, DateTimeOffset addedAt) => new()

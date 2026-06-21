@@ -1,12 +1,22 @@
 # Implementation Plan
 
-Status: Draft
+Status: Active
 Created: 2026-06-17
-Updated: 2026-06-17
+Updated: 2026-06-21
+
+> **Storage-model change (2026-06-21).** The catalog storage model was reworked
+> from two hardlinked subtrees (`files/` + `library/`) to a **single tree**: a
+> transient `.incoming/` staging dir plus canonical media at the catalog root,
+> with the playable file **moved** (not hardlinked) into place, the `Download`
+> dropped at the download→identify hand-off, seeding only during download, and a
+> per-catalog import **Scan**. Milestone narrative below that still mentions
+> `files/`/`library/` hardlinks or seed-copy teardown predates this change and is
+> kept as a historical record; the current model is in
+> [Torrents and organizer](torrents-and-organizer.md).
 
 ## Purpose
 
-This is the execution plan that turns the `docs/planning/` specifications into a
+This is the execution plan that turns the `docs/features/` specifications into a
 buildable sequence of milestones and tasks. It locks the technology stack,
 reconciles the specs against the **actual** Hosty Core contracts (verified
 against the sibling `docker-host` repository on 2026-06-17), defines the
@@ -58,7 +68,7 @@ capabilities. Most blockers are now implemented. This table is authoritative;
 
 | Capability | Status | Concrete contract | Consequence for us |
 | --- | --- | --- | --- |
-| External catalog-root mounts (#1) | **Implemented** | `externalMounts.catalogRoots` (`kind: host-path`, `multiple`, `mode: rw`, `service`, `required`). Injected `HOSTY_MOUNT_CATALOGROOTS`: docker → `/mnt/catalogRoots/{label}` (one bind per path), dev → host paths. | **Unblocks `docker`.** Hardlinks work: one root = one bind = one filesystem; `files/`+`library/` are subdirs of it. |
+| External catalog-root mounts (#1) | **Implemented** | `externalMounts.catalogRoots` (`kind: host-path`, `multiple`, `mode: rw`, `service`, `required`). Injected `HOSTY_MOUNT_CATALOGROOTS`: docker → `/mnt/catalogRoots/{label}` (one bind per path), dev → host paths. | **Unblocks `docker`.** One root = one bind = one filesystem, so the move from `.incoming/` into the canonical tree is atomic. |
 | Public ingress + TLS (#2) | **Implemented** | `HOSTY_INGRESS_PROVIDER=cloudflared` → `HOSTY_PUBLIC_ORIGIN_{KEY}=https://{sub}.{base}`; subdomain via `HOSTY_INGRESS_SUBDOMAIN`. | **Drop** the operator reverse-proxy workaround. Read `HOSTY_PUBLIC_ORIGIN_UI` / `_JELLYFIN`. |
 | On-demand backup (#3) | **Implemented** | `POST /api/internal/apps/{appId}/backups` body `{ "note" }`, bearer `HOSTY_APP_SERVICE_TOKEN`; 201 completed / 200 empty. | Call before EF migrations. App must flush itself first (no quiesce hook). |
 | Operator notifications (#5) | **Implemented** | `POST /api/internal/apps/{appId}/notifications` `{ target, audience, level, title, body, link, dedupeKey }`; levels info/success/warning/error; app may **not** use `host-admin` audience. | Use for migration failure, low disk, catalog offline. |

@@ -11,7 +11,7 @@ public sealed record ParsedName(MediaKind Kind, string Title, int? Year, int? Se
 /// <summary>
 /// Parses a release/file name into title + year (movies) or title + season/episode (series/anime).
 /// The parser is selected by catalog type: a Jellyfin-style regex engine for movie/series, and
-/// AnitomySharp for anime absolute numbering. See <c>docs/planning/metadata.md</c>.
+/// AnitomySharp for anime absolute numbering. See <c>docs/features/metadata.md</c>.
 /// </summary>
 public interface INameParser
 {

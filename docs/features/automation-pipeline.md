@@ -1,8 +1,8 @@
 # Automation Pipeline
 
-Status: Draft
+Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-06-21
 
 ## Description
 
@@ -42,8 +42,8 @@ flowchart LR
 | --- | --- | --- |
 | `Intake` | torrent + chosen catalog | creates an ingest item; resolves catalog paths, naming, seeding policy; reads torrent metadata/file list where available |
 | `Identify` | torrent name/file list + catalog type | suggests or confirms provider identities; maps playable source files to movies or episodes |
-| `Download` | torrent | file(s) in `<catalog.root>/files/`; progress events |
-| `Organize` | completed files | hardlinks main media into `<catalog.root>/library/` clean names; applies seeding policy |
+| `Download` | torrent | file(s) in `<catalog.root>/.incoming/<downloadId>/`; progress events; on completion the download→identify hand-off drops the `Download` row (files kept) |
+| `Organize` | confirmed files | **moves** the main media into the canonical layout at the catalog root (rename, no hardlink) and clears the `.incoming/` staging folder |
 | `Probe` | library file | `ffprobe` → media sources and streams |
 | `Enrich` | matched id | fetches and caches metadata in all supported languages |
 | `Publish` | enriched item | item becomes browsable and playable; emits availability event |
@@ -60,6 +60,17 @@ If confidence is high, matching is automatic; if candidates are ambiguous, the
 item enters `NeedsReview`. Download can continue while metadata is unresolved, but
 organize/publish waits for each playable file to be assigned to a movie or
 episode.
+
+**Two entry points.** The full pipeline starts at `Intake` for a torrent. A
+**catalog scan** is a second entry point: it creates an ingest **at `Identify`**
+for each media file already present in the catalog root with no published source,
+then runs the same identify → organize → probe → enrich → publish tail — for
+onboarding a hand-copied collection (see [Catalogs](catalogs.md)).
+
+**Seeding** lives only on the `Download` stage and is mutually exclusive with
+being in the library: with `keepSeeding` the ingest parks at `Download` (the file
+stays seedable in `.incoming/`) until the operator stops seeding, which then runs
+the hand-off and the rest of the pipeline.
 
 ## Design Principles
 
@@ -79,7 +90,8 @@ episode.
 - **Observable.** Each stage emits background job events (see
   [Background tasks](background-tasks.md)) consumed by the UI activity view.
 - **Database is source of truth.** Publish writes items to the database; the
-  catalog scan only reconciles `library/` against it (see [Catalogs](catalogs.md)).
+  reconcile scan only checks the catalog root against it, while the import scan
+  ingests orphan files through the pipeline (see [Catalogs](catalogs.md)).
 
 ## Ingest Item State
 
@@ -104,8 +116,8 @@ passed is recorded so re-entry resumes at the correct point.
   and the relevant playable source files. The operator confirms the movie or the
   series/season/episode mapping, which resumes the pipeline.
 - The operator can remap an already published source file to another movie or
-  episode. Remap rebuilds the clean hardlink path and re-runs probe/enrich/publish
-  where needed.
+  episode. Remap **moves/renames** the canonical file and re-runs probe/enrich/
+  publish where needed.
 - The operator can re-run identify/enrich/probe for any item.
 
 ## Extension Points (future)

@@ -127,9 +127,12 @@ public sealed class TorrentCoordinator(
                 ? (long)(snapshot.SizeBytes * (1 - snapshot.PercentComplete / 100.0) / snapshot.DownloadRateBytesPerSecond)
                 : null;
 
+            // Send the live engine state (e.g. Paused/Downloading), not the persisted DownloadState — the
+            // UI derives the pause/resume affordance from it, and the DB state never reflects a pause. Coarse
+            // DB transitions ride the separate downloadStateChanged event.
             await notifier.DownloadProgressAsync(new DownloadProgress(
                 download.Id,
-                download.State.ToString(),
+                snapshot.EngineState,
                 snapshot.PercentComplete,
                 snapshot.DownloadRateBytesPerSecond,
                 snapshot.UploadRateBytesPerSecond,
@@ -209,19 +212,17 @@ public sealed class TorrentCoordinator(
 
         if (download.State is not (DownloadState.Completed or DownloadState.Seeding or DownloadState.StoppedSeeding))
         {
-            download.State = DownloadState.Completed;
+            // keepSeeding parks the ingest at the download stage (seeding is mutually exclusive with being
+            // in the library) and leaves MonoTorrent's auto-seed running until the operator stops it.
+            // Otherwise mark it Completed and stop uploading now so the download→identify hand-off proceeds.
+            download.State = download.KeepSeeding ? DownloadState.Seeding : DownloadState.Completed;
             download.CompletedAt = DateTimeOffset.UtcNow;
             await database.SaveChangesAsync();
-        }
 
-        // MonoTorrent auto-seeds the instant a torrent completes. When the operator opted out of seeding,
-        // stop uploading now instead of leaving it running: an item parked before Organize (e.g. Identify →
-        // NeedsReview) would otherwise keep seeding indefinitely. Only the active transfer is stopped here;
-        // the files/ seed copy stays on disk (Organize still hardlinks from it) and the whole download
-        // backing is reclaimed once the item reaches Done (see DownloadCleanupService).
-        if (!download.KeepSeeding && download.State == DownloadState.Completed)
-        {
-            await engine.StopAsync(infoHash, CancellationToken.None);
+            if (!download.KeepSeeding)
+            {
+                await engine.StopAsync(infoHash, CancellationToken.None);
+            }
         }
 
         await notifier.DownloadStateChangedAsync(new DownloadStateChanged(download.Id, download.State.ToString(), download.Name));

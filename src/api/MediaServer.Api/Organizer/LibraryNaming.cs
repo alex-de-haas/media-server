@@ -5,22 +5,22 @@ using MediaServer.Api.Data;
 namespace MediaServer.Api.Organizer;
 
 /// <summary>
-/// Builds clean <c>library/</c>-relative paths from confirmed identity, preserving the original
-/// extension (the container is never changed — playback is Direct Play/Stream only). Movies use the
-/// catalog naming template; series/anime use the Jellyfin <c>Show/Season NN/Show SxxEyy</c> layout
-/// (see <c>docs/planning/catalogs.md</c>).
+/// Builds clean catalog-root-relative paths from confirmed identity, preserving the original extension
+/// (the container is never changed — playback is Direct Play/Stream only). Movies use the catalog naming
+/// template; series/anime use the Jellyfin <c>Show/Season NN/Show SxxEyy</c> layout. Published media
+/// lives directly at the catalog root (no <c>library/</c> subtree). See <c>docs/features/catalogs.md</c>.
 /// </summary>
 public static class LibraryNaming
 {
-    /// <summary>Builds the library path (relative to the catalog root) for a movie file.</summary>
+    /// <summary>Builds the canonical path (relative to the catalog root) for a movie file.</summary>
     public static string ForMovie(Catalog catalog, MediaItem movie, string extension)
     {
         var baseName = RenderTemplate(catalog.NamingTemplate, movie.Title, movie.Year);
         var folder = Sanitize(baseName);
-        return CombineLibrary(folder, Sanitize(baseName) + NormalizeExtension(extension));
+        return Combine(folder, Sanitize(baseName) + NormalizeExtension(extension));
     }
 
-    /// <summary>Builds the library path for an episode file, given the owning series.</summary>
+    /// <summary>Builds the canonical path for an episode file, given the owning series.</summary>
     public static string ForEpisode(MediaItem series, MediaItem episode, string extension)
     {
         var showFolder = Sanitize(series.Year is { } year ? $"{series.Title} ({year})" : series.Title);
@@ -32,7 +32,7 @@ public static class LibraryNaming
             : $"E{episodeNumber:D2}";
 
         var fileName = Sanitize($"{series.Title} S{season:D2}{episodeToken}") + NormalizeExtension(extension);
-        return CombineLibrary(showFolder, $"Season {season:D2}", fileName);
+        return Combine(showFolder, $"Season {season:D2}", fileName);
     }
 
     /// <summary>Renders the movie naming template; tokens: <c>{Title}</c>, <c>{Year}</c>.</summary>
@@ -47,8 +47,8 @@ public static class LibraryNaming
         return string.Join(' ', rendered.Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
-    private static string CombineLibrary(params string[] segments) =>
-        string.Join('/', new[] { CatalogPaths.LibraryDirName }.Concat(segments));
+    // Canonical media lives directly at the catalog root; segments join posix-style (forward slashes).
+    private static string Combine(params string[] segments) => string.Join('/', segments);
 
     private static string NormalizeExtension(string extension)
     {

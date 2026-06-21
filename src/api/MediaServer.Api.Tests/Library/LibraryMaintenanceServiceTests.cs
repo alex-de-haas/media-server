@@ -32,7 +32,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
     private LibraryMaintenanceService Service() => new(
         _database,
         new CatalogPathSandbox(),
-        new FilesystemInspector(new HardLinker()),
+        new FilesystemInspector(),
         new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }),
         _core,
         NullLogger<LibraryMaintenanceService>.Instance);

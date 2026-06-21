@@ -1,6 +1,5 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
-using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.Pipeline;
@@ -11,21 +10,15 @@ namespace MediaServer.Api.Library;
 /// <summary>
 /// Corrects a misidentified, already-published leaf item (movie or episode). The operator picks the right
 /// metadata identity; we reassign the item's <see cref="MediaSource"/>(s) to the resolved target item and
-/// rebuild the clean <c>library/</c> hardlink to match the target's naming — then prune the now-orphaned
-/// old item (and any emptied season/series).
-///
-/// Because a download is ephemeral (its <c>files/</c> seed copy and <see cref="SourceFile"/> rows are
-/// reclaimed once published), the surviving <c>library/</c> hardlink is the only link to the inode, so the
-/// new link is created <b>from the existing library file</b> rather than from <c>files/</c>. No raw
-/// rename — a fresh hardlink plus a delete of the old one. See <c>docs/planning/domain-model.md</c>.
+/// <b>move</b> the canonical file to match the target's naming — then prune the now-orphaned old item
+/// (and any emptied season/series). A move within the catalog root is atomic and zero-copy; there are no
+/// hardlinks. See <c>docs/features/torrents-and-organizer.md</c>.
 /// </summary>
 public sealed class RemapService(
     MediaServerDbContext database,
     IdentifyService identifyService,
     EnrichService enrichService,
     ICatalogPathSandbox sandbox,
-    IHardLinker hardLinker,
-    LibraryFileEraser fileEraser,
     ILogger<RemapService> logger)
 {
     // Path equality follows the filesystem: case-insensitive on Windows and default macOS, ordinal elsewhere.
@@ -101,9 +94,8 @@ public sealed class RemapService(
             ? await database.MediaItems.FirstOrDefaultAsync(item => item.Id == seriesId, cancellationToken)
             : null;
 
-        // 1. Relink every source file to the target's clean path (new link first so content is never
-        //    momentarily unlinked), reassigning the MediaSource rows.
-        var oldFiles = new List<string>();
+        // 1. Move every source file to the target's clean path, reassigning the MediaSource rows.
+        var emptiedDirs = new List<string>();
         string? targetLibraryPath = null;
         foreach (var source in sources)
         {
@@ -120,8 +112,8 @@ public sealed class RemapService(
             }
 
             // Compare the *resolved* absolute paths case-insensitively on case-insensitive filesystems
-            // (Windows, default macOS): a case-only path change maps to the same inode, so deleting the
-            // "destination" would delete the source itself and the relink would then fail — data loss.
+            // (Windows, default macOS): a case-only path change maps to the same file, so deleting the
+            // "destination" would delete the source itself — a no-op move avoids that data loss.
             var sameFile = string.Equals(oldAbsolute, newAbsolute, PathComparison);
             if (!sameFile)
             {
@@ -131,13 +123,14 @@ public sealed class RemapService(
                     return RemapResult.MissingFile;
                 }
 
+                Directory.CreateDirectory(Path.GetDirectoryName(newAbsolute)!);
                 if (File.Exists(newAbsolute))
                 {
-                    File.Delete(newAbsolute); // Idempotent: replace any stale link at the destination.
+                    File.Delete(newAbsolute); // Idempotent: replace any stale file at the destination.
                 }
 
-                hardLinker.Create(oldAbsolute, newAbsolute);
-                oldFiles.Add(source.Path);
+                File.Move(oldAbsolute, newAbsolute);
+                emptiedDirs.Add(Path.GetDirectoryName(oldAbsolute)!);
             }
 
             source.MediaItemId = target.Id;
@@ -178,17 +171,52 @@ public sealed class RemapService(
             await transaction.CommitAsync(cancellationToken);
         }
 
-        // 4. Erase the old library files last — content is already linked under the new path and the DB
-        //    is committed, so a failed erase only leaves a stray file (logged), never data loss.
-        foreach (var relative in oldFiles)
+        // 4. Remove any directories the moves emptied (best effort; the file already lives at its new path).
+        foreach (var directory in emptiedDirs)
         {
-            fileEraser.Erase(catalog, relative);
+            TryRemoveEmptyDirectories(directory, catalog.Root);
         }
 
         logger.LogInformation("Remapped {Old} → {Kind} '{Title}' ({Provider}:{Id}).",
             current.Id, target.Kind, target.Title, target.IdentityProvider, target.IdentityProviderId);
         return RemapResult.Ok(target.Id);
     }
+
+    // Walk up from the emptied directory, deleting each now-empty directory until a non-empty one (or the
+    // catalog root) is reached, so remapping out of a season/series folder leaves no empty parents behind.
+    private void TryRemoveEmptyDirectories(string directory, string root)
+    {
+        var stop = EnsureTrailingSeparator(Path.GetFullPath(root));
+        var current = Path.GetFullPath(directory);
+        while (EnsureTrailingSeparator(current).StartsWith(stop, PathComparison) &&
+               !EnsureTrailingSeparator(current).Equals(stop, PathComparison))
+        {
+            try
+            {
+                if (!Directory.Exists(current) || Directory.EnumerateFileSystemEntries(current).Any())
+                {
+                    break;
+                }
+
+                Directory.Delete(current);
+                var parent = Path.GetDirectoryName(current);
+                if (string.IsNullOrEmpty(parent))
+                {
+                    break;
+                }
+
+                current = parent;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(exception, "Failed to remove emptied directory {Path}", current);
+                break;
+            }
+        }
+    }
+
+    private static string EnsureTrailingSeparator(string path) =>
+        path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
 
     private static void AssignPublicId(MediaItem item) => item.PublicId ??= PublicIdFactory.ForItem(item);
 

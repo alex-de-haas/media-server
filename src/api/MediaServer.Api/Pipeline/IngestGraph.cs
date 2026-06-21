@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Pipeline;
 
-/// <summary>The media items touched by one download: assigned leaves (movies/episodes) plus their
+/// <summary>The media items touched by one ingest item: assigned leaves (movies/episodes) plus their
 /// series/season ancestors. Used by the organize/probe/enrich/publish stages.</summary>
 public sealed record IngestGraph(
     IReadOnlyList<MediaItem> Leaves,
@@ -11,10 +11,10 @@ public sealed record IngestGraph(
 {
     public IEnumerable<MediaItem> All => Leaves.Concat(Containers);
 
-    public static async Task<IngestGraph> LoadAsync(MediaServerDbContext database, Guid downloadId, CancellationToken cancellationToken)
+    public static async Task<IngestGraph> LoadAsync(MediaServerDbContext database, Guid ingestItemId, CancellationToken cancellationToken)
     {
         var leafIds = await database.SourceFiles
-            .Where(file => file.DownloadId == downloadId && file.MediaItemId != null)
+            .Where(file => file.IngestItemId == ingestItemId && file.MediaItemId != null)
             .Select(file => file.MediaItemId!.Value)
             .Distinct()
             .ToListAsync(cancellationToken);

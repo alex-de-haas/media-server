@@ -1,8 +1,8 @@
 # Catalogs
 
-Status: Draft
+Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-06-21
 
 ## Description
 
@@ -22,7 +22,7 @@ This replaces the earlier single movie/TV "library" model.
   "id": "{uuid}",
   "name": "Movies 4K",
   "type": "movie",                 // movie | series | anime
-  "root": "/mnt/media/movies-4k",  // one volume; contains files/ and library/
+  "root": "/mnt/media/movies-4k",  // one volume; holds .incoming/ + canonical media
   "namingTemplate": "{Title} ({Year})",
   "defaultKeepSeeding": false,
   "metadataLanguage": null         // optional override of SUPPORTED_LANGUAGES default
@@ -42,19 +42,22 @@ This replaces the earlier single movie/TV "library" model.
 
 ## On-Disk Layout
 
-Each catalog root contains two sibling subtrees on the **same volume**, so the
-organizer can hardlink between them:
+Each catalog root holds a transient `.incoming/` staging directory plus the
+canonical, published media tree **directly at the root**. There is no `library/`
+subtree and no hardlinking — a completed file is **moved** from `.incoming/` into
+its canonical place (an atomic, zero-copy move within the one filesystem):
 
 ```text
 <catalog.root>/
-  files/        # physical files: torrent download target and seeding source
-    Inception.2010.1080p.BluRay.x264/Inception.2010.1080p.mkv
-  library/      # clean structure: hardlinks into files/ (scanned by the catalog)
-    Inception (2010)/
-      Inception (2010).mkv      # same inode as the file under files/
+  .incoming/                          # transient: in-flight torrent data + seed copy
+    <downloadId>/Inception.2010.1080p.BluRay.x264/Inception.2010.1080p.mkv
+  Inception (2010)/
+    Inception (2010).mkv              # canonical, published
 ```
 
-- Media Server scans and exposes only `library/`. `files/` is internal.
+- Media Server scans and exposes everything **except** `.incoming/`. A file is
+  "in the library" iff a published `MediaSource` row points at it — the
+  distinction is database state, not a folder name.
 - The clean name preserves the **original file extension** (the container is
   never changed — playback is Direct Play / Direct Stream only). Resolution and
   quality are read from the file by probing, not encoded in the filename, except
@@ -64,11 +67,10 @@ organizer can hardlink between them:
   base name in one folder as alternate versions of a single item (see
   [Jellyfin compatibility](jellyfin-compatibility.md)); reserving it now avoids a
   path migration later.
-- Series layout: `library/<Show> (<Year>)/Season 01/<Show> S01E02.<ext>`.
+- Series layout: `<Show> (<Year>)/Season 01/<Show> S01E02.<ext>`.
 
-Configuration validation must reject a catalog whose `files/` and `library/` are
-on different filesystems (compare `st_dev`), because hardlinks cannot cross
-filesystems.
+The catalog root is a single filesystem, so the move from `.incoming/` into the
+canonical tree is atomic and copies no bytes.
 
 ## Free Space
 
@@ -96,7 +98,7 @@ for the pre-download space check (see
   "type": "movie",
   "title": "Inception",
   "year": 2010,
-  "libraryPath": "library/Inception (2010)/Inception (2010).mkv",
+  "libraryPath": "Inception (2010)/Inception (2010).mkv",
   "identityProvider": "tmdb",
   "identityProviderId": "27205",
   "providers": { "tmdb": 27205 },   // provider dictionary, not a single tmdbId
@@ -112,15 +114,21 @@ changing the canonical identity automatically.
 
 ## Scanning
 
-The database is the **source of truth**; a scan is a **reconcile** pass that
-compares `library/` against the database, not the primary publish path (items are
-created by the pipeline's Publish stage — see
-[Automation pipeline](automation-pipeline.md)).
+The database is the **source of truth**. Items are created by the pipeline's
+Publish stage (see [Automation pipeline](automation-pipeline.md)). Two scan flows
+operate over the catalog root (always excluding `.incoming/`):
+
+- a **reconcile** pass that compares published `MediaSource` rows against disk and
+  flags files that have gone missing;
+- an **import** scan (the per-catalog *Scan* action) that ingests media files
+  with no `MediaSource` row through the pipeline from the identify stage, for
+  onboarding a hand-copied collection (see
+  [Torrents and organizer](torrents-and-organizer.md)).
 
 - Manual and scheduled scans, constrained to catalog roots.
 - Detect supported formats: `.mp4`, `.m4v`, `.mov`, `.mkv`, `.webm`, `.avi`,
   `.ts`, `.m2ts`.
-- Parse title, year, season, and episode from names in `library/`. The parser is
+- Parse title, year, season, and episode from file names. The parser is
   selected by catalog `type`: a Jellyfin-compatible naming engine for
   `movie`/`series`, and a dedicated anime parser (AnitomySharp) for `anime`,
   which understands absolute episode numbering and release-group tags. See
@@ -143,7 +151,7 @@ created by the pipeline's Publish stage — see
 
 Backend tests should use xUnit and Imposter. Required coverage:
 
-- Catalog configuration validation, including same-filesystem enforcement.
+- Catalog configuration validation.
 - Parser/provider selection by catalog type (movie / series / anime).
 - Scanner behavior for supported formats and idempotency.
 - Offline-root handling and soft "missing" marking without purging items.

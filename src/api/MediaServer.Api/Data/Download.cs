@@ -21,7 +21,7 @@ public sealed class Download
     /// <summary>Per-torrent override of the catalog default seeding policy.</summary>
     public bool KeepSeeding { get; set; }
 
-    /// <summary>Directory under <c>&lt;catalog.root&gt;/files/</c>.</summary>
+    /// <summary>The download's transient staging directory, <c>&lt;catalog.root&gt;/.incoming/&lt;downloadId&gt;/</c>.</summary>
     public required string SavePath { get; set; }
 
     /// <summary>Original magnet URI or stored .torrent path; lets the engine re-add on restart.</summary>

@@ -54,4 +54,6 @@ public sealed class IngestItem
     public Catalog? Catalog { get; set; }
 
     public Download? Download { get; set; }
+
+    public ICollection<SourceFile> SourceFiles { get; set; } = new List<SourceFile>();
 }

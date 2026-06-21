@@ -3,7 +3,7 @@ namespace MediaServer.Api.Configuration;
 /// <summary>
 /// Application settings injected by Hosty from the manifest <c>settings</c> block (as environment
 /// variables with the declared keys) plus the catalog-root mounts. Secrets and global toggles come
-/// from here, never the database (see <c>docs/planning/domain-model.md</c>).
+/// from here, never the database (see <c>docs/features/domain-model.md</c>).
 /// </summary>
 public sealed class MediaServerSettings
 {

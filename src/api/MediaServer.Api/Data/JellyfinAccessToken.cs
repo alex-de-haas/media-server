@@ -4,7 +4,7 @@ namespace MediaServer.Api.Data;
 /// An opaque, revocable access token issued to a Jellyfin client after PIN login. The raw token
 /// (≥128 bits of entropy) is returned once and stored only as a hash at rest; the row id doubles as
 /// the Jellyfin session id. Tokens are validated locally on every request — Core is consulted only at
-/// issuance and session validation. See <c>docs/planning/security.md</c>.
+/// issuance and session validation. See <c>docs/features/security.md</c>.
 /// </summary>
 public sealed class JellyfinAccessToken
 {

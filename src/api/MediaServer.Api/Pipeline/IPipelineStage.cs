@@ -5,7 +5,7 @@ namespace MediaServer.Api.Pipeline;
 /// <summary>
 /// One ordered, idempotent pipeline stage over a shared <see cref="IngestContext"/>. New stages
 /// (including future acquisition stages) implement the same contract and slot in by <see cref="Order"/>
-/// without touching existing ones. See <c>docs/planning/automation-pipeline.md</c>.
+/// without touching existing ones. See <c>docs/features/automation-pipeline.md</c>.
 /// </summary>
 public interface IPipelineStage
 {

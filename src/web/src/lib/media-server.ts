@@ -272,6 +272,13 @@ export interface LibraryScanReport {
   missingPaths: string[];
 }
 
+// Result of a per-catalog import scan: orphan media files under the root are ingested from identify.
+export interface LibraryImportReport {
+  filesScanned: number;
+  imported: number;
+  skipped: number;
+}
+
 async function send(path: string, method: string, body?: unknown): Promise<void> {
   await apiFetch(`${BASE}${path}`, {
     method,
@@ -291,6 +298,7 @@ export const mediaServer = {
       body: JSON.stringify(input),
     }),
   deleteCatalog: (id: string) => send(`/catalogs/${id}`, "DELETE"),
+  scanCatalog: (id: string) => apiJson<LibraryImportReport>(`${BASE}/catalogs/${id}/scan`, { method: "POST" }),
 
   listDownloads: () => apiJson<Download[]>(`${BASE}/torrents`),
   addTorrent: (input: AddTorrentInput) =>

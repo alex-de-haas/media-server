@@ -63,10 +63,8 @@ public sealed class FakeTorrentEngine : ITorrentEngine
 public sealed class FakeOrganizer : IOrganizer
 {
     public Task<IReadOnlyList<OrganizedFile>> OrganizeAsync(
-        Download download, IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken) =>
+        IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<OrganizedFile>>([]);
-
-    public Task UnlinkSeedCopyAsync(Download download, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 /// <summary>Swallows realtime broadcasts.</summary>

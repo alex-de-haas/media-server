@@ -3,7 +3,7 @@ namespace MediaServer.Api.Jellyfin.Streaming;
 /// <summary>
 /// The containers Media Server serves by Direct Play/Direct Stream (no conversion). Maps a file
 /// extension to a content type and gates which files are streamable. See
-/// <c>docs/planning/jellyfin-compatibility.md</c>.
+/// <c>docs/features/jellyfin-compatibility.md</c>.
 /// </summary>
 public static class DirectPlay
 {

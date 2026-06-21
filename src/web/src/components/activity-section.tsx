@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, MoreVertical, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
@@ -12,7 +12,6 @@ import { useSession } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -31,17 +30,19 @@ import { AddTorrentDialog } from "@/components/add-torrent-dialog";
 // Download states where the torrent is no longer actively transferring (content is on disk).
 const DOWNLOAD_DONE_STATES = ["Completed", "Seeding", "StoppedSeeding"];
 
-type TabKey = "active" | "seeding" | "done";
+type TabKey = "active" | "done";
+
+// The per-item category drives row rendering (stepper vs seeding controls); the Active tab groups the
+// first two so seeding items live alongside everything still in flight.
+type Category = "active" | "seeding" | "done";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "active", label: "Active" },
-  { key: "seeding", label: "Seeding" },
   { key: "done", label: "Done" },
 ];
 
 const EMPTY: Record<TabKey, string> = {
   active: "Nothing in the pipeline right now.",
-  seeding: "No torrents are seeding.",
   done: "No completed items yet.",
 };
 
@@ -49,12 +50,17 @@ function isDownloadPaused(download: Download): boolean {
   return /paus/i.test(download.engineState ?? download.state);
 }
 
-// Which tab an item belongs to: still running the pipeline (active), published and seeding, or settled.
-// A seeding item is one whose pipeline finished while its torrent kept uploading; a done item has had its
-// download torn down (or never seeded).
-function tabOf(item: IngestItem, download: Download | undefined): TabKey {
+// A torrent kept seeding parks its ingest at the download stage (still seedable — shown with a Seeding
+// badge and a Stop seeding action); everything else still in flight is active; published is done.
+function categoryOf(item: IngestItem, download: Download | undefined): Category {
+  if (download?.state === "Seeding") return "seeding";
   if (item.status !== "Done") return "active";
-  return download?.state === "Seeding" ? "seeding" : "done";
+  return "done";
+}
+
+// Which tab an item shows under: Active groups in-flight + seeding; Done is published.
+function tabOf(item: IngestItem, download: Download | undefined): TabKey {
+  return categoryOf(item, download) === "done" ? "done" : "active";
 }
 
 export function ActivitySection() {
@@ -77,7 +83,7 @@ export function ActivitySection() {
   const downloadFor = (item: IngestItem) => (item.downloadId ? downloadsById.get(item.downloadId) : undefined);
 
   const counts = useMemo(() => {
-    const tally: Record<TabKey, number> = { active: 0, seeding: 0, done: 0 };
+    const tally: Record<TabKey, number> = { active: 0, done: 0 };
     for (const item of ingest.data ?? []) {
       tally[tabOf(item, item.downloadId ? downloadsById.get(item.downloadId) : undefined)] += 1;
     }
@@ -171,33 +177,6 @@ function warningText(item: IngestItem): string | null {
   return null;
 }
 
-// Routes a card removal to the right backend operation. Non-published items have no library copy to keep,
-// so their files are always purged; published items respect the operator's "delete files" choice.
-async function removeItem(item: IngestItem, download: Download | undefined, deleteFiles: boolean): Promise<void> {
-  const published = item.status === "Done" && item.mediaItemId != null;
-
-  if (download) {
-    // DownloadDeletionService stops the torrent and reconciles everything it produced.
-    await mediaServer.removeDownload(download.id, published ? deleteFiles : true);
-    if (published && !deleteFiles) {
-      // Keep-files detaches (but keeps) the published ingest row — drop it so the card disappears.
-      await mediaServer.deleteIngest(item.id);
-    }
-    return;
-  }
-
-  if (item.mediaItemId) {
-    // Download already torn down: act on the published library item, then remove the tracking row.
-    if (deleteFiles) {
-      await mediaServer.deleteLibraryItem(item.mediaItemId, true);
-    }
-    await mediaServer.deleteIngest(item.id);
-    return;
-  }
-
-  await mediaServer.deleteIngest(item.id);
-}
-
 function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Catalog | undefined; download: Download | undefined }) {
   const { role } = useSession();
   const queryClient = useQueryClient();
@@ -225,8 +204,10 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
     },
     onError: onError("stop seeding"),
   });
+  // One backend action: deleting the ingest cancels any in-flight download and clears its .incoming/
+  // staging (engine resume cache included); a published item's library file is left untouched.
   const remove = useMutation({
-    mutationFn: (deleteFiles: boolean) => removeItem(item, download, deleteFiles),
+    mutationFn: () => mediaServer.deleteIngest(item.id),
     onSuccess: () => {
       invalidate();
       toast.success("Removed");
@@ -237,8 +218,12 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
   const [reviewOpen, setReviewOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const category = tabOf(item, download);
-  const title = item.mediaTitle ?? item.downloadName ?? item.sourceFiles[0]?.relativePath ?? "Untitled item";
+  const category = categoryOf(item, download);
+  const title =
+    item.mediaTitle ??
+    item.downloadName ??
+    (item.sourceFiles?.[0]?.relativePath ? displayPath(item.sourceFiles[0].relativePath) : undefined) ??
+    "Untitled item";
   const age = formatTimeAgo(item.createdAt);
   const hint = stateHint(item, download);
   const warning = warningText(item);
@@ -335,7 +320,7 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
         </div>
       </div>
 
-      {category === "active" && transferring && download && item.stage === "Download" && <DownloadProgress download={download} />}
+      {category === "active" && transferring && download && <DownloadProgress download={download} />}
       {category === "seeding" && download && <SeedingStats download={download} />}
 
       {item.status === "NeedsReview" && (
@@ -356,8 +341,8 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
         onOpenChange={setConfirmOpen}
         title={title}
         published={published}
-        onConfirm={(deleteFiles) => {
-          remove.mutate(deleteFiles);
+        onConfirm={() => {
+          remove.mutate();
           setConfirmOpen(false);
         }}
       />
@@ -377,9 +362,10 @@ function DownloadProgress({ download }: { download: Download }) {
       <div className="bg-secondary h-2 w-full overflow-hidden rounded-full">
         <div className="bg-primary h-full transition-[width] duration-500" style={{ width: `${Math.min(percent, 100)}%` }} />
       </div>
-      <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1">
+      <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono">
         <span>{formatPercent(download.percentComplete)}</span>
         <span>↓ {formatSpeed(download.downloadRateBytesPerSecond)}</span>
+        <span>↑ {formatSpeed(download.uploadRateBytesPerSecond)}</span>
         <span>ETA {formatEta(eta)}</span>
       </div>
     </div>
@@ -388,7 +374,7 @@ function DownloadProgress({ download }: { download: Download }) {
 
 function SeedingStats({ download }: { download: Download }) {
   return (
-    <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+    <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono">
       <span>↑ {formatSpeed(download.uploadRateBytesPerSecond)}</span>
       <span>ratio {download.ratio?.toFixed(2) ?? "—"}</span>
       <span>{download.peers ?? 0} peers</span>
@@ -396,14 +382,20 @@ function SeedingStats({ download }: { download: Download }) {
   );
 }
 
+// Source-file paths are catalog-root-relative; while a torrent is still in flight they sit under the
+// transient `.incoming/<downloadId>/` staging folder, which is noise to the operator — hide it.
+function displayPath(relativePath: string): string {
+  return relativePath.replace(/^\.incoming\/[0-9a-f]{32}\//i, "");
+}
+
 function FileSummary({ files }: { files: IngestSourceFile[] }) {
   const shown = files.slice(0, 2);
   const rest = files.length - shown.length;
   return (
-    <ul className="text-muted-foreground flex flex-col gap-0.5 font-mono text-xs">
+    <ul className="text-muted-foreground flex flex-col gap-0.5 text-xs">
       {shown.map((file) => (
-        <li key={file.id} className="truncate" title={file.relativePath}>
-          {file.relativePath}
+        <li key={file.id} className="truncate" title={displayPath(file.relativePath)}>
+          {displayPath(file.relativePath)}
         </li>
       ))}
       {rest > 0 && (
@@ -451,53 +443,27 @@ function RemoveDialog({
   onOpenChange: (open: boolean) => void;
   title: string;
   published: boolean;
-  onConfirm: (deleteFiles: boolean) => void;
+  onConfirm: () => void;
 }) {
-  const checkboxId = useId();
-  // Default to keeping the published library item; the checkbox only appears once there is one to keep.
-  const [deleteFiles, setDeleteFiles] = useState(false);
-
-  // Re-apply the default each time the dialog (re)opens so a prior toggle (then cancel) doesn't carry over.
-  const [wasOpen, setWasOpen] = useState(open);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) setDeleteFiles(false);
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Remove item?</DialogTitle>
           <DialogDescription>
-            Remove <span className="text-foreground font-medium">{title}</span>
-            {published ? " from the list." : " and its download."}
+            Remove <span className="text-foreground font-medium">{title}</span> from Activity.{" "}
+            {published
+              ? "The published item stays in your library — delete it from its detail page."
+              : "Any in-progress download and staging files are cleaned up."}
           </DialogDescription>
         </DialogHeader>
-
-        {published && (
-          <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
-            <Checkbox
-              id={checkboxId}
-              className="mt-0.5"
-              checked={deleteFiles}
-              onCheckedChange={(checked) => setDeleteFiles(checked === true)}
-            />
-            <label htmlFor={checkboxId} className="cursor-pointer select-none">
-              Delete media files from disk
-              <span className="text-muted-foreground block text-xs">
-                Also removes the published library item and its files. Otherwise it stays in your library.
-              </span>
-            </label>
-          </div>
-        )}
 
         <DialogFooter>
           <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" size="sm" onClick={() => onConfirm(deleteFiles)}>
-            {deleteFiles ? "Remove + delete files" : "Remove"}
+          <Button type="button" variant="destructive" size="sm" onClick={onConfirm}>
+            Remove
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    [Migration("20260618071052_M2Jellyfin")]
-    partial class M2Jellyfin
+    [Migration("20260621094736_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -26,7 +26,8 @@ namespace MediaServer.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("DisplayName")
@@ -39,7 +40,8 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("LastSeenAt")
+                    b.Property<string>("LastSeenAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Role")
@@ -61,11 +63,15 @@ namespace MediaServer.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("DefaultKeepSeeding")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("LowDiskSince")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("MetadataLanguage")
                         .HasColumnType("TEXT");
@@ -78,6 +84,9 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OfflineSince")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Root")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -85,7 +94,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<int>("Type")
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTimeOffset>("UpdatedAt")
+                    b.Property<string>("UpdatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -102,13 +112,14 @@ namespace MediaServer.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("AddedAt")
+                    b.Property<string>("AddedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("CatalogId")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("CompletedAt")
+                    b.Property<string>("CompletedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("InfoHash")
@@ -196,7 +207,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<Guid>("CatalogId")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("DownloadId")
@@ -208,13 +220,13 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("LeaseOwner")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("LeaseUntil")
+                    b.Property<string>("LeaseUntil")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("MediaItemId")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                    b.Property<string>("NextAttemptAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ReviewCandidates")
@@ -238,7 +250,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("TraceId")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("UpdatedAt")
+                    b.Property<string>("UpdatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -267,7 +280,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("Client")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("CredentialId")
@@ -279,7 +293,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("DeviceName")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("LastSeenAt")
+                    b.Property<string>("LastSeenAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("Revoked")
@@ -310,7 +325,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<int>("AppUserId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("FailedAttempts")
@@ -320,10 +336,10 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("LastUsedAt")
+                    b.Property<string>("LastUsedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("LockedUntil")
+                    b.Property<string>("LockedUntil")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("PermanentlyLocked")
@@ -360,7 +376,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<int>("AttemptCount")
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTimeOffset?>("CompletedAt")
+                    b.Property<string>("CompletedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Error")
@@ -375,7 +391,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("RelatedType")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("StartedAt")
+                    b.Property<string>("StartedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Status")
@@ -388,7 +404,8 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("UpdatedAt")
+                    b.Property<string>("UpdatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -404,7 +421,8 @@ namespace MediaServer.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("AddedAt")
+                    b.Property<string>("AddedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("CatalogId")
@@ -463,7 +481,8 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("UpdatedAt")
+                    b.Property<string>("UpdatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("Year")
@@ -494,7 +513,8 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<long>("DurationTicks")
@@ -599,7 +619,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("Crew")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("FetchedAt")
+                    b.Property<string>("FetchedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Genres")
@@ -626,7 +647,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("Raw")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("ReleaseDate")
+                    b.Property<string>("ReleaseDate")
                         .HasColumnType("TEXT");
 
                     b.Property<long?>("RuntimeTicks")
@@ -658,10 +679,14 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("ContentHash")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("DownloadId")
+                    b.Property<Guid?>("DownloadId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("IngestItemId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("MediaItemId")
@@ -677,7 +702,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<int?>("TorrentFileIndex")
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTimeOffset>("UpdatedAt")
+                    b.Property<string>("UpdatedAt")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -686,7 +712,47 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("MediaItemId");
 
+                    b.HasIndex("IngestItemId", "RelativePath")
+                        .IsUnique();
+
                     b.ToTable("SourceFiles");
+                });
+
+            modelBuilder.Entity("MediaServer.Api.Data.UserItemData", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AppUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsFavorite")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastPlayedDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PlayCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PlaybackPositionTicks")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Played")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("AppUserId", "MediaItemId")
+                        .IsUnique();
+
+                    b.ToTable("UserItemData");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.Download", b =>
@@ -813,6 +879,11 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasOne("MediaServer.Api.Data.Download", "Download")
                         .WithMany("SourceFiles")
                         .HasForeignKey("DownloadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("MediaServer.Api.Data.IngestItem", "IngestItem")
+                        .WithMany("SourceFiles")
+                        .HasForeignKey("IngestItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -823,10 +894,36 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.Navigation("Download");
 
+                    b.Navigation("IngestItem");
+
+                    b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("MediaServer.Api.Data.UserItemData", b =>
+                {
+                    b.HasOne("MediaServer.Api.Data.AppUser", "AppUser")
+                        .WithMany()
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MediaServer.Api.Data.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AppUser");
+
                     b.Navigation("MediaItem");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.Download", b =>
+                {
+                    b.Navigation("SourceFiles");
+                });
+
+            modelBuilder.Entity("MediaServer.Api.Data.IngestItem", b =>
                 {
                     b.Navigation("SourceFiles");
                 });

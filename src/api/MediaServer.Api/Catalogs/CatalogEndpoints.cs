@@ -1,4 +1,5 @@
 using MediaServer.Api.Hosty;
+using MediaServer.Api.Library;
 
 namespace MediaServer.Api.Catalogs;
 
@@ -65,6 +66,13 @@ public static class CatalogEndpoints
             {
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status409Conflict);
             }
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Import: scan the catalog root for orphan media files and ingest them from the identify stage.
+        group.MapPost("/{id:guid}/scan", async (Guid id, LibraryImportService import, CancellationToken cancellationToken) =>
+        {
+            var report = await import.ImportAsync(id, cancellationToken);
+            return report is null ? Results.NotFound() : Results.Ok(report);
         }).RequireAuthorization(AppRoles.AdminPolicy);
     }
 }

@@ -8,7 +8,7 @@ namespace MediaServer.Api.Data;
 /// written atomically to a fixed snapshot file beside the database. Because Hosty Core has no
 /// pre-backup quiesce hook, a scheduled host backup of <c>HOSTY_APP_DATA_DIR</c> could otherwise
 /// capture the live DB mid-write; this snapshot (plus WAL journaling) gives the host a recoverable copy.
-/// See <c>docs/planning/storage-and-data.md</c> and the M4 plan.
+/// See <c>docs/features/storage-and-data.md</c> and the M4 plan.
 /// </summary>
 public sealed class SqliteSnapshotService(HostyOptions options, ILogger<SqliteSnapshotService> logger)
 {

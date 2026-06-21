@@ -5,7 +5,7 @@ namespace MediaServer.Api.Catalogs;
 /// <summary>
 /// Confines every file operation to a catalog root. Resolves and normalizes catalog-relative paths,
 /// rejects <c>..</c> traversal, absolute inputs, and symlink escapes. See
-/// <c>docs/planning/file-directory-management.md</c> and <c>docs/planning/security.md</c>.
+/// <c>docs/features/file-directory-management.md</c> and <c>docs/features/security.md</c>.
 /// </summary>
 public interface ICatalogPathSandbox
 {

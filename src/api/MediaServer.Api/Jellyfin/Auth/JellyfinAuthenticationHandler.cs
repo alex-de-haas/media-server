@@ -10,7 +10,7 @@ namespace MediaServer.Api.Jellyfin.Auth;
 /// <summary>
 /// Authenticates Jellyfin-surface requests against a Media Server-owned opaque token. Unlike the Hosty
 /// identity scheme, the token is validated <em>locally</em> against the credential store on every
-/// request — Core is consulted only at login/issuance (see <c>docs/planning/security.md</c>). The token
+/// request — Core is consulted only at login/issuance (see <c>docs/features/security.md</c>). The token
 /// is read from the <c>MediaBrowser</c>/<c>Emby</c> authorization header, the <c>X-Emby-Token</c>
 /// header, or (for media/image URLs only) the <c>api_key</c> query parameter.
 /// </summary>

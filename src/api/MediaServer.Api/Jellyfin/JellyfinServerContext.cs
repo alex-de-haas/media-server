@@ -6,7 +6,7 @@ namespace MediaServer.Api.Jellyfin;
 /// <summary>
 /// Stable server-level facts the compatibility surface reports. The version is a tested constant —
 /// Infuse 8.3 is known to pair against Jellyfin 10.11, and some clients gate features on it, so bump
-/// it deliberately after verifying. See <c>docs/planning/jellyfin-compatibility.md</c>.
+/// it deliberately after verifying. See <c>docs/features/jellyfin-compatibility.md</c>.
 /// </summary>
 public sealed class JellyfinServerContext(HostyOptions hosty, MediaServerSettings settings)
 {

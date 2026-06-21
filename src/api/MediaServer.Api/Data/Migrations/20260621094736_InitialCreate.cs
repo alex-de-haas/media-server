@@ -6,11 +6,29 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace MediaServer.Api.Data.Migrations
 {
     /// <inheritdoc />
-    public partial class M1Schema : Migration
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.CreateTable(
+                name: "AppUsers",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    HostUserId = table.Column<string>(type: "TEXT", nullable: false),
+                    Email = table.Column<string>(type: "TEXT", nullable: true),
+                    DisplayName = table.Column<string>(type: "TEXT", nullable: true),
+                    Role = table.Column<int>(type: "INTEGER", nullable: false),
+                    CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
+                    LastSeenAt = table.Column<string>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_AppUsers", x => x.Id);
+                });
+
             migrationBuilder.CreateTable(
                 name: "Catalogs",
                 columns: table => new
@@ -22,8 +40,10 @@ namespace MediaServer.Api.Data.Migrations
                     NamingTemplate = table.Column<string>(type: "TEXT", nullable: false),
                     DefaultKeepSeeding = table.Column<bool>(type: "INTEGER", nullable: false),
                     MetadataLanguage = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    OfflineSince = table.Column<string>(type: "TEXT", nullable: true),
+                    LowDiskSince = table.Column<string>(type: "TEXT", nullable: true),
+                    CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -43,13 +63,40 @@ namespace MediaServer.Api.Data.Migrations
                     AttemptCount = table.Column<int>(type: "INTEGER", nullable: false),
                     Error = table.Column<string>(type: "TEXT", nullable: true),
                     TraceId = table.Column<string>(type: "TEXT", nullable: true),
-                    StartedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    CompletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    StartedAt = table.Column<string>(type: "TEXT", nullable: true),
+                    CompletedAt = table.Column<string>(type: "TEXT", nullable: true),
+                    UpdatedAt = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Jobs", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "JellyfinCredentials",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
+                    AppUserId = table.Column<int>(type: "INTEGER", nullable: false),
+                    HostUserId = table.Column<string>(type: "TEXT", nullable: false),
+                    Username = table.Column<string>(type: "TEXT", nullable: false),
+                    PinHash = table.Column<string>(type: "TEXT", nullable: false),
+                    FailedAttempts = table.Column<int>(type: "INTEGER", nullable: false),
+                    LockedUntil = table.Column<string>(type: "TEXT", nullable: true),
+                    PermanentlyLocked = table.Column<bool>(type: "INTEGER", nullable: false),
+                    Revoked = table.Column<bool>(type: "INTEGER", nullable: false),
+                    CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
+                    LastUsedAt = table.Column<string>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_JellyfinCredentials", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_JellyfinCredentials_AppUsers_AppUserId",
+                        column: x => x.AppUserId,
+                        principalTable: "AppUsers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -65,8 +112,8 @@ namespace MediaServer.Api.Data.Migrations
                     KeepSeeding = table.Column<bool>(type: "INTEGER", nullable: false),
                     SavePath = table.Column<string>(type: "TEXT", nullable: false),
                     SourceUri = table.Column<string>(type: "TEXT", nullable: true),
-                    AddedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    CompletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                    AddedAt = table.Column<string>(type: "TEXT", nullable: false),
+                    CompletedAt = table.Column<string>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -103,8 +150,8 @@ namespace MediaServer.Api.Data.Migrations
                     IdentitySeasonNumber = table.Column<int>(type: "INTEGER", nullable: true),
                     IdentityEpisodeNumber = table.Column<int>(type: "INTEGER", nullable: true),
                     Providers = table.Column<string>(type: "TEXT", nullable: false),
-                    AddedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    AddedAt = table.Column<string>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -124,6 +171,39 @@ namespace MediaServer.Api.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "JellyfinAccessTokens",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
+                    CredentialId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    AppUserId = table.Column<int>(type: "INTEGER", nullable: false),
+                    TokenHash = table.Column<string>(type: "TEXT", nullable: false),
+                    Client = table.Column<string>(type: "TEXT", nullable: true),
+                    DeviceName = table.Column<string>(type: "TEXT", nullable: true),
+                    DeviceId = table.Column<string>(type: "TEXT", nullable: true),
+                    AppVersion = table.Column<string>(type: "TEXT", nullable: true),
+                    CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
+                    LastSeenAt = table.Column<string>(type: "TEXT", nullable: false),
+                    Revoked = table.Column<bool>(type: "INTEGER", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_JellyfinAccessTokens", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_JellyfinAccessTokens_AppUsers_AppUserId",
+                        column: x => x.AppUserId,
+                        principalTable: "AppUsers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_JellyfinAccessTokens_JellyfinCredentials_CredentialId",
+                        column: x => x.CredentialId,
+                        principalTable: "JellyfinCredentials",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "IngestItems",
                 columns: table => new
                 {
@@ -136,14 +216,14 @@ namespace MediaServer.Api.Data.Migrations
                     AttemptCount = table.Column<int>(type: "INTEGER", nullable: false),
                     StagesCompleted = table.Column<string>(type: "TEXT", nullable: false),
                     LeaseOwner = table.Column<string>(type: "TEXT", nullable: true),
-                    LeaseUntil = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    NextAttemptAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
+                    LeaseUntil = table.Column<string>(type: "TEXT", nullable: true),
+                    NextAttemptAt = table.Column<string>(type: "TEXT", nullable: true),
                     RowVersion = table.Column<byte[]>(type: "BLOB", nullable: false),
                     ReviewCandidates = table.Column<string>(type: "TEXT", nullable: true),
                     LastError = table.Column<string>(type: "TEXT", nullable: true),
                     TraceId = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -199,7 +279,7 @@ namespace MediaServer.Api.Data.Migrations
                     SizeBytes = table.Column<long>(type: "INTEGER", nullable: false),
                     Bitrate = table.Column<int>(type: "INTEGER", nullable: true),
                     DurationTicks = table.Column<long>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    CreatedAt = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -226,12 +306,12 @@ namespace MediaServer.Api.Data.Migrations
                     Genres = table.Column<string>(type: "TEXT", nullable: false),
                     OfficialRating = table.Column<string>(type: "TEXT", nullable: true),
                     CommunityRating = table.Column<double>(type: "REAL", nullable: true),
-                    ReleaseDate = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
+                    ReleaseDate = table.Column<string>(type: "TEXT", nullable: true),
                     RuntimeTicks = table.Column<long>(type: "INTEGER", nullable: true),
                     Cast = table.Column<string>(type: "TEXT", nullable: true),
                     Crew = table.Column<string>(type: "TEXT", nullable: true),
                     Raw = table.Column<string>(type: "TEXT", nullable: true),
-                    FetchedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    FetchedAt = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -245,19 +325,50 @@ namespace MediaServer.Api.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "UserItemData",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
+                    AppUserId = table.Column<int>(type: "INTEGER", nullable: false),
+                    MediaItemId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PlaybackPositionTicks = table.Column<long>(type: "INTEGER", nullable: false),
+                    PlayCount = table.Column<int>(type: "INTEGER", nullable: false),
+                    Played = table.Column<bool>(type: "INTEGER", nullable: false),
+                    IsFavorite = table.Column<bool>(type: "INTEGER", nullable: false),
+                    LastPlayedDate = table.Column<string>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_UserItemData", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_UserItemData_AppUsers_AppUserId",
+                        column: x => x.AppUserId,
+                        principalTable: "AppUsers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_UserItemData_MediaItems_MediaItemId",
+                        column: x => x.MediaItemId,
+                        principalTable: "MediaItems",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "SourceFiles",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    DownloadId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    IngestItemId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    DownloadId = table.Column<Guid>(type: "TEXT", nullable: true),
                     RelativePath = table.Column<string>(type: "TEXT", nullable: false),
                     TorrentFileIndex = table.Column<int>(type: "INTEGER", nullable: true),
                     SizeBytes = table.Column<long>(type: "INTEGER", nullable: false),
                     ContentHash = table.Column<string>(type: "TEXT", nullable: true),
                     MediaItemId = table.Column<Guid>(type: "TEXT", nullable: true),
                     AssignmentStatus = table.Column<int>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -266,6 +377,12 @@ namespace MediaServer.Api.Data.Migrations
                         name: "FK_SourceFiles_Downloads_DownloadId",
                         column: x => x.DownloadId,
                         principalTable: "Downloads",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.SetNull);
+                    table.ForeignKey(
+                        name: "FK_SourceFiles_IngestItems_IngestItemId",
+                        column: x => x.IngestItemId,
+                        principalTable: "IngestItems",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
@@ -311,6 +428,17 @@ namespace MediaServer.Api.Data.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_AppUsers_Email",
+                table: "AppUsers",
+                column: "Email");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AppUsers_HostUserId",
+                table: "AppUsers",
+                column: "HostUserId",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Catalogs_Root",
                 table: "Catalogs",
                 column: "Root",
@@ -346,6 +474,34 @@ namespace MediaServer.Api.Data.Migrations
                 name: "IX_IngestItems_Status",
                 table: "IngestItems",
                 column: "Status");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_JellyfinAccessTokens_AppUserId",
+                table: "JellyfinAccessTokens",
+                column: "AppUserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_JellyfinAccessTokens_CredentialId",
+                table: "JellyfinAccessTokens",
+                column: "CredentialId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_JellyfinAccessTokens_TokenHash",
+                table: "JellyfinAccessTokens",
+                column: "TokenHash",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_JellyfinCredentials_AppUserId",
+                table: "JellyfinCredentials",
+                column: "AppUserId",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_JellyfinCredentials_Username",
+                table: "JellyfinCredentials",
+                column: "Username",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_Jobs_RelatedType_RelatedId",
@@ -390,8 +546,25 @@ namespace MediaServer.Api.Data.Migrations
                 column: "DownloadId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_SourceFiles_IngestItemId_RelativePath",
+                table: "SourceFiles",
+                columns: new[] { "IngestItemId", "RelativePath" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_SourceFiles_MediaItemId",
                 table: "SourceFiles",
+                column: "MediaItemId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_UserItemData_AppUserId_MediaItemId",
+                table: "UserItemData",
+                columns: new[] { "AppUserId", "MediaItemId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_UserItemData_MediaItemId",
+                table: "UserItemData",
                 column: "MediaItemId");
         }
 
@@ -402,7 +575,7 @@ namespace MediaServer.Api.Data.Migrations
                 name: "ImageAssets");
 
             migrationBuilder.DropTable(
-                name: "IngestItems");
+                name: "JellyfinAccessTokens");
 
             migrationBuilder.DropTable(
                 name: "Jobs");
@@ -417,13 +590,25 @@ namespace MediaServer.Api.Data.Migrations
                 name: "SourceFiles");
 
             migrationBuilder.DropTable(
+                name: "UserItemData");
+
+            migrationBuilder.DropTable(
+                name: "JellyfinCredentials");
+
+            migrationBuilder.DropTable(
                 name: "MediaSources");
 
             migrationBuilder.DropTable(
-                name: "Downloads");
+                name: "IngestItems");
+
+            migrationBuilder.DropTable(
+                name: "AppUsers");
 
             migrationBuilder.DropTable(
                 name: "MediaItems");
+
+            migrationBuilder.DropTable(
+                name: "Downloads");
 
             migrationBuilder.DropTable(
                 name: "Catalogs");

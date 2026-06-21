@@ -6,7 +6,7 @@ organizes/identifies/probes media automatically, and exposes a
 Jellyfin-compatible streaming surface for native clients such as Infuse.
 
 Planning docs live in [`docs/`](docs/root.md); the execution plan and milestones
-are in [`docs/planning/implementation-plan.md`](docs/planning/implementation-plan.md).
+are in [`docs/features/implementation-plan.md`](docs/features/implementation-plan.md).
 
 ## Repository layout
 
@@ -18,7 +18,9 @@ src/
 scripts/
   dev.sh                   # one-shot dev launch via Hosty Core
   validate-manifest.sh
-.github/workflows/ci.yml   # build + test both services, validate manifest
+.github/workflows/
+  ci.yml                   # build + test both services, validate manifest
+  publish.yml              # build + push api/web images to GHCR (docker delivery)
 docs/                      # planning documentation
 ```
 
@@ -72,6 +74,37 @@ cd src/api && dotnet test && dotnet run --project MediaServer.Api
 # web
 cd src/web && pnpm install && pnpm test && pnpm dev
 ```
+
+## Install from a manifest URL (docker runtime)
+
+For a non-development install, point Hosty Core straight at the published
+`manifest.json` — no clone, no local checkout. Because `defaultRuntime` is
+`docker`, Core pulls the prebuilt images from GHCR (`media-server-api` +
+`media-server-web`, published by
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml)) instead of
+building from source.
+
+```bash
+hosty core start
+hosty apps install https://raw.githubusercontent.com/alex-de-haas/media-server/main/manifest.json
+hosty apps start com.haas.media-server
+hosty apps open com.haas.media-server --user <you@example.com>
+```
+
+- `install` defaults to the `docker` runtime here (`defaultRuntime: docker`); pass
+  `--runtime docker` to be explicit. A URL install supports `docker` only —
+  `--runtime dev` needs a local checkout, since the manifest ships no
+  `source.repository` for Core to clone.
+- The `main` manifest tracks the `:latest` images — swap `main` for a release tag
+  (e.g. `v0.1.0`) to pin a specific build.
+
+Before the app is functional, configure the required pieces through the Shell
+(Core does not enforce them at `start`):
+
+- **`TMDB_API_KEY`** — required app setting (TMDb API key, stored as a secret).
+- **Catalog roots** — at least one host path for the required `catalogRoots`
+  external mount; published media lives in canonical folders at the root and
+  in-flight downloads stage under `.incoming/` (one root = one filesystem).
 
 ## Status
 

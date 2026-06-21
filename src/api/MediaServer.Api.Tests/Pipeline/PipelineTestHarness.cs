@@ -41,7 +41,6 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddDbContext<MediaServerDbContext>(options => options.UseSqlite(_connection));
 
         services.AddSingleton(new MediaServerSettings { SupportedLanguages = ["en-US"] });
-        services.AddSingleton<IHardLinker, HardLinker>();
         services.AddSingleton<IFilesystemInspector, FilesystemInspector>();
         services.AddSingleton<ICatalogPathSandbox, CatalogPathSandbox>();
         services.AddSingleton<INameParser, NameParser>();
@@ -52,10 +51,10 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddSingleton<IPipelineQueue, PipelineQueue>();
 
         services.AddScoped<IOrganizer, OrganizerService>();
-        services.AddScoped<DownloadCleanupService>();
         services.AddScoped<IdentifyService>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
+        services.AddScoped<DownloadDeletionService>();
         services.AddScoped<IngestService>();
         services.AddScoped<IPipelineStage, IntakeStage>();
         services.AddScoped<IPipelineStage, DownloadStage>();
@@ -82,8 +81,8 @@ public sealed class PipelineTestHarness : IDisposable
 
     public T GetService<T>() where T : notnull => _provider.GetRequiredService<T>();
 
-    /// <summary>Sets up a catalog with files/ and library/, a completed download, a source file on disk,
-    /// and a pending ingest item. Returns the ingest item id.</summary>
+    /// <summary>Sets up a catalog, a completed download whose file sits under <c>.incoming/&lt;id&gt;/</c>,
+    /// the owning source file, and a pending ingest item. Returns the ingest item id.</summary>
     public async Task<(Guid IngestId, Guid CatalogId, Guid DownloadId)> SeedCompletedDownloadAsync(
         CatalogType type, string torrentName, string sourceRelativePath, Guid? catalogId = null, bool keepSeeding = false)
     {
@@ -98,29 +97,35 @@ public sealed class PipelineTestHarness : IDisposable
         var paths = CatalogPaths.For(catalog.Root);
         paths.EnsureCreated();
 
-        // Write a fake media file under files/.
-        var absolute = Path.Combine(paths.FilesDir, sourceRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        var downloadId = Guid.NewGuid();
+        var ingestId = Guid.NewGuid();
+
+        // Write a fake media file under the download's .incoming/<downloadId>/ staging folder.
+        var stagingRelative = $"{CatalogPaths.IncomingRelative(downloadId)}/{sourceRelativePath}";
+        var absolute = Path.Combine(catalog.Root, stagingRelative.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
         await File.WriteAllBytesAsync(absolute, new byte[1024]);
 
         var download = new Download
         {
-            Id = Guid.NewGuid(),
+            Id = downloadId,
             InfoHash = Guid.NewGuid().ToString("N"),
             Name = torrentName,
             CatalogId = catalog.Id,
             SourceType = TorrentSourceType.Magnet,
-            State = DownloadState.Completed,
+            // keepSeeding parks the ingest at the download stage; otherwise it hands off into identify.
+            State = keepSeeding ? DownloadState.Seeding : DownloadState.Completed,
             KeepSeeding = keepSeeding,
-            SavePath = paths.FilesDir,
+            SavePath = paths.IncomingFor(downloadId),
             AddedAt = now,
             CompletedAt = now,
         };
         var sourceFile = new SourceFile
         {
             Id = Guid.NewGuid(),
-            DownloadId = download.Id,
-            RelativePath = sourceRelativePath,
+            IngestItemId = ingestId,
+            DownloadId = downloadId,
+            RelativePath = stagingRelative,
             SizeBytes = 1024,
             AssignmentStatus = SourceFileAssignmentStatus.Unassigned,
             CreatedAt = now,
@@ -128,9 +133,9 @@ public sealed class PipelineTestHarness : IDisposable
         };
         var ingest = new IngestItem
         {
-            Id = Guid.NewGuid(),
+            Id = ingestId,
             CatalogId = catalog.Id,
-            DownloadId = download.Id,
+            DownloadId = downloadId,
             Stage = IngestStage.Intake,
             Status = IngestStatus.Pending,
             CreatedAt = now,

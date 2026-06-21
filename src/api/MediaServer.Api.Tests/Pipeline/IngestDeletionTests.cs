@@ -1,3 +1,4 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Pipeline;
 using Microsoft.EntityFrameworkCore;
@@ -5,16 +6,17 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace MediaServer.Api.Tests.Pipeline;
 
-/// <summary>Covers the orphan guard (download removed mid-pipeline) and the manual ingest-delete valve.</summary>
+/// <summary>Covers download-less (scan-style) ingest processing and the manual ingest-delete valve.</summary>
 public sealed class IngestDeletionTests
 {
     [Fact]
-    public async Task Orphaned_item_with_no_download_is_failed_not_looped()
+    public async Task Download_less_item_is_processed_via_identify_not_failed()
     {
         using var harness = new PipelineTestHarness();
         var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Movie.mkv", "Movie.mkv");
 
-        // Simulate the download having been removed: its FK is set null on the ingest item.
+        // A download-less ingest is valid now (the scan entry point, or a download already handed off):
+        // drop the download FK and the item must still flow through the pipeline rather than fail.
         using (var scope = harness.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
@@ -27,15 +29,15 @@ public sealed class IngestDeletionTests
 
         using var verify = harness.CreateScope();
         var driven = await verify.ServiceProvider.GetRequiredService<MediaServerDbContext>().IngestItems.AsNoTracking().FirstAsync(i => i.Id == ingestId);
-        Assert.Equal(IngestStatus.Failed, driven.Status);
-        Assert.Contains("removed", driven.LastError, StringComparison.OrdinalIgnoreCase);
+        // The fake provider returns no confident match, so identify parks it for review — not Failed.
+        Assert.Equal(IngestStatus.NeedsReview, driven.Status);
     }
 
     [Fact]
-    public async Task DeleteAsync_removes_only_the_ingest_row()
+    public async Task DeleteAsync_of_an_in_flight_item_also_removes_its_download_and_staging()
     {
         using var harness = new PipelineTestHarness();
-        var (ingestId, _, downloadId) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Movie.mkv", "Movie.mkv");
+        var (ingestId, catalogId, downloadId) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Movie.mkv", "Movie.mkv");
 
         using (var scope = harness.CreateScope())
         {
@@ -45,10 +47,52 @@ public sealed class IngestDeletionTests
 
         using var verify = harness.CreateScope();
         var db = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        // An in-flight ingest delegates to download removal: the ingest, its source files, the download, and
+        // the .incoming/ staging are all gone (so a re-add re-downloads cleanly).
         Assert.False(await db.IngestItems.AnyAsync(i => i.Id == ingestId));
-        // The download and its source files are left intact — manual ingest-delete is row-scoped.
-        Assert.True(await db.Downloads.AnyAsync(d => d.Id == downloadId));
-        Assert.True(await db.SourceFiles.AnyAsync(f => f.DownloadId == downloadId));
+        Assert.False(await db.Downloads.AnyAsync(d => d.Id == downloadId));
+        Assert.False(await db.SourceFiles.AnyAsync(f => f.IngestItemId == ingestId));
+        var catalog = await db.Catalogs.SingleAsync(c => c.Id == catalogId);
+        Assert.False(Directory.Exists(Path.Combine(catalog.Root, CatalogPaths.IncomingDirName, downloadId.ToString("N"))));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_of_a_download_less_item_erases_its_incoming_staging()
+    {
+        using var harness = new PipelineTestHarness();
+        var (ingestId, catalogId, downloadId) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Movie.mkv", "Movie.mkv");
+
+        // Simulate a post-hand-off item: drop the download FK (the file stays in .incoming/, owned by the ingest).
+        using (var scope = harness.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            var item = await db.IngestItems.FirstAsync(i => i.Id == ingestId);
+            item.DownloadId = null;
+            await db.SaveChangesAsync();
+        }
+
+        var staging = Path.Combine(
+            (await StagingCatalogRootAsync(harness, catalogId)),
+            CatalogPaths.IncomingRelative(downloadId).Replace('/', Path.DirectorySeparatorChar), "Movie.mkv");
+        Assert.True(File.Exists(staging)); // seeded on disk
+
+        using (var scope = harness.CreateScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+            Assert.True(await service.DeleteAsync(ingestId, CancellationToken.None));
+        }
+
+        using var verify = harness.CreateScope();
+        var db2 = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.False(await db2.IngestItems.AnyAsync(i => i.Id == ingestId));
+        Assert.False(File.Exists(staging)); // .incoming staging erased
+    }
+
+    private static async Task<string> StagingCatalogRootAsync(PipelineTestHarness harness, Guid catalogId)
+    {
+        using var scope = harness.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        return (await db.Catalogs.SingleAsync(c => c.Id == catalogId)).Root;
     }
 
     [Fact]

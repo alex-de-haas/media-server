@@ -1,8 +1,8 @@
 # Background Tasks and Progress
 
-Status: Draft
+Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-06-21
 
 ## Description
 
@@ -14,12 +14,13 @@ job state that survives restarts.
 ## Job Types
 
 - Torrent downloads.
-- Organizer (hardlink) operations.
+- Organizer (move) operations.
 - Media scans.
 - Identify and metadata enrich/refresh (including language backfill).
 - Media probing.
-- Media file operations: hardlink creation/removal, remap cleanup, library item
-  deletion, and large-file streaming support work where progress is useful.
+- Media file operations: move/organize, remap, `.incoming/` staging cleanup,
+  library item deletion, and large-file streaming support work where progress is
+  useful.
 - Reconciler runs that re-drive stuck pipeline items.
 
 ## Progress Model

@@ -1,6 +1,5 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
-using MediaServer.Api.IO;
 using MediaServer.Api.Media;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,17 +8,23 @@ namespace MediaServer.Api.Organizer;
 public sealed class OrganizerService(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
-    IHardLinker hardLinker,
     ILogger<OrganizerService> logger)
     : IOrganizer
 {
+    // Path equality follows the filesystem: case-insensitive on Windows and default macOS, ordinal elsewhere.
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
     public async Task<IReadOnlyList<OrganizedFile>> OrganizeAsync(
-        Download download, IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken)
+        IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken)
     {
         var paths = CatalogPaths.For(catalog);
         paths.EnsureCreated();
 
         var organized = new List<OrganizedFile>();
+        var stagingToClean = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var sourceFile in sourceFiles)
         {
@@ -39,53 +44,88 @@ public sealed class OrganizerService(
                 continue;
             }
 
+            if (!sandbox.TryResolve(catalog, sourceFile.RelativePath, out var sourceAbsolute))
+            {
+                logger.LogWarning("Refusing to organize unresolved source path {Path}", sourceFile.RelativePath);
+                continue;
+            }
+
             var extension = Path.GetExtension(sourceFile.RelativePath);
-            var libraryRelative = await BuildLibraryPathAsync(catalog, item, extension, cancellationToken);
+            var canonicalRelative = await BuildLibraryPathAsync(catalog, item, extension, cancellationToken);
 
-            if (!sandbox.TryResolve(catalog, libraryRelative, out var libraryAbsolute))
+            if (!sandbox.TryResolve(catalog, canonicalRelative, out var canonicalAbsolute))
             {
-                logger.LogWarning("Refusing to organize outside catalog root: {Path}", libraryRelative);
+                logger.LogWarning("Refusing to organize outside catalog root: {Path}", canonicalRelative);
                 continue;
             }
 
-            var sourceAbsolute = Path.Combine(paths.FilesDir, sourceFile.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(sourceAbsolute))
+            // Remember the staging folder so it can be removed once its file(s) move out.
+            if (StagingRootOf(sourceFile.RelativePath) is { } stagingRoot &&
+                sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
             {
-                logger.LogWarning("Source file missing for organize: {Path}", sourceAbsolute);
-                continue;
+                stagingToClean.Add(stagingAbsolute);
             }
 
-            CreateOrReplaceHardlink(sourceAbsolute, libraryAbsolute);
+            // A case-only path change on a case-insensitive filesystem maps to the same file — skip the move.
+            if (!string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison))
+            {
+                if (!File.Exists(sourceAbsolute))
+                {
+                    logger.LogWarning("Source file missing for organize: {Path}", sourceAbsolute);
+                    continue;
+                }
 
-            item.LibraryPath = libraryRelative;
+                Directory.CreateDirectory(Path.GetDirectoryName(canonicalAbsolute)!);
+                if (File.Exists(canonicalAbsolute))
+                {
+                    File.Delete(canonicalAbsolute); // Idempotent re-run: replace any stale file at the destination.
+                }
+
+                File.Move(sourceAbsolute, canonicalAbsolute);
+            }
+
+            sourceFile.RelativePath = canonicalRelative;
+            sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+            item.LibraryPath = canonicalRelative;
             item.UpdatedAt = DateTimeOffset.UtcNow;
-            organized.Add(new OrganizedFile(sourceFile.Id, item.Id, libraryRelative, libraryAbsolute));
+            organized.Add(new OrganizedFile(sourceFile.Id, item.Id, canonicalRelative, canonicalAbsolute));
         }
 
         await database.SaveChangesAsync(cancellationToken);
+
+        // Remove emptied .incoming/<downloadId>/ staging folders (torrent leftovers: samples, .nfo, extras).
+        foreach (var staging in stagingToClean)
+        {
+            TryDeleteDirectory(staging);
+        }
+
         return organized;
     }
 
-    public async Task UnlinkSeedCopyAsync(Download download, CancellationToken cancellationToken)
+    /// <summary>The <c>.incoming/&lt;downloadId&gt;</c> staging root of a path, or null if it is not staged.</summary>
+    private static string? StagingRootOf(string relativePath)
     {
-        var sourceFiles = await database.SourceFiles
-            .Where(file => file.DownloadId == download.Id)
-            .ToListAsync(cancellationToken);
-
-        foreach (var sourceFile in sourceFiles)
+        if (!CatalogPaths.IsIncoming(relativePath))
         {
-            var absolute = Path.Combine(download.SavePath, sourceFile.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-            try
+            return null;
+        }
+
+        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 2 ? $"{segments[0]}/{segments[1]}" : segments[0];
+    }
+
+    private void TryDeleteDirectory(string absolute)
+    {
+        try
+        {
+            if (Directory.Exists(absolute))
             {
-                if (File.Exists(absolute))
-                {
-                    File.Delete(absolute);
-                }
+                Directory.Delete(absolute, recursive: true);
             }
-            catch (IOException exception)
-            {
-                logger.LogWarning(exception, "Failed to unlink seed copy {Path}", absolute);
-            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(exception, "Failed to remove staging folder {Path}", absolute);
         }
     }
 
@@ -103,16 +143,5 @@ public sealed class OrganizerService(
         }
 
         return LibraryNaming.ForMovie(catalog, item, extension);
-    }
-
-    private void CreateOrReplaceHardlink(string sourceAbsolute, string libraryAbsolute)
-    {
-        if (File.Exists(libraryAbsolute))
-        {
-            // Idempotent re-run: rebuild the link so it points at the current source inode.
-            File.Delete(libraryAbsolute);
-        }
-
-        hardLinker.Create(sourceAbsolute, libraryAbsolute);
     }
 }

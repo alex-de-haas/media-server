@@ -2,19 +2,18 @@ using MediaServer.Api.Data;
 
 namespace MediaServer.Api.Organizer;
 
-/// <summary>The result of hardlinking one source file into the clean library layout.</summary>
+/// <summary>The result of moving one source file into the canonical catalog layout.</summary>
 public sealed record OrganizedFile(Guid SourceFileId, Guid MediaItemId, string LibraryRelativePath, string AbsolutePath);
 
 /// <summary>
-/// Hardlinks confirmed playable source files from <c>files/</c> into the catalog's clean
-/// <c>library/</c> layout (zero copy, same filesystem), and unlinks the <c>files/</c> seed copy when
-/// seeding stops. See <c>docs/planning/torrents-and-organizer.md</c>.
+/// Moves confirmed playable source files from their current location — a torrent's <c>.incoming/</c>
+/// staging area, or wherever a scanned file already sits — into the catalog's canonical layout at the
+/// catalog root, renaming per the confirmed metadata. A move within one filesystem is atomic and
+/// zero-copy; there are no hardlinks. Emptied <c>.incoming/</c> staging folders are removed.
+/// See <c>docs/features/torrents-and-organizer.md</c>.
 /// </summary>
 public interface IOrganizer
 {
     Task<IReadOnlyList<OrganizedFile>> OrganizeAsync(
-        Download download, IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken);
-
-    /// <summary>Unlinks the <c>files/</c> seed copies; any <c>library/</c> hardlink keeps the data alive.</summary>
-    Task UnlinkSeedCopyAsync(Download download, CancellationToken cancellationToken);
+        IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken);
 }

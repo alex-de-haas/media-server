@@ -5,8 +5,6 @@ public interface IFilesystemInspector
 {
     bool DirectoryExists(string path);
 
-    bool AreSameFilesystem(string directoryA, string directoryB);
-
     /// <summary>Bytes available to a non-privileged user on the volume that holds <paramref name="path"/>.</summary>
     long GetAvailableFreeBytes(string path);
 
@@ -17,16 +15,13 @@ public interface IFilesystemInspector
     string GetVolumeKey(string path);
 }
 
-public sealed class FilesystemInspector(IHardLinker hardLinker) : IFilesystemInspector
+public sealed class FilesystemInspector : IFilesystemInspector
 {
     // Windows paths are case-insensitive; POSIX paths are not.
     private static readonly StringComparison PathComparison =
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     public bool DirectoryExists(string path) => Directory.Exists(path);
-
-    public bool AreSameFilesystem(string directoryA, string directoryB) =>
-        hardLinker.AreSameFilesystem(directoryA, directoryB);
 
     public long GetAvailableFreeBytes(string path) => ResolveDrive(path)?.AvailableFreeSpace ?? 0;
 

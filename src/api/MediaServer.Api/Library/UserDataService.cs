@@ -8,7 +8,7 @@ namespace MediaServer.Api.Library;
 /// favorites, keyed to the internal <see cref="MediaItem.Id"/>. Reads project <see cref="UserItemDataDto"/>
 /// for batches of items — with season/series watched rollups computed from descendant episodes — and the
 /// report/mark methods apply the watched threshold and resume-reset policy. See
-/// <c>docs/planning/jellyfin-compatibility.md</c> ("Playback Progress and User Data").
+/// <c>docs/features/jellyfin-compatibility.md</c> ("Playback Progress and User Data").
 /// </summary>
 public sealed class UserDataService(MediaServerDbContext database, TimeProvider time)
 {

@@ -9,7 +9,7 @@ namespace MediaServer.Api.Jellyfin.Endpoints;
 /// Playback-state sync (M3): the <c>Sessions/Playing*</c> progress reports plus played/favorite toggles.
 /// Progress reports apply the resume + watched-threshold policy in <see cref="UserDataService"/>; the
 /// toggles return the updated <see cref="UserItemDataDto"/>. See
-/// <c>docs/planning/jellyfin-compatibility.md</c> ("Playback state").
+/// <c>docs/features/jellyfin-compatibility.md</c> ("Playback state").
 /// </summary>
 internal static class JellyfinPlaybackEndpoints
 {

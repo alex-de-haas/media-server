@@ -113,12 +113,6 @@ public sealed class CatalogService(
         var paths = CatalogPaths.For(root);
         paths.EnsureCreated();
 
-        if (!filesystem.AreSameFilesystem(paths.FilesDir, paths.LibraryDir))
-        {
-            throw new CatalogValidationException(
-                "files/ and library/ must be on the same filesystem so the organizer can hardlink between them.");
-        }
-
         var now = DateTimeOffset.UtcNow;
         var catalog = new Catalog
         {

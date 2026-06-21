@@ -30,7 +30,7 @@ public sealed record RemoteImage(ImageType Type, string? Language, string Remote
 /// Search/match/fetch/images abstraction; TMDb is the first implementation. Identify uses
 /// <see cref="SearchAsync"/> + scoring; enrich uses <see cref="FetchAsync"/>/<see cref="GetImagesAsync"/>
 /// to populate <c>MetadataRecord</c>/<c>ImageAsset</c> keyed by provider+language. See
-/// <c>docs/planning/metadata.md</c>.
+/// <c>docs/features/metadata.md</c>.
 /// </summary>
 public interface IMetadataProvider
 {
