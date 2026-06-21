@@ -40,5 +40,10 @@ public static class IngestEndpoints
         group.MapDelete("/{id:guid}", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
             await service.DeleteAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound())
             .RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Bulk companion to the single delete: clears every published row from the Done tab in one action.
+        group.MapDelete("/done", async (IngestService service, CancellationToken cancellationToken) =>
+            Results.Ok(new { removed = await service.DeleteCompletedAsync(cancellationToken) }))
+            .RequireAuthorization(AppRoles.AdminPolicy);
     }
 }

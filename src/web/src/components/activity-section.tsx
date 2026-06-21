@@ -64,7 +64,10 @@ function tabOf(item: IngestItem, download: Download | undefined): TabKey {
 }
 
 export function ActivitySection() {
+  const { role } = useSession();
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabKey>("active");
+  const [clearOpen, setClearOpen] = useState(false);
   // Realtime is pushed over SSE (see RealtimeBridge); these slow intervals are only a reconnect fallback.
   const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 20000 });
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
@@ -81,6 +84,17 @@ export function ActivitySection() {
   );
 
   const downloadFor = (item: IngestItem) => (item.downloadId ? downloadsById.get(item.downloadId) : undefined);
+
+  // "Delete all" on the Done tab: drops every published tracking row at once; library files stay put.
+  const clearDone = useMutation({
+    mutationFn: mediaServer.deleteDoneIngest,
+    onSuccess: (removed) => {
+      queryClient.invalidateQueries({ queryKey: ["ingest"] });
+      queryClient.invalidateQueries({ queryKey: ["downloads"] });
+      toast.success(removed > 0 ? `Removed ${removed} item${removed === 1 ? "" : "s"}` : "Nothing to remove");
+    },
+    onError: (error) => toast.error("Couldn’t delete completed items", { description: errorMessage(error) }),
+  });
 
   const counts = useMemo(() => {
     const tally: Record<TabKey, number> = { active: 0, done: 0 };
@@ -100,7 +114,25 @@ export function ActivitySection() {
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
-        <TabBar tab={tab} counts={counts} onChange={setTab} />
+        <TabBar
+          tab={tab}
+          counts={counts}
+          onChange={setTab}
+          action={
+            tab === "done" && role === "admin" && counts.done > 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => setClearOpen(true)}
+              >
+                <Trash2 />
+                Delete all
+              </Button>
+            ) : null
+          }
+        />
         <QueryState query={ingest} empty="Nothing here yet. Add a torrent to get started.">
           {(items) => {
             const visible = items.filter((item) => tabOf(item, downloadFor(item)) === tab);
@@ -118,31 +150,54 @@ export function ActivitySection() {
           }}
         </QueryState>
       </CardContent>
+
+      <ClearDoneDialog
+        open={clearOpen}
+        onOpenChange={setClearOpen}
+        count={counts.done}
+        onConfirm={() => {
+          clearDone.mutate();
+          setClearOpen(false);
+        }}
+      />
     </Card>
   );
 }
 
-function TabBar({ tab, counts, onChange }: { tab: TabKey; counts: Record<TabKey, number>; onChange: (tab: TabKey) => void }) {
+function TabBar({
+  tab,
+  counts,
+  onChange,
+  action,
+}: {
+  tab: TabKey;
+  counts: Record<TabKey, number>;
+  onChange: (tab: TabKey) => void;
+  action?: ReactNode;
+}) {
   return (
-    <div role="tablist" className="flex items-center gap-1 border-b">
-      {TABS.map(({ key, label }) => (
-        <button
-          key={key}
-          type="button"
-          role="tab"
-          aria-selected={tab === key}
-          onClick={() => onChange(key)}
-          className={cn(
-            "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-            tab === key
-              ? "border-brand text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {label}
-          {counts[key] > 0 && <span className="text-muted-foreground ml-1.5 text-xs">{counts[key]}</span>}
-        </button>
-      ))}
+    <div className="flex items-center justify-between border-b">
+      <div role="tablist" className="flex items-center gap-1">
+        {TABS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => onChange(key)}
+            className={cn(
+              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+              tab === key
+                ? "border-brand text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+            {counts[key] > 0 && <span className="text-muted-foreground ml-1.5 text-xs">{counts[key]}</span>}
+          </button>
+        ))}
+      </div>
+      {action}
     </div>
   );
 }
@@ -464,6 +519,44 @@ function RemoveDialog({
           </Button>
           <Button type="button" variant="destructive" size="sm" onClick={onConfirm}>
             Remove
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ClearDoneDialog({
+  open,
+  onOpenChange,
+  count,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  count: number;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete all completed items?</DialogTitle>
+          <DialogDescription>
+            Remove{" "}
+            <span className="text-foreground font-medium">
+              {count} completed item{count === 1 ? "" : "s"}
+            </span>{" "}
+            from Activity. Published items stay in your library — this only clears the Done list.
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogFooter>
+          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="button" variant="destructive" size="sm" onClick={onConfirm}>
+            Delete all
           </Button>
         </DialogFooter>
       </DialogContent>

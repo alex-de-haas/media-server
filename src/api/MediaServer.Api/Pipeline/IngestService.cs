@@ -198,6 +198,30 @@ public sealed class IngestService(
         return true;
     }
 
+    /// <summary>
+    /// Clears every published (<see cref="IngestStatus.Done"/>) item — the "Delete all" on the Done tab.
+    /// Each row is removed through <see cref="DeleteAsync"/>, so its staging cleanup rules apply and library
+    /// files are left untouched. Returns how many rows were removed.
+    /// </summary>
+    public async Task<int> DeleteCompletedAsync(CancellationToken cancellationToken)
+    {
+        var ids = await database.IngestItems
+            .Where(item => item.Status == IngestStatus.Done)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+
+        var removed = 0;
+        foreach (var id in ids)
+        {
+            if (await DeleteAsync(id, cancellationToken))
+            {
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
     /// <summary>The <c>.incoming/&lt;downloadId&gt;</c> staging root of a path, or null if it is not staged.</summary>
     private static string? StagingRootOf(string relativePath)
     {

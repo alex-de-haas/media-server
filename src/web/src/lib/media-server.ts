@@ -323,6 +323,8 @@ export const mediaServer = {
       body: JSON.stringify(input),
     }),
   deleteIngest: (id: string) => send(`/ingest/${id}`, "DELETE"),
+  deleteDoneIngest: async () =>
+    (await apiJson<{ removed: number }>(`${BASE}/ingest/done`, { method: "DELETE" })).removed,
 
   listLibrary: () => apiJson<LibraryItem[]>(`${BASE}/library`),
   getLibraryDetail: (id: string) => apiJson<LibraryDetail>(`${BASE}/library/${id}`),
