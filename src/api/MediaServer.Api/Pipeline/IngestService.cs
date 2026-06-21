@@ -200,22 +200,67 @@ public sealed class IngestService(
 
     /// <summary>
     /// Clears every published (<see cref="IngestStatus.Done"/>) item — the "Delete all" on the Done tab.
-    /// Each row is removed through <see cref="DeleteAsync"/>, so its staging cleanup rules apply and library
-    /// files are left untouched. Returns how many rows were removed.
+    /// Published rows have already handed off their download (DownloadId is null), so they are dropped in a
+    /// single batch after noting any <c>.incoming/</c> staging to erase; the rare row that still holds a
+    /// download falls back to the per-item <see cref="DeleteAsync"/>. Library files are left untouched.
+    /// Returns how many rows were removed.
     /// </summary>
     public async Task<int> DeleteCompletedAsync(CancellationToken cancellationToken)
     {
-        var ids = await database.IngestItems
+        var items = await database.IngestItems
             .Where(item => item.Status == IngestStatus.Done)
-            .Select(item => item.Id)
             .ToListAsync(cancellationToken);
+        if (items.Count == 0)
+        {
+            return 0;
+        }
 
         var removed = 0;
-        foreach (var id in ids)
+
+        // A published item handed its download off long before reaching Done, so DownloadId is null. Should one
+        // ever defy that, fall back to the single-item path so its torrent + files are torn down correctly.
+        foreach (var item in items.Where(item => item.DownloadId is not null))
         {
-            if (await DeleteAsync(id, cancellationToken))
+            if (await DeleteAsync(item.Id, cancellationToken))
             {
                 removed++;
+            }
+        }
+
+        var batch = items.Where(item => item.DownloadId is null).ToList();
+        if (batch.Count == 0)
+        {
+            return removed;
+        }
+
+        // Note any .incoming/ staging the batch still owns (paired with its catalog) before the rows — and
+        // their cascading source files — are gone, then drop every row in one round-trip. Published library
+        // files are left untouched.
+        var ingestIds = batch.Select(item => item.Id).ToList();
+        var catalogIds = batch.Select(item => item.CatalogId).Distinct().ToList();
+        var catalogById = await database.Catalogs
+            .Where(catalog => catalogIds.Contains(catalog.Id))
+            .ToDictionaryAsync(catalog => catalog.Id, cancellationToken);
+        var catalogByIngest = batch.ToDictionary(item => item.Id, item => item.CatalogId);
+        var stagingDirs = (await database.SourceFiles
+                .Where(file => ingestIds.Contains(file.IngestItemId))
+                .Select(file => new { file.IngestItemId, file.RelativePath })
+                .ToListAsync(cancellationToken))
+            .Where(file => CatalogPaths.IsIncoming(file.RelativePath))
+            .Select(file => (CatalogId: catalogByIngest[file.IngestItemId], Staging: StagingRootOf(file.RelativePath)))
+            .Where(pair => pair.Staging is not null)
+            .Distinct()
+            .ToList();
+
+        database.IngestItems.RemoveRange(batch); // SourceFile rows cascade away with them.
+        await database.SaveChangesAsync(cancellationToken);
+        removed += batch.Count;
+
+        foreach (var (catalogId, staging) in stagingDirs)
+        {
+            if (catalogById.TryGetValue(catalogId, out var catalog) && sandbox.TryResolve(catalog, staging!, out var absolute))
+            {
+                TryDeleteDirectory(absolute);
             }
         }
 
