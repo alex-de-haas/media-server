@@ -169,12 +169,13 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     /// (the same host path). Falls back to the trailing <c>.incoming/{id}</c> segments.</summary>
     internal static string ToMountRelative(string saveDirectory, IReadOnlyList<string> mountRoots)
     {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var full = Path.GetFullPath(saveDirectory);
         foreach (var root in mountRoots)
         {
             var rootFull = Path.GetFullPath(root);
-            if (string.Equals(full, rootFull, StringComparison.Ordinal) ||
-                full.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            if (string.Equals(full, rootFull, comparison) ||
+                full.StartsWith(rootFull + Path.DirectorySeparatorChar, comparison))
             {
                 return Path.GetRelativePath(rootFull, full).Replace('\\', '/');
             }
@@ -302,7 +303,12 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         }
     }
 
-    public void Dispose() => _cts?.Dispose();
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _http.Dispose(); // Owned: created per-instance in Program.cs.
+    }
 
     private sealed record AddDownloadRequest(
         string? Magnet, string? TorrentBase64, string? SavePath, int MaxDownloadRate, int MaxUploadRate, bool AutoStart);
