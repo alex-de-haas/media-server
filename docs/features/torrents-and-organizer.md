@@ -71,16 +71,11 @@ content will not fit.
 ## Networking
 
 The torrent engine needs inbound connectivity for good peer performance and for
-fetching magnet metadata via DHT. It is a raw TCP/UDP listener, not an HTTP
-endpoint that Hosty proxies, and BitTorrent's connection churn collapses under the
-docker bridge NAT (and, on Docker Desktop/WSL2, the VM network relay), so the `api`
-service runs in **host networking** mode (`network: "host"` in the manifest). The
-container shares the host's network namespace — no NAT, no per-port publishing — and
-the engine binds the injected `HOSTY_PORT_TORRENT` (default `6881`) directly on the
-host for both TCP and UDP. Router port-forwarding remains the operator's
-responsibility; on Windows/WSL2 the host also needs WSL2 mirrored networking (Core
-warns when it does not). See [Hosty runtime app](hosty-runtime-app.md) and the
-docker-host **Host networking** feature.
+fetching magnet metadata via DHT. It is a raw TCP/UDP listener, not an HTTP endpoint
+that Hosty proxies, so the manifest declares a pinned `torrent` port with
+`expose: "host"` + `transport: ["tcp", "udp"]`; Core publishes it on all interfaces
+and injects it as `HOSTY_PORT_TORRENT` (see [Hosty runtime app](hosty-runtime-app.md)).
+Router port-forwarding remains the operator's responsibility.
 
 - Fixed listen port from the injected `HOSTY_PORT_TORRENT` (TCP + UDP).
 - **DHT** enabled (required to fetch metadata for magnet links without trackers),
@@ -91,6 +86,33 @@ docker-host **Host networking** feature.
   it, the operator forwards the port manually.
 - Optional bind to a specific interface/address (`TORRENT_BIND_ADDRESS`) for VPN
   setups.
+
+### Throughput under Docker (bridge NAT) — host OS matters
+
+BitTorrent opens a high churn of short-lived peer connections. The docker **bridge
+NAT** copes poorly with that volume, and the symptom is dramatic: near-zero download
+through the containerized engine while a native client on the *same machine* pulls
+several MB/s. The fix depends on the host OS:
+
+- **Windows + WSL2 (Docker Desktop)** — the dominant bottleneck. Default WSL2 NAT
+  routing throttles P2P to a crawl. Enable **WSL2 mirrored networking**: add
+  `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`, then run
+  `wsl --shutdown` and restart Docker Desktop. This took a real test from ~0 to
+  3–5 MB/s. This is a host-level setting Hosty Core cannot apply for you; Core logs a
+  one-time advisory when a host-exposed UDP port (or host networking) starts on
+  Windows/WSL2.
+- **macOS (Docker Desktop)** — containers run in a Linux VM with a userspace network
+  relay that throttles P2P similarly. There is no mirrored-networking equivalent;
+  for heavy downloading prefer the `dev` (localCommand) runtime, which runs the
+  engine natively on the host.
+- **Native Linux** — the bridge does not meaningfully throttle P2P (kernel-native
+  networking); only the standard concern remains: forward `6881/tcp`+`6881/udp` on
+  the router for inbound peers.
+
+> A separate, VPN-isolated torrent service is planned to route only torrent traffic
+> through a VPN (and incidentally sidestep the bridge-NAT throttle by tunnelling all
+> peer connections through a single flow). See
+> [Torrent engine app](../ideas/torrent-engine-app.md).
 
 ## Pipeline
 
