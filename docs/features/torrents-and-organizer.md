@@ -72,11 +72,15 @@ content will not fit.
 
 The torrent engine needs inbound connectivity for good peer performance and for
 fetching magnet metadata via DHT. It is a raw TCP/UDP listener, not an HTTP
-endpoint that Hosty proxies, so the manifest declares a pinned `torrent` port with
-`expose: host` + `transport: ["tcp", "udp"]`; Core publishes it on all interfaces
-and injects it as `HOSTY_PORT_TORRENT` (see
-[Hosty runtime app](hosty-runtime-app.md)). Router port-forwarding remains the
-operator's responsibility.
+endpoint that Hosty proxies, and BitTorrent's connection churn collapses under the
+docker bridge NAT (and, on Docker Desktop/WSL2, the VM network relay), so the `api`
+service runs in **host networking** mode (`network: "host"` in the manifest). The
+container shares the host's network namespace — no NAT, no per-port publishing — and
+the engine binds the injected `HOSTY_PORT_TORRENT` (default `6881`) directly on the
+host for both TCP and UDP. Router port-forwarding remains the operator's
+responsibility; on Windows/WSL2 the host also needs WSL2 mirrored networking (Core
+warns when it does not). See [Hosty runtime app](hosty-runtime-app.md) and the
+docker-host **Host networking** feature.
 
 - Fixed listen port from the injected `HOSTY_PORT_TORRENT` (TCP + UDP).
 - **DHT** enabled (required to fetch metadata for magnet links without trackers),

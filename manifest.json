@@ -16,10 +16,11 @@
         "docker": {
           "type": "docker",
           "image": { "repository": "ghcr.io/alex-de-haas/media-server-api", "tag": "latest", "pullPolicy": "always" },
+          "network": "host",
           "ports": [
             { "key": "internal", "containerPort": 8080, "protocol": "http" },
             { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true },
-            { "key": "torrent", "containerPort": 6881, "hostPort": 6881, "expose": "host", "transport": ["tcp", "udp"] }
+            { "key": "torrent", "containerPort": 6881 }
           ]
         },
         "dev": {
