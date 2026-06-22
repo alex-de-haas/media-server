@@ -60,6 +60,9 @@
     { "key": "ui", "service": "web", "port": "http", "protocol": "http", "public": true },
     { "key": "jellyfin", "service": "api", "port": "jellyfin", "protocol": "http", "public": true }
   ],
+  "dependencies": [
+    { "id": "com.haas.torrent-engine", "required": false, "endpoints": [{ "key": "control", "as": "torrent-engine" }] }
+  ],
   "ui": {
     "entrypoint": { "endpoint": "ui", "path": "/" },
     "navigation": [

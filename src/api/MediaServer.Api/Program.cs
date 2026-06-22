@@ -56,10 +56,25 @@ builder.Services.AddSingleton<SseRealtimeNotifier>();
 builder.Services.AddSingleton<IRealtimeNotifier>(serviceProvider => serviceProvider.GetRequiredService<SseRealtimeNotifier>());
 builder.Services.AddSingleton<IPipelineQueue, PipelineQueue>();
 
-// Torrent engine (hosted) + coordinator that bridges it to persistence and the pipeline.
-builder.Services.AddSingleton<MonoTorrentEngine>();
-builder.Services.AddSingleton<ITorrentEngine>(serviceProvider => serviceProvider.GetRequiredService<MonoTorrentEngine>());
-builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MonoTorrentEngine>());
+// Torrent engine (hosted) + coordinator that bridges it to persistence and the pipeline. When a
+// torrent-engine dependency URL is configured, downloading is delegated to that app over HTTP/SSE;
+// otherwise the in-process MonoTorrent engine runs (standalone/dev).
+if (settings.TorrentEngineUrl is { Length: > 0 } torrentEngineUrl)
+{
+    builder.Services.AddSingleton(serviceProvider => new RemoteTorrentEngine(
+        new HttpClient { BaseAddress = new Uri(torrentEngineUrl), Timeout = Timeout.InfiniteTimeSpan },
+        settings,
+        serviceProvider.GetRequiredService<ILogger<RemoteTorrentEngine>>()));
+    builder.Services.AddSingleton<ITorrentEngine>(serviceProvider => serviceProvider.GetRequiredService<RemoteTorrentEngine>());
+    builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<RemoteTorrentEngine>());
+}
+else
+{
+    builder.Services.AddSingleton<MonoTorrentEngine>();
+    builder.Services.AddSingleton<ITorrentEngine>(serviceProvider => serviceProvider.GetRequiredService<MonoTorrentEngine>());
+    builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MonoTorrentEngine>());
+}
+
 builder.Services.AddHostedService<TorrentCoordinator>();
 builder.Services.AddScoped<TorrentService>();
 builder.Services.AddScoped<DownloadFileService>();
