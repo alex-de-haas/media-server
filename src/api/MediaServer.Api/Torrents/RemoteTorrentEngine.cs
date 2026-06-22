@@ -17,6 +17,11 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    // Short timeout for control calls. The shared HttpClient has no timeout (the SSE stream is
+    // long-lived), so each non-streaming request gets its own deadline to avoid hanging the
+    // coordinator/pipeline if the engine becomes unresponsive.
+    private static readonly TimeSpan ControlTimeout = TimeSpan.FromSeconds(30);
+
     private readonly HttpClient _http;
     private readonly MediaServerSettings _settings;
     private readonly ILogger<RemoteTorrentEngine> _logger;
@@ -43,13 +48,14 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         // event stream is still connecting.
         try
         {
-            var snapshots = await _http.GetFromJsonAsync<List<TorrentSnapshot>>("/downloads", Json, cancellationToken);
+            using var cts = ControlCts(cancellationToken);
+            var snapshots = await _http.GetFromJsonAsync<List<TorrentSnapshot>>("/downloads", Json, cts.Token);
             foreach (var snapshot in snapshots ?? [])
             {
                 _snapshots[snapshot.InfoHash] = snapshot;
             }
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(exception, "Could not seed torrent state from {Url}; will populate from the event stream.", _settings.TorrentEngineUrl);
         }
@@ -88,7 +94,8 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
             limits.MaxUploadRate,
             autoStart);
 
-        using var response = await _http.PostAsJsonAsync("/downloads", request, Json, cancellationToken);
+        using var cts = ControlCts(cancellationToken);
+        using var response = await _http.PostAsJsonAsync("/downloads", request, Json, cts.Token);
 
         // A re-add after a media-server restart hits a torrent the engine already has: treat 409 as
         // success so resume is idempotent.
@@ -100,7 +107,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         }
 
         response.EnsureSuccessStatusCode();
-        var descriptor = await response.Content.ReadFromJsonAsync<TorrentDescriptor>(Json, cancellationToken)
+        var descriptor = await response.Content.ReadFromJsonAsync<TorrentDescriptor>(Json, cts.Token)
             ?? throw new InvalidOperationException("torrent-engine returned an empty descriptor.");
         SeedInitial(descriptor);
         return descriptor;
@@ -116,7 +123,8 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     {
         try
         {
-            using var response = await _http.DeleteAsync($"/downloads/{infoHash}?deleteFiles={deleteFiles.ToString().ToLowerInvariant()}", cancellationToken);
+            using var cts = ControlCts(cancellationToken);
+            using var response = await _http.DeleteAsync($"/downloads/{infoHash}?deleteFiles={deleteFiles.ToString().ToLowerInvariant()}", cts.Token);
             // Treat a missing torrent as already-removed.
             if (response.StatusCode != HttpStatusCode.NotFound)
             {
@@ -138,7 +146,8 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
 
     private async Task PostAsync(string path, CancellationToken cancellationToken)
     {
-        using var response = await _http.PostAsync(path, content: null, cancellationToken);
+        using var cts = ControlCts(cancellationToken);
+        using var response = await _http.PostAsync(path, content: null, cts.Token);
         if (response.StatusCode != HttpStatusCode.NotFound)
         {
             response.EnsureSuccessStatusCode();
@@ -173,6 +182,14 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
 
         var parent = Path.GetFileName(Path.GetDirectoryName(full)) ?? string.Empty;
         return $"{parent}/{Path.GetFileName(full)}".TrimStart('/');
+    }
+
+    // Links the caller's token with a per-request deadline for control (non-streaming) calls.
+    private static CancellationTokenSource ControlCts(CancellationToken cancellationToken)
+    {
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(ControlTimeout);
+        return cts;
     }
 
     private async Task ConsumeEventsAsync(CancellationToken cancellationToken)
@@ -272,13 +289,14 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     {
         try
         {
-            var files = await _http.GetFromJsonAsync<List<TorrentFileInfo>>($"/downloads/{infoHash}/files", Json, cancellationToken);
+            using var cts = ControlCts(cancellationToken);
+            var files = await _http.GetFromJsonAsync<List<TorrentFileInfo>>($"/downloads/{infoHash}/files", Json, cts.Token);
             if (files is not null)
             {
                 _files[infoHash] = files;
             }
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(exception, "Could not fetch files for {InfoHash}.", infoHash);
         }
