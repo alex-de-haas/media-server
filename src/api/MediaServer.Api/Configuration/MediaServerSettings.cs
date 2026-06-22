@@ -33,6 +33,14 @@ public sealed class MediaServerSettings
     public int? TorrentPort { get; init; }
 
     /// <summary>
+    /// Base URL of the external <c>torrent-engine</c> app, injected as the cross-app dependency
+    /// <c>HOSTY_DEPENDENCY_TORRENT_ENGINE_URL</c>. When set, downloading is delegated to that app over
+    /// HTTP/SSE; when null, the in-process MonoTorrent engine is used (standalone/dev). See
+    /// <c>docs/ideas/torrent-engine-app.md</c>.
+    /// </summary>
+    public string? TorrentEngineUrl { get; init; }
+
+    /// <summary>
     /// Catalog-root mounts from <c>HOSTY_MOUNT_CATALOGROOTS</c>. Each operator-configured catalog
     /// root must live within one of these (when provided). May be empty under standalone local runs.
     /// </summary>
@@ -63,6 +71,7 @@ public sealed class MediaServerSettings
             TorrentMaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),
             TorrentMaxUploadSpeed = ReadInt("TORRENT_MAX_UPLOAD_SPEED", 0),
             TorrentPort = int.TryParse(Read("HOSTY_PORT_TORRENT"), out var port) ? port : null,
+            TorrentEngineUrl = Read("HOSTY_DEPENDENCY_TORRENT_ENGINE_URL"),
             CatalogMountRoots = ParseMountRoots(Read("HOSTY_MOUNT_CATALOGROOTS")),
         };
     }
