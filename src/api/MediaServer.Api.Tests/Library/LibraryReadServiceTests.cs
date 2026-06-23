@@ -110,6 +110,107 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Detail_picks_the_language_matched_title_logo()
+    {
+        using (var context = _db.Create())
+        {
+            context.ImageAssets.AddRange(
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Logo, Language = "ru", Provider = "tmdb", RemotePath = "https://image.tmdb.org/logo-ru.png", Tag = "logoru", SortOrder = 0 },
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Logo, Language = null, Provider = "tmdb", RemotePath = "https://image.tmdb.org/logo-neutral.png", Tag = "logonull", SortOrder = 1 },
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Logo, Language = "en", Provider = "tmdb", RemotePath = "https://image.tmdb.org/logo-en.png", Tag = "logoen", SortOrder = 2 });
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        // SupportedLanguages = ["en-US"] → the "en" logo wins over the lower-sorted ru/neutral logos.
+        Assert.Equal("https://image.tmdb.org/logo-en.png", detail!.LogoUrl);
+    }
+
+    [Fact]
+    public async Task Detail_falls_back_to_a_neutral_title_logo_when_no_language_matches()
+    {
+        using (var context = _db.Create())
+        {
+            context.ImageAssets.AddRange(
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Logo, Language = "ru", Provider = "tmdb", RemotePath = "https://image.tmdb.org/logo-ru.png", Tag = "logoru", SortOrder = 0 },
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Logo, Language = null, Provider = "tmdb", RemotePath = "https://image.tmdb.org/logo-neutral.png", Tag = "logonull", SortOrder = 1 });
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        // No en/en-* logo present → fall back to the language-neutral one over the ru one.
+        Assert.Equal("https://image.tmdb.org/logo-neutral.png", detail!.LogoUrl);
+    }
+
+    [Fact]
+    public async Task Detail_for_series_parses_networks_with_absolute_logo_urls()
+    {
+        using (var context = _db.Create())
+        {
+            context.MetadataRecords.Add(new MetadataRecord
+            {
+                Id = Guid.NewGuid(),
+                MediaItemId = _seriesId,
+                Provider = "tmdb",
+                Language = "en-US",
+                Title = "Breaking Bad",
+                Raw = """{"networks":[{"name":"AMC","logo_path":"/amc.png"},{"name":"Netflix","logo_path":null}]}""",
+                FetchedAt = DateTimeOffset.UtcNow,
+            });
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_seriesId, appUserId: null, CancellationToken.None);
+
+        Assert.NotNull(detail!.Networks);
+        Assert.Collection(
+            detail.Networks!,
+            network =>
+            {
+                Assert.Equal("AMC", network.Name);
+                Assert.Equal("https://image.tmdb.org/t/p/original/amc.png", network.LogoUrl); // bare logo_path prefixed
+            },
+            network =>
+            {
+                Assert.Equal("Netflix", network.Name);
+                Assert.Null(network.LogoUrl); // no logo_path → null
+            });
+    }
+
+    [Fact]
+    public async Task Detail_for_series_ignores_malformed_metadata_when_parsing_networks()
+    {
+        using (var context = _db.Create())
+        {
+            context.MetadataRecords.Add(new MetadataRecord
+            {
+                Id = Guid.NewGuid(),
+                MediaItemId = _seriesId,
+                Provider = "tmdb",
+                Language = "en-US",
+                Title = "Breaking Bad",
+                Raw = "{ not valid json",
+                FetchedAt = DateTimeOffset.UtcNow,
+            });
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_seriesId, appUserId: null, CancellationToken.None);
+
+        Assert.Null(detail!.Networks); // malformed JSON is swallowed, not thrown
+    }
+
+    [Fact]
+    public async Task Detail_for_movie_has_no_networks()
+    {
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        Assert.Null(detail!.Networks); // networks are series-only
+    }
+
+    [Fact]
     public async Task Episodes_lists_ordered_episodes_with_resume_state()
     {
         SeedUserData(_episodeId, position: TimeSpan.FromMinutes(5).Ticks);

@@ -57,7 +57,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <SessionContext.Provider value={session.data}>
       <RealtimeBridge />
-      <div className="flex min-h-full flex-col">
+      {/* overflow-x-clip lets full-bleed children (e.g. the detail backdrop) span 100vw without adding a
+          horizontal scrollbar. `clip` (not `hidden`) doesn't create a scroll container, so the sticky
+          TabBar below keeps sticking to the viewport. */}
+      <div className="flex min-h-full flex-col overflow-x-clip">
         <TabBar isAdmin={session.data.role === "admin"} />
         <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">{children}</main>
       </div>

@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type IngestSourceFile, type MetadataCandidate } from "@/lib/media-server";
-import { inputClass, errorMessage } from "@/lib/ui";
+import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,6 +14,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 /**
  * The metadata-resolution popup for a NeedsReview ingest item. On open it pre-fills the corrected title
@@ -37,6 +40,8 @@ export function IngestReviewDialog({
   const isEpisodic = catalog?.type === "Series" || catalog?.type === "Anime";
   const unresolved = item.sourceFiles.filter((file) => file.assignmentStatus === "NeedsReview" || file.mediaItemId == null);
 
+  const titleId = useId();
+  const yearId = useId();
   const [searchTitle, setSearchTitle] = useState("");
   const [searchYear, setSearchYear] = useState("");
   // Per-file season/episode, keyed by source-file id and seeded from each file's parsed SxxEyy. A whole
@@ -141,26 +146,27 @@ export function IngestReviewDialog({
               if (searchTitle.trim()) search.mutate({ title: searchTitle.trim(), year: searchYear.trim() ? Number(searchYear) : null });
             }}
           >
-            <label className="flex flex-1 flex-col gap-1">
-              <span className="text-muted-foreground text-xs">Corrected title</span>
-              <input
-                className={`${inputClass} h-8`}
+            <Field className="flex-1">
+              <FieldLabel htmlFor={titleId}>Corrected title</FieldLabel>
+              <Input
+                id={titleId}
                 value={searchTitle}
                 placeholder={isEpisodic ? "Series title" : "Movie title"}
                 onChange={(e) => setSearchTitle(e.target.value)}
               />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-xs">Year</span>
-              <input className={`${inputClass} h-8 w-20`} type="number" value={searchYear} onChange={(e) => setSearchYear(e.target.value)} />
-            </label>
+            </Field>
+            <Field className="w-20">
+              <FieldLabel htmlFor={yearId}>Year</FieldLabel>
+              <Input id={yearId} type="number" value={searchYear} onChange={(e) => setSearchYear(e.target.value)} />
+            </Field>
             <Button type="submit" variant="secondary" size="sm" disabled={!searchTitle.trim() || search.isPending}>
               <Search />
               {search.isPending ? "Searching…" : "Search"}
             </Button>
           </form>
 
-          <div className="flex max-h-72 flex-col gap-3 overflow-y-auto">
+          <ScrollArea className="max-h-72">
+           <div className="flex flex-col gap-3 pr-3">
             {unresolved.map((file) => {
               const numbers = numbersFor(file);
               return (
@@ -173,8 +179,8 @@ export function IngestReviewDialog({
                     <div className="text-muted-foreground flex items-center gap-3">
                       <label className="flex items-center gap-1.5">
                         Season
-                        <input
-                          className={`${inputClass} h-7 w-16`}
+                        <Input
+                          className="w-16"
                           type="number"
                           min={0}
                           value={numbers.season}
@@ -183,8 +189,8 @@ export function IngestReviewDialog({
                       </label>
                       <label className="flex items-center gap-1.5">
                         Episode
-                        <input
-                          className={`${inputClass} h-7 w-16`}
+                        <Input
+                          className="w-16"
                           type="number"
                           min={0}
                           value={numbers.episode}
@@ -230,7 +236,8 @@ export function IngestReviewDialog({
                 </div>
               );
             })}
-          </div>
+           </div>
+          </ScrollArea>
         </div>
       </DialogContent>
     </Dialog>

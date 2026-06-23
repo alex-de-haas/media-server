@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer } from "@/lib/media-server";
 import { buildAddTorrentTasks, type TorrentFile } from "@/lib/add-torrent";
 import { formatBytes } from "@/lib/format";
-import { inputClass, errorMessage } from "@/lib/ui";
+import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -18,11 +18,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export function AddTorrentDialog() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
+  const catalogSelectId = useId();
+  const magnetId = useId();
+  const filesId = useId();
   const [catalogId, setCatalogId] = useState("");
   const [magnet, setMagnet] = useState("");
   const [keepSeeding, setKeepSeeding] = useState(false);
@@ -103,36 +109,45 @@ export function AddTorrentDialog() {
               if (catalogId && sourceCount > 0) add.mutate();
             }}
           >
-            <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-xs">Catalog</span>
+            <Field>
+              <FieldLabel htmlFor={catalogSelectId}>Catalog</FieldLabel>
               <div className="flex flex-wrap items-center gap-3">
-                <select className={`${inputClass} max-w-xs`} value={catalogId} onChange={(e) => setCatalogId(e.target.value)}>
-                  <option value="">Select a catalog…</option>
-                  {catalogs.data?.map((catalog) => (
-                    <option key={catalog.id} value={catalog.id}>
-                      {catalog.name} ({catalog.type})
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={catalogId || null}
+                  onValueChange={(value) => setCatalogId((value as string | null) ?? "")}
+                  items={(catalogs.data ?? []).map((catalog) => ({ value: catalog.id, label: `${catalog.name} (${catalog.type})` }))}
+                >
+                  <SelectTrigger id={catalogSelectId} className="w-full max-w-xs">
+                    <SelectValue placeholder="Select a catalog…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {catalogs.data?.map((catalog) => (
+                      <SelectItem key={catalog.id} value={catalog.id}>
+                        {catalog.name} ({catalog.type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {selectedCatalog && (
                   <span className="text-muted-foreground text-xs">{formatBytes(selectedCatalog.freeBytes)} free</span>
                 )}
               </div>
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-xs">Magnet link</span>
-              <input
-                className={inputClass}
+            <Field>
+              <FieldLabel htmlFor={magnetId}>Magnet link</FieldLabel>
+              <Input
+                id={magnetId}
                 placeholder="magnet:?xt=urn:btih:…"
                 value={magnet}
                 onChange={(e) => setMagnet(e.target.value)}
               />
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-xs">…or one or more .torrent files</span>
+            <Field>
+              <FieldLabel htmlFor={filesId}>…or one or more .torrent files</FieldLabel>
               <input
+                id={filesId}
                 type="file"
                 accept=".torrent"
                 multiple
@@ -142,7 +157,7 @@ export function AddTorrentDialog() {
                 }}
                 className="text-muted-foreground file:bg-secondary file:text-secondary-foreground file:mr-3 file:rounded-md file:border-0 file:px-2.5 file:py-1 file:text-xs text-xs"
               />
-            </label>
+            </Field>
 
             {files.length > 0 && (
               <ul className="flex flex-col gap-1">

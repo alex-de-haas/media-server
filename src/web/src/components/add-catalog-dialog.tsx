@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type CatalogType } from "@/lib/media-server";
-import { inputClass, errorMessage } from "@/lib/ui";
+import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -16,6 +16,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const CATALOG_TYPES: CatalogType[] = ["Movie", "Series", "Anime"];
 
@@ -32,6 +35,11 @@ export function AddCatalogDialog() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const mounts = useQuery({ queryKey: ["catalog-mounts"], queryFn: mediaServer.listCatalogMounts });
+  const nameId = useId();
+  const typeId = useId();
+  const mountId = useId();
+  const relativePathId = useId();
+  const freeRootId = useId();
 
   const [name, setName] = useState("");
   const [type, setType] = useState<CatalogType>("Movie");
@@ -83,54 +91,72 @@ export function AddCatalogDialog() {
             }}
           >
             <div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
-              <label className="flex flex-col gap-1">
-                <span className="text-muted-foreground text-xs">Name</span>
-                <input className={inputClass} placeholder="Movies" value={name} onChange={(e) => setName(e.target.value)} required />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-muted-foreground text-xs">Type</span>
-                <select className={inputClass} value={type} onChange={(e) => setType(e.target.value as CatalogType)}>
-                  {CATALOG_TYPES.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Field>
+                <FieldLabel htmlFor={nameId}>Name</FieldLabel>
+                <Input id={nameId} placeholder="Movies" value={name} onChange={(e) => setName(e.target.value)} required />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={typeId}>Type</FieldLabel>
+                <Select
+                  value={type}
+                  onValueChange={(value) => setType(value as CatalogType)}
+                  items={CATALOG_TYPES.map((value) => ({ value, label: value }))}
+                >
+                  <SelectTrigger id={typeId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATALOG_TYPES.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
             </div>
 
             {hasMounts ? (
               <>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-muted-foreground text-xs">Mount</span>
-                    <select className={inputClass} value={selectedMount} onChange={(e) => setMountPath(e.target.value)}>
-                      {mounts.data?.map((mount) => (
-                        <option key={mount.path} value={mount.path}>
-                          {mount.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-muted-foreground text-xs">Path within mount</span>
-                    <input
-                      className={inputClass}
+                  <Field>
+                    <FieldLabel htmlFor={mountId}>Mount</FieldLabel>
+                    <Select
+                      value={selectedMount}
+                      onValueChange={(value) => setMountPath((value as string | null) ?? "")}
+                      items={(mounts.data ?? []).map((mount) => ({ value: mount.path, label: mount.label }))}
+                    >
+                      <SelectTrigger id={mountId} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {mounts.data?.map((mount) => (
+                          <SelectItem key={mount.path} value={mount.path}>
+                            {mount.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={relativePathId}>Path within mount</FieldLabel>
+                    <Input
+                      id={relativePathId}
                       placeholder="movies"
                       value={relativePath}
                       onChange={(e) => setRelativePath(e.target.value)}
                     />
-                  </label>
+                  </Field>
                 </div>
                 <p className="text-muted-foreground text-xs">
                   Catalog root: <span className="text-foreground font-mono break-all">{root}</span>
                 </p>
               </>
             ) : (
-              <label className="flex flex-col gap-1">
-                <span className="text-muted-foreground text-xs">Catalog root (absolute path)</span>
-                <input className={inputClass} placeholder="/path/to/media/movies" value={freeRoot} onChange={(e) => setFreeRoot(e.target.value)} required />
-              </label>
+              <Field>
+                <FieldLabel htmlFor={freeRootId}>Catalog root (absolute path)</FieldLabel>
+                <Input id={freeRootId} placeholder="/path/to/media/movies" value={freeRoot} onChange={(e) => setFreeRoot(e.target.value)} required />
+              </Field>
             )}
 
             <label className="flex items-center gap-2">

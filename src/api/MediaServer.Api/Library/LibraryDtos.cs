@@ -38,10 +38,17 @@ public sealed record LibraryDetailDto(
     int? ParentIndexNumber,
     string? PosterUrl,
     string? BackdropUrl,
+    // Title artwork (TMDb "logo": the styled title as a transparent PNG), language-matched when available.
+    string? LogoUrl,
     string? LibraryPath,
     UserItemDataDto? UserData,
     IReadOnlyList<MediaSourceDto> MediaSources,
-    IReadOnlyList<SeasonSummaryDto>? Seasons);
+    IReadOnlyList<SeasonSummaryDto>? Seasons,
+    // Distributor/network logos (Netflix, Apple TV+, …) for series; null for movies.
+    IReadOnlyList<NetworkDto>? Networks);
+
+/// <summary>A TV network/distributor with its (optional) logo, surfaced on series detail.</summary>
+public sealed record NetworkDto(string Name, string? LogoUrl);
 
 public sealed record MediaSourceDto(
     Guid Id,

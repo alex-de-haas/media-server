@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type MetadataCandidate, type RemapInput } from "@/lib/media-server";
-import { inputClass, errorMessage } from "@/lib/ui";
+import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,6 +14,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 /**
  * Corrects a misidentified published leaf. Search a corrected title (a movie, or the owning series for an
@@ -41,6 +44,8 @@ export function RemapDialog({
 }) {
   const isEpisode = mode === "episode";
 
+  const titleId = useId();
+  const yearId = useId();
   const [searchTitle, setSearchTitle] = useState("");
   const [searchYear, setSearchYear] = useState("");
   const [season, setSeason] = useState(defaultSeason ?? 1);
@@ -110,19 +115,19 @@ export function RemapDialog({
               if (searchTitle.trim()) search.mutate();
             }}
           >
-            <label className="flex flex-1 flex-col gap-1">
-              <span className="text-muted-foreground text-xs">{isEpisode ? "Series title" : "Movie title"}</span>
-              <input
-                className={`${inputClass} h-8`}
+            <Field className="flex-1">
+              <FieldLabel htmlFor={titleId}>{isEpisode ? "Series title" : "Movie title"}</FieldLabel>
+              <Input
+                id={titleId}
                 value={searchTitle}
                 placeholder={isEpisode ? "Series title" : "Movie title"}
                 onChange={(e) => setSearchTitle(e.target.value)}
               />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-xs">Year</span>
-              <input className={`${inputClass} h-8 w-20`} type="number" value={searchYear} onChange={(e) => setSearchYear(e.target.value)} />
-            </label>
+            </Field>
+            <Field className="w-20">
+              <FieldLabel htmlFor={yearId}>Year</FieldLabel>
+              <Input id={yearId} type="number" value={searchYear} onChange={(e) => setSearchYear(e.target.value)} />
+            </Field>
             <Button type="submit" variant="secondary" size="sm" disabled={!searchTitle.trim() || search.isPending}>
               <Search />
               {search.isPending ? "Searching…" : "Search"}
@@ -133,20 +138,20 @@ export function RemapDialog({
             <div className="text-muted-foreground flex items-center gap-3">
               <label className="flex items-center gap-1.5">
                 Season
-                <input className={`${inputClass} h-7 w-16`} type="number" min={0} value={season} onChange={(e) => setSeason(Number(e.target.value))} />
+                <Input className="w-16" type="number" min={0} value={season} onChange={(e) => setSeason(Number(e.target.value))} />
               </label>
               <label className="flex items-center gap-1.5">
                 Episode
-                <input className={`${inputClass} h-7 w-16`} type="number" min={0} value={episode} onChange={(e) => setEpisode(Number(e.target.value))} />
+                <Input className="w-16" type="number" min={0} value={episode} onChange={(e) => setEpisode(Number(e.target.value))} />
               </label>
             </div>
           )}
 
-          <div className="flex max-h-72 flex-col gap-2 overflow-y-auto">
-            {results === null ? (
-              <span className="text-muted-foreground text-xs">Search for the correct {isEpisode ? "series" : "title"} above.</span>
-            ) : results.length ? (
-              <div className="flex flex-wrap gap-2">
+          {results === null ? (
+            <span className="text-muted-foreground text-xs">Search for the correct {isEpisode ? "series" : "title"} above.</span>
+          ) : results.length ? (
+            <ScrollArea className="max-h-72">
+              <div className="flex flex-wrap gap-2 pr-3">
                 {results.map((candidate) => (
                   <Button
                     key={`${candidate.reference.provider}:${candidate.reference.id}`}
@@ -160,10 +165,10 @@ export function RemapDialog({
                   </Button>
                 ))}
               </div>
-            ) : (
-              <span className="text-muted-foreground text-xs">No matches for that title.</span>
-            )}
-          </div>
+            </ScrollArea>
+          ) : (
+            <span className="text-muted-foreground text-xs">No matches for that title.</span>
+          )}
         </div>
       </DialogContent>
     </Dialog>
