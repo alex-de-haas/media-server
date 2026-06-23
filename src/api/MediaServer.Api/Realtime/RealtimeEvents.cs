@@ -12,6 +12,8 @@ public static class RealtimeEvents
     public const string DownloadStateChanged = "downloadStateChanged";
 
     public const string IngestStageChanged = "ingestStageChanged";
+
+    public const string VpnStatusChanged = "vpnStatusChanged";
 }
 
 /// <summary>Live torrent progress snapshot. Broadcast from the engine's in-memory state; never persisted.</summary>
@@ -28,6 +30,15 @@ public sealed record DownloadProgress(
 
 /// <summary>A persisted torrent state transition (the trigger for downstream pipeline actions).</summary>
 public sealed record DownloadStateChanged(Guid DownloadId, string State, string? Name);
+
+/// <summary>Engine-wide VPN tunnel status for the activity view (mirrors the engine's VpnStatus).</summary>
+public sealed record VpnStatusChanged(
+    bool Connected,
+    string? TunnelInterface,
+    string? TunnelAddress,
+    string? ExitIp,
+    string? ExitCountry,
+    DateTimeOffset CheckedAt);
 
 /// <summary>A pipeline stage/status transition for the activity view.</summary>
 public sealed record IngestStageChanged(

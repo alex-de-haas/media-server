@@ -12,5 +12,7 @@ public interface IRealtimeNotifier
 
     Task IngestStageChangedAsync(IngestStageChanged change, CancellationToken cancellationToken = default);
 
+    Task VpnStatusChangedAsync(VpnStatusChanged status, CancellationToken cancellationToken = default);
+
     Task JobChangedAsync(string eventName, JobEvent job, CancellationToken cancellationToken = default);
 }

@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { openEventStream } from "@/lib/sse";
-import type { Download } from "@/lib/media-server";
+import type { Download, VpnStatus } from "@/lib/media-server";
 
 // The same-origin BFF route that proxies to the internal `api` SSE endpoint (`/api/events`).
 const STREAM_PATH = "/api/proxy/api/events";
@@ -44,7 +44,7 @@ function useRealtime() {
       // On (re)connect, reconcile anything missed while disconnected.
       onStatus: (connected) => {
         if (connected) {
-          invalidate(queryClient, ["downloads"], ["ingest"]);
+          invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"]);
         }
       },
     });
@@ -65,6 +65,10 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
       if ((data as IngestStageEvent).status === "Done") {
         invalidate(queryClient, ["library"], ["recent"], ["resume"], ["nextup"]);
       }
+      break;
+    case "vpnStatusChanged":
+      // Engine-wide status — patch the cache directly (the event payload mirrors VpnStatus).
+      queryClient.setQueryData<VpnStatus>(["vpn"], data as VpnStatus);
       break;
     case "jobStarted":
     case "jobProgress":

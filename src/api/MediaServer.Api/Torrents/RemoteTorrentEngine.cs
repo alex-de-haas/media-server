@@ -28,6 +28,9 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     private readonly ConcurrentDictionary<string, TorrentSnapshot> _snapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, IReadOnlyList<TorrentFileInfo>> _files = new(StringComparer.OrdinalIgnoreCase);
 
+    // Latest VPN tunnel status: seeded from GET /vpn on connect, kept live by the `vpn` SSE event.
+    private volatile VpnStatus? _vpn;
+
     private CancellationTokenSource? _cts;
     private Task? _streamLoop;
 
@@ -41,6 +44,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     public event EventHandler<string>? MetadataReceived;
     public event EventHandler<string>? DownloadCompleted;
     public event EventHandler<string>? DownloadErrored;
+    public event EventHandler<VpnStatus>? VpnStatusChanged;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -59,6 +63,8 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         {
             _logger.LogWarning(exception, "Could not seed torrent state from {Url}; will populate from the event stream.", _settings.TorrentEngineUrl);
         }
+
+        await SeedVpnAsync(cancellationToken);
 
         _cts = new CancellationTokenSource();
         _streamLoop = Task.Run(() => ConsumeEventsAsync(_cts.Token));
@@ -144,6 +150,8 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
 
     public IReadOnlyList<TorrentFileInfo> GetFiles(string infoHash) => _files.GetValueOrDefault(infoHash) ?? [];
 
+    public VpnStatus? GetVpnStatus() => _vpn;
+
     private async Task PostAsync(string path, CancellationToken cancellationToken)
     {
         using var cts = ControlCts(cancellationToken);
@@ -201,6 +209,11 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
             {
                 using var response = await _http.GetAsync("/events", HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 response.EnsureSuccessStatusCode();
+
+                // The stream doesn't replay the last `vpn` event to a fresh subscriber, so re-seed it on
+                // every (re)connect to recover the current tunnel status after a drop.
+                await SeedVpnAsync(cancellationToken);
+
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 using var reader = new StreamReader(stream);
 
@@ -257,7 +270,23 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
             return;
         }
 
-        if (evt is null || string.IsNullOrEmpty(evt.InfoHash))
+        if (evt is null)
+        {
+            return;
+        }
+
+        // Engine-wide event with no info hash — handle before the per-torrent guard below.
+        if (evt.Type == "vpn")
+        {
+            if (evt.Vpn is not null)
+            {
+                ApplyVpn(evt.Vpn);
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrEmpty(evt.InfoHash))
         {
             return;
         }
@@ -303,6 +332,40 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         }
     }
 
+    private async Task SeedVpnAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cts = ControlCts(cancellationToken);
+            // Body is `null` when the engine reports no VPN — leave the cache untouched in that case.
+            var status = await _http.GetFromJsonAsync<VpnStatus>("/vpn", Json, cts.Token);
+            if (status is not null)
+            {
+                ApplyVpn(status);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogDebug(exception, "Could not read VPN status from {Url}.", _settings.TorrentEngineUrl);
+        }
+    }
+
+    private void ApplyVpn(VpnStatus status)
+    {
+        var previous = _vpn;
+        _vpn = status;
+        // Only fan out meaningful changes — CheckedAt ticks on every poll, so ignore it for equality.
+        if (previous is null
+            || previous.Connected != status.Connected
+            || previous.TunnelInterface != status.TunnelInterface
+            || previous.TunnelAddress != status.TunnelAddress
+            || previous.ExitIp != status.ExitIp
+            || previous.ExitCountry != status.ExitCountry)
+        {
+            VpnStatusChanged?.Invoke(this, status);
+        }
+    }
+
     public void Dispose()
     {
         _cts?.Cancel();
@@ -313,5 +376,5 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     private sealed record AddDownloadRequest(
         string? Magnet, string? TorrentBase64, string? SavePath, int MaxDownloadRate, int MaxUploadRate, bool AutoStart);
 
-    private sealed record RemoteEvent(string Type, string InfoHash, TorrentSnapshot? Snapshot);
+    private sealed record RemoteEvent(string Type, string InfoHash, TorrentSnapshot? Snapshot, VpnStatus? Vpn);
 }

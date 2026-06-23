@@ -7,6 +7,10 @@ public static class TorrentEndpoints
 {
     public static void MapTorrentEndpoints(this IEndpointRouteBuilder routes)
     {
+        // Engine-wide VPN tunnel status (null when downloading runs in-process — no tunnel). The web
+        // seeds this on mount, then keeps it live from the `vpnStatusChanged` SSE event.
+        routes.MapGet("/api/vpn", (ITorrentEngine engine) => Results.Ok(engine.GetVpnStatus())).RequireAuthorization();
+
         var group = routes.MapGroup("/api/torrents").RequireAuthorization();
 
         group.MapGet("/", async (TorrentService service, CancellationToken cancellationToken) =>

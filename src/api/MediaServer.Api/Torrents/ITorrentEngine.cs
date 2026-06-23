@@ -28,6 +28,17 @@ public sealed record TorrentSnapshot(
 /// <summary>Per-torrent rate limits (bytes/sec; 0 = unlimited).</summary>
 public sealed record TorrentLimits(int MaxDownloadRate, int MaxUploadRate);
 
+/// <summary>Status of the VPN tunnel the engine runs behind (engine-wide, not per-torrent).
+/// <see cref="Connected"/> is the primary signal; <see cref="ExitIp"/>/<see cref="ExitCountry"/> are a
+/// best-effort proof of egress and may be <c>null</c>.</summary>
+public sealed record VpnStatus(
+    bool Connected,
+    string? TunnelInterface,
+    string? TunnelAddress,
+    string? ExitIp,
+    string? ExitCountry,
+    DateTimeOffset CheckedAt);
+
 /// <summary>
 /// Thin wrapper over the MonoTorrent <c>ClientEngine</c>. Owns no database state; surfaces the file
 /// list and live snapshots, and raises events for the transitions that drive the pipeline. The
@@ -55,8 +66,14 @@ public interface ITorrentEngine
 
     IReadOnlyList<TorrentFileInfo> GetFiles(string infoHash);
 
+    /// <summary>Current VPN tunnel status, or <c>null</c> when downloading runs in-process (no tunnel).</summary>
+    VpnStatus? GetVpnStatus();
+
     /// <summary>Raised when a magnet's file list becomes available after metadata download.</summary>
     event EventHandler<string>? MetadataReceived;
+
+    /// <summary>Raised when the VPN tunnel status changes. Never raised by the in-process engine.</summary>
+    event EventHandler<VpnStatus>? VpnStatusChanged;
 
     /// <summary>Raised when a torrent finishes downloading (transition to a complete/seeding state).</summary>
     event EventHandler<string>? DownloadCompleted;

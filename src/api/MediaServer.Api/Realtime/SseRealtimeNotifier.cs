@@ -26,6 +26,9 @@ public sealed class SseRealtimeNotifier : IRealtimeNotifier
     public Task IngestStageChangedAsync(IngestStageChanged change, CancellationToken cancellationToken = default) =>
         PublishAsync(RealtimeEvents.IngestStageChanged, change);
 
+    public Task VpnStatusChangedAsync(VpnStatusChanged status, CancellationToken cancellationToken = default) =>
+        PublishAsync(RealtimeEvents.VpnStatusChanged, status);
+
     public Task JobChangedAsync(string eventName, JobEvent job, CancellationToken cancellationToken = default) =>
         PublishAsync(eventName, job);
 
