@@ -345,8 +345,12 @@ function IngestRow({
     "Untitled item";
   const age = formatTimeAgo(item.createdAt);
   // While the tunnel is down the engine pauses transfers behind the killswitch — say so explicitly
-  // instead of the generic "waiting for the download" hint.
-  const hint = vpnDown && item.stage === "Download" ? "Paused — VPN is down." : stateHint(item, download);
+  // instead of the generic "waiting for the download" hint. Keep stateHint's guards so a Failed/
+  // NeedsReview item (surfaced by the warning icon) isn't mislabelled as merely VPN-paused.
+  const hint =
+    vpnDown && item.stage === "Download" && item.status === "Pending" && !item.lastError
+      ? "Paused — VPN is down."
+      : stateHint(item, download);
   const warning = warningText(item);
   const published = item.status === "Done" && item.mediaItemId != null;
 
