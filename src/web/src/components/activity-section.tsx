@@ -75,6 +75,9 @@ export function ActivitySection() {
   const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 20000 });
   // Engine-wide VPN tunnel status (null when downloading is in-process). Pushed over SSE; slow interval is a fallback.
   const vpn = useQuery({ queryKey: ["vpn"], queryFn: mediaServer.getVpnStatus, refetchInterval: 30000 });
+  // Only "down" when there's a VPN to report and it's disconnected — the engine pauses transfers behind the
+  // killswitch, so the cards show "Paused — VPN down" rather than a stalled 0 B/s.
+  const vpnDown = vpn.data != null && !vpn.data.connected;
 
   const catalogsById = useMemo(
     () => new Map((catalogs.data ?? []).map((catalog) => [catalog.id, catalog])),
@@ -150,6 +153,7 @@ export function ActivitySection() {
                 item={item}
                 catalog={catalogsById.get(item.catalogId)}
                 download={downloadFor(item)}
+                vpnDown={vpnDown}
               />
             ));
           }}
@@ -255,9 +259,9 @@ function TabBar({
 // The Download step maps to a torrent; reflect its live transfer/pause state on that step so the stepper
 // shows a spinner while downloading and a pause glyph when paused. Other stages fall back to the coarse
 // ingest `status` inside the stepper itself.
-function downloadActivity(item: IngestItem, download: Download | undefined): StepActivity | undefined {
+function downloadActivity(item: IngestItem, download: Download | undefined, vpnDown: boolean): StepActivity | undefined {
   if (item.stage !== "Download" || !download) return undefined;
-  if (isDownloadPaused(download)) return "paused";
+  if (vpnDown || isDownloadPaused(download)) return "paused";
   if (!DOWNLOAD_DONE_STATES.includes(download.state)) return "running";
   return undefined;
 }
@@ -282,7 +286,17 @@ function warningText(item: IngestItem): string | null {
   return null;
 }
 
-function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Catalog | undefined; download: Download | undefined }) {
+function IngestRow({
+  item,
+  catalog,
+  download,
+  vpnDown,
+}: {
+  item: IngestItem;
+  catalog: Catalog | undefined;
+  download: Download | undefined;
+  vpnDown: boolean;
+}) {
   const { role } = useSession();
   const queryClient = useQueryClient();
   const invalidate = () => {
@@ -330,7 +344,13 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
     (item.sourceFiles?.[0]?.relativePath ? displayPath(item.sourceFiles[0].relativePath) : undefined) ??
     "Untitled item";
   const age = formatTimeAgo(item.createdAt);
-  const hint = stateHint(item, download);
+  // While the tunnel is down the engine pauses transfers behind the killswitch — say so explicitly
+  // instead of the generic "waiting for the download" hint. Keep stateHint's guards so a Failed/
+  // NeedsReview item (surfaced by the warning icon) isn't mislabelled as merely VPN-paused.
+  const hint =
+    vpnDown && item.stage === "Download" && item.status === "Pending" && !item.lastError
+      ? "Paused — VPN is down."
+      : stateHint(item, download);
   const warning = warningText(item);
   const published = item.status === "Done" && item.mediaItemId != null;
 
@@ -347,7 +367,7 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
           stage={item.stage}
           stagesCompleted={item.stagesCompleted}
           status={item.status}
-          activity={downloadActivity(item, download)}
+          activity={downloadActivity(item, download, vpnDown)}
         />
       )}
 
@@ -383,7 +403,9 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
-          {transferring && download && (
+          {/* No manual pause/resume while the VPN is down — the engine gates transfers and a resume can't
+              succeed under the killswitch. */}
+          {transferring && download && !vpnDown && (
             isDownloadPaused(download) ? (
               <IconAction label="Resume" icon={<Play />} onClick={() => resume.mutate(download.id)} />
             ) : (
@@ -425,7 +447,7 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
         </div>
       </div>
 
-      {category === "active" && transferring && download && <DownloadProgress download={download} />}
+      {category === "active" && transferring && download && <DownloadProgress download={download} vpnDown={vpnDown} />}
       {category === "seeding" && download && <SeedingStats download={download} />}
 
       {item.status === "NeedsReview" && (
@@ -455,7 +477,7 @@ function IngestRow({ item, catalog, download }: { item: IngestItem; catalog: Cat
   );
 }
 
-function DownloadProgress({ download }: { download: Download }) {
+function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: boolean }) {
   const percent = download.percentComplete ?? 0;
   const eta =
     download.downloadRateBytesPerSecond && download.sizeBytes
@@ -469,9 +491,16 @@ function DownloadProgress({ download }: { download: Download }) {
       </div>
       <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono">
         <span>{formatPercent(download.percentComplete)}</span>
-        <span>↓ {formatSpeed(download.downloadRateBytesPerSecond)}</span>
-        <span>↑ {formatSpeed(download.uploadRateBytesPerSecond)}</span>
-        <span>ETA {formatEta(eta)}</span>
+        {vpnDown ? (
+          // Transfer is gated by the killswitch — show why instead of a misleading 0 B/s.
+          <span className="text-amber-500">Paused · VPN down</span>
+        ) : (
+          <>
+            <span>↓ {formatSpeed(download.downloadRateBytesPerSecond)}</span>
+            <span>↑ {formatSpeed(download.uploadRateBytesPerSecond)}</span>
+            <span>ETA {formatEta(eta)}</span>
+          </>
+        )}
       </div>
     </div>
   );
