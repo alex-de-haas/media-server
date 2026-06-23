@@ -357,6 +357,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         // Only fan out meaningful changes — CheckedAt ticks on every poll, so ignore it for equality.
         if (previous is null
             || previous.Connected != status.Connected
+            || previous.TunnelInterface != status.TunnelInterface
             || previous.TunnelAddress != status.TunnelAddress
             || previous.ExitIp != status.ExitIp
             || previous.ExitCountry != status.ExitCountry)

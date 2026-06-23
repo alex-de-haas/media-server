@@ -24,6 +24,25 @@ public sealed class SseRealtimeNotifierTests
     }
 
     [Fact]
+    public async Task Publishes_vpn_status_with_camelCase_json()
+    {
+        var notifier = new SseRealtimeNotifier();
+        using var subscription = notifier.Subscribe();
+
+        await notifier.VpnStatusChangedAsync(new VpnStatusChanged(
+            Connected: true, "tun0", "10.8.0.6", "203.0.113.7", "NL", DateTimeOffset.UtcNow));
+
+        var message = await ReadAsync(subscription);
+        Assert.Equal(RealtimeEvents.VpnStatusChanged, message.Event);
+
+        using var json = JsonDocument.Parse(message.Data);
+        Assert.True(json.RootElement.GetProperty("connected").GetBoolean()); // camelCase keys
+        Assert.Equal("tun0", json.RootElement.GetProperty("tunnelInterface").GetString());
+        Assert.Equal("203.0.113.7", json.RootElement.GetProperty("exitIp").GetString());
+        Assert.Equal("NL", json.RootElement.GetProperty("exitCountry").GetString());
+    }
+
+    [Fact]
     public async Task Fans_out_to_every_subscriber()
     {
         var notifier = new SseRealtimeNotifier();

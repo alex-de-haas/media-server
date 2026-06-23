@@ -205,8 +205,10 @@ function vpnTooltip(status: VpnStatus): string {
   if (!status.connected) {
     return "VPN tunnel is down — torrent traffic is blocked by the killswitch.";
   }
+  // exitIp and exitCountry can be independently null, so surface whichever is known.
+  const exitValue = [status.exitIp, status.exitCountry].filter(Boolean).join(" · ");
   const parts = [
-    status.exitIp ? `exit ${status.exitIp}${status.exitCountry ? ` (${status.exitCountry})` : ""}` : null,
+    exitValue ? `exit ${exitValue}` : null,
     status.tunnelAddress ? `tunnel ${status.tunnelAddress}` : null,
   ].filter(Boolean);
   return parts.length > 0 ? `Traffic egresses through the VPN — ${parts.join(", ")}.` : "VPN tunnel is up.";
