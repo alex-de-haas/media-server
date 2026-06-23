@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
@@ -236,6 +237,8 @@ public sealed class LibraryReadService(
         var userDataByItem = await userData.LoadAsync(appUserId, [item], cancellationToken);
         var runtimeTicks = meta?.RuntimeTicks
             ?? (mediaSources.Count > 0 ? mediaSources.Max(source => source.DurationTicks) : null);
+        // Networks (Netflix, Apple TV+, …) live in the cached TMDb payload and only apply to series.
+        var networks = item.Kind == MediaKind.Series ? ParseNetworks(meta?.Raw) : null;
 
         return new LibraryDetailDto(
             item.Id,
@@ -256,10 +259,12 @@ public sealed class LibraryReadService(
             item.ParentIndexNumber,
             ImageUrl(images, ImageType.Primary),
             ImageUrl(images, ImageType.Backdrop),
+            LogoUrl(images),
             item.LibraryPath,
             userDataByItem.GetValueOrDefault(item.Id),
             mediaSources,
-            seasons);
+            seasons,
+            networks);
     }
 
     /// <summary>Episodes of a series (optionally a single season), ordered by season then episode number.</summary>
@@ -410,6 +415,79 @@ public sealed class LibraryReadService(
     private static string? ImageUrl(IReadOnlyList<ImageAsset> images, ImageType type) =>
         images.Where(image => image.ImageType == type).OrderBy(image => image.SortOrder)
             .Select(image => image.RemotePath).FirstOrDefault();
+
+    // The TMDb image CDN base. Poster/backdrop/logo RemotePaths are already absolute (the provider
+    // prefixes them), but network logo_paths come straight from the cached JSON payload, so prefix here.
+    private const string TmdbImageBase = "https://image.tmdb.org/t/p/original";
+
+    /// <summary>
+    /// The best title logo: prefer the configured language, then English, then a language-neutral logo,
+    /// then whatever is first. Logos are tagged with a 2-letter language (or null) by the provider.
+    /// </summary>
+    private string? LogoUrl(IReadOnlyList<ImageAsset> images)
+    {
+        var logos = images.Where(image => image.ImageType == ImageType.Logo).ToList();
+        if (logos.Count == 0)
+        {
+            return null;
+        }
+
+        var preferred = settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
+        var prefix = preferred.Length >= 2 ? preferred[..2] : preferred;
+
+        string? Pick(string? language) => logos
+            .Where(image => string.Equals(image.Language, language, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(image => image.SortOrder)
+            .Select(image => image.RemotePath)
+            .FirstOrDefault();
+
+        return Pick(prefix)
+            ?? Pick("en")
+            ?? Pick(null)
+            ?? logos.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First();
+    }
+
+    /// <summary>Extracts the series' networks (name + absolute logo url) from the cached TMDb payload.</summary>
+    private static IReadOnlyList<NetworkDto>? ParseNetworks(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            if (!document.RootElement.TryGetProperty("networks", out var array) || array.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var networks = new List<NetworkDto>();
+            foreach (var network in array.EnumerateArray())
+            {
+                var name = network.TryGetProperty("name", out var nameValue) && nameValue.ValueKind == JsonValueKind.String
+                    ? nameValue.GetString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                var logoPath = network.TryGetProperty("logo_path", out var logoValue) && logoValue.ValueKind == JsonValueKind.String
+                    ? logoValue.GetString()
+                    : null;
+                var logoUrl = string.IsNullOrWhiteSpace(logoPath) ? null : TmdbImageBase + logoPath;
+                networks.Add(new NetworkDto(name!, logoUrl));
+            }
+
+            return networks.Count == 0 ? null : networks;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static MediaSourceDto MapSource(MediaSource source) => new(
         source.Id,

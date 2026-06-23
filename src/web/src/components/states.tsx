@@ -2,25 +2,52 @@
 
 import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
+import { AlertTriangle, type LucideIcon } from "lucide-react";
+import { Alert, AlertAction, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 
 export function Loading({ label = "Loading…" }: { label?: string }) {
   return <p className="text-muted-foreground text-sm">{label}</p>;
 }
 
-export function EmptyState({ children }: { children: ReactNode }) {
-  return <p className="text-muted-foreground text-sm">{children}</p>;
+export function EmptyState({
+  children,
+  icon: Icon,
+  title,
+}: {
+  children: ReactNode;
+  icon?: LucideIcon;
+  title?: string;
+}) {
+  return (
+    <Empty className="py-10">
+      <EmptyHeader>
+        {Icon && (
+          <EmptyMedia variant="icon">
+            <Icon />
+          </EmptyMedia>
+        )}
+        {title && <EmptyTitle>{title}</EmptyTitle>}
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
 }
 
 export function ErrorState({ onRetry }: { onRetry?: () => void }) {
   return (
-    <p className="text-destructive flex flex-wrap items-center gap-2 text-sm">
-      Couldn&rsquo;t load this.
+    <Alert variant="destructive">
+      <AlertTriangle />
+      <AlertTitle>Couldn&rsquo;t load this.</AlertTitle>
       {onRetry && (
-        <button type="button" onClick={onRetry} className="text-foreground underline underline-offset-2">
-          Retry
-        </button>
+        <AlertAction>
+          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+            Retry
+          </Button>
+        </AlertAction>
       )}
-    </p>
+    </Alert>
   );
 }
 
@@ -28,14 +55,17 @@ export function ErrorState({ onRetry }: { onRetry?: () => void }) {
 export function QueryState<T>({
   query,
   empty,
+  pending,
   children,
 }: {
   query: UseQueryResult<T[]>;
   empty: ReactNode;
+  /** Optional placeholder shown while the query is pending (e.g. a skeleton). Defaults to a text line. */
+  pending?: ReactNode;
   children: (data: T[]) => ReactNode;
 }) {
   if (query.isPending) {
-    return <Loading />;
+    return <>{pending ?? <Loading />}</>;
   }
   if (query.isError) {
     return <ErrorState onRetry={() => void query.refetch()} />;

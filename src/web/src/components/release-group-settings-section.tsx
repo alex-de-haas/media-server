@@ -5,10 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer } from "@/lib/media-server";
-import { inputClass, errorMessage } from "@/lib/ui";
+import { errorMessage } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 /**
  * Manages the operator-editable list of release groups stripped from file names before identification.
@@ -82,8 +83,8 @@ export function ReleaseGroupSettingsSection() {
             addDraft();
           }}
         >
-          <input
-            className={`${inputClass} h-8 flex-1`}
+          <Input
+            className="flex-1"
             placeholder="Add a group, e.g. RARBG"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

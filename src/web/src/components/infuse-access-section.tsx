@@ -1,17 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { KeyRound } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer } from "@/lib/media-server";
-import { inputClass, errorMessage } from "@/lib/ui";
+import { errorMessage } from "@/lib/ui";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 
 export function InfuseAccessSection() {
   const queryClient = useQueryClient();
   const credential = useQuery({ queryKey: ["jellyfin-credential"], queryFn: mediaServer.getJellyfinCredential });
+  const pinId = useId();
   const [pin, setPin] = useState("");
   const [secret, setSecret] = useState<{ username: string; pin: string | null; serverUrl: string | null } | null>(null);
 
@@ -71,30 +76,33 @@ export function InfuseAccessSection() {
         )}
 
         {secret && (
-          <div className="rounded-md border border-dashed p-3">
-            <p className="font-medium">Save this — it is shown only once.</p>
-            <p>
-              Username: <span className="font-mono">{secret.username}</span>
-            </p>
-            {secret.pin && (
-              <p>
-                PIN: <span className="font-mono text-base">{secret.pin}</span>
-              </p>
-            )}
-          </div>
+          <Alert>
+            <KeyRound />
+            <AlertTitle>Save this — it is shown only once.</AlertTitle>
+            <AlertDescription className="flex flex-col gap-0.5">
+              <span>
+                Username: <span className="text-foreground font-mono">{secret.username}</span>
+              </span>
+              {secret.pin && (
+                <span>
+                  PIN: <span className="text-foreground font-mono text-base">{secret.pin}</span>
+                </span>
+              )}
+            </AlertDescription>
+          </Alert>
         )}
 
         <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground text-xs">PIN (optional, 6–8 digits)</span>
-            <input
-              className={`${inputClass} w-40`}
+          <Field className="w-40">
+            <FieldLabel htmlFor={pinId}>PIN (optional, 6–8 digits)</FieldLabel>
+            <Input
+              id={pinId}
               inputMode="numeric"
               placeholder="auto-generate"
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
             />
-          </label>
+          </Field>
           <Button onClick={() => create.mutate()} disabled={create.isPending}>
             {create.isPending ? "Saving…" : status?.hasCredential ? "Regenerate" : "Create credential"}
           </Button>

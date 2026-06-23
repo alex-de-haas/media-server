@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
 import { Rail, RailItem } from "@/components/rail";
 import { PosterCard, detailHref } from "@/components/poster-card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function Home() {
   const session = useSession();
@@ -27,7 +28,9 @@ export function Home() {
       {resume.data?.length ? <RailRow title="Continue watching" items={resume.data} /> : null}
       {nextUp.data?.length ? <RailRow title="Next up" items={nextUp.data} /> : null}
 
-      {recent.data?.length ? (
+      {recent.isPending ? (
+        <RailSkeleton title="Recently added" />
+      ) : recent.data?.length ? (
         <Rail title="Recently added">
           {recent.data.map((item) => (
             <RailItem key={item.id}>
@@ -63,6 +66,21 @@ function RailRow({ title, items }: { title: string; items: LibraryRailItem[] }) 
         </RailItem>
       ))}
     </Rail>
+  );
+}
+
+function RailSkeleton({ title }: { title: string }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      <div className="flex gap-3 overflow-hidden pb-1">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="w-28 shrink-0 sm:w-32">
+            <Skeleton className="aspect-[2/3] w-full rounded-md" />
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

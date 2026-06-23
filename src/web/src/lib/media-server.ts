@@ -243,10 +243,20 @@ export interface LibraryDetail {
   parentIndexNumber: number | null;
   posterUrl: string | null;
   backdropUrl: string | null;
+  // TMDb title logo (styled title as a transparent PNG), language-matched when available.
+  logoUrl: string | null;
   libraryPath: string | null;
   userData: UserItemData | null;
   mediaSources: LibraryMediaSource[];
   seasons: SeasonSummary[] | null;
+  // Distributor/network logos (Netflix, Apple TV+, …) for series; null for movies.
+  networks: Network[] | null;
+}
+
+// A TV network/distributor surfaced on series detail.
+export interface Network {
+  name: string;
+  logoUrl: string | null;
 }
 
 export interface Episode {

@@ -6,22 +6,27 @@ import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, Link2, MoreVertical, Play, RefreshCw, Star, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type Episode, type LibraryDetail, type LibraryMediaSource } from "@/lib/media-server";
+import { mediaServer, type Episode, type LibraryDetail, type LibraryMediaSource, type Network } from "@/lib/media-server";
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { RemapDialog } from "@/components/remap-dialog";
 import { formatBytes, formatRuntime } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
 
@@ -30,7 +35,7 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
   const detail = useQuery({ queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id) });
 
   if (detail.isPending) {
-    return <p className="text-muted-foreground text-sm">Loading…</p>;
+    return <MediaDetailSkeleton />;
   }
 
   if (detail.isError || !detail.data) {
@@ -50,8 +55,27 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
         <AdminControls id={item.id} title={item.title} kind={item.kind} backHref={backHref} />
       </div>
       <Hero item={item} />
-      {item.overview && <p className="max-w-2xl text-sm leading-relaxed">{item.overview}</p>}
       {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo sources={item.mediaSources} />}
+    </div>
+  );
+}
+
+function MediaDetailSkeleton() {
+  return (
+    <div className="flex flex-col gap-6">
+      <Skeleton className="h-5 w-28" />
+      <div className="flex gap-4 sm:gap-6">
+        <Skeleton className="aspect-[2/3] w-28 shrink-0 rounded-md sm:w-40" />
+        <div className="flex flex-1 flex-col gap-3 pt-2">
+          <Skeleton className="h-9 w-2/3" />
+          <Skeleton className="h-4 w-40" />
+          <div className="mt-2 flex gap-2">
+            <Skeleton className="h-9 w-32" />
+            <Skeleton className="h-9 w-28" />
+          </div>
+        </div>
+      </div>
+      <Skeleton className="h-14 w-full max-w-2xl" />
     </div>
   );
 }
@@ -173,14 +197,14 @@ function DeleteItemDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Delete item?</DialogTitle>
-          <DialogDescription>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent className="sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete item?</AlertDialogTitle>
+          <AlertDialogDescription>
             Remove <span className="text-foreground font-medium">{title}</span> from the library.
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
 
         <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
           <Checkbox
@@ -197,16 +221,14 @@ function DeleteItemDialog({
           </label>
         </div>
 
-        <DialogFooter>
-          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" variant="destructive" size="sm" onClick={() => onConfirm(deleteFiles)}>
+        <AlertDialogFooter>
+          <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" size="sm" onClick={() => onConfirm(deleteFiles)}>
             {deleteFiles ? "Delete + remove files" : "Remove from library"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -235,60 +257,111 @@ function Hero({ item }: { item: LibraryDetail }) {
   const meta = [item.year?.toString(), runtime, item.genres.slice(0, 3).join(", ") || null].filter(Boolean).join(" · ");
 
   return (
-    <div className="relative overflow-hidden rounded-lg border">
+    // Full-bleed cinematic banner: breaks out of the centered content column to span the viewport width
+    // (see the overflow-x-clip note in AppShell). The backdrop fills the band; scrims keep text legible.
+    <div className="relative left-1/2 right-1/2 -mr-[50vw] -ml-[50vw] w-screen overflow-hidden border-y bg-secondary">
       {item.backdropUrl && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={item.backdropUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-25" />
+        <img src={item.backdropUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-70" />
       )}
-      <div className="from-background via-background/85 relative flex flex-col gap-4 bg-linear-to-t to-transparent p-5 sm:flex-row sm:p-6">
-        <div className="bg-secondary aspect-[2/3] w-28 shrink-0 overflow-hidden rounded-md sm:w-36">
-          {item.posterUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.posterUrl} alt={item.title} className="h-full w-full object-cover" />
-          )}
-        </div>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1">
-            <h1 className="font-serif text-3xl leading-tight font-medium sm:text-4xl">{item.title}</h1>
-            {meta && <p className="text-muted-foreground text-sm">{meta}</p>}
-            {item.communityRating != null && (
-              <p className="text-muted-foreground flex items-center gap-1 text-sm">
-                <Star className="text-brand size-4" aria-hidden /> {item.communityRating.toFixed(1)}
-              </p>
+      {/* The backdrop runs the full height of the banner — poster, title and description — fading downward
+          so the artwork stays bright up top and is only lightly darkened behind the description. */}
+      <div className="from-background/85 via-background/40 absolute inset-0 bg-linear-to-t to-transparent" />
+      <div className="from-background/65 absolute inset-0 bg-linear-to-r to-transparent" />
+      <div className="relative mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-6 pb-10 sm:pt-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
+          <div className="bg-background/40 aspect-[2/3] w-28 shrink-0 overflow-hidden rounded-md shadow-lg ring-1 ring-black/10 sm:w-40">
+            {item.posterUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={item.posterUrl} alt={item.title} className="h-full w-full object-cover" />
             )}
           </div>
-
-          {resume != null && (
-            <div className="max-w-xs">
-              <div className="bg-secondary h-1 overflow-hidden rounded-full">
-                <div className="bg-brand h-full" style={{ width: `${resume}%` }} />
-              </div>
-              <p className="text-muted-foreground mt-1 text-xs">{Math.round(resume)}% watched</p>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
+              {item.logoUrl ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={item.logoUrl}
+                    alt={item.title}
+                    className="max-h-20 w-auto max-w-[16rem] object-contain object-left drop-shadow-[0_1px_6px_rgb(0_0_0/0.55)] sm:max-h-28 sm:max-w-sm"
+                  />
+                  {/* The logo is the visible title; keep a real heading for screen readers and the page outline. */}
+                  <h1 className="sr-only">{item.title}</h1>
+                </>
+              ) : (
+                <h1 className="font-serif text-3xl leading-tight font-medium sm:text-4xl">{item.title}</h1>
+              )}
+              {meta && <p className="text-muted-foreground text-sm">{meta}</p>}
+              {item.communityRating != null && (
+                <p className="text-muted-foreground flex items-center gap-1 text-sm">
+                  <Star className="text-brand size-4" aria-hidden /> {item.communityRating.toFixed(1)}
+                </p>
+              )}
             </div>
-          )}
 
-          <div className="flex flex-wrap gap-2">
-            <InfuseLaunch item={item} />
-            <Button
-              variant="outline"
-              onClick={() => played.mutate(!isPlayed)}
-              disabled={played.isPending}
-              className={cn(isPlayed && "border-brand text-brand")}
-            >
-              <Check className="size-4" aria-hidden /> {isPlayed ? "Watched" : "Mark watched"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => favorite.mutate(!isFavorite)}
-              disabled={favorite.isPending}
-              aria-label={isFavorite ? "Remove favorite" : "Add favorite"}
-              className={cn(isFavorite && "border-brand text-brand")}
-            >
-              <Star className="size-4" aria-hidden /> Favorite
-            </Button>
+            {item.networks && item.networks.length > 0 && <NetworkLogos networks={item.networks} />}
+
+            {resume != null && (
+              <div className="max-w-xs">
+                <div className="bg-secondary h-1 overflow-hidden rounded-full">
+                  <div className="bg-brand h-full" style={{ width: `${resume}%` }} />
+                </div>
+                <p className="text-muted-foreground mt-1 text-xs">{Math.round(resume)}% watched</p>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <InfuseLaunch item={item} />
+              <Button
+                variant="outline"
+                onClick={() => played.mutate(!isPlayed)}
+                disabled={played.isPending}
+                className={cn(isPlayed && "border-brand text-brand")}
+              >
+                <Check className="size-4" aria-hidden /> {isPlayed ? "Watched" : "Mark watched"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => favorite.mutate(!isFavorite)}
+                disabled={favorite.isPending}
+                aria-label={isFavorite ? "Remove favorite" : "Add favorite"}
+                className={cn(isFavorite && "border-brand text-brand")}
+              >
+                <Star className="size-4" aria-hidden /> Favorite
+              </Button>
+            </div>
           </div>
         </div>
+        {/* Overview lives inside the banner so the backdrop runs underneath it before fading out. */}
+        {item.overview && <p className="max-w-2xl text-sm leading-relaxed">{item.overview}</p>}
       </div>
+    </div>
+  );
+}
+
+// Network/distributor logos for a series (Netflix, Apple TV+, …). TMDb logos are transparent PNGs in
+// assorted colours, so each sits on a light chip to stay legible over the backdrop in either theme; a
+// network without artwork falls back to a name badge.
+function NetworkLogos({ networks }: { networks: Network[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {networks.map((network) =>
+        network.logoUrl ? (
+          <span
+            key={network.name}
+            title={network.name}
+            className="inline-flex items-center rounded-md bg-white/90 px-2 py-1 ring-1 ring-black/5"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={network.logoUrl} alt={network.name} className="h-4 w-auto object-contain sm:h-5" />
+          </span>
+        ) : (
+          <Badge key={network.name} variant="secondary">
+            {network.name}
+          </Badge>
+        ),
+      )}
     </div>
   );
 }
@@ -338,6 +411,7 @@ function MediaInfo({ sources }: { sources: LibraryMediaSource[] }) {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-lg font-semibold tracking-tight">Media</h2>
+      <Separator />
       {sources.map((source) => (
         <div key={source.id} className="rounded-md border p-3 text-sm">
           {source.versionName ? <p className="font-medium">{source.versionName}</p> : null}
@@ -385,6 +459,7 @@ function SeriesEpisodes({ seriesId }: { seriesId: string }) {
         .map(([season, eps]) => (
           <div key={season} className="flex flex-col gap-2">
             <h2 className="text-lg font-semibold tracking-tight">Season {season}</h2>
+            <Separator />
             <ul className="flex flex-col divide-y rounded-md border">
               {eps.map((episode) => (
                 <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} />

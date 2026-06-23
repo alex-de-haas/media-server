@@ -2,25 +2,29 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, MoreVertical, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, MoreVertical, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type VpnStatus } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { QueryState } from "@/components/states";
 import { IngestStepper, type StepActivity } from "@/components/ingest-stepper";
@@ -115,19 +119,25 @@ export function ActivitySection() {
         <CardTitle>Activity</CardTitle>
         <CardDescription>Torrents from download through the ingest pipeline into your library.</CardDescription>
         <CardAction>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <ThroughputBadge downloads={downloads.data ?? []} vpnDown={vpnDown} />
             <VpnBadge status={vpn.data ?? null} />
             <AddTorrentDialog />
           </div>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3 text-sm">
-        <TabBar
-          tab={tab}
-          counts={counts}
-          onChange={setTab}
-          action={
-            tab === "done" && role === "admin" && counts.done > 0 ? (
+      <CardContent className="text-sm">
+        <Tabs value={tab} onValueChange={(value) => setTab(value as TabKey)}>
+          <div className="flex items-center justify-between border-b">
+            <TabsList variant="line">
+              {TABS.map(({ key, label }) => (
+                <TabsTrigger key={key} value={key}>
+                  {label}
+                  {counts[key] > 0 && <span className="text-muted-foreground text-xs">{counts[key]}</span>}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {tab === "done" && role === "admin" && counts.done > 0 && (
               <Button
                 type="button"
                 variant="ghost"
@@ -138,26 +148,30 @@ export function ActivitySection() {
                 <Trash2 />
                 Delete all
               </Button>
-            ) : null
-          }
-        />
-        <QueryState query={ingest} empty="Nothing here yet. Add a torrent to get started.">
-          {(items) => {
-            const visible = items.filter((item) => tabOf(item, downloadFor(item)) === tab);
-            if (visible.length === 0) {
-              return <p className="text-muted-foreground text-sm">{EMPTY[tab]}</p>;
-            }
-            return visible.map((item) => (
-              <IngestRow
-                key={item.id}
-                item={item}
-                catalog={catalogsById.get(item.catalogId)}
-                download={downloadFor(item)}
-                vpnDown={vpnDown}
-              />
-            ));
-          }}
-        </QueryState>
+            )}
+          </div>
+          {TABS.map(({ key }) => (
+            <TabsContent key={key} value={key} className="flex flex-col gap-3 pt-3">
+              <QueryState query={ingest} empty="Nothing here yet. Add a torrent to get started.">
+                {(items) => {
+                  const visible = items.filter((item) => tabOf(item, downloadFor(item)) === key);
+                  if (visible.length === 0) {
+                    return <p className="text-muted-foreground text-sm">{EMPTY[key]}</p>;
+                  }
+                  return visible.map((item) => (
+                    <IngestRow
+                      key={item.id}
+                      item={item}
+                      catalog={catalogsById.get(item.catalogId)}
+                      download={downloadFor(item)}
+                      vpnDown={vpnDown}
+                    />
+                  ));
+                }}
+              </QueryState>
+            </TabsContent>
+          ))}
+        </Tabs>
       </CardContent>
 
       <ClearDoneDialog
@@ -170,6 +184,41 @@ export function ActivitySection() {
         }}
       />
     </Card>
+  );
+}
+
+// Aggregate transfer rate across every torrent, shown in the Activity header: ↓ is the combined download
+// speed, ↑ the combined upload (active downloads + anything still seeding). Hidden when idle, and while the
+// VPN is down (the engine pauses transfers behind the killswitch, so the rates would just read 0).
+function ThroughputBadge({ downloads, vpnDown }: { downloads: Download[]; vpnDown: boolean }) {
+  if (vpnDown) {
+    return null;
+  }
+
+  const downloadRate = downloads.reduce((total, download) => total + (download.downloadRateBytesPerSecond ?? 0), 0);
+  const uploadRate = downloads.reduce((total, download) => total + (download.uploadRateBytesPerSecond ?? 0), 0);
+  if (downloadRate <= 0 && uploadRate <= 0) {
+    return null;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Badge variant="secondary" tabIndex={0} className="gap-2 font-mono tabular-nums">
+            <span className="inline-flex items-center gap-1">
+              <ArrowDown className="size-3" aria-hidden />
+              {formatSpeed(downloadRate)}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <ArrowUp className="size-3" aria-hidden />
+              {formatSpeed(uploadRate)}
+            </span>
+          </Badge>
+        }
+      />
+      <TooltipContent>Total throughput — ↓ downloading, ↑ uploading / seeding.</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -216,44 +265,6 @@ function vpnTooltip(status: VpnStatus): string {
     status.tunnelAddress ? `tunnel ${status.tunnelAddress}` : null,
   ].filter(Boolean);
   return parts.length > 0 ? `Traffic egresses through the VPN — ${parts.join(", ")}.` : "VPN tunnel is up.";
-}
-
-function TabBar({
-  tab,
-  counts,
-  onChange,
-  action,
-}: {
-  tab: TabKey;
-  counts: Record<TabKey, number>;
-  onChange: (tab: TabKey) => void;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between border-b">
-      <div role="tablist" className="flex items-center gap-1">
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => onChange(key)}
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              tab === key
-                ? "border-brand text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {label}
-            {counts[key] > 0 && <span className="text-muted-foreground ml-1.5 text-xs">{counts[key]}</span>}
-          </button>
-        ))}
-      </div>
-      {action}
-    </div>
-  );
 }
 
 // The Download step maps to a torrent; reflect its live transfer/pause state on that step so the stepper
@@ -485,11 +496,9 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
       : null;
 
   return (
-    <div>
-      <div className="bg-secondary h-2 w-full overflow-hidden rounded-full">
-        <div className="bg-primary h-full transition-[width] duration-500" style={{ width: `${Math.min(percent, 100)}%` }} />
-      </div>
-      <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono">
+    <div className="flex flex-col gap-2">
+      <Progress value={Math.min(percent, 100)} />
+      <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono">
         <span>{formatPercent(download.percentComplete)}</span>
         {vpnDown ? (
           // Transfer is gated by the killswitch — show why instead of a misleading 0 B/s.
@@ -580,28 +589,26 @@ function RemoveDialog({
   onConfirm: () => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Remove item?</DialogTitle>
-          <DialogDescription>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent className="sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove item?</AlertDialogTitle>
+          <AlertDialogDescription>
             Remove <span className="text-foreground font-medium">{title}</span> from Activity.{" "}
             {published
               ? "The published item stays in your library — delete it from its detail page."
               : "Any in-progress download and staging files are cleaned up."}
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
 
-        <DialogFooter>
-          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" variant="destructive" size="sm" onClick={onConfirm}>
+        <AlertDialogFooter>
+          <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" size="sm" onClick={onConfirm}>
             Remove
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -617,28 +624,26 @@ function ClearDoneDialog({
   onConfirm: () => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Delete all completed items?</DialogTitle>
-          <DialogDescription>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent className="sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete all completed items?</AlertDialogTitle>
+          <AlertDialogDescription>
             Remove{" "}
             <span className="text-foreground font-medium">
               {count} completed item{count === 1 ? "" : "s"}
             </span>{" "}
             from Activity. Published items stay in your library — this only clears the Done list.
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
 
-        <DialogFooter>
-          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" variant="destructive" size="sm" onClick={onConfirm}>
+        <AlertDialogFooter>
+          <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" size="sm" onClick={onConfirm}>
             Delete all
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
