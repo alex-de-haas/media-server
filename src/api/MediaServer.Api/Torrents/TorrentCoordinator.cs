@@ -27,6 +27,7 @@ public sealed class TorrentCoordinator(
         engine.MetadataReceived += OnMetadataReceived;
         engine.DownloadCompleted += OnDownloadCompleted;
         engine.DownloadErrored += OnDownloadErrored;
+        engine.VpnStatusChanged += OnVpnStatusChanged;
 
         await ResumeDownloadsAsync(stoppingToken);
 
@@ -47,6 +48,7 @@ public sealed class TorrentCoordinator(
             engine.MetadataReceived -= OnMetadataReceived;
             engine.DownloadCompleted -= OnDownloadCompleted;
             engine.DownloadErrored -= OnDownloadErrored;
+            engine.VpnStatusChanged -= OnVpnStatusChanged;
         }
     }
 
@@ -156,6 +158,12 @@ public sealed class TorrentCoordinator(
     private void OnDownloadCompleted(object? sender, string infoHash) => RunSafely(() => HandleCompletedAsync(infoHash));
 
     private void OnDownloadErrored(object? sender, string infoHash) => RunSafely(() => HandleErroredAsync(infoHash));
+
+    // VPN status is engine-wide (one tunnel for all downloads); forward it straight to the realtime
+    // stream — no persistence, the UI shows it as a live indicator.
+    private void OnVpnStatusChanged(object? sender, VpnStatus status) =>
+        RunSafely(() => notifier.VpnStatusChangedAsync(new VpnStatusChanged(
+            status.Connected, status.TunnelInterface, status.TunnelAddress, status.ExitIp, status.ExitCountry, status.CheckedAt)));
 
     private async Task HandleMetadataAsync(string infoHash)
     {

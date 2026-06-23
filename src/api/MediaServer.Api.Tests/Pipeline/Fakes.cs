@@ -46,6 +46,9 @@ public sealed class FakeTorrentEngine : ITorrentEngine
     public event EventHandler<string>? MetadataReceived { add { } remove { } }
     public event EventHandler<string>? DownloadCompleted { add { } remove { } }
     public event EventHandler<string>? DownloadErrored { add { } remove { } }
+    public event EventHandler<VpnStatus>? VpnStatusChanged { add { } remove { } }
+
+    public VpnStatus? GetVpnStatus() => null;
 
     public TorrentDescriptor Inspect(TorrentSource source) => new("hash", "Name", 0, false, []);
     public Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken) =>
@@ -73,5 +76,6 @@ public sealed class NullRealtimeNotifier : IRealtimeNotifier
     public Task DownloadProgressAsync(DownloadProgress progress, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task DownloadStateChangedAsync(DownloadStateChanged change, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task IngestStageChangedAsync(IngestStageChanged change, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task VpnStatusChangedAsync(VpnStatusChanged status, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task JobChangedAsync(string eventName, JobEvent job, CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

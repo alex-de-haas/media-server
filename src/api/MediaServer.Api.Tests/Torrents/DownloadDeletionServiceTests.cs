@@ -120,6 +120,9 @@ public sealed class DownloadDeletionServiceTests : IDisposable
         public event EventHandler<string>? MetadataReceived { add { } remove { } }
         public event EventHandler<string>? DownloadCompleted { add { } remove { } }
         public event EventHandler<string>? DownloadErrored { add { } remove { } }
+        public event EventHandler<VpnStatus>? VpnStatusChanged { add { } remove { } }
+
+        public VpnStatus? GetVpnStatus() => null;
 
         public Task RemoveAsync(string infoHash, bool deleteFiles, CancellationToken cancellationToken)
         {

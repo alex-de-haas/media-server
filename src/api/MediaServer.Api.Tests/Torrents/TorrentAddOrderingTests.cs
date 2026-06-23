@@ -78,6 +78,9 @@ public sealed class TorrentAddOrderingTests : IDisposable
         public event EventHandler<string>? MetadataReceived { add { } remove { } }
         public event EventHandler<string>? DownloadCompleted { add { } remove { } }
         public event EventHandler<string>? DownloadErrored { add { } remove { } }
+        public event EventHandler<VpnStatus>? VpnStatusChanged { add { } remove { } }
+
+        public VpnStatus? GetVpnStatus() => null;
 
         public TorrentDescriptor Inspect(TorrentSource source) =>
             new("feedface", "The Movie", 100, true, [new TorrentFileInfo(0, "The Movie/The Movie.mkv", 100)]);

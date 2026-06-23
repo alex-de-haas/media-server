@@ -78,6 +78,18 @@ export interface AddTorrentInput {
   keepSeeding?: boolean;
 }
 
+// Engine-wide VPN tunnel status. `connected` is the primary signal; `exitIp`/`exitCountry` are a
+// best-effort proof that traffic egresses through the tunnel and may be null. The whole object is null
+// when downloading runs in-process (no VPN to report) — the UI hides the indicator in that case.
+export interface VpnStatus {
+  connected: boolean;
+  tunnelInterface: string | null;
+  tunnelAddress: string | null;
+  exitIp: string | null;
+  exitCountry: string | null;
+  checkedAt: string;
+}
+
 export interface IngestSourceFile {
   id: string;
   relativePath: string;
@@ -315,6 +327,7 @@ export const mediaServer = {
   scanCatalog: (id: string) => apiJson<LibraryImportReport>(`${BASE}/catalogs/${id}/scan`, { method: "POST" }),
 
   listDownloads: () => apiJson<Download[]>(`${BASE}/torrents`),
+  getVpnStatus: () => apiJson<VpnStatus | null>(`${BASE}/vpn`),
   addTorrent: (input: AddTorrentInput) =>
     apiJson<Download>(`${BASE}/torrents/add`, {
       method: "POST",

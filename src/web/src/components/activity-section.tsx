@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, MoreVertical, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile } from "@/lib/media-server";
+import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type VpnStatus } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -73,6 +73,8 @@ export function ActivitySection() {
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
   // Live torrent progress/state is patched into this cache by SSE; the interval is a fallback only.
   const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 20000 });
+  // Engine-wide VPN tunnel status (null when downloading is in-process). Pushed over SSE; slow interval is a fallback.
+  const vpn = useQuery({ queryKey: ["vpn"], queryFn: mediaServer.getVpnStatus, refetchInterval: 30000 });
 
   const catalogsById = useMemo(
     () => new Map((catalogs.data ?? []).map((catalog) => [catalog.id, catalog])),
@@ -110,7 +112,10 @@ export function ActivitySection() {
         <CardTitle>Activity</CardTitle>
         <CardDescription>Torrents from download through the ingest pipeline into your library.</CardDescription>
         <CardAction>
-          <AddTorrentDialog />
+          <div className="flex items-center gap-2">
+            <VpnBadge status={vpn.data ?? null} />
+            <AddTorrentDialog />
+          </div>
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
@@ -162,6 +167,49 @@ export function ActivitySection() {
       />
     </Card>
   );
+}
+
+// Engine-wide VPN indicator shown in the Activity header. The tunnel is shared by every download, so it
+// belongs here rather than on each card. Hidden entirely when there's no VPN to report (in-process engine).
+function VpnBadge({ status }: { status: VpnStatus | null }) {
+  if (!status) return null;
+
+  const connected = status.connected;
+  const detail = connected ? (status.exitCountry ?? status.exitIp ?? null) : null;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            aria-label={vpnTooltip(status)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              connected
+                ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                : "border-destructive/30 text-destructive",
+            )}
+          >
+            <span className={cn("size-1.5 rounded-full", connected ? "bg-emerald-500" : "bg-destructive")} />
+            VPN{connected ? (detail ? ` · ${detail}` : "") : " off"}
+          </span>
+        }
+      />
+      <TooltipContent>{vpnTooltip(status)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function vpnTooltip(status: VpnStatus): string {
+  if (!status.connected) {
+    return "VPN tunnel is down — torrent traffic is blocked by the killswitch.";
+  }
+  const parts = [
+    status.exitIp ? `exit ${status.exitIp}${status.exitCountry ? ` (${status.exitCountry})` : ""}` : null,
+    status.tunnelAddress ? `tunnel ${status.tunnelAddress}` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? `Traffic egresses through the VPN — ${parts.join(", ")}.` : "VPN tunnel is up.";
 }
 
 function TabBar({

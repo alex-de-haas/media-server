@@ -34,6 +34,14 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     public event EventHandler<string>? DownloadCompleted;
     public event EventHandler<string>? DownloadErrored;
 
+    // In-process downloading runs without a VPN tunnel, so there is no status to report and this event
+    // is never raised. (Tunnel isolation is the remote torrent-engine app's job.)
+#pragma warning disable CS0067 // Event is never used — satisfies ITorrentEngine for the no-VPN engine.
+    public event EventHandler<VpnStatus>? VpnStatusChanged;
+#pragma warning restore CS0067
+
+    public VpnStatus? GetVpnStatus() => null;
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         var port = _settings.TorrentPort ?? 6881;
