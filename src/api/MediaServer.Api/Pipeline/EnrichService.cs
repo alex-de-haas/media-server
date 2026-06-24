@@ -3,6 +3,7 @@ using System.Text;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.People;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Pipeline;
@@ -12,7 +13,7 @@ namespace MediaServer.Api.Pipeline;
 /// <c>provider + language</c>. Idempotent: re-enriching refreshes existing records in place. See
 /// <c>docs/features/metadata.md</c>.
 /// </summary>
-public sealed class EnrichService(MediaServerDbContext database, IMetadataProvider provider, MediaServerSettings settings)
+public sealed class EnrichService(MediaServerDbContext database, IMetadataProvider provider, MediaServerSettings settings, PersonSyncService personSync)
 {
     public async Task EnrichAsync(Catalog catalog, MediaItem item, CancellationToken cancellationToken)
     {
@@ -66,6 +67,14 @@ public sealed class EnrichService(MediaServerDbContext database, IMetadataProvid
 
         await UpsertImagesAsync(item, reference, languages, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
+
+        // Persist cast/crew from the freshly fetched credits (in the primary record's payload). Done after
+        // the metadata save so a credits failure can't strand the rest of the enrich, and re-run on every
+        // (re)fetch so the join converges to the latest credits.
+        if (primary is not null)
+        {
+            await personSync.SyncAsync(item.Id, reference.Provider, primary.Raw, cancellationToken);
+        }
     }
 
     private async Task UpsertImagesAsync(MediaItem item, ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken)

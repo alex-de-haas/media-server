@@ -10,6 +10,7 @@ using MediaServer.Api.Metadata;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Library;
 using MediaServer.Api.Organizer;
+using MediaServer.Api.People;
 using MediaServer.Api.Pipeline;
 using MediaServer.Api.Pipeline.Stages;
 using MediaServer.Api.Probe;
@@ -91,6 +92,7 @@ builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
 
 // Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
 builder.Services.AddScoped<IdentifyService>();
+builder.Services.AddScoped<PersonSyncService>();
 builder.Services.AddScoped<EnrichService>();
 builder.Services.AddScoped<JobService>();
 builder.Services.AddScoped<IPipelineStage, IntakeStage>();
@@ -127,6 +129,10 @@ builder.Services.AddScoped<RemapService>();
 // Scheduled scans (missing-file drift) + on-demand metadata refresh.
 builder.Services.AddScoped<LibraryMaintenanceService>();
 builder.Services.AddHostedService<LibraryScanWorker>();
+
+// One-off, idempotent backfill of cast/crew from already-cached metadata for pre-existing items.
+builder.Services.AddScoped<PersonBackfillService>();
+builder.Services.AddHostedService<PersonBackfillWorker>();
 
 // Library import: scan a catalog root for orphan media files and ingest them from the identify stage.
 builder.Services.AddScoped<LibraryImportService>();

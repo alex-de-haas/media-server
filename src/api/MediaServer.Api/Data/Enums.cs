@@ -97,3 +97,10 @@ public enum JobStatus
     Completed = 2,
     Failed = 3,
 }
+
+/// <summary>How a <see cref="Person"/> is credited on a media item (cast = acting, crew = everyone else).</summary>
+public enum PersonRole
+{
+    Cast = 0,
+    Crew = 1,
+}

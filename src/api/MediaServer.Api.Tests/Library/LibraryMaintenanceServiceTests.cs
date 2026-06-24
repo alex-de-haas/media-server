@@ -4,6 +4,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Library;
+using MediaServer.Api.People;
 using MediaServer.Api.Pipeline;
 using MediaServer.Api.Tests.Pipeline;
 using Microsoft.Data.Sqlite;
@@ -33,7 +34,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         _database,
         new CatalogPathSandbox(),
         new FilesystemInspector(),
-        new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }),
+        new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }, new PersonSyncService(_database)),
         _core,
         NullLogger<LibraryMaintenanceService>.Instance);
 

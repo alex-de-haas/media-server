@@ -5,6 +5,7 @@ using MediaServer.Api.IO;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Organizer;
+using MediaServer.Api.People;
 using MediaServer.Api.Pipeline;
 using MediaServer.Api.Pipeline.Stages;
 using MediaServer.Api.Probe;
@@ -53,6 +54,7 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddScoped<AppSettingsService>();
         services.AddScoped<IOrganizer, OrganizerService>();
         services.AddScoped<IdentifyService>();
+        services.AddScoped<PersonSyncService>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
         services.AddScoped<DownloadDeletionService>();
