@@ -12,6 +12,8 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<MediaStream> MediaStreams => Set<MediaStream>();
     public DbSet<MetadataRecord> MetadataRecords => Set<MetadataRecord>();
     public DbSet<ImageAsset> ImageAssets => Set<ImageAsset>();
+    public DbSet<Person> Persons => Set<Person>();
+    public DbSet<MediaItemPerson> MediaItemPersons => Set<MediaItemPerson>();
     public DbSet<Download> Downloads => Set<Download>();
     public DbSet<SourceFile> SourceFiles => Set<SourceFile>();
     public DbSet<IngestItem> IngestItems => Set<IngestItem>();
@@ -40,6 +42,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureMediaSource(modelBuilder);
         ConfigureMetadataRecord(modelBuilder);
         ConfigureImageAsset(modelBuilder);
+        ConfigurePerson(modelBuilder);
         ConfigureDownload(modelBuilder);
         ConfigureSourceFile(modelBuilder);
         ConfigureIngestItem(modelBuilder);
@@ -157,6 +160,33 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         image.HasOne(entity => entity.MediaItem)
             .WithMany()
             .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigurePerson(ModelBuilder modelBuilder)
+    {
+        var person = modelBuilder.Entity<Person>();
+        person.HasKey(entity => entity.Id);
+        person.Property(entity => entity.Provider).IsRequired();
+        person.Property(entity => entity.ProviderId).IsRequired();
+        person.Property(entity => entity.Name).IsRequired();
+        // One row per provider identity; the upsert keys on this pair so a person is shared across items.
+        person.HasIndex(entity => new { entity.Provider, entity.ProviderId }).IsUnique();
+
+        var credit = modelBuilder.Entity<MediaItemPerson>();
+        credit.HasKey(entity => entity.Id);
+        credit.Property(entity => entity.Role).HasConversion<int>();
+        credit.HasIndex(entity => entity.PersonId);
+        credit.HasIndex(entity => entity.MediaItemId);
+
+        credit.HasOne(entity => entity.MediaItem)
+            .WithMany()
+            .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        credit.HasOne(entity => entity.Person)
+            .WithMany(entity => entity.Credits)
+            .HasForeignKey(entity => entity.PersonId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 
