@@ -52,7 +52,8 @@ export function PosterCard({
           </span>
         )}
       </div>
-      <span className="truncate font-serif text-[15px] leading-tight font-medium">{title}</span>
+      {/* Title lives on the poster art itself; only the type·year caption is repeated below. The title is
+          still the image alt / no-poster fallback, so it stays accessible. */}
       {subtitle && <span className="text-muted-foreground truncate text-xs">{subtitle}</span>}
     </Link>
   );

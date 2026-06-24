@@ -110,6 +110,8 @@ export interface MetadataCandidate {
   title: string;
   year: number | null;
   score: number;
+  // Ready-to-render poster thumbnail URL, or null when the provider returned no poster.
+  posterUrl: string | null;
 }
 
 export interface IngestItem {

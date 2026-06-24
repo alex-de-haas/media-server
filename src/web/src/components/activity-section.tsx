@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowUp, MoreVertical, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Loader2, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type VpnStatus } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
@@ -22,7 +22,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -279,13 +278,11 @@ function downloadActivity(item: IngestItem, download: Download | undefined, vpnD
 
 // A human explanation of why an item sits where it does — especially the "Pending with no error" states
 // that otherwise look identical and inert. Mirrors the pipeline stage semantics on the server.
-function stateHint(item: IngestItem, download: Download | undefined): string | null {
+function stateHint(item: IngestItem): string | null {
   if (item.status !== "Pending") return null;
   if (item.lastError) return null; // surfaced through the warning icon instead.
-  if (item.stage === "Download") {
-    if (download && isDownloadPaused(download)) return "Download paused.";
-    return "Waiting for the download to finish.";
-  }
+  // The progress bar and the stepper's pause glyph already convey the Download stage; no text needed.
+  if (item.stage === "Download") return null;
   if (item.sourceFiles.length === 0) return "Waiting for the torrent's file list — no files received yet.";
   return "Queued, waiting to be processed.";
 }
@@ -316,6 +313,12 @@ function IngestRow({
   };
   const onError = (action: string) => (error: unknown) => toast.error(`Couldn’t ${action}`, { description: errorMessage(error) });
 
+  // Pause/resume return before the engine actually flips the download state, so the mutation's own
+  // isPending clears too early — the button re-enables before anything visibly changes and an impatient
+  // second click double-fires. Track the intended state and keep the control pending (spinner, disabled)
+  // until the polled download state reflects it (or the request errors).
+  const [transferIntent, setTransferIntent] = useState<"pause" | "resume" | null>(null);
+
   const retry = useMutation({
     mutationFn: () => mediaServer.retryIngest(item.id),
     onSuccess: () => {
@@ -324,8 +327,22 @@ function IngestRow({
     },
     onError: onError("retry"),
   });
-  const pause = useMutation({ mutationFn: (id: string) => mediaServer.pauseDownload(id), onSuccess: invalidate, onError: onError("pause download") });
-  const resume = useMutation({ mutationFn: (id: string) => mediaServer.resumeDownload(id), onSuccess: invalidate, onError: onError("resume download") });
+  const pause = useMutation({
+    mutationFn: (id: string) => mediaServer.pauseDownload(id),
+    onSuccess: invalidate,
+    onError: (error) => {
+      setTransferIntent(null);
+      onError("pause download")(error);
+    },
+  });
+  const resume = useMutation({
+    mutationFn: (id: string) => mediaServer.resumeDownload(id),
+    onSuccess: invalidate,
+    onError: (error) => {
+      setTransferIntent(null);
+      onError("resume download")(error);
+    },
+  });
   const stopSeeding = useMutation({
     mutationFn: (id: string) => mediaServer.stopSeeding(id),
     onSuccess: () => {
@@ -348,26 +365,42 @@ function IngestRow({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // Drop the optimistic pending flag once the polled download reflects the intended pause/resume. Adjusted
+  // during render (React's recommended alternative to an effect for derived-from-props state); the guard
+  // makes it converge to a no-op so it can't loop.
+  if (transferIntent !== null && download) {
+    const paused = isDownloadPaused(download);
+    if ((transferIntent === "pause" && paused) || (transferIntent === "resume" && !paused)) {
+      setTransferIntent(null);
+    }
+  }
+
+  const togglePause = () => {
+    if (!download) return;
+    if (isDownloadPaused(download)) {
+      setTransferIntent("resume");
+      resume.mutate(download.id);
+    } else {
+      setTransferIntent("pause");
+      pause.mutate(download.id);
+    }
+  };
+
   const category = categoryOf(item, download);
-  const title =
-    item.mediaTitle ??
-    item.downloadName ??
-    (item.sourceFiles?.[0]?.relativePath ? displayPath(item.sourceFiles[0].relativePath) : undefined) ??
-    "Untitled item";
+  const title = ingestTitle(item);
   const age = formatTimeAgo(item.createdAt);
-  // While the tunnel is down the engine pauses transfers behind the killswitch — say so explicitly
-  // instead of the generic "waiting for the download" hint. Keep stateHint's guards so a Failed/
-  // NeedsReview item (surfaced by the warning icon) isn't mislabelled as merely VPN-paused.
-  const hint =
-    vpnDown && item.stage === "Download" && item.status === "Pending" && !item.lastError
-      ? "Paused — VPN is down."
-      : stateHint(item, download);
-  const warning = warningText(item);
+  const hint = stateHint(item);
+  // The stepper's pause glyph already shows the transfer is stopped; the tunnel being down is the
+  // non-obvious, actionable part, so surface it through the amber warning icon like a Failed/NeedsReview
+  // item rather than as a body line. (Guarded to Pending so a Failed/NeedsReview warning still wins.)
+  const vpnPaused = vpnDown && item.stage === "Download" && item.status === "Pending" && !item.lastError;
+  const warning = warningText(item) ?? (vpnPaused ? "VPN is down — transfer paused." : null);
   const published = item.status === "Done" && item.mediaItemId != null;
 
   const meta = [catalog?.name, age && `added ${age}`, item.attemptCount > 0 && `attempt ${item.attemptCount}/5`]
     .filter(Boolean)
     .join(" · ");
+  const showFiles = category === "active" && item.status !== "NeedsReview" && item.sourceFiles.length > 0;
 
   const transferring = download !== undefined && !DOWNLOAD_DONE_STATES.includes(download.state);
 
@@ -406,54 +439,44 @@ function IngestRow({
               </Tooltip>
             )}
           </div>
-          {meta && <p className="text-muted-foreground text-xs">{meta}</p>}
-          {category === "active" && hint && <p className="text-muted-foreground text-xs">{hint}</p>}
-          {category === "active" && item.status !== "NeedsReview" && item.sourceFiles.length > 0 && (
-            <FileSummary files={item.sourceFiles} />
+          {(meta || showFiles) && (
+            <p className="text-muted-foreground text-xs">
+              {meta}
+              {showFiles && (
+                <>
+                  {meta && " · "}
+                  <FilesTooltip files={item.sourceFiles} />
+                </>
+              )}
+            </p>
           )}
+          {category === "active" && hint && <p className="text-muted-foreground text-xs">{hint}</p>}
         </div>
 
+        {/* One icon row, right of the title: only the actions that apply to the item's current step/state. */}
         <div className="flex shrink-0 items-center gap-1">
           {/* No manual pause/resume while the VPN is down — the engine gates transfers and a resume can't
               succeed under the killswitch. */}
           {transferring && download && !vpnDown && (
-            isDownloadPaused(download) ? (
-              <IconAction label="Resume" icon={<Play />} onClick={() => resume.mutate(download.id)} />
+            transferIntent !== null ? (
+              <IconAction label={transferIntent === "pause" ? "Pausing…" : "Resuming…"} icon={<Pause />} pending onClick={() => {}} />
+            ) : isDownloadPaused(download) ? (
+              <IconAction label="Resume" icon={<Play />} onClick={togglePause} />
             ) : (
-              <IconAction label="Pause" icon={<Pause />} onClick={() => pause.mutate(download.id)} />
+              <IconAction label="Pause" icon={<Pause />} onClick={togglePause} />
             )
           )}
           {category === "seeding" && download && (
-            <IconAction label="Stop seeding" icon={<Square />} onClick={() => stopSeeding.mutate(download.id)} />
+            <IconAction label="Stop seeding" icon={<Square />} pending={stopSeeding.isPending} onClick={() => stopSeeding.mutate(download.id)} />
           )}
           {item.status === "NeedsReview" && (
             <IconAction label="Resolve match" icon={<SearchCheck />} onClick={() => setReviewOpen(true)} />
           )}
-          {item.status === "Failed" && (
-            <IconAction label="Retry" icon={<RotateCw />} onClick={() => retry.mutate()} disabled={retry.isPending} />
+          {(item.status === "Failed" || (item.status === "NeedsReview" && role === "admin")) && (
+            <IconAction label="Retry" icon={<RotateCw />} pending={retry.isPending} onClick={() => retry.mutate()} />
           )}
           {role === "admin" && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon-sm" aria-label="More actions">
-                    <MoreVertical />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent>
-                {item.status === "NeedsReview" && (
-                  <DropdownMenuItem onClick={() => retry.mutate()} disabled={retry.isPending}>
-                    <RotateCw />
-                    Retry
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
-                  <Trash2 />
-                  Remove
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <IconAction label="Remove" icon={<Trash2 />} destructive pending={remove.isPending} onClick={() => setConfirmOpen(true)} />
           )}
         </div>
       </div>
@@ -503,6 +526,9 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
         {vpnDown ? (
           // Transfer is gated by the killswitch — show why instead of a misleading 0 B/s.
           <span className="text-amber-500">Paused · VPN down</span>
+        ) : isDownloadPaused(download) ? (
+          // Rates/ETA are meaningless (and stale) while paused — say "Paused" instead of misleading numbers.
+          <span>Paused</span>
         ) : (
           <>
             <span>↓ {formatSpeed(download.downloadRateBytesPerSecond)}</span>
@@ -531,22 +557,52 @@ function displayPath(relativePath: string): string {
   return relativePath.replace(/^\.incoming\/[0-9a-f]{32}\//i, "");
 }
 
-function FileSummary({ files }: { files: IngestSourceFile[] }) {
-  const shown = files.slice(0, 2);
+// The card title is the parsed title the pipeline identifies by — release groups and per-file noise
+// (SxxEyy, codecs, the raw filename) stripped — so it reads the same whether or not the item has been
+// identified yet. Prefer the resolved media title, then the backend's parsed title, and only fall back to
+// the torrent/download name when no files have been parsed yet (e.g. a magnet still fetching metadata).
+function ingestTitle(item: IngestItem): string {
+  if (item.mediaTitle) return item.mediaTitle;
+  const parsed = item.sourceFiles.find((file) => file.parsedTitle.trim())?.parsedTitle.trim();
+  if (parsed) return parsed;
+  if (item.downloadName) return item.downloadName;
+  const first = item.sourceFiles[0]?.relativePath;
+  return first ? displayPath(first) : "Untitled item";
+}
+
+// The torrent's files are detail-on-demand: a compact count on the card, the full list (capped) in a
+// tooltip, so a multi-file pack doesn't push three lines of paths onto every card.
+function FilesTooltip({ files }: { files: IngestSourceFile[] }) {
+  const max = 12;
+  const shown = files.slice(0, max);
   const rest = files.length - shown.length;
   return (
-    <ul className="text-muted-foreground flex flex-col gap-0.5 text-xs">
-      {shown.map((file) => (
-        <li key={file.id} className="truncate" title={displayPath(file.relativePath)}>
-          {displayPath(file.relativePath)}
-        </li>
-      ))}
-      {rest > 0 && (
-        <li>
-          +{rest} more file{rest > 1 ? "s" : ""}
-        </li>
-      )}
-    </ul>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className="text-muted-foreground focus-visible:ring-ring w-fit rounded-sm text-xs underline decoration-dotted underline-offset-2 outline-none focus-visible:ring-2"
+          >
+            {files.length} file{files.length > 1 ? "s" : ""}
+          </button>
+        }
+      />
+      <TooltipContent className="max-w-md">
+        <ul className="flex flex-col gap-0.5 font-mono text-xs">
+          {shown.map((file) => (
+            <li key={file.id} className="break-all">
+              {displayPath(file.relativePath)}
+            </li>
+          ))}
+          {rest > 0 && (
+            <li className="opacity-70">
+              +{rest} more file{rest > 1 ? "s" : ""}
+            </li>
+          )}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -555,18 +611,32 @@ function IconAction({
   icon,
   onClick,
   disabled,
+  pending,
+  destructive,
 }: {
   label: string;
   icon: ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  // Swaps the icon for a spinner and disables the button — feedback for commands that take a moment to
+  // land (and a guard against impatient double-clicks).
+  pending?: boolean;
+  destructive?: boolean;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button variant="ghost" size="icon-sm" aria-label={label} onClick={onClick} disabled={disabled}>
-            {icon}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={label}
+            aria-busy={pending}
+            onClick={onClick}
+            disabled={disabled || pending}
+            className={cn(destructive && "text-destructive hover:text-destructive hover:bg-destructive/10")}
+          >
+            {pending ? <Loader2 className="animate-spin" /> : icon}
           </Button>
         }
       />

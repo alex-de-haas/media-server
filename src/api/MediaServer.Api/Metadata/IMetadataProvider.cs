@@ -6,7 +6,9 @@ public sealed record MediaQuery(MediaKind Kind, string Title, int? Year, int? Se
 
 public sealed record ProviderRef(string Provider, string Id);
 
-public sealed record MetadataCandidate(ProviderRef Reference, string Title, int? Year, double Score);
+// PosterUrl is a ready-to-render thumbnail URL (or null when the provider returned no poster); it lets the
+// manual-match UI show a poster alongside the title. Optional so non-search call sites stay unchanged.
+public sealed record MetadataCandidate(ProviderRef Reference, string Title, int? Year, double Score, string? PosterUrl = null);
 
 /// <summary>One provider record for a single language; <see cref="Raw"/> keeps the full payload.</summary>
 public sealed record ProviderMetadata(

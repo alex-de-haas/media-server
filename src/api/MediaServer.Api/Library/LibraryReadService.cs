@@ -767,7 +767,7 @@ public sealed class LibraryReadService(
 
     private static string? DisplayTitle(MediaStream stream) => stream.StreamType switch
     {
-        StreamType.Video => Join(ResolutionLabel(stream.Height), stream.Codec?.ToUpperInvariant(), stream.HdrFormat),
+        StreamType.Video => Join(ResolutionLabel(stream.Width, stream.Height), stream.Codec?.ToUpperInvariant(), stream.HdrFormat),
         StreamType.Audio => Join(stream.Language, stream.Codec?.ToUpperInvariant(), ChannelLabel(stream.Channels)),
         StreamType.Subtitle => Join(stream.Language, stream.IsForced ? "Forced" : null),
         _ => null,
@@ -779,15 +779,23 @@ public sealed class LibraryReadService(
         return joined.Length == 0 ? null : joined;
     }
 
-    private static string? ResolutionLabel(int? height) => height switch
+    // Key off width: widescreen films keep the nominal width (e.g. 1920) while the
+    // height drops below the matching value, so height alone mislabels them. Height is
+    // a fallback for vertical video and the unbucketed remainder.
+    private static string? ResolutionLabel(int? width, int? height)
     {
-        null or <= 0 => null,
-        >= 2160 => "2160p",
-        >= 1080 => "1080p",
-        >= 720 => "720p",
-        >= 480 => "480p",
-        _ => $"{height}p",
-    };
+        var w = width ?? 0;
+        var h = height ?? 0;
+        return (w, h) switch
+        {
+            ( <= 0, <= 0) => null,
+            ( >= 3800, _) or (_, >= 2000) => "2160p",
+            ( >= 1900, _) or (_, >= 1000) => "1080p",
+            ( >= 1260, _) or (_, >= 700) => "720p",
+            ( >= 700, _) or (_, >= 480) => "480p",
+            _ => $"{(h > 0 ? h : w)}p",
+        };
+    }
 
     private static string? ChannelLabel(int? channels) => channels switch
     {

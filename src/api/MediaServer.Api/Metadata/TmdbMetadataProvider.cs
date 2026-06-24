@@ -16,6 +16,8 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
 {
     public const string HttpClientName = "tmdb";
     private const string ImageBaseUrl = "https://image.tmdb.org/t/p/original";
+    // Smaller rendition for search-candidate thumbnails in the manual-match UI.
+    private const string PosterThumbBaseUrl = "https://image.tmdb.org/t/p/w154";
 
     public string Key => "tmdb";
 
@@ -46,7 +48,9 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
 
             var candidateYear = ParseYear(GetString(result, type == "movie" ? "release_date" : "first_air_date"));
             var score = TitleScoring.Score(query.Title, query.Year, title, candidateYear);
-            candidates.Add(new MetadataCandidate(new ProviderRef(Key, id), title, candidateYear, score));
+            var posterPath = GetString(result, "poster_path");
+            var posterUrl = string.IsNullOrEmpty(posterPath) ? null : PosterThumbBaseUrl + posterPath;
+            candidates.Add(new MetadataCandidate(new ProviderRef(Key, id), title, candidateYear, score, posterUrl));
         }
 
         return candidates.OrderByDescending(candidate => candidate.Score).ToList();

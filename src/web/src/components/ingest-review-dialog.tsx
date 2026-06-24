@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Film, Loader2, Search } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type IngestSourceFile, type MetadataCandidate } from "@/lib/media-server";
 import { errorMessage } from "@/lib/ui";
@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 /**
  * The metadata-resolution popup for a NeedsReview ingest item. On open it pre-fills the corrected title
@@ -129,7 +128,7 @@ export function IngestReviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-h-[85vh] max-w-xl">
         <DialogHeader>
           <DialogTitle>Resolve match</DialogTitle>
           <DialogDescription className="truncate" title={title}>
@@ -165,8 +164,9 @@ export function IngestReviewDialog({
             </Button>
           </form>
 
-          <ScrollArea className="max-h-72">
-           <div className="flex flex-col gap-3 pr-3">
+          {/* Bounded scroll container: max-height + overflow on the same element scrolls reliably (a
+              max-height on a ScrollArea root can't bound its height:100% viewport, so the list spilled out). */}
+          <div className="-mr-2 flex max-h-[55vh] flex-col gap-3 overflow-y-auto pr-2">
             {unresolved.map((file) => {
               const numbers = numbersFor(file);
               return (
@@ -199,30 +199,43 @@ export function IngestReviewDialog({
                       </label>
                     </div>
                   )}
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-col gap-1.5">
                     {candidates.length ? (
-                      candidates.map((candidate) => (
-                        <Button
-                          key={`${candidate.reference.provider}:${candidate.reference.id}`}
-                          variant="outline"
-                          size="sm"
-                          disabled={match.isPending}
-                          onClick={() =>
-                            match.mutate({
-                              sourceFileId: file.id,
-                              provider: candidate.reference.provider,
-                              providerId: candidate.reference.id,
-                              title: candidate.title,
-                              year: candidate.year,
-                              season: numbers.season,
-                              episode: numbers.episode,
-                            })
-                          }
-                        >
-                          {candidate.title}
-                          {candidate.year ? ` (${candidate.year})` : ""} · {(candidate.score * 100).toFixed(0)}%
-                        </Button>
-                      ))
+                      candidates.map((candidate) => {
+                        const matching =
+                          match.isPending &&
+                          match.variables?.sourceFileId === file.id &&
+                          match.variables?.providerId === candidate.reference.id;
+                        return (
+                          <button
+                            key={`${candidate.reference.provider}:${candidate.reference.id}`}
+                            type="button"
+                            disabled={match.isPending}
+                            onClick={() =>
+                              match.mutate({
+                                sourceFileId: file.id,
+                                provider: candidate.reference.provider,
+                                providerId: candidate.reference.id,
+                                title: candidate.title,
+                                year: candidate.year,
+                                season: numbers.season,
+                                episode: numbers.episode,
+                              })
+                            }
+                            className="hover:bg-accent focus-visible:ring-ring flex items-center gap-2.5 rounded-md border px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-60"
+                          >
+                            <CandidatePoster url={candidate.posterUrl} title={candidate.title} />
+                            <span className="flex min-w-0 flex-1 flex-col">
+                              <span className="truncate font-medium">
+                                {candidate.title}
+                                {candidate.year ? ` (${candidate.year})` : ""}
+                              </span>
+                              <span className="text-muted-foreground text-xs">{(candidate.score * 100).toFixed(0)}% match</span>
+                            </span>
+                            {matching && <Loader2 className="size-4 shrink-0 animate-spin" />}
+                          </button>
+                        );
+                      })
                     ) : (
                       <span className="text-muted-foreground text-xs">
                         {search.isPending
@@ -236,10 +249,32 @@ export function IngestReviewDialog({
                 </div>
               );
             })}
-           </div>
-          </ScrollArea>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// 2:3 poster thumbnail for a candidate, with a neutral placeholder when the provider returned no poster
+// (or the image fails to load), so every row keeps the same shape.
+function CandidatePoster({ url, title }: { url: string | null; title: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!url || failed) {
+    return (
+      <div className="bg-muted text-muted-foreground flex aspect-[2/3] w-10 shrink-0 items-center justify-center rounded">
+        <Film className="size-4" />
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt={title}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="aspect-[2/3] w-10 shrink-0 rounded object-cover"
+    />
   );
 }

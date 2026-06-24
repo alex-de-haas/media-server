@@ -593,7 +593,9 @@ public sealed class LibraryReadServiceTests : IDisposable
         };
         context.MediaSources.Add(source);
         context.MediaStreams.AddRange(
-            new MediaStream { Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Video, Index = 0, Codec = "h264", Width = 1920, Height = 1080, FrameRate = 23.976, BitDepth = 8 },
+            // Widescreen 1080p: width is the nominal 1920 but the height is letterboxed below 1080,
+            // so the resolution label must key off width to report "1080p" (not "720p").
+            new MediaStream { Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Video, Index = 0, Codec = "h264", Width = 1920, Height = 816, FrameRate = 23.976, BitDepth = 8 },
             new MediaStream { Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Audio, Index = 1, Codec = "ac3", Channels = 6, Language = "eng", IsDefault = true },
             new MediaStream { Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Subtitle, Index = 2, Codec = "subrip", Language = "eng" });
 

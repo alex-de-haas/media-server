@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-06-24
 
 ## Description
 
@@ -24,9 +24,11 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   (resume), Next Up, and Recently Added, plus an admin-only ops strip (active
   downloads, items needing review, catalog warnings).
 - **Movies / Series** (`/movies`, `/series`) — poster grids (infinite scroll) with
-  detail pages (`/movies/[id]`, `/series/[id]`): backdrop hero, overview, media
-  info (resolution/codec/audio), watched/favorite toggles, season/episode listing
-  with resume, source-file remap, and delete. **Playback is not in-browser** — Play
+  detail pages (`/movies/[id]`, `/series/[id]`): backdrop hero, overview,
+  watched/favorite toggles, and detail tabs. Movie detail tabs show Cast, Media
+  (resolution/codec/audio), and Tags. Series detail tabs show Cast, Episodes
+  grouped by season, and Tags. Detail admin controls support metadata refresh,
+  remap where applicable, and deletion. **Playback is not in-browser** — Play
   deep-links to an Infuse/Jellyfin client.
 - **Downloads** (`/downloads`) — torrent list with live progress, ratio, and
   seeding status; add (with catalog + `keepSeeding`, showing each catalog's free
