@@ -173,10 +173,17 @@ public sealed class CatalogMetadataRefreshServiceTests : IDisposable
         }
     }
 
-    /// <summary>Records what the coordinator enqueues without running a worker.</summary>
+    /// <summary>
+    /// Records what the coordinator enqueues without running a worker. Tracks reservations so a second
+    /// request for the same catalog is rejected (no worker releases it here), mirroring the real queue.
+    /// </summary>
     private sealed class RecordingQueue : ICatalogRefreshQueue
     {
+        private readonly HashSet<Guid> _active = [];
         public List<CatalogRefreshRequest> Enqueued { get; } = [];
+
+        public bool TryReserve(Guid catalogId) => _active.Add(catalogId);
+        public void Release(Guid catalogId) => _active.Remove(catalogId);
         public void Enqueue(CatalogRefreshRequest request) => Enqueued.Add(request);
 
         public async IAsyncEnumerable<CatalogRefreshRequest> DequeueAllAsync([EnumeratorCancellation] CancellationToken cancellationToken)

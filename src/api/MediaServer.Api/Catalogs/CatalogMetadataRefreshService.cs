@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using MediaServer.Api.Data;
 using MediaServer.Api.Jobs;
@@ -27,10 +28,18 @@ public sealed record CatalogRefreshStatus(Guid CatalogId, Guid JobId, int Progre
 
 /// <summary>
 /// In-process queue handing catalog ids to <see cref="CatalogRefreshWorker"/>. A single reader drains it,
-/// so refreshes run one catalog at a time — which also paces provider traffic globally.
+/// so refreshes run one catalog at a time — which also paces provider traffic globally. An in-memory set of
+/// active catalogs is the race-free source of truth for "a refresh is in flight" (one process owns it):
+/// <see cref="TryReserve"/> admits a catalog atomically, <see cref="Release"/> frees it when the run ends.
 /// </summary>
 public interface ICatalogRefreshQueue
 {
+    /// <summary>Atomically reserves the catalog. False when a refresh is already queued or running for it.</summary>
+    bool TryReserve(Guid catalogId);
+
+    /// <summary>Frees a reservation once its run finishes (success, failure, or shutdown).</summary>
+    void Release(Guid catalogId);
+
     void Enqueue(CatalogRefreshRequest request);
 
     IAsyncEnumerable<CatalogRefreshRequest> DequeueAllAsync(CancellationToken cancellationToken);
@@ -40,6 +49,11 @@ public sealed class CatalogRefreshQueue : ICatalogRefreshQueue
 {
     private readonly Channel<CatalogRefreshRequest> _channel = Channel.CreateUnbounded<CatalogRefreshRequest>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+    private readonly ConcurrentDictionary<Guid, byte> _active = new();
+
+    public bool TryReserve(Guid catalogId) => _active.TryAdd(catalogId, 0);
+
+    public void Release(Guid catalogId) => _active.TryRemove(catalogId, out _);
 
     public void Enqueue(CatalogRefreshRequest request) => _channel.Writer.TryWrite(request);
 
@@ -49,8 +63,7 @@ public sealed class CatalogRefreshQueue : ICatalogRefreshQueue
 
 /// <summary>
 /// Validates and admits a catalog-wide metadata refresh: rejects an unknown catalog, refuses to start a
-/// second run while one is already in flight (a running <see cref="Job"/> is the source of truth), and
-/// otherwise opens a job and queues the work.
+/// second run while one is already in flight, and otherwise opens a job and queues the work.
 /// </summary>
 public sealed class CatalogRefreshCoordinator(MediaServerDbContext database, JobService jobs, ICatalogRefreshQueue queue)
 {
@@ -62,19 +75,25 @@ public sealed class CatalogRefreshCoordinator(MediaServerDbContext database, Job
             return new CatalogRefreshRequestResult(CatalogRefreshRequestStatus.NotFound, null);
         }
 
-        var alreadyRunning = await database.Jobs.AsNoTracking().AnyAsync(
-            job => job.Type == CatalogMetadataRefreshService.JobType && job.RelatedId == catalogId && job.Status == JobStatus.Running,
-            cancellationToken);
-        if (alreadyRunning)
+        // Atomic admit: closes the check-then-start race between two concurrent requests for the same catalog
+        // (a DB "is one running?" read could let both pass). The worker releases it when the run ends.
+        if (!queue.TryReserve(catalogId))
         {
             return new CatalogRefreshRequestResult(CatalogRefreshRequestStatus.AlreadyRunning, null);
         }
 
-        // StartAsync persists the Running row before returning, so a second request sees it (closing the
-        // double-click window). The worker drives it to Completed/Failed.
-        var job = await jobs.StartAsync(CatalogMetadataRefreshService.JobType, "catalog", catalogId, cancellationToken);
-        queue.Enqueue(new CatalogRefreshRequest(catalogId, job.Id));
-        return new CatalogRefreshRequestResult(CatalogRefreshRequestStatus.Started, job.Id);
+        try
+        {
+            var job = await jobs.StartAsync(CatalogMetadataRefreshService.JobType, "catalog", catalogId, cancellationToken);
+            queue.Enqueue(new CatalogRefreshRequest(catalogId, job.Id));
+            return new CatalogRefreshRequestResult(CatalogRefreshRequestStatus.Started, job.Id);
+        }
+        catch
+        {
+            // Never leak the reservation if we couldn't open/queue the job.
+            queue.Release(catalogId);
+            throw;
+        }
     }
 
     /// <summary>The catalogs with a refresh currently in flight, with their job id and progress.</summary>
@@ -129,13 +148,15 @@ public sealed class CatalogMetadataRefreshService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (await EnrichOneAsync(catalog, itemIds[index], cancellationToken))
+            switch (await EnrichOneAsync(catalog, itemIds[index], cancellationToken))
             {
-                refreshed++;
-            }
-            else
-            {
-                failed++;
+                case EnrichOutcome.Refreshed:
+                    refreshed++;
+                    break;
+                case EnrichOutcome.Failed:
+                    failed++;
+                    break;
+                // Skipped (deleted mid-refresh): counts toward neither refreshed nor failed.
             }
 
             // Persist/broadcast only when the whole-number percent advances, so a big catalog emits at most
@@ -159,7 +180,7 @@ public sealed class CatalogMetadataRefreshService(
         return new CatalogRefreshReport(total, refreshed, failed);
     }
 
-    private async Task<bool> EnrichOneAsync(Catalog catalog, Guid itemId, CancellationToken cancellationToken)
+    private async Task<EnrichOutcome> EnrichOneAsync(Catalog catalog, Guid itemId, CancellationToken cancellationToken)
     {
         try
         {
@@ -172,18 +193,26 @@ public sealed class CatalogMetadataRefreshService(
             var item = await scopedDatabase.MediaItems.FirstOrDefaultAsync(candidate => candidate.Id == itemId, cancellationToken);
             if (item is null)
             {
-                return false; // Deleted mid-refresh — not a failure.
+                return EnrichOutcome.Skipped; // Deleted between selection and enrich — neither refreshed nor failed.
             }
 
             await enrich.EnrichAsync(catalog, item, cancellationToken);
-            return true;
+            return EnrichOutcome.Refreshed;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        // Catch any per-item failure — including a provider timeout, which surfaces as a (Task)Canceled with
+        // our token un-cancelled — but let a genuine caller-requested cancellation propagate to stop the run.
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // One item's provider hiccup shouldn't abort the whole catalog — log and keep going.
             logger.LogWarning(exception, "Catalog refresh: failed to enrich item {Item}.", itemId);
-            return false;
+            return EnrichOutcome.Failed;
         }
+    }
+
+    private enum EnrichOutcome
+    {
+        Refreshed,
+        Failed,
+        Skipped,
     }
 }
 
@@ -210,30 +239,38 @@ public sealed class CatalogRefreshWorker(IServiceScopeFactory scopeFactory, ICat
 
     private async Task ProcessAsync(CatalogRefreshRequest request, CancellationToken cancellationToken)
     {
-        using var scope = scopeFactory.CreateScope();
-        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
-        var jobs = scope.ServiceProvider.GetRequiredService<JobService>();
-        var service = scope.ServiceProvider.GetRequiredService<CatalogMetadataRefreshService>();
-
-        var job = await database.Jobs.FirstOrDefaultAsync(candidate => candidate.Id == request.JobId, cancellationToken);
-        if (job is null)
-        {
-            return; // The job row vanished (shouldn't happen) — nothing to drive.
-        }
-
         try
         {
-            await service.RunAsync(request.CatalogId, job, cancellationToken);
-            await jobs.CompleteAsync(job, cancellationToken);
+            using var scope = scopeFactory.CreateScope();
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            var jobs = scope.ServiceProvider.GetRequiredService<JobService>();
+            var service = scope.ServiceProvider.GetRequiredService<CatalogMetadataRefreshService>();
+
+            var job = await database.Jobs.FirstOrDefaultAsync(candidate => candidate.Id == request.JobId, cancellationToken);
+            if (job is null)
+            {
+                return; // The job row vanished (shouldn't happen) — nothing to drive.
+            }
+
+            try
+            {
+                await service.RunAsync(request.CatalogId, job, cancellationToken);
+                await jobs.CompleteAsync(job, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Shutting down — leave the row Running; the next start reconciles it to Failed.
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Catalog {Catalog} metadata refresh failed.", request.CatalogId);
+                await jobs.FailAsync(job, exception.Message, CancellationToken.None);
+            }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        finally
         {
-            // Shutting down — leave the row Running; the next start reconciles it to Failed.
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(exception, "Catalog {Catalog} metadata refresh failed.", request.CatalogId);
-            await jobs.FailAsync(job, exception.Message, CancellationToken.None);
+            // Free the reservation on every path (done, failed, vanished, or shutdown) so a later refresh can run.
+            queue.Release(request.CatalogId);
         }
     }
 
