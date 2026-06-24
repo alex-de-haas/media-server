@@ -316,7 +316,7 @@ function Hero({ item }: { item: LibraryDetail }) {
                 {item.communityRating != null && (
                   <span className="flex items-center gap-1">
                     <Star className="text-brand size-4" aria-hidden /> {item.communityRating.toFixed(1)}
-                    {item.voteCount ? <span className="text-xs">({formatCount(item.voteCount)})</span> : null}
+                    {item.voteCount != null ? <span className="text-xs">({formatCount(item.voteCount)})</span> : null}
                   </span>
                 )}
                 {item.kind === "Series" && item.status && <span className="text-xs">{item.status}</span>}
@@ -469,13 +469,18 @@ function KeywordTags({ keywords }: { keywords: string[] }) {
   );
 }
 
-// Opens a trailer / IMDb page in a new tab, severing the opener for safety.
+// Opens a trailer / IMDb page in a new tab, severing the opener for safety. The `noopener` window
+// feature already nulls `opener`, but not every browser honours it, so clear it explicitly too.
 function openExternal(url: string) {
-  window.open(url, "_blank", "noopener,noreferrer");
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (opened) {
+    opened.opener = null;
+  }
 }
 
-// Compact vote counts: 12345 → "12K".
-const countFormatter = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+// Compact vote counts: 12345 → "12K". Pin the locale so SSR and the client format identically (avoids a
+// hydration mismatch); the UI is English-only.
+const countFormatter = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 function formatCount(value: number) {
   return countFormatter.format(value);
 }

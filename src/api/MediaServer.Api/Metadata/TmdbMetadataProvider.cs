@@ -194,15 +194,19 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
                 continue;
             }
 
-            var iso = GetString(entry, "iso_3166_1");
-            if (string.Equals(iso, region, StringComparison.OrdinalIgnoreCase))
+            // ValueEquals compares the UTF-8 bytes directly (no string allocation per entry). TMDb
+            // returns iso_3166_1 as an upper-case alpha-2 code, and region is upper-cased to match.
+            if (entry.TryGetProperty("iso_3166_1", out var iso) && iso.ValueKind == JsonValueKind.String)
             {
-                return value;
-            }
+                if (iso.ValueEquals(region))
+                {
+                    return value;
+                }
 
-            if (string.Equals(iso, "US", StringComparison.OrdinalIgnoreCase))
-            {
-                fallbackUs ??= value;
+                if (iso.ValueEquals("US"))
+                {
+                    fallbackUs ??= value;
+                }
             }
 
             fallbackAny ??= value;
@@ -211,11 +215,21 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
         return fallbackUs ?? fallbackAny;
     }
 
-    // "ru-RU" → "RU"; a bare "en" (no region) defaults to US, TMDb's most complete certification set.
+    // "ru-RU" → "RU"; "zh-Hans-CN" → "CN"; a tag with no region (bare "en") defaults to US, TMDb's most
+    // complete certification set. The region is the first 2-letter subtag after the language code, so a
+    // script subtag (4 letters) between them is skipped.
     private static string PreferredRegion(string language)
     {
         var parts = language.Split('-');
-        return parts.Length > 1 && parts[1].Length == 2 ? parts[1].ToUpperInvariant() : "US";
+        for (var i = 1; i < parts.Length; i++)
+        {
+            if (parts[i].Length == 2)
+            {
+                return parts[i].ToUpperInvariant();
+            }
+        }
+
+        return "US";
     }
 
     private static long? FirstEpisodeRuntimeTicks(JsonElement root)

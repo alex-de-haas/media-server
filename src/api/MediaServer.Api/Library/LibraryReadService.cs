@@ -589,7 +589,7 @@ public sealed class LibraryReadService(
         var names = new List<string>();
         foreach (var member in crew.EnumerateArray())
         {
-            if (string.Equals(JsonString(member, "job"), job, StringComparison.OrdinalIgnoreCase) &&
+            if (JsonEquals(member, "job", job) &&
                 EmptyToNull(JsonString(member, "name")) is { } name && !names.Contains(name))
             {
                 names.Add(name);
@@ -687,15 +687,14 @@ public sealed class LibraryReadService(
         string? anyYoutube = null;
         foreach (var video in results.EnumerateArray())
         {
-            if (!string.Equals(JsonString(video, "site"), "YouTube", StringComparison.OrdinalIgnoreCase) ||
-                EmptyToNull(JsonString(video, "key")) is not { } key)
+            if (!JsonEquals(video, "site", "YouTube") || EmptyToNull(JsonString(video, "key")) is not { } key)
             {
                 continue;
             }
 
             var url = "https://www.youtube.com/watch?v=" + key;
             anyYoutube ??= url;
-            if (!string.Equals(JsonString(video, "type"), "Trailer", StringComparison.OrdinalIgnoreCase))
+            if (!JsonEquals(video, "type", "Trailer"))
             {
                 continue;
             }
@@ -727,6 +726,12 @@ public sealed class LibraryReadService(
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    // Ordinal compare against a string-valued property, allocation-free (ValueEquals reads the UTF-8 bytes).
+    // The ValueKind guard keeps it from throwing on a non-string value, unlike a bare ValueEquals call.
+    private static bool JsonEquals(JsonElement element, string property, string value) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var prop) &&
+        prop.ValueKind == JsonValueKind.String && prop.ValueEquals(value);
 
     private static int? JsonInt(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.TryGetInt32(out var number)
