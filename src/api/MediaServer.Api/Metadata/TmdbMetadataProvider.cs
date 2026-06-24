@@ -108,6 +108,28 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
         return images;
     }
 
+    public async Task<PersonDetails?> FetchPersonAsync(ProviderRef reference, string language, CancellationToken cancellationToken)
+    {
+        // Person biography/birth fields are not part of the media credits payload, so they need their own
+        // /person/{id} call. Like the detail fetch, the api_key rides as a query/Bearer credential in GetAsync
+        // and is never logged. profile_path is returned raw here; the caller derives the absolute image URL.
+        var document = await GetAsync($"person/{reference.Id}?language={Uri.EscapeDataString(language)}", cancellationToken);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var root = document.RootElement;
+        return new PersonDetails(
+            EmptyToNull(GetString(root, "name")),
+            EmptyToNull(GetString(root, "biography")),
+            EmptyToNull(GetString(root, "profile_path")),
+            EmptyToNull(GetString(root, "known_for_department")),
+            EmptyToNull(GetString(root, "birthday")),
+            EmptyToNull(GetString(root, "deathday")),
+            EmptyToNull(GetString(root, "place_of_birth")));
+    }
+
     private static void AppendImages(JsonElement root, string property, ImageType type, List<RemoteImage> images)
     {
         if (!root.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)

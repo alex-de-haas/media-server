@@ -124,6 +124,15 @@ public sealed class LibraryReadService(
         return await ProjectRailAsync(ordered, appUserId, cancellationToken);
     }
 
+    /// <summary>
+    /// Projects already-loaded items into library cards (localized title, year, poster, kind). Shared with
+    /// the person filmography read so it reuses the same poster/title resolution; pass <c>appUserId</c> null
+    /// when the caller does not need per-user playback state.
+    /// </summary>
+    public async Task<IReadOnlyList<LibraryItemDto>> ProjectCardsAsync(
+        IReadOnlyList<MediaItem> items, int? appUserId, CancellationToken cancellationToken) =>
+        await ProjectItemsAsync(items, appUserId, cancellationToken);
+
     private async Task<List<LibraryItemDto>> ProjectItemsAsync(
         IReadOnlyList<MediaItem> items, int? appUserId, CancellationToken cancellationToken)
     {
@@ -238,9 +247,11 @@ public sealed class LibraryReadService(
         var userDataByItem = await userData.LoadAsync(appUserId, [item], cancellationToken);
         var runtimeTicks = meta?.RuntimeTicks
             ?? (mediaSources.Count > 0 ? mediaSources.Max(source => source.DurationTicks) : null);
-        // Cast, crew, networks, studios, trailer, keywords, … all live in the cached TMDb payload (Raw);
-        // parse them once here rather than persisting a column per field.
+        // Crew, networks, studios, trailer, keywords, … live in the cached TMDb payload (Raw); parse them
+        // once here rather than persisting a column per field. Cast is the exception: it comes from the
+        // normalized Person/MediaItemPerson join so each member carries a stable person id the UI can link to.
         var rich = ParseRich(meta?.Raw, item.Kind);
+        var cast = await LoadCastAsync(item.Id, cancellationToken);
 
         return new LibraryDetailDto(
             item.Id,
@@ -275,7 +286,7 @@ public sealed class LibraryReadService(
             rich.Homepage,
             rich.ImdbId,
             rich.TrailerUrl,
-            rich.Cast,
+            cast,
             rich.Directors,
             rich.Creators,
             rich.Studios,
@@ -473,7 +484,6 @@ public sealed class LibraryReadService(
 
         public IReadOnlyList<NetworkDto>? Networks { get; init; }
         public IReadOnlyList<StudioDto> Studios { get; init; } = [];
-        public IReadOnlyList<CastMemberDto> Cast { get; init; } = [];
         public IReadOnlyList<string> Directors { get; init; } = [];
         public IReadOnlyList<string> Creators { get; init; } = [];
         public IReadOnlyList<string> Keywords { get; init; } = [];
@@ -515,7 +525,6 @@ public sealed class LibraryReadService(
             {
                 Networks = networks.Count > 0 ? networks : null,
                 Studios = ParseBrands(root, "production_companies").Select(brand => new StudioDto(brand.Name, brand.LogoUrl)).ToList(),
-                Cast = ParseCast(root),
                 Directors = ParseCrewJob(root, "Director"),
                 Creators = ParseNames(root, "created_by"),
                 Keywords = ParseKeywords(root),
@@ -555,30 +564,20 @@ public sealed class LibraryReadService(
         return brands;
     }
 
-    private static IReadOnlyList<CastMemberDto> ParseCast(JsonElement root)
-    {
-        if (!TryGetArray(root, "credits", "cast", out var cast))
-        {
-            return [];
-        }
-
-        var members = new List<CastMemberDto>();
-        foreach (var member in cast.EnumerateArray())
-        {
-            if (EmptyToNull(JsonString(member, "name")) is not { } name)
-            {
-                continue;
-            }
-
-            members.Add(new CastMemberDto(name, EmptyToNull(JsonString(member, "character")), ImageUrl(JsonString(member, "profile_path"))));
-            if (members.Count >= MaxCast)
-            {
-                break;
-            }
-        }
-
-        return members;
-    }
+    // The top-billed cast from the normalized Person/MediaItemPerson join (written at enrich time), ordered
+    // by billing order. Each member carries its stable provider identity so the UI can link to the person
+    // page — unlike the old Raw-payload parse, which had only a name.
+    private async Task<IReadOnlyList<CastMemberDto>> LoadCastAsync(Guid itemId, CancellationToken cancellationToken) =>
+        await database.MediaItemPersons.AsNoTracking()
+            .Where(credit => credit.MediaItemId == itemId && credit.Role == PersonRole.Cast)
+            .OrderBy(credit => credit.Order)
+            .Join(
+                database.Persons.AsNoTracking(),
+                credit => credit.PersonId,
+                person => person.Id,
+                (credit, person) => new CastMemberDto(person.Provider, person.ProviderId, person.Name, credit.Character, person.ProfileUrl))
+            .Take(MaxCast)
+            .ToListAsync(cancellationToken);
 
     private static IReadOnlyList<string> ParseCrewJob(JsonElement root, string job)
     {

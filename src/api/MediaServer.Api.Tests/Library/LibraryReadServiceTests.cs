@@ -274,23 +274,13 @@ public sealed class LibraryReadServiceTests : IDisposable
                 Assert.Null(studio.LogoUrl);
             });
 
-        Assert.Collection(
-            detail.Cast,
-            member =>
-            {
-                Assert.Equal("Leonardo DiCaprio", member.Name);
-                Assert.Equal("Cobb", member.Character);
-                Assert.Equal("https://image.tmdb.org/t/p/original/leo.jpg", member.ProfileUrl);
-            },
-            member =>
-            {
-                Assert.Equal("Joseph Gordon-Levitt", member.Name);
-                Assert.Null(member.ProfileUrl);
-            });
+        // Cast is no longer projected from Raw — it now comes from the Person/MediaItemPerson join, with no
+        // join rows seeded here. Join-backed cast (and its stable person ids) is covered by its own test.
+        Assert.Empty(detail.Cast);
     }
 
     [Fact]
-    public async Task Detail_for_series_parses_creators_status_counts_and_cast_from_raw()
+    public async Task Detail_for_series_parses_creators_status_and_counts_from_raw()
     {
         using (var context = _db.Create())
         {
@@ -330,8 +320,46 @@ public sealed class LibraryReadServiceTests : IDisposable
         Assert.Equal("tt0903747", detail.ImdbId);
         Assert.Equal("https://www.youtube.com/watch?v=bbtrailer", detail.TrailerUrl);
         Assert.Equal(["drugs"], detail.Keywords);
-        Assert.Equal("Walter White", Assert.Single(detail.Cast).Character);
+        Assert.Empty(detail.Cast); // cast comes from the Person join now, not this Raw payload
         Assert.NotNull(detail.Networks); // networks still parse from the same payload
+    }
+
+    [Fact]
+    public async Task Detail_cast_is_read_from_the_person_join_with_stable_provider_ids()
+    {
+        // Two cast members on the movie, intentionally inserted out of billing order to prove the read orders
+        // by Order. ProfileUrl comes from the Person row; provider+providerId give the UI a person-page link.
+        await using (var context = _db.Create())
+        {
+            var leo = new Person { Id = Guid.NewGuid(), Provider = "tmdb", ProviderId = "6193", Name = "Leonardo DiCaprio", ProfileUrl = "https://image.tmdb.org/t/p/original/leo.jpg", UpdatedAt = DateTimeOffset.UtcNow };
+            var jgl = new Person { Id = Guid.NewGuid(), Provider = "tmdb", ProviderId = "24045", Name = "Joseph Gordon-Levitt", ProfileUrl = null, UpdatedAt = DateTimeOffset.UtcNow };
+            context.Persons.AddRange(leo, jgl);
+            context.MediaItemPersons.AddRange(
+                new MediaItemPerson { Id = Guid.NewGuid(), MediaItemId = _movieId, PersonId = jgl.Id, Role = PersonRole.Cast, Character = "Arthur", Order = 1 },
+                new MediaItemPerson { Id = Guid.NewGuid(), MediaItemId = _movieId, PersonId = leo.Id, Role = PersonRole.Cast, Character = "Cobb", Order = 0 },
+                // A crew row for the same person must not leak into the cast list.
+                new MediaItemPerson { Id = Guid.NewGuid(), MediaItemId = _movieId, PersonId = leo.Id, Role = PersonRole.Crew, Job = "Director", Department = "Directing", Order = 0 });
+            await context.SaveChangesAsync();
+        }
+
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        Assert.Collection(
+            detail!.Cast,
+            member =>
+            {
+                Assert.Equal("tmdb", member.Provider);
+                Assert.Equal("6193", member.ProviderId); // billed first (Order 0)
+                Assert.Equal("Leonardo DiCaprio", member.Name);
+                Assert.Equal("Cobb", member.Character);
+                Assert.Equal("https://image.tmdb.org/t/p/original/leo.jpg", member.ProfileUrl);
+            },
+            member =>
+            {
+                Assert.Equal("24045", member.ProviderId);
+                Assert.Equal("Arthur", member.Character);
+                Assert.Null(member.ProfileUrl); // no profile on the person row
+            });
     }
 
     [Fact]
