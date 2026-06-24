@@ -16,11 +16,15 @@ export function personHref(provider: string, providerId: string): string {
   return `/people/${provider}-${providerId}`;
 }
 
+// Splits a `[id]` route segment back into the provider identity. A malformed id (no dash, or an empty
+// half from a leading/trailing dash) yields a blank pair so callers can short-circuit instead of issuing
+// an invalid `/persons/{provider}/` request.
 export function parsePersonId(id: string): { provider: string; providerId: string } {
   const dash = id.indexOf("-");
-  return dash === -1
-    ? { provider: id, providerId: "" }
-    : { provider: id.slice(0, dash), providerId: id.slice(dash + 1) };
+  if (dash <= 0 || dash === id.length - 1) {
+    return { provider: "", providerId: "" };
+  }
+  return { provider: id.slice(0, dash), providerId: id.slice(dash + 1) };
 }
 
 // A poster tile used in both the library grids and the Home rails. Title is set in the serif display

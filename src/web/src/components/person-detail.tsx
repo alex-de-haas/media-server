@@ -16,22 +16,25 @@ import { cn } from "@/lib/utils";
  *  originating detail page. Addressed by the provider identity its cast members carry. */
 export function PersonDetail({ id }: { id: string }) {
   const { provider, providerId } = parsePersonId(id);
+  const valid = !!provider && !!providerId;
   const person = useQuery({
     queryKey: ["person", provider, providerId],
     queryFn: () => mediaServer.getPerson(provider, providerId),
+    enabled: valid,
   });
 
-  if (person.isPending) {
-    return <PersonDetailSkeleton />;
-  }
-
-  if (person.isError || !person.data) {
+  // A malformed route id never resolves to a person — skip the request and show not-found directly.
+  if (!valid || person.isError || (!person.isPending && !person.data)) {
     return (
       <div className="flex flex-col gap-3">
         <BackButton />
         <p className="text-muted-foreground text-sm">This person could not be found.</p>
       </div>
     );
+  }
+
+  if (person.isPending) {
+    return <PersonDetailSkeleton />;
   }
 
   const data = person.data;
@@ -113,7 +116,8 @@ function Biography({ text }: { text: string | null }) {
 
   return (
     <div className="flex max-w-2xl flex-col items-start gap-1">
-      <p className={cn("text-sm leading-relaxed", isLong && !expanded && "line-clamp-5")}>{text}</p>
+      {/* whitespace-pre-line keeps the provider's paragraph breaks instead of collapsing them to one block. */}
+      <p className={cn("text-sm leading-relaxed whitespace-pre-line", isLong && !expanded && "line-clamp-5")}>{text}</p>
       {isLong && (
         <button
           type="button"
@@ -134,7 +138,7 @@ function Filmography({
   crew,
 }: {
   cast: PersonFilmographyEntry[];
-  crew: { department: string; credits: PersonFilmographyEntry[] }[];
+  crew: PersonCrewGroup[];
 }) {
   const sections = [
     { title: "Acting", entries: cast },
@@ -152,9 +156,9 @@ function Filmography({
           <h2 className="text-lg font-semibold tracking-tight">{section.title}</h2>
           <Separator />
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
-            {section.entries.map((entry) => (
+            {section.entries.map((entry, index) => (
               <PosterCard
-                key={`${entry.id}:${entry.character ?? entry.job ?? ""}`}
+                key={`${entry.id}:${entry.character ?? entry.job ?? ""}:${index}`}
                 href={detailHref(entry.kind, entry.id)}
                 title={entry.title}
                 subtitle={entrySubtitle(entry)}
