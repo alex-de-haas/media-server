@@ -98,7 +98,7 @@ link between items:
   column per field. Each value is self-contained — it describes only the item
   whose `Raw` it came from — so the blob is a sufficient source of truth.
 - **Cross-item structure** (people, and the planned movie
-  [collections](collections.md)) is persisted as normalized, provider-identified
+  collections) is persisted as normalized, provider-identified
   entities. Each item's `Raw` is independent and cannot express a link between
   two items, so "the same actor across these ten films" or "these titles share a
   franchise" only exists once a person/collection is deduplicated by provider

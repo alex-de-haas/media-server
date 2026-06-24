@@ -70,9 +70,12 @@ public sealed class PersonReadService(
             var language = settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
             details = await metadata.FetchPersonAsync(new ProviderRef(person.Provider, person.ProviderId), language, cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             // The person page is still useful from the credits-derived fields; don't fail it on a fetch error.
+            // An HttpClient timeout surfaces as a TaskCanceledException (an OperationCanceledException) with the
+            // caller's token *not* cancelled, so the IsCancellationRequested guard keeps that transient case here
+            // while still letting a genuine caller-requested cancellation propagate.
             logger.LogDebug(exception, "Person-detail fetch failed for {Provider}:{ProviderId}.", person.Provider, person.ProviderId);
             return;
         }

@@ -80,9 +80,9 @@ public sealed record StudioDto(string Name, string? LogoUrl);
 /// <summary>
 /// A cast member: the stable person identity (<see cref="Provider"/> + <see cref="ProviderId"/>) so the UI
 /// can link to the person page, the actor name, the character they play (when known), and a profile photo url.
-/// Provider/ProviderId are null only for a legacy credit with no persisted person row.
+/// Cast is read from the Person join, so the identity is always present.
 /// </summary>
-public sealed record CastMemberDto(string? Provider, string? ProviderId, string Name, string? Character, string? ProfileUrl);
+public sealed record CastMemberDto(string Provider, string ProviderId, string Name, string? Character, string? ProfileUrl);
 
 public sealed record MediaSourceDto(
     Guid Id,
