@@ -19,6 +19,12 @@ public static class JellyfinIds
     /// <summary>Catalogs surface as Jellyfin collection folders (views).</summary>
     public static string Catalog(Guid catalogId) => Hex($"catalog|{catalogId:N}");
 
+    /// <summary>The single synthetic "Collections" view (a Jellyfin boxsets collection folder).</summary>
+    public static string CollectionsView() => Hex("view|collections");
+
+    /// <summary>A movie franchise surfaces as a Jellyfin <c>BoxSet</c> folder under the Collections view.</summary>
+    public static string Collection(Guid collectionId) => Hex($"collection|{collectionId:N}");
+
     /// <summary>Per playable source; lets clients pin a specific version via <c>MediaSourceId</c>.</summary>
     public static string MediaSource(Guid mediaSourceId) => Hex($"source|{mediaSourceId:N}");
 

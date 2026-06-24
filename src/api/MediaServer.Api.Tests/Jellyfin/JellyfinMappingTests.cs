@@ -30,7 +30,7 @@ public sealed class JellyfinMappingTests : IDisposable
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
             _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
-            new UserDataService(_db.Create(), TimeProvider.System), _settings);
+            new JellyfinCollectionService(_db.Create()), new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
 

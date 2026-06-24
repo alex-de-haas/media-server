@@ -13,8 +13,9 @@ namespace MediaServer.Api.Collections;
 public sealed class CollectionReadService(MediaServerDbContext database, LibraryReadService library)
 {
     // A single owned movie is not a browsable "franchise" — only surface a collection once at least this many
-    // of its movies are in the library, so the page is franchises rather than a wall of one-offs.
-    private const int MinMovies = 2;
+    // of its movies are in the library, so the page is franchises rather than a wall of one-offs. Shared with
+    // the Jellyfin/Infuse surface so the two never drift.
+    private const int MinMovies = CollectionMetadata.MinOwnedMovies;
 
     // Cap on IN-list parameters per query so a large library never exceeds SQLite's 999-parameter limit
     // (mirrors LibraryReadService.PostersAsync).

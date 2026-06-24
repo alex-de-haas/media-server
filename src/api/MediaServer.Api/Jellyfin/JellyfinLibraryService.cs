@@ -27,6 +27,7 @@ public sealed class JellyfinLibraryService(
     MediaServerDbContext database,
     JellyfinItemMapper mapper,
     JellyfinCatalogArtwork catalogArtwork,
+    JellyfinCollectionService collections,
     UserDataService userData,
     MediaServerSettings settings)
 {
@@ -37,15 +38,30 @@ public sealed class JellyfinLibraryService(
         var catalogs = await database.Catalogs.AsNoTracking().OrderBy(catalog => catalog.Name).ToListAsync(cancellationToken);
         var backdropTags = await catalogArtwork.GetLatestBackdropTagsAsync(
             catalogs.Select(catalog => catalog.Id).ToList(), cancellationToken);
-        return catalogs
+        var views = catalogs
             .Select(catalog => mapper.MapCollectionFolder(catalog, backdropTags.GetValueOrDefault(catalog.Id)))
             .ToList();
+
+        // Append the synthetic Collections view only when at least one franchise qualifies, so Infuse never
+        // shows an empty "Collections" library.
+        if (await collections.AnyEligibleAsync(cancellationToken))
+        {
+            views.Add(mapper.MapCollectionsView());
+        }
+
+        return views;
     }
 
-    /// <summary>A single library/view (collection folder) by its public id, or null if it is not a catalog.</summary>
+    /// <summary>A single library/view (collection folder) by its public id, or null if it is not a view.</summary>
     public async Task<BaseItemDto?> GetViewAsync(string publicId, CancellationToken cancellationToken)
     {
-        // A view is always a catalog, so query catalogs directly rather than probing MediaItems first.
+        // The synthetic Collections view exists only while a franchise qualifies.
+        if (JellyfinCollectionService.IsView(publicId))
+        {
+            return await collections.AnyEligibleAsync(cancellationToken) ? mapper.MapCollectionsView() : null;
+        }
+
+        // Otherwise a view is always a catalog, so query catalogs directly rather than probing MediaItems first.
         var catalogs = await database.Catalogs.AsNoTracking().ToListAsync(cancellationToken);
         var catalog = catalogs.FirstOrDefault(candidate => JellyfinIds.Catalog(candidate.Id) == publicId);
         return catalog is null ? null : mapper.MapCollectionFolder(catalog, await BackdropTagAsync(catalog.Id, cancellationToken));
@@ -61,6 +77,14 @@ public sealed class JellyfinLibraryService(
             .FirstOrDefaultAsync(candidate => candidate.PublicId == publicId, cancellationToken);
         if (item is null)
         {
+            // A BoxSet (movie franchise) is not a media item; resolve it to its collection.
+            if (await collections.ResolveAsync(publicId, cancellationToken) is { } collection)
+            {
+                var count = await collections.MemberCountAsync(collection.Id, cancellationToken);
+                return mapper.MapBoxSet(
+                    collection, count, JellyfinCollectionService.PrimaryTag(collection), JellyfinCollectionService.BackdropTag(collection));
+            }
+
             return null;
         }
 
@@ -71,6 +95,12 @@ public sealed class JellyfinLibraryService(
     public async Task<QueryResult<BaseItemDto>> ListItemsAsync(
         JellyfinItemsQuery query, int? appUserId, CancellationToken cancellationToken)
     {
+        // The Collections view's children are BoxSets, not media items — project them directly.
+        if (!string.IsNullOrEmpty(query.ParentId) && JellyfinCollectionService.IsView(query.ParentId))
+        {
+            return await ListBoxSetsAsync(query, cancellationToken);
+        }
+
         var items = await ResolveItemsAsync(query, cancellationToken);
 
         var total = items.Count;
@@ -83,6 +113,39 @@ public sealed class JellyfinLibraryService(
 
         var dtos = await MapManyAsync(page.ToList(), query.IncludeMediaSources, appUserId, cancellationToken);
         return new QueryResult<BaseItemDto>(dtos, total, start);
+    }
+
+    /// <summary>The BoxSets under the Collections view, honoring an explicit type filter, search, and paging.</summary>
+    private async Task<QueryResult<BaseItemDto>> ListBoxSetsAsync(JellyfinItemsQuery query, CancellationToken cancellationToken)
+    {
+        var start = query.StartIndex ?? 0;
+
+        // If the client asked for specific types and BoxSet is not among them, nothing here matches.
+        if (query.IncludeItemTypes is { Count: > 0 } types && !types.Contains("BoxSet"))
+        {
+            return new QueryResult<BaseItemDto>([], 0, start);
+        }
+
+        IEnumerable<(MovieCollection Collection, int Count)> eligible = await collections.EligibleAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(query.SearchTerm))
+        {
+            var term = query.SearchTerm.Trim();
+            eligible = eligible.Where(entry => entry.Collection.Name.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var all = eligible.ToList();
+        IEnumerable<(MovieCollection Collection, int Count)> page = all.Skip(start);
+        if (query.Limit is { } limit)
+        {
+            page = page.Take(limit);
+        }
+
+        var dtos = page
+            .Select(entry => mapper.MapBoxSet(
+                entry.Collection, entry.Count,
+                JellyfinCollectionService.PrimaryTag(entry.Collection), JellyfinCollectionService.BackdropTag(entry.Collection)))
+            .ToList();
+        return new QueryResult<BaseItemDto>(dtos, all.Count, start);
     }
 
     public async Task<QueryResult<BaseItemDto>> GetSeasonsAsync(
@@ -142,6 +205,14 @@ public sealed class JellyfinLibraryService(
         var query = TopLevelItems();
         if (!string.IsNullOrEmpty(parentPublicId))
         {
+            // "Latest" is meaningless for the synthetic Collections view / a BoxSet, and must not silently fall
+            // back to the whole library — that would leak unrelated titles into those rows.
+            if (JellyfinCollectionService.IsView(parentPublicId) ||
+                await collections.ResolveAsync(parentPublicId, cancellationToken) is not null)
+            {
+                return new QueryResult<BaseItemDto>([], 0);
+            }
+
             var catalogId = await ResolveCatalogIdAsync(parentPublicId, cancellationToken);
             if (catalogId is { } id)
             {
@@ -329,6 +400,11 @@ public sealed class JellyfinLibraryService(
                 ? database.MediaItems.AsNoTracking().Where(item => item.PublicId != null &&
                     (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series || item.Kind == MediaKind.Episode))
                 : TopLevelItems();
+        }
+        else if (await collections.ResolveAsync(query.ParentId, cancellationToken) is { } collection)
+        {
+            // Browsing into a BoxSet → its member movies (which also remain under their own movie catalog).
+            source = collections.MemberMovies(collection.Id);
         }
         else
         {

@@ -109,7 +109,9 @@ public sealed class JellyfinCatalogArtworkTests : IDisposable
             CoreOrigin = "http://localhost:3001",
             AppDataDir = Path.GetTempPath(),
         };
-        return new JellyfinImageService(_db.Create(), new JellyfinCatalogArtwork(_db.Create()), new StubHttpClientFactory(), hosty);
+        return new JellyfinImageService(
+            _db.Create(), new JellyfinCatalogArtwork(_db.Create()), new JellyfinCollectionService(_db.Create()),
+            new StubHttpClientFactory(), hosty);
     }
 
     public void Dispose()

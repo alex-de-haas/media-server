@@ -39,6 +39,44 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         BackdropImageTags = backdropTag is { Length: > 0 } backdrop ? [backdrop] : null,
     };
 
+    /// <summary>
+    /// The synthetic top-level "Collections" view: a Jellyfin <c>boxsets</c> collection folder that holds the
+    /// movie franchises. Unlike catalog views it advertises no artwork of its own (its children — the
+    /// <c>BoxSet</c>s — carry the posters), so Infuse renders it as a labelled library tile.
+    /// </summary>
+    public BaseItemDto MapCollectionsView() => new()
+    {
+        Id = JellyfinIds.CollectionsView(),
+        ServerId = server.ServerId,
+        Name = "Collections",
+        Type = "CollectionFolder",
+        CollectionType = "boxsets",
+        IsFolder = true,
+    };
+
+    /// <summary>
+    /// Projects a movie franchise as a Jellyfin <c>BoxSet</c> folder under the Collections view. Its members
+    /// are the owned movies (queried by <c>ParentId</c>); a movie still appears under its own movie catalog
+    /// too, exactly as Jellyfin models collections. Artwork is the collection's own poster/backdrop, served by
+    /// <c>JellyfinImageService</c> via the matching tags.
+    /// </summary>
+    public BaseItemDto MapBoxSet(MovieCollection collection, int childCount, string? primaryTag, string? backdropTag) => new()
+    {
+        Id = JellyfinIds.Collection(collection.Id),
+        ServerId = server.ServerId,
+        Name = collection.Name,
+        SortName = collection.Name,
+        Type = "BoxSet",
+        CollectionType = "boxsets",
+        IsFolder = true,
+        ParentId = JellyfinIds.CollectionsView(),
+        DateCreated = collection.UpdatedAt,
+        ChildCount = childCount,
+        RecursiveItemCount = childCount,
+        ImageTags = primaryTag is { Length: > 0 } primary ? new Dictionary<string, string> { ["Primary"] = primary } : null,
+        BackdropImageTags = backdropTag is { Length: > 0 } backdrop ? [backdrop] : null,
+    };
+
     public BaseItemDto MapItem(
         MediaItem item,
         MetadataRecord? meta,

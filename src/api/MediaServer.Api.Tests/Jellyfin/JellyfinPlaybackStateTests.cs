@@ -42,7 +42,8 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         _context = _db.Create();
         _userData = new UserDataService(_context, _time);
         _library = new JellyfinLibraryService(
-            _context, new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_context), _userData, settings);
+            _context, new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_context),
+            new JellyfinCollectionService(_context), _userData, settings);
         Seed();
     }
 
