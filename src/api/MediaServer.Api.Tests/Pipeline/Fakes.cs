@@ -27,6 +27,11 @@ public sealed class FakeMetadataProvider : IMetadataProvider
 
     public Task<IReadOnlyList<RemoteImage>> GetImagesAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<RemoteImage>>([new RemoteImage(ImageType.Primary, "en", "https://image/poster.jpg", 0)]);
+
+    public Func<ProviderRef, PersonDetails?> OnFetchPerson { get; set; } = _ => null;
+
+    public Task<PersonDetails?> FetchPersonAsync(ProviderRef reference, string language, CancellationToken cancellationToken) =>
+        Task.FromResult(OnFetchPerson(reference));
 }
 
 /// <summary>Returns a fixed probe result without invoking ffprobe.</summary>

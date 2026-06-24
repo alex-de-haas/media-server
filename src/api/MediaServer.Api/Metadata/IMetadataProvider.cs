@@ -29,6 +29,20 @@ public sealed record ProviderMetadata(
 public sealed record RemoteImage(ImageType Type, string? Language, string RemotePath, int SortOrder);
 
 /// <summary>
+/// Person-level details from a dedicated person fetch (TMDb <c>/person/{id}</c>). These are not present in
+/// the media credits payload, so they are fetched on demand and cached on the <c>Person</c> row. Dates are
+/// passed through as the provider's raw strings (e.g. <c>1974-11-11</c>); any field may be null.
+/// </summary>
+public sealed record PersonDetails(
+    string? Name,
+    string? Biography,
+    string? ProfilePath,
+    string? KnownForDepartment,
+    string? Birthday,
+    string? Deathday,
+    string? PlaceOfBirth);
+
+/// <summary>
 /// Search/match/fetch/images abstraction; TMDb is the first implementation. Identify uses
 /// <see cref="SearchAsync"/> + scoring; enrich uses <see cref="FetchAsync"/>/<see cref="GetImagesAsync"/>
 /// to populate <c>MetadataRecord</c>/<c>ImageAsset</c> keyed by provider+language. See
@@ -43,4 +57,10 @@ public interface IMetadataProvider
     Task<IReadOnlyList<ProviderMetadata>> FetchAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<RemoteImage>> GetImagesAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Fetches person-level details (biography, birth/death, place of birth, …) for a single person, localized
+    /// to <paramref name="language"/>. Returns null when the provider has no such person or the call fails.
+    /// </summary>
+    Task<PersonDetails?> FetchPersonAsync(ProviderRef reference, string language, CancellationToken cancellationToken);
 }

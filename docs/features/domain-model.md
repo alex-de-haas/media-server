@@ -39,6 +39,8 @@ erDiagram
   MediaSource ||--o{ MediaStream : "has"
   MediaItem ||--o{ MetadataRecord : "cached per provider+language"
   MediaItem ||--o{ ImageAsset : "artwork"
+  MediaItem ||--o{ MediaItemPerson : "credits"
+  Person ||--o{ MediaItemPerson : "credited in"
   MediaItem ||--o{ UserData : "per user"
   Download ||--o| IngestItem : "drives (transient)"
   IngestItem ||--o{ SourceFile : "owns"
@@ -149,7 +151,7 @@ change is intended; clients re-sync `UserData` from the server on refresh.
 | Genres | JSON | |
 | OfficialRating / CommunityRating | string? / double? | |
 | ReleaseDate / RuntimeTicks | nullable | |
-| Cast / Crew | JSON | kept as blob in v1 (normalize later if needed) |
+| Cast / Crew | JSON | retained blob; people are normalized into `Person`/`MediaItemPerson`. Detail **cast** is read from the join (each member carries a stable person id); crew/directors still project from `Raw` |
 | Raw | JSON | full provider payload |
 | FetchedAt | DateTime | |
 
@@ -164,6 +166,49 @@ change is intended; clients re-sync `UserData` from the server on refresh.
 | LocalPath | string? | cached under app data dir |
 | Tag | string | hash → Jellyfin `ImageTags` |
 | SortOrder | int | |
+
+**Person** — one cast/crew member, deduped across the whole library by provider identity `(Provider, ProviderId)`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| Id | Guid | PK (internal) |
+| Provider / ProviderId | string | dedup key, e.g. `tmdb` / TMDb person id as string |
+| Name | string | |
+| ProfilePath | string? | raw provider profile path; null when no photo |
+| ProfileUrl | string? | absolute, ready-to-render image URL derived from `ProfilePath` |
+| Biography | string? | from a person-detail fetch; not in media credits |
+| KnownForDepartment | string? | provider's "known for", e.g. `Acting` |
+| Birthday / Deathday | string? | provider date strings (e.g. `1974-11-11`); from a person-detail fetch |
+| PlaceOfBirth | string? | from a person-detail fetch |
+| DetailsFetchedAt | DateTimeOffset? | when the person-detail fetch last ran; drives the lazy/staleness refresh, distinct from `UpdatedAt` (which credit syncs also bump) |
+| UpdatedAt | DateTimeOffset | |
+
+The credits payload carries only name/profile/known-for; `Biography`,
+`Birthday`/`Deathday`, and `PlaceOfBirth` come from a separate person-detail
+fetch (`/person/{id}`) done lazily the first time a person page is viewed and
+refreshed on a staleness window keyed off `DetailsFetchedAt`.
+
+A `Person` is **shared** across every item it is credited on; per-item credit
+details live on the join, not here. Enrich upserts people by `(Provider,
+ProviderId)` and never duplicates a person per item. See [Metadata](metadata.md).
+
+**MediaItemPerson** — credit join linking a `Person` to a `MediaItem`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| Id | Guid | PK |
+| MediaItemId | Guid | FK |
+| PersonId | Guid | FK |
+| Role | PersonRole | Cast \| Crew |
+| Character | string? | portrayed character; set for `Cast` rows |
+| Job | string? | crew job, e.g. `Director`; set for `Crew` rows |
+| Department | string? | crew department, e.g. `Directing`; set for `Crew` rows |
+| Order | int | billing/display order within the item (provider billing order for cast) |
+
+One person can have several rows for the same item (e.g. an actor who also
+directed): a `Cast` row carrying the `Character` plus a `Crew` row carrying the
+`Job`. Enrich replaces an item's credits wholesale on each refetch, so the set
+converges to the latest payload while the shared `Person` rows outlive it.
 
 ## Entities — Acquisition & Pipeline
 
@@ -319,6 +364,7 @@ enum IngestStatus { Pending, Running, NeedsReview, Failed, Done }
 enum PipelinePhase { Acquisition, Processing }
 enum StreamType { Video, Audio, Subtitle }
 enum ImageType { Primary, Backdrop, Logo }
+enum PersonRole { Cast, Crew }
 enum SourceFileAssignmentStatus { Unassigned, Suggested, Confirmed, NeedsReview }
 enum UserRole { Admin, User }
 ```

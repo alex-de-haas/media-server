@@ -89,12 +89,49 @@ Common fields cached per language where applicable:
 The detail fetch uses TMDb `append_to_response`
 (`credits,external_ids,videos,release_dates|content_ratings,keywords`) so the
 single localized detail call already carries everything above — no extra
-round-trips. The full payload is kept in the per-language `Raw` JSON blob, and
-the read layer projects the derived fields (cast, crew, studios, trailer,
-keywords, collection, …) from it at display time rather than persisting a column
-per field. Official rating is the one such field promoted to its own column,
-mapped from the region-specific certification (the region is implied by the
-requested language, falling back to US).
+round-trips. The full payload is kept in the per-language `Raw` JSON blob. How a
+field leaves that blob depends on whether it is a property of the one item or a
+link between items:
+
+- **Single-item display attributes** (overview, tagline, studios, keywords,
+  trailer, …) are projected from `Raw` at display time rather than persisting a
+  column per field. Each value is self-contained — it describes only the item
+  whose `Raw` it came from — so the blob is a sufficient source of truth.
+- **Cross-item structure** (people, and the planned movie
+  [collections](collections.md)) is persisted as normalized, provider-identified
+  entities. Each item's `Raw` is independent and cannot express a link between
+  two items, so "the same actor across these ten films" or "these titles share a
+  franchise" only exists once a person/collection is deduplicated by provider
+  identity into its own row and joined back to the items. Cast and crew are
+  written to `Person` + `MediaItemPerson` on every enrich (see
+  [Domain model](domain-model.md)); each `Person` is shared library-wide by
+  `(Provider, ProviderId)`, and the join carries the per-item credit (character,
+  job, billing order).
+
+Official rating is the one display attribute promoted to its own column on
+`MetadataRecord`, mapped from the region-specific certification (the region is
+implied by the requested language, falling back to US).
+
+The detail **cast** is read from the `Person`/`MediaItemPerson` tables, so each
+cast member on a detail page carries its stable `(Provider, ProviderId)` and the
+UI links straight to a person page. The remaining people-derived detail fields
+(directors, creators) are still projected from `Raw`, which is sufficient since
+they are plain names with no cross-item identity to resolve.
+
+### Person details
+
+The credits payload only carries a person's name, profile path, and known-for
+department — not their biography or birth/death facts. Those come from a
+dedicated person fetch (TMDb `/person/{id}`, api_key as a query/Bearer credential,
+never logged) done **lazily**: the first time a person page is viewed, the
+`/api/persons/{provider}/{providerId}` read fetches the details and caches them on
+the `Person` row (`Biography`, `Birthday`/`Deathday`, `PlaceOfBirth`, refreshed
+`ProfilePath`/`KnownForDepartment`). A `DetailsFetchedAt` marker — separate from
+`UpdatedAt`, which credit syncs bump — drives a staleness window so the fetch
+runs at most once per person until it goes stale, never on every request. A
+provider miss leaves the row untouched and retries on the next view. The person
+page's filmography is the person's `MediaItemPerson` credits joined back to
+published library items, split into cast and crew (crew grouped by department).
 
 ## Caching and Refresh
 
