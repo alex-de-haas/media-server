@@ -1,24 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { setupApp } from "./support";
 
-test("deduplicates duplicate review files and candidates", async ({ page }) => {
-  const duplicatePath = ".incoming/57ae079cfcd94e8aa791a8c9c327a7e0/Zootopia.2.rus.LostFilm.TV.avi";
-  const nestedDuplicatePath = `${duplicatePath}/Zootopia.2.rus.LostFilm.TV.avi`;
+// The Resolve-match dialog lists each unresolved file with its metadata candidates (poster + title + score).
+// Duplicate source files are prevented at the backend (LocalTorrentInspector), so the dialog renders the
+// files it is given as-is — it does not de-duplicate.
+test("resolve match dialog lists metadata candidates for a needs-review item", async ({ page }) => {
+  const relativePath = ".incoming/57ae079cfcd94e8aa791a8c9c327a7e0/Zootopia.2.rus.LostFilm.TV.avi";
   const candidate = {
     reference: { provider: "tmdb", id: "1084242" },
     title: "Zootopia 2",
     year: 2025,
     score: 1,
-  };
-  const sourceFile = {
-    relativePath: duplicatePath,
-    sizeBytes: 1024,
-    assignmentStatus: "NeedsReview",
-    mediaItemId: null,
-    parsedTitle: "Zootopia 2",
-    parsedYear: null,
-    parsedSeason: null,
-    parsedEpisode: null,
+    posterUrl: null,
   };
 
   await setupApp(page, {
@@ -37,10 +30,19 @@ test("deduplicates duplicate review files and candidates", async ({ page }) => {
         stagesCompleted: ["Intake", "Download"],
         lastError: null,
         nextAttemptAt: null,
-        reviewCandidates: [candidate, candidate],
+        reviewCandidates: [candidate],
         sourceFiles: [
-          { id: "source-1", ...sourceFile },
-          { id: "source-2", ...sourceFile, relativePath: nestedDuplicatePath },
+          {
+            id: "source-1",
+            relativePath,
+            sizeBytes: 1024,
+            assignmentStatus: "NeedsReview",
+            mediaItemId: null,
+            parsedTitle: "Zootopia 2",
+            parsedYear: null,
+            parsedSeason: null,
+            parsedEpisode: null,
+          },
         ],
         createdAt: "2026-06-24T10:00:00Z",
         updatedAt: "2026-06-24T10:00:00Z",
@@ -53,7 +55,6 @@ test("deduplicates duplicate review files and candidates", async ({ page }) => {
 
   const dialog = page.getByRole("dialog", { name: "Resolve match" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText(duplicatePath, { exact: true })).toHaveCount(1);
-  await expect(dialog.getByText(nestedDuplicatePath, { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText(relativePath, { exact: true })).toHaveCount(1);
   await expect(dialog.getByRole("button", { name: /Zootopia 2 \(2025\).*100%/ })).toHaveCount(1);
 });
