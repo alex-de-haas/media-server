@@ -12,7 +12,11 @@ public sealed record ImagePayload(byte[] Content, string ContentType, string Tag
 /// The client addresses images by item id + image type, never by path.
 /// </summary>
 public sealed class JellyfinImageService(
-    MediaServerDbContext database, JellyfinCatalogArtwork catalogArtwork, IHttpClientFactory httpFactory, HostyOptions hosty)
+    MediaServerDbContext database,
+    JellyfinCatalogArtwork catalogArtwork,
+    JellyfinCollectionService collections,
+    IHttpClientFactory httpFactory,
+    HostyOptions hosty)
 {
     public const string HttpClientName = "jellyfin-images";
 
@@ -22,7 +26,9 @@ public sealed class JellyfinImageService(
         var asset = await ResolveAssetAsync(itemPublicId, type, tag, index, cancellationToken);
         if (asset is null)
         {
-            return null;
+            // Not a media item or catalog: it may be a BoxSet (collection), whose art is the collection's own
+            // remote poster/backdrop rather than a stored ImageAsset.
+            return await GetCollectionImageAsync(itemPublicId, type, cancellationToken);
         }
 
         if (asset.LocalPath is { Length: > 0 } cached && File.Exists(cached))
@@ -59,6 +65,69 @@ public sealed class JellyfinImageService(
         return tag is { Length: > 0 }
             ? candidates.FirstOrDefault(image => image.Tag == tag)
             : candidates.Skip(index).FirstOrDefault() ?? candidates.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Serves a BoxSet's artwork: the collection's own remote poster/backdrop, fetched on first request and
+    /// cached to disk under a deterministic name (a collection is not a media item, so there is no
+    /// <see cref="ImageAsset"/> row to track). Null when the id is not a collection or it has no such art.
+    /// </summary>
+    private async Task<ImagePayload?> GetCollectionImageAsync(string itemPublicId, ImageType type, CancellationToken cancellationToken)
+    {
+        var collection = await collections.ResolveAsync(itemPublicId, cancellationToken);
+        if (collection is null)
+        {
+            return null;
+        }
+
+        var remote = type == ImageType.Backdrop ? collection.BackdropUrl ?? collection.PosterUrl : collection.PosterUrl;
+        if (string.IsNullOrEmpty(remote))
+        {
+            return null;
+        }
+
+        var tag = (type == ImageType.Backdrop ? JellyfinCollectionService.BackdropTag(collection) : JellyfinCollectionService.PrimaryTag(collection))
+            ?? JellyfinCollectionService.PrimaryTag(collection)
+            ?? string.Empty;
+
+        var directory = Path.Combine(hosty.AppDataDir, "images");
+        var slot = type == ImageType.Backdrop ? "backdrop" : "primary";
+        var path = Path.Combine(directory, $"collection-{collection.Id:N}-{slot}{ExtensionFor(remote)}");
+        if (File.Exists(path))
+        {
+            return new ImagePayload(await File.ReadAllBytesAsync(path, cancellationToken), ContentTypeFor(path), tag);
+        }
+
+        var client = httpFactory.CreateClient(HttpClientName);
+        using var response = await client.GetAsync(remote, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? ContentTypeFor(path);
+        try
+        {
+            Directory.CreateDirectory(directory);
+            await File.WriteAllBytesAsync(path, bytes, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Serving still works even if the cache write fails.
+        }
+
+        return new ImagePayload(bytes, contentType, tag);
+    }
+
+    private static string ExtensionFor(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && Path.GetExtension(uri.AbsolutePath) is { Length: > 0 } extension)
+        {
+            return extension;
+        }
+
+        return ".jpg";
     }
 
     private async Task<ImagePayload?> FetchAndCacheAsync(ImageAsset asset, CancellationToken cancellationToken)

@@ -16,6 +16,12 @@ public sealed record CollectionInfo(string ProviderId, string Name, string? Post
 /// </summary>
 public static class CollectionMetadata
 {
+    /// <summary>
+    /// How many owned movies a franchise needs before it is surfaced as a browsable collection (web grid and
+    /// Infuse BoxSet alike). A single owned movie is not a franchise. Shared so the two surfaces never drift.
+    /// </summary>
+    public const int MinOwnedMovies = 2;
+
     private const string ImageBase = "https://image.tmdb.org/t/p/original";
 
     /// <summary>

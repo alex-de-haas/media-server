@@ -31,7 +31,9 @@ Protocol references:
 ## Non-Goals (initial)
 
 - Full Jellyfin administration API.
-- Live TV, DVR, music, photos, books, plugins, collections, playlists.
+- Live TV, DVR, music, photos, books, plugins, playlists. (Movie *collections* —
+  TMDb franchises as `BoxSet`s — are now supported; see
+  [collections.md](collections.md).)
 - DLNA.
 - On-the-fly transcoding (Media Server does no conversion).
 
@@ -178,6 +180,9 @@ Deferred compatibility endpoints:
 
 - Catalog (`movie`) → `CollectionFolder` with `CollectionType = movies`.
 - Catalog (`series`) → `CollectionFolder` with `CollectionType = tvshows`.
+- The synthetic Collections view → `CollectionFolder` with
+  `CollectionType = boxsets`; each qualifying `MovieCollection` → `BoxSet` whose
+  children are its owned movies. See [collections.md](collections.md).
 - Movie → `Movie`; Series → `Series`; Season → `Season`; Episode → `Episode`.
   Unmatched files are represented internally as `Video` but are **not exposed to
   Jellyfin clients** until they have a canonical identity.

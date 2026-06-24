@@ -28,7 +28,7 @@ public sealed class JellyfinStreamingTests : IDisposable
         var server = new JellyfinServerContext(hosty, settings);
         var library = new JellyfinLibraryService(
             _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
-            new UserDataService(_db.Create(), TimeProvider.System), settings);
+            new JellyfinCollectionService(_db.Create()), new UserDataService(_db.Create(), TimeProvider.System), settings);
         _resolver = new JellyfinStreamResolver(library, new CatalogPathSandbox());
         Seed();
     }

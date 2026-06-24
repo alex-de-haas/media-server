@@ -1,14 +1,14 @@
 # Collections (Movie Franchises)
 
-Status: Phase 1 (web) implemented; Phase 2 (Infuse) planned
+Status: Phase 1 (web) + Phase 2 (Infuse) implemented
 Created: 2026-06-24
 Updated: 2026-06-24
 
-> Phased scope. **Phase 1 (implemented)** adds a web "Collections" page that
-> groups owned movies by their TMDb franchise. **Phase 2 (planned)** exposes those
-> collections to Infuse as a separate Jellyfin catalog (`BoxSet`s) — this extends a
-> documented Jellyfin non-goal (see [jellyfin-compatibility.md](jellyfin-compatibility.md))
-> and is deliberately deferred behind Phase 1.
+> Phased scope, both shipped. **Phase 1** adds a web "Collections" page that groups
+> owned movies by their TMDb franchise. **Phase 2** exposes those collections to
+> Infuse as a separate Jellyfin catalog (`BoxSet`s) — this extends a documented
+> Jellyfin non-goal (see [jellyfin-compatibility.md](jellyfin-compatibility.md)),
+> taken on deliberately after Phase 1.
 
 ## Description
 
@@ -150,33 +150,44 @@ Mirrors the existing movies surface:
 A collection card's poster comes from the collection's own `poster_path`, with a
 fallback to the first member movie's poster.
 
-## Jellyfin / Infuse Surface (Phase 2)
+## Jellyfin / Infuse Surface (Phase 2, implemented)
 
-Deferred behind Phase 1; extends the documented Jellyfin non-goal.
+Extends the documented Jellyfin non-goal — collections are now exposed to native
+clients. All collection state on this surface is read-only and derived from the
+Phase 1 `MovieCollection` entity; no schema change.
 
-- Add a synthetic top-level view in
-  [`JellyfinLibraryService.GetViewsAsync`](../../src/api/MediaServer.Api/Jellyfin/JellyfinLibraryService.cs):
-  a `CollectionFolder` with `CollectionType = "boxsets"`, shown alongside the
-  catalog views.
-- New `BoxSet` shape in `JellyfinItemMapper` and stable ids via
-  `JellyfinIds.Collection(...)` plus an id for the collections view itself.
-- Parent resolution: `ParentId` = collections view → all `BoxSet`s;
-  `ParentId` = a `BoxSet` → the owned movies with that `CollectionId`. The
-  recursive top-level branch already returns only `Movie/Series/Episode`, so
-  `BoxSet`s are naturally excluded from flat recursive scans — the new view needs
-  its own handling.
-- BoxSet artwork: v1 uses the collection's poster/backdrop (served through the
-  existing image proxy), falling back to a member movie's poster. Image binaries
-  are currently cached per `MediaItem`; collection artwork is a small addition.
+- **Collections view.** [`JellyfinLibraryService.GetViewsAsync`](../../src/api/MediaServer.Api/Jellyfin/JellyfinLibraryService.cs)
+  appends a synthetic `CollectionFolder` with `CollectionType = "boxsets"`
+  (`JellyfinItemMapper.MapCollectionsView`) alongside the catalog views — but only
+  while at least one franchise qualifies, so Infuse never shows an empty library.
+- **BoxSets.** `JellyfinItemMapper.MapBoxSet` projects each qualifying
+  `MovieCollection` as a `BoxSet` folder; ids are stable via
+  `JellyfinIds.Collection(id)` and `JellyfinIds.CollectionsView()`.
+- **Eligibility.** A new [`JellyfinCollectionService`](../../src/api/MediaServer.Api/Jellyfin/JellyfinCollectionService.cs)
+  owns the "≥ `CollectionMetadata.MinOwnedMovies` owned movies" query (shared
+  constant with the web surface), member lookup, public-id resolution, and the
+  artwork tags.
+- **Parent navigation.** `ParentId` = collections view → its `BoxSet`s;
+  `ParentId` = a `BoxSet` → that collection's owned movies (which still also live
+  under their movie catalog, exactly as Jellyfin models collections). `BoxSet`s
+  stay out of flat recursive scans (those return only `Movie/Series/Episode`), and
+  `Items/Latest` returns empty for the view/BoxSet rather than leaking the whole
+  library.
+- **Artwork.** A BoxSet advertises the collection's own TMDb poster/backdrop;
+  `JellyfinImageService` fetches and disk-caches it on first request (keyed by a
+  stable per-collection tag). The Collections view itself carries no artwork (its
+  BoxSets do), so Infuse renders it as a labelled tile.
 
 ## Open Decisions
 
 - **Entity vs bare column** (see Data Model). Decided: thin entity.
-- **Minimum size to surface a collection.** Default ≥ 2 owned movies.
-- **Missing movies.** Phase 1 shows owned movies only. Showing the full franchise
-  (greyed-out unowned entries) needs a `/collection/{id}` TMDb fetch and extra
-  `MovieCollection` fields/rows — out of scope unless requested.
-- **Phase 2 timing.** The Infuse catalog is a separate effort gated on Phase 1.
+- **Minimum size to surface a collection.** Decided: ≥ 2 owned movies
+  (`CollectionMetadata.MinOwnedMovies`), applied on both surfaces.
+- **Missing movies.** Both surfaces show owned movies only. Showing the full
+  franchise (greyed-out unowned entries) needs a `/collection/{id}` TMDb fetch and
+  extra `MovieCollection` fields/rows — out of scope unless requested.
+- **Collections view artwork.** The view itself shows no image (its BoxSets carry
+  the posters). Giving the view a representative tile is a possible later polish.
 
 ## Non-Goals
 
@@ -186,8 +197,10 @@ Deferred behind Phase 1; extends the documented Jellyfin non-goal.
 
 ## Testing Expectations
 
-- `LibraryReadServiceTests` already has a `belongs_to_collection` fixture; extend
-  it to cover collection-id extraction, grouping, the ≥ 2 threshold, and the
-  detail projection.
-- `CollectionSyncService` tests mirroring `PersonSyncServiceTests`: upsert by
-  `(Provider, ProviderId)`, FK set/clear convergence on re-fetch, movie-only.
+- `CollectionSyncServiceTests` / `CollectionReadServiceTests` / `CollectionMetadataTests`
+  cover Phase 1: parse, upsert by `(Provider, ProviderId)`, FK set/clear
+  convergence, the ≥ 2 threshold, ordering, and the poster fallback.
+- `JellyfinCollectionsTests` covers Phase 2: the boxsets view appears only when a
+  franchise qualifies, the view lists eligible BoxSets, a BoxSet maps with the
+  right shape/parent/child-count/poster, and browsing a BoxSet returns its member
+  movies.
