@@ -3,10 +3,13 @@
 import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { openEventStream } from "@/lib/sse";
-import type { Download, VpnStatus } from "@/lib/media-server";
+import type { CatalogRefreshJob, Download, VpnStatus } from "@/lib/media-server";
 
 // The same-origin BFF route that proxies to the internal `api` SSE endpoint (`/api/events`).
 const STREAM_PATH = "/api/proxy/api/events";
+
+// The Job.Type the catalog-wide metadata refresh emits (mirrors CatalogMetadataRefreshService.JobType).
+const CATALOG_REFRESH_JOB = "catalog:refresh-metadata";
 
 // Live torrent progress snapshot pushed on every `downloadProgress` event (mirrors the api DownloadProgress).
 interface DownloadProgressEvent {
@@ -22,6 +25,16 @@ interface DownloadProgressEvent {
 
 interface IngestStageEvent {
   status: string;
+}
+
+// Background-job lifecycle event (mirrors the api JobEvent). `relatedId` is the catalog id for a
+// catalog-wide metadata refresh.
+interface JobEvent {
+  jobId: string;
+  type: string;
+  relatedId: string | null;
+  status: string;
+  progress: number;
 }
 
 /**
@@ -44,7 +57,7 @@ function useRealtime() {
       // On (re)connect, reconcile anything missed while disconnected.
       onStatus: (connected) => {
         if (connected) {
-          invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"]);
+          invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"], ["catalog-refresh-jobs"]);
         }
       },
     });
@@ -74,8 +87,34 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
     case "jobProgress":
     case "jobCompleted":
     case "jobFailed":
-      invalidate(queryClient, ["ingest"]);
+      handleJobEvent(queryClient, event, data as JobEvent);
       break;
+  }
+}
+
+// Catalog refresh jobs drive their own UI (a progress bar on the catalog row); every other job type just
+// nudges the activity view to refetch.
+function handleJobEvent(queryClient: QueryClient, event: string, job: JobEvent): void {
+  if (job.type !== CATALOG_REFRESH_JOB || !job.relatedId) {
+    invalidate(queryClient, ["ingest"]);
+    return;
+  }
+  patchCatalogRefresh(queryClient, event, job);
+}
+
+// Keep the ["catalog-refresh-jobs"] cache in step with the live job: upsert while running, drop when it
+// finishes. On completion the catalog's metadata changed, so refresh the library views that render it.
+function patchCatalogRefresh(queryClient: QueryClient, event: string, job: JobEvent): void {
+  const catalogId = job.relatedId!;
+  const done = event === "jobCompleted" || event === "jobFailed";
+
+  queryClient.setQueryData<CatalogRefreshJob[]>(["catalog-refresh-jobs"], (jobs = []) => {
+    const others = jobs.filter((entry) => entry.catalogId !== catalogId);
+    return done ? others : [...others, { catalogId, jobId: job.jobId, progress: job.progress }];
+  });
+
+  if (event === "jobCompleted") {
+    invalidate(queryClient, ["library"], ["collections"], ["recent"], ["resume"], ["nextup"]);
   }
 }
 

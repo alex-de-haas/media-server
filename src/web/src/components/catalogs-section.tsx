@@ -2,14 +2,15 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderSearch, MoreVertical, Trash2 } from "lucide-react";
+import { FolderSearch, MoreVertical, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type Catalog, type CatalogVolumeUsage } from "@/lib/media-server";
+import { mediaServer, type Catalog, type CatalogRefreshJob, type CatalogVolumeUsage } from "@/lib/media-server";
 import { formatBytes } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +40,13 @@ const SEGMENT_COLORS = [
 export function CatalogsSection() {
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
   const usage = useQuery({ queryKey: ["catalog-usage"], queryFn: mediaServer.listCatalogUsage });
+  // In-flight metadata refreshes, keyed by catalog. Seeded here, then kept live by RealtimeBridge over SSE.
+  const refreshes = useQuery({ queryKey: ["catalog-refresh-jobs"], queryFn: mediaServer.listActiveCatalogRefreshes });
+
+  const refreshByCatalog = useMemo(
+    () => new Map((refreshes.data ?? []).map((job) => [job.catalogId, job])),
+    [refreshes.data],
+  );
 
   const usedById = useMemo(() => {
     const map = new Map<string, number>();
@@ -83,6 +91,7 @@ export function CatalogsSection() {
                   // Once usage has loaded, a catalog absent from it (e.g. just added) is 0 used — not "free".
                   usedBytes={usage.data ? (usedById.get(catalog.id) ?? 0) : undefined}
                   color={colorById.get(catalog.id)}
+                  refresh={refreshByCatalog.get(catalog.id)}
                 />
               ))}
             </ul>
@@ -157,13 +166,16 @@ function CatalogRow({
   catalog,
   usedBytes,
   color,
+  refresh,
 }: {
   catalog: Catalog;
   usedBytes: number | undefined;
   color: string | undefined;
+  refresh: CatalogRefreshJob | undefined;
 }) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const refreshing = refresh !== undefined;
 
   const remove = useMutation({
     mutationFn: () => mediaServer.deleteCatalog(catalog.id),
@@ -174,6 +186,20 @@ function CatalogRow({
       toast.success("Catalog removed");
     },
     onError: (error) => toast.error("Couldn’t remove catalog", { description: errorMessage(error) }),
+  });
+
+  // Re-fetch provider metadata + images for every identified item in the catalog. Runs in the background;
+  // the bar below tracks it live over SSE (and finishes by itself), so this only kicks it off.
+  const refreshMetadata = useMutation({
+    mutationFn: () => mediaServer.refreshCatalogMetadata(catalog.id),
+    onSuccess: ({ jobId }) => {
+      // Show the bar immediately rather than waiting for the first SSE tick; RealtimeBridge reconciles it.
+      queryClient.setQueryData<CatalogRefreshJob[]>(["catalog-refresh-jobs"], (jobs = []) =>
+        jobs.some((job) => job.catalogId === catalog.id) ? jobs : [...jobs, { catalogId: catalog.id, jobId, progress: 0 }],
+      );
+      toast.success("Refreshing metadata — this runs in the background");
+    },
+    onError: (error) => toast.error("Couldn’t refresh metadata", { description: errorMessage(error) }),
   });
 
   // Scan the catalog root for media files placed outside the app (a hand-copied collection) and ingest
@@ -193,46 +219,66 @@ function CatalogRow({
   });
 
   return (
-    <li className="flex items-center justify-between gap-3 rounded-md border p-2">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span
-            className="size-2 shrink-0 rounded-full"
-            style={{ backgroundColor: color ?? "var(--muted-foreground)" }}
-            aria-hidden
-          />
-          <span className="font-medium">{catalog.name}</span>
-          <Badge variant="secondary">{catalog.type}</Badge>
-          {!catalog.online && <Badge variant="destructive">offline</Badge>}
+    <li className="flex flex-col gap-2 rounded-md border p-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: color ?? "var(--muted-foreground)" }}
+              aria-hidden
+            />
+            <span className="font-medium">{catalog.name}</span>
+            <Badge variant="secondary">{catalog.type}</Badge>
+            {!catalog.online && <Badge variant="destructive">offline</Badge>}
+          </div>
+          <p className="text-muted-foreground truncate font-mono text-xs" title={catalog.root}>
+            {catalog.root}
+          </p>
         </div>
-        <p className="text-muted-foreground truncate font-mono text-xs" title={catalog.root}>
-          {catalog.root}
-        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-muted-foreground">
+            {usedBytes !== undefined ? `${formatBytes(usedBytes)} used` : `${formatBytes(catalog.freeBytes)} free`}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="ghost" size="icon-sm" aria-label="Catalog actions">
+                  <MoreVertical />
+                </Button>
+              }
+            />
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => scan.mutate()} disabled={scan.isPending || !catalog.online}>
+                <FolderSearch />
+                {scan.isPending ? "Scanning…" : "Scan for media"}
+              </DropdownMenuItem>
+              {/* Refresh pulls from the provider into the DB + image cache — it doesn't read the catalog
+                  volume, so (unlike Scan) it stays available while the volume is offline. */}
+              <DropdownMenuItem
+                onClick={() => refreshMetadata.mutate()}
+                disabled={refreshing || refreshMetadata.isPending}
+              >
+                <RotateCw />
+                {refreshing ? "Refreshing…" : "Refresh metadata"}
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
+                <Trash2 />
+                Remove
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <span className="text-muted-foreground">
-          {usedBytes !== undefined ? `${formatBytes(usedBytes)} used` : `${formatBytes(catalog.freeBytes)} free`}
-        </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button variant="ghost" size="icon-sm" aria-label="Catalog actions">
-                <MoreVertical />
-              </Button>
-            }
-          />
-          <DropdownMenuContent>
-            <DropdownMenuItem onClick={() => scan.mutate()} disabled={scan.isPending || !catalog.online}>
-              <FolderSearch />
-              {scan.isPending ? "Scanning…" : "Scan for media"}
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
-              <Trash2 />
-              Remove
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+
+      {refresh && (
+        <div className="flex items-center gap-2">
+          <Progress value={refresh.progress} className="h-1.5" />
+          <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">
+            Refreshing {refresh.progress}%
+          </span>
+        </div>
+      )}
 
       <RemoveCatalogDialog
         open={confirmOpen}

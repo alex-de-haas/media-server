@@ -74,5 +74,23 @@ public static class CatalogEndpoints
             var report = await import.ImportAsync(id, cancellationToken);
             return report is null ? Results.NotFound() : Results.Ok(report);
         }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // The catalogs with a metadata refresh currently in flight (job id + progress), for the UI.
+        group.MapGet("/refresh-metadata/active", async (CatalogRefreshCoordinator coordinator, CancellationToken cancellationToken) =>
+            Results.Ok(await coordinator.ListActiveAsync(cancellationToken)))
+            .RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Re-fetch provider metadata + images for every identified item in the catalog (admin only). Runs in
+        // the background as an observable job; progress streams over /api/events. 409 if one is already running.
+        group.MapPost("/{id:guid}/refresh-metadata", async (Guid id, CatalogRefreshCoordinator coordinator, CancellationToken cancellationToken) =>
+        {
+            var result = await coordinator.RequestAsync(id, cancellationToken);
+            return result.Status switch
+            {
+                CatalogRefreshRequestStatus.Started => Results.Accepted($"/api/catalogs/{id}/refresh-metadata", new { jobId = result.JobId }),
+                CatalogRefreshRequestStatus.AlreadyRunning => Results.Conflict(new { error = "A metadata refresh is already running for this catalog." }),
+                _ => Results.NotFound(),
+            };
+        }).RequireAuthorization(AppRoles.AdminPolicy);
     }
 }

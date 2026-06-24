@@ -30,6 +30,15 @@ public sealed class JobService(MediaServerDbContext database, IRealtimeNotifier 
         return job;
     }
 
+    /// <summary>Updates a running job's progress (0–100) and broadcasts it. Caller throttles call frequency.</summary>
+    public async Task ProgressAsync(Job job, int progress, CancellationToken cancellationToken)
+    {
+        job.Progress = Math.Clamp(progress, 0, 100);
+        job.UpdatedAt = DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync(cancellationToken);
+        await notifier.JobChangedAsync(RealtimeEvents.JobProgress, ToEvent(job), cancellationToken);
+    }
+
     public async Task CompleteAsync(Job job, CancellationToken cancellationToken)
     {
         job.Status = JobStatus.Completed;

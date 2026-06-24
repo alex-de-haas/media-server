@@ -411,6 +411,13 @@ export interface LibraryImportReport {
   skipped: number;
 }
 
+// A catalog whose metadata refresh is currently in flight, with its job id and 0–100 progress.
+export interface CatalogRefreshJob {
+  catalogId: string;
+  jobId: string;
+  progress: number;
+}
+
 async function send(path: string, method: string, body?: unknown): Promise<void> {
   await apiFetch(`${BASE}${path}`, {
     method,
@@ -431,6 +438,10 @@ export const mediaServer = {
     }),
   deleteCatalog: (id: string) => send(`/catalogs/${id}`, "DELETE"),
   scanCatalog: (id: string) => apiJson<LibraryImportReport>(`${BASE}/catalogs/${id}/scan`, { method: "POST" }),
+  // Kick off a background refresh of every identified item's metadata in the catalog; progress streams over SSE.
+  refreshCatalogMetadata: (id: string) =>
+    apiJson<{ jobId: string }>(`${BASE}/catalogs/${id}/refresh-metadata`, { method: "POST" }),
+  listActiveCatalogRefreshes: () => apiJson<CatalogRefreshJob[]>(`${BASE}/catalogs/refresh-metadata/active`),
 
   listDownloads: () => apiJson<Download[]>(`${BASE}/torrents`),
   getVpnStatus: () => apiJson<VpnStatus | null>(`${BASE}/vpn`),
