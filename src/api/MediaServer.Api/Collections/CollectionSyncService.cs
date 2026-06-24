@@ -95,8 +95,9 @@ public sealed class CollectionSyncService(MediaServerDbContext database)
             catch (DbUpdateException) when (attempt == 0)
             {
                 // A concurrent sync inserted this (Provider, ProviderId) collection first and the unique index
-                // rejected ours. Drop our losing insert and retry once, reloading to adopt the winner.
-                foreach (var entry in database.ChangeTracker.Entries<MovieCollection>().Where(entry => entry.State == EntityState.Added).ToList())
+                // rejected ours. Detach just our losing insert and retry once, reloading to adopt the winner.
+                var entry = database.Entry(collection);
+                if (entry.State == EntityState.Added)
                 {
                     entry.State = EntityState.Detached;
                 }

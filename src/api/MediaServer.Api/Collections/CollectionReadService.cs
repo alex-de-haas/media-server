@@ -16,26 +16,30 @@ public sealed class CollectionReadService(MediaServerDbContext database, Library
     // of its movies are in the library, so the page is franchises rather than a wall of one-offs.
     private const int MinMovies = 2;
 
+    // Cap on IN-list parameters per query so a large library never exceeds SQLite's 999-parameter limit
+    // (mirrors LibraryReadService.PostersAsync).
+    private const int ChunkSize = 500;
+
     /// <summary>Every collection with at least <see cref="MinMovies"/> owned movies, by name.</summary>
     public async Task<IReadOnlyList<CollectionSummaryDto>> ListAsync(CancellationToken cancellationToken)
     {
+        // Count owned movies per collection and apply the threshold in SQL (HAVING), so ineligible
+        // collections never leave the database.
         var counts = await database.MediaItems.AsNoTracking()
             .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null)
             .GroupBy(item => item.CollectionId!.Value)
+            .Where(group => group.Count() >= MinMovies)
             .Select(group => new { CollectionId = group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
 
-        var eligible = counts.Where(entry => entry.Count >= MinMovies).ToList();
-        if (eligible.Count == 0)
+        if (counts.Count == 0)
         {
             return [];
         }
 
-        var ids = eligible.Select(entry => entry.CollectionId).ToList();
-        var countById = eligible.ToDictionary(entry => entry.CollectionId, entry => entry.Count);
-        var collections = await database.MovieCollections.AsNoTracking()
-            .Where(collection => ids.Contains(collection.Id))
-            .ToListAsync(cancellationToken);
+        var ids = counts.Select(entry => entry.CollectionId).ToList();
+        var countById = counts.ToDictionary(entry => entry.CollectionId, entry => entry.Count);
+        var collections = await CollectionsByIdAsync(ids, cancellationToken);
         var posterFallback = await PosterFallbackAsync(ids, cancellationToken);
 
         return collections
@@ -76,24 +80,49 @@ public sealed class CollectionReadService(MediaServerDbContext database, Library
         return new CollectionDetailDto(collection.Id, collection.Name, poster, collection.BackdropUrl, ordered);
     }
 
+    // Loads the collection rows for the eligible ids, chunked so the IN-list never exceeds SQLite's limit.
+    private async Task<List<MovieCollection>> CollectionsByIdAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken)
+    {
+        var collections = new List<MovieCollection>(ids.Count);
+        foreach (var chunk in ids.Chunk(ChunkSize))
+        {
+            collections.AddRange(await database.MovieCollections.AsNoTracking()
+                .Where(collection => chunk.Contains(collection.Id))
+                .ToListAsync(cancellationToken));
+        }
+
+        return collections;
+    }
+
     // A representative poster per collection (the earliest member's), used when the collection itself has no
-    // artwork. One query joins the member movies to their primary images; the earliest year wins.
+    // artwork. Joins member movies to their primary images, chunked over the collection ids; the earliest
+    // year (then sort order) wins, merged across chunks.
     private async Task<Dictionary<Guid, string>> PosterFallbackAsync(IReadOnlyList<Guid> collectionIds, CancellationToken cancellationToken)
     {
-        var rows = await database.MediaItems.AsNoTracking()
-            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie &&
-                item.CollectionId != null && collectionIds.Contains(item.CollectionId.Value))
-            .Join(
-                database.ImageAssets.AsNoTracking().Where(image => image.ImageType == ImageType.Primary),
-                item => item.Id,
-                image => image.MediaItemId,
-                (item, image) => new { CollectionId = item.CollectionId!.Value, item.Year, image.RemotePath, image.SortOrder })
-            .ToListAsync(cancellationToken);
+        var best = new Dictionary<Guid, (int Year, int SortOrder, string RemotePath)>();
+        foreach (var chunk in collectionIds.Chunk(ChunkSize))
+        {
+            var rows = await database.MediaItems.AsNoTracking()
+                .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie &&
+                    item.CollectionId != null && chunk.Contains(item.CollectionId.Value))
+                .Join(
+                    database.ImageAssets.AsNoTracking().Where(image => image.ImageType == ImageType.Primary),
+                    item => item.Id,
+                    image => image.MediaItemId,
+                    (item, image) => new { CollectionId = item.CollectionId!.Value, Year = item.Year ?? int.MaxValue, image.RemotePath, image.SortOrder })
+                .ToListAsync(cancellationToken);
 
-        return rows
-            .GroupBy(row => row.CollectionId)
-            .ToDictionary(
-                group => group.Key,
-                group => group.OrderBy(row => row.Year ?? int.MaxValue).ThenBy(row => row.SortOrder).First().RemotePath);
+            foreach (var row in rows)
+            {
+                if (!best.TryGetValue(row.CollectionId, out var current) ||
+                    row.Year < current.Year ||
+                    (row.Year == current.Year && row.SortOrder < current.SortOrder))
+                {
+                    best[row.CollectionId] = (row.Year, row.SortOrder, row.RemotePath);
+                }
+            }
+        }
+
+        return best.ToDictionary(entry => entry.Key, entry => entry.Value.RemotePath);
     }
 }

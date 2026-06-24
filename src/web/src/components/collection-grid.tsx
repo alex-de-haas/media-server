@@ -1,15 +1,16 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Layers } from "lucide-react";
 import { mediaServer } from "@/lib/media-server";
 import { PosterCard } from "@/components/poster-card";
-import { EmptyState, QueryState } from "@/components/states";
+import { QueryState } from "@/components/states";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * Poster grid of movie franchises. The internal `/api/library/collections` returns each collection with at
- * least two owned movies; cards link to the collection's member list. Mirrors {@link LibraryGrid}.
+ * least two owned movies; cards link to the collection's member list. Mirrors {@link LibraryGrid}: the
+ * RealtimeBridge invalidates `["collections"]` as items publish, with `refetchInterval` as the SSE-down
+ * fallback.
  */
 export function CollectionGrid() {
   const collections = useQuery({
@@ -20,25 +21,20 @@ export function CollectionGrid() {
 
   return (
     <QueryState query={collections} empty="No collections yet." pending={<PosterGridSkeleton />}>
-      {(items) => {
-        if (!items.length) {
-          return <EmptyState icon={Layers}>Nothing here yet.</EmptyState>;
-        }
-        return (
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
-            {items.map((collection) => (
-              <PosterCard
-                key={collection.id}
-                href={`/collections/${collection.id}`}
-                title={collection.name}
-                subtitle={`${collection.itemCount} movies`}
-                posterUrl={collection.posterUrl}
-                userData={null}
-              />
-            ))}
-          </div>
-        );
-      }}
+      {(items) => (
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+          {items.map((collection) => (
+            <PosterCard
+              key={collection.id}
+              href={`/collections/${collection.id}`}
+              title={collection.name}
+              subtitle={`${collection.itemCount} movies`}
+              posterUrl={collection.posterUrl}
+              userData={null}
+            />
+          ))}
+        </div>
+      )}
     </QueryState>
   );
 }

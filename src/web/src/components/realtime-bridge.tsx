@@ -61,9 +61,9 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
       break;
     case "ingestStageChanged":
       invalidate(queryClient, ["ingest"]);
-      // A published item changes the library + Home rails.
+      // A published item changes the library, its collections, and the Home rails.
       if ((data as IngestStageEvent).status === "Done") {
-        invalidate(queryClient, ["library"], ["recent"], ["resume"], ["nextup"]);
+        invalidate(queryClient, ["library"], ["collections"], ["recent"], ["resume"], ["nextup"]);
       }
       break;
     case "vpnStatusChanged":
