@@ -290,11 +290,52 @@ export interface Studio {
   logoUrl: string | null;
 }
 
-// A cast member: actor, the character they play (when known), and a profile photo.
+// A cast member: actor, the character they play (when known), and a profile photo. `provider`/
+// `providerId` are the stable person identity used to link to the person page; cast is read from the
+// Person join server-side, so the identity is always present.
 export interface CastMember {
+  provider: string;
+  providerId: string;
   name: string;
   character: string | null;
   profileUrl: string | null;
+}
+
+// One entry in a person's filmography: a movie or series in the library they're credited on. `id` is the
+// media item id and doubles as the detail-page navigation target.
+export interface PersonFilmographyEntry {
+  id: string;
+  kind: string;
+  title: string;
+  year: number | null;
+  posterUrl: string | null;
+  // The portrayed character for a cast credit; null for crew.
+  character: string | null;
+  // The crew job (e.g. "Director") for a crew credit; null for cast.
+  job: string | null;
+}
+
+// A person's crew filmography for one department (e.g. "Directing"), entries newest first.
+export interface PersonCrewGroup {
+  department: string;
+  credits: PersonFilmographyEntry[];
+}
+
+// A person page: provider-identified details plus their filmography within the library, split into cast
+// (acting) credits and crew credits grouped by department.
+export interface Person {
+  provider: string;
+  providerId: string;
+  name: string;
+  profileUrl: string | null;
+  biography: string | null;
+  knownForDepartment: string | null;
+  // Birth/death dates as the provider returns them (e.g. "1974-11-11"); null when unknown.
+  birthday: string | null;
+  deathday: string | null;
+  placeOfBirth: string | null;
+  cast: PersonFilmographyEntry[];
+  crew: PersonCrewGroup[];
 }
 
 export interface Episode {
@@ -430,6 +471,10 @@ export const mediaServer = {
       body: JSON.stringify(input),
     }),
   scanLibrary: () => apiJson<LibraryScanReport>(`${BASE}/library/scan`, { method: "POST" }),
+
+  // Person page, keyed by the provider identity its cast members carry (CastMember.provider/providerId).
+  getPerson: (provider: string, providerId: string) =>
+    apiJson<Person>(`${BASE}/persons/${provider}/${providerId}`),
 
   searchMetadata: (input: MetadataSearchInput) =>
     apiJson<MetadataCandidate[]>(`${BASE}/metadata/search`, {

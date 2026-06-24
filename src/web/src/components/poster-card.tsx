@@ -9,6 +9,20 @@ export function detailHref(kind: string, id: string): string {
   return kind === "Series" ? `/series/${id}` : `/movies/${id}`;
 }
 
+// The person page is keyed by the provider identity its cast members carry, but the route is a single
+// `[id]` segment — so the pair is joined as `provider-providerId` and split back on the first dash
+// (provider tokens never contain one). Keep these two in sync.
+export function personHref(provider: string, providerId: string): string {
+  return `/people/${provider}-${providerId}`;
+}
+
+export function parsePersonId(id: string): { provider: string; providerId: string } {
+  const dash = id.indexOf("-");
+  return dash === -1
+    ? { provider: id, providerId: "" }
+    : { provider: id.slice(0, dash), providerId: id.slice(dash + 1) };
+}
+
 // A poster tile used in both the library grids and the Home rails. Title is set in the serif display
 // face ("content speaks serif"); the amber accent carries the resume bar and the watched badge.
 export function PosterCard({

@@ -16,6 +16,7 @@ import {
   type Studio,
 } from "@/lib/media-server";
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
+import { personHref } from "@/components/poster-card";
 import { RemapDialog } from "@/components/remap-dialog";
 import { formatBytes, formatRuntime } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
@@ -442,7 +443,8 @@ function CreditLine({ item }: { item: LibraryDetail }) {
   );
 }
 
-// Top-billed cast with headshots; a person without a photo falls back to a placeholder icon.
+// Top-billed cast with headshots; a person without a photo falls back to a placeholder icon. Each member
+// links to their person page (the cast DTO always carries a stable person identity).
 function CastList({ cast }: { cast: CastMember[] }) {
   if (!cast.length) {
     return <EmptyDetailPanel>No cast information available.</EmptyDetailPanel>;
@@ -452,25 +454,33 @@ function CastList({ cast }: { cast: CastMember[] }) {
     <section className="flex flex-col gap-3">
       <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
         {cast.map((member) => (
-          <li key={`${member.name}:${member.character ?? ""}`} className="flex flex-col gap-2">
-            <div className="bg-secondary aspect-[2/3] w-full overflow-hidden rounded-md ring-1 ring-black/5">
-              {member.profileUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={member.profileUrl} alt={member.name} className="h-full w-full object-cover" />
-              ) : (
-                <div className="text-muted-foreground flex h-full w-full items-center justify-center">
-                  <User className="size-8" aria-hidden />
-                </div>
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{member.name}</p>
-              {member.character && <p className="text-muted-foreground truncate text-xs">{member.character}</p>}
-            </div>
+          <li key={`${member.provider}-${member.providerId}:${member.character ?? ""}`}>
+            <CastCard member={member} />
           </li>
         ))}
       </ul>
     </section>
+  );
+}
+
+function CastCard({ member }: { member: CastMember }) {
+  return (
+    <Link href={personHref(member.provider, member.providerId)} className="group flex flex-col gap-2">
+      <div className="bg-secondary aspect-[2/3] w-full overflow-hidden rounded-md ring-1 ring-black/5 transition group-hover:opacity-90">
+        {member.profileUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={member.profileUrl} alt={member.name} className="h-full w-full object-cover" />
+        ) : (
+          <div className="text-muted-foreground flex h-full w-full items-center justify-center">
+            <User className="size-8" aria-hidden />
+          </div>
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium transition-colors group-hover:text-brand">{member.name}</p>
+        {member.character && <p className="text-muted-foreground truncate text-xs">{member.character}</p>}
+      </div>
+    </Link>
   );
 }
 
