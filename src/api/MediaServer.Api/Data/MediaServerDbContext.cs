@@ -8,6 +8,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<Catalog> Catalogs => Set<Catalog>();
     public DbSet<MediaItem> MediaItems => Set<MediaItem>();
+    public DbSet<MovieCollection> MovieCollections => Set<MovieCollection>();
     public DbSet<MediaSource> MediaSources => Set<MediaSource>();
     public DbSet<MediaStream> MediaStreams => Set<MediaStream>();
     public DbSet<MetadataRecord> MetadataRecords => Set<MetadataRecord>();
@@ -39,6 +40,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureAppUser(modelBuilder);
         ConfigureCatalog(modelBuilder);
         ConfigureMediaItem(modelBuilder);
+        ConfigureMovieCollection(modelBuilder);
         ConfigureMediaSource(modelBuilder);
         ConfigureMetadataRecord(modelBuilder);
         ConfigureImageAsset(modelBuilder);
@@ -110,6 +112,25 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
             .WithMany()
             .HasForeignKey(entity => entity.ParentId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // Movie → franchise/collection (one-to-many). SetNull (not Cascade): pruning a collection must never
+        // delete its movies, it just unlinks them.
+        item.HasIndex(entity => entity.CollectionId);
+        item.HasOne(entity => entity.Collection)
+            .WithMany(entity => entity.Movies)
+            .HasForeignKey(entity => entity.CollectionId)
+            .OnDelete(DeleteBehavior.SetNull);
+    }
+
+    private static void ConfigureMovieCollection(ModelBuilder modelBuilder)
+    {
+        var collection = modelBuilder.Entity<MovieCollection>();
+        collection.HasKey(entity => entity.Id);
+        collection.Property(entity => entity.Provider).IsRequired();
+        collection.Property(entity => entity.ProviderId).IsRequired();
+        collection.Property(entity => entity.Name).IsRequired();
+        // One row per provider identity; the upsert keys on this pair so a collection is shared across its movies.
+        collection.HasIndex(entity => new { entity.Provider, entity.ProviderId }).IsUnique();
     }
 
     private static void ConfigureMediaSource(ModelBuilder modelBuilder)

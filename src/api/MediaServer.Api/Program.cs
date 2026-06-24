@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using MediaServer.Api.Catalogs;
+using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Diagnostics;
@@ -93,6 +94,7 @@ builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
 // Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
 builder.Services.AddScoped<IdentifyService>();
 builder.Services.AddScoped<PersonSyncService>();
+builder.Services.AddScoped<CollectionSyncService>();
 builder.Services.AddScoped<EnrichService>();
 builder.Services.AddScoped<JobService>();
 builder.Services.AddScoped<IPipelineStage, IntakeStage>();
@@ -123,6 +125,7 @@ builder.Services.AddHostedService<DatabaseSnapshotWorker>();
 // Surface-neutral: it shares the domain + UserDataService with Jellyfin but never the Jellyfin DTOs.
 builder.Services.AddScoped<LibraryReadService>();
 builder.Services.AddScoped<PersonReadService>();
+builder.Services.AddScoped<CollectionReadService>();
 builder.Services.AddSingleton<LibraryFileEraser>();
 builder.Services.AddScoped<LibraryDeleteService>();
 builder.Services.AddScoped<RemapService>();
@@ -134,6 +137,8 @@ builder.Services.AddHostedService<LibraryScanWorker>();
 // One-off, idempotent backfill of cast/crew from already-cached metadata for pre-existing items.
 builder.Services.AddScoped<PersonBackfillService>();
 builder.Services.AddHostedService<PersonBackfillWorker>();
+builder.Services.AddScoped<CollectionBackfillService>();
+builder.Services.AddHostedService<CollectionBackfillWorker>();
 
 // Library import: scan a catalog root for orphan media files and ingest them from the identify stage.
 builder.Services.AddScoped<LibraryImportService>();
@@ -275,6 +280,7 @@ app.MapTorrentEndpoints();
 app.MapIngestEndpoints();
 app.MapLibraryEndpoints();
 app.MapPersonEndpoints();
+app.MapCollectionEndpoints();
 app.MapMetadataEndpoints();
 app.MapSettingsEndpoints();
 app.MapJellyfinCredentialEndpoints();

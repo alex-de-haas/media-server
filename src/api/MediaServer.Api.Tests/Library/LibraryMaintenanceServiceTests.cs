@@ -1,4 +1,5 @@
 using MediaServer.Api.Catalogs;
+using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
@@ -34,7 +35,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         _database,
         new CatalogPathSandbox(),
         new FilesystemInspector(),
-        new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }, new PersonSyncService(_database)),
+        new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }, new PersonSyncService(_database), new CollectionSyncService(_database)),
         _core,
         NullLogger<LibraryMaintenanceService>.Instance);
 

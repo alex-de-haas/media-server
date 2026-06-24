@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
@@ -13,7 +14,12 @@ namespace MediaServer.Api.Pipeline;
 /// <c>provider + language</c>. Idempotent: re-enriching refreshes existing records in place. See
 /// <c>docs/features/metadata.md</c>.
 /// </summary>
-public sealed class EnrichService(MediaServerDbContext database, IMetadataProvider provider, MediaServerSettings settings, PersonSyncService personSync)
+public sealed class EnrichService(
+    MediaServerDbContext database,
+    IMetadataProvider provider,
+    MediaServerSettings settings,
+    PersonSyncService personSync,
+    CollectionSyncService collectionSync)
 {
     public async Task EnrichAsync(Catalog catalog, MediaItem item, CancellationToken cancellationToken)
     {
@@ -74,6 +80,9 @@ public sealed class EnrichService(MediaServerDbContext database, IMetadataProvid
         if (primary is not null)
         {
             await personSync.SyncAsync(item.Id, reference.Provider, primary.Raw, cancellationToken);
+            // Link a movie to its franchise/collection from the same payload (no-op for non-movies). Kept
+            // separate from the metadata save so a sync failure can't strand the rest of the enrich.
+            await collectionSync.SyncAsync(item.Id, reference.Provider, primary.Raw, cancellationToken);
         }
     }
 
