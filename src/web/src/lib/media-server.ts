@@ -251,12 +251,48 @@ export interface LibraryDetail {
   seasons: SeasonSummary[] | null;
   // Distributor/network logos (Netflix, Apple TV+, …) for series; null for movies.
   networks: Network[] | null;
+  // Production status (Released, Ended, Returning Series, …).
+  status: string | null;
+  // Number of community ratings backing `communityRating`.
+  voteCount: number | null;
+  // Total seasons/episodes per TMDb (series only).
+  seasonCount: number | null;
+  episodeCount: number | null;
+  // Franchise/collection a movie belongs to (e.g. "The Lord of the Rings Collection").
+  collectionName: string | null;
+  homepage: string | null;
+  // IMDb id (tt…) for cross-linking.
+  imdbId: string | null;
+  // Best YouTube trailer URL, or null when none.
+  trailerUrl: string | null;
+  cast: CastMember[];
+  // Director(s) for movies.
+  directors: string[];
+  // Creator(s) for series.
+  creators: string[];
+  // Production companies / studios.
+  studios: Studio[];
+  // TMDb keyword tags.
+  keywords: string[];
 }
 
 // A TV network/distributor surfaced on series detail.
 export interface Network {
   name: string;
   logoUrl: string | null;
+}
+
+// A production company / studio (same shape as Network).
+export interface Studio {
+  name: string;
+  logoUrl: string | null;
+}
+
+// A cast member: actor, the character they play (when known), and a profile photo.
+export interface CastMember {
+  name: string;
+  character: string | null;
+  profileUrl: string | null;
 }
 
 export interface Episode {

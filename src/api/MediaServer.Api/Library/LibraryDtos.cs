@@ -45,10 +45,40 @@ public sealed record LibraryDetailDto(
     IReadOnlyList<MediaSourceDto> MediaSources,
     IReadOnlyList<SeasonSummaryDto>? Seasons,
     // Distributor/network logos (Netflix, Apple TV+, …) for series; null for movies.
-    IReadOnlyList<NetworkDto>? Networks);
+    IReadOnlyList<NetworkDto>? Networks,
+    // Production status (Released, Ended, Returning Series, …) from TMDb.
+    string? Status,
+    // Number of community ratings backing CommunityRating (qualifies a high score from few votes).
+    int? VoteCount,
+    // Total seasons/episodes per TMDb (series only); distinct from the locally-held SeasonSummary counts.
+    int? SeasonCount,
+    int? EpisodeCount,
+    // Franchise/collection this movie belongs to (e.g. "The Lord of the Rings Collection"); null otherwise.
+    string? CollectionName,
+    string? Homepage,
+    // IMDb id (tt…) for cross-linking; from TMDb external_ids.
+    string? ImdbId,
+    // Best YouTube trailer URL (official trailer preferred), or null when none is available.
+    string? TrailerUrl,
+    // Top-billed cast, in TMDb order.
+    IReadOnlyList<CastMemberDto> Cast,
+    // Director(s) for movies (from crew).
+    IReadOnlyList<string> Directors,
+    // Creator(s) for series (from created_by).
+    IReadOnlyList<string> Creators,
+    // Production companies / studios with their (optional) logos.
+    IReadOnlyList<StudioDto> Studios,
+    // TMDb keyword tags.
+    IReadOnlyList<string> Keywords);
 
 /// <summary>A TV network/distributor with its (optional) logo, surfaced on series detail.</summary>
 public sealed record NetworkDto(string Name, string? LogoUrl);
+
+/// <summary>A production company/studio with its (optional) logo.</summary>
+public sealed record StudioDto(string Name, string? LogoUrl);
+
+/// <summary>A cast member: actor name, the character they play (when known), and a profile photo url.</summary>
+public sealed record CastMemberDto(string Name, string? Character, string? ProfileUrl);
 
 public sealed record MediaSourceDto(
     Guid Id,
