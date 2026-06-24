@@ -24,7 +24,7 @@ public sealed class DisabledTorrentEngine : ITorrentEngine
     public TorrentDescriptor Inspect(TorrentSource source) => LocalTorrentInspector.Inspect(source);
 
     public Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken) =>
-        throw new InvalidOperationException(Unavailable);
+        Task.FromException<TorrentDescriptor>(new InvalidOperationException(Unavailable));
 
     // Commands against a torrent the engine never knew about are no-ops, so stale download rows can still
     // be paused/stopped/removed (the DB-side cleanup runs regardless) without surfacing a 500.
