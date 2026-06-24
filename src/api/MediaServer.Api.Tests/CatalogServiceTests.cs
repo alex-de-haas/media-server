@@ -78,7 +78,7 @@ public sealed class CatalogServiceTests : IDisposable
     [Fact]
     public async Task Rejects_root_outside_configured_mounts()
     {
-        var settings = new MediaServerSettings { CatalogMountRoots = ["/mnt/allowed"] };
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("allowed", "/mnt/allowed")] };
         var service = CreateService(settings);
 
         await Assert.ThrowsAsync<CatalogValidationException>(() => service.CreateAsync(Request(_tempRoot), CancellationToken.None));

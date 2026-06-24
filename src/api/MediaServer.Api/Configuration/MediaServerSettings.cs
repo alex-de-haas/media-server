@@ -41,10 +41,14 @@ public sealed class MediaServerSettings
     public string? TorrentEngineUrl { get; init; }
 
     /// <summary>
-    /// Catalog-root mounts from <c>HOSTY_MOUNT_CATALOGROOTS</c>. Each operator-configured catalog
-    /// root must live within one of these (when provided). May be empty under standalone local runs.
+    /// Catalog-root mounts from <c>HOSTY_MOUNT_CATALOGROOTS</c>, each carrying its operator-chosen
+    /// <see cref="CatalogMount.Label"/> and host/container <see cref="CatalogMount.Path"/>. Each
+    /// operator-configured catalog root must live within one of these (when provided). May be empty under
+    /// standalone local runs. The label is the only key shared with the torrent-engine's downloads mounts
+    /// (Hosty configures each app's mounts independently), so it is what we send the engine to pick the
+    /// matching download root — see <see cref="Torrents.RemoteTorrentEngine"/>.
     /// </summary>
-    public IReadOnlyList<string> CatalogMountRoots { get; init; } = [];
+    public IReadOnlyList<CatalogMount> CatalogMountRoots { get; init; } = [];
 
     public static MediaServerSettings FromConfiguration(IConfiguration configuration)
     {
@@ -77,13 +81,15 @@ public sealed class MediaServerSettings
     }
 
     /// <summary>
-    /// Parses the catalog-root mount injection. Core joins multiple mount paths with a comma into
-    /// <c>HOSTY_MOUNT_{KEY}</c> and rejects mount host paths containing a comma (or ':'), so comma is
-    /// the canonical separator here — splitting on it is safe and required for multi-mount setups.
-    /// Newline, ';', and <c>os.PathSeparator</c> are also accepted defensively, as are optional
-    /// <c>label=path</c> pairs.
+    /// Parses the catalog-root mount injection. Core joins the mounts with a comma into
+    /// <c>HOSTY_MOUNT_{KEY}</c> as <c>label=path</c> entries (and rejects mount host paths containing a
+    /// comma or ':'), so comma is the canonical separator and each entry's first <c>'='</c> splits its
+    /// label from its path. A host path may itself contain <c>'='</c>, so we split on the <b>first</b> one
+    /// only; an entry with no <c>'='</c> (an older Core that injected bare paths) falls back to the path's
+    /// base name as its label. Newline, ';', and <c>os.PathSeparator</c> are also accepted defensively, and
+    /// duplicate paths are dropped (first label wins).
     /// </summary>
-    internal static IReadOnlyList<string> ParseMountRoots(string? raw)
+    internal static IReadOnlyList<CatalogMount> ParseMountRoots(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
         {
@@ -91,15 +97,27 @@ public sealed class MediaServerSettings
         }
 
         var separators = new[] { ',', '\n', '\r', ';', Path.PathSeparator };
-        return raw
-            .Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(entry =>
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var mounts = new List<CatalogMount>();
+        foreach (var entry in raw.Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var equals = entry.IndexOf('=');
+            var path = (equals >= 0 ? entry[(equals + 1)..] : entry).Trim();
+            if (path.Length == 0 || !seen.Add(path))
             {
-                var equals = entry.IndexOf('=');
-                return equals >= 0 ? entry[(equals + 1)..].Trim() : entry;
-            })
-            .Where(path => path.Length > 0)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+                continue;
+            }
+
+            var label = equals >= 0
+                ? entry[..equals].Trim()
+                : Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            mounts.Add(new CatalogMount(label, path));
+        }
+
+        return mounts;
     }
 }
+
+/// <summary>A catalog-root mount: its Hosty <paramref name="Label"/> (the per-bind key shared with the
+/// torrent-engine's downloads mounts) and host/container <paramref name="Path"/>.</summary>
+public sealed record CatalogMount(string Label, string Path);

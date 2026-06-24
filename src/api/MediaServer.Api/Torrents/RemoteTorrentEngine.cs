@@ -92,10 +92,12 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     public async Task<TorrentDescriptor> AddAsync(
         TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken)
     {
+        var (mountLabel, savePath) = ToMountRelative(saveDirectory, _settings.CatalogMountRoots);
         var request = new AddDownloadRequest(
             (source as TorrentSource.Magnet)?.Uri,
             source is TorrentSource.File file ? Convert.ToBase64String(file.Content) : null,
-            ToMountRelative(saveDirectory, _settings.CatalogMountRoots),
+            mountLabel,
+            savePath,
             limits.MaxDownloadRate,
             limits.MaxUploadRate,
             autoStart);
@@ -112,11 +114,35 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
             return existing;
         }
 
-        response.EnsureSuccessStatusCode();
+        // Surface the engine's own error (e.g. an unknown mountLabel — a downloads mount whose host path /
+        // label the operator hasn't bound to match this catalog root) instead of a bare status code, so the
+        // operator gets an actionable message rather than a silent off-mount download.
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = await ReadEngineErrorAsync(response, cts.Token);
+            throw new InvalidOperationException(detail is null
+                ? $"torrent-engine rejected the download ({(int)response.StatusCode})."
+                : $"torrent-engine rejected the download: {detail}");
+        }
+
         var descriptor = await response.Content.ReadFromJsonAsync<TorrentDescriptor>(Json, cts.Token)
             ?? throw new InvalidOperationException("torrent-engine returned an empty descriptor.");
         SeedInitial(descriptor);
         return descriptor;
+    }
+
+    // Best-effort read of the engine's `{ "error": "..." }` body on a non-success response.
+    private static async Task<string?> ReadEngineErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var body = await response.Content.ReadFromJsonAsync<EngineError>(Json, cancellationToken);
+            return string.IsNullOrWhiteSpace(body?.Error) ? null : body.Error;
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException or HttpRequestException)
+        {
+            return null;
+        }
     }
 
     public Task PauseAsync(string infoHash, CancellationToken cancellationToken) => PostAsync($"/downloads/{infoHash}/pause", cancellationToken);
@@ -172,25 +198,28 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         }
     }
 
-    /// <summary>Translates the absolute local save directory (<c>{catalogRoot}/.incoming/{id}</c>) into a
-    /// path relative to the shared downloads mount, which the engine resolves against its own mount root
-    /// (the same host path). Falls back to the trailing <c>.incoming/{id}</c> segments.</summary>
-    internal static string ToMountRelative(string saveDirectory, IReadOnlyList<string> mountRoots)
+    /// <summary>Translates the absolute local save directory (<c>{catalogRoot}/.incoming/{id}</c>) into the
+    /// matching catalog mount's <c>Label</c> plus a path relative to that mount root. The engine resolves the
+    /// relative path against its own downloads root with the same label (the same host path), so the
+    /// post-download move stays on one filesystem. When no mount matches (standalone runs with no injected
+    /// mounts) the label is <c>null</c> and the relative path falls back to the trailing
+    /// <c>.incoming/{id}</c> segments — the engine then uses its single/default root.</summary>
+    internal static (string? Label, string Relative) ToMountRelative(string saveDirectory, IReadOnlyList<CatalogMount> mounts)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var full = Path.GetFullPath(saveDirectory);
-        foreach (var root in mountRoots)
+        foreach (var mount in mounts)
         {
-            var rootFull = Path.GetFullPath(root);
+            var rootFull = Path.GetFullPath(mount.Path);
             if (string.Equals(full, rootFull, comparison) ||
                 full.StartsWith(rootFull + Path.DirectorySeparatorChar, comparison))
             {
-                return Path.GetRelativePath(rootFull, full).Replace('\\', '/');
+                return (mount.Label, Path.GetRelativePath(rootFull, full).Replace('\\', '/'));
             }
         }
 
         var parent = Path.GetFileName(Path.GetDirectoryName(full)) ?? string.Empty;
-        return $"{parent}/{Path.GetFileName(full)}".TrimStart('/');
+        return (null, $"{parent}/{Path.GetFileName(full)}".TrimStart('/'));
     }
 
     // Links the caller's token with a per-request deadline for control (non-streaming) calls.
@@ -374,7 +403,9 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     }
 
     private sealed record AddDownloadRequest(
-        string? Magnet, string? TorrentBase64, string? SavePath, int MaxDownloadRate, int MaxUploadRate, bool AutoStart);
+        string? Magnet, string? TorrentBase64, string? MountLabel, string? SavePath, int MaxDownloadRate, int MaxUploadRate, bool AutoStart);
+
+    private sealed record EngineError(string? Error);
 
     private sealed record RemoteEvent(string Type, string InfoHash, TorrentSnapshot? Snapshot, VpnStatus? Vpn);
 }

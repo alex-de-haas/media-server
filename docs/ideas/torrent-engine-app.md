@@ -82,13 +82,22 @@ than netns-sharing.
 `.incoming/<downloadId>/` into the catalog. If the engine is a different container,
 downloaded files must land on a filesystem `media-server` can move from in place.
 
-- **Plan:** a **shared host-path mount** (Hosty `externalMounts`) bound into *both*
-  apps at the catalog root, so the torrent app writes into
+- **Plan:** **shared host-path mounts** (Hosty `externalMounts`) bound into *both*
+  apps at each catalog root, so the torrent app writes into
   `<catalog.root>/.incoming/<downloadId>/` and `media-server` performs the existing
   in-place move. No cross-container copy.
-- **Open:** how the catalog-root selection (currently a media-server concept) is
-  shared with the torrent app — the torrent app should be told only "write under this
-  staging path", staying ignorant of catalogs.
+- **Multiple roots:** media-server's `catalogRoots` mount is `multiple`, but Hosty has
+  no cross-app mount sharing — each app configures its mounts independently. The only
+  key shared across the two apps is the per-bind **label**. So the engine's `downloads`
+  mount is also `multiple`, the operator binds each catalog's host path into the engine
+  with the **same label**, and media-server resolves the catalog's mount label and sends
+  it as `mountLabel` on `POST /downloads`. The engine resolves the relative `savePath`
+  against the downloads root with that label, keeping the write — and therefore the
+  post-download move — on one filesystem. An unknown label is a `400` (clear operator
+  error) rather than a silent off-mount download.
+- **Resolved:** the torrent app stays ignorant of catalogs — it is told only a
+  `mountLabel` + relative staging `savePath` and resolves it against its own labelled
+  downloads root.
 
 ### 3. Control API + auth
 
@@ -98,7 +107,7 @@ downloaded files must land on a filesystem `media-server` can move from in place
 - Discovery via cross-app `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`; auth via Hosty app
   identity (the existing service-token/identity mechanism).
 - Sketch:
-  - `POST /downloads` `{ source (magnet|torrent), savePath, limits, keepSeeding }` → `{ infoHash }`
+  - `POST /downloads` `{ source (magnet|torrent), mountLabel, savePath, limits, keepSeeding }` → `{ infoHash }`
   - `GET  /downloads` / `GET /downloads/{infoHash}` → snapshot (state, progress, rates, peers, files, size)
   - `POST /downloads/{infoHash}/pause|resume|stop`
   - `DELETE /downloads/{infoHash}` `?deleteFiles=`

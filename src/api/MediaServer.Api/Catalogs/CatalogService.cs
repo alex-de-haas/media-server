@@ -32,12 +32,8 @@ public sealed class CatalogService(
     public IReadOnlyList<CatalogMountResponse> ListMounts()
     {
         return settings.CatalogMountRoots
-            .Select(path =>
-            {
-                var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                var label = Path.GetFileName(trimmed);
-                return new CatalogMountResponse(string.IsNullOrEmpty(label) ? path : label, path);
-            })
+            .Select(mount => new CatalogMountResponse(
+                string.IsNullOrEmpty(mount.Label) ? mount.Path : mount.Label, mount.Path))
             .ToList();
     }
 
@@ -232,7 +228,7 @@ public sealed class CatalogService(
 
         var withinMount = settings.CatalogMountRoots.Any(mount =>
         {
-            var normalized = Path.GetFullPath(mount);
+            var normalized = Path.GetFullPath(mount.Path);
             var withSeparator = normalized.EndsWith(Path.DirectorySeparatorChar) ? normalized : normalized + Path.DirectorySeparatorChar;
             return root.Equals(normalized, StringComparison.Ordinal) || root.StartsWith(withSeparator, StringComparison.Ordinal);
         });

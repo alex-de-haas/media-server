@@ -31,8 +31,9 @@ Priority:
 
 **Status.** Implemented in Hosty Core as `externalMounts` (`kind: host-path`,
 `multiple`, `mode`, `service`, `required`); configured paths are injected as
-`HOSTY_MOUNT_{KEY}` (docker → `/mnt/{key}/{label}` binds, dev → host paths). This
-unblocks the `docker` runtime profile, now the v1 delivery target.
+`HOSTY_MOUNT_{KEY}` as comma-joined `label=path` entries (docker → `/mnt/{key}/{label}`
+binds, dev → host paths). This unblocks the `docker` runtime profile, now the v1
+delivery target.
 
 **Problem (historical).** Catalog roots are large media folders that must live
 outside app data, be configured by the operator after install, survive app
@@ -50,9 +51,12 @@ Core-managed, operator-configured set of host-path → container-path binds:
 }
 ```
 
-Core injects the active binds at runtime, e.g.
-`HOSTY_MOUNT_CATALOGROOTS=/srv/movies-4k,/srv/anime` (under `docker` these are bind
-mounts; under `dev` they are the configured host paths read directly).
+Core injects the active binds at runtime as comma-joined `label=path` entries, e.g.
+`HOSTY_MOUNT_CATALOGROOTS=movies-4k=/srv/movies-4k,anime=/srv/anime` (under `docker`
+these are bind mounts; under `dev` they are the configured host paths read directly).
+The label is the per-bind key Media Server forwards to the torrent-engine (`mountLabel`)
+so it picks the downloads mount on the same host path — see
+[Torrent engine app](../ideas/torrent-engine-app.md).
 
 **How Media Server uses it.** Reads the injected roots and uses a transient
 `.incoming/` staging dir plus the canonical media tree under each for download and
