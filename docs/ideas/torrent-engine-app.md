@@ -1,7 +1,19 @@
 # Idea: Standalone Torrent Engine App (VPN-isolated)
 
-Status: Proposed
+Status: Implemented
 Created: 2026-06-22
+Updated: 2026-06-24
+
+> **Realized (2026-06-24).** This is no longer a proposal. The standalone
+> `torrent-engine` app exists (sibling repo `../torrent-engine`: manifest +
+> Dockerfile, in-container OpenVPN with a killswitch gate, a `multiple` labelled
+> `downloads` mount, and the full HTTP control API + SSE stream). The media-server
+> side is done too: the in-process MonoTorrent engine was removed and replaced by
+> `RemoteTorrentEngine` (a thin HTTP/SSE client behind `ITorrentEngine`), discovered
+> via `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`, with a `DisabledTorrentEngine` fallback
+> when the dependency is absent. Phases 2–4 below are complete; only phase 5
+> (multiple consumers) remains future. See
+> [Torrents and organizer](../features/torrents-and-organizer.md).
 
 ## Motivation
 
@@ -117,14 +129,15 @@ downloaded files must land on a filesystem `media-server` can move from in place
 
 ## Phased rollout
 
-1. **(now, done)** Revert `api` to bridge + raw-port; document the WSL2 mirrored /
+1. **(done)** Revert `api` to bridge + raw-port; document the WSL2 mirrored /
    per-OS throughput guidance. Interim throughput = 3–5 MB/s on WSL2-mirrored.
-2. **docker-host**: add the capabilities/device manifest feature (NET_ADMIN +
+2. **(done) docker-host**: add the capabilities/device manifest feature (NET_ADMIN +
    /dev/net/tun), install-review gated.
-3. **torrent-engine app**: extract MonoTorrent + control API + SSE into a standalone
-   app image with in-container OpenVPN + killswitch.
-4. **media-server**: replace the in-process engine with the API client; wire the
-   shared downloads mount; re-plumb the coordinator/SSE.
+3. **(done) torrent-engine app**: extract MonoTorrent + control API + SSE into a
+   standalone app image with in-container OpenVPN + killswitch.
+4. **(done) media-server**: replace the in-process engine with the API client
+   (`RemoteTorrentEngine`, `DisabledTorrentEngine` fallback); wire the shared
+   downloads mount (catalog `mountLabel`); re-plumb the coordinator/SSE.
 5. (later, only on demand) generalize to multiple consumers.
 
 ## Open questions

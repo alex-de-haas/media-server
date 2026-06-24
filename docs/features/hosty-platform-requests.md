@@ -252,10 +252,15 @@ rate limiting, and temporary/permanent lockout (already specced in
 **Status.** Implemented in `docker-host` as a minimal opt-in per-port extension
 (`expose: host` + `transport: ["tcp", "udp"]` on a manifest port); `expose: host`
 requires a pinned `hostPort`. Core publishes `0.0.0.0:host:container/proto` and
-injects `HOSTY_PORT_{KEY}` once. media-server declares a pinned `torrent` port and
-reads `HOSTY_PORT_TORRENT`. Router port-forwarding stays the operator's
+injects `HOSTY_PORT_{KEY}` once. Router port-forwarding stays the operator's
 responsibility (no Core-managed UPnP). The currently installed `0.4.0` release
-predates this merge, so M4 docker delivery needs a Core build that includes it.
+predates this merge, so docker delivery needs a Core build that includes it.
+
+> **Update (2026-06-24).** media-server no longer consumes this primitive: the
+> torrent engine was extracted into the standalone `torrent-engine` app, which now
+> owns the raw listen port (behind its VPN). The capability is still required by the
+> platform — it is just the `torrent-engine` app, not media-server, that declares the
+> pinned raw port. See [Torrent engine app](../ideas/torrent-engine-app.md).
 
 **Problem.** The torrent engine needs a stable raw listen port for peer
 connectivity and DHT, ideally with router port mapping. Hosty only manages and

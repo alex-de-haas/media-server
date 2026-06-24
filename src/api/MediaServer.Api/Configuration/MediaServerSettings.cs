@@ -20,23 +20,16 @@ public sealed class MediaServerSettings
     /// <summary>Override path to the <c>ffprobe</c> binary; falls back to PATH lookup when null.</summary>
     public string? FfprobePath { get; init; }
 
-    public bool TorrentEnablePortMapping { get; init; } = true;
-
-    public string? TorrentBindAddress { get; init; }
-
-    /// <summary>Bytes/sec; 0 means unlimited.</summary>
+    /// <summary>Per-download rate limits forwarded to the torrent-engine; bytes/sec, 0 means unlimited.</summary>
     public int TorrentMaxDownloadSpeed { get; init; }
 
     public int TorrentMaxUploadSpeed { get; init; }
 
-    /// <summary>Raw L4 torrent port injected as <c>HOSTY_PORT_TORRENT</c>; null falls back to a default.</summary>
-    public int? TorrentPort { get; init; }
-
     /// <summary>
     /// Base URL of the external <c>torrent-engine</c> app, injected as the cross-app dependency
     /// <c>HOSTY_DEPENDENCY_TORRENT_ENGINE_URL</c>. When set, downloading is delegated to that app over
-    /// HTTP/SSE; when null, the in-process MonoTorrent engine is used (standalone/dev). See
-    /// <c>docs/ideas/torrent-engine-app.md</c>.
+    /// HTTP/SSE; when null, downloading is disabled (see <see cref="MediaServer.Api.Torrents.DisabledTorrentEngine"/>). The
+    /// engine is a required dependency — see <c>docs/ideas/torrent-engine-app.md</c>.
     /// </summary>
     public string? TorrentEngineUrl { get; init; }
 
@@ -46,7 +39,7 @@ public sealed class MediaServerSettings
     /// operator-configured catalog root must live within one of these (when provided). May be empty under
     /// standalone local runs. The label is the only key shared with the torrent-engine's downloads mounts
     /// (Hosty configures each app's mounts independently), so it is what we send the engine to pick the
-    /// matching download root — see <see cref="Torrents.RemoteTorrentEngine"/>.
+    /// matching download root — see <see cref="MediaServer.Api.Torrents.RemoteTorrentEngine"/>.
     /// </summary>
     public IReadOnlyList<CatalogMount> CatalogMountRoots { get; init; } = [];
 
@@ -70,11 +63,8 @@ public sealed class MediaServerSettings
             JellyfinServerName = Read("JELLYFIN_SERVER_NAME") ?? "Media Server",
             JellyfinDiscoveryEnabled = ReadBool("JELLYFIN_DISCOVERY_ENABLED", false),
             FfprobePath = Read("FFPROBE_PATH"),
-            TorrentEnablePortMapping = ReadBool("TORRENT_ENABLE_PORT_MAPPING", true),
-            TorrentBindAddress = Read("TORRENT_BIND_ADDRESS"),
             TorrentMaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),
             TorrentMaxUploadSpeed = ReadInt("TORRENT_MAX_UPLOAD_SPEED", 0),
-            TorrentPort = int.TryParse(Read("HOSTY_PORT_TORRENT"), out var port) ? port : null,
             TorrentEngineUrl = Read("HOSTY_DEPENDENCY_TORRENT_ENGINE_URL"),
             CatalogMountRoots = ParseMountRoots(Read("HOSTY_MOUNT_CATALOGROOTS")),
         };

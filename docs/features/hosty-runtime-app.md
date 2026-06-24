@@ -22,8 +22,9 @@ contract.
 
 Two services with stable keys across runtime profiles:
 
-- `api` — the .NET backend: torrent engine, catalog, metadata, probing, the
-  automation orchestrator, SignalR, and the Jellyfin-compatible endpoints.
+- `api` — the .NET backend: the torrent control client (drives the external
+  `torrent-engine` app), catalog, metadata, probing, the automation orchestrator,
+  the realtime (SSE) stream, and the Jellyfin-compatible endpoints.
 - `web` — the Next.js frontend and backend-for-frontend. Depends on `api`.
 
 `api` exposes two ports so internal and external surfaces are isolated:
@@ -61,11 +62,15 @@ navigation across profiles so switching runtime is reviewable and reversible.
 The internal `api` port is not exposed as a public endpoint; only `web` reaches
 it, through the injected dependency URL.
 
-The torrent engine's listen port is a raw TCP/UDP listener for peer connectivity
-and DHT, not an HTTP endpoint that Hosty proxies. The manifest declares a pinned
-`torrent` port with `expose: host` + `transport: ["tcp", "udp"]`; Core publishes
-it on all interfaces and injects it as `HOSTY_PORT_TORRENT`. The operator forwards
-it at the network level (see [Torrents and organizer](torrents-and-organizer.md)).
+Media Server holds **no** raw torrent port. Downloading is delegated to the
+external, VPN-isolated `torrent-engine` app — a **required** cross-app dependency
+declared in the manifest's `dependencies`, discovered via the injected
+`HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`, and driven over its HTTP control API + SSE
+by `RemoteTorrentEngine`. All peer connectivity, the raw listen port, and port
+mapping live in that app. When the dependency is unconfigured, a
+`DisabledTorrentEngine` keeps the rest of the app working (see
+[Torrents and organizer](torrents-and-organizer.md) and
+[Torrent engine app](../ideas/torrent-engine-app.md)).
 
 ## Runtime Environment
 
@@ -78,7 +83,8 @@ Core injects, per service:
 - `HOSTY_CORE_PUBLIC_ORIGIN` (browser-facing Core origin)
 - `HOSTY_APP_DATA_DIR`
 - `HOSTY_PORT_{KEY}` (and `PORT` for single-port services)
-- `HOSTY_DEPENDENCY_{KEY}_URL` (e.g. `HOSTY_DEPENDENCY_API_URL` injected into `web`)
+- `HOSTY_DEPENDENCY_{KEY}_URL` for cross-app dependencies (e.g.
+  `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL` injected into `api`)
 
 The app must read these instead of hard-coding ports, origins, or paths.
 
@@ -145,8 +151,6 @@ App-owned configuration declared in the manifest (`key`, `type`, `default`,
 | `TORRENT_MAX_DOWNLOAD_SPEED` | number | 0 = unlimited. |
 | `TORRENT_MAX_UPLOAD_SPEED` | number | 0 = unlimited. |
 | `FFPROBE_PATH` | string | Path to the `ffprobe` binary on the host (dev profile). |
-| `TORRENT_ENABLE_PORT_MAPPING` | boolean | App-side UPnP / NAT-PMP mapping of the injected `HOSTY_PORT_TORRENT` (default on). |
-| `TORRENT_BIND_ADDRESS` | string | Optional bind address/interface for VPN setups. |
 
 Public endpoint origins are configured after install through Core-managed
 `HOSTY_PUBLIC_ORIGIN_{ENDPOINT_KEY}` settings (`HOSTY_PUBLIC_ORIGIN_UI`,
@@ -154,10 +158,13 @@ Public endpoint origins are configured after install through Core-managed
 
 ## Sample Manifest
 
-The authoritative, schema-correct manifest lives in
-[Implementation plan §4](implementation-plan.md). The real `app.0.1` schema uses
-**arrays** (not objects) for `services` and `endpoints`, a top-level
-`runtimeProfiles` list, and per-service `runtimes` keyed by profile key:
+The authoritative manifest is `manifest.json` at the repo root.
+[Implementation plan §4](implementation-plan.md) keeps the original planning copy,
+now historical — it predates the torrent-engine extraction and still shows the
+removed raw `torrent` port and the `TORRENT_ENABLE_PORT_MAPPING` /
+`TORRENT_BIND_ADDRESS` settings. The real `app.0.1` schema uses **arrays** (not
+objects) for `services` and `endpoints`, a top-level `runtimeProfiles` list, and
+per-service `runtimes` keyed by profile key:
 
 ```jsonc
 {
@@ -174,7 +181,7 @@ The authoritative, schema-correct manifest lives in
     {
       "key": "api",
       "runtimes": {
-        "docker": { "type": "docker", "image": { "repository": "ghcr.io/<owner>/media-server-api", "tag": "latest" }, "ports": [ /* internal; jellyfin (public); torrent (expose: host, transport tcp+udp) */ ] },
+        "docker": { "type": "docker", "image": { "repository": "ghcr.io/<owner>/media-server-api", "tag": "latest" }, "ports": [ /* internal; jellyfin (public) */ ] },
         "dev":    { "type": "localCommand", "command": "dotnet run --project MediaServer.Api", "ports": [ /* same keys */ ] }
       }
     },
@@ -191,24 +198,28 @@ The authoritative, schema-correct manifest lives in
     { "key": "ui",       "service": "web", "port": "http",     "public": true },
     { "key": "jellyfin", "service": "api", "port": "jellyfin", "public": true }
   ],
+  "dependencies": [
+    { "id": "com.haas.torrent-engine", "required": true, "endpoints": [ { "key": "control", "as": "torrent-engine" } ] }
+  ],
   "data": { "enabled": true },
   "externalMounts": {
     "catalogRoots": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "api", "required": true }
   },
-  "settings": [ /* TMDB_API_KEY (secret, required), SUPPORTED_LANGUAGES, JELLYFIN_*, FFPROBE_PATH, TORRENT_* — see §4 */ ],
+  "settings": [ /* TMDB_API_KEY (secret, required), SUPPORTED_LANGUAGES, JELLYFIN_*, FFPROBE_PATH, TORRENT_MAX_DOWNLOAD_SPEED, TORRENT_MAX_UPLOAD_SPEED */ ],
   "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
 }
 ```
 
 The default install runs the `docker` profile; use `--runtime dev` for local
-development. See [Implementation plan §4](implementation-plan.md) for the full,
-non-abbreviated manifest (including every port and setting).
+development. The repo-root `manifest.json` is the full, current manifest (every
+port, dependency, and setting).
 
 ## Storage And Backups
 
 - `data.enabled: true` with the primary app data directory at `HOSTY_APP_DATA_DIR`.
-- The SQLite database, metadata/image caches, torrent engine state, and job state
-  all live under this directory so Hosty backup/restore covers them.
+- The SQLite database, metadata/image caches, and job state all live under this
+  directory so Hosty backup/restore covers them. (Torrent fast-resume/engine state
+  lives in the external `torrent-engine` app's own data, not here.)
 - Catalog roots (the actual large media folders) are configured separately and
   are not part of app data or backups.
 - On schema upgrade, the app prefers to request an on-demand backup from Core

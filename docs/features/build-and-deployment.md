@@ -43,9 +43,10 @@ hosty apps logs com.haas.media-server
 
 ## Production Images (`docker` profile, v1 delivery target)
 
-- `api` image: ASP.NET Core app exposing internal `/api` + SignalR, the public
-  `jellyfin` surface, and the raw `torrent` listener, with `ffprobe` available in
-  the image.
+- `api` image: ASP.NET Core app exposing internal `/api` + the realtime (SSE)
+  stream and the public `jellyfin` surface, with `ffprobe` available in the image.
+  Downloading is delegated to the external `torrent-engine` app (a required cross-app
+  dependency), so this image binds **no** raw torrent listener.
 - `web` image: Next.js production server (or static export if later converted).
 - `docker` is the default install profile; `dev` is used for local development.
   Catalog roots are bound through Hosty external host-path mounts (see

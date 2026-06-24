@@ -56,9 +56,10 @@ builder.Services.AddSingleton<SseRealtimeNotifier>();
 builder.Services.AddSingleton<IRealtimeNotifier>(serviceProvider => serviceProvider.GetRequiredService<SseRealtimeNotifier>());
 builder.Services.AddSingleton<IPipelineQueue, PipelineQueue>();
 
-// Torrent engine (hosted) + coordinator that bridges it to persistence and the pipeline. When a
-// torrent-engine dependency URL is configured, downloading is delegated to that app over HTTP/SSE;
-// otherwise the in-process MonoTorrent engine runs (standalone/dev).
+// Torrent engine (hosted) + coordinator that bridges it to persistence and the pipeline. Downloading is
+// delegated to the external torrent-engine app (a required dependency) over HTTP/SSE; it runs VPN-isolated
+// in its own container. When no dependency URL is injected (dev without the engine, or a misconfiguration)
+// a disabled engine keeps the rest of the app working while downloading is unavailable.
 if (settings.TorrentEngineUrl is { Length: > 0 } torrentEngineUrl)
 {
     builder.Services.AddSingleton(serviceProvider => new RemoteTorrentEngine(
@@ -70,9 +71,7 @@ if (settings.TorrentEngineUrl is { Length: > 0 } torrentEngineUrl)
 }
 else
 {
-    builder.Services.AddSingleton<MonoTorrentEngine>();
-    builder.Services.AddSingleton<ITorrentEngine>(serviceProvider => serviceProvider.GetRequiredService<MonoTorrentEngine>());
-    builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<MonoTorrentEngine>());
+    builder.Services.AddSingleton<ITorrentEngine, DisabledTorrentEngine>();
 }
 
 builder.Services.AddHostedService<TorrentCoordinator>();

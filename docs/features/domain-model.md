@@ -438,7 +438,7 @@ grabs the best (or queues for approval), and hands the result to the pipeline's
 ## Supporting Service Interfaces
 
 ```csharp
-public interface ITorrentEngine          // MonoTorrent wrapper
+public interface ITorrentEngine          // external torrent-engine app client (or disabled stub)
 {
     Task<Download> AddAsync(TorrentSource source, Catalog catalog, bool keepSeeding, CancellationToken ct);
     Task PauseAsync(Guid id, CancellationToken ct);

@@ -18,8 +18,7 @@
           "image": { "repository": "ghcr.io/alex-de-haas/media-server-api", "tag": "latest", "pullPolicy": "always" },
           "ports": [
             { "key": "internal", "containerPort": 8080, "protocol": "http" },
-            { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true },
-            { "key": "torrent", "containerPort": 6881, "hostPort": 6881, "expose": "host", "transport": ["tcp", "udp"] }
+            { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true }
           ]
         },
         "dev": {
@@ -28,8 +27,7 @@
           "command": "dotnet run --project MediaServer.Api",
           "ports": [
             { "key": "internal", "containerPort": 8080, "protocol": "http" },
-            { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true },
-            { "key": "torrent", "containerPort": 6881, "hostPort": 6881, "expose": "host", "transport": ["tcp", "udp"] }
+            { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true }
           ]
         }
       }
@@ -61,7 +59,7 @@
     { "key": "jellyfin", "service": "api", "port": "jellyfin", "protocol": "http", "public": true }
   ],
   "dependencies": [
-    { "id": "com.haas.torrent-engine", "required": false, "endpoints": [{ "key": "control", "as": "torrent-engine" }] }
+    { "id": "com.haas.torrent-engine", "required": true, "endpoints": [{ "key": "control", "as": "torrent-engine" }] }
   ],
   "ui": {
     "entrypoint": { "endpoint": "ui", "path": "/" },
@@ -90,8 +88,6 @@
     { "key": "JELLYFIN_SERVER_NAME", "type": "string", "default": "Media Server" },
     { "key": "JELLYFIN_DISCOVERY_ENABLED", "type": "boolean", "default": "false" },
     { "key": "FFPROBE_PATH", "type": "string" },
-    { "key": "TORRENT_ENABLE_PORT_MAPPING", "type": "boolean", "default": "true" },
-    { "key": "TORRENT_BIND_ADDRESS", "type": "string" },
     { "key": "TORRENT_MAX_DOWNLOAD_SPEED", "type": "number", "default": "0" },
     { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0" }
   ],

@@ -25,9 +25,9 @@ RUN apt-get update \
 COPY --from=build /app/publish ./
 
 # In a container HostyKestrel defers to ASPNETCORE_URLS; bind both the internal and Jellyfin ports.
-# (Core publishes hostPort:containerPort and injects HOSTY_* for everything else.) The raw torrent
-# port is read from HOSTY_PORT_TORRENT by the engine.
+# (Core publishes hostPort:containerPort and injects HOSTY_* for everything else.) Downloading runs in
+# the external torrent-engine app, so this image no longer binds a raw BitTorrent port.
 ENV ASPNETCORE_URLS=http://+:8080;http://+:8096
-EXPOSE 8080 8096 6881
+EXPOSE 8080 8096
 
 ENTRYPOINT ["dotnet", "MediaServer.Api.dll"]
