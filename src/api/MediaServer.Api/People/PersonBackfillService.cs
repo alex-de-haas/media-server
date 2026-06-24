@@ -18,39 +18,31 @@ public sealed class PersonBackfillService(MediaServerDbContext database, PersonS
     {
         // Items that already have credits were populated by a previous run or by enrich; skip them.
         var alreadyPopulated = database.MediaItemPersons.Select(link => link.MediaItemId);
-        var pending = await database.MetadataRecords
-            .Where(record => !alreadyPopulated.Contains(record.MediaItemId))
-            .Select(record => record.MediaItemId)
-            .Distinct()
+
+        // One query for every candidate record (no N+1); group by item and parse each Raw once in memory.
+        var records = await database.MetadataRecords
+            .Where(record => record.Raw != null && !alreadyPopulated.Contains(record.MediaItemId))
+            .Select(record => new { record.MediaItemId, record.Provider, record.Raw })
             .ToListAsync(cancellationToken);
 
+        var itemsProcessed = 0;
         var creditsWritten = 0;
-        foreach (var mediaItemId in pending)
+        foreach (var group in records.GroupBy(record => record.MediaItemId))
         {
+            itemsProcessed++;
             // The credits are language-independent, so any cached record will do; prefer one whose Raw
             // actually carries a credits object.
-            var records = await database.MetadataRecords
-                .Where(record => record.MediaItemId == mediaItemId && record.Raw != null)
-                .Select(record => new { record.Provider, record.Raw })
-                .ToListAsync(cancellationToken);
-
-            var chosen = records.FirstOrDefault(record => PersonCredits.Parse(record.Raw).Count > 0)
-                         ?? records.FirstOrDefault();
-            if (chosen is null)
-            {
-                continue;
-            }
-
-            creditsWritten += await sync.SyncAsync(mediaItemId, chosen.Provider, chosen.Raw, cancellationToken);
+            var chosen = group.FirstOrDefault(record => PersonCredits.Parse(record.Raw).Count > 0) ?? group.First();
+            creditsWritten += await sync.SyncAsync(group.Key, chosen.Provider, chosen.Raw, cancellationToken);
         }
 
-        if (pending.Count > 0)
+        if (itemsProcessed > 0)
         {
             logger.LogInformation(
-                "People backfill: processed {Items} item(s), wrote {Credits} credit(s).", pending.Count, creditsWritten);
+                "People backfill: processed {Items} item(s), wrote {Credits} credit(s).", itemsProcessed, creditsWritten);
         }
 
-        return new PersonBackfillReport(pending.Count, creditsWritten);
+        return new PersonBackfillReport(itemsProcessed, creditsWritten);
     }
 }
 

@@ -36,35 +36,7 @@ public sealed class PersonSyncService(MediaServerDbContext database)
         }
 
         var providerIds = credits.Select(credit => credit.ProviderId).Distinct().ToList();
-        var existingPersons = await database.Persons
-            .Where(person => person.Provider == provider && providerIds.Contains(person.ProviderId))
-            .ToListAsync(cancellationToken);
-        var personByProviderId = existingPersons.ToDictionary(person => person.ProviderId, StringComparer.Ordinal);
-
-        var now = DateTimeOffset.UtcNow;
-        foreach (var providerId in providerIds)
-        {
-            // Cast/crew entries for one person carry identical person attributes, so the first wins.
-            var source = credits.First(credit => credit.ProviderId == providerId);
-            if (!personByProviderId.TryGetValue(providerId, out var person))
-            {
-                person = new Person
-                {
-                    Id = Guid.NewGuid(),
-                    Provider = provider,
-                    ProviderId = providerId,
-                    Name = source.Name,
-                };
-                database.Persons.Add(person);
-                personByProviderId[providerId] = person;
-            }
-
-            person.Name = source.Name;
-            person.ProfilePath = source.ProfilePath;
-            person.ProfileUrl = PersonCredits.ProfileUrl(source.ProfilePath);
-            person.KnownForDepartment = source.KnownForDepartment;
-            person.UpdatedAt = now;
-        }
+        var personByProviderId = await UpsertPersonsAsync(provider, providerIds, credits, cancellationToken);
 
         // Replace the item's credits wholesale; the Person rows above outlive this and stay shared.
         database.MediaItemPersons.RemoveRange(existingJoins);
@@ -85,5 +57,65 @@ public sealed class PersonSyncService(MediaServerDbContext database)
 
         await database.SaveChangesAsync(cancellationToken);
         return credits.Count;
+    }
+
+    /// <summary>
+    /// Upserts the <see cref="Person"/> rows for <paramref name="providerIds"/> and returns them keyed by
+    /// provider id. Only writes a row when it is new or an attribute actually changed, so a re-enrich does not
+    /// churn <c>UpdatedAt</c> (and emit redundant UPDATEs) for unchanged people. Retries once if a concurrent
+    /// sync inserts a shared person first and trips the <c>(Provider, ProviderId)</c> unique index.
+    /// </summary>
+    private async Task<Dictionary<string, Person>> UpsertPersonsAsync(
+        string provider, IReadOnlyList<string> providerIds, IReadOnlyList<PersonCredit> credits, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var existing = await database.Persons
+                .Where(person => person.Provider == provider && providerIds.Contains(person.ProviderId))
+                .ToListAsync(cancellationToken);
+            var byProviderId = existing.ToDictionary(person => person.ProviderId, StringComparer.Ordinal);
+            var now = DateTimeOffset.UtcNow;
+
+            foreach (var providerId in providerIds)
+            {
+                // Cast/crew entries for one person carry identical person attributes, so the first wins.
+                var source = credits.First(credit => credit.ProviderId == providerId);
+                var isNew = false;
+                if (!byProviderId.TryGetValue(providerId, out var person))
+                {
+                    person = new Person { Id = Guid.NewGuid(), Provider = provider, ProviderId = providerId, Name = source.Name };
+                    database.Persons.Add(person);
+                    byProviderId[providerId] = person;
+                    isNew = true;
+                }
+
+                if (isNew
+                    || person.Name != source.Name
+                    || person.ProfilePath != source.ProfilePath
+                    || person.KnownForDepartment != source.KnownForDepartment)
+                {
+                    person.Name = source.Name;
+                    person.ProfilePath = source.ProfilePath;
+                    person.ProfileUrl = PersonCredits.ProfileUrl(source.ProfilePath);
+                    person.KnownForDepartment = source.KnownForDepartment;
+                    person.UpdatedAt = now;
+                }
+            }
+
+            try
+            {
+                await database.SaveChangesAsync(cancellationToken);
+                return byProviderId;
+            }
+            catch (DbUpdateException) when (attempt == 0)
+            {
+                // A concurrent sync inserted one of these (Provider, ProviderId) persons first and the unique
+                // index rejected ours. Drop our losing inserts and retry once, reloading to adopt the winners.
+                foreach (var entry in database.ChangeTracker.Entries<Person>().Where(entry => entry.State == EntityState.Added).ToList())
+                {
+                    entry.State = EntityState.Detached;
+                }
+            }
+        }
     }
 }
