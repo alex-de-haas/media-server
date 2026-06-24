@@ -1,4 +1,5 @@
 using MediaServer.Api.Catalogs;
+using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
@@ -38,7 +39,7 @@ public sealed class RemapServiceTests : IDisposable
         _remap = new RemapService(
             _database,
             new IdentifyService(_database, new NameParser(), provider, new AppSettingsService(_database), NullLogger<IdentifyService>.Instance),
-            new EnrichService(_database, provider, settings, new PersonSyncService(_database)),
+            new EnrichService(_database, provider, settings, new PersonSyncService(_database), new CollectionSyncService(_database)),
             sandbox,
             NullLogger<RemapService>.Instance);
     }

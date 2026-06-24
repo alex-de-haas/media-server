@@ -4,7 +4,7 @@ import { createContext, useContext } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Film, FolderTree, Home, Settings, Tv, type LucideIcon } from "lucide-react";
+import { Activity, Film, FolderTree, Home, Layers, Settings, Tv, type LucideIcon } from "lucide-react";
 import { apiJson, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RealtimeBridge } from "@/components/realtime-bridge";
@@ -81,6 +81,7 @@ const PRIMARY_TABS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Home", icon: Home },
   { href: "/movies", label: "Movies", icon: Film },
   { href: "/series", label: "Series", icon: Tv },
+  { href: "/collections", label: "Collections", icon: Layers },
   { href: "/activity", label: "Activity", icon: Activity },
 ];
 

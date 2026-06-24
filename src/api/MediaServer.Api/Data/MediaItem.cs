@@ -39,6 +39,10 @@ public sealed class MediaItem
 
     public int? ParentIndexNumber { get; set; }
 
+    /// <summary>The franchise/collection this movie belongs to (TMDb <c>belongs_to_collection</c>); null for
+    /// non-movies and movies outside any collection. One-to-many: a movie has at most one collection.</summary>
+    public Guid? CollectionId { get; set; }
+
     /// <summary>Relative to catalog root; null for Series/Season containers.</summary>
     public string? LibraryPath { get; set; }
 
@@ -60,6 +64,8 @@ public sealed class MediaItem
     public DateTimeOffset UpdatedAt { get; set; }
 
     public Catalog? Catalog { get; set; }
+
+    public MovieCollection? Collection { get; set; }
 
     public ICollection<MediaSource> Sources { get; set; } = new List<MediaSource>();
 }

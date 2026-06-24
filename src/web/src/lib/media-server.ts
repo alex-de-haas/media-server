@@ -192,6 +192,23 @@ export interface LibraryItem {
   userData: UserItemData | null;
 }
 
+// A movie franchise/collection tile for the Collections grid (TMDb belongs_to_collection).
+export interface CollectionSummary {
+  id: string;
+  name: string;
+  posterUrl: string | null;
+  itemCount: number;
+}
+
+// A collection detail: the franchise artwork plus its in-library movies as library cards.
+export interface CollectionDetail {
+  id: string;
+  name: string;
+  posterUrl: string | null;
+  backdropUrl: string | null;
+  items: LibraryItem[];
+}
+
 export interface MediaStream {
   type: string;
   index: number;
@@ -454,6 +471,8 @@ export const mediaServer = {
   getLibraryDetail: (id: string) => apiJson<LibraryDetail>(`${BASE}/library/${id}`),
   listEpisodes: (seriesId: string, seasonId?: string) =>
     apiJson<Episode[]>(`${BASE}/library/${seriesId}/episodes${seasonId ? `?seasonId=${seasonId}` : ""}`),
+  listCollections: () => apiJson<CollectionSummary[]>(`${BASE}/library/collections`),
+  getCollectionDetail: (id: string) => apiJson<CollectionDetail>(`${BASE}/library/collections/${id}`),
   listRecent: () => apiJson<LibraryItem[]>(`${BASE}/library/recent`),
   listResume: () => apiJson<LibraryRailItem[]>(`${BASE}/library/resume`),
   listNextUp: () => apiJson<LibraryRailItem[]>(`${BASE}/library/nextup`),

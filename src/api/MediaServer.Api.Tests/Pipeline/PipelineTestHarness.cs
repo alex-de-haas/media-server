@@ -1,4 +1,5 @@
 using MediaServer.Api.Catalogs;
+using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.IO;
@@ -55,6 +56,7 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddScoped<IOrganizer, OrganizerService>();
         services.AddScoped<IdentifyService>();
         services.AddScoped<PersonSyncService>();
+        services.AddScoped<CollectionSyncService>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
         services.AddScoped<DownloadDeletionService>();
