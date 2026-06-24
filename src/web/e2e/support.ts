@@ -31,6 +31,11 @@ export interface AppMock {
   resume?: unknown[];
   nextup?: unknown[];
   detail?: Record<string, unknown>;
+  episodes?: Record<string, unknown[]>;
+  catalogs?: unknown[];
+  downloads?: unknown[];
+  ingest?: unknown[];
+  vpn?: unknown;
   metadataSearch?: unknown[];
   remapTargetId?: string; // id returned by POST /library/{id}/remap
 }
@@ -57,15 +62,23 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/library/recent") return route.fulfill({ json: mock.recent ?? [] });
     if (path === "/library/resume") return route.fulfill({ json: mock.resume ?? [] });
     if (path === "/library/nextup") return route.fulfill({ json: mock.nextup ?? [] });
+    if (path === "/catalogs") return route.fulfill({ json: mock.catalogs ?? [] });
+    if (path === "/torrents") return route.fulfill({ json: mock.downloads ?? [] });
+    if (path === "/ingest") return route.fulfill({ json: mock.ingest ?? [] });
+    if (path === "/vpn") return route.fulfill({ json: mock.vpn ?? null });
     if (path.endsWith("/played")) return route.fulfill({ json: userData({ played: method === "POST" }) });
     if (path.endsWith("/favorite")) return route.fulfill({ json: userData({ isFavorite: method === "POST" }) });
 
     if (path === "/metadata/search") return route.fulfill({ json: mock.metadataSearch ?? [] });
+    if (/^\/ingest\/[^/]+\/search$/.test(path)) return route.fulfill({ json: mock.metadataSearch ?? [] });
+    if (/^\/ingest\/[^/]+\/match$/.test(path)) return route.fulfill({ json: null });
     if (/^\/library\/[^/]+\/remap$/.test(path)) return route.fulfill({ json: { id: mock.remapTargetId ?? "remapped" } });
 
     const detailId = path.match(/^\/library\/([^/]+)$/)?.[1];
     if (detailId && mock.detail?.[detailId]) return route.fulfill({ json: mock.detail[detailId] });
-    if (/^\/library\/[^/]+\/episodes$/.test(path)) return route.fulfill({ json: [] });
+
+    const episodesSeriesId = path.match(/^\/library\/([^/]+)\/episodes$/)?.[1];
+    if (episodesSeriesId) return route.fulfill({ json: mock.episodes?.[episodesSeriesId] ?? [] });
 
     // Anything else the shell touches (downloads, ingest, catalogs for the ops strip) → empty.
     return route.fulfill({ json: [] });
@@ -79,6 +92,17 @@ export const aMovie = (id: string, title: string) => ({
   kind: "Movie",
   title,
   year: 2016,
+  posterUrl: null,
+  userData: null,
+});
+
+export const aSeries = (id: string, title: string) => ({
+  id,
+  publicId: id,
+  catalogId: "c1",
+  kind: "Series",
+  title,
+  year: 2022,
   posterUrl: null,
   userData: null,
 });
@@ -121,4 +145,29 @@ export const movieDetail = (id: string, title: string, tmdbId: string | null = n
   creators: [],
   studios: [],
   keywords: [],
+});
+
+export const seriesDetail = (id: string, title: string, tmdbId: string | null = null) => ({
+  ...movieDetail(id, title, tmdbId),
+  kind: "Series",
+  runtimeTicks: null,
+  seasonCount: 1,
+  episodeCount: 1,
+  seasons: [],
+  networks: [],
+  directors: [],
+  creators: [],
+});
+
+export const anEpisode = (id: string, seasonNumber: number, episodeNumber: number, title: string) => ({
+  id,
+  publicId: id,
+  seriesTmdbId: "123",
+  seasonNumber,
+  episodeNumber,
+  title,
+  overview: null,
+  runtimeTicks: 2_400_000_000,
+  posterUrl: null,
+  userData: null,
 });

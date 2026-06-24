@@ -44,9 +44,27 @@ public static class LocalTorrentInspector
         for (var index = 0; index < torrentFiles.Count; index++)
         {
             var file = torrentFiles[index];
-            files.Add(new TorrentFileInfo(index, Path.Combine(torrentName, file.Path).Replace('\\', '/'), file.Length));
+            files.Add(new TorrentFileInfo(index, ToSaveRelativePath(file.Path, torrentName, torrentFiles.Count), file.Length));
         }
 
         return files;
+    }
+
+    /// <summary>
+    /// The file's path relative to the download's save directory, matching what the engine reports
+    /// post-download. A single-file torrent has no containing directory — it is saved directly as
+    /// <c>&lt;torrentName&gt;</c> and MonoTorrent already reports the file's <c>Path</c> as that name — so
+    /// prepending the name again would double it (<c>&lt;name&gt;/&lt;name&gt;</c>) and diverge from the
+    /// engine's path, persisting a second <c>SourceFile</c> row for the same file. Multi-file torrents nest
+    /// their files under the name directory, so their paths are joined.
+    /// </summary>
+    internal static string ToSaveRelativePath(string filePath, string torrentName, int fileCount)
+    {
+        // Normalize separators (and compare case-insensitively) so a backslash or casing quirk in the
+        // torrent metadata doesn't defeat the single-file check and re-introduce the doubled path.
+        var normalizedPath = filePath.Replace('\\', '/');
+        var normalizedName = torrentName.Replace('\\', '/');
+        var isSingleFile = fileCount == 1 && string.Equals(normalizedPath, normalizedName, StringComparison.OrdinalIgnoreCase);
+        return isSingleFile ? normalizedPath : $"{normalizedName}/{normalizedPath}";
     }
 }

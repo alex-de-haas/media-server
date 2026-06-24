@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 /**
  * Corrects a misidentified published leaf. Search a corrected title (a movie, or the owning series for an
@@ -98,7 +97,7 @@ export function RemapDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-h-[85vh] max-w-xl">
         <DialogHeader>
           <DialogTitle>Fix match</DialogTitle>
           <DialogDescription className="truncate" title={currentTitle}>
@@ -150,22 +149,22 @@ export function RemapDialog({
           {results === null ? (
             <span className="text-muted-foreground text-xs">Search for the correct {isEpisode ? "series" : "title"} above.</span>
           ) : results.length ? (
-            <ScrollArea className="max-h-72">
-              <div className="flex flex-wrap gap-2 pr-3">
-                {results.map((candidate) => (
-                  <Button
-                    key={`${candidate.reference.provider}:${candidate.reference.id}`}
-                    variant="outline"
-                    size="sm"
-                    disabled={remap.isPending}
-                    onClick={() => remap.mutate(candidate)}
-                  >
-                    {candidate.title}
-                    {candidate.year ? ` (${candidate.year})` : ""} · {(candidate.score * 100).toFixed(0)}%
-                  </Button>
-                ))}
-              </div>
-            </ScrollArea>
+            <div className="-mr-2 flex max-h-72 flex-wrap content-start gap-2 overflow-y-auto pr-2">
+              {/* Bounded scroll: max-height + overflow on one element scrolls reliably; a max-height on a
+                  ScrollArea root can't bound its height:100% viewport, so the list spilled out. */}
+              {results.map((candidate) => (
+                <Button
+                  key={`${candidate.reference.provider}:${candidate.reference.id}`}
+                  variant="outline"
+                  size="sm"
+                  disabled={remap.isPending}
+                  onClick={() => remap.mutate(candidate)}
+                >
+                  {candidate.title}
+                  {candidate.year ? ` (${candidate.year})` : ""} · {(candidate.score * 100).toFixed(0)}%
+                </Button>
+              ))}
+            </div>
           ) : (
             <span className="text-muted-foreground text-xs">No matches for that title.</span>
           )}

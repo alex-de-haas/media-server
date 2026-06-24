@@ -1,5 +1,6 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Media;
 using MediaServer.Api.Jellyfin.Streaming;
 
 namespace MediaServer.Api.Jellyfin;
@@ -242,8 +243,8 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
 
         switch (type)
         {
-            case "Video" when stream.Height is { } height:
-                parts.Add($"{height}p");
+            case "Video" when VideoResolution.Label(stream.Width, stream.Height) is { } resolution:
+                parts.Add(resolution);
                 break;
             case "Audio":
                 if (!string.IsNullOrEmpty(stream.Codec))

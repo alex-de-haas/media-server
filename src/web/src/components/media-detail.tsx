@@ -35,6 +35,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
 
@@ -63,10 +64,34 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
         <AdminControls id={item.id} title={item.title} kind={item.kind} backHref={backHref} />
       </div>
       <Hero item={item} />
-      {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo sources={item.mediaSources} />}
-      {item.cast.length > 0 && <CastList cast={item.cast} />}
-      {item.keywords.length > 0 && <KeywordTags keywords={item.keywords} />}
+      <DetailTabs item={item} />
     </div>
+  );
+}
+
+function DetailTabs({ item }: { item: LibraryDetail }) {
+  const mediaLabel = item.kind === "Series" ? "Episodes" : "Media";
+
+  return (
+    <Tabs defaultValue="cast" className="gap-4">
+      <div className="min-w-0 border-b">
+        <TabsList variant="line" aria-label="Media detail sections">
+          <TabsTrigger value="cast">Cast</TabsTrigger>
+          <TabsTrigger value="media">{mediaLabel}</TabsTrigger>
+          <TabsTrigger value="tags">Tags</TabsTrigger>
+        </TabsList>
+      </div>
+
+      <TabsContent value="cast">
+        <CastList cast={item.cast} />
+      </TabsContent>
+      <TabsContent value="media">
+        {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo sources={item.mediaSources} />}
+      </TabsContent>
+      <TabsContent value="tags">
+        <KeywordTags keywords={item.keywords} />
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -323,10 +348,12 @@ function Hero({ item }: { item: LibraryDetail }) {
               </div>
               <CreditLine item={item} />
               {item.collectionName && <p className="text-muted-foreground text-xs">Part of {item.collectionName}</p>}
+              {item.kind === "Series" ? (
+                <BrandSummary label="Networks" brands={item.networks ?? []} />
+              ) : (
+                <BrandSummary label="Studios" brands={item.studios} />
+              )}
             </div>
-
-            {item.networks && item.networks.length > 0 && <BrandLogos brands={item.networks} />}
-            {item.kind !== "Series" && item.studios.length > 0 && <BrandLogos brands={item.studios.slice(0, 4)} />}
 
             {resume != null && (
               <div className="max-w-xs">
@@ -363,11 +390,12 @@ function Hero({ item }: { item: LibraryDetail }) {
               )}
               {item.imdbId && (
                 <Button
-                  variant="outline"
-                  size="icon"
+                  variant="secondary"
                   aria-label="View on IMDb"
+                  className="border-transparent bg-[#f5c518] text-black hover:bg-[#e4b915] hover:text-black"
                   onClick={() => openExternal(`https://www.imdb.com/title/${item.imdbId}/`)}
                 >
+                  <span className="font-semibold tracking-normal">IMDb</span>
                   <ExternalLink className="size-4" aria-hidden />
                 </Button>
               )}
@@ -381,29 +409,21 @@ function Hero({ item }: { item: LibraryDetail }) {
   );
 }
 
-// Network/studio logos (Netflix, Apple TV+, A24, …) — networks for series, production companies for
-// movies. TMDb logos are transparent PNGs in assorted colours, so each sits on a light chip to stay
-// legible over the backdrop in either theme; a brand without artwork falls back to a name badge.
-function BrandLogos({ brands }: { brands: (Network | Studio)[] }) {
+// Keep studio/network metadata available without letting mixed external logos dominate the hero.
+function BrandSummary({ label, brands }: { label: string; brands: (Network | Studio)[] }) {
+  if (brands.length === 0) {
+    return null;
+  }
+
+  const [primary, ...rest] = brands;
+  const names = brands.map((brand) => brand.name).join(", ");
+  const value = rest.length > 0 ? `${primary.name} +${rest.length}` : primary.name;
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {brands.map((brand) =>
-        brand.logoUrl ? (
-          <span
-            key={brand.name}
-            title={brand.name}
-            className="inline-flex items-center rounded-md bg-white/90 px-2 py-1 ring-1 ring-black/5"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={brand.logoUrl} alt={brand.name} className="h-4 w-auto object-contain sm:h-5" />
-          </span>
-        ) : (
-          <Badge key={brand.name} variant="secondary">
-            {brand.name}
-          </Badge>
-        ),
-      )}
-    </div>
+    <p className="text-muted-foreground max-w-xl truncate text-xs" title={`${label}: ${names}`}>
+      <span className="text-foreground/70">{label}: </span>
+      {value}
+    </p>
   );
 }
 
@@ -424,10 +444,12 @@ function CreditLine({ item }: { item: LibraryDetail }) {
 
 // Top-billed cast with headshots; a person without a photo falls back to a placeholder icon.
 function CastList({ cast }: { cast: CastMember[] }) {
+  if (!cast.length) {
+    return <EmptyDetailPanel>No cast information available.</EmptyDetailPanel>;
+  }
+
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold tracking-tight">Cast</h2>
-      <Separator />
       <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
         {cast.map((member) => (
           <li key={`${member.name}:${member.character ?? ""}`} className="flex flex-col gap-2">
@@ -454,10 +476,12 @@ function CastList({ cast }: { cast: CastMember[] }) {
 
 // TMDb keyword tags — a lightweight "themes" cloud below the cast.
 function KeywordTags({ keywords }: { keywords: string[] }) {
+  if (!keywords.length) {
+    return <EmptyDetailPanel>No tags available.</EmptyDetailPanel>;
+  }
+
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold tracking-tight">Tags</h2>
-      <Separator />
       <div className="flex flex-wrap gap-2">
         {keywords.map((keyword) => (
           <Badge key={keyword} variant="secondary" className="font-normal capitalize">
@@ -524,13 +548,11 @@ async function copyInfuseLink(deepLink: string) {
 
 function MediaInfo({ sources }: { sources: LibraryMediaSource[] }) {
   if (!sources.length) {
-    return null;
+    return <EmptyDetailPanel>No media sources available.</EmptyDetailPanel>;
   }
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold tracking-tight">Media</h2>
-      <Separator />
       {sources.map((source) => (
         <div key={source.id} className="rounded-md border p-3 text-sm">
           {source.versionName ? <p className="font-medium">{source.versionName}</p> : null}
@@ -560,7 +582,7 @@ function SeriesEpisodes({ seriesId }: { seriesId: string }) {
 
   const all = episodes.data ?? [];
   if (!all.length) {
-    return null;
+    return <EmptyDetailPanel>No episodes available.</EmptyDetailPanel>;
   }
 
   const seasons = new Map<number, Episode[]>();
@@ -588,6 +610,10 @@ function SeriesEpisodes({ seriesId }: { seriesId: string }) {
         ))}
     </section>
   );
+}
+
+function EmptyDetailPanel({ children }: { children: string }) {
+  return <p className="text-muted-foreground py-6 text-sm">{children}</p>;
 }
 
 function EpisodeRow({ episode, seriesId }: { episode: Episode; seriesId: string }) {
