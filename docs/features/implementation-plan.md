@@ -13,6 +13,22 @@ Updated: 2026-06-21
 > `files/`/`library/` hardlinks or seed-copy teardown predates this change and is
 > kept as a historical record; the current model is in
 > [Torrents and organizer](torrents-and-organizer.md).
+>
+> **Torrent-engine extraction (2026-06-24).** The in-process **MonoTorrent** engine
+> was removed from `api` and extracted into a standalone, VPN-isolated
+> `torrent-engine` app (sibling repo `../torrent-engine`). Media Server now delegates
+> downloading to it as a **required** cross-app dependency, driven over the app's HTTP
+> control API + SSE by `RemoteTorrentEngine` (discovered via
+> `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`); when the dependency URL is absent a
+> `DisabledTorrentEngine` keeps the rest of the app working. The manifest no longer
+> declares a raw `torrent` port, so `HOSTY_PORT_TORRENT` and the
+> `TORRENT_ENABLE_PORT_MAPPING` / `TORRENT_BIND_ADDRESS` settings are gone (only
+> `TORRENT_MAX_DOWNLOAD_SPEED` / `TORRENT_MAX_UPLOAD_SPEED` remain). Everything below
+> that describes an **in-process** engine, the raw torrent port / `HOSTY_PORT_TORRENT`,
+> or those two settings (including the §4 manifest, the M1 narrative, and §7/§8)
+> predates this change and is kept as a historical record. Current model:
+> [Torrents and organizer](torrents-and-organizer.md) and
+> [Torrent engine app](../ideas/torrent-engine-app.md).
 
 ## Purpose
 

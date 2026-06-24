@@ -57,8 +57,9 @@ SQLite is single-writer, so the app minimizes and serializes writes:
 - Run in **WAL** mode (also required for backup consistency below) and set a
   `busy_timeout` (5–10 s) so transient lock contention retries instead of failing.
 - **Torrent progress, speed, ratio, and ETA are never written to the database.**
-  The torrent engine tracks them in memory and broadcasts them over the realtime
-  stream; only **state transitions** (e.g. Completed) are persisted, and a
+  The external `torrent-engine` app tracks them in memory and streams them over its
+  SSE, which Media Server relays to the UI; only **state transitions** (e.g.
+  Completed) are persisted, and a
   transition is what triggers downstream pipeline actions (identify, move/organize,
   probe, enrich, publish).
 - The orchestrator claims an ingest item with a lease (`LeaseOwner`/`LeaseUntil`)
@@ -73,8 +74,10 @@ Everything Hosty should back up lives under `HOSTY_APP_DATA_DIR`:
 
 - `media-server.db` (plus `-wal` / `-shm`).
 - Metadata image cache.
-- Torrent engine state (resume data, fast-resume).
 - Background job and pipeline state.
+
+(Torrent resume/fast-resume state is **not** here — it lives in the external
+`torrent-engine` app's own data directory and is backed up with that app.)
 
 ### Backup Consistency
 

@@ -40,9 +40,11 @@ public sealed record VpnStatus(
     DateTimeOffset CheckedAt);
 
 /// <summary>
-/// Thin wrapper over the MonoTorrent <c>ClientEngine</c>. Owns no database state; surfaces the file
-/// list and live snapshots, and raises events for the transitions that drive the pipeline. The
-/// coordinator translates these into persisted <see cref="Data.DownloadState"/> changes.
+/// Abstraction over the torrent engine. The download surface is the external <c>torrent-engine</c> app
+/// (<see cref="RemoteTorrentEngine"/>); <see cref="DisabledTorrentEngine"/> stands in when none is
+/// configured. Owns no database state; surfaces the file list and live snapshots, and raises events for
+/// the transitions that drive the pipeline. The coordinator translates these into persisted
+/// <see cref="Data.DownloadState"/> changes.
 /// </summary>
 public interface ITorrentEngine
 {
@@ -66,13 +68,13 @@ public interface ITorrentEngine
 
     IReadOnlyList<TorrentFileInfo> GetFiles(string infoHash);
 
-    /// <summary>Current VPN tunnel status, or <c>null</c> when downloading runs in-process (no tunnel).</summary>
+    /// <summary>Current VPN tunnel status, or <c>null</c> when no engine reports one (e.g. downloading disabled).</summary>
     VpnStatus? GetVpnStatus();
 
     /// <summary>Raised when a magnet's file list becomes available after metadata download.</summary>
     event EventHandler<string>? MetadataReceived;
 
-    /// <summary>Raised when the VPN tunnel status changes. Never raised by the in-process engine.</summary>
+    /// <summary>Raised when the VPN tunnel status changes. Only the remote engine raises it.</summary>
     event EventHandler<VpnStatus>? VpnStatusChanged;
 
     /// <summary>Raised when a torrent finishes downloading (transition to a complete/seeding state).</summary>

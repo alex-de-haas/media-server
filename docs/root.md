@@ -51,7 +51,7 @@ flowchart TB
     WEB["web service (Next.js)<br/>UI + BFF + app session"]
     subgraph API["api service (.NET)"]
       ORCH["Automation Orchestrator"]
-      TOR["Torrent Engine (MonoTorrent)"]
+      TOR["Torrent control client<br/>(RemoteTorrentEngine)"]
       ORG["Organizer (move)"]
       CAT["Catalog / Items"]
       META["Metadata providers"]
@@ -60,6 +60,7 @@ flowchart TB
       JOBS["Jobs + SSE notifier"]
     end
   end
+  TENG["torrent-engine app<br/>(required dependency · MonoTorrent · VPN-isolated)"]
   INFUSE["Infuse / Jellyfin client"]
   TMDB["TMDb"]
   DB[("SQLite + caches<br/>HOSTY_APP_DATA_DIR")]
@@ -71,8 +72,9 @@ flowchart TB
   INFUSE <-->|MediaBrowser token + Range| JELLY
   META <--> TMDB
   ORCH --- TOR & ORG & META & PROBE & CAT
+  TOR <-->|HOSTY_DEPENDENCY_TORRENT_ENGINE_URL<br/>control API + SSE| TENG
   API --> DB
-  TOR --> CATFS
+  TENG -->|writes .incoming/| CATFS
   ORG --> CATFS
   JELLY --> CATFS
 ```
@@ -84,7 +86,11 @@ Backend (`api` service):
 - ASP.NET Core Minimal API.
 - EF Core over SQLite (single embedded database file, JSON columns for flexible
   provider blobs).
-- MonoTorrent torrent engine as a hosted service.
+- Torrent downloading delegated to the external, VPN-isolated `torrent-engine` app
+  (a **required** cross-app dependency that runs MonoTorrent in its own container),
+  driven over its HTTP control API + SSE by `RemoteTorrentEngine`; a
+  `DisabledTorrentEngine` fallback keeps the rest of the app working when the
+  dependency URL is absent.
 - FFprobe for media probing (FFmpeg only later, if transcoding is ever added).
 - Server-Sent Events for real-time job and download progress (server→client only).
 - An extensible automation pipeline (the orchestrator).

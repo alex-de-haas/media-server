@@ -221,7 +221,7 @@ public sealed class TorrentCoordinator(
         if (download.State is not (DownloadState.Completed or DownloadState.Seeding or DownloadState.StoppedSeeding))
         {
             // keepSeeding parks the ingest at the download stage (seeding is mutually exclusive with being
-            // in the library) and leaves MonoTorrent's auto-seed running until the operator stops it.
+            // in the library) and leaves the engine's auto-seed running until the operator stops it.
             // Otherwise mark it Completed and stop uploading now so the download→identify hand-off proceeds.
             download.State = download.KeepSeeding ? DownloadState.Seeding : DownloadState.Completed;
             download.CompletedAt = DateTimeOffset.UtcNow;

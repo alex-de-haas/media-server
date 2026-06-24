@@ -2,11 +2,11 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-06-24
 
 ## Description
 
-Media Server downloads torrents with MonoTorrent as a background service, then
+Media Server downloads torrents via the external, VPN-isolated `torrent-engine` app, then
 runs each completed file through a single ingest pipeline that identifies it,
 **moves it into the catalog's canonical layout**, probes it, enriches metadata,
 and publishes it. Torrent state, progress, and seeding status are streamed to the
@@ -48,71 +48,50 @@ Each catalog root contains:
 
 ## Torrent Engine
 
-MonoTorrent runs as a hosted service. Capabilities:
+Downloading is delegated to the external `torrent-engine` app — a **required**
+cross-app dependency that runs the BitTorrent client (MonoTorrent) VPN-isolated in
+its own container. Media Server drives it over the app's HTTP control API + SSE
+stream through `RemoteTorrentEngine` (the `ITorrentEngine` abstraction), discovered
+via the injected `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`. See
+[Torrent engine app](../ideas/torrent-engine-app.md).
+
+Engine capabilities (driven through `ITorrentEngine`):
 
 - Magnet links and `.torrent` files.
 - Pause, resume, stop.
-- Sequential download (for future partial-streaming use cases).
-- Per-download directory under the catalog's `.incoming/<downloadId>/`.
-- Per-torrent and global speed limits (`TORRENT_MAX_DOWNLOAD_SPEED`,
-  `TORRENT_MAX_UPLOAD_SPEED`).
+- Per-download directory under the catalog's `.incoming/<downloadId>/`, handed to
+  the engine as a `mountLabel` + relative path against its matching downloads mount
+  (so the post-download move stays on one filesystem — see the multi-mount note below).
+- Per-download speed limits forwarded from `TORRENT_MAX_DOWNLOAD_SPEED` /
+  `TORRENT_MAX_UPLOAD_SPEED`.
+
+`.torrent` parsing (info hash, size, file list) runs **locally** in Media Server
+(`LocalTorrentInspector`) before a download row is created — it needs no network.
 
 At add time the operator selects a **catalog** (not a raw path). The catalog
 resolves the staging directory (`<catalog.root>/.incoming/`), the type used for
 parsing, the naming template, and the default seeding policy. A per-torrent
 `keepSeeding` flag overrides the catalog default.
 
-Before starting, the engine checks free space on the catalog volume against the
-torrent size. For `.torrent` files (size known up front) a download larger than
-free space is **refused**. For magnet links the size is unknown until metadata
-arrives, so the check runs after start and surfaces a **notification** if the
-content will not fit.
+Before delegating to the engine, Media Server checks free space on the catalog
+volume against the torrent size. For `.torrent` files (size known up front) a
+download larger than free space is **refused**. For magnet links the size is unknown
+until metadata arrives, so the check runs after start (in the coordinator) and
+surfaces a **notification** if the content will not fit.
+
+**When the dependency is not configured** (e.g. dev without the engine), Media Server
+registers a `DisabledTorrentEngine`: downloading is unavailable (add returns a clear
+error) but the rest of the app — Jellyfin surface, library browsing, identify / probe
+/ enrich — keeps working. This matches Hosty's advisory, non-blocking dependency model.
 
 ## Networking
 
-The torrent engine needs inbound connectivity for good peer performance and for
-fetching magnet metadata via DHT. It is a raw TCP/UDP listener, not an HTTP endpoint
-that Hosty proxies, so the manifest declares a pinned `torrent` port with
-`expose: "host"` + `transport: ["tcp", "udp"]`; Core publishes it on all interfaces
-and injects it as `HOSTY_PORT_TORRENT` (see [Hosty runtime app](hosty-runtime-app.md)).
-Router port-forwarding remains the operator's responsibility.
-
-- Fixed listen port from the injected `HOSTY_PORT_TORRENT` (TCP + UDP).
-- **DHT** enabled (required to fetch metadata for magnet links without trackers),
-  plus **PEX** and **LSD** for peer discovery.
-- **Protocol encryption (MSE/PE)** enabled to reduce ISP throttling.
-- Optional **UPnP / NAT-PMP** automatic port mapping
-  (`TORRENT_ENABLE_PORT_MAPPING`, default on); when the router does not support
-  it, the operator forwards the port manually.
-- Optional bind to a specific interface/address (`TORRENT_BIND_ADDRESS`) for VPN
-  setups.
-
-### Throughput under Docker (bridge NAT) — host OS matters
-
-BitTorrent opens a high churn of short-lived peer connections. The docker **bridge
-NAT** copes poorly with that volume, and the symptom is dramatic: near-zero download
-through the containerized engine while a native client on the *same machine* pulls
-several MB/s. The fix depends on the host OS:
-
-- **Windows + WSL2 (Docker Desktop)** — the dominant bottleneck. Default WSL2 NAT
-  routing throttles P2P to a crawl. Enable **WSL2 mirrored networking**: add
-  `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`, then run
-  `wsl --shutdown` and restart Docker Desktop. This took a real test from ~0 to
-  3–5 MB/s. This is a host-level setting Hosty Core cannot apply for you; Core logs a
-  one-time advisory when a host-exposed UDP port (or host networking) starts on
-  Windows/WSL2.
-- **macOS (Docker Desktop)** — containers run in a Linux VM with a userspace network
-  relay that throttles P2P similarly. There is no mirrored-networking equivalent;
-  for heavy downloading prefer the `dev` (localCommand) runtime, which runs the
-  engine natively on the host.
-- **Native Linux** — the bridge does not meaningfully throttle P2P (kernel-native
-  networking); only the standard concern remains: forward `6881/tcp`+`6881/udp` on
-  the router for inbound peers.
-
-> A separate, VPN-isolated torrent service is planned to route only torrent traffic
-> through a VPN (and incidentally sidestep the bridge-NAT throttle by tunnelling all
-> peer connections through a single flow). See
-> [Torrent engine app](../ideas/torrent-engine-app.md).
+Media Server holds **no** raw BitTorrent port — it speaks only the engine app's HTTP
+control API. All peer connectivity (the fixed TCP/UDP listen port, DHT/PEX/LSD, MSE
+encryption, port mapping) and the VPN tunnel + killswitch live in the `torrent-engine`
+app and are configured there. This also sidesteps the docker bridge-NAT throughput
+collapse that plagued the old in-process engine, by tunnelling all peer connections
+through a single VPN flow. See [Torrent engine app](../ideas/torrent-engine-app.md).
 
 ## Pipeline
 
