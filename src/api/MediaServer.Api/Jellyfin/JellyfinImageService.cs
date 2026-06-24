@@ -92,7 +92,9 @@ public sealed class JellyfinImageService(
 
         var directory = Path.Combine(hosty.AppDataDir, "images");
         var slot = type == ImageType.Backdrop ? "backdrop" : "primary";
-        var path = Path.Combine(directory, $"collection-{collection.Id:N}-{slot}{ExtensionFor(remote)}");
+        // The tag is part of the filename so a swapped poster/backdrop (new url → new tag) lands in a new file
+        // and is refetched, instead of the stale cached bytes being served forever.
+        var path = Path.Combine(directory, $"collection-{collection.Id:N}-{slot}-{tag}{ExtensionFor(remote)}");
         if (File.Exists(path))
         {
             return new ImagePayload(await File.ReadAllBytesAsync(path, cancellationToken), ContentTypeFor(path), tag);
@@ -107,14 +109,26 @@ public sealed class JellyfinImageService(
 
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
         var contentType = response.Content.Headers.ContentType?.MediaType ?? ContentTypeFor(path);
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
             Directory.CreateDirectory(directory);
-            await File.WriteAllBytesAsync(path, bytes, cancellationToken);
+            // Write to a sibling temp file then atomically rename, so a concurrent request never reads a
+            // half-written cache file.
+            await File.WriteAllBytesAsync(tempPath, bytes, cancellationToken);
+            File.Move(tempPath, path, overwrite: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // Serving still works even if the cache write fails.
+            // Serving still works even if the cache write fails; clean up a stray temp file.
+            try
+            {
+                File.Delete(tempPath);
+            }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort.
+            }
         }
 
         return new ImagePayload(bytes, contentType, tag);

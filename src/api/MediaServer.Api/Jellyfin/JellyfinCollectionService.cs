@@ -19,11 +19,24 @@ public sealed class JellyfinCollectionService(MediaServerDbContext database)
     public static bool IsView(string publicId) => publicId == JellyfinIds.CollectionsView();
 
     /// <summary>
+    /// Whether any franchise qualifies — the cheap existence check the view-gating uses, so it never loads the
+    /// eligible collections just to ask "are there any?".
+    /// </summary>
+    public async Task<bool> AnyEligibleAsync(CancellationToken cancellationToken) =>
+        await database.MediaItems.AsNoTracking()
+            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null)
+            .GroupBy(item => item.CollectionId!.Value)
+            .Where(group => group.Count() >= CollectionMetadata.MinOwnedMovies)
+            .Select(group => group.Key)
+            .AnyAsync(cancellationToken);
+
+    /// <summary>
     /// The franchises worth surfacing — collections with at least the threshold of owned movies — with their
-    /// member counts, by name. Uses a server-side subquery for the id filter, so no IN-list parameters.
+    /// member counts, by name.
     /// </summary>
     public async Task<IReadOnlyList<(MovieCollection Collection, int Count)>> EligibleAsync(CancellationToken cancellationToken)
     {
+        // One grouping yields both the eligible ids and their counts.
         var counts = await database.MediaItems.AsNoTracking()
             .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null)
             .GroupBy(item => item.CollectionId!.Value)
@@ -35,12 +48,9 @@ public sealed class JellyfinCollectionService(MediaServerDbContext database)
             return [];
         }
 
-        // Reuse the same grouping as a subquery so the collection load filters in SQL (no id IN-list params).
-        var eligibleIds = database.MediaItems.AsNoTracking()
-            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null)
-            .GroupBy(item => item.CollectionId!.Value)
-            .Where(group => group.Count() >= CollectionMetadata.MinOwnedMovies)
-            .Select(group => group.Key);
+        // The eligible set is the franchises with >=2 owned movies — bounded and small (far under SQLite's
+        // parameter limit), unlike the all-movies IN-lists elsewhere, so the id list needs no chunking.
+        var eligibleIds = counts.Select(entry => entry.CollectionId).ToList();
         var collections = await database.MovieCollections.AsNoTracking()
             .Where(collection => eligibleIds.Contains(collection.Id))
             .ToListAsync(cancellationToken);
@@ -68,9 +78,15 @@ public sealed class JellyfinCollectionService(MediaServerDbContext database)
     /// <summary>Resolves a BoxSet public id back to its collection, or null if it is not one.</summary>
     public async Task<MovieCollection?> ResolveAsync(string publicId, CancellationToken cancellationToken)
     {
-        // The public id is a one-way hash of the collection id, so match over ids (mirrors catalog resolution).
-        var collections = await database.MovieCollections.AsNoTracking().ToListAsync(cancellationToken);
-        return collections.FirstOrDefault(collection => JellyfinIds.Collection(collection.Id) == publicId);
+        // The public id is a one-way hash of the collection id, so match over ids only (mirrors catalog/user
+        // resolution), then load the single matching row rather than materializing every collection.
+        var ids = await database.MovieCollections.AsNoTracking()
+            .Select(collection => collection.Id)
+            .ToListAsync(cancellationToken);
+        var matchedId = ids.FirstOrDefault(id => JellyfinIds.Collection(id) == publicId);
+        return matchedId == default
+            ? null
+            : await database.MovieCollections.AsNoTracking().FirstOrDefaultAsync(collection => collection.Id == matchedId, cancellationToken);
     }
 
     /// <summary>The Primary-image tag advertised for a BoxSet; null when the collection has no poster.</summary>

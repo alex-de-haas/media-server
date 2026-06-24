@@ -44,7 +44,7 @@ public sealed class JellyfinLibraryService(
 
         // Append the synthetic Collections view only when at least one franchise qualifies, so Infuse never
         // shows an empty "Collections" library.
-        if ((await collections.EligibleAsync(cancellationToken)).Count > 0)
+        if (await collections.AnyEligibleAsync(cancellationToken))
         {
             views.Add(mapper.MapCollectionsView());
         }
@@ -58,7 +58,7 @@ public sealed class JellyfinLibraryService(
         // The synthetic Collections view exists only while a franchise qualifies.
         if (JellyfinCollectionService.IsView(publicId))
         {
-            return (await collections.EligibleAsync(cancellationToken)).Count > 0 ? mapper.MapCollectionsView() : null;
+            return await collections.AnyEligibleAsync(cancellationToken) ? mapper.MapCollectionsView() : null;
         }
 
         // Otherwise a view is always a catalog, so query catalogs directly rather than probing MediaItems first.
