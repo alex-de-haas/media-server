@@ -365,15 +365,15 @@ function IngestRow({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  // Drop the optimistic pending flag once the polled download reflects the intended pause/resume. Adjusted
-  // during render (React's recommended alternative to an effect for derived-from-props state); the guard
-  // makes it converge to a no-op so it can't loop.
-  if (transferIntent !== null && download) {
-    const paused = isDownloadPaused(download);
-    if ((transferIntent === "pause" && paused) || (transferIntent === "resume" && !paused)) {
-      setTransferIntent(null);
-    }
-  }
+  // Derived (no state write needed): pause/resume return before the engine flips the state, so show the
+  // control as pending from the click until the polled download catches up to the intent. transferIntent is
+  // cleared by the next click or on error; a satisfied intent simply stops being "pending" here.
+  const transferPending =
+    transferIntent !== null && download
+      ? transferIntent === "pause"
+        ? !isDownloadPaused(download)
+        : isDownloadPaused(download)
+      : false;
 
   const togglePause = () => {
     if (!download) return;
@@ -458,7 +458,7 @@ function IngestRow({
           {/* No manual pause/resume while the VPN is down — the engine gates transfers and a resume can't
               succeed under the killswitch. */}
           {transferring && download && !vpnDown && (
-            transferIntent !== null ? (
+            transferPending ? (
               <IconAction label={transferIntent === "pause" ? "Pausing…" : "Resuming…"} icon={<Pause />} pending onClick={() => {}} />
             ) : isDownloadPaused(download) ? (
               <IconAction label="Resume" icon={<Play />} onClick={togglePause} />
@@ -563,7 +563,7 @@ function displayPath(relativePath: string): string {
 // the torrent/download name when no files have been parsed yet (e.g. a magnet still fetching metadata).
 function ingestTitle(item: IngestItem): string {
   if (item.mediaTitle) return item.mediaTitle;
-  const parsed = item.sourceFiles.find((file) => file.parsedTitle.trim())?.parsedTitle.trim();
+  const parsed = item.sourceFiles.find((file) => file.parsedTitle?.trim())?.parsedTitle?.trim();
   if (parsed) return parsed;
   if (item.downloadName) return item.downloadName;
   const first = item.sourceFiles[0]?.relativePath;

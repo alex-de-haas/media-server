@@ -260,6 +260,14 @@ export function IngestReviewDialog({
 // (or the image fails to load), so every row keeps the same shape.
 function CandidatePoster({ url, title }: { url: string | null; title: string }) {
   const [failed, setFailed] = useState(false);
+  // Reset the load-error state if this instance is reused for a different candidate (React reconciliation),
+  // otherwise a prior failure would wrongly keep showing the placeholder for the new poster.
+  const [lastUrl, setLastUrl] = useState(url);
+  if (url !== lastUrl) {
+    setLastUrl(url);
+    setFailed(false);
+  }
+
   if (!url || failed) {
     return (
       <div className="bg-muted text-muted-foreground flex aspect-[2/3] w-10 shrink-0 items-center justify-center rounded">

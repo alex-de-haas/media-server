@@ -1,5 +1,6 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Media;
 using MediaServer.Api.Jellyfin.Streaming;
 
 namespace MediaServer.Api.Jellyfin;
@@ -242,7 +243,7 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
 
         switch (type)
         {
-            case "Video" when ResolutionLabel(stream.Width, stream.Height) is { } resolution:
+            case "Video" when VideoResolution.Label(stream.Width, stream.Height) is { } resolution:
                 parts.Add(resolution);
                 break;
             case "Audio":
@@ -274,24 +275,6 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
 
     // VideoRangeType is a finer enum than VideoRange ("HDR" is not a member); collapse non-SDR to HDR10.
     private static string VideoRangeType(string? hdrFormat) => IsSdr(hdrFormat) ? "SDR" : "HDR10";
-
-    // Key off width: widescreen films keep the nominal width (e.g. 1920) while the
-    // height drops below the matching value, so height alone mislabels them. Height is
-    // a fallback for vertical video and the unbucketed remainder.
-    private static string? ResolutionLabel(int? width, int? height)
-    {
-        var w = width ?? 0;
-        var h = height ?? 0;
-        return (w, h) switch
-        {
-            ( <= 0, <= 0) => null,
-            ( >= 3800, _) or (_, >= 2000) => "2160p",
-            ( >= 1900, _) or (_, >= 1000) => "1080p",
-            ( >= 1260, _) or (_, >= 700) => "720p",
-            ( >= 700, _) or (_, >= 480) => "480p",
-            _ => $"{(h > 0 ? h : w)}p",
-        };
-    }
 
     private static string? AspectRatio(MediaStream stream)
     {

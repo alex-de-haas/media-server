@@ -60,8 +60,11 @@ public static class LocalTorrentInspector
     /// </summary>
     internal static string ToSaveRelativePath(string filePath, string torrentName, int fileCount)
     {
-        var isSingleFile = fileCount == 1 && string.Equals(filePath, torrentName, StringComparison.Ordinal);
-        var relative = isSingleFile ? filePath : Path.Combine(torrentName, filePath);
-        return relative.Replace('\\', '/');
+        // Normalize separators (and compare case-insensitively) so a backslash or casing quirk in the
+        // torrent metadata doesn't defeat the single-file check and re-introduce the doubled path.
+        var normalizedPath = filePath.Replace('\\', '/');
+        var normalizedName = torrentName.Replace('\\', '/');
+        var isSingleFile = fileCount == 1 && string.Equals(normalizedPath, normalizedName, StringComparison.OrdinalIgnoreCase);
+        return isSingleFile ? normalizedPath : $"{normalizedName}/{normalizedPath}";
     }
 }

@@ -149,9 +149,9 @@ export function RemapDialog({
           {results === null ? (
             <span className="text-muted-foreground text-xs">Search for the correct {isEpisode ? "series" : "title"} above.</span>
           ) : results.length ? (
-            // Bounded scroll container: max-height + overflow on the same element scrolls reliably (a
-            // max-height on a ScrollArea root can't bound its height:100% viewport, so the list spilled out).
             <div className="-mr-2 flex max-h-72 flex-wrap content-start gap-2 overflow-y-auto pr-2">
+              {/* Bounded scroll: max-height + overflow on one element scrolls reliably; a max-height on a
+                  ScrollArea root can't bound its height:100% viewport, so the list spilled out. */}
               {results.map((candidate) => (
                 <Button
                   key={`${candidate.reference.provider}:${candidate.reference.id}`}
