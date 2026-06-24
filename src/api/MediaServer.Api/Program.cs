@@ -143,6 +143,12 @@ builder.Services.AddHostedService<CollectionBackfillWorker>();
 // Library import: scan a catalog root for orphan media files and ingest them from the identify stage.
 builder.Services.AddScoped<LibraryImportService>();
 
+// Catalog-wide metadata refresh: an admin-triggered background job that re-enriches every identified item.
+builder.Services.AddSingleton<ICatalogRefreshQueue, CatalogRefreshQueue>();
+builder.Services.AddScoped<CatalogRefreshCoordinator>();
+builder.Services.AddScoped<CatalogMetadataRefreshService>();
+builder.Services.AddHostedService<CatalogRefreshWorker>();
+
 // Jellyfin-compatible surface (M2): credentials/tokens, DTO mapping, browsing, images, streaming.
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IPinHasher, Argon2idPinHasher>();

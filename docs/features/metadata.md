@@ -139,6 +139,13 @@ published library items, split into cast and crew (crew grouped by department).
   [Storage and data](storage-and-data.md)); image binaries are cached on disk
   under the app data directory.
 - Manual refresh re-fetches metadata for an item across all supported languages.
+- Catalog-wide refresh re-runs the idempotent enrich for **every identified item**
+  in a catalog as an admin-triggered background job (`catalog:refresh-metadata`).
+  It enriches one item per DI scope (bounded change tracker over a large catalog)
+  and paces items to stay under the provider's rate limit. Progress (0–100) streams
+  over the realtime job feed (see [Background tasks](background-tasks.md)); only one
+  refresh runs per catalog at a time, and a run stranded by a restart is reconciled
+  to failed on startup.
 - Scheduled refresh can update changed records.
 
 ## Testing Expectations
