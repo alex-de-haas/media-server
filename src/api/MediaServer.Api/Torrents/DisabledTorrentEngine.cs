@@ -5,12 +5,15 @@ namespace MediaServer.Api.Torrents;
 /// (<c>TorrentEngineUrl</c> is unset). Downloading is unavailable, but the rest of the app — the
 /// Jellyfin surface, library browsing, identify/probe/enrich — keeps working: this is the graceful
 /// degradation that matches Hosty's advisory (non-blocking) dependency model. Parsing
-/// (<see cref="Inspect"/>) stays available so callers can still read an info hash offline; every
-/// command that needs a running engine fails with a clear message, and queries return empty.
+/// (<see cref="Inspect"/>) stays available so callers can still read an info hash offline. Only
+/// <see cref="AddAsync"/> — the one command that needs a running engine to start a download — fails
+/// with a clear message; pause/resume/stop/remove are deliberately no-ops so stale download rows can
+/// still be cleaned up DB-side, and every query returns empty/null.
 /// </summary>
 public sealed class DisabledTorrentEngine : ITorrentEngine
 {
-    private const string Unavailable = "the torrent-engine dependency is not configured.";
+    private const string Unavailable =
+        "the torrent-engine dependency is not configured (HOSTY_DEPENDENCY_TORRENT_ENGINE_URL is not set).";
 
     // Never raised — there is no engine to produce events. Suppress the "unused event" warning.
 #pragma warning disable CS0067

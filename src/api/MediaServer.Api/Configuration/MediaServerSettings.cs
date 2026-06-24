@@ -28,7 +28,7 @@ public sealed class MediaServerSettings
     /// <summary>
     /// Base URL of the external <c>torrent-engine</c> app, injected as the cross-app dependency
     /// <c>HOSTY_DEPENDENCY_TORRENT_ENGINE_URL</c>. When set, downloading is delegated to that app over
-    /// HTTP/SSE; when null, downloading is disabled (see <see cref="Torrents.DisabledTorrentEngine"/>). The
+    /// HTTP/SSE; when null, downloading is disabled (see <see cref="MediaServer.Api.Torrents.DisabledTorrentEngine"/>). The
     /// engine is a required dependency — see <c>docs/ideas/torrent-engine-app.md</c>.
     /// </summary>
     public string? TorrentEngineUrl { get; init; }
@@ -39,7 +39,7 @@ public sealed class MediaServerSettings
     /// operator-configured catalog root must live within one of these (when provided). May be empty under
     /// standalone local runs. The label is the only key shared with the torrent-engine's downloads mounts
     /// (Hosty configures each app's mounts independently), so it is what we send the engine to pick the
-    /// matching download root — see <see cref="Torrents.RemoteTorrentEngine"/>.
+    /// matching download root — see <see cref="MediaServer.Api.Torrents.RemoteTorrentEngine"/>.
     /// </summary>
     public IReadOnlyList<CatalogMount> CatalogMountRoots { get; init; } = [];
 
