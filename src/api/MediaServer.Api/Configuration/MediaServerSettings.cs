@@ -85,9 +85,10 @@ public sealed class MediaServerSettings
     /// <c>HOSTY_MOUNT_{KEY}</c> as <c>label=path</c> entries (and rejects mount host paths containing a
     /// comma or ':'), so comma is the canonical separator and each entry's first <c>'='</c> splits its
     /// label from its path. A host path may itself contain <c>'='</c>, so we split on the <b>first</b> one
-    /// only; an entry with no <c>'='</c> (an older Core that injected bare paths) falls back to the path's
-    /// base name as its label. Newline, ';', and <c>os.PathSeparator</c> are also accepted defensively, and
-    /// duplicate paths are dropped (first label wins).
+    /// only; an entry with no <c>'='</c> (an older Core that injected bare paths) or a blank explicit label
+    /// falls back to the path's base name as its label, and an entry with no usable label is skipped (Core
+    /// never injects an empty label). Newline, ';', and <c>os.PathSeparator</c> are also accepted
+    /// defensively, and duplicate paths are dropped (first label wins).
     /// </summary>
     internal static IReadOnlyList<CatalogMount> ParseMountRoots(string? raw)
     {
@@ -97,7 +98,10 @@ public sealed class MediaServerSettings
         }
 
         var separators = new[] { ',', '\n', '\r', ';', Path.PathSeparator };
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // On Windows paths are case-insensitive, so dedupe with an OS-appropriate comparer to avoid keeping
+        // the same mount twice under different casing.
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var seen = new HashSet<string>(comparer);
         var mounts = new List<CatalogMount>();
         foreach (var entry in raw.Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -108,9 +112,17 @@ public sealed class MediaServerSettings
                 continue;
             }
 
-            var label = equals >= 0
-                ? entry[..equals].Trim()
-                : Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var label = equals >= 0 ? entry[..equals].Trim() : string.Empty;
+            if (label.Length == 0)
+            {
+                label = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            }
+
+            if (label.Length == 0)
+            {
+                continue;
+            }
+
             mounts.Add(new CatalogMount(label, path));
         }
 

@@ -27,7 +27,8 @@ public sealed class CatalogService(
 
     /// <summary>
     /// The catalog-root mounts the operator may place catalogs under (from <c>HOSTY_MOUNT_CATALOGROOTS</c>).
-    /// Empty under standalone local runs where mounts are not enforced. The label is the base folder name.
+    /// Empty under standalone local runs where mounts are not enforced. The label is the operator-chosen
+    /// Hosty mount label (falling back to the path base name only when none was injected).
     /// </summary>
     public IReadOnlyList<CatalogMountResponse> ListMounts()
     {
@@ -226,11 +227,14 @@ public sealed class CatalogService(
             return;
         }
 
+        // Match ToMountRelative: paths are case-insensitive on Windows, so a validly-cased catalog root
+        // under a mount isn't rejected over a casing difference.
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var withinMount = settings.CatalogMountRoots.Any(mount =>
         {
             var normalized = Path.GetFullPath(mount.Path);
             var withSeparator = normalized.EndsWith(Path.DirectorySeparatorChar) ? normalized : normalized + Path.DirectorySeparatorChar;
-            return root.Equals(normalized, StringComparison.Ordinal) || root.StartsWith(withSeparator, StringComparison.Ordinal);
+            return root.Equals(normalized, comparison) || root.StartsWith(withSeparator, comparison);
         });
 
         if (!withinMount)

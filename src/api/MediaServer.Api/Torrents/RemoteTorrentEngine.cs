@@ -139,7 +139,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
             var body = await response.Content.ReadFromJsonAsync<EngineError>(Json, cancellationToken);
             return string.IsNullOrWhiteSpace(body?.Error) ? null : body.Error;
         }
-        catch (Exception exception) when (exception is JsonException or NotSupportedException or HttpRequestException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             return null;
         }
@@ -214,7 +214,10 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
             if (string.Equals(full, rootFull, comparison) ||
                 full.StartsWith(rootFull + Path.DirectorySeparatorChar, comparison))
             {
-                return (mount.Label, Path.GetRelativePath(rootFull, full).Replace('\\', '/'));
+                // Normalize a blank label to null (the "no label / single root" case) so a malformed mount
+                // entry never sends the engine an empty mountLabel, which is neither valid nor "no label".
+                var label = string.IsNullOrEmpty(mount.Label) ? null : mount.Label;
+                return (label, Path.GetRelativePath(rootFull, full).Replace('\\', '/'));
             }
         }
 

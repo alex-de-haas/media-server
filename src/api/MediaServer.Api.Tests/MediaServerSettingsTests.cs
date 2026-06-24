@@ -21,6 +21,16 @@ public sealed class MediaServerSettingsTests
     }
 
     [Fact]
+    public void ParseMountRoots_blank_explicit_label_falls_back_to_base_name()
+    {
+        // A malformed `=/path` entry has a blank explicit label; derive it from the base name rather than
+        // forwarding an empty mountLabel to the engine.
+        Assert.Equal(
+            [("anime", "/mnt/anime")],
+            MediaServerSettings.ParseMountRoots("=/mnt/anime").Select(mount => (mount.Label, mount.Path)));
+    }
+
+    [Fact]
     public void ParseMountRoots_splits_comma_joined_label_path_entries()
     {
         // Core joins multiple mounts with a comma into HOSTY_MOUNT_CATALOGROOTS as label=path entries
