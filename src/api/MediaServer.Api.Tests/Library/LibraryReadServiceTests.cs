@@ -211,6 +211,130 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Detail_for_movie_parses_credits_collection_studios_trailer_and_keywords_from_raw()
+    {
+        using (var context = _db.Create())
+        {
+            var record = context.MetadataRecords.Single(metadata => metadata.MediaItemId == _movieId);
+            record.Raw = """
+                {
+                  "status": "Released",
+                  "vote_count": 34000,
+                  "homepage": "https://inception.example",
+                  "imdb_id": "tt1375666",
+                  "belongs_to_collection": { "id": 1, "name": "Inception Collection" },
+                  "production_companies": [
+                    { "name": "Legendary Pictures", "logo_path": "/leg.png" },
+                    { "name": "Syncopy", "logo_path": null }
+                  ],
+                  "external_ids": { "imdb_id": "tt1375666" },
+                  "credits": {
+                    "cast": [
+                      { "name": "Leonardo DiCaprio", "character": "Cobb", "profile_path": "/leo.jpg" },
+                      { "name": "Joseph Gordon-Levitt", "character": "Arthur", "profile_path": null }
+                    ],
+                    "crew": [
+                      { "name": "Christopher Nolan", "job": "Director" },
+                      { "name": "Hans Zimmer", "job": "Original Music Composer" }
+                    ]
+                  },
+                  "videos": { "results": [
+                    { "site": "YouTube", "type": "Teaser", "key": "teaserkey", "official": true },
+                    { "site": "YouTube", "type": "Trailer", "key": "trailerkey", "official": true }
+                  ] },
+                  "keywords": { "keywords": [ { "name": "dream" }, { "name": "heist" } ] }
+                }
+                """;
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        Assert.NotNull(detail);
+        Assert.Equal("Released", detail!.Status);
+        Assert.Equal(34000, detail.VoteCount);
+        Assert.Equal("https://inception.example", detail.Homepage);
+        Assert.Equal("tt1375666", detail.ImdbId);
+        Assert.Equal("Inception Collection", detail.CollectionName);
+        Assert.Equal("https://www.youtube.com/watch?v=trailerkey", detail.TrailerUrl); // Trailer wins over Teaser
+        Assert.Equal(["dream", "heist"], detail.Keywords);
+        Assert.Equal(["Christopher Nolan"], detail.Directors);
+        Assert.Empty(detail.Creators); // movies have no creators
+
+        Assert.Collection(
+            detail.Studios,
+            studio =>
+            {
+                Assert.Equal("Legendary Pictures", studio.Name);
+                Assert.Equal("https://image.tmdb.org/t/p/original/leg.png", studio.LogoUrl);
+            },
+            studio =>
+            {
+                Assert.Equal("Syncopy", studio.Name);
+                Assert.Null(studio.LogoUrl);
+            });
+
+        Assert.Collection(
+            detail.Cast,
+            member =>
+            {
+                Assert.Equal("Leonardo DiCaprio", member.Name);
+                Assert.Equal("Cobb", member.Character);
+                Assert.Equal("https://image.tmdb.org/t/p/original/leo.jpg", member.ProfileUrl);
+            },
+            member =>
+            {
+                Assert.Equal("Joseph Gordon-Levitt", member.Name);
+                Assert.Null(member.ProfileUrl);
+            });
+    }
+
+    [Fact]
+    public async Task Detail_for_series_parses_creators_status_counts_and_cast_from_raw()
+    {
+        using (var context = _db.Create())
+        {
+            context.MetadataRecords.Add(new MetadataRecord
+            {
+                Id = Guid.NewGuid(),
+                MediaItemId = _seriesId,
+                Provider = "tmdb",
+                Language = "en-US",
+                Title = "Breaking Bad",
+                Raw = """
+                    {
+                      "status": "Ended",
+                      "number_of_seasons": 5,
+                      "number_of_episodes": 62,
+                      "created_by": [ { "name": "Vince Gilligan" } ],
+                      "networks": [ { "name": "AMC", "logo_path": "/amc.png" } ],
+                      "external_ids": { "imdb_id": "tt0903747" },
+                      "credits": { "cast": [ { "name": "Bryan Cranston", "character": "Walter White", "profile_path": "/bc.jpg" } ] },
+                      "videos": { "results": [ { "site": "YouTube", "type": "Trailer", "key": "bbtrailer" } ] },
+                      "keywords": { "results": [ { "name": "drugs" } ] }
+                    }
+                    """,
+                FetchedAt = DateTimeOffset.UtcNow,
+            });
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_seriesId, appUserId: null, CancellationToken.None);
+
+        Assert.NotNull(detail);
+        Assert.Equal("Ended", detail!.Status);
+        Assert.Equal(5, detail.SeasonCount);
+        Assert.Equal(62, detail.EpisodeCount);
+        Assert.Equal(["Vince Gilligan"], detail.Creators);
+        Assert.Empty(detail.Directors); // series have no movie-style director credit
+        Assert.Equal("tt0903747", detail.ImdbId);
+        Assert.Equal("https://www.youtube.com/watch?v=bbtrailer", detail.TrailerUrl);
+        Assert.Equal(["drugs"], detail.Keywords);
+        Assert.Equal("Walter White", Assert.Single(detail.Cast).Character);
+        Assert.NotNull(detail.Networks); // networks still parse from the same payload
+    }
+
+    [Fact]
     public async Task Episodes_lists_ordered_episodes_with_resume_state()
     {
         SeedUserData(_episodeId, position: TimeSpan.FromMinutes(5).Ticks);

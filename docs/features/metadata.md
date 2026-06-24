@@ -76,11 +76,25 @@ Efficiency:
 
 Common fields cached per language where applicable:
 
-- Title, original title, original language, overview, genres.
-- Release/premiere date, runtime, official rating, community rating.
+- Title, original title, original language, overview, tagline, genres.
+- Release/premiere date, runtime, official rating (certification), community
+  rating and vote count.
 - Posters, backdrops, and logos (language-tagged where provided).
-- Cast and crew.
-- For series: seasons and episodes.
+- Cast and crew (directors for movies, creators for series).
+- Networks and production companies/studios (with logos).
+- External ids (IMDb), trailer (YouTube), keyword tags, homepage, production
+  status, and — for movies — the collection/franchise the title belongs to.
+- For series: seasons and episodes (counts from the provider).
+
+The detail fetch uses TMDb `append_to_response`
+(`credits,external_ids,videos,release_dates|content_ratings,keywords`) so the
+single localized detail call already carries everything above — no extra
+round-trips. The full payload is kept in the per-language `Raw` JSON blob, and
+the read layer projects the derived fields (cast, crew, studios, trailer,
+keywords, collection, …) from it at display time rather than persisting a column
+per field. Official rating is the one such field promoted to its own column,
+mapped from the region-specific certification (the region is implied by the
+requested language, falling back to US).
 
 ## Caching and Refresh
 

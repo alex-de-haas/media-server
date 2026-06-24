@@ -61,10 +61,20 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
         // silently fetch an unrelated title whenever a tv id collides with a movie id.
         var type = TmdbType(kind);
 
+        // append_to_response folds credits/external ids/videos/certification/keywords into the same detail
+        // call (TMDb allows up to 20 sub-requests) — no extra round-trips, and the full payload lands in
+        // MetadataRecord.Raw for the read layer to project from. Certification lives in release_dates for
+        // movies and content_ratings for tv.
+        var appends = type == "movie"
+            ? "credits,external_ids,videos,release_dates,keywords"
+            : "credits,external_ids,videos,content_ratings,keywords";
+
         var records = new List<ProviderMetadata>(languages.Count);
         foreach (var language in languages)
         {
-            var document = await GetAsync($"{type}/{reference.Id}?language={Uri.EscapeDataString(language)}", cancellationToken);
+            var document = await GetAsync(
+                $"{type}/{reference.Id}?language={Uri.EscapeDataString(language)}&append_to_response={appends}",
+                cancellationToken);
             if (document is null)
             {
                 continue;
@@ -136,11 +146,90 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
             EmptyToNull(GetString(root, "overview")),
             EmptyToNull(GetString(root, "tagline")),
             genres,
-            OfficialRating: null,
+            OfficialRating: ParseOfficialRating(root, type, PreferredRegion(language)),
             CommunityRating: GetDouble(root, "vote_average"),
             ReleaseDate: ParseDate(GetString(root, type == "movie" ? "release_date" : "first_air_date")),
             RuntimeTicks: runtimeTicks,
             Raw: root.GetRawText());
+    }
+
+    // The certification (PG-13, TV-MA, 16, …) for the operator's region. TMDb keys it by country, so
+    // prefer the region implied by the requested language, then fall back to US, then any available rating.
+    private static string? ParseOfficialRating(JsonElement root, string type, string region) => type == "movie"
+        ? PickByRegion(root, "release_dates", region, MovieCertification)
+        : PickByRegion(root, "content_ratings", region, entry => EmptyToNull(GetString(entry, "rating")));
+
+    private static string? MovieCertification(JsonElement entry)
+    {
+        if (!entry.TryGetProperty("release_dates", out var dates) || dates.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var date in dates.EnumerateArray())
+        {
+            if (EmptyToNull(GetString(date, "certification")) is { } certification)
+            {
+                return certification;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? PickByRegion(JsonElement root, string property, string region, Func<JsonElement, string?> select)
+    {
+        if (!root.TryGetProperty(property, out var container) || container.ValueKind != JsonValueKind.Object ||
+            !container.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        string? fallbackUs = null;
+        string? fallbackAny = null;
+        foreach (var entry in results.EnumerateArray())
+        {
+            if (select(entry) is not { } value)
+            {
+                continue;
+            }
+
+            // ValueEquals compares the UTF-8 bytes directly (no string allocation per entry). TMDb
+            // returns iso_3166_1 as an upper-case alpha-2 code, and region is upper-cased to match.
+            if (entry.TryGetProperty("iso_3166_1", out var iso) && iso.ValueKind == JsonValueKind.String)
+            {
+                if (iso.ValueEquals(region))
+                {
+                    return value;
+                }
+
+                if (iso.ValueEquals("US"))
+                {
+                    fallbackUs ??= value;
+                }
+            }
+
+            fallbackAny ??= value;
+        }
+
+        return fallbackUs ?? fallbackAny;
+    }
+
+    // "ru-RU" → "RU"; "zh-Hans-CN" → "CN"; a tag with no region (bare "en") defaults to US, TMDb's most
+    // complete certification set. The region is the first 2-letter subtag after the language code, so a
+    // script subtag (4 letters) between them is skipped.
+    private static string PreferredRegion(string language)
+    {
+        var parts = language.Split('-');
+        for (var i = 1; i < parts.Length; i++)
+        {
+            if (parts[i].Length == 2)
+            {
+                return parts[i].ToUpperInvariant();
+            }
+        }
+
+        return "US";
     }
 
     private static long? FirstEpisodeRuntimeTicks(JsonElement root)

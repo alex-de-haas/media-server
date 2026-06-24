@@ -4,9 +4,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Link2, MoreVertical, Play, RefreshCw, Star, Trash2, Wand2 } from "lucide-react";
+import { ArrowLeft, Check, Clapperboard, ExternalLink, Link2, MoreVertical, Play, RefreshCw, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type Episode, type LibraryDetail, type LibraryMediaSource, type Network } from "@/lib/media-server";
+import {
+  mediaServer,
+  type CastMember,
+  type Episode,
+  type LibraryDetail,
+  type LibraryMediaSource,
+  type Network,
+  type Studio,
+} from "@/lib/media-server";
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { RemapDialog } from "@/components/remap-dialog";
 import { formatBytes, formatRuntime } from "@/lib/format";
@@ -56,6 +64,8 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
       </div>
       <Hero item={item} />
       {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo sources={item.mediaSources} />}
+      {item.cast.length > 0 && <CastList cast={item.cast} />}
+      {item.keywords.length > 0 && <KeywordTags keywords={item.keywords} />}
     </div>
   );
 }
@@ -254,7 +264,11 @@ function Hero({ item }: { item: LibraryDetail }) {
   const isFavorite = item.userData?.isFavorite ?? false;
   const resume = !isPlayed && item.userData?.playedPercentage ? Math.min(item.userData.playedPercentage, 100) : null;
   const runtime = formatRuntime(item.runtimeTicks);
-  const meta = [item.year?.toString(), runtime, item.genres.slice(0, 3).join(", ") || null].filter(Boolean).join(" · ");
+  const seriesCounts =
+    item.kind === "Series" && item.seasonCount ? `${item.seasonCount} season${item.seasonCount === 1 ? "" : "s"}` : null;
+  const meta = [item.year?.toString(), runtime, seriesCounts, item.genres.slice(0, 3).join(", ") || null]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     // Full-bleed cinematic banner: breaks out of the centered content column to span the viewport width
@@ -293,14 +307,26 @@ function Hero({ item }: { item: LibraryDetail }) {
                 <h1 className="font-serif text-3xl leading-tight font-medium sm:text-4xl">{item.title}</h1>
               )}
               {meta && <p className="text-muted-foreground text-sm">{meta}</p>}
-              {item.communityRating != null && (
-                <p className="text-muted-foreground flex items-center gap-1 text-sm">
-                  <Star className="text-brand size-4" aria-hidden /> {item.communityRating.toFixed(1)}
-                </p>
-              )}
+              <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                {item.officialRating && (
+                  <Badge variant="outline" className="font-normal">
+                    {item.officialRating}
+                  </Badge>
+                )}
+                {item.communityRating != null && (
+                  <span className="flex items-center gap-1">
+                    <Star className="text-brand size-4" aria-hidden /> {item.communityRating.toFixed(1)}
+                    {item.voteCount != null ? <span className="text-xs">({formatCount(item.voteCount)})</span> : null}
+                  </span>
+                )}
+                {item.kind === "Series" && item.status && <span className="text-xs">{item.status}</span>}
+              </div>
+              <CreditLine item={item} />
+              {item.collectionName && <p className="text-muted-foreground text-xs">Part of {item.collectionName}</p>}
             </div>
 
-            {item.networks && item.networks.length > 0 && <NetworkLogos networks={item.networks} />}
+            {item.networks && item.networks.length > 0 && <BrandLogos brands={item.networks} />}
+            {item.kind !== "Series" && item.studios.length > 0 && <BrandLogos brands={item.studios.slice(0, 4)} />}
 
             {resume != null && (
               <div className="max-w-xs">
@@ -330,6 +356,21 @@ function Hero({ item }: { item: LibraryDetail }) {
               >
                 <Star className="size-4" aria-hidden /> Favorite
               </Button>
+              {item.trailerUrl && (
+                <Button variant="outline" onClick={() => openExternal(item.trailerUrl!)}>
+                  <Clapperboard className="size-4" aria-hidden /> Trailer
+                </Button>
+              )}
+              {item.imdbId && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="View on IMDb"
+                  onClick={() => openExternal(`https://www.imdb.com/title/${item.imdbId}/`)}
+                >
+                  <ExternalLink className="size-4" aria-hidden />
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -340,30 +381,108 @@ function Hero({ item }: { item: LibraryDetail }) {
   );
 }
 
-// Network/distributor logos for a series (Netflix, Apple TV+, …). TMDb logos are transparent PNGs in
-// assorted colours, so each sits on a light chip to stay legible over the backdrop in either theme; a
-// network without artwork falls back to a name badge.
-function NetworkLogos({ networks }: { networks: Network[] }) {
+// Network/studio logos (Netflix, Apple TV+, A24, …) — networks for series, production companies for
+// movies. TMDb logos are transparent PNGs in assorted colours, so each sits on a light chip to stay
+// legible over the backdrop in either theme; a brand without artwork falls back to a name badge.
+function BrandLogos({ brands }: { brands: (Network | Studio)[] }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {networks.map((network) =>
-        network.logoUrl ? (
+      {brands.map((brand) =>
+        brand.logoUrl ? (
           <span
-            key={network.name}
-            title={network.name}
+            key={brand.name}
+            title={brand.name}
             className="inline-flex items-center rounded-md bg-white/90 px-2 py-1 ring-1 ring-black/5"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={network.logoUrl} alt={network.name} className="h-4 w-auto object-contain sm:h-5" />
+            <img src={brand.logoUrl} alt={brand.name} className="h-4 w-auto object-contain sm:h-5" />
           </span>
         ) : (
-          <Badge key={network.name} variant="secondary">
-            {network.name}
+          <Badge key={brand.name} variant="secondary">
+            {brand.name}
           </Badge>
         ),
       )}
     </div>
   );
+}
+
+// "Directed by …" for movies, "Created by …" for series. Renders nothing when the credit is unknown.
+function CreditLine({ item }: { item: LibraryDetail }) {
+  const names = item.kind === "Series" ? item.creators : item.directors;
+  if (names.length === 0) {
+    return null;
+  }
+
+  return (
+    <p className="text-muted-foreground text-sm">
+      {item.kind === "Series" ? "Created by " : "Directed by "}
+      <span className="text-foreground">{names.join(", ")}</span>
+    </p>
+  );
+}
+
+// Top-billed cast with headshots; a person without a photo falls back to a placeholder icon.
+function CastList({ cast }: { cast: CastMember[] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-lg font-semibold tracking-tight">Cast</h2>
+      <Separator />
+      <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+        {cast.map((member) => (
+          <li key={`${member.name}:${member.character ?? ""}`} className="flex flex-col gap-2">
+            <div className="bg-secondary aspect-[2/3] w-full overflow-hidden rounded-md ring-1 ring-black/5">
+              {member.profileUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={member.profileUrl} alt={member.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="text-muted-foreground flex h-full w-full items-center justify-center">
+                  <User className="size-8" aria-hidden />
+                </div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{member.name}</p>
+              {member.character && <p className="text-muted-foreground truncate text-xs">{member.character}</p>}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// TMDb keyword tags — a lightweight "themes" cloud below the cast.
+function KeywordTags({ keywords }: { keywords: string[] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-lg font-semibold tracking-tight">Tags</h2>
+      <Separator />
+      <div className="flex flex-wrap gap-2">
+        {keywords.map((keyword) => (
+          <Badge key={keyword} variant="secondary" className="font-normal capitalize">
+            {keyword}
+          </Badge>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// Opens a trailer / IMDb page in a new tab, severing the opener for safety. The `noopener` window
+// feature already nulls `opener`, but not every browser honours it, so clear it explicitly too.
+function openExternal(url: string) {
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (opened) {
+    opened.opener = null;
+  }
+}
+
+// Compact vote counts: 12345 → "12K". Pin the locale so SSR and the client format identically (avoids a
+// hydration mismatch); the UI is English-only.
+const countFormatter = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+function formatCount(value: number) {
+  return countFormatter.format(value);
 }
 
 /**
