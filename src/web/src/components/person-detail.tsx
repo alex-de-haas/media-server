@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Film, User } from "lucide-react";
-import { mediaServer, type PersonFilmographyEntry } from "@/lib/media-server";
+import { mediaServer, type PersonCrewGroup, type PersonFilmographyEntry } from "@/lib/media-server";
 import { PosterCard, detailHref, parsePersonId } from "@/components/poster-card";
 import { EmptyState } from "@/components/states";
 import { Separator } from "@/components/ui/separator";
@@ -43,7 +43,7 @@ export function PersonDetail({ id }: { id: string }) {
       <BackButton />
 
       <header className="flex flex-col gap-4 sm:flex-row sm:gap-6">
-        <div className="bg-secondary aspect-[2/3] w-28 shrink-0 overflow-hidden rounded-md shadow-lg ring-1 ring-black/10 sm:w-40">
+        <div className="bg-secondary aspect-[2/3] w-28 shrink-0 self-start overflow-hidden rounded-md shadow-lg ring-1 ring-black/10 sm:w-40">
           {data.profileUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={data.profileUrl} alt={data.name} className="h-full w-full object-cover" />
