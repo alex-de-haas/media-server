@@ -426,6 +426,38 @@ async function send(path: string, method: string, body?: unknown): Promise<void>
   });
 }
 
+// A transcode job: re-encode one movie source into a smaller sibling version, run by the external
+// transcode-engine. Persisted facts plus the live engine snapshot (fps/speed/eta/outputSize are null
+// unless the job is running).
+export interface TranscodeJob {
+  id: string;
+  engineJobId: string;
+  mediaSourceId: string;
+  mediaItemId: string;
+  name: string | null;
+  inputPath: string;
+  outputPath: string;
+  videoCodec: string;
+  hardwareAcceleration: string;
+  crf: number | null;
+  state: string;
+  percentComplete: number;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  fps: number | null;
+  speed: number | null;
+  etaSeconds: number | null;
+  outputSizeBytes: number | null;
+}
+
+export interface CreateTranscodeInput {
+  sourceId: string;
+  videoCodec?: string;
+  hardwareAcceleration?: string;
+  crf?: number | null;
+}
+
 export const mediaServer = {
   listCatalogs: () => apiJson<Catalog[]>(`${BASE}/catalogs`),
   listCatalogMounts: () => apiJson<CatalogMount[]>(`${BASE}/catalogs/mounts`),
@@ -456,6 +488,16 @@ export const mediaServer = {
   stopSeeding: (id: string) => send(`/torrents/${id}/stop-seeding`, "POST"),
   removeDownload: (id: string, deleteFiles: boolean) =>
     send(`/torrents/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
+
+  listTranscodeJobs: () => apiJson<TranscodeJob[]>(`${BASE}/transcode`),
+  createTranscodeJob: (input: CreateTranscodeInput) =>
+    apiJson<TranscodeJob>(`${BASE}/transcode`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  cancelTranscodeJob: (id: string) => send(`/transcode/${id}/cancel`, "POST"),
+  removeTranscodeJob: (id: string) => send(`/transcode/${id}`, "DELETE"),
 
   listIngest: () => apiJson<IngestItem[]>(`${BASE}/ingest`),
   retryIngest: (id: string) => send(`/ingest/${id}/retry`, "POST"),
@@ -493,6 +535,9 @@ export const mediaServer = {
     apiJson<UserItemData>(`${BASE}/library/${id}/favorite`, { method: favorite ? "POST" : "DELETE" }),
   deleteLibraryItem: (id: string, deleteFiles: boolean) =>
     send(`/library/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
+  // Delete one media source / version (admin); deleteFile also erases the file (used for transcode "replace").
+  deleteMediaSource: (sourceId: string, deleteFile: boolean) =>
+    send(`/library/sources/${sourceId}?deleteFile=${deleteFile}`, "DELETE"),
   refreshMetadata: (id: string) => send(`/library/${id}/refresh`, "POST"),
   remapLibraryItem: (id: string, input: RemapInput) =>
     apiJson<{ id: string }>(`${BASE}/library/${id}/remap`, {

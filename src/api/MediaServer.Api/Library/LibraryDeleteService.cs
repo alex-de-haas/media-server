@@ -66,6 +66,54 @@ public sealed class LibraryDeleteService(
         return true;
     }
 
+    /// <summary>
+    /// Deletes a single <see cref="MediaSource"/> (one version of a movie) — used to drop the original after
+    /// a verified transcode "replace". Removes the source + its streams (and cascades any transcode-job
+    /// history that fed off it); with <paramref name="deleteFile"/> it also erases the file from disk and
+    /// unlinks the originating source file. Returns false if no such source exists.
+    /// </summary>
+    public async Task<bool> DeleteSourceAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
+    {
+        var source = await database.MediaSources.AsNoTracking()
+            .Where(candidate => candidate.Id == sourceId)
+            .Select(candidate => new { candidate.Id, candidate.Path, candidate.SourceFileId, candidate.MediaItemId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (source is null)
+        {
+            return false;
+        }
+
+        // Resolve the catalog up front (the rows are the source of truth for the path) when erasing the file.
+        Catalog? catalog = deleteFile
+            ? await database.MediaItems.AsNoTracking()
+                .Where(item => item.Id == source.MediaItemId)
+                .Join(database.Catalogs.AsNoTracking(), item => item.CatalogId, candidate => candidate.Id, (_, candidate) => candidate)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
+        {
+            // Unlink the originating ingest file (if any), mirroring the item-delete detach.
+            if (source.SourceFileId is { } sourceFileId)
+            {
+                await database.SourceFiles.Where(file => file.Id == sourceFileId)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(file => file.MediaItemId, (Guid?)null), cancellationToken);
+            }
+
+            await database.MediaStreams.Where(stream => stream.MediaSourceId == sourceId).ExecuteDeleteAsync(cancellationToken);
+            await database.MediaSources.Where(candidate => candidate.Id == sourceId).ExecuteDeleteAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        if (deleteFile && catalog is not null)
+        {
+            fileEraser.Erase(catalog, source.Path);
+        }
+
+        return true;
+    }
+
     private async Task<List<Guid>> CollectItemIdsAsync(MediaItem item, CancellationToken cancellationToken)
     {
         if (item.Kind != MediaKind.Series)

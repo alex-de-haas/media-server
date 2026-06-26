@@ -59,7 +59,8 @@
     { "key": "jellyfin", "service": "api", "port": "jellyfin", "protocol": "http", "public": true }
   ],
   "dependencies": [
-    { "id": "com.haas.torrent-engine", "required": true, "endpoints": [{ "key": "control", "as": "torrent-engine" }] }
+    { "id": "com.haas.torrent-engine", "required": true, "endpoints": [{ "key": "control", "as": "torrent-engine" }] },
+    { "id": "com.haas.transcode-engine", "required": false, "endpoints": [{ "key": "control", "as": "transcode-engine" }] }
   ],
   "ui": {
     "entrypoint": { "endpoint": "ui", "path": "/" },

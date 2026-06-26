@@ -16,6 +16,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<Person> Persons => Set<Person>();
     public DbSet<MediaItemPerson> MediaItemPersons => Set<MediaItemPerson>();
     public DbSet<Download> Downloads => Set<Download>();
+    public DbSet<TranscodeJob> TranscodeJobs => Set<TranscodeJob>();
     public DbSet<SourceFile> SourceFiles => Set<SourceFile>();
     public DbSet<IngestItem> IngestItems => Set<IngestItem>();
     public DbSet<Job> Jobs => Set<Job>();
@@ -46,6 +47,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureImageAsset(modelBuilder);
         ConfigurePerson(modelBuilder);
         ConfigureDownload(modelBuilder);
+        ConfigureTranscodeJob(modelBuilder);
         ConfigureSourceFile(modelBuilder);
         ConfigureIngestItem(modelBuilder);
         ConfigureJob(modelBuilder);
@@ -222,6 +224,37 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         download.HasIndex(entity => entity.InfoHash).IsUnique();
 
         download.HasOne(entity => entity.Catalog)
+            .WithMany()
+            .HasForeignKey(entity => entity.CatalogId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private static void ConfigureTranscodeJob(ModelBuilder modelBuilder)
+    {
+        var job = modelBuilder.Entity<TranscodeJob>();
+        job.HasKey(entity => entity.Id);
+        job.Property(entity => entity.EngineJobId).IsRequired();
+        job.Property(entity => entity.InputPath).IsRequired();
+        job.Property(entity => entity.OutputPath).IsRequired();
+        job.Property(entity => entity.VideoCodec).IsRequired();
+        job.Property(entity => entity.HardwareAcceleration).IsRequired();
+        job.Property(entity => entity.State).HasConversion<int>();
+        job.HasIndex(entity => entity.EngineJobId).IsUnique();
+        job.HasIndex(entity => entity.State);
+
+        // Cascade from the source: removing the original source (e.g. after a verified replace) drops its
+        // job history too. The movie/catalog links are denormalized for listing.
+        job.HasOne(entity => entity.MediaSource)
+            .WithMany()
+            .HasForeignKey(entity => entity.MediaSourceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        job.HasOne(entity => entity.MediaItem)
+            .WithMany()
+            .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        job.HasOne(entity => entity.Catalog)
             .WithMany()
             .HasForeignKey(entity => entity.CatalogId)
             .OnDelete(DeleteBehavior.Restrict);

@@ -17,6 +17,7 @@ using MediaServer.Api.Pipeline.Stages;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Realtime;
 using MediaServer.Api.Torrents;
+using MediaServer.Api.Transcoding;
 using MediaServer.Api.Jellyfin;
 using MediaServer.Api.Jellyfin.Auth;
 using MediaServer.Api.Jellyfin.Endpoints;
@@ -80,6 +81,28 @@ builder.Services.AddHostedService<TorrentCoordinator>();
 builder.Services.AddScoped<TorrentService>();
 builder.Services.AddScoped<DownloadFileService>();
 builder.Services.AddScoped<DownloadDeletionService>();
+
+// Transcode engine. Re-encoding is delegated to the external transcode-engine app (an optional dependency)
+// over HTTP/SSE; it runs ffmpeg with the host's /dev/dri passed through for VAAPI hardware encoding. When no
+// dependency URL is injected, a disabled engine keeps the rest of the app working while transcoding is
+// unavailable. See docs/ideas/transcode-engine-app.md.
+if (settings.TranscodeEngineUrl is { Length: > 0 } transcodeEngineUrl)
+{
+    builder.Services.AddSingleton(serviceProvider => new RemoteTranscodeEngine(
+        new HttpClient { BaseAddress = new Uri(transcodeEngineUrl), Timeout = Timeout.InfiniteTimeSpan },
+        settings,
+        serviceProvider.GetRequiredService<ILogger<RemoteTranscodeEngine>>()));
+    builder.Services.AddSingleton<ITranscodeEngine>(serviceProvider => serviceProvider.GetRequiredService<RemoteTranscodeEngine>());
+    builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<RemoteTranscodeEngine>());
+}
+else
+{
+    builder.Services.AddSingleton<ITranscodeEngine, DisabledTranscodeEngine>();
+}
+
+builder.Services.AddHostedService<TranscodeCoordinator>();
+builder.Services.AddScoped<TranscodeService>();
+builder.Services.AddScoped<TranscodeOutputImporter>();
 
 // Identify / probe / enrich building blocks.
 builder.Services.AddSingleton<INameParser, NameParser>();
@@ -284,6 +307,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapCatalogEndpoints();
 app.MapTorrentEndpoints();
+app.MapTranscodeEndpoints();
 app.MapIngestEndpoints();
 app.MapLibraryEndpoints();
 app.MapPersonEndpoints();
