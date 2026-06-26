@@ -37,6 +37,17 @@ public enum TorrentSourceType
     File = 1,
 }
 
+/// <summary>Persisted transcode-job lifecycle state. Mirrors the external engine's job states; only
+/// transitions are written, live progress rides the realtime stream / list snapshot.</summary>
+public enum TranscodeJobState
+{
+    Queued = 0,
+    Running = 1,
+    Completed = 2,
+    Failed = 3,
+    Cancelled = 4,
+}
+
 /// <summary>The v1 processing (PROC) pipeline stages, persisted as <c>IngestItem.Stage</c>.</summary>
 public enum IngestStage
 {

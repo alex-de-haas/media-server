@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Clapperboard, ExternalLink, Link2, MoreVertical, Play, RefreshCw, Star, Trash2, User, Wand2 } from "lucide-react";
+import { ArrowLeft, Check, Clapperboard, ExternalLink, Link2, MoreVertical, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -14,7 +14,9 @@ import {
   type LibraryMediaSource,
   type Network,
   type Studio,
+  type TranscodeJob,
 } from "@/lib/media-server";
+import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
 import { RemapDialog } from "@/components/remap-dialog";
@@ -87,7 +89,7 @@ function DetailTabs({ item }: { item: LibraryDetail }) {
         <CastList cast={item.cast} />
       </TabsContent>
       <TabsContent value="media">
-        {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo sources={item.mediaSources} />}
+        {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo item={item} />}
       </TabsContent>
       <TabsContent value="tags">
         <KeywordTags keywords={item.keywords} />
@@ -556,30 +558,179 @@ async function copyInfuseLink(deepLink: string) {
   }
 }
 
-function MediaInfo({ sources }: { sources: LibraryMediaSource[] }) {
-  if (!sources.length) {
+function MediaInfo({ item }: { item: LibraryDetail }) {
+  const { role } = useSession();
+  // Transcoding ("shrink a movie source into a smaller version") is movies-only and admin-only for now.
+  const canManage = item.kind === "Movie" && role === "admin";
+  const sources = item.mediaSources;
+
+  if (!sources.length && !canManage) {
     return <EmptyDetailPanel>No media sources available.</EmptyDetailPanel>;
   }
 
   return (
     <section className="flex flex-col gap-3">
-      {sources.map((source) => (
-        <div key={source.id} className="rounded-md border p-3 text-sm">
+      {canManage && <MovieConversions itemId={item.id} />}
+      {sources.length ? (
+        sources.map((source) => <SourceCard key={source.id} source={source} itemId={item.id} canManage={canManage} />)
+      ) : (
+        <EmptyDetailPanel>No media sources available.</EmptyDetailPanel>
+      )}
+    </section>
+  );
+}
+
+// One source/version card. For movies an admin can convert it into a smaller version or delete it (the
+// "verify then replace" flow: convert → check the new version → delete the original).
+function SourceCard({ source, itemId, canManage }: { source: LibraryMediaSource; itemId: string; canManage: boolean }) {
+  const [convertOpen, setConvertOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  return (
+    <div className="rounded-md border p-3 text-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
           {source.versionName ? <p className="font-medium">{source.versionName}</p> : null}
           <p className="text-muted-foreground font-mono text-xs">
             {source.container} · {formatBytes(source.sizeBytes)}
           </p>
-          <ul className="mt-2 flex flex-col gap-1">
-            {source.streams.map((stream) => (
-              <li key={stream.index} className="flex items-center gap-2">
-                <span className="text-muted-foreground w-16 shrink-0 text-xs">{stream.type}</span>
-                <span>{stream.displayTitle ?? stream.codec ?? "—"}</span>
-              </li>
-            ))}
-          </ul>
         </div>
+        {canManage && (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button variant="ghost" size="icon-sm" aria-label="Convert to a smaller version" onClick={() => setConvertOpen(true)}>
+              <Shrink />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Delete this version"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        )}
+      </div>
+      <ul className="mt-2 flex flex-col gap-1">
+        {source.streams.map((stream) => (
+          <li key={stream.index} className="flex items-center gap-2">
+            <span className="text-muted-foreground w-16 shrink-0 text-xs">{stream.type}</span>
+            <span>{stream.displayTitle ?? stream.codec ?? "—"}</span>
+          </li>
+        ))}
+      </ul>
+
+      {canManage && <TranscodeDialog source={source} open={convertOpen} onOpenChange={setConvertOpen} />}
+      {canManage && <DeleteVersionDialog source={source} itemId={itemId} open={deleteOpen} onOpenChange={setDeleteOpen} />}
+    </div>
+  );
+}
+
+// This movie's transcode jobs, polled while any is active. When the last one finishes, the detail is
+// refreshed so the freshly produced version appears in the source list above.
+function MovieConversions({ itemId }: { itemId: string }) {
+  const queryClient = useQueryClient();
+  const jobs = useQuery({
+    queryKey: ["transcode-jobs"],
+    queryFn: mediaServer.listTranscodeJobs,
+    refetchInterval: (query) => {
+      const data = (query.state.data ?? []) as TranscodeJob[];
+      return data.some((job) => job.mediaItemId === itemId && isTranscodeActive(job)) ? 2000 : false;
+    },
+  });
+
+  const mine = (jobs.data ?? []).filter((job) => job.mediaItemId === itemId);
+  const activeCount = mine.filter(isTranscodeActive).length;
+
+  const previousActive = useRef(activeCount);
+  useEffect(() => {
+    if (previousActive.current > 0 && activeCount === 0) {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
+    }
+    previousActive.current = activeCount;
+  }, [activeCount, itemId, queryClient]);
+
+  if (mine.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-dashed p-3">
+      <p className="text-muted-foreground text-xs font-medium">Conversions</p>
+      {mine.map((job) => (
+        <TranscodeJobRow key={job.id} job={job} />
       ))}
-    </section>
+    </div>
+  );
+}
+
+function DeleteVersionDialog({
+  source,
+  itemId,
+  open,
+  onOpenChange,
+}: {
+  source: LibraryMediaSource;
+  itemId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const deleteFileId = useId();
+  const [deleteFile, setDeleteFile] = useState(false);
+
+  // Re-apply the default each time the dialog (re)opens so a prior toggle (then cancel) doesn't carry over.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setDeleteFile(false);
+  }
+
+  const remove = useMutation({
+    mutationFn: () => mediaServer.deleteMediaSource(source.id, deleteFile),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
+      onOpenChange(false);
+      toast.success("Version removed");
+    },
+    onError: (error) => toast.error("Couldn’t remove version", { description: errorMessage(error) }),
+  });
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent className="sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove this version?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Removes <span className="text-foreground font-medium">{source.versionName ?? source.container}</span> (
+            {formatBytes(source.sizeBytes)}) from this movie.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
+          <Checkbox
+            id={deleteFileId}
+            className="mt-0.5"
+            checked={deleteFile}
+            onCheckedChange={(checked) => setDeleteFile(checked === true)}
+          />
+          <label htmlFor={deleteFileId} className="cursor-pointer">
+            Delete file from disk
+            <span className="text-muted-foreground block text-xs">
+              Frees the disk space. Otherwise only the library entry is removed.
+            </span>
+          </label>
+        </div>
+
+        <AlertDialogFooter>
+          <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" size="sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
+            {deleteFile ? "Delete + remove file" : "Remove version"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

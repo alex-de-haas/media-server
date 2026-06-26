@@ -34,6 +34,15 @@ public sealed class MediaServerSettings
     public string? TorrentEngineUrl { get; init; }
 
     /// <summary>
+    /// Base URL of the external <c>transcode-engine</c> app, injected as the cross-app dependency
+    /// <c>HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL</c>. When set, transcoding is delegated to that app over
+    /// HTTP/SSE; when null, transcoding is disabled (see
+    /// <see cref="MediaServer.Api.Transcoding.DisabledTranscodeEngine"/>). The engine is an optional
+    /// dependency — see <c>docs/ideas/transcode-engine-app.md</c>.
+    /// </summary>
+    public string? TranscodeEngineUrl { get; init; }
+
+    /// <summary>
     /// Catalog-root mounts from <c>HOSTY_MOUNT_CATALOGROOTS</c>, each carrying its operator-chosen
     /// <see cref="CatalogMount.Label"/> and host/container <see cref="CatalogMount.Path"/>. Each
     /// operator-configured catalog root must live within one of these (when provided). May be empty under
@@ -66,6 +75,7 @@ public sealed class MediaServerSettings
             TorrentMaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),
             TorrentMaxUploadSpeed = ReadInt("TORRENT_MAX_UPLOAD_SPEED", 0),
             TorrentEngineUrl = Read("HOSTY_DEPENDENCY_TORRENT_ENGINE_URL"),
+            TranscodeEngineUrl = Read("HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL"),
             CatalogMountRoots = ParseMountRoots(Read("HOSTY_MOUNT_CATALOGROOTS")),
         };
     }

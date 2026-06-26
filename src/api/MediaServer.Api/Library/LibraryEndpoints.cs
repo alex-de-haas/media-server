@@ -97,6 +97,14 @@ public static class LibraryEndpoints
             return deleted ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Delete a single media source / version (admin only). `deleteFile=true` also erases the file from
+        // disk — used to drop the original after a verified transcode "replace".
+        group.MapDelete("/sources/{sourceId:guid}", async (Guid sourceId, bool? deleteFile, LibraryDeleteService deleteService, CancellationToken cancellationToken) =>
+        {
+            var deleted = await deleteService.DeleteSourceAsync(sourceId, deleteFile ?? false, cancellationToken);
+            return deleted ? Results.NoContent() : Results.NotFound();
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         // Re-fetch provider metadata + images for one item (admin only).
         group.MapPost("/{id:guid}/refresh", async (Guid id, LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
         {
