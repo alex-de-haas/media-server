@@ -57,6 +57,17 @@ export function TranscodeDialog({
   const [hardware, setHardware] = useState("auto");
   const [crf, setCrf] = useState("");
 
+  // Reset the form each time the dialog (re)opens so inputs from a previous source don't leak in.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setCodec("hevc");
+      setHardware("auto");
+      setCrf("");
+    }
+  }
+
   const convert = useMutation({
     mutationFn: () =>
       mediaServer.createTranscodeJob({
@@ -203,11 +214,11 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
 function stateLabel(job: TranscodeJob): string {
   if (job.state === "Running") {
     const parts = [formatPercent(job.percentComplete)];
-    if (job.speed) parts.push(`${job.speed.toFixed(1)}×`);
+    if (job.speed != null) parts.push(`${job.speed.toFixed(1)}×`);
     if (job.etaSeconds != null) parts.push(`ETA ${formatEta(job.etaSeconds)}`);
     return parts.join(" · ");
   }
   if (job.state === "Queued") return "Queued";
-  if (job.state === "Completed") return job.outputSizeBytes ? `Done · ${formatBytes(job.outputSizeBytes)}` : "Done";
+  if (job.state === "Completed") return job.outputSizeBytes != null ? `Done · ${formatBytes(job.outputSizeBytes)}` : "Done";
   return job.state;
 }

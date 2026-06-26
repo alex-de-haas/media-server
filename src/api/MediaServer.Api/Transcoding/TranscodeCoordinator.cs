@@ -125,9 +125,9 @@ public sealed class TranscodeCoordinator(
                 await database.SaveChangesAsync(cancellationToken);
             }
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // Allow a retry on the next reconcile tick.
+            // Allow a retry on the next reconcile tick. (A genuine shutdown cancellation propagates.)
             _imported.TryRemove(job.Id, out _);
             logger.LogError(exception, "Failed to import transcode output for job {JobId}.", job.Id);
         }

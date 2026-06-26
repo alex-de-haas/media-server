@@ -7,7 +7,9 @@ public static class TranscodeEndpoints
 {
     public static void MapTranscodeEndpoints(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/api/transcode").RequireAuthorization();
+        // Transcoding is an admin operation (re-encodes library files, consumes host resources, exposes
+        // input/output paths), so the whole surface is admin-only — matching the UI gating.
+        var group = routes.MapGroup("/api/transcode").RequireAuthorization(AppRoles.AdminPolicy);
 
         group.MapGet("/", async (TranscodeService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListAsync(cancellationToken)));
@@ -28,9 +30,7 @@ public static class TranscodeEndpoints
         group.MapPost("/{id:guid}/cancel", async (Guid id, TranscodeService service, CancellationToken cancellationToken) =>
             await service.CancelAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound());
 
-        // Destructive: can delete the produced output file, so it is admin-only (matching library delete).
         group.MapDelete("/{id:guid}", async (Guid id, bool? deleteOutput, TranscodeService service, CancellationToken cancellationToken) =>
-            await service.RemoveAsync(id, deleteOutput ?? false, cancellationToken) ? Results.NoContent() : Results.NotFound())
-            .RequireAuthorization(AppRoles.AdminPolicy);
+            await service.RemoveAsync(id, deleteOutput ?? false, cancellationToken) ? Results.NoContent() : Results.NotFound());
     }
 }

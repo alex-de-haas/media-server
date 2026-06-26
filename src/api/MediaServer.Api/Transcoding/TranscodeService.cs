@@ -147,9 +147,21 @@ public sealed class TranscodeService(
             return false;
         }
 
-        await engine.RemoveAsync(job.EngineJobId, deleteOutput, cancellationToken);
+        var engineJobId = job.EngineJobId;
         database.TranscodeJobs.Remove(job);
         await database.SaveChangesAsync(cancellationToken);
+
+        // Best-effort engine/file cleanup AFTER the row is gone, so a transient engine failure can't roll
+        // back (or block) the removal the operator asked for.
+        try
+        {
+            await engine.RemoveAsync(engineJobId, deleteOutput, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "Removed transcode job {JobId} but the engine cleanup failed.", id);
+        }
+
         return true;
     }
 
@@ -182,8 +194,11 @@ public sealed class TranscodeService(
         foreach (var mount in settings.CatalogMountRoots)
         {
             var rootFull = Path.GetFullPath(mount.Path);
+            // Don't double-append a separator when the mount root already ends with one (e.g. a filesystem
+            // root like "/"), which would break the descendant check.
+            var rootPrefix = rootFull.EndsWith(Path.DirectorySeparatorChar) ? rootFull : rootFull + Path.DirectorySeparatorChar;
             if (string.Equals(full, rootFull, comparison) ||
-                full.StartsWith(rootFull + Path.DirectorySeparatorChar, comparison))
+                full.StartsWith(rootPrefix, comparison))
             {
                 var label = string.IsNullOrEmpty(mount.Label) ? null : mount.Label;
                 return (label, Path.GetRelativePath(rootFull, full).Replace('\\', '/'));
