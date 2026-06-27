@@ -12,7 +12,12 @@ public sealed record TranscodeJobRequest(
     string OutputRelativePath,
     string VideoCodec,
     string HardwareAcceleration,
-    int? Crf);
+    int? Crf,
+    int? MaxHeight = null,
+    IReadOnlyList<int>? AudioStreamIndexes = null,
+    IReadOnlyList<int>? SubtitleStreamIndexes = null,
+    int? DefaultAudioStreamIndex = null,
+    int? DefaultSubtitleStreamIndex = null);
 
 /// <summary>What is known about a job right after it is created.</summary>
 public sealed record JobDescriptor(

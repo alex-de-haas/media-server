@@ -112,6 +112,13 @@ public static class LibraryEndpoints
             return refreshed ? Results.Accepted() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Re-probe the item's media files and replace its stored streams (admin only).
+        group.MapPost("/{id:guid}/refresh-media", async (Guid id, LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
+        {
+            var refreshed = await maintenance.RefreshMediaAsync(id, cancellationToken);
+            return refreshed ? Results.Accepted() : Results.NotFound();
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         // Reassign a misidentified leaf (movie/episode) to a corrected identity and rebuild its hardlink (admin only).
         group.MapPost("/{id:guid}/remap", async (Guid id, RemapRequest request, RemapService remap, CancellationToken cancellationToken) =>
         {

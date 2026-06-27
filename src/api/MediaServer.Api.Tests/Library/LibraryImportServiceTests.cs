@@ -90,6 +90,43 @@ public sealed class LibraryImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Skips_orphaned_transcode_outputs()
+    {
+        var catalog = SeedCatalog();
+        var now = DateTimeOffset.UtcNow;
+        // The transcode output sits on disk with no MediaSource (e.g. its version was removed but the file
+        // kept). Re-ingesting it would let the organizer rename it over the original — so it must be skipped.
+        WriteFile("Movie (2020)/Movie (2020) - HEVC.mkv");
+        var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Movie", AddedAt = now, UpdatedAt = now };
+        _database.MediaItems.Add(movie);
+        // The transcode job's input is the original source (still present); only its output version was removed.
+        var original = new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "mkv", Path = "Movie (2020)/Movie (2020).mkv", CreatedAt = now };
+        _database.MediaSources.Add(original);
+        _database.TranscodeJobs.Add(new TranscodeJob
+        {
+            Id = Guid.NewGuid(),
+            EngineJobId = "job-1",
+            MediaSourceId = original.Id,
+            MediaItemId = movie.Id,
+            CatalogId = catalog.Id,
+            InputPath = "Movie (2020)/Movie (2020).mkv",
+            OutputPath = "Movie (2020)/Movie (2020) - HEVC.mkv",
+            VideoCodec = "hevc",
+            HardwareAcceleration = "auto",
+            State = TranscodeJobState.Completed,
+            CreatedAt = now,
+        });
+        await _database.SaveChangesAsync();
+
+        var report = await Service().ImportAsync(catalog.Id, CancellationToken.None);
+
+        Assert.NotNull(report);
+        Assert.Equal(0, report!.Imported);
+        Assert.Equal(1, report.Skipped);
+        Assert.Empty(await _database.IngestItems.ToListAsync());
+    }
+
+    [Fact]
     public async Task Re_running_is_idempotent()
     {
         var catalog = SeedCatalog();

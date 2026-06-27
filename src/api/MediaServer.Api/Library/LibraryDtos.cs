@@ -99,6 +99,7 @@ public sealed record MediaStreamDto(
     string? Codec,
     string? Language,
     string? DisplayTitle,
+    string? Title,
     int? Width,
     int? Height,
     string? HdrFormat,

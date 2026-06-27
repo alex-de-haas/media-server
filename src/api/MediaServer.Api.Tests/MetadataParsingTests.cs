@@ -166,7 +166,7 @@ public sealed class FfprobeParsingTests
         {
           "streams": [
             { "index": 0, "codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "r_frame_rate": "24000/1001", "color_transfer": "smpte2084", "disposition": { "default": 1, "forced": 0 } },
-            { "index": 1, "codec_type": "audio", "codec_name": "aac", "channels": 6, "sample_rate": "48000", "tags": { "language": "eng" }, "disposition": { "default": 1, "forced": 0 } },
+            { "index": 1, "codec_type": "audio", "codec_name": "aac", "channels": 6, "sample_rate": "48000", "tags": { "language": "eng", "title": "Director's Commentary" }, "disposition": { "default": 1, "forced": 0 } },
             { "index": 2, "codec_type": "subtitle", "codec_name": "subrip", "tags": { "language": "spa" }, "disposition": { "default": 0, "forced": 1 } }
           ],
           "format": { "format_name": "matroska,webm", "duration": "7200.0", "bit_rate": "8000000", "size": "7200000000" }
@@ -185,9 +185,34 @@ public sealed class FfprobeParsingTests
         Assert.Equal(1920, video.Width);
         Assert.Equal("HDR10", video.HdrFormat);
         Assert.True(video.IsDefault);
+        Assert.Null(video.Title);
+
+        var audio = result.Streams.Single(stream => stream.Type == StreamType.Audio);
+        Assert.Equal("Director's Commentary", audio.Title);
 
         var subtitle = result.Streams.Single(stream => stream.Type == StreamType.Subtitle);
         Assert.True(subtitle.IsForced);
         Assert.Equal("spa", subtitle.Language);
+    }
+
+    [Fact]
+    public void Detects_dolby_vision_over_hdr10_base()
+    {
+        const string json = """
+        {
+          "streams": [
+            {
+              "index": 0, "codec_type": "video", "codec_name": "hevc", "color_transfer": "smpte2084",
+              "side_data_list": [ { "side_data_type": "DOVI configuration record", "dv_profile": 8 } ]
+            }
+          ],
+          "format": { "format_name": "matroska,webm", "duration": "60.0" }
+        }
+        """;
+
+        var result = FfprobeMediaProbe.Parse(json, "/library/movie.mkv");
+
+        var video = result.Streams.Single(stream => stream.Type == StreamType.Video);
+        Assert.Equal("Dolby Vision · HDR10", video.HdrFormat);
     }
 }

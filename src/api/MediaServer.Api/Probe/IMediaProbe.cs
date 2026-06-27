@@ -16,7 +16,8 @@ public sealed record ProbedStream(
     int? Channels,
     int? SampleRate,
     bool IsDefault,
-    bool IsForced);
+    bool IsForced,
+    string? Title);
 
 public sealed record ProbeResult(
     string Container,

@@ -129,19 +129,58 @@ public sealed class FfprobeMediaProbe(MediaServerSettings settings) : IMediaProb
             (int?)GetLong(stream, "height"),
             ParseFrameRate(GetString(stream, "r_frame_rate")),
             (int?)GetLong(stream, "bits_per_raw_sample"),
-            MapHdr(transfer),
+            MapHdr(transfer, HasDolbyVision(stream)),
             (int?)GetLong(stream, "channels"),
             int.TryParse(GetString(stream, "sample_rate"), out var sampleRate) ? sampleRate : null,
             GetLong(disposition, "default") == 1,
-            GetLong(disposition, "forced") == 1);
+            GetLong(disposition, "forced") == 1,
+            GetString(tags, "title"));
     }
 
-    private static string? MapHdr(string? colorTransfer) => colorTransfer switch
+    /// <summary>Maps the colour transfer (and a detected Dolby Vision layer) to a display HDR label. PQ
+    /// (<c>smpte2084</c>) is the HDR10 family base, <c>arib-std-b67</c> is HLG. Dolby Vision rides on top of a
+    /// PQ base, so both are shown when present (e.g. "Dolby Vision · HDR10"). HDR10+ dynamic metadata lives in
+    /// frame side data and isn't detected from a stream-level probe.</summary>
+    private static string? MapHdr(string? colorTransfer, bool dolbyVision)
     {
-        "smpte2084" => "HDR10",
-        "arib-std-b67" => "HLG",
-        _ => null,
-    };
+        var baseFormat = colorTransfer switch
+        {
+            "smpte2084" => "HDR10",
+            "arib-std-b67" => "HLG",
+            _ => null,
+        };
+
+        if (!dolbyVision)
+        {
+            return baseFormat;
+        }
+
+        return baseFormat is null ? "Dolby Vision" : $"Dolby Vision · {baseFormat}";
+    }
+
+    /// <summary>True when the video stream carries a Dolby Vision configuration record in its side data
+    /// (ffprobe exposes it under <c>side_data_list</c> with a "DOVI"/"Dolby Vision" <c>side_data_type</c>).</summary>
+    private static bool HasDolbyVision(JsonElement stream)
+    {
+        if (stream.ValueKind != JsonValueKind.Object ||
+            !stream.TryGetProperty("side_data_list", out var list) || list.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var entry in list.EnumerateArray())
+        {
+            var type = GetString(entry, "side_data_type");
+            if (type is not null &&
+                (type.Contains("DOVI", StringComparison.OrdinalIgnoreCase) ||
+                 type.Contains("Dolby Vision", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static double? ParseFrameRate(string? value)
     {

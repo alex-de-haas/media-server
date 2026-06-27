@@ -48,6 +48,10 @@ public sealed class MediaStream
 
     public string? Language { get; set; }
 
+    /// <summary>Free-text track label from the container (ffprobe <c>tags.title</c>), e.g. "Director's
+    /// Commentary", "SDH", "Forced". Null when the file doesn't tag the stream.</summary>
+    public string? Title { get; set; }
+
     // Video
     public int? Width { get; set; }
     public int? Height { get; set; }

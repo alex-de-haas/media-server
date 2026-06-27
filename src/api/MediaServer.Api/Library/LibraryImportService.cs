@@ -48,7 +48,16 @@ public sealed class LibraryImportService(
             .Where(file => file.IngestItem!.CatalogId == catalogId)
             .Select(file => file.RelativePath)
             .ToListAsync(cancellationToken);
-        var known = new HashSet<string>(publishedPaths.Concat(queuedPaths), PathComparer);
+        // Transcode-engine outputs ("Movie - HEVC.mkv", etc.) are derived alternate versions managed by the
+        // transcode importer, not primary library files. They may sit on disk without a current MediaSource —
+        // e.g. after a version was removed but its file kept. Re-ingesting one identifies it as the same movie
+        // and the organizer renames it onto the original's canonical path, destroying the original. Keep every
+        // known transcode output off-limits so a scan never re-ingests it.
+        var transcodeOutputs = await database.TranscodeJobs.AsNoTracking()
+            .Where(job => job.CatalogId == catalogId)
+            .Select(job => job.OutputPath)
+            .ToListAsync(cancellationToken);
+        var known = new HashSet<string>(publishedPaths.Concat(queuedPaths).Concat(transcodeOutputs), PathComparer);
 
         var scanned = 0;
         var skipped = 0;

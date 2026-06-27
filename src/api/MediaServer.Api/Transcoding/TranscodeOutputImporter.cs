@@ -52,7 +52,7 @@ public sealed class TranscodeOutputImporter(
             Id = Guid.NewGuid(),
             MediaItemId = job.MediaItemId,
             SourceFileId = null,
-            VersionName = VersionLabel(job.VideoCodec),
+            VersionName = VersionLabel(job, result),
             Container = result.Container,
             Path = job.OutputPath,
             SizeBytes = result.SizeBytes,
@@ -73,6 +73,7 @@ public sealed class TranscodeOutputImporter(
                 Codec = stream.Codec,
                 Profile = stream.Profile,
                 Language = stream.Language,
+                Title = stream.Title,
                 Width = stream.Width,
                 Height = stream.Height,
                 FrameRate = stream.FrameRate,
@@ -92,6 +93,20 @@ public sealed class TranscodeOutputImporter(
         return true;
     }
 
-    private static string VersionLabel(string codec) =>
-        codec.Equals("hevc", StringComparison.OrdinalIgnoreCase) ? "HEVC" : "H.264";
+    /// <summary>Names the imported version from what the output actually contains: "Remux" (with the kept
+    /// resolution) for a video copy, otherwise the real video codec plus its height (e.g. "HEVC 1080p"). Read
+    /// from the probe so the label always reflects the produced file, not just the requested settings.</summary>
+    private static string VersionLabel(TranscodeJob job, ProbeResult result)
+    {
+        var video = result.Streams.FirstOrDefault(stream => stream.Type == StreamType.Video);
+        var height = video?.Height;
+
+        if (string.Equals(job.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase))
+        {
+            return height is { } remuxHeight ? $"Remux {remuxHeight}p" : "Remux";
+        }
+
+        var codec = string.Equals(video?.Codec, "h264", StringComparison.OrdinalIgnoreCase) ? "H.264" : "HEVC";
+        return height is { } encodeHeight ? $"{codec} {encodeHeight}p" : codec;
+    }
 }

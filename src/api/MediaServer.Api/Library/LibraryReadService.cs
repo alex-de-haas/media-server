@@ -757,6 +757,7 @@ public sealed class LibraryReadService(
         stream.Codec,
         stream.Language,
         DisplayTitle(stream),
+        EmptyToNull(stream.Title),
         stream.Width,
         stream.Height,
         stream.HdrFormat,
