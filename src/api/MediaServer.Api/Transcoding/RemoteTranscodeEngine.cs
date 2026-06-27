@@ -88,7 +88,12 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
             request.OutputRelativePath,
             request.VideoCodec,
             request.HardwareAcceleration,
-            request.Crf);
+            request.Crf,
+            request.MaxHeight,
+            request.AudioStreamIndexes,
+            request.SubtitleStreamIndexes,
+            request.DefaultAudioStreamIndex,
+            request.DefaultSubtitleStreamIndex);
 
         using var cts = ControlCts(cancellationToken);
         using var response = await _http.PostAsJsonAsync("/jobs", wire, Json, cts.Token);
@@ -274,7 +279,9 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
     }
 
     private sealed record WireCreateJobRequest(
-        string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, int? Crf);
+        string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, int? Crf,
+        int? MaxHeight = null, IReadOnlyList<int>? AudioStreamIndexes = null, IReadOnlyList<int>? SubtitleStreamIndexes = null,
+        int? DefaultAudioStreamIndex = null, int? DefaultSubtitleStreamIndex = null);
 
     private sealed record EngineError(string? Error);
 

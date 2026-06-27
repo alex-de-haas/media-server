@@ -4,15 +4,24 @@ namespace MediaServer.Api.Tests.Transcoding;
 
 public sealed class TranscodeServiceTests
 {
-    // The output is a sibling of the source in the same folder, with a codec suffix and the same container,
-    // so the re-encode can become a new version of the same movie.
+    // The output is a sibling of the source in the same folder, with a version-label suffix, always in a
+    // Matroska container (the universal carrier) regardless of the source extension.
     [Theory]
-    [InlineData("The Rock (1996)/The Rock (1996).mkv", "hevc", "The Rock (1996)/The Rock (1996) - HEVC.mkv")]
-    [InlineData("Movies/Heat (1995).mp4", "h264", "Movies/Heat (1995) - H264.mp4")]
-    [InlineData("a/b/c.mkv", "hevc", "a/b/c - HEVC.mkv")]
-    [InlineData("movie.mp4", "hevc", "movie - HEVC.mp4")]
-    [InlineData("movie", "hevc", "movie - HEVC")]
-    [InlineData("dir\\file.mkv", "hevc", "dir/file - HEVC.mkv")]
-    public void BuildOutputRelative_AddsCodecSuffix_KeepsFolderAndContainer(string source, string codec, string expected) =>
-        Assert.Equal(expected, TranscodeService.BuildOutputRelative(source, codec));
+    [InlineData("The Rock (1996)/The Rock (1996).mkv", "HEVC 1080p", "The Rock (1996)/The Rock (1996) - HEVC 1080p.mkv")]
+    [InlineData("Movies/Heat (1995).mp4", "H.264", "Movies/Heat (1995) - H.264.mkv")]
+    [InlineData("a/b/c.mkv", "Remux", "a/b/c - Remux.mkv")]
+    [InlineData("movie.mp4", "HEVC", "movie - HEVC.mkv")]
+    [InlineData("movie", "HEVC", "movie - HEVC.mkv")]
+    [InlineData("dir\\file.mkv", "HEVC", "dir/file - HEVC.mkv")]
+    public void BuildOutputRelative_AddsLabelSuffix_AlwaysMatroska(string source, string label, string expected) =>
+        Assert.Equal(expected, TranscodeService.BuildOutputRelative(source, label));
+
+    [Theory]
+    [InlineData("copy", null, "Remux")]
+    [InlineData("hevc", null, "HEVC")]
+    [InlineData("hevc", 1080, "HEVC 1080p")]
+    [InlineData("h264", null, "H.264")]
+    [InlineData("h264", 720, "H.264 720p")]
+    public void VersionLabel_DescribesCodecAndResolution(string codec, int? targetHeight, string expected) =>
+        Assert.Equal(expected, TranscodeService.VersionLabel(codec, targetHeight));
 }

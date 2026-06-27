@@ -2,15 +2,24 @@ using MediaServer.Api.Data;
 
 namespace MediaServer.Api.Transcoding;
 
-/// <summary>Request to transcode a movie source into a smaller sibling. <see cref="VideoCodec"/>
-/// (<c>h264</c>/<c>hevc</c>, default <c>hevc</c>), <see cref="HardwareAcceleration"/>
-/// (<c>auto</c>/<c>vaapi</c>/<c>none</c>, default <c>auto</c>) and <see cref="Crf"/> (software only) fall
-/// back to defaults when omitted.</summary>
+/// <summary>Request to transcode a movie source into a new sibling version. <see cref="VideoCodec"/>
+/// (<c>h264</c>/<c>hevc</c>, default <c>hevc</c>, or <c>copy</c> to remux the video untouched — lossless and
+/// HDR-safe), <see cref="HardwareAcceleration"/> (<c>auto</c>/<c>vaapi</c>/<c>none</c>, default <c>auto</c>)
+/// and <see cref="Crf"/> (software only) fall back to defaults when omitted. <see cref="MaxHeight"/>
+/// downscales to that height (ignored for <c>copy</c> or when the source is already smaller).
+/// <see cref="AudioStreamIndexes"/>/<see cref="SubtitleStreamIndexes"/> are the source stream indexes to copy
+/// (null = all); <see cref="DefaultAudioStreamIndex"/>/<see cref="DefaultSubtitleStreamIndex"/> mark one
+/// copied track as the container default.</summary>
 public sealed record CreateTranscodeRequest(
     Guid SourceId,
     string? VideoCodec,
     string? HardwareAcceleration,
-    int? Crf);
+    int? Crf,
+    int? MaxHeight = null,
+    IReadOnlyList<int>? AudioStreamIndexes = null,
+    IReadOnlyList<int>? SubtitleStreamIndexes = null,
+    int? DefaultAudioStreamIndex = null,
+    int? DefaultSubtitleStreamIndex = null);
 
 /// <summary>A transcode job with its persisted facts plus the live engine snapshot (when running).</summary>
 public sealed record TranscodeJobResponse(

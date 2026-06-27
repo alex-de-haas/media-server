@@ -22,6 +22,7 @@ public sealed class TranscodeService(
         var source = await database.MediaSources
             .Include(candidate => candidate.MediaItem)
             .ThenInclude(item => item!.Catalog)
+            .Include(candidate => candidate.Streams)
             .FirstOrDefaultAsync(candidate => candidate.Id == request.SourceId, cancellationToken)
             ?? throw new TranscodeRequestException("Media source not found.");
 
@@ -40,12 +41,40 @@ public sealed class TranscodeService(
             throw new TranscodeRequestException("crf must be between 0 and 51.");
         }
 
+        // Resolve track selection and target resolution against the source's probed streams.
+        var orderedAudio = source.Streams.Where(stream => stream.StreamType == StreamType.Audio)
+            .OrderBy(stream => stream.Index).Select(stream => stream.Index).ToList();
+        var orderedSubtitles = source.Streams.Where(stream => stream.StreamType == StreamType.Subtitle)
+            .OrderBy(stream => stream.Index).Select(stream => stream.Index).ToList();
+
+        var audioSelection = ResolveSelection(request.AudioStreamIndexes, orderedAudio, "audio");
+        var subtitleSelection = ResolveSelection(request.SubtitleStreamIndexes, orderedSubtitles, "subtitle");
+        var defaultAudio = ResolveDefault(request.DefaultAudioStreamIndex, ref audioSelection, orderedAudio, "audio");
+        var defaultSubtitle = ResolveDefault(request.DefaultSubtitleStreamIndex, ref subtitleSelection, orderedSubtitles, "subtitle");
+
+        // Downscale only — never upscale, and never when remuxing (copy keeps the original picture untouched).
+        var sourceHeight = source.Streams.Where(stream => stream.StreamType == StreamType.Video)
+            .Select(stream => stream.Height).FirstOrDefault();
+        int? targetHeight = null;
+        if (codec != "copy" && request.MaxHeight is { } requestedHeight)
+        {
+            if (requestedHeight is < 16 or > 4320)
+            {
+                throw new TranscodeRequestException("maxHeight must be between 16 and 4320.");
+            }
+
+            if (sourceHeight is null || requestedHeight < sourceHeight)
+            {
+                targetHeight = requestedHeight;
+            }
+        }
+
         if (!sandbox.TryResolve(catalog, source.Path, out var inputAbsolute) || !File.Exists(inputAbsolute))
         {
             throw new TranscodeRequestException("Source file not found on disk.");
         }
 
-        var outputRelative = BuildOutputRelative(source.Path, codec);
+        var outputRelative = BuildOutputRelative(source.Path, VersionLabel(codec, targetHeight));
         if (!sandbox.TryResolve(catalog, outputRelative, out var outputAbsolute))
         {
             throw new TranscodeRequestException("Could not place the output inside the catalog.");
@@ -58,7 +87,7 @@ public sealed class TranscodeService(
                 candidate => candidate.MediaItemId == item.Id && candidate.Path == outputRelative, cancellationToken))
         {
             throw new TranscodeRequestException(
-                $"This movie already has a version at '{outputRelative}'. Delete that version first, or choose a different codec.");
+                $"This movie already has a version at '{outputRelative}'. Delete that version first, or change the settings.");
         }
 
         if (await database.TranscodeJobs.AnyAsync(
@@ -77,7 +106,9 @@ public sealed class TranscodeService(
         try
         {
             descriptor = await engine.CreateAsync(
-                new TranscodeJobRequest(input.Label, input.Relative, output.Label, output.Relative, codec, hardware, request.Crf),
+                new TranscodeJobRequest(
+                    input.Label, input.Relative, output.Label, output.Relative, codec, hardware, request.Crf,
+                    targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle),
                 cancellationToken);
         }
         catch (InvalidOperationException exception)
@@ -165,10 +196,12 @@ public sealed class TranscodeService(
         return true;
     }
 
-    /// <summary>Output is a sibling of the input with a codec suffix and the same container, so it lands in
-    /// the same movie folder and can become a new version of the same item (verified before replacing the
-    /// original). Operates on the catalog-root-relative (posix) path.</summary>
-    internal static string BuildOutputRelative(string sourceRelative, string codec)
+    /// <summary>Output is a sibling of the input with a descriptive version suffix (codec + resolution, or
+    /// "Remux"), always in a Matroska (.mkv) container — the universal carrier that keeps every audio track,
+    /// subtitle, attachment and HDR layer. The suffix encodes the distinguishing settings so two different
+    /// conversions of one movie don't collide on the same path. Operates on the catalog-root-relative (posix)
+    /// path.</summary>
+    internal static string BuildOutputRelative(string sourceRelative, string label)
     {
         var slashed = sourceRelative.Replace('\\', '/');
         var lastSlash = slashed.LastIndexOf('/');
@@ -177,10 +210,64 @@ public sealed class TranscodeService(
 
         var dot = file.LastIndexOf('.');
         var stem = dot >= 0 ? file[..dot] : file;
-        var extension = dot >= 0 ? file[dot..] : string.Empty;
 
-        var name = $"{stem} - {codec.ToUpperInvariant()}{extension}";
+        var name = $"{stem} - {label}.mkv";
         return directory.Length > 0 ? $"{directory}/{name}" : name;
+    }
+
+    /// <summary>The version label used for the output filename: "Remux" for a video copy, otherwise the codec
+    /// plus the target height when downscaling (e.g. "HEVC 1080p") or just the codec at full resolution.</summary>
+    internal static string VersionLabel(string codec, int? targetHeight) =>
+        codec == "copy"
+            ? "Remux"
+            : targetHeight is { } height ? $"{CodecLabel(codec)} {height}p" : CodecLabel(codec);
+
+    private static string CodecLabel(string codec) => codec == "h264" ? "H.264" : "HEVC";
+
+    /// <summary>Validates a requested per-type stream selection against the source's streams. Null = copy all
+    /// (left to the engine's default). An explicit list must reference real streams of that type; order is
+    /// preserved and duplicates dropped. An empty list drops every stream of that type.</summary>
+    private static IReadOnlyList<int>? ResolveSelection(IReadOnlyList<int>? requested, IReadOnlyList<int> available, string kind)
+    {
+        if (requested is null)
+        {
+            return null;
+        }
+
+        var valid = available.ToHashSet();
+        var result = new List<int>();
+        foreach (var index in requested)
+        {
+            if (!valid.Contains(index))
+            {
+                throw new TranscodeRequestException($"Stream {index} is not a {kind} track of this source.");
+            }
+
+            if (!result.Contains(index))
+            {
+                result.Add(index);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Resolves the chosen default track. A non-null choice forces an explicit selection (so the
+    /// engine can translate the absolute index into an output position) and must be one of the copied tracks.</summary>
+    private static int? ResolveDefault(int? requested, ref IReadOnlyList<int>? selection, IReadOnlyList<int> available, string kind)
+    {
+        if (requested is not { } index)
+        {
+            return null;
+        }
+
+        selection ??= available;
+        if (!selection.Contains(index))
+        {
+            throw new TranscodeRequestException($"The default {kind} track must be one of the copied {kind} tracks.");
+        }
+
+        return index;
     }
 
     /// <summary>Maps an absolute path under a configured catalog mount to that mount's <c>Label</c> plus a
@@ -212,7 +299,8 @@ public sealed class TranscodeService(
     {
         null or "" or "hevc" or "h265" or "x265" => "hevc",
         "h264" or "avc" or "x264" => "h264",
-        _ => throw new TranscodeRequestException($"videoCodec '{raw}' is not supported (use 'h264' or 'hevc')."),
+        "copy" or "remux" => "copy",
+        _ => throw new TranscodeRequestException($"videoCodec '{raw}' is not supported (use 'h264', 'hevc' or 'copy')."),
     };
 
     private static string NormalizeHardware(string? raw) => raw?.Trim().ToLowerInvariant() switch

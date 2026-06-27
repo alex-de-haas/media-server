@@ -12,6 +12,7 @@ import {
   type Episode,
   type LibraryDetail,
   type LibraryMediaSource,
+  type MediaStream,
   type Network,
   type Studio,
   type TranscodeJob,
@@ -146,6 +147,17 @@ function AdminControls({ id, title, kind, backHref }: { id: string; title: strin
     onError: (error) => toast.error("Couldn’t refresh metadata", { description: errorMessage(error) }),
   });
 
+  // Re-probes the file(s) with ffprobe and rewrites the stored streams — picks up media data (codecs,
+  // languages, track titles) that wasn't captured at import time, without a full library rescan.
+  const refreshMedia = useMutation({
+    mutationFn: () => mediaServer.refreshMedia(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
+      toast.success("Media data refreshed");
+    },
+    onError: (error) => toast.error("Couldn’t refresh media data", { description: errorMessage(error) }),
+  });
+
   if (role !== "admin") {
     return null;
   }
@@ -165,6 +177,13 @@ function AdminControls({ id, title, kind, backHref }: { id: string; title: strin
             <RefreshCw className={cn(refresh.isPending && "animate-spin")} aria-hidden />
             Refresh metadata
           </DropdownMenuItem>
+          {/* Media sources live on the leaf (movie/episode), not the series row. */}
+          {kind !== "Series" && (
+            <DropdownMenuItem disabled={refreshMedia.isPending} onClick={() => refreshMedia.mutate()}>
+              <Clapperboard className={cn(refreshMedia.isPending && "animate-pulse")} aria-hidden />
+              Refresh media data
+            </DropdownMenuItem>
+          )}
           {/* Series are corrected per episode (in the episode list), not at the series level. */}
           {kind !== "Series" && (
             <DropdownMenuItem onClick={() => setRemapOpen(true)}>
@@ -580,17 +599,71 @@ function MediaInfo({ item }: { item: LibraryDetail }) {
   );
 }
 
+// Stream types we know how to order/label; anything else falls through in its original order with its raw
+// type name. "Subtitle" reads better pluralised once it heads a group of them.
+const STREAM_TYPE_ORDER = ["Video", "Audio", "Subtitle"];
+const STREAM_TYPE_LABELS: Record<string, string> = { Subtitle: "Subtitles" };
+
+type StreamEntry = { text: string; title: string | null; count: number };
+type StreamGroup = { type: string; label: string; entries: StreamEntry[] };
+
+// Collapse a flat stream list into one row per type, deduplicating identical entries (e.g. four
+// "rus DTS 5.1" audio tracks) into a single "rus DTS 5.1 ×4". Turns the ~20-row mediainfo dump into a
+// few lines while keeping every distinct track and language visible. The container's own track label
+// (stream.title, e.g. "Director's Commentary", "SDH") rides along and is part of the dedup key, so
+// differently-labelled tracks stay separate. First-seen order is preserved within each type (Map
+// iteration order); the types themselves follow STREAM_TYPE_ORDER.
+function summarizeStreams(streams: MediaStream[]): StreamGroup[] {
+  const byType = new Map<string, Map<string, StreamEntry>>();
+  for (const stream of streams) {
+    const text = stream.displayTitle ?? stream.codec ?? "—";
+    // Drop a title that just restates the technical summary we already derive.
+    const raw = stream.title?.trim();
+    const title = raw && raw.toLowerCase() !== text.toLowerCase() ? raw : null;
+    const key = JSON.stringify([text, title]);
+    const entries = byType.get(stream.type) ?? new Map<string, StreamEntry>();
+    const existing = entries.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      entries.set(key, { text, title, count: 1 });
+    }
+    byType.set(stream.type, entries);
+  }
+
+  const rank = (type: string) => {
+    const index = STREAM_TYPE_ORDER.indexOf(type);
+    return index === -1 ? STREAM_TYPE_ORDER.length : index;
+  };
+
+  return [...byType.keys()]
+    .sort((a, b) => rank(a) - rank(b))
+    .map((type) => ({
+      type,
+      label: STREAM_TYPE_LABELS[type] ?? type,
+      entries: [...byType.get(type)!.values()],
+    }));
+}
+
 // One source/version card. For movies an admin can convert it into a smaller version or delete it (the
 // "verify then replace" flow: convert → check the new version → delete the original).
 function SourceCard({ source, itemId, canManage }: { source: LibraryMediaSource; itemId: string; canManage: boolean }) {
   const [convertOpen, setConvertOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat;
 
   return (
     <div className="rounded-md border p-3 text-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          {source.versionName ? <p className="font-medium">{source.versionName}</p> : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {source.versionName ? <p className="font-medium">{source.versionName}</p> : null}
+            {hdr ? (
+              <Badge variant="secondary" className="font-normal">
+                {hdr}
+              </Badge>
+            ) : null}
+          </div>
           <p className="text-muted-foreground font-mono text-xs">
             {source.container} · {formatBytes(source.sizeBytes)}
           </p>
@@ -612,14 +685,29 @@ function SourceCard({ source, itemId, canManage }: { source: LibraryMediaSource;
           </div>
         )}
       </div>
-      <ul className="mt-2 flex flex-col gap-1">
-        {source.streams.map((stream) => (
-          <li key={stream.index} className="flex items-center gap-2">
-            <span className="text-muted-foreground w-16 shrink-0 text-xs">{stream.type}</span>
-            <span>{stream.displayTitle ?? stream.codec ?? "—"}</span>
-          </li>
+      <dl className="mt-2 flex flex-col gap-1.5">
+        {summarizeStreams(source.streams).map((group) => (
+          <div key={group.type} className="flex gap-2">
+            <dt className="text-muted-foreground w-16 shrink-0 pt-px text-xs leading-5">{group.label}</dt>
+            <dd className="flex flex-wrap gap-x-1.5 gap-y-0.5">
+              {group.entries.map((entry, index) => (
+                <span key={JSON.stringify([entry.text, entry.title])} className="flex items-center gap-1.5 leading-5">
+                  {index > 0 ? (
+                    <span aria-hidden className="text-muted-foreground/40">
+                      ·
+                    </span>
+                  ) : null}
+                  <span>
+                    {entry.text}
+                    {entry.title ? <span className="text-muted-foreground"> “{entry.title}”</span> : null}
+                    {entry.count > 1 ? <span className="text-muted-foreground"> ×{entry.count}</span> : null}
+                  </span>
+                </span>
+              ))}
+            </dd>
+          </div>
         ))}
-      </ul>
+      </dl>
 
       {canManage && <TranscodeDialog source={source} open={convertOpen} onOpenChange={setConvertOpen} />}
       {canManage && <DeleteVersionDialog source={source} itemId={itemId} open={deleteOpen} onOpenChange={setDeleteOpen} />}

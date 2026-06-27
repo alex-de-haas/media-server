@@ -3,6 +3,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Pipeline;
+using MediaServer.Api.Probe;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Library;
@@ -20,6 +21,7 @@ public sealed class LibraryMaintenanceService(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
     IFilesystemInspector filesystem,
+    IMediaProbe probe,
     EnrichService enrichService,
     IHostyCoreClient core,
     ILogger<LibraryMaintenanceService> logger)
@@ -43,6 +45,95 @@ public sealed class LibraryMaintenanceService(
 
         await enrichService.EnrichAsync(catalog, item, cancellationToken);
         logger.LogInformation("Refreshed metadata for media item {MediaItem}.", item.Id);
+        return true;
+    }
+
+    /// <summary>Re-runs ffprobe on every media source of one item and replaces its stored streams (and the
+    /// source's own container/size/bitrate/duration). Lets an operator pick up probe data that wasn't
+    /// captured at import time — e.g. per-track titles — without a full library rescan. Sources whose file is
+    /// missing or that fail to probe are left untouched. False only when the item itself is unknown.</summary>
+    public async Task<bool> RefreshMediaAsync(Guid mediaItemId, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.FirstOrDefaultAsync(candidate => candidate.Id == mediaItemId, cancellationToken);
+        if (item is null)
+        {
+            return false;
+        }
+
+        var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == item.CatalogId, cancellationToken);
+        if (catalog is null)
+        {
+            return false;
+        }
+
+        var sources = await database.MediaSources
+            .Include(source => source.Streams)
+            .Where(source => source.MediaItemId == mediaItemId)
+            .ToListAsync(cancellationToken);
+
+        var reprobed = 0;
+        foreach (var source in sources)
+        {
+            if (!sandbox.TryResolve(catalog, source.Path, out var absolute) || !File.Exists(absolute))
+            {
+                logger.LogWarning(
+                    "Refresh media data: source '{Path}' of item {MediaItem} is missing on disk; skipping.",
+                    source.Path, mediaItemId);
+                continue;
+            }
+
+            ProbeResult result;
+            try
+            {
+                result = await probe.ProbeAsync(absolute, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                logger.LogWarning(
+                    exception, "Refresh media data: ffprobe failed for source '{Path}' of item {MediaItem}; skipping.",
+                    source.Path, mediaItemId);
+                continue;
+            }
+
+            source.Container = result.Container;
+            source.SizeBytes = result.SizeBytes;
+            source.Bitrate = result.Bitrate;
+            source.DurationTicks = result.DurationTicks;
+
+            // Swap the whole stream set: deleting the old rows (distinct ids) and inserting the freshly probed
+            // ones is simpler and safer than diffing by index, and the cascade keeps no orphans.
+            database.MediaStreams.RemoveRange(source.Streams);
+            foreach (var stream in result.Streams)
+            {
+                database.MediaStreams.Add(new MediaStream
+                {
+                    Id = Guid.NewGuid(),
+                    MediaSourceId = source.Id,
+                    StreamType = stream.Type,
+                    Index = stream.Index,
+                    Codec = stream.Codec,
+                    Profile = stream.Profile,
+                    Language = stream.Language,
+                    Title = stream.Title,
+                    Width = stream.Width,
+                    Height = stream.Height,
+                    FrameRate = stream.FrameRate,
+                    BitDepth = stream.BitDepth,
+                    HdrFormat = stream.HdrFormat,
+                    Channels = stream.Channels,
+                    SampleRate = stream.SampleRate,
+                    IsDefault = stream.IsDefault,
+                    IsForced = stream.IsForced,
+                });
+            }
+
+            reprobed++;
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
+        logger.LogInformation(
+            "Refreshed media data for item {MediaItem}: re-probed {Count} of {Total} source(s).",
+            mediaItemId, reprobed, sources.Count);
         return true;
     }
 

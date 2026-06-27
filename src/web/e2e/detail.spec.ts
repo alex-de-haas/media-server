@@ -80,7 +80,7 @@ test("shows movie cast, media, and tags as ordered detail tabs", async ({ page }
             sizeBytes: 1024,
             bitrate: null,
             durationTicks: 70_560_000_000,
-            streams: [{ type: "Video", index: 0, codec: "h264", language: null, displayTitle: "1080p H.264" }],
+            streams: [{ type: "Video", index: 0, codec: "h264", language: null, displayTitle: "1080p H.264", title: null }],
           },
         ],
         cast: [{ name: "Amy Adams", character: "Louise Banks", profileUrl: null }],

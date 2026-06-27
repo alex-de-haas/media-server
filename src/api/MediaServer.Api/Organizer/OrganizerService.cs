@@ -93,7 +93,23 @@ public sealed class OrganizerService(
                     Directory.CreateDirectory(Path.GetDirectoryName(canonicalAbsolute)!);
                     if (File.Exists(canonicalAbsolute))
                     {
-                        File.Delete(canonicalAbsolute); // Idempotent re-run: replace any stale file at the destination.
+                        // Replacing a stale leftover is fine, but never destroy a file that already backs a
+                        // different version: organizing one file onto another source's canonical path would
+                        // silently overwrite it (e.g. a re-ingested transcode output colliding with the
+                        // original). In that case leave both files alone and skip this one.
+                        var backsAnotherSource = await database.MediaSources.AnyAsync(
+                            existing => existing.MediaItem!.CatalogId == catalog.Id &&
+                                existing.Path == canonicalRelative && existing.SourceFileId != sourceFile.Id,
+                            cancellationToken);
+                        if (backsAnotherSource)
+                        {
+                            logger.LogWarning(
+                                "Refusing to organize {Source} onto {Target}: that path already backs another version.",
+                                sourceFile.RelativePath, canonicalRelative);
+                            continue;
+                        }
+
+                        File.Delete(canonicalAbsolute); // Idempotent re-run: replace a stale, unreferenced leftover.
                     }
 
                     File.Move(sourceAbsolute, canonicalAbsolute);

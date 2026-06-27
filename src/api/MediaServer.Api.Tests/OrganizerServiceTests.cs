@@ -125,6 +125,47 @@ public sealed class OrganizerServiceTests : IDisposable
         Assert.Equal(regular.RelativePath, episode.LibraryPath);
     }
 
+    [Fact]
+    public async Task Organize_refuses_to_overwrite_a_file_backing_another_version()
+    {
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var now = DateTimeOffset.UtcNow;
+
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now };
+        var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Inception", Year = 2010, AddedAt = now, UpdatedAt = now };
+        // The original already exists on disk at the canonical path and is backed by a MediaSource.
+        var canonical = "Inception (2010)/Inception (2010).mkv";
+        _database.AddRange(catalog, movie, new MediaSource
+        {
+            Id = Guid.NewGuid(),
+            MediaItemId = movie.Id,
+            SourceFileId = Guid.NewGuid(),
+            Container = "mkv",
+            Path = canonical,
+            CreatedAt = now,
+        });
+
+        // A re-ingested orphan (e.g. a transcode output) is assigned to the same movie. Alone in its ingest it
+        // has no edition label, so its canonical path collides with the original's.
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Stage = IngestStage.Organize, Status = IngestStatus.Running, CreatedAt = now, UpdatedAt = now };
+        var orphan = new SourceFile { Id = Guid.NewGuid(), IngestItemId = ingest.Id, RelativePath = "Inception (2010)/Inception (2010) - HEVC.mkv", SizeBytes = 5, MediaItemId = movie.Id, AssignmentStatus = SourceFileAssignmentStatus.Confirmed, CreatedAt = now, UpdatedAt = now };
+        _database.AddRange(ingest, orphan);
+        await _database.SaveChangesAsync();
+
+        var originalAbsolute = Path.Combine(_root, canonical.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(originalAbsolute)!);
+        await File.WriteAllTextAsync(originalAbsolute, "ORIGINAL");
+        await WriteStagingFileAsync(orphan.RelativePath); // writes "video"
+
+        var organized = await organizer.OrganizeAsync([orphan], catalog, CancellationToken.None);
+
+        // The collision is refused: nothing organized, the original is untouched, the orphan stays put.
+        Assert.Empty(organized);
+        Assert.Equal("ORIGINAL", await File.ReadAllTextAsync(originalAbsolute));
+        Assert.True(File.Exists(Path.Combine(_root, orphan.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
+        Assert.Equal("Inception (2010)/Inception (2010) - HEVC.mkv", orphan.RelativePath);
+    }
+
     private static SourceFile MakeSource(Guid ingestId, Guid mediaItemId, string relativePath, int torrentIndex, DateTimeOffset now) => new()
     {
         Id = Guid.NewGuid(),

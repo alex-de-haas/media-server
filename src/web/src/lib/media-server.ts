@@ -215,6 +215,7 @@ export interface MediaStream {
   codec: string | null;
   language: string | null;
   displayTitle: string | null;
+  title: string | null;
   width: number | null;
   height: number | null;
   hdrFormat: string | null;
@@ -456,6 +457,14 @@ export interface CreateTranscodeInput {
   videoCodec?: string;
   hardwareAcceleration?: string;
   crf?: number | null;
+  /** Downscale target height; omit to keep the source resolution. Ignored when videoCodec is "copy". */
+  maxHeight?: number | null;
+  /** Source stream indexes to copy; omit to copy all of that type. */
+  audioStreamIndexes?: number[];
+  subtitleStreamIndexes?: number[];
+  /** Mark one copied track as the container default. */
+  defaultAudioStreamIndex?: number | null;
+  defaultSubtitleStreamIndex?: number | null;
 }
 
 export const mediaServer = {
@@ -539,6 +548,7 @@ export const mediaServer = {
   deleteMediaSource: (sourceId: string, deleteFile: boolean) =>
     send(`/library/sources/${sourceId}?deleteFile=${deleteFile}`, "DELETE"),
   refreshMetadata: (id: string) => send(`/library/${id}/refresh`, "POST"),
+  refreshMedia: (id: string) => send(`/library/${id}/refresh-media`, "POST"),
   remapLibraryItem: (id: string, input: RemapInput) =>
     apiJson<{ id: string }>(`${BASE}/library/${id}/remap`, {
       method: "POST",

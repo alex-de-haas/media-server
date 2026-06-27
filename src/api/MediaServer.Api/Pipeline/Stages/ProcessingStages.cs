@@ -212,6 +212,7 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
                     Codec = stream.Codec,
                     Profile = stream.Profile,
                     Language = stream.Language,
+                    Title = stream.Title,
                     Width = stream.Width,
                     Height = stream.Height,
                     FrameRate = stream.FrameRate,

@@ -35,6 +35,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         _database,
         new CatalogPathSandbox(),
         new FilesystemInspector(),
+        new FakeMediaProbe(),
         new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }, new PersonSyncService(_database), new CollectionSyncService(_database)),
         _core,
         NullLogger<LibraryMaintenanceService>.Instance);
@@ -140,6 +141,48 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
 
         Assert.False(await Service().RefreshMetadataAsync(unidentified, CancellationToken.None));
         Assert.False(await Service().RefreshMetadataAsync(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RefreshMedia_reprobes_sources_and_replaces_streams()
+    {
+        var catalog = SeedCatalog();
+        var relative = Path.Combine("library", "A", "a.mkv");
+        var absolute = Path.Combine(_root, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        await File.WriteAllBytesAsync(absolute, new byte[16]);
+        var itemId = SeedItemWithSource(catalog, relative);
+
+        var refreshed = await Service().RefreshMediaAsync(itemId, CancellationToken.None);
+
+        Assert.True(refreshed);
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        var source = await fresh.MediaSources.Include(s => s.Streams).SingleAsync(s => s.MediaItemId == itemId);
+        // FakeMediaProbe returns a 2-stream matroska result, replacing the seeded (stream-less) source.
+        Assert.Equal("matroska", source.Container);
+        Assert.Equal(2, source.Streams.Count);
+        Assert.Contains(source.Streams, s => s.StreamType == StreamType.Audio);
+    }
+
+    [Fact]
+    public async Task RefreshMedia_skips_sources_missing_on_disk_but_still_succeeds()
+    {
+        var catalog = SeedCatalog();
+        // No file written to disk, so the source can't be re-probed and its streams stay as seeded (none).
+        var itemId = SeedItemWithSource(catalog, Path.Combine("library", "Gone", "gone.mkv"));
+
+        var refreshed = await Service().RefreshMediaAsync(itemId, CancellationToken.None);
+
+        Assert.True(refreshed);
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        var source = await fresh.MediaSources.Include(s => s.Streams).SingleAsync(s => s.MediaItemId == itemId);
+        Assert.Empty(source.Streams);
+    }
+
+    [Fact]
+    public async Task RefreshMedia_returns_false_for_unknown_item()
+    {
+        Assert.False(await Service().RefreshMediaAsync(Guid.NewGuid(), CancellationToken.None));
     }
 
     public void Dispose()
