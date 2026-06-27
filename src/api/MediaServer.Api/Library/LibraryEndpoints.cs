@@ -105,6 +105,22 @@ public static class LibraryEndpoints
             return deleted ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Pin (or clear, with sourceId=null) the version that plays by default — clients honor the first
+        // MediaSource, so this reorders the sources (admin only).
+        group.MapPut("/{id:guid}/default-source", async (Guid id, SetDefaultSourceRequest request, LibrarySourceService sources, CancellationToken cancellationToken) =>
+        {
+            var ok = await sources.SetDefaultSourceAsync(id, request.SourceId, cancellationToken);
+            return ok ? Results.NoContent() : Results.NotFound();
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Rename (or clear, with versionName=null) a single source's version label shown in client pickers;
+        // does not touch the file on disk (admin only).
+        group.MapPut("/sources/{sourceId:guid}/version", async (Guid sourceId, SetVersionRequest request, LibrarySourceService sources, CancellationToken cancellationToken) =>
+        {
+            var ok = await sources.SetVersionAsync(sourceId, request.VersionName, cancellationToken);
+            return ok ? Results.NoContent() : Results.NotFound();
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         // Re-fetch provider metadata + images for one item (admin only).
         group.MapPost("/{id:guid}/refresh", async (Guid id, LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
         {

@@ -42,6 +42,8 @@ public sealed record LibraryDetailDto(
     string? LogoUrl,
     string? LibraryPath,
     UserItemDataDto? UserData,
+    // The source pinned to play by default (first in MediaSources); null when no preference is set.
+    Guid? DefaultSourceId,
     IReadOnlyList<MediaSourceDto> MediaSources,
     IReadOnlyList<SeasonSummaryDto>? Seasons,
     // Distributor/network logos (Netflix, Apple TV+, …) for series; null for movies.
@@ -87,6 +89,9 @@ public sealed record CastMemberDto(string Provider, string ProviderId, string Na
 public sealed record MediaSourceDto(
     Guid Id,
     string? VersionName,
+    // The on-disk file name (with extension). Read-only in the UI — shown so an operator can tell sources
+    // apart; the editable label is VersionName.
+    string FileName,
     string Container,
     long SizeBytes,
     int? Bitrate,
@@ -104,6 +109,12 @@ public sealed record MediaStreamDto(
     int? Height,
     string? HdrFormat,
     int? Channels,
+    // Secondary technical specs surfaced under each track: codec profile (e.g. "High"), video frame rate,
+    // colour bit depth, audio sample rate (Hz). Whatever the probe captured; null when unknown.
+    string? Profile,
+    double? FrameRate,
+    int? BitDepth,
+    int? SampleRate,
     bool IsDefault,
     bool IsForced,
     bool IsExternal);

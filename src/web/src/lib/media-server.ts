@@ -220,6 +220,11 @@ export interface MediaStream {
   height: number | null;
   hdrFormat: string | null;
   channels: number | null;
+  // Secondary specs shown under each track: codec profile, video frame rate, bit depth, audio sample rate (Hz).
+  profile: string | null;
+  frameRate: number | null;
+  bitDepth: number | null;
+  sampleRate: number | null;
   isDefault: boolean;
   isForced: boolean;
   isExternal: boolean;
@@ -228,6 +233,8 @@ export interface MediaStream {
 export interface LibraryMediaSource {
   id: string;
   versionName: string | null;
+  // On-disk file name (with extension); read-only, shown to tell sources apart.
+  fileName: string;
   container: string;
   sizeBytes: number;
   bitrate: number | null;
@@ -267,6 +274,8 @@ export interface LibraryDetail {
   logoUrl: string | null;
   libraryPath: string | null;
   userData: UserItemData | null;
+  // The source pinned to play by default (first in `mediaSources`); null when no preference is set.
+  defaultSourceId: string | null;
   mediaSources: LibraryMediaSource[];
   seasons: SeasonSummary[] | null;
   // Distributor/network logos (Netflix, Apple TV+, …) for series; null for movies.
@@ -547,6 +556,12 @@ export const mediaServer = {
   // Delete one media source / version (admin); deleteFile also erases the file (used for transcode "replace").
   deleteMediaSource: (sourceId: string, deleteFile: boolean) =>
     send(`/library/sources/${sourceId}?deleteFile=${deleteFile}`, "DELETE"),
+  // Pin the version that plays by default (pass null to clear); admin only.
+  setDefaultSource: (itemId: string, sourceId: string | null) =>
+    send(`/library/${itemId}/default-source`, "PUT", { sourceId }),
+  // Rename a source's version label (pass null/empty to clear); admin only. Does not rename the file.
+  setSourceVersion: (sourceId: string, versionName: string | null) =>
+    send(`/library/sources/${sourceId}/version`, "PUT", { versionName }),
   refreshMetadata: (id: string) => send(`/library/${id}/refresh`, "POST"),
   refreshMedia: (id: string) => send(`/library/${id}/refresh-media`, "POST"),
   remapLibraryItem: (id: string, input: RemapInput) =>

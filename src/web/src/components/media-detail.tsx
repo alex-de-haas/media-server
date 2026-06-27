@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Clapperboard, ExternalLink, Link2, MoreVertical, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Clapperboard, ExternalLink, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -36,7 +36,17 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -591,7 +601,16 @@ function MediaInfo({ item }: { item: LibraryDetail }) {
     <section className="flex flex-col gap-3">
       {canManage && <MovieConversions itemId={item.id} />}
       {sources.length ? (
-        sources.map((source) => <SourceCard key={source.id} source={source} itemId={item.id} canManage={canManage} />)
+        sources.map((source) => (
+          <SourceCard
+            key={source.id}
+            source={source}
+            itemId={item.id}
+            canManage={canManage}
+            isDefault={source.id === item.defaultSourceId}
+            hasMultiple={sources.length > 1}
+          />
+        ))
       ) : (
         <EmptyDetailPanel>No media sources available.</EmptyDetailPanel>
       )}
@@ -604,31 +623,17 @@ function MediaInfo({ item }: { item: LibraryDetail }) {
 const STREAM_TYPE_ORDER = ["Video", "Audio", "Subtitle"];
 const STREAM_TYPE_LABELS: Record<string, string> = { Subtitle: "Subtitles" };
 
-type StreamEntry = { text: string; title: string | null; count: number };
-type StreamGroup = { type: string; label: string; entries: StreamEntry[] };
+type StreamGroup = { type: string; label: string; streams: MediaStream[]; defaultIndex: number | null };
 
-// Collapse a flat stream list into one row per type, deduplicating identical entries (e.g. four
-// "rus DTS 5.1" audio tracks) into a single "rus DTS 5.1 ×4". Turns the ~20-row mediainfo dump into a
-// few lines while keeping every distinct track and language visible. The container's own track label
-// (stream.title, e.g. "Director's Commentary", "SDH") rides along and is part of the dedup key, so
-// differently-labelled tracks stay separate. First-seen order is preserved within each type (Map
-// iteration order); the types themselves follow STREAM_TYPE_ORDER.
-function summarizeStreams(streams: MediaStream[]): StreamGroup[] {
-  const byType = new Map<string, Map<string, StreamEntry>>();
+// Group the flat stream list by type, preserving each individual track (no dedup) and container order.
+// `defaultIndex` is the track a player treats as default — an explicitly flagged track, or (audio only) the
+// first track when none is flagged; subtitles stay off unless flagged. Matches the Convert dialog.
+function groupStreams(streams: MediaStream[]): StreamGroup[] {
+  const byType = new Map<string, MediaStream[]>();
   for (const stream of streams) {
-    const text = stream.displayTitle ?? stream.codec ?? "—";
-    // Drop a title that just restates the technical summary we already derive.
-    const raw = stream.title?.trim();
-    const title = raw && raw.toLowerCase() !== text.toLowerCase() ? raw : null;
-    const key = JSON.stringify([text, title]);
-    const entries = byType.get(stream.type) ?? new Map<string, StreamEntry>();
-    const existing = entries.get(key);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      entries.set(key, { text, title, count: 1 });
-    }
-    byType.set(stream.type, entries);
+    const list = byType.get(stream.type) ?? [];
+    list.push(stream);
+    byType.set(stream.type, list);
   }
 
   const rank = (type: string) => {
@@ -638,38 +643,171 @@ function summarizeStreams(streams: MediaStream[]): StreamGroup[] {
 
   return [...byType.keys()]
     .sort((a, b) => rank(a) - rank(b))
-    .map((type) => ({
-      type,
-      label: STREAM_TYPE_LABELS[type] ?? type,
-      entries: [...byType.get(type)!.values()],
-    }));
+    .map((type) => {
+      const list = byType.get(type)!;
+      const flagged = list.find((stream) => stream.isDefault)?.index;
+      const defaultIndex = flagged ?? (type === "Audio" ? list[0]?.index : undefined) ?? null;
+      return { type, label: STREAM_TYPE_LABELS[type] ?? type, streams: list, defaultIndex };
+    });
 }
 
-// One source/version card. For movies an admin can convert it into a smaller version or delete it (the
-// "verify then replace" flow: convert → check the new version → delete the original).
-function SourceCard({ source, itemId, canManage }: { source: LibraryMediaSource; itemId: string; canManage: boolean }) {
+// Secondary technical specs shown muted after a track: video → profile · bit depth · frame rate; audio →
+// sample rate. Only what the probe captured; "" when nothing to add. Numbers are trimmed of trailing zeros.
+function streamSpecs(stream: MediaStream): string {
+  const parts: string[] = [];
+  if (stream.type === "Video") {
+    if (stream.profile) parts.push(stream.profile);
+    if (stream.bitDepth) parts.push(`${stream.bitDepth}-bit`);
+    if (stream.frameRate) parts.push(`${Number(stream.frameRate.toFixed(3))} fps`);
+  } else if (stream.type === "Audio") {
+    if (stream.sampleRate) parts.push(`${Number((stream.sampleRate / 1000).toFixed(1))} kHz`);
+  }
+  return parts.join(" · ");
+}
+
+// The per-track summary text, its optional container label ("Director's Commentary", "SDH") — dropping a
+// label that just restates the summary — and the muted secondary specs.
+function TrackText({ stream }: { stream: MediaStream }) {
+  const text = stream.displayTitle ?? stream.codec ?? "—";
+  const raw = stream.title?.trim();
+  const title = raw && raw.toLowerCase() !== text.toLowerCase() ? raw : null;
+  const specs = streamSpecs(stream);
+  return (
+    <>
+      {text}
+      {title ? <span className="text-muted-foreground"> “{title}”</span> : null}
+      {specs ? <span className="text-muted-foreground"> · {specs}</span> : null}
+    </>
+  );
+}
+
+// One "Video/Audio/Subtitles" section. A single track shows inline; a section with several collapses into a
+// toggle ("N tracks") that expands to list every track, marking the default one.
+function StreamSection({ group }: { group: StreamGroup }) {
+  const [open, setOpen] = useState(false);
+
+  if (group.streams.length <= 1) {
+    const stream = group.streams[0];
+    return (
+      <div className="flex gap-2">
+        <dt className="text-muted-foreground w-16 shrink-0 pt-px text-xs leading-5">{group.label}</dt>
+        <dd className="leading-5">{stream ? <TrackText stream={stream} /> : "—"}</dd>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-2">
+      <dt className="text-muted-foreground w-16 shrink-0 pt-px text-xs leading-5">{group.label}</dt>
+      <dd className="min-w-0 flex-1">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="text-muted-foreground hover:text-foreground flex items-center gap-1 leading-5"
+        >
+          <ChevronDown className={cn("size-3.5 transition-transform", open ? "" : "-rotate-90")} />
+          <span>{group.streams.length} tracks</span>
+        </button>
+        {open ? (
+          <div className="mt-0.5 flex flex-col gap-0.5">
+            {group.streams.map((stream) => (
+              <span key={stream.index} className="flex items-center gap-1.5 leading-5">
+                <span>
+                  <TrackText stream={stream} />
+                </span>
+                {stream.index === group.defaultIndex ? (
+                  <Check className="text-primary size-3.5 shrink-0" aria-label="Default track" />
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </dd>
+    </div>
+  );
+}
+
+// One source/version card. The file name (title + year part) is read-only; the editable label is the
+// version (shown in players' version pickers) and an admin can pin which version plays by default. For
+// movies an admin can also convert it into a smaller version or delete it (the "verify then replace"
+// flow: convert → check the new version → delete the original).
+function SourceCard({
+  source,
+  itemId,
+  canManage,
+  isDefault,
+  hasMultiple,
+}: {
+  source: LibraryMediaSource;
+  itemId: string;
+  canManage: boolean;
+  isDefault: boolean;
+  hasMultiple: boolean;
+}) {
+  const queryClient = useQueryClient();
   const [convertOpen, setConvertOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat;
+
+  // The default only matters when a title has several versions; clients play MediaSources[0].
+  const showDefault = hasMultiple;
+
+  // Header meta: container · size · duration · overall bitrate. The container often omits an overall
+  // bitrate (typical for MKV), so fall back to the average derived from size ÷ duration — display only.
+  const bitrateKbps =
+    source.bitrate != null && source.bitrate > 0
+      ? Math.round(source.bitrate / 1000)
+      : source.durationTicks > 0
+        ? Math.round((source.sizeBytes * 8) / (source.durationTicks / 1e7) / 1000)
+        : null;
+  const metaParts = [
+    source.container,
+    formatBytes(source.sizeBytes),
+    formatRuntime(source.durationTicks),
+    bitrateKbps ? `${bitrateKbps.toLocaleString()} kbps` : null,
+  ].filter(Boolean);
+
+  const setDefault = useMutation({
+    mutationFn: (next: boolean) => mediaServer.setDefaultSource(itemId, next ? source.id : null),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
+      toast.success(isDefault ? "Default version cleared" : "Set as default version");
+    },
+    onError: (error) => toast.error("Couldn’t update default version", { description: errorMessage(error) }),
+  });
 
   return (
     <div className="rounded-md border p-3 text-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            {source.versionName ? <p className="font-medium">{source.versionName}</p> : null}
+            <p className="font-mono font-medium break-all">{source.fileName}</p>
             {hdr ? (
               <Badge variant="secondary" className="font-normal">
                 {hdr}
               </Badge>
             ) : null}
           </div>
-          <p className="text-muted-foreground font-mono text-xs">
-            {source.container} · {formatBytes(source.sizeBytes)}
-          </p>
+          <p className="text-muted-foreground mt-1 font-mono text-xs">{metaParts.join(" · ")}</p>
         </div>
         {canManage && (
           <div className="flex shrink-0 items-center gap-1">
+            {showDefault && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={isDefault ? "Clear default version" : "Set as default version"}
+                disabled={setDefault.isPending}
+                onClick={() => setDefault.mutate(!isDefault)}
+              >
+                <Star className={cn(isDefault && "fill-current text-amber-500")} />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon-sm" aria-label="Rename version" onClick={() => setEditOpen(true)}>
+              <Pencil />
+            </Button>
             <Button variant="ghost" size="icon-sm" aria-label="Convert to a smaller version" onClick={() => setConvertOpen(true)}>
               <Shrink />
             </Button>
@@ -686,32 +824,103 @@ function SourceCard({ source, itemId, canManage }: { source: LibraryMediaSource;
         )}
       </div>
       <dl className="mt-2 flex flex-col gap-1.5">
-        {summarizeStreams(source.streams).map((group) => (
-          <div key={group.type} className="flex gap-2">
-            <dt className="text-muted-foreground w-16 shrink-0 pt-px text-xs leading-5">{group.label}</dt>
-            <dd className="flex flex-wrap gap-x-1.5 gap-y-0.5">
-              {group.entries.map((entry, index) => (
-                <span key={JSON.stringify([entry.text, entry.title])} className="flex items-center gap-1.5 leading-5">
-                  {index > 0 ? (
-                    <span aria-hidden className="text-muted-foreground/40">
-                      ·
-                    </span>
-                  ) : null}
-                  <span>
-                    {entry.text}
-                    {entry.title ? <span className="text-muted-foreground"> “{entry.title}”</span> : null}
-                    {entry.count > 1 ? <span className="text-muted-foreground"> ×{entry.count}</span> : null}
-                  </span>
-                </span>
-              ))}
-            </dd>
-          </div>
+        {groupStreams(source.streams).map((group) => (
+          <StreamSection key={group.type} group={group} />
         ))}
       </dl>
 
+      {canManage && <EditVersionDialog source={source} itemId={itemId} open={editOpen} onOpenChange={setEditOpen} />}
       {canManage && <TranscodeDialog source={source} open={convertOpen} onOpenChange={setConvertOpen} />}
       {canManage && <DeleteVersionDialog source={source} itemId={itemId} open={deleteOpen} onOpenChange={setDeleteOpen} />}
     </div>
+  );
+}
+
+// Rename or clear a source's version label — the name a player shows in its version picker. This edits
+// metadata only; the file on disk (whose title+year part is the stable identity) is never renamed.
+function EditVersionDialog({
+  source,
+  itemId,
+  open,
+  onOpenChange,
+}: {
+  source: LibraryMediaSource;
+  itemId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const inputId = useId();
+  const [value, setValue] = useState(source.versionName ?? "");
+
+  // Re-seed the field with the current label each time the dialog (re)opens.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setValue(source.versionName ?? "");
+  }
+
+  const save = useMutation({
+    mutationFn: (next: string | null) => mediaServer.setSourceVersion(source.id, next),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
+      onOpenChange(false);
+      toast.success("Version updated");
+    },
+    onError: (error) => toast.error("Couldn’t update version", { description: errorMessage(error) }),
+  });
+
+  const submit = () => save.mutate(value.trim() ? value.trim() : null);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Rename version</DialogTitle>
+          <DialogDescription>
+            The label shown in players (e.g. Infuse) when a movie has several versions. This doesn’t rename the
+            file on disk.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={inputId}>Version label</Label>
+          <Input
+            id={inputId}
+            value={value}
+            placeholder="e.g. Remux 1080p, Director’s Cut"
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <p className="text-muted-foreground font-mono text-xs break-all">{source.fileName}</p>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          {source.versionName ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive mr-auto"
+              disabled={save.isPending}
+              onClick={() => save.mutate(null)}
+            >
+              Remove label
+            </Button>
+          ) : null}
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button size="sm" disabled={save.isPending} onClick={submit}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -79,7 +79,7 @@ public sealed class FfprobeMediaProbe(MediaServerSettings settings) : IMediaProb
         var root = document.RootElement;
 
         var format = root.TryGetProperty("format", out var formatElement) ? formatElement : default;
-        var container = GetString(format, "format_name") ?? Path.GetExtension(absolutePath).TrimStart('.');
+        var container = NormalizeContainer(absolutePath, GetString(format, "format_name"));
         var durationTicks = (long)((GetDouble(format, "duration") ?? 0) * TimeSpan.TicksPerSecond);
         var bitrate = (int?)GetLong(format, "bit_rate");
         var size = GetLong(format, "size") ?? SafeFileSize(absolutePath);
@@ -211,6 +211,23 @@ public sealed class FfprobeMediaProbe(MediaServerSettings settings) : IMediaProb
         {
             return 0;
         }
+    }
+
+    // ffprobe's format_name is the *demuxer's* format list, not the container — e.g. an .mkv reports
+    // "matroska,webm" and an .mp4 "mov,mp4,m4a,3gp,3g2,mj2". The file extension is the real container (and
+    // is what the Direct Play path already trusts), so prefer it; fall back to the first listed format only
+    // when there's no extension.
+    private static string NormalizeContainer(string absolutePath, string? formatName)
+    {
+        var extension = Path.GetExtension(absolutePath).TrimStart('.').ToLowerInvariant();
+        if (!string.IsNullOrEmpty(extension))
+        {
+            return extension;
+        }
+
+        var first = formatName?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+        return first?.ToLowerInvariant() ?? string.Empty;
     }
 
     private static string? GetString(JsonElement element, string property) =>

@@ -235,7 +235,12 @@ public sealed class LibraryReadService(
                 .Include(source => source.Streams)
                 .Where(source => source.MediaItemId == item.Id)
                 .ToListAsync(cancellationToken);
-            mediaSources = sources.Select(MapSource).ToList();
+            // The management UI keeps a stable order by file name (the default version is marked with a star,
+            // not by position). The Jellyfin surface still puts the default first — that's how Infuse picks it.
+            mediaSources = sources
+                .OrderBy(source => Path.GetFileName(source.Path), StringComparer.OrdinalIgnoreCase)
+                .Select(MapSource)
+                .ToList();
         }
 
         List<SeasonSummaryDto>? seasons = null;
@@ -275,6 +280,7 @@ public sealed class LibraryReadService(
             LogoUrl(images),
             item.LibraryPath,
             userDataByItem.GetValueOrDefault(item.Id),
+            item.DefaultSourceId,
             mediaSources,
             seasons,
             rich.Networks,
@@ -745,11 +751,27 @@ public sealed class LibraryReadService(
     private static MediaSourceDto MapSource(MediaSource source) => new(
         source.Id,
         source.VersionName,
-        source.Container,
+        Path.GetFileName(source.Path),
+        DisplayContainer(source),
         source.SizeBytes,
         source.Bitrate,
         source.DurationTicks,
         source.Streams.OrderBy(stream => stream.Index).Select(MapStream).ToList());
+
+    // Older rows stored ffprobe's demuxer format list (e.g. "matroska,webm") as the container; show the real
+    // container from the file extension instead, falling back to the first listed format. New rows are already
+    // clean (see FfprobeMediaProbe.NormalizeContainer).
+    private static string DisplayContainer(MediaSource source)
+    {
+        var extension = Path.GetExtension(source.Path).TrimStart('.').ToLowerInvariant();
+        if (!string.IsNullOrEmpty(extension))
+        {
+            return extension;
+        }
+
+        return source.Container.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault()?.ToLowerInvariant() ?? source.Container;
+    }
 
     private static MediaStreamDto MapStream(MediaStream stream) => new(
         stream.StreamType.ToString(),
@@ -762,6 +784,10 @@ public sealed class LibraryReadService(
         stream.Height,
         stream.HdrFormat,
         stream.Channels,
+        stream.Profile,
+        stream.FrameRate,
+        stream.BitDepth,
+        stream.SampleRate,
         stream.IsDefault,
         stream.IsForced,
         stream.IsExternal);
