@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2, X } from "lucide-react";
+import { AlertTriangle, Trash2, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
 import { formatBytes, formatEta, formatPercent } from "@/lib/format";
@@ -68,6 +68,10 @@ export function TranscodeDialog({
   const subtitleStreams = source.streams.filter((stream) => stream.type === "Subtitle");
   const sourceDefaultAudio = audioStreams.find((stream) => stream.isDefault)?.index ?? audioStreams[0]?.index ?? null;
   const sourceDefaultSubtitle = subtitleStreams.find((stream) => stream.isDefault)?.index ?? null;
+  const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat ?? null;
+  const hdrWarning = hdr?.includes("Dolby Vision")
+    ? `This source is ${hdr}. Re-encoding drops the Dolby Vision (and any HDR10+) layer — choose “Keep original video” to preserve it.`
+    : `This source is ${hdr}. Re-encoding won’t carry its HDR metadata — choose “Keep original video” to preserve it.`;
 
   const queryClient = useQueryClient();
   const modeId = useId();
@@ -205,6 +209,13 @@ export function TranscodeDialog({
               </SelectContent>
             </Select>
           </Field>
+
+          {!isCopy && hdr ? (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-500" role="alert">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>{hdrWarning}</span>
+            </div>
+          ) : null}
 
           {!isCopy && (
             <>
