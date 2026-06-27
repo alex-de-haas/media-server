@@ -151,6 +151,7 @@ builder.Services.AddScoped<PersonReadService>();
 builder.Services.AddScoped<CollectionReadService>();
 builder.Services.AddSingleton<LibraryFileEraser>();
 builder.Services.AddScoped<LibraryDeleteService>();
+builder.Services.AddScoped<LibrarySourceService>();
 builder.Services.AddScoped<RemapService>();
 
 // Scheduled scans (missing-file drift) + on-demand metadata refresh.

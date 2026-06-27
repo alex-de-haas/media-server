@@ -368,10 +368,11 @@ public sealed class JellyfinLibraryService(
             return null;
         }
 
-        // Honor an explicit MediaSourceId so multi-version titles play the right file.
+        // Honor an explicit MediaSourceId so multi-version titles play the right file; otherwise fall back to
+        // the item's chosen default version (first after ordering).
         var source = mediaSourceId is { Length: > 0 }
             ? sources.FirstOrDefault(candidate => JellyfinIds.MediaSource(candidate.Id) == mediaSourceId)
-            : sources[0];
+            : sources.OrderByDefault(item.DefaultSourceId)[0];
         if (source is null)
         {
             return null;
@@ -516,7 +517,7 @@ public sealed class JellyfinLibraryService(
         var result = new List<BaseItemDto>(items.Count);
         foreach (var item in items)
         {
-            var sources = sourcesByItem.GetValueOrDefault(item.Id, []);
+            var sources = sourcesByItem.GetValueOrDefault(item.Id, []).OrderByDefault(item.DefaultSourceId);
             result.Add(mapper.MapItem(
                 item,
                 metadataByItem.GetValueOrDefault(item.Id),

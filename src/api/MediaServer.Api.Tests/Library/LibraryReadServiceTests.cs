@@ -78,7 +78,9 @@ public sealed class LibraryReadServiceTests : IDisposable
         Assert.Null(detail.Seasons);
 
         var source = Assert.Single(detail.MediaSources);
-        Assert.Equal("matroska", source.Container);
+        // Container is shown as the real container from the file extension, not a stored demuxer name.
+        Assert.Equal("mkv", source.Container);
+        Assert.Equal("Inception (2010).mkv", source.FileName);
 
         var video = Assert.Single(source.Streams, stream => stream.Type == "Video");
         Assert.Equal("1080p H264", video.DisplayTitle);

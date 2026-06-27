@@ -175,7 +175,8 @@ public sealed class FfprobeParsingTests
 
         var result = FfprobeMediaProbe.Parse(json, "/library/movie.mkv");
 
-        Assert.Equal("matroska,webm", result.Container);
+        // The container is the real container from the file extension, not ffprobe's "matroska,webm" demuxer list.
+        Assert.Equal("mkv", result.Container);
         Assert.Equal(TimeSpan.FromSeconds(7200).Ticks, result.DurationTicks);
         Assert.Equal(8_000_000, result.Bitrate);
         Assert.Equal(3, result.Streams.Count);

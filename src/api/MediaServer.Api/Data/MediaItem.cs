@@ -46,6 +46,12 @@ public sealed class MediaItem
     /// <summary>Relative to catalog root; null for Series/Season containers.</summary>
     public string? LibraryPath { get; set; }
 
+    /// <summary>The <see cref="MediaSource"/> a player should default to when a multi-version title is played
+    /// without an explicit source pick. Clients (Infuse) treat <c>MediaSources[0]</c> as the default, so this
+    /// only controls ordering. Null = no preference (fall back to natural order). Not a hard FK: a deleted
+    /// source just makes this stale and ordering falls back.</summary>
+    public Guid? DefaultSourceId { get; set; }
+
     /// <summary>Canonical provider, e.g. <c>tmdb</c>.</summary>
     public string? IdentityProvider { get; set; }
 
