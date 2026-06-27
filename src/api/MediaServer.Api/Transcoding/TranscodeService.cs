@@ -53,8 +53,10 @@ public sealed class TranscodeService(
         var defaultSubtitle = ResolveDefault(request.DefaultSubtitleStreamIndex, ref subtitleSelection, orderedSubtitles, "subtitle");
 
         // Downscale only — never upscale, and never when remuxing (copy keeps the original picture untouched).
+        // Max known video height (ignores a null/cover-art stream that might sort first); null only when no
+        // video height is known at all, in which case we don't scale rather than risk an upscale.
         var sourceHeight = source.Streams.Where(stream => stream.StreamType == StreamType.Video)
-            .Select(stream => stream.Height).FirstOrDefault();
+            .Max(stream => stream.Height);
         int? targetHeight = null;
         if (codec != "copy" && request.MaxHeight is { } requestedHeight)
         {
@@ -63,7 +65,8 @@ public sealed class TranscodeService(
                 throw new TranscodeRequestException("maxHeight must be between 16 and 4320.");
             }
 
-            if (sourceHeight is null || requestedHeight < sourceHeight)
+            // Downscale only: apply the target solely when the real source height is known and strictly larger.
+            if (sourceHeight is { } known && requestedHeight < known)
             {
                 targetHeight = requestedHeight;
             }
@@ -198,8 +201,9 @@ public sealed class TranscodeService(
 
     /// <summary>Output is a sibling of the input with a descriptive version suffix (codec + resolution, or
     /// "Remux"), always in a Matroska (.mkv) container — the universal carrier that keeps every audio track,
-    /// subtitle, attachment and HDR layer. The suffix encodes the distinguishing settings so two different
-    /// conversions of one movie don't collide on the same path. Operates on the catalog-root-relative (posix)
+    /// subtitle, attachment and HDR layer. The suffix captures the codec and target resolution; conversions
+    /// that share those but differ only in track selection still land on the same path, which the caller's
+    /// existing "a version already lives here" check rejects. Operates on the catalog-root-relative (posix)
     /// path.</summary>
     internal static string BuildOutputRelative(string sourceRelative, string label)
     {

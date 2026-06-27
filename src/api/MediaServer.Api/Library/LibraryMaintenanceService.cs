@@ -101,7 +101,9 @@ public sealed class LibraryMaintenanceService(
             source.DurationTicks = result.DurationTicks;
 
             // Swap the whole stream set: deleting the old rows (distinct ids) and inserting the freshly probed
-            // ones is simpler and safer than diffing by index, and the cascade keeps no orphans.
+            // ones is simpler and safer than diffing by index, and the cascade keeps no orphans. The new rows
+            // carry an explicit MediaSourceId, so they're added to the DbSet rather than the tracked navigation
+            // (clearing/adding via source.Streams here trips an EF optimistic-concurrency failure on save).
             database.MediaStreams.RemoveRange(source.Streams);
             foreach (var stream in result.Streams)
             {
