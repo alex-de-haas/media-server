@@ -20,6 +20,11 @@ public sealed class LibrarySourceService(MediaServerDbContext database)
             return false;
         }
 
+        if (item.DefaultSourceId == sourceId)
+        {
+            return true; // No change — skip the write and the UpdatedAt bump.
+        }
+
         if (sourceId is { } id &&
             !await database.MediaSources.AnyAsync(source => source.Id == id && source.MediaItemId == itemId, cancellationToken))
         {
@@ -43,8 +48,13 @@ public sealed class LibrarySourceService(MediaServerDbContext database)
             return false;
         }
 
-        var trimmed = versionName?.Trim();
-        source.VersionName = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+        var next = string.IsNullOrWhiteSpace(versionName) ? null : versionName.Trim();
+        if (source.VersionName == next)
+        {
+            return true; // No change — skip the write.
+        }
+
+        source.VersionName = next;
         await database.SaveChangesAsync(cancellationToken);
         return true;
     }

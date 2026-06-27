@@ -870,7 +870,10 @@ function EditVersionDialog({
     onError: (error) => toast.error("Couldn’t update version", { description: errorMessage(error) }),
   });
 
-  const submit = () => save.mutate(value.trim() ? value.trim() : null);
+  const submit = () => {
+    if (save.isPending) return; // Guard against a double-submit (e.g. repeated Enter) mid-save.
+    save.mutate(value.trim() ? value.trim() : null);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
