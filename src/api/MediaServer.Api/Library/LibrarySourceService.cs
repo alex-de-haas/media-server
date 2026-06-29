@@ -21,6 +21,12 @@ public sealed class LibrarySourceService(
     // matches what the operator typed instead of being silently mangled.
     private static readonly char[] InvalidNameChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
+    // Path equality follows the filesystem: case-insensitive on Windows and default macOS, ordinal elsewhere.
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
     /// <summary>Pins the source a player defaults to, or clears the preference when <paramref name="sourceId"/>
     /// is null. The source must belong to the item. Returns false if the item or source is unknown.</summary>
     public async Task<bool> SetDefaultSourceAsync(Guid itemId, Guid? sourceId, CancellationToken cancellationToken)
@@ -116,20 +122,28 @@ public sealed class LibrarySourceService(
             return RenameVersionResult.MissingFile;
         }
 
-        if (File.Exists(newAbsolute))
+        // A case-only edit (e.g. "1080p" -> "1080P") maps to the same file on a case-insensitive filesystem:
+        // the target "exists" because it *is* the source, and File.Move would fail. Skip the move and just
+        // restamp the stored path/label; on a case-sensitive filesystem the rename happens for real.
+        var sameFileOnDisk = string.Equals(oldAbsolute, newAbsolute, PathComparison);
+
+        if (!sameFileOnDisk && File.Exists(newAbsolute))
         {
             return RenameVersionResult.Conflict("Another version already uses this name.");
         }
 
-        try
+        if (!sameFileOnDisk)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(newAbsolute)!);
-            File.Move(oldAbsolute, newAbsolute);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(exception, "Failed to rename source file {Old} -> {New}", oldAbsolute, newAbsolute);
-            return RenameVersionResult.Conflict("Couldn't rename the file on disk.");
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(newAbsolute)!);
+                File.Move(oldAbsolute, newAbsolute);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(exception, "Failed to rename source file {Old} -> {New}", oldAbsolute, newAbsolute);
+                return RenameVersionResult.Conflict("Couldn't rename the file on disk.");
+            }
         }
 
         try
@@ -160,14 +174,17 @@ public sealed class LibrarySourceService(
         }
         catch
         {
-            // Roll the file back so disk and DB don't diverge.
-            try
+            // Roll the file back so disk and DB don't diverge (only when we actually moved it).
+            if (!sameFileOnDisk)
             {
-                File.Move(newAbsolute, oldAbsolute);
-            }
-            catch (Exception rollback) when (rollback is IOException or UnauthorizedAccessException)
-            {
-                logger.LogError(rollback, "Failed to roll back rename {New} -> {Old} after a DB error", newAbsolute, oldAbsolute);
+                try
+                {
+                    File.Move(newAbsolute, oldAbsolute);
+                }
+                catch (Exception rollback) when (rollback is IOException or UnauthorizedAccessException)
+                {
+                    logger.LogError(rollback, "Failed to roll back rename {New} -> {Old} after a DB error", newAbsolute, oldAbsolute);
+                }
             }
 
             throw;
@@ -197,7 +214,7 @@ public sealed class LibrarySourceService(
         }
 
         var collapsed = string.Join(' ', trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
-        if (collapsed.Length == 0)
+        if (!collapsed.Any(char.IsLetterOrDigit))
         {
             error = "The version name must contain a letter or number.";
             return false;

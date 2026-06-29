@@ -884,12 +884,15 @@ function EditVersionDialog({
   }
 
   // Preview the resulting file name: locked "Title (Year)" stem + the typed suffix + the current extension.
+  // Normalize the suffix the same way the server does (collapse runs of spaces, drop trailing dots) so the
+  // preview matches what actually lands on disk.
   const trimmed = value.trim();
+  const suffix = trimmed.replace(/\s+/g, " ").replace(/\.+$/, "");
   const invalid = INVALID_VERSION_CHARS.test(value);
   const stem = year != null ? `${title} (${year})` : title;
   const fileName = source.fileName ?? "";
   const extension = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")) : "";
-  const previewName = `${stem}${trimmed ? ` - ${trimmed}` : ""}${extension}`;
+  const previewName = `${stem}${suffix ? ` - ${suffix}` : ""}${extension}`;
 
   const save = useMutation({
     mutationFn: (next: string | null) => mediaServer.setSourceVersion(source.id, next),

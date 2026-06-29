@@ -58,6 +58,18 @@ public sealed class LibrarySourceServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SetDefaultSource_clears_with_null()
+    {
+        await _service.SetDefaultSourceAsync(_movieId, _sourceA, CancellationToken.None);
+
+        var ok = await _service.SetDefaultSourceAsync(_movieId, null, CancellationToken.None);
+
+        Assert.True(ok);
+        await using var verify = CreateContext();
+        Assert.Null((await verify.MediaItems.FindAsync(_movieId))!.DefaultSourceId);
+    }
+
+    [Fact]
     public async Task SetDefaultSource_rejects_a_source_from_another_item()
     {
         var ok = await _service.SetDefaultSourceAsync(_movieId, _otherSource, CancellationToken.None);
@@ -142,6 +154,21 @@ public sealed class LibrarySourceServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RenameVersion_supports_a_case_only_change()
+    {
+        // "HEVC 1080p" -> "HEVC 1080P" differs only by case; it must not be mistaken for a self-collision.
+        var result = await _service.RenameVersionAsync(_sourceA, "HEVC 1080P", CancellationToken.None);
+
+        Assert.Equal(RenameVersionResult.Kind.Ok, result.Status);
+        const string expected = MovieFolder + "/The Rock (1996) - HEVC 1080P.mkv";
+        Assert.True(File.Exists(Absolute(expected)));
+        await using var verify = CreateContext();
+        var source = (await verify.MediaSources.FindAsync(_sourceA))!;
+        Assert.Equal(expected, source.Path);
+        Assert.Equal("HEVC 1080P", source.VersionName);
+    }
+
+    [Fact]
     public async Task RenameVersion_returns_conflict_when_the_target_name_is_taken()
     {
         // Renaming B onto A's existing path must not clobber A.
@@ -167,6 +194,17 @@ public sealed class LibrarySourceServiceTests : IDisposable
         Assert.True(File.Exists(Absolute(SourceARelative)));
         await using var verify = CreateContext();
         Assert.Equal("1080p", (await verify.MediaSources.FindAsync(_sourceA))!.VersionName);
+    }
+
+    [Theory]
+    [InlineData("---")]
+    [InlineData("   ...")]
+    public async Task RenameVersion_rejects_a_name_without_a_letter_or_digit(string name)
+    {
+        var result = await _service.RenameVersionAsync(_sourceA, name, CancellationToken.None);
+
+        Assert.Equal(RenameVersionResult.Kind.InvalidName, result.Status);
+        Assert.True(File.Exists(Absolute(SourceARelative)));
     }
 
     [Fact]
