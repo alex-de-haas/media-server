@@ -113,12 +113,20 @@ public static class LibraryEndpoints
             return ok ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
-        // Rename (or clear, with versionName=null) a single source's version label shown in client pickers;
-        // does not touch the file on disk (admin only).
+        // Rename (or clear, with versionName=null) a single movie source's version — renaming the file on disk
+        // to "Title (Year) - {version}.ext" and syncing the stored label (admin only).
         group.MapPut("/sources/{sourceId:guid}/version", async (Guid sourceId, SetVersionRequest request, LibrarySourceService sources, CancellationToken cancellationToken) =>
         {
-            var ok = await sources.SetVersionAsync(sourceId, request.VersionName, cancellationToken);
-            return ok ? Results.NoContent() : Results.NotFound();
+            var result = await sources.RenameVersionAsync(sourceId, request.VersionName, cancellationToken);
+            return result.Status switch
+            {
+                RenameVersionResult.Kind.Ok => Results.NoContent(),
+                RenameVersionResult.Kind.Unsupported => Results.Problem(detail: result.Error, statusCode: 400),
+                RenameVersionResult.Kind.InvalidName => Results.Problem(detail: result.Error, statusCode: 400),
+                RenameVersionResult.Kind.Conflict => Results.Problem(detail: result.Error, statusCode: 409),
+                RenameVersionResult.Kind.MissingFile => Results.Problem(detail: result.Error, statusCode: 409),
+                _ => Results.NotFound(),
+            };
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
         // Re-fetch provider metadata + images for one item (admin only).

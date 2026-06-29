@@ -606,6 +606,8 @@ function MediaInfo({ item }: { item: LibraryDetail }) {
             key={source.id}
             source={source}
             itemId={item.id}
+            title={item.title}
+            year={item.year}
             canManage={canManage}
             isDefault={source.id === item.defaultSourceId}
             hasMultiple={sources.length > 1}
@@ -735,12 +737,16 @@ function StreamSection({ group }: { group: StreamGroup }) {
 function SourceCard({
   source,
   itemId,
+  title,
+  year,
   canManage,
   isDefault,
   hasMultiple,
 }: {
   source: LibraryMediaSource;
   itemId: string;
+  title: string;
+  year: number | null;
   canManage: boolean;
   isDefault: boolean;
   hasMultiple: boolean;
@@ -829,23 +835,40 @@ function SourceCard({
         ))}
       </dl>
 
-      {canManage && <EditVersionDialog source={source} itemId={itemId} open={editOpen} onOpenChange={setEditOpen} />}
+      {canManage && (
+        <EditVersionDialog
+          source={source}
+          itemId={itemId}
+          title={title}
+          year={year}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+        />
+      )}
       {canManage && <TranscodeDialog source={source} open={convertOpen} onOpenChange={setConvertOpen} />}
       {canManage && <DeleteVersionDialog source={source} itemId={itemId} open={deleteOpen} onOpenChange={setDeleteOpen} />}
     </div>
   );
 }
 
-// Rename or clear a source's version label — the name a player shows in its version picker. This edits
-// metadata only; the file on disk (whose title+year part is the stable identity) is never renamed.
+// Characters the server rejects (they'd be stripped from a filename). Mirrored here so the field flags them
+// before the request, but the server stays the source of truth.
+const INVALID_VERSION_CHARS = /[/\\:*?"<>|]/;
+
+// Rename or clear a movie source's version — the ` - {version}` suffix on its filename, which also labels the
+// version in players (e.g. Infuse). This renames the file on disk; the `Title (Year)` stem is locked.
 function EditVersionDialog({
   source,
   itemId,
+  title,
+  year,
   open,
   onOpenChange,
 }: {
   source: LibraryMediaSource;
   itemId: string;
+  title: string;
+  year: number | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -853,26 +876,33 @@ function EditVersionDialog({
   const inputId = useId();
   const [value, setValue] = useState(source.versionName ?? "");
 
-  // Re-seed the field with the current label each time the dialog (re)opens.
+  // Re-seed the field with the current version each time the dialog (re)opens.
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) setValue(source.versionName ?? "");
   }
 
+  // Preview the resulting file name: locked "Title (Year)" stem + the typed suffix + the current extension.
+  const trimmed = value.trim();
+  const invalid = INVALID_VERSION_CHARS.test(value);
+  const stem = year != null ? `${title} (${year})` : title;
+  const extension = source.fileName.includes(".") ? source.fileName.slice(source.fileName.lastIndexOf(".")) : "";
+  const previewName = `${stem}${trimmed ? ` - ${trimmed}` : ""}${extension}`;
+
   const save = useMutation({
     mutationFn: (next: string | null) => mediaServer.setSourceVersion(source.id, next),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
       onOpenChange(false);
-      toast.success("Version updated");
+      toast.success("Version renamed");
     },
-    onError: (error) => toast.error("Couldn’t update version", { description: errorMessage(error) }),
+    onError: (error) => toast.error("Couldn’t rename version", { description: errorMessage(error) }),
   });
 
   const submit = () => {
-    if (save.isPending) return; // Guard against a double-submit (e.g. repeated Enter) mid-save.
-    save.mutate(value.trim() ? value.trim() : null);
+    if (save.isPending || invalid) return; // Guard against double-submit (e.g. repeated Enter) and bad input.
+    save.mutate(trimmed ? trimmed : null);
   };
 
   return (
@@ -881,16 +911,17 @@ function EditVersionDialog({
         <DialogHeader>
           <DialogTitle>Rename version</DialogTitle>
           <DialogDescription>
-            The label shown in players (e.g. Infuse) when a movie has several versions. This doesn’t rename the
-            file on disk.
+            Renames the file on disk and the label shown in players (e.g. Infuse). The “{stem}” part is locked —
+            only the part after it changes.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor={inputId}>Version label</Label>
+          <Label htmlFor={inputId}>Version</Label>
           <Input
             id={inputId}
             value={value}
+            aria-invalid={invalid}
             placeholder="e.g. Remux 1080p, Director’s Cut"
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
@@ -900,7 +931,11 @@ function EditVersionDialog({
               }
             }}
           />
-          <p className="text-muted-foreground font-mono text-xs break-all">{source.fileName}</p>
+          {invalid ? (
+            <p className="text-destructive text-xs">{`Can’t contain / \\ : * ? " < > |`}</p>
+          ) : (
+            <p className="text-muted-foreground font-mono text-xs break-all">{previewName}</p>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
@@ -912,13 +947,13 @@ function EditVersionDialog({
               disabled={save.isPending}
               onClick={() => save.mutate(null)}
             >
-              Remove label
+              Remove version
             </Button>
           ) : null}
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button size="sm" disabled={save.isPending} onClick={submit}>
+          <Button size="sm" disabled={save.isPending || invalid} onClick={submit}>
             Save
           </Button>
         </DialogFooter>
