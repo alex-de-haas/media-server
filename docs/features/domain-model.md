@@ -123,7 +123,7 @@ change is intended; clients re-sync `UserData` from the server on refresh.
 | Id | Guid (PK) |
 | MediaItemId | Guid (FK) |
 | SourceFileId | Guid? (FK) |
-| VersionName | string? (version-picker label, e.g. "Black & White"; null for single-source items) |
+| VersionName | string? (version-picker label, e.g. "Black & White"; null for single-source items; kept in sync with the filename's ` - {edition}` suffix — editing it renames the file) |
 | Container / Path | string |
 | SizeBytes / Bitrate | long / int? |
 | DurationTicks | long |

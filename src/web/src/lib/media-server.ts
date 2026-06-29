@@ -559,7 +559,8 @@ export const mediaServer = {
   // Pin the version that plays by default (pass null to clear); admin only.
   setDefaultSource: (itemId: string, sourceId: string | null) =>
     send(`/library/${itemId}/default-source`, "PUT", { sourceId }),
-  // Rename a source's version label (pass null/empty to clear); admin only. Does not rename the file.
+  // Rename a movie source's version (pass null/empty to clear); admin only. Renames the file on disk to
+  // "Title (Year) - {version}.ext" and syncs the stored label.
   setSourceVersion: (sourceId: string, versionName: string | null) =>
     send(`/library/sources/${sourceId}/version`, "PUT", { versionName }),
   refreshMetadata: (id: string) => send(`/library/${id}/refresh`, "POST"),
