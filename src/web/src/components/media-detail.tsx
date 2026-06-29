@@ -887,7 +887,8 @@ function EditVersionDialog({
   const trimmed = value.trim();
   const invalid = INVALID_VERSION_CHARS.test(value);
   const stem = year != null ? `${title} (${year})` : title;
-  const extension = source.fileName.includes(".") ? source.fileName.slice(source.fileName.lastIndexOf(".")) : "";
+  const fileName = source.fileName ?? "";
+  const extension = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")) : "";
   const previewName = `${stem}${trimmed ? ` - ${trimmed}` : ""}${extension}`;
 
   const save = useMutation({

@@ -76,6 +76,7 @@ test("shows movie cast, media, and tags as ordered detail tabs", async ({ page }
           {
             id: "source-1",
             versionName: null,
+            fileName: "Arrival (2016).mkv",
             container: "mkv",
             sizeBytes: 1024,
             bitrate: null,
