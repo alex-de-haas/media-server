@@ -113,3 +113,13 @@ the Core lifecycle, the UI loads in the Shell, Host identity validates end to en
 (web BFF and api both revalidate against Core), `/health` is green, and CI builds
 and tests both services. Subsequent milestones (ingest, Jellyfin Direct Play,
 playback state, automation polish) are tracked in the implementation plan.
+
+## Telemetry
+
+Both services export OpenTelemetry traces, metrics, and logs over OTLP when Hosty Core injects the
+`OTEL_*` environment (operator has enabled observability **and** the collector is running; docker
+runtime only). The `api` uses the OpenTelemetry .NET SDK (`src/api/MediaServer.Api/Hosty/HostyTelemetry.cs`);
+the `web` BFF uses `@vercel/otel` for traces/metrics plus a `console`→OTLP logs bridge
+(`src/web/src/instrumentation.ts`, `src/web/src/otel-logs.ts`). With no endpoint — the `dev` runtime,
+or observability off — both emit nothing. Opt-in is the `telemetry` block in `manifest.json`. See the
+platform's `docs/features/observability.md`.
