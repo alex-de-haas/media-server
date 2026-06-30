@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { format } from "node:util";
 
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
@@ -8,6 +9,11 @@ import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs
 type ConsoleMethod = "log" | "info" | "warn" | "error" | "debug";
 
 let configured = false;
+
+// Set while the exporter is shipping a batch, so any console output the exporter or the network stack
+// emits during the (async) export is NOT re-ingested — prevents an export-failure → log → export
+// cascade that the synchronous `emitting` flag below cannot catch.
+const exportSuppression = new AsyncLocalStorage<boolean>();
 
 // Bridge console.* into the OpenTelemetry logs signal so application logs reach the Hosty collector as
 // structured OTLP records — with severity and (when emitted inside a span) trace_id/span_id
@@ -21,9 +27,15 @@ export function setupOtlpLogs(): void {
   configured = true;
 
   // The OTLP/proto exporter reads OTEL_EXPORTER_OTLP_ENDPOINT (appends /v1/logs) from the environment.
+  // Wrap export() so the whole async ship runs inside the suppression context (see exportSuppression).
+  const exporter = new OTLPLogExporter();
+  const originalExport = exporter.export.bind(exporter);
+  exporter.export = (records, resultCallback) =>
+    exportSuppression.run(true, () => originalExport(records, resultCallback));
+
   const provider = new LoggerProvider({
     resource: detectResources({ detectors: [envDetector] }),
-    processors: [new BatchLogRecordProcessor(new OTLPLogExporter())],
+    processors: [new BatchLogRecordProcessor(exporter)],
   });
   logs.setGlobalLoggerProvider(provider);
 
@@ -50,8 +62,9 @@ export function setupOtlpLogs(): void {
     const original = target[method].bind(console);
     target[method] = (...args: unknown[]): void => {
       original(...args);
-      // Guard against re-entrancy: an exporter error path that itself writes to console must not recurse.
-      if (emitting) return;
+      // Skip re-ingestion: the synchronous `emitting` flag guards direct recursion, and
+      // exportSuppression catches console output emitted asynchronously from within the exporter.
+      if (emitting || exportSuppression.getStore()) return;
       emitting = true;
       try {
         logger.emit({ severityNumber, severityText, body: format(...args) });
