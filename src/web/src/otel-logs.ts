@@ -14,7 +14,8 @@ let configured = false;
 // correlation — while still printing to stdout/stderr. Hosty keeps the console (`docker logs`) and OTLP
 // log streams separate and surfaces them in distinct views, so feeding both is intended, not double
 // logging. The log resource is detected from the injected OTEL_RESOURCE_ATTRIBUTES (incl. hosty.app.id,
-// which Core uses to attribute each record to this app). See docs/features/observability.md.
+// which Core uses to attribute each record to this app). See docs/features/observability.md in the
+// Hosty Core platform repo (not this one).
 export function setupOtlpLogs(): void {
   if (configured) return;
   configured = true;
@@ -25,6 +26,14 @@ export function setupOtlpLogs(): void {
     processors: [new BatchLogRecordProcessor(new OTLPLogExporter())],
   });
   logs.setGlobalLoggerProvider(provider);
+
+  // Flush buffered records on container stop (SIGTERM) / Ctrl-C (SIGINT) so the last ~5s batch isn't
+  // lost. These are additive `once` listeners — Next's own shutdown handling still runs.
+  const shutdown = (): void => {
+    void provider.shutdown().catch(() => undefined);
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 
   const logger = logs.getLogger("console");
   const levels: ReadonlyArray<[ConsoleMethod, SeverityNumber, string]> = [

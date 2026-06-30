@@ -121,5 +121,5 @@ Both services export OpenTelemetry traces, metrics, and logs over OTLP when Host
 runtime only). The `api` uses the OpenTelemetry .NET SDK (`src/api/MediaServer.Api/Hosty/HostyTelemetry.cs`);
 the `web` BFF uses `@vercel/otel` for traces/metrics plus a `console`→OTLP logs bridge
 (`src/web/src/instrumentation.ts`, `src/web/src/otel-logs.ts`). With no endpoint — the `dev` runtime,
-or observability off — both emit nothing. Opt-in is the `telemetry` block in `manifest.json`. See the
-platform's `docs/features/observability.md`.
+or observability off — both emit nothing. Opt-in is the `telemetry` block in `manifest.json`. See
+`docs/features/observability.md` in the Hosty Core platform repo (not this one).
