@@ -34,6 +34,10 @@ var hosty = HostyOptions.FromConfiguration(builder.Configuration, builder.Enviro
 builder.Services.AddSingleton(hosty);
 HostyKestrel.ConfigureUrls(builder.WebHost, hosty);
 
+// Export traces/metrics/logs over OTLP to the Hosty collector when Core injects the OTEL_* env
+// (docker runtime + observability enabled); a no-op otherwise. See Hosty/HostyTelemetry.cs.
+builder.AddHostyTelemetry();
+
 // Internal /api surface serializes enums by name (the web client uses string enum values like
 // "Movie"); the Jellyfin surface keeps its own options in JellyfinJson.
 builder.Services.ConfigureHttpJsonOptions(options =>
