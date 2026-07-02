@@ -125,9 +125,12 @@ public sealed class TorrentCoordinator(
                 continue;
             }
 
-            long? eta = snapshot.DownloadRateBytesPerSecond > 0 && !snapshot.Complete
-                ? (long)(snapshot.SizeBytes * (1 - snapshot.PercentComplete / 100.0) / snapshot.DownloadRateBytesPerSecond)
-                : null;
+            // Prefer the engine's own ETA (it derives it from real piece completion); fall back to a local
+            // estimate for older engine builds that don't send one.
+            long? eta = snapshot.EtaSeconds
+                ?? (snapshot.DownloadRateBytesPerSecond > 0 && !snapshot.Complete
+                    ? (long)(snapshot.SizeBytes * (1 - snapshot.PercentComplete / 100.0) / snapshot.DownloadRateBytesPerSecond)
+                    : null);
 
             // Send the live engine state (e.g. Paused/Downloading), not the persisted DownloadState — the
             // UI derives the pause/resume affordance from it, and the DB state never reflects a pause. Coarse
@@ -141,7 +144,15 @@ public sealed class TorrentCoordinator(
                 snapshot.Ratio,
                 snapshot.Peers,
                 snapshot.SizeBytes,
-                eta), cancellationToken);
+                eta,
+                snapshot.Seeds,
+                snapshot.Leeches,
+                snapshot.AvailablePeers,
+                snapshot.DownloadedBytes,
+                snapshot.UploadedBytes,
+                snapshot.RemainingBytes,
+                snapshot.TotalPieces,
+                snapshot.CompletePieces), cancellationToken);
 
             // Self-heal a missed completion: the engine reports the torrent complete but our persisted
             // state never caught up (e.g. a re-added, already-complete torrent that finished hashing). Drive

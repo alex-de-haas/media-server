@@ -12,7 +12,13 @@ public sealed record TorrentDescriptor(
     bool HasMetadata,
     IReadOnlyList<TorrentFileInfo> Files);
 
-/// <summary>A live, in-memory progress snapshot (never persisted).</summary>
+/// <summary>
+/// A live, in-memory progress snapshot (never persisted). Mirrors the <c>torrent-engine</c> wire
+/// contract: the first ten fields are the original shape; the rest are additive richer stats that
+/// default to zero/null when talking to an older engine build that does not send them.
+/// <see cref="AvailablePeers"/> high with few <see cref="Peers"/> points at a connectivity/port-forwarding
+/// issue rather than a discovery one.
+/// </summary>
 public sealed record TorrentSnapshot(
     string InfoHash,
     string? Name,
@@ -23,7 +29,18 @@ public sealed record TorrentSnapshot(
     long UploadRateBytesPerSecond,
     double Ratio,
     int Peers,
-    long SizeBytes);
+    long SizeBytes,
+    // Nullable so an older engine build that omits these deserializes to null (UI omits them) rather than
+    // 0, which would read as a real "0 seeds · 0 leeches". A new engine reporting a genuine 0 still shows it.
+    int? Seeds = null,
+    int? Leeches = null,
+    int? AvailablePeers = null,
+    long? DownloadedBytes = null,
+    long? UploadedBytes = null,
+    long? RemainingBytes = null,
+    int? TotalPieces = null,
+    int? CompletePieces = null,
+    long? EtaSeconds = null);
 
 /// <summary>Per-torrent rate limits (bytes/sec; 0 = unlimited).</summary>
 public sealed record TorrentLimits(int MaxDownloadRate, int MaxUploadRate);

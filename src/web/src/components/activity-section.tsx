@@ -513,10 +513,15 @@ function IngestRow({
 
 function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: boolean }) {
   const percent = download.percentComplete ?? 0;
+  // Prefer the engine's own ETA (derived from real piece completion); fall back to a local estimate for
+  // older engine builds that don't report one.
   const eta =
-    download.downloadRateBytesPerSecond && download.sizeBytes
+    download.etaSeconds ??
+    (download.downloadRateBytesPerSecond && download.sizeBytes
       ? (download.sizeBytes * (1 - percent / 100)) / download.downloadRateBytesPerSecond
-      : null;
+      : null);
+
+  const active = !vpnDown && !isDownloadPaused(download);
 
   return (
     <div className="flex flex-col gap-2">
@@ -537,6 +542,31 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
           </>
         )}
       </div>
+      {active && <PeerStats download={download} />}
+    </div>
+  );
+}
+
+// Peer/piece breakdown shown during an active download. Many `availablePeers` (known from
+// trackers/DHT/PEX but not connected) while `peers` (connected) stays low is the tell-tale of a
+// connectivity/port-forwarding problem behind the VPN rather than a peer-discovery one.
+function PeerStats({ download }: { download: Download }) {
+  const parts: string[] = [`${download.peers ?? 0} peers`];
+  if (download.seeds != null || download.leeches != null) {
+    parts.push(`${download.seeds ?? 0} seeds · ${download.leeches ?? 0} leeches`);
+  }
+  if (download.availablePeers != null && download.availablePeers > 0) {
+    parts.push(`${download.availablePeers} known`);
+  }
+  if (download.totalPieces != null && download.totalPieces > 0) {
+    parts.push(`${download.completePieces ?? 0}/${download.totalPieces} pieces`);
+  }
+
+  return (
+    <div className="text-muted-foreground/80 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs">
+      {parts.map((part, index) => (
+        <span key={index}>{part}</span>
+      ))}
     </div>
   );
 }
