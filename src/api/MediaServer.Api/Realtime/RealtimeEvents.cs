@@ -29,14 +29,16 @@ public sealed record DownloadProgress(
     int Peers,
     long SizeBytes,
     long? EtaSeconds,
-    int Seeds = 0,
-    int Leeches = 0,
-    int AvailablePeers = 0,
-    long DownloadedBytes = 0,
-    long UploadedBytes = 0,
-    long RemainingBytes = 0,
-    int TotalPieces = 0,
-    int CompletePieces = 0);
+    // Nullable so an older engine's absent stats stay null through to the UI (which omits them) instead of
+    // surfacing as a misleading zero.
+    int? Seeds = null,
+    int? Leeches = null,
+    int? AvailablePeers = null,
+    long? DownloadedBytes = null,
+    long? UploadedBytes = null,
+    long? RemainingBytes = null,
+    int? TotalPieces = null,
+    int? CompletePieces = null);
 
 /// <summary>A persisted torrent state transition (the trigger for downstream pipeline actions).</summary>
 public sealed record DownloadStateChanged(Guid DownloadId, string State, string? Name);

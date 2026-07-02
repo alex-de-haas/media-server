@@ -30,14 +30,16 @@ public sealed record TorrentSnapshot(
     double Ratio,
     int Peers,
     long SizeBytes,
-    int Seeds = 0,
-    int Leeches = 0,
-    int AvailablePeers = 0,
-    long DownloadedBytes = 0,
-    long UploadedBytes = 0,
-    long RemainingBytes = 0,
-    int TotalPieces = 0,
-    int CompletePieces = 0,
+    // Nullable so an older engine build that omits these deserializes to null (UI omits them) rather than
+    // 0, which would read as a real "0 seeds · 0 leeches". A new engine reporting a genuine 0 still shows it.
+    int? Seeds = null,
+    int? Leeches = null,
+    int? AvailablePeers = null,
+    long? DownloadedBytes = null,
+    long? UploadedBytes = null,
+    long? RemainingBytes = null,
+    int? TotalPieces = null,
+    int? CompletePieces = null,
     long? EtaSeconds = null);
 
 /// <summary>Per-torrent rate limits (bytes/sec; 0 = unlimited).</summary>

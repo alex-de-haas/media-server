@@ -22,14 +22,14 @@ interface DownloadProgressEvent {
   peers: number;
   sizeBytes: number;
   etaSeconds: number | null;
-  seeds: number;
-  leeches: number;
-  availablePeers: number;
-  downloadedBytes: number;
-  uploadedBytes: number;
-  remainingBytes: number;
-  totalPieces: number;
-  completePieces: number;
+  seeds: number | null;
+  leeches: number | null;
+  availablePeers: number | null;
+  downloadedBytes: number | null;
+  uploadedBytes: number | null;
+  remainingBytes: number | null;
+  totalPieces: number | null;
+  completePieces: number | null;
 }
 
 interface IngestStageEvent {
