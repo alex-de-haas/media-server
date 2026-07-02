@@ -21,6 +21,15 @@ interface DownloadProgressEvent {
   ratio: number;
   peers: number;
   sizeBytes: number;
+  etaSeconds: number | null;
+  seeds: number;
+  leeches: number;
+  availablePeers: number;
+  downloadedBytes: number;
+  uploadedBytes: number;
+  remainingBytes: number;
+  totalPieces: number;
+  completePieces: number;
 }
 
 interface IngestStageEvent {
@@ -132,6 +141,15 @@ function patchDownload(queryClient: QueryClient, progress: DownloadProgressEvent
             ratio: progress.ratio,
             peers: progress.peers,
             sizeBytes: progress.sizeBytes,
+            etaSeconds: progress.etaSeconds,
+            seeds: progress.seeds,
+            leeches: progress.leeches,
+            availablePeers: progress.availablePeers,
+            downloadedBytes: progress.downloadedBytes,
+            uploadedBytes: progress.uploadedBytes,
+            remainingBytes: progress.remainingBytes,
+            totalPieces: progress.totalPieces,
+            completePieces: progress.completePieces,
           }
         : download,
     ),

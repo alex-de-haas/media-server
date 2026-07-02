@@ -16,7 +16,9 @@ public static class RealtimeEvents
     public const string VpnStatusChanged = "vpnStatusChanged";
 }
 
-/// <summary>Live torrent progress snapshot. Broadcast from the engine's in-memory state; never persisted.</summary>
+/// <summary>Live torrent progress snapshot. Broadcast from the engine's in-memory state; never persisted.
+/// The fields after <see cref="EtaSeconds"/> are additive richer stats; <see cref="AvailablePeers"/> high
+/// with few <see cref="Peers"/> flags a connectivity/port-forwarding issue rather than a discovery one.</summary>
 public sealed record DownloadProgress(
     Guid DownloadId,
     string State,
@@ -26,7 +28,15 @@ public sealed record DownloadProgress(
     double Ratio,
     int Peers,
     long SizeBytes,
-    long? EtaSeconds);
+    long? EtaSeconds,
+    int Seeds = 0,
+    int Leeches = 0,
+    int AvailablePeers = 0,
+    long DownloadedBytes = 0,
+    long UploadedBytes = 0,
+    long RemainingBytes = 0,
+    int TotalPieces = 0,
+    int CompletePieces = 0);
 
 /// <summary>A persisted torrent state transition (the trigger for downstream pipeline actions).</summary>
 public sealed record DownloadStateChanged(Guid DownloadId, string State, string? Name);

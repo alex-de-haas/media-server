@@ -25,7 +25,17 @@ public sealed record DownloadResponse(
     long? UploadRateBytesPerSecond,
     double? Ratio,
     int? Peers,
-    long? SizeBytes)
+    long? SizeBytes,
+    // Extended live stats (null when there is no active manager for this download).
+    int? Seeds,
+    int? Leeches,
+    int? AvailablePeers,
+    long? DownloadedBytes,
+    long? UploadedBytes,
+    long? RemainingBytes,
+    int? TotalPieces,
+    int? CompletePieces,
+    long? EtaSeconds)
 {
     public static DownloadResponse From(Download download, TorrentSnapshot? snapshot)
     {
@@ -52,7 +62,18 @@ public sealed record DownloadResponse(
             snapshot?.UploadRateBytesPerSecond,
             snapshot?.Ratio,
             snapshot?.Peers,
-            snapshot?.SizeBytes);
+            snapshot?.SizeBytes,
+            snapshot?.Seeds,
+            snapshot?.Leeches,
+            snapshot?.AvailablePeers,
+            snapshot?.DownloadedBytes,
+            snapshot?.UploadedBytes,
+            // Complete content has nothing left; otherwise mirror the engine.
+            contentComplete ? 0 : snapshot?.RemainingBytes,
+            snapshot?.TotalPieces,
+            snapshot?.CompletePieces,
+            // Engine ETA is already null when complete/stalled; never show an ETA on a finished download.
+            contentComplete ? null : snapshot?.EtaSeconds);
     }
 }
 

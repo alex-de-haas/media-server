@@ -69,6 +69,16 @@ export interface Download {
   ratio: number | null;
   peers: number | null;
   sizeBytes: number | null;
+  // Extended live stats (null when the engine has no active manager for this download).
+  seeds: number | null;
+  leeches: number | null;
+  availablePeers: number | null;
+  downloadedBytes: number | null;
+  uploadedBytes: number | null;
+  remainingBytes: number | null;
+  totalPieces: number | null;
+  completePieces: number | null;
+  etaSeconds: number | null;
 }
 
 export interface AddTorrentInput {
