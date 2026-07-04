@@ -1,16 +1,17 @@
 # Idea: Standalone Transcode Engine App (VAAPI-in-docker)
 
-Status: In progress
+Status: Implemented (movies-only v1; later items deferred)
 Created: 2026-06-26
-Updated: 2026-06-26
+Updated: 2026-07-04
 
-> **Engine implemented (2026-06-26).** The standalone `transcode-engine` app exists (sibling repo
+> **Shipped (2026-06-26, PR #38).** The standalone `transcode-engine` app exists (sibling repo
 > `../transcode-engine`: manifest + Dockerfile + the ffmpeg engine and full HTTP/SSE control API, with
 > tests). The media-server consumer trio is wired (`ITranscodeEngine` / `RemoteTranscodeEngine` /
 > `DisabledTranscodeEngine`, discovered via `HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL`, with a disabled
-> fallback). What remains is a user-facing surface in media-server (a job/UI to actually request a
-> transcode) — see Phased rollout. Built as a deliberate mirror of
-> [Torrent engine app](torrent-engine-app.md).
+> fallback), and the full user-facing surface (backend job/service, output→version import, and the
+> movie-page "Convert" UI) is in place — all five rollout phases below are done. Only the explicit
+> **(later)** follow-ups remain (series, resolution scaling/audio re-encode, live transcode, etc.).
+> Built as a deliberate mirror of [Torrent engine app](torrent-engine-app.md).
 
 ## Motivation
 

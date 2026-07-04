@@ -2,7 +2,7 @@
 
 Status: Active
 Created: 2026-06-17
-Updated: 2026-06-21
+Updated: 2026-07-04
 
 > **Storage-model change (2026-06-21).** The catalog storage model was reworked
 > from two hardlinked subtrees (`files/` + `library/`) to a **single tree**: a
@@ -392,7 +392,7 @@ sandbox is `allow-scripts allow-same-origin allow-forms allow-popups allow-downl
 `allow-popups`), with a copy-link fallback. Implemented with Infuse's TMDb library deep
 links; end-to-end behaviour on a device with Infuse installed remains a manual check.
 
-**Status (in progress 2026-06-18, branch `feat/m3.5-app-shell`):** slice 1 (app
+**Status (done 2026-06-20, branch `feat/m3.5-app-shell`):** slice 1 (app
 shell — light/dark tokens, Hosty theme bridge, top-tab routing, `dashboard.tsx` split
 into per-page components; web build/lint/vitest green) and slice 2 (backend `/api`
 read layer) are done. Slice 2 moved `UserDataService` + `UserItemDataDto` into the
@@ -411,7 +411,7 @@ streams, per-season episodes), Home rails (Continue Watching / Next Up / Recentl
 Added) + an admin ops strip, and `/api` rails (recent/resume/nextup) + id-keyed
 played/favorite mutations (also fixed a SQLite `DateTimeOffset` ORDER BY crash latent
 in the Jellyfin "Latest" path). api: 96 xUnit tests green; web build/lint/tsc/vitest
-green. Slice 5 (polish) in progress: empty/loading/error states (a shared `QueryState`)
+green. Slice 5 (polish) is done: empty/loading/error states (a shared `QueryState`)
 across the library grid, downloads, activity, and catalogs, plus real role-gating — an
 `Admin` authorization policy (`AppRoles.AdminPolicy`) guards catalog writes server-side
 and the Catalogs page/tab is admin-only (`AdminOnly`) — are done, as is admin-gated

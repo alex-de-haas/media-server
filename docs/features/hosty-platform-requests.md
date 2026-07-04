@@ -1,8 +1,8 @@
 # Hosty Platform Requests
 
-Status: Implemented
+Status: Active (partially implemented — see per-item status)
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-04
 
 ## Description
 
@@ -380,7 +380,7 @@ single catalog volume.
 - Read-only host disk/CPU info available to the app.
 - Optional quota declaration honored by Core.
 
-## 14. Intra-app service-to-service URL discovery — Planned (2026-06-17)
+## 14. Intra-app service-to-service URL discovery — Implemented (2026-06-17)
 
 **Status.** Implemented in Hosty Core (`docker-host`, working tree): `dependsOn` now drives
 both startup ordering **and** intra-app discovery. Core injects `HOSTY_SERVICE_{KEY}_URL` with

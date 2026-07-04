@@ -2,11 +2,14 @@
 
 ## Overview
 
-This documentation is the draft implementation plan for Media Server. The
-application has not been implemented yet, so current behavior must not be
-documented under `docs/features/` until the corresponding implementation exists.
+This documentation covers Media Server, which is implemented and shipping. The
+core product — milestones M0 through M4 (plus the M3.5 UI redesign) — is built and
+merged across 40+ pull requests. The `docs/features/` set holds the living
+specifications (each now describes implemented behavior, with per-milestone status
+tracked in the [implementation plan](features/implementation-plan.md)), and
+`docs/ideas/` holds forward-looking designs and epics.
 
-Media Server is planned as a self-hosted, automation-first application for
+Media Server is a self-hosted, automation-first application for
 acquiring, organizing, and streaming movie and TV libraries. The defining goal is
 **maximum automation**: an operator adds a torrent and picks a destination
 catalog, and the system downloads it, organizes it into a clean library layout,
@@ -14,7 +17,7 @@ identifies it, fetches metadata, probes media streams, and publishes it for
 playback without further manual steps. The content then becomes available to
 clients such as Infuse over a Jellyfin-compatible API.
 
-Media Server will be built and distributed as a **Hosty runtime app** with
+Media Server is built and distributed as a **Hosty runtime app** with
 manifest `schemaVersion: "app.0.1"`. It runs under Hosty Core-managed lifecycle
 and supports both runtime profiles: `dev` (`localCommand`) is the primary local
 development loop, and `docker` is the v1 delivery target — unblocked now that
@@ -91,7 +94,9 @@ Backend (`api` service):
   driven over its HTTP control API + SSE by `RemoteTorrentEngine`; a
   `DisabledTorrentEngine` fallback keeps the rest of the app working when the
   dependency URL is absent.
-- FFprobe for media probing (FFmpeg only later, if transcoding is ever added).
+- FFprobe for media probing in `api`; encoding is out-of-process in the separate
+  [`transcode-engine`](ideas/transcode-engine-app.md) app (batch re-encode), never
+  in-process.
 - Server-Sent Events for real-time job and download progress (server→client only).
 - An extensible automation pipeline (the orchestrator).
 
@@ -115,9 +120,20 @@ Runtime and delivery:
 
 ## Ideas
 
-No idea documents yet.
+Forward-looking designs and epics, kept separate from the roadmap specs:
 
-## Planning
+- [Torrent engine app](ideas/torrent-engine-app.md) — extract MonoTorrent into a
+  standalone, VPN-isolated Hosty app (implemented).
+- [Transcode engine app](ideas/transcode-engine-app.md) — ffmpeg/VAAPI batch
+  conversion as a standalone Hosty app (implemented, movies-only v1).
+
+## Feature documentation
+
+The specifications below live in `docs/features/` and are the source of truth for
+the product's behavior. Most describe functionality already implemented through M4;
+see the [implementation plan](features/implementation-plan.md) for per-milestone
+status. [Watchlist and discovery](features/watchlist-and-discovery.md) is the main
+still-planned (M5) spec.
 
 - [Implementation plan](features/implementation-plan.md)
 - [Hosty runtime app](features/hosty-runtime-app.md)
@@ -127,6 +143,7 @@ No idea documents yet.
 - [Torrents and organizer](features/torrents-and-organizer.md)
 - [Metadata](features/metadata.md)
 - [Storage and data](features/storage-and-data.md)
+- [Collections](features/collections.md)
 - [Jellyfin compatibility](features/jellyfin-compatibility.md)
 - [File and directory management](features/file-directory-management.md)
 - [Background tasks and progress](features/background-tasks.md)
@@ -135,10 +152,6 @@ No idea documents yet.
 - [Build and deployment](features/build-and-deployment.md)
 - [Watchlist and discovery](features/watchlist-and-discovery.md)
 - [Hosty platform requests](features/hosty-platform-requests.md)
-
-## Features
-
-No implemented feature documentation yet.
 
 ## Testing Expectations
 
@@ -151,25 +164,31 @@ relevant planning files until implementation is complete.
 
 ## Roadmap
 
-- **M0 — Scaffold.** `app.0.1` manifest, `api` + `web` services, `dev` + `docker`
-  profiles, Hosty app-code session in `web`, health checks, this documentation.
-- **M1 — Ingest happy path.** Torrent add + catalog → download → organize → scan
-  → TMDb → probe → catalog. Live activity in the UI. Closes the primary use case
-  on the server side.
-- **M2 — Jellyfin Direct Play.** System/Users/UserViews/Items/Images,
+- **M0 — Scaffold.** ✅ Done. `app.0.1` manifest, `api` + `web` services, `dev` +
+  `docker` profiles, Hosty app-code session in `web`, health checks, this
+  documentation.
+- **M1 — Ingest happy path.** ✅ Done. Torrent add + catalog → download → organize
+  → scan → TMDb → probe → catalog. Live activity in the UI. Closes the primary use
+  case on the server side.
+- **M2 — Jellyfin Direct Play.** ✅ Done. System/Users/UserViews/Items/Images,
   `PlaybackInfo`, and range-based direct streaming. Infuse connects, browses, and
   plays.
-- **M3 — Playback state.** `Sessions/Playing*`, user data, resume, watched
+- **M3 — Playback state.** ✅ Done. `Sessions/Playing*`, user data, resume, watched
   threshold, season/series aggregates.
-- **M4 — Automation polish.** Reconciler, retries, review queue, manual match
-  override, scheduled scans, metadata refresh, app-data backups.
+- **M3.5 — App shell & UI redesign.** ✅ Done. Multi-page themed UI, browse/detail
+  pages, Home rails, admin gating.
+- **M4 — Automation polish & Docker delivery.** ✅ Done. Reconciler, retries, review
+  queue, manual match override, scheduled scans, metadata refresh, app-data backups,
+  GHCR image publishing.
 - **M5 — Watchlist and discovery (future).** Custom content-source providers,
   watchlist, release calendar.
 - **M6 — MCP / AI (future).** Use cases exposed as MCP tools for an AI agent.
 
 ## Non-Goals
 
-- Media conversion and transcoding (Direct Play / Direct Stream only).
+- Live/on-the-fly playback transcode (Direct Play / Direct Stream only). Offline,
+  operator-initiated batch re-encode into smaller library versions *is* supported —
+  see the [transcode engine app](ideas/transcode-engine-app.md).
 - Public torrent indexing.
 - DRM-protected content playback.
 - Full Jellyfin server replacement (only the subset Infuse needs).
@@ -177,7 +196,7 @@ relevant planning files until implementation is complete.
 
 ## Summary
 
-Media Server is planned as an automation-first Hosty runtime app: a `.NET` `api`
+Media Server is an automation-first Hosty runtime app: a `.NET` `api`
 service and a Next.js `web` service under Hosty Core lifecycle. Its center of
 gravity is the automation pipeline that turns an added torrent into a clean,
 identified, metadata-rich, directly-playable library item with no manual steps,
