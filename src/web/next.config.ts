@@ -9,6 +9,10 @@ const standalone = process.env.NEXT_OUTPUT_STANDALONE === "1";
 
 const nextConfig: NextConfig = {
   ...(standalone ? { output: "standalone", outputFileTracingRoot: path.join(__dirname) } : {}),
+  // Dev-only: Next blocks cross-origin requests to dev resources (e.g. /_next/webpack-hmr) by default.
+  // The app is reached over multiple loopback hosts during Hosty/iframe dev, so allow 127.0.0.1
+  // alongside the auto-allowed localhost. Ignored in production builds.
+  allowedDevOrigins: ["127.0.0.1"],
 };
 
 export default nextConfig;
