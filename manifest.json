@@ -85,13 +85,55 @@
     "catalogRoots": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "api", "required": true }
   },
   "settings": [
-    { "key": "TMDB_API_KEY", "type": "string", "secret": true, "required": true },
-    { "key": "SUPPORTED_LANGUAGES", "type": "string", "default": "en-US" },
-    { "key": "JELLYFIN_SERVER_NAME", "type": "string", "default": "Media Server" },
-    { "key": "JELLYFIN_DISCOVERY_ENABLED", "type": "boolean", "default": "false" },
-    { "key": "FFPROBE_PATH", "type": "string" },
-    { "key": "TORRENT_MAX_DOWNLOAD_SPEED", "type": "number", "default": "0" },
-    { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0" }
+    {
+      "key": "TMDB_API_KEY",
+      "type": "string",
+      "secret": true,
+      "required": true,
+      "label": "TMDb API key",
+      "description": "API key for The Movie Database, used to identify and fetch metadata for your media."
+    },
+    {
+      "key": "SUPPORTED_LANGUAGES",
+      "type": "string",
+      "default": "en-US",
+      "label": "Supported languages",
+      "description": "Comma-separated metadata languages in priority order; the first is the fallback (e.g. en-US,ru-RU)."
+    },
+    {
+      "key": "JELLYFIN_SERVER_NAME",
+      "type": "string",
+      "default": "Media Server",
+      "label": "Jellyfin server name",
+      "description": "Server name advertised to Jellyfin-compatible clients such as Infuse."
+    },
+    {
+      "key": "JELLYFIN_DISCOVERY_ENABLED",
+      "type": "boolean",
+      "default": "false",
+      "label": "Jellyfin auto-discovery",
+      "description": "Broadcast the server on the local network so Jellyfin clients can find it automatically."
+    },
+    {
+      "key": "FFPROBE_PATH",
+      "type": "string",
+      "label": "ffprobe path",
+      "description": "Override path to the ffprobe binary. Leave empty to use the one found on PATH."
+    },
+    {
+      "key": "TORRENT_MAX_DOWNLOAD_SPEED",
+      "type": "number",
+      "default": "0",
+      "label": "Max download speed (bytes/s)",
+      "description": "Per-download rate limit forwarded to the torrent engine, in bytes per second. 0 means unlimited."
+    },
+    {
+      "key": "TORRENT_MAX_UPLOAD_SPEED",
+      "type": "number",
+      "default": "0",
+      "label": "Max upload speed (bytes/s)",
+      "description": "Per-download upload rate limit forwarded to the torrent engine, in bytes per second. 0 means unlimited."
+    }
   ],
   "telemetry": { "enabled": true, "sampleRatio": 0.1 },
   "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
