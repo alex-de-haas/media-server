@@ -23,7 +23,7 @@ import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
 import { RemapDialog } from "@/components/remap-dialog";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
-import { formatBytes, formatRuntime } from "@/lib/format";
+import { formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import {
   AlertDialog,
@@ -146,6 +146,13 @@ function MoveProgress({ itemId }: { itemId: string }) {
         <Progress value={move.progress} className="h-1.5" />
         <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">{move.progress}%</span>
       </div>
+      {(move.bytesPerSecond != null || move.etaSeconds != null) && (
+        <div className="text-muted-foreground flex flex-wrap gap-x-3 font-mono text-xs tabular-nums">
+          {/* Each shown only when present — the final 100% tick reports a rate but no ETA. */}
+          {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
+          {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
+        </div>
+      )}
     </div>
   );
 }

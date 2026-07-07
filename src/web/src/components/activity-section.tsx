@@ -2,9 +2,9 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Loader2, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Loader2, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type VpnStatus } from "@/lib/media-server";
+import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -25,10 +25,11 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { QueryState } from "@/components/states";
+import { EmptyState, ErrorState, Loading } from "@/components/states";
 import { IngestStepper, type StepActivity } from "@/components/ingest-stepper";
 import { IngestReviewDialog } from "@/components/ingest-review-dialog";
 import { AddTorrentDialog } from "@/components/add-torrent-dialog";
+import { TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
 
 // Download states where the torrent is no longer actively transferring (content is on disk).
 const DOWNLOAD_DONE_STATES = ["Completed", "Seeding", "StoppedSeeding"];
@@ -85,6 +86,14 @@ export function ActivitySection() {
     queryFn: mediaServer.listActiveMoves,
     enabled: role === "admin",
   });
+  // Conversions (re-encodes). Admin-only like the /api/transcode surface; not pushed over SSE, so poll while
+  // any job is still running (idle otherwise). Active ones group under the Active tab, finished ones under Done.
+  const transcodes = useQuery({
+    queryKey: ["transcode-jobs"],
+    queryFn: mediaServer.listTranscodeJobs,
+    enabled: role === "admin",
+    refetchInterval: (query) => ((query.state.data as TranscodeJob[] | undefined)?.some(isTranscodeActive) ? 2000 : false),
+  });
   // Only "down" when there's a VPN to report and it's disconnected — the engine pauses transfers behind the
   // killswitch, so the cards show "Paused — VPN down" rather than a stalled 0 B/s.
   const vpnDown = vpn.data != null && !vpn.data.connected;
@@ -111,6 +120,7 @@ export function ActivitySection() {
     onError: (error) => toast.error("Couldn’t delete completed items", { description: errorMessage(error) }),
   });
 
+  // Ingest tallies only — drives the "Delete all" gate on the Done tab (which deletes ingest rows).
   const counts = useMemo(() => {
     const tally: Record<TabKey, number> = { active: 0, done: 0 };
     for (const item of ingest.data ?? []) {
@@ -119,11 +129,48 @@ export function ActivitySection() {
     return tally;
   }, [ingest.data, downloadsById]);
 
+  const moveList = moves.data ?? [];
+  const activeTranscodes = useMemo(() => (transcodes.data ?? []).filter(isTranscodeActive), [transcodes.data]);
+  const doneTranscodes = useMemo(() => (transcodes.data ?? []).filter((job) => !isTranscodeActive(job)), [transcodes.data]);
+
+  // Tab badges cover every category the tab shows, not just ingest: Active also holds moves + running
+  // conversions; Done also holds finished conversions.
+  const badgeCounts: Record<TabKey, number> = {
+    active: counts.active + moveList.length + activeTranscodes.length,
+    done: counts.done + doneTranscodes.length,
+  };
+
+  // The published-library history (ingest) filtered to one tab, with the download group header when other
+  // categories share the tab. Loading/error/empty handled here so the extra groups can render alongside.
+  const renderIngest = (key: TabKey, hasOtherGroups: boolean): ReactNode => {
+    if (ingest.isPending) return hasOtherGroups ? null : <Loading />;
+    if (ingest.isError) return <ErrorState onRetry={() => void ingest.refetch()} />;
+    const all = ingest.data ?? [];
+    if (all.length === 0) {
+      return hasOtherGroups ? null : <EmptyState>Nothing here yet. Add a torrent to get started.</EmptyState>;
+    }
+    const visible = all.filter((item) => tabOf(item, downloadFor(item)) === key);
+    if (visible.length === 0) {
+      return hasOtherGroups ? null : <p className="text-muted-foreground text-sm">{EMPTY[key]}</p>;
+    }
+    const rows = visible.map((item) => (
+      <IngestRow key={item.id} item={item} catalog={catalogsById.get(item.catalogId)} download={downloadFor(item)} vpnDown={vpnDown} />
+    ));
+    // A lone downloads list keeps today's headerless look; a header appears only to separate it from siblings.
+    return key === "active" && hasOtherGroups ? (
+      <ActivityGroup icon={ArrowDown} label="Downloads">
+        {rows}
+      </ActivityGroup>
+    ) : (
+      <div className="flex flex-col gap-3">{rows}</div>
+    );
+  };
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Activity</CardTitle>
-        <CardDescription>Torrents from download through the ingest pipeline into your library.</CardDescription>
+        <CardDescription>Downloads, catalog moves, and conversions in your library.</CardDescription>
         <CardAction>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <ThroughputBadge downloads={downloads.data ?? []} vpnDown={vpnDown} />
@@ -133,21 +180,13 @@ export function ActivitySection() {
         </CardAction>
       </CardHeader>
       <CardContent className="text-sm">
-        {(moves.data?.length ?? 0) > 0 && (
-          <div className="mb-3 flex flex-col gap-3">
-            {moves.data!.map((move) => (
-              <MoveProgressRow key={move.jobId} move={move} />
-            ))}
-          </div>
-        )}
-
         <Tabs value={tab} onValueChange={(value) => setTab(value as TabKey)}>
           <div className="flex items-center justify-between border-b">
             <TabsList variant="line">
               {TABS.map(({ key, label }) => (
                 <TabsTrigger key={key} value={key}>
                   {label}
-                  {counts[key] > 0 && <span className="text-muted-foreground text-xs">{counts[key]}</span>}
+                  {badgeCounts[key] > 0 && <span className="text-muted-foreground text-xs">{badgeCounts[key]}</span>}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -164,27 +203,35 @@ export function ActivitySection() {
               </Button>
             )}
           </div>
-          {TABS.map(({ key }) => (
-            <TabsContent key={key} value={key} className="flex flex-col gap-3 pt-3">
-              <QueryState query={ingest} empty="Nothing here yet. Add a torrent to get started.">
-                {(items) => {
-                  const visible = items.filter((item) => tabOf(item, downloadFor(item)) === key);
-                  if (visible.length === 0) {
-                    return <p className="text-muted-foreground text-sm">{EMPTY[key]}</p>;
-                  }
-                  return visible.map((item) => (
-                    <IngestRow
-                      key={item.id}
-                      item={item}
-                      catalog={catalogsById.get(item.catalogId)}
-                      download={downloadFor(item)}
-                      vpnDown={vpnDown}
-                    />
-                  ));
-                }}
-              </QueryState>
-            </TabsContent>
-          ))}
+
+          <TabsContent value="active" className="flex flex-col gap-4 pt-3">
+            {moveList.length > 0 && (
+              <ActivityGroup icon={ArrowLeftRight} label="Moving to another catalog">
+                {moveList.map((move) => (
+                  <MoveProgressRow key={move.jobId} move={move} />
+                ))}
+              </ActivityGroup>
+            )}
+            {activeTranscodes.length > 0 && (
+              <ActivityGroup icon={Wand2} label="Converting">
+                {activeTranscodes.map((job) => (
+                  <TranscodeJobRow key={job.id} job={job} />
+                ))}
+              </ActivityGroup>
+            )}
+            {renderIngest("active", moveList.length > 0 || activeTranscodes.length > 0)}
+          </TabsContent>
+
+          <TabsContent value="done" className="flex flex-col gap-4 pt-3">
+            {doneTranscodes.length > 0 && (
+              <ActivityGroup icon={Wand2} label="Conversions">
+                {doneTranscodes.map((job) => (
+                  <TranscodeJobRow key={job.id} job={job} />
+                ))}
+              </ActivityGroup>
+            )}
+            {renderIngest("done", doneTranscodes.length > 0)}
+          </TabsContent>
         </Tabs>
       </CardContent>
 
@@ -526,21 +573,36 @@ function IngestRow({
   );
 }
 
+// A labelled category inside a tab (moving, converting, downloads): a small icon + label header over a stack
+// of that category's cards. The header carries the icon, so the cards themselves don't repeat it.
+function ActivityGroup({ icon: Icon, label, children }: { icon: LucideIcon; label: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+        <Icon className="size-3.5" aria-hidden />
+        {label}
+      </div>
+      <div className="flex flex-col gap-3">{children}</div>
+    </section>
+  );
+}
+
 // A cross-catalog move in flight: file bytes are being relocated (a copy across volumes, an instant rename
-// within one). Progress is per-byte, pushed over SSE. Labels can be absent for a move stranded by a restart.
+// within one). Full progress bar with the live speed/ETA below (per-byte, pushed over SSE), mirroring a
+// download card. Labels can be absent for a move stranded by a restart; speed/ETA until the first tick.
 function MoveProgressRow({ move }: { move: LibraryMoveJob }) {
   return (
     <div className="flex flex-col gap-2 rounded-md border p-3">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <ArrowLeftRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
-        <p className="min-w-0 truncate font-medium">
-          Moving {move.title ? <span title={move.title}>“{move.title}”</span> : "item"}
-          {move.targetCatalogName && <span className="text-muted-foreground font-normal"> → {move.targetCatalogName}</span>}
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Progress value={move.progress} />
-        <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">{move.progress}%</span>
+      <p className="min-w-0 truncate font-medium">
+        Moving {move.title ? <span title={move.title}>“{move.title}”</span> : "item"}
+        {move.targetCatalogName && <span className="text-muted-foreground font-normal"> → {move.targetCatalogName}</span>}
+      </p>
+      <Progress value={move.progress} />
+      {/* Speed/ETA are each present only mid-copy — the 100% tick has a rate but no ETA — so gate them apart. */}
+      <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
+        <span>{move.progress}%</span>
+        {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
+        {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
       </div>
     </div>
   );

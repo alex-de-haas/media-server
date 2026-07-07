@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.IO;
@@ -357,15 +358,47 @@ public sealed class LibraryMoveService(
         var copiedBytes = 0L;
         var lastPercent = 0;
 
+        // Copy speed / ETA readout: sample bytes-over-elapsed and smooth with an EWMA so a chunk that briefly
+        // stalls or bursts doesn't make the number lurch. The sample window is wider than a single 1 MB chunk
+        // (which lands many times a second) to keep the rate steady enough to read. Same-volume renames finish
+        // before the first window elapses, so they report no rate and the UI simply omits it.
+        var stopwatch = Stopwatch.StartNew();
+        var sampleBytes = 0L;
+        var sampleElapsed = TimeSpan.Zero;
+        double? bytesPerSecond = null;
+
         // ProgressAsync persists + broadcasts on every whole-percent change, so only call it when the integer
         // percent actually advances (a multi-GB copy would otherwise hit the DB and SSE feed thousands of times).
         async Task ReportAsync()
         {
+            var elapsed = stopwatch.Elapsed;
+            var windowSeconds = (elapsed - sampleElapsed).TotalSeconds;
+            if (windowSeconds >= 0.5)
+            {
+                var instant = (copiedBytes - sampleBytes) / windowSeconds;
+                bytesPerSecond = bytesPerSecond is { } previous ? previous * 0.6 + instant * 0.4 : instant;
+                sampleBytes = copiedBytes;
+                sampleElapsed = elapsed;
+            }
+
             var percent = totalBytes > 0 ? (int)(copiedBytes * 100L / totalBytes) : 100;
             if (percent != lastPercent)
             {
                 lastPercent = percent;
-                await jobs.ProgressAsync(job, percent, cancellationToken);
+                var remaining = totalBytes - copiedBytes;
+                // ETA in whole seconds from the smoothed rate. Guard the double→long cast: a near-stalled copy
+                // gives an astronomically large (or infinite) value that would wrap to a negative long, so cap
+                // at a sane ~100 days and report anything beyond (or non-finite) as unknown.
+                long? eta = null;
+                if (bytesPerSecond is > 0 && remaining > 0)
+                {
+                    var seconds = Math.Ceiling(remaining / bytesPerSecond.Value);
+                    if (seconds is > 0 and <= 8_640_000)
+                    {
+                        eta = (long)seconds;
+                    }
+                }
+                await jobs.ProgressAsync(job, percent, cancellationToken, bytesPerSecond is { } rate ? (long)rate : null, eta);
             }
         }
 

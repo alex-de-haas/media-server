@@ -445,12 +445,16 @@ export interface CatalogRefreshJob {
 
 // A move of a top-level item into another catalog that's currently in flight, with its 0–100 progress and
 // the labels the Activity view shows. title/targetCatalogName are null for a move stranded by a restart.
+// bytesPerSecond/etaSeconds are the live copy throughput, pushed on each progress tick over SSE; they're
+// absent until the first tick (and always for an instant same-volume rename).
 export interface LibraryMoveJob {
   itemId: string;
   jobId: string;
   progress: number;
   title: string | null;
   targetCatalogName: string | null;
+  bytesPerSecond?: number | null;
+  etaSeconds?: number | null;
 }
 
 async function send(path: string, method: string, body?: unknown): Promise<void> {
