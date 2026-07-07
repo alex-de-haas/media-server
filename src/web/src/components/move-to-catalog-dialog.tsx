@@ -55,8 +55,10 @@ export function MoveToCatalogDialog({
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs, enabled: open });
 
   const allowed = compatibleTypes(itemKind);
+  // Only offer online catalogs of a compatible type (excluding the current one) — an offline root would
+  // just be rejected with a 409.
   const targets = (catalogs.data ?? []).filter(
-    (catalog) => catalog.id !== currentCatalogId && allowed.includes(catalog.type),
+    (catalog) => catalog.id !== currentCatalogId && catalog.online && allowed.includes(catalog.type),
   );
   const selected = targets.find((catalog) => catalog.id === targetId);
 
@@ -97,7 +99,9 @@ export function MoveToCatalogDialog({
               items={targets.map((catalog) => ({ value: catalog.id, label: `${catalog.name} (${catalog.type})` }))}
             >
               <SelectTrigger id={selectId} className="w-full max-w-xs">
-                <SelectValue placeholder={targets.length ? "Select a catalog…" : "No compatible catalog"} />
+                <SelectValue
+                  placeholder={catalogs.isPending ? "Loading catalogs…" : targets.length ? "Select a catalog…" : "No compatible catalog"}
+                />
               </SelectTrigger>
               <SelectContent>
                 {targets.map((catalog) => (

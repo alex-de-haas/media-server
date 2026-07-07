@@ -149,10 +149,11 @@ public sealed class LibraryMoveCoordinator(
             return await database.MediaSources.Where(source => source.MediaItemId == item.Id).SumAsync(source => source.SizeBytes, cancellationToken);
         }
 
-        var itemIds = await database.MediaItems
+        // Keep the id set as an IQueryable so EF Core emits one SQL roundtrip with a subquery instead of
+        // pulling the ids into memory first.
+        var itemIds = database.MediaItems
             .Where(candidate => candidate.Id == item.Id || candidate.SeriesId == item.Id || candidate.ParentId == item.Id)
-            .Select(candidate => candidate.Id)
-            .ToListAsync(cancellationToken);
+            .Select(candidate => candidate.Id);
         return await database.MediaSources.Where(source => itemIds.Contains(source.MediaItemId)).SumAsync(source => source.SizeBytes, cancellationToken);
     }
 }

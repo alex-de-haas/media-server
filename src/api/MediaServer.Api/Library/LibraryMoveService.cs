@@ -97,25 +97,25 @@ public sealed class LibraryMoveService(
 
         // Move the bytes first, outside any transaction, so a long cross-volume copy never holds the SQLite
         // write lock. Same-volume renames are instant; cross-volume copies keep the source until commit.
+        // Move the bytes, then repoint/merge the rows in one short transaction. If either the file IO or the
+        // DB work fails before commit, undo the file moves so disk and database never drift apart (a
+        // same-volume rename or a cross-volume copy would otherwise be left behind after a rolled-back txn).
         var crossVolumeSources = new List<string>();
         try
         {
             await ExecuteFilesAsync(plan.Moves, target, sameVolume, crossVolumeSources, job, cancellationToken);
-        }
-        catch
-        {
-            RollbackFiles(plan.Moves, sameVolume, cancellationToken);
-            throw;
-        }
 
-        // Repoint/merge the rows in one short transaction now the files are in place.
-        await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
-        {
+            await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
             await ApplyAsync(plan, source, target, cancellationToken);
             job.RelatedId = plan.ResultTopId;
             await database.SaveChangesAsync(cancellationToken);
             await PrunePlanAsync(plan, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            RollbackFiles(plan.Moves, sameVolume, cancellationToken);
+            throw;
         }
 
         // Free the source copies (cross-volume) and any directories the moves emptied.
@@ -367,7 +367,14 @@ public sealed class LibraryMoveService(
             }
             else
             {
-                File.Copy(move.OldAbsolute, move.NewAbsolute);
+                // Copy asynchronously so a large 4K file doesn't block a thread-pool thread and honours
+                // cancellation (a stopped/cancelled job aborts mid-copy). The source is deleted only after commit.
+                await using (var input = new FileStream(move.OldAbsolute, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1 << 20, useAsync: true))
+                await using (var output = new FileStream(move.NewAbsolute, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 1 << 20, useAsync: true))
+                {
+                    await input.CopyToAsync(output, cancellationToken);
+                }
+
                 crossVolumeSources.Add(move.OldAbsolute);
             }
 
@@ -445,14 +452,23 @@ public sealed class LibraryMoveService(
             }
         }
 
-        // Move the owning ingest items into the target catalog too.
+        // Move the owning ingest items into the target catalog and point their durable MediaItemId at the
+        // target leaf: a merge deletes the source leaf, so the link would otherwise be SET NULL (orphaned).
         var ingestIds = sourceFiles.Select(file => file.IngestItemId).Distinct().ToList();
         if (ingestIds.Count > 0)
         {
+            var targetLeafByIngest = sourceFiles
+                .Where(file => file.MediaItemId is not null)
+                .GroupBy(file => file.IngestItemId)
+                .ToDictionary(group => group.Key, group => group.First().MediaItemId);
             var ingestItems = await database.IngestItems.Where(ingest => ingestIds.Contains(ingest.Id)).ToListAsync(cancellationToken);
             foreach (var ingest in ingestItems)
             {
                 ingest.CatalogId = target.Id;
+                if (targetLeafByIngest.TryGetValue(ingest.Id, out var leafId))
+                {
+                    ingest.MediaItemId = leafId;
+                }
             }
         }
 
@@ -557,7 +573,7 @@ public sealed class LibraryMoveService(
             IdentityProvider = targetSeries.IdentityProvider,
             IdentityProviderId = targetSeries.IdentityProviderId,
             IdentitySeasonNumber = seasonNumber,
-            Providers = new Dictionary<string, string>(targetSeries.Providers),
+            Providers = targetSeries.Providers is { } providers ? new Dictionary<string, string>(providers) : new(),
             AddedAt = now,
             UpdatedAt = now,
         };

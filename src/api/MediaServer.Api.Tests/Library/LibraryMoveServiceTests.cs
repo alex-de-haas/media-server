@@ -99,6 +99,12 @@ public sealed class LibraryMoveServiceTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_targetRoot, "Inception (2010)", "Inception (2010).mkv")));
         Assert.True(File.Exists(Path.Combine(_targetRoot, "Inception (2010)", "Inception (2010) - Movies HD.mkv")));
         Assert.False(Directory.Exists(Path.Combine(_sourceRoot, "Inception (2010)")));
+
+        // The owning ingest items follow to the target catalog and point at the surviving target item (not the
+        // pruned source), so their durable MediaItemId is never left dangling.
+        var ingestItems = await _database.IngestItems.AsNoTracking().ToListAsync();
+        Assert.All(ingestItems, ingest => Assert.Equal(target.Id, ingest.CatalogId));
+        Assert.All(ingestItems, ingest => Assert.Equal(existing.Id, ingest.MediaItemId));
     }
 
     [Fact]
