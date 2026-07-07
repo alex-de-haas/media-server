@@ -30,8 +30,11 @@ public sealed class JobService(MediaServerDbContext database, IRealtimeNotifier 
         return job;
     }
 
-    /// <summary>Updates a running job's progress (0–100) and broadcasts it. Caller throttles call frequency.</summary>
-    public async Task ProgressAsync(Job job, int progress, CancellationToken cancellationToken)
+    /// <summary>Updates a running job's progress (0–100) and broadcasts it. Caller throttles call frequency.
+    /// A byte-moving job may pass its live <paramref name="bytesPerSecond"/>/<paramref name="etaSeconds"/> to
+    /// ride along on the broadcast — they're transient (not persisted) and default to null for other jobs.</summary>
+    public async Task ProgressAsync(
+        Job job, int progress, CancellationToken cancellationToken, long? bytesPerSecond = null, long? etaSeconds = null)
     {
         var clamped = Math.Clamp(progress, 0, 100);
         if (job.Progress == clamped)
@@ -42,7 +45,7 @@ public sealed class JobService(MediaServerDbContext database, IRealtimeNotifier 
         job.Progress = clamped;
         job.UpdatedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
-        await notifier.JobChangedAsync(RealtimeEvents.JobProgress, ToEvent(job), cancellationToken);
+        await notifier.JobChangedAsync(RealtimeEvents.JobProgress, ToEvent(job, bytesPerSecond, etaSeconds), cancellationToken);
     }
 
     public async Task CompleteAsync(Job job, CancellationToken cancellationToken)
@@ -66,6 +69,6 @@ public sealed class JobService(MediaServerDbContext database, IRealtimeNotifier 
         await notifier.JobChangedAsync(RealtimeEvents.JobFailed, ToEvent(job), cancellationToken);
     }
 
-    private static JobEvent ToEvent(Job job) =>
-        new(job.Id, job.Type, job.RelatedType, job.RelatedId, job.Status.ToString(), job.Progress, job.Error);
+    private static JobEvent ToEvent(Job job, long? bytesPerSecond = null, long? etaSeconds = null) =>
+        new(job.Id, job.Type, job.RelatedType, job.RelatedId, job.Status.ToString(), job.Progress, job.Error, bytesPerSecond, etaSeconds);
 }

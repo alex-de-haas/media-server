@@ -61,7 +61,9 @@ public sealed record IngestStageChanged(
     string Status,
     string? LastError);
 
-/// <summary>An observable background-job event.</summary>
+/// <summary>An observable background-job event. The trailing throughput fields are populated only on a
+/// byte-moving job's progress tick (a cross-catalog file copy) and null everywhere else; they're ephemeral —
+/// recomputed from the live copy each tick, never persisted on the job.</summary>
 public sealed record JobEvent(
     Guid JobId,
     string Type,
@@ -69,4 +71,6 @@ public sealed record JobEvent(
     Guid? RelatedId,
     string Status,
     int Progress,
-    string? Error);
+    string? Error,
+    long? BytesPerSecond = null,
+    long? EtaSeconds = null);

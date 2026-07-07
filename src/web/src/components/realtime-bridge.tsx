@@ -40,13 +40,16 @@ interface IngestStageEvent {
 }
 
 // Background-job lifecycle event (mirrors the api JobEvent). `relatedId` is the catalog id for a
-// catalog-wide metadata refresh.
+// catalog-wide metadata refresh. `bytesPerSecond`/`etaSeconds` ride along on a move's progress tick (the
+// live copy throughput) and are null for other jobs and for the start/complete/fail events.
 interface JobEvent {
   jobId: string;
   type: string;
   relatedId: string | null;
   status: string;
   progress: number;
+  bytesPerSecond: number | null;
+  etaSeconds: number | null;
 }
 
 /**
@@ -135,13 +138,16 @@ function patchLibraryMove(queryClient: QueryClient, event: string, job: JobEvent
       ? others
       : [
           ...others,
-          // Preserve the labels a prior seed/tick resolved — the event itself doesn't carry them.
+          // Preserve the labels a prior seed/tick resolved — the event itself doesn't carry them. Speed/ETA
+          // ride on each progress tick; keep the last-known values between ticks (a jobStarted carries none).
           {
             itemId: job.relatedId ?? existing?.itemId ?? "",
             jobId: job.jobId,
             progress: job.progress,
             title: existing?.title ?? null,
             targetCatalogName: existing?.targetCatalogName ?? null,
+            bytesPerSecond: job.bytesPerSecond ?? existing?.bytesPerSecond ?? null,
+            etaSeconds: job.etaSeconds ?? existing?.etaSeconds ?? null,
           },
         ],
   );

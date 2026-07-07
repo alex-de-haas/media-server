@@ -379,40 +379,41 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
   });
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 truncate font-mono text-xs" title={job.name ?? job.outputPath}>
           {job.name ?? job.outputPath}
         </span>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className={cn(job.state === "Failed" ? "text-destructive" : "text-muted-foreground", "text-xs")}>
-            {stateLabel(job)}
-          </span>
-          {active ? (
-            <Button variant="ghost" size="icon-sm" aria-label="Cancel" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
-              <X />
-            </Button>
-          ) : (
-            <Button variant="ghost" size="icon-sm" aria-label="Dismiss" disabled={remove.isPending} onClick={() => remove.mutate()}>
-              <Trash2 />
-            </Button>
-          )}
-        </div>
+        {active ? (
+          <Button variant="ghost" size="icon-sm" aria-label="Cancel" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
+            <X />
+          </Button>
+        ) : (
+          <Button variant="ghost" size="icon-sm" aria-label="Dismiss" disabled={remove.isPending} onClick={() => remove.mutate()}>
+            <Trash2 />
+          </Button>
+        )}
       </div>
       {active && <Progress value={Math.min(job.percentComplete, 100)} />}
+      {/* Stats below the bar (percent · speed × · ETA), mirroring the move and download cards. */}
+      <div className={cn("flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums", job.state === "Failed" ? "text-destructive" : "text-muted-foreground")}>
+        {job.state === "Running" ? (
+          <>
+            <span>{formatPercent(job.percentComplete)}</span>
+            {job.speed != null && <span>{job.speed.toFixed(1)}×</span>}
+            {job.etaSeconds != null && <span>ETA {formatEta(job.etaSeconds)}</span>}
+          </>
+        ) : (
+          <span>{stateLabel(job)}</span>
+        )}
+      </div>
       {job.state === "Failed" && job.error && <p className="text-destructive text-xs">{job.error}</p>}
     </div>
   );
 }
 
 function stateLabel(job: TranscodeJob): string {
-  if (job.state === "Running") {
-    const parts = [formatPercent(job.percentComplete)];
-    if (job.speed != null) parts.push(`${job.speed.toFixed(1)}×`);
-    if (job.etaSeconds != null) parts.push(`ETA ${formatEta(job.etaSeconds)}`);
-    return parts.join(" · ");
-  }
   if (job.state === "Queued") return "Queued";
   if (job.state === "Completed") return job.outputSizeBytes != null ? `Done · ${formatBytes(job.outputSizeBytes)}` : "Done";
-  return job.state;
+  return job.state; // Failed / Canceled — the running case is rendered inline as split stat spans.
 }
