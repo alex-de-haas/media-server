@@ -148,6 +148,9 @@ function patchLibraryMove(queryClient: QueryClient, event: string, job: JobEvent
             targetCatalogName: existing?.targetCatalogName ?? null,
             bytesPerSecond: job.bytesPerSecond ?? existing?.bytesPerSecond ?? null,
             etaSeconds: job.etaSeconds ?? existing?.etaSeconds ?? null,
+            // A progress tick proves the move is copying, so it can't be queued; otherwise keep the seeded flag
+            // (the event itself doesn't carry it — the active-list refetch on start/complete is authoritative).
+            queued: event === "jobProgress" ? false : (existing?.queued ?? false),
           },
         ],
   );

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ChevronDown, Clapperboard, ExternalLink, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -142,16 +142,26 @@ function MoveProgress({ itemId }: { itemId: string }) {
       <p className="text-muted-foreground text-xs font-medium">
         Moving to {move.targetCatalogName ?? "another catalog"}…
       </p>
-      <div className="flex items-center gap-2">
-        <Progress value={move.progress} className="h-1.5" />
-        <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">{move.progress}%</span>
-      </div>
-      {(move.bytesPerSecond != null || move.etaSeconds != null) && (
-        <div className="text-muted-foreground flex flex-wrap gap-x-3 font-mono text-xs tabular-nums">
-          {/* Each shown only when present — the final 100% tick reports a rate but no ETA. */}
-          {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
-          {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
-        </div>
+      {move.queued ? (
+        // Waiting behind the move that's copying now — no bar/stats yet, just say it's queued.
+        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+          <Clock className="size-3.5 shrink-0" aria-hidden />
+          Queued
+        </span>
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+            <Progress value={move.progress} className="h-1.5" />
+            <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">{move.progress}%</span>
+          </div>
+          {(move.bytesPerSecond != null || move.etaSeconds != null) && (
+            <div className="text-muted-foreground flex flex-wrap gap-x-3 font-mono text-xs tabular-nums">
+              {/* Each shown only when present — the final 100% tick reports a rate but no ETA. */}
+              {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
+              {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

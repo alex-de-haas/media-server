@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using MediaServer.Api.Data;
 using MediaServer.Api.IO;
@@ -26,9 +27,10 @@ public enum LibraryMoveRequestStatus
 
 public sealed record LibraryMoveRequestResult(LibraryMoveRequestStatus Status, Guid? JobId);
 
-/// <summary>The live state of one running move, for the UI. Title/target are best-effort labels captured at
-/// request time (null after a restart, where only progress survives on the persisted job).</summary>
-public sealed record LibraryMoveStatus(Guid ItemId, Guid JobId, int Progress, string? Title, string? TargetCatalogName);
+/// <summary>The live state of one running move, for the UI. <see cref="Queued"/> is true while the move is
+/// admitted but waiting behind the one that's actively copying (moves run one at a time). Title/target are
+/// best-effort labels captured at request time (null after a restart, where only progress survives).</summary>
+public sealed record LibraryMoveStatus(Guid ItemId, Guid JobId, int Progress, bool Queued, string? Title, string? TargetCatalogName);
 
 /// <summary>Descriptive labels for an in-flight move, captured at request time so the UI can name what's moving where.</summary>
 public sealed record ActiveMove(Guid JobId, string Title, string TargetCatalogName);
@@ -55,6 +57,13 @@ public interface ILibraryMoveQueue
     /// <summary>Frees a reservation once its run finishes (success, failure, or shutdown).</summary>
     void Release(Guid itemId);
 
+    /// <summary>Records which reserved item the single worker is actively copying now (null when idle). Every
+    /// other reserved item is queued behind it, which the UI surfaces as a "Queued" label.</summary>
+    void SetRunning(Guid? itemId);
+
+    /// <summary>The item currently being copied, if any; the rest of the reserved items are queued behind it.</summary>
+    Guid? RunningItemId { get; }
+
     void Enqueue(LibraryMoveWorkItem work);
 
     IAsyncEnumerable<LibraryMoveWorkItem> DequeueAllAsync(CancellationToken cancellationToken);
@@ -67,6 +76,10 @@ public sealed class LibraryMoveQueue : ILibraryMoveQueue
     // Value is null between the atomic reserve and Describe (the labels aren't known until the job is opened).
     private readonly ConcurrentDictionary<Guid, ActiveMove?> _active = new();
 
+    // The item the single worker is copying right now. A boxed value behind a volatile reference: the worker
+    // publishes it and ListActiveAsync reads it lock-free (a reference write is atomic; a bare Guid is not).
+    private volatile StrongBox<Guid>? _running;
+
     public bool TryReserve(Guid itemId) => _active.TryAdd(itemId, null);
 
     public bool IsReserved(Guid itemId) => _active.ContainsKey(itemId);
@@ -76,6 +89,10 @@ public sealed class LibraryMoveQueue : ILibraryMoveQueue
     public bool TryGetActive(Guid itemId, out ActiveMove? move) => _active.TryGetValue(itemId, out move) && move is not null;
 
     public void Release(Guid itemId) => _active.TryRemove(itemId, out _);
+
+    public void SetRunning(Guid? itemId) => _running = itemId is { } id ? new StrongBox<Guid>(id) : null;
+
+    public Guid? RunningItemId => _running?.Value;
 
     public void Enqueue(LibraryMoveWorkItem work) => _channel.Writer.TryWrite(work);
 
@@ -181,11 +198,13 @@ public sealed class LibraryMoveCoordinator(
             .Select(job => new { ItemId = job.RelatedId!.Value, JobId = job.Id, job.Progress })
             .ToListAsync(cancellationToken);
 
+        var runningItem = queue.RunningItemId;
         return running
             .Select(job =>
             {
                 var meta = queue.TryGetActive(job.ItemId, out var active) ? active : null;
-                return new LibraryMoveStatus(job.ItemId, job.JobId, job.Progress, meta?.Title, meta?.TargetCatalogName);
+                // Only one move copies at a time; everything else admitted is queued behind it.
+                return new LibraryMoveStatus(job.ItemId, job.JobId, job.Progress, runningItem != job.ItemId, meta?.Title, meta?.TargetCatalogName);
             })
             .ToList();
     }
@@ -242,6 +261,8 @@ public sealed class LibraryMoveWorker(IServiceScopeFactory scopeFactory, ILibrar
                 return; // The job row vanished (shouldn't happen) — nothing to drive.
             }
 
+            queue.SetRunning(work.ItemId); // Now actively copying (vs. queued behind an earlier move).
+
             try
             {
                 var result = await service.MoveAsync(work.ItemId, work.TargetCatalogId, job, cancellationToken);
@@ -266,6 +287,7 @@ public sealed class LibraryMoveWorker(IServiceScopeFactory scopeFactory, ILibrar
         }
         finally
         {
+            queue.SetRunning(null);
             queue.Release(work.ItemId);
         }
     }

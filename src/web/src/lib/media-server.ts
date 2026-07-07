@@ -455,6 +455,9 @@ export interface LibraryMoveJob {
   targetCatalogName: string | null;
   bytesPerSecond?: number | null;
   etaSeconds?: number | null;
+  // True while the move is admitted but waiting behind the one that's actively copying (moves run one at a
+  // time). Comes from the seeded active list; a progress tick proves it's running and clears it.
+  queued?: boolean;
 }
 
 async function send(path: string, method: string, body?: unknown): Promise<void> {

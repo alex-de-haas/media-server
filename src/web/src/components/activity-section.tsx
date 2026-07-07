@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Loader2, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Trash2, Wand2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Clock, Loader2, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
@@ -207,9 +207,13 @@ export function ActivitySection() {
           <TabsContent value="active" className="flex flex-col gap-4 pt-3">
             {moveList.length > 0 && (
               <ActivityGroup icon={ArrowLeftRight} label="Moving to another catalog">
-                {moveList.map((move) => (
-                  <MoveProgressRow key={move.jobId} move={move} />
-                ))}
+                {/* The one that's copying first, queued ones below it. */}
+                {moveList
+                  .slice()
+                  .sort((a, b) => Number(a.queued ?? false) - Number(b.queued ?? false))
+                  .map((move) => (
+                    <MoveProgressRow key={move.jobId} move={move} />
+                  ))}
               </ActivityGroup>
             )}
             {activeTranscodes.length > 0 && (
@@ -597,13 +601,23 @@ function MoveProgressRow({ move }: { move: LibraryMoveJob }) {
         Moving {move.title ? <span title={move.title}>“{move.title}”</span> : "item"}
         {move.targetCatalogName && <span className="text-muted-foreground font-normal"> → {move.targetCatalogName}</span>}
       </p>
-      <Progress value={move.progress} />
-      {/* Speed/ETA are each present only mid-copy — the 100% tick has a rate but no ETA — so gate them apart. */}
-      <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
-        <span>{move.progress}%</span>
-        {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
-        {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
-      </div>
+      {move.queued ? (
+        // Waiting behind the move that's copying now — no bar/stats yet, just say it's queued.
+        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+          <Clock className="size-3.5 shrink-0" aria-hidden />
+          Queued
+        </span>
+      ) : (
+        <>
+          <Progress value={move.progress} />
+          {/* Speed/ETA are each present only mid-copy — the 100% tick has a rate but no ETA — so gate them apart. */}
+          <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
+            <span>{move.progress}%</span>
+            {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
+            {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
+          </div>
+        </>
+      )}
     </div>
   );
 }
