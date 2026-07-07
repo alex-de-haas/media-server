@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Pipelines;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.IO;
@@ -48,6 +49,17 @@ public sealed class LibraryMoveService(
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparer.OrdinalIgnoreCase
             : StringComparer.Ordinal;
+
+    // Cross-volume copy tuning. Chunk: one read/write unit. Pipe capacity: bounded read-ahead between the
+    // source and the target, so a transient stall on either side is absorbed instead of stopping the other.
+    // Fsync interval: FileStream writes land in the OS write cache, which absorbs gigabytes at RAM speed and
+    // then blocks the writer while it flushes to the device — observed speed saws between "instant" and
+    // "stalled". Syncing every 64 MB keeps the dirty-page backlog small, so the copy runs at the device's
+    // real, steady rate.
+    private const int CopyChunkBytes = 1 << 20;
+    private const int CopyPipePauseBytes = 64 << 20;
+    private const int CopyPipeResumeBytes = 32 << 20;
+    private const long CopyFsyncIntervalBytes = 64L << 20;
 
     /// <summary>
     /// Runs a validated move. The coordinator has already confirmed the item, the target catalog, type
@@ -358,10 +370,11 @@ public sealed class LibraryMoveService(
         var copiedBytes = 0L;
         var lastPercent = 0;
 
-        // Copy speed / ETA readout: sample bytes-over-elapsed and smooth with an EWMA so a chunk that briefly
-        // stalls or bursts doesn't make the number lurch. The sample window is wider than a single 1 MB chunk
-        // (which lands many times a second) to keep the rate steady enough to read. Same-volume renames finish
-        // before the first window elapses, so they report no rate and the UI simply omits it.
+        // Copy speed / ETA readout: sample bytes-over-elapsed and smooth with an EWMA. Even with periodic
+        // fsync the instantaneous rate still breathes with the OS write-cache cycle (absorb, then flush), so
+        // the window spans a couple of seconds and the EWMA leans on history — the number should read as the
+        // sustained device rate, not the cache cycle. Same-volume renames finish before the first window
+        // elapses, so they report no rate and the UI simply omits it.
         var stopwatch = Stopwatch.StartNew();
         var sampleBytes = 0L;
         var sampleElapsed = TimeSpan.Zero;
@@ -373,10 +386,10 @@ public sealed class LibraryMoveService(
         {
             var elapsed = stopwatch.Elapsed;
             var windowSeconds = (elapsed - sampleElapsed).TotalSeconds;
-            if (windowSeconds >= 0.5)
+            if (windowSeconds >= 2)
             {
                 var instant = (copiedBytes - sampleBytes) / windowSeconds;
-                bytesPerSecond = bytesPerSecond is { } previous ? previous * 0.6 + instant * 0.4 : instant;
+                bytesPerSecond = bytesPerSecond is { } previous ? previous * 0.8 + instant * 0.2 : instant;
                 sampleBytes = copiedBytes;
                 sampleElapsed = elapsed;
             }
@@ -402,7 +415,6 @@ public sealed class LibraryMoveService(
             }
         }
 
-        byte[][]? buffers = null;
         for (var index = 0; index < moves.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -429,38 +441,122 @@ public sealed class LibraryMoveService(
             }
             else
             {
-                // Copy asynchronously so a large 4K file doesn't block a thread-pool thread and honours
-                // cancellation (a stopped/cancelled job aborts mid-copy). Chunked (not one CopyToAsync) so
-                // progress advances within the file, and double-buffered — the next chunk is read while the
-                // previous one writes — so the target disk sees a continuous stream instead of stalling on
-                // every alternate read (visibly smoother on a USB/HDD target). SequentialScan hints the OS
-                // prefetcher; internal FileStream buffering is off since we bring our own buffers. The source
-                // is deleted only after commit.
-                buffers ??= [new byte[1 << 20], new byte[1 << 20]];
-                await using (var input = new FileStream(move.OldAbsolute, FileMode.Open, FileAccess.Read, FileShare.Read,
-                                 bufferSize: 1, FileOptions.Asynchronous | FileOptions.SequentialScan))
-                await using (var output = new FileStream(move.NewAbsolute, FileMode.Create, FileAccess.Write, FileShare.None,
-                                 bufferSize: 1, FileOptions.Asynchronous))
-                {
-                    output.SetLength(input.Length); // Preallocate: fewer metadata updates, less fragmentation.
-
-                    var current = 0;
-                    var read = await input.ReadAsync(buffers[current], cancellationToken);
-                    while (read > 0)
+                // Copy through a bounded pipe (see CopyFileAsync) so the target disk sees one continuous
+                // stream, with progress advancing as bytes actually land on it. The source is deleted only
+                // after commit.
+                await CopyFileAsync(move.OldAbsolute, move.NewAbsolute,
+                    async written =>
                     {
-                        var next = 1 - current;
-                        var write = output.WriteAsync(buffers[current].AsMemory(0, read), cancellationToken).AsTask();
-                        var readAhead = input.ReadAsync(buffers[next], cancellationToken).AsTask();
-                        await Task.WhenAll(write, readAhead); // Both settle before we touch either buffer again.
-                        copiedBytes += read;
+                        copiedBytes += written;
                         await ReportAsync();
-                        read = await readAhead;
-                        current = next;
-                    }
-                }
+                    },
+                    cancellationToken);
 
                 crossVolumeSources.Add(move.OldAbsolute);
             }
+        }
+    }
+
+    /// <summary>
+    /// Copies one file across volumes through a bounded pipe: a fill task streams the source into the pipe
+    /// while this method drains it to the destination, so reads and writes run concurrently at their own
+    /// pace and a transient stall on either side is absorbed by up to <see cref="CopyPipePauseBytes"/> of
+    /// buffered read-ahead. <paramref name="onBytesWrittenAsync"/> fires on the drain side, so progress
+    /// tracks bytes handed to the target, and the periodic fsync (see the tuning constants) keeps that
+    /// honest — the final fsync also means the data is durably on disk before the caller commits and
+    /// deletes the source. Both streams stay fully asynchronous, so a stopped job cancels mid-copy.
+    /// </summary>
+    private static async Task CopyFileAsync(
+        string sourcePath, string destinationPath, Func<int, Task> onBytesWrittenAsync, CancellationToken cancellationToken)
+    {
+        // SequentialScan hints the OS prefetcher; internal FileStream buffering is off since every read and
+        // write already moves a pipe-sized chunk.
+        await using var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var output = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None,
+            bufferSize: 1, FileOptions.Asynchronous);
+
+        output.SetLength(input.Length); // Preallocate: fewer metadata updates, less fragmentation.
+
+        var pipe = new Pipe(new PipeOptions(
+            pauseWriterThreshold: CopyPipePauseBytes,
+            resumeWriterThreshold: CopyPipeResumeBytes,
+            minimumSegmentSize: CopyChunkBytes,
+            useSynchronizationContext: false));
+
+        // Fill side: source → pipe. Never faults — a read error is handed to the pipe and re-thrown by the
+        // drain side's ReadAsync, so the method has a single failure path.
+        async Task FillAsync()
+        {
+            Exception? error = null;
+            try
+            {
+                while (true)
+                {
+                    var read = await input.ReadAsync(pipe.Writer.GetMemory(CopyChunkBytes), cancellationToken);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    pipe.Writer.Advance(read);
+                    var flushed = await pipe.Writer.FlushAsync(cancellationToken);
+                    if (flushed.IsCompleted)
+                    {
+                        break; // Drain side quit; its failure is already propagating, so just stop reading.
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                error = exception;
+            }
+
+            await pipe.Writer.CompleteAsync(error);
+        }
+
+        // Drain side: pipe → destination, inline so its exceptions surface directly to the caller.
+        var fill = FillAsync();
+        try
+        {
+            var unsyncedBytes = 0L;
+            while (true)
+            {
+                var result = await pipe.Reader.ReadAsync(cancellationToken);
+                foreach (var segment in result.Buffer)
+                {
+                    await output.WriteAsync(segment, cancellationToken);
+                    unsyncedBytes += segment.Length;
+                    await onBytesWrittenAsync(segment.Length);
+                }
+
+                pipe.Reader.AdvanceTo(result.Buffer.End);
+
+                var final = result.IsCompleted;
+                if (unsyncedBytes >= CopyFsyncIntervalBytes || (final && unsyncedBytes > 0))
+                {
+                    unsyncedBytes = 0;
+                    // Flush(true) is a synchronous fsync; push it off this thread so a slow target device
+                    // stalls only a pool thread, not the drain loop's async contract.
+                    await Task.Run(() => output.Flush(flushToDisk: true), CancellationToken.None);
+                }
+
+                if (final)
+                {
+                    break;
+                }
+            }
+
+            await pipe.Reader.CompleteAsync();
+        }
+        catch (Exception exception)
+        {
+            await pipe.Reader.CompleteAsync(exception); // Unblocks a fill task parked on backpressure.
+            throw;
+        }
+        finally
+        {
+            await fill; // Always completes (it never faults); awaited so the streams outlive it.
         }
     }
 
