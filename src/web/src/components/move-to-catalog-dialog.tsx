@@ -1,10 +1,10 @@
 "use client";
 
 import { useId, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderInput } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type CatalogType } from "@/lib/media-server";
+import { mediaServer, type CatalogType, type LibraryMoveJob } from "@/lib/media-server";
 import { formatBytes } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
@@ -28,9 +28,9 @@ function compatibleTypes(kind: string): CatalogType[] {
 
 /**
  * Moves a published movie/series into another type-compatible catalog. Lists the eligible target catalogs
- * (right type, online, not the current one); picking one starts a background move. Because the move relocates
- * files and re-mints the item id, the caller navigates away once it is queued and the library refreshes when
- * the job completes.
+ * (right type, online, not the current one); picking one starts a background move. The caller stays on the
+ * detail page — the move's progress shows on its Media tab (seeded into ["library-move-jobs"] here, kept
+ * live by RealtimeBridge) and on Activity; the library refreshes when the job completes.
  */
 export function MoveToCatalogDialog({
   itemId,
@@ -50,6 +50,7 @@ export function MoveToCatalogDialog({
   onMoveStarted: () => void;
 }) {
   const selectId = useId();
+  const queryClient = useQueryClient();
   const [targetId, setTargetId] = useState("");
 
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs, enabled: open });
@@ -71,7 +72,13 @@ export function MoveToCatalogDialog({
 
   const move = useMutation({
     mutationFn: () => mediaServer.moveLibraryItem(itemId, targetId),
-    onSuccess: () => {
+    onSuccess: ({ jobId }) => {
+      // Show the progress (Media tab + Activity) immediately rather than waiting for the first SSE tick;
+      // RealtimeBridge reconciles the entry from there (mirrors the catalog-refresh seed).
+      queryClient.setQueryData<LibraryMoveJob[]>(["library-move-jobs"], (jobs = []) => [
+        ...jobs.filter((job) => job.jobId !== jobId),
+        { itemId, jobId, progress: 0, title: itemTitle, targetCatalogName: selected?.name ?? null },
+      ]);
       toast.success("Move started", { description: `Moving “${itemTitle}” to ${selected?.name ?? "the catalog"}.` });
       onOpenChange(false);
       onMoveStarted();

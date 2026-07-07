@@ -2,9 +2,9 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowUp, Loader2, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Loader2, Pause, Play, RotateCw, SearchCheck, Square, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type VpnStatus } from "@/lib/media-server";
+import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type VpnStatus } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -78,6 +78,13 @@ export function ActivitySection() {
   const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 20000 });
   // Engine-wide VPN tunnel status (null when downloading is in-process). Pushed over SSE; slow interval is a fallback.
   const vpn = useQuery({ queryKey: ["vpn"], queryFn: mediaServer.getVpnStatus, refetchInterval: 30000 });
+  // In-flight cross-catalog moves. Seeded here, then kept live by RealtimeBridge over SSE (progress per byte).
+  // Only admins can move (and read the admin-only active list), so don't fire the request for other roles.
+  const moves = useQuery({
+    queryKey: ["library-move-jobs"],
+    queryFn: mediaServer.listActiveMoves,
+    enabled: role === "admin",
+  });
   // Only "down" when there's a VPN to report and it's disconnected — the engine pauses transfers behind the
   // killswitch, so the cards show "Paused — VPN down" rather than a stalled 0 B/s.
   const vpnDown = vpn.data != null && !vpn.data.connected;
@@ -126,6 +133,14 @@ export function ActivitySection() {
         </CardAction>
       </CardHeader>
       <CardContent className="text-sm">
+        {(moves.data?.length ?? 0) > 0 && (
+          <div className="mb-3 flex flex-col gap-3">
+            {moves.data!.map((move) => (
+              <MoveProgressRow key={move.jobId} move={move} />
+            ))}
+          </div>
+        )}
+
         <Tabs value={tab} onValueChange={(value) => setTab(value as TabKey)}>
           <div className="flex items-center justify-between border-b">
             <TabsList variant="line">
@@ -507,6 +522,26 @@ function IngestRow({
           setConfirmOpen(false);
         }}
       />
+    </div>
+  );
+}
+
+// A cross-catalog move in flight: file bytes are being relocated (a copy across volumes, an instant rename
+// within one). Progress is per-byte, pushed over SSE. Labels can be absent for a move stranded by a restart.
+function MoveProgressRow({ move }: { move: LibraryMoveJob }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-3">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <ArrowLeftRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
+        <p className="min-w-0 truncate font-medium">
+          Moving {move.title ? <span title={move.title}>“{move.title}”</span> : "item"}
+          {move.targetCatalogName && <span className="text-muted-foreground font-normal"> → {move.targetCatalogName}</span>}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Progress value={move.progress} />
+        <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">{move.progress}%</span>
+      </div>
     </div>
   );
 }

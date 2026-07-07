@@ -1,6 +1,7 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Library;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Transcoding;
@@ -15,6 +16,7 @@ public sealed class TranscodeService(
     ITranscodeEngine engine,
     ICatalogPathSandbox sandbox,
     MediaServerSettings settings,
+    LibraryMoveGuard moveGuard,
     ILogger<TranscodeService> logger)
 {
     public async Task<TranscodeJobResponse> CreateAsync(CreateTranscodeRequest request, CancellationToken cancellationToken)
@@ -30,6 +32,13 @@ public sealed class TranscodeService(
         if (item.Kind != MediaKind.Movie)
         {
             throw new TranscodeRequestException("Only movies can be transcoded for now.");
+        }
+
+        // The mirror of the move coordinator's transcode check: a move is relocating this movie's files, so
+        // an encode reading them (and writing a sibling into the old catalog) would break both.
+        if (await moveGuard.IsItemMovingAsync(item.Id, cancellationToken))
+        {
+            throw new TranscodeConflictException(LibraryMoveGuard.MoveInProgressError);
         }
 
         var catalog = item.Catalog ?? throw new TranscodeRequestException("Source's catalog is unavailable.");

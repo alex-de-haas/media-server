@@ -4,6 +4,7 @@ using MediaServer.Api.IO;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Library;
 using MediaServer.Api.Pipeline;
+using MediaServer.Api.Realtime;
 using MediaServer.Api.Tests.Pipeline;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,7 @@ public sealed class LibraryMoveServiceTests : IDisposable
     private readonly LibraryMoveService _service;
     private readonly LibraryMoveCoordinator _coordinator;
     private readonly LibraryMoveQueue _queue = new();
+    private readonly RecordingJobNotifier _notifier = new();
     private readonly JobService _jobs;
     private readonly FakeFilesystem _filesystem;
     private readonly string _sourceRoot = Path.Combine(Path.GetTempPath(), "ms-move-src-" + Guid.NewGuid().ToString("N"));
@@ -38,7 +40,7 @@ public sealed class LibraryMoveServiceTests : IDisposable
         CatalogPaths.For(_sourceRoot).EnsureCreated();
         CatalogPaths.For(_targetRoot).EnsureCreated();
 
-        _jobs = new JobService(_database, new NullRealtimeNotifier());
+        _jobs = new JobService(_database, _notifier);
         _filesystem = new FakeFilesystem(_targetRoot);
         _service = new LibraryMoveService(_database, new CatalogPathSandbox(), _filesystem, _jobs, NullLogger<LibraryMoveService>.Instance);
         _coordinator = new LibraryMoveCoordinator(_database, _filesystem, _jobs, _queue);
@@ -173,6 +175,24 @@ public sealed class LibraryMoveServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Move_across_volumes_reports_incremental_progress()
+    {
+        // A single large file must tick as its bytes copy — not sit at 0% and jump to 100% at the end (the old
+        // per-file behaviour, which reported nothing useful for the common one-file movie).
+        _filesystem.CrossVolume = true;
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Movie, "Movies HD");
+        var target = await AddCatalogAsync(_targetRoot, CatalogType.Movie, "Movies 4K");
+        var movie = await AddMovieAsync(source, "Dune", 2021, "tmdb", "438631", new string('x', 3 << 20)); // 3 MB / 1 MB chunks
+
+        var result = await MoveAsync(movie.Id, target.Id);
+
+        Assert.Equal(MoveResult.Kind.Ok, result.Status);
+        var progress = _notifier.JobProgressValues;
+        Assert.Contains(progress, percent => percent is > 0 and < 100); // at least one mid-copy tick
+        Assert.Equal(100, progress[^1]); // finishes at 100
+    }
+
+    [Fact]
     public async Task Request_rejects_an_incompatible_target_type()
     {
         var source = await AddCatalogAsync(_sourceRoot, CatalogType.Movie, "Movies");
@@ -225,6 +245,91 @@ public sealed class LibraryMoveServiceTests : IDisposable
 
         var second = await _coordinator.RequestAsync(movie.Id, target.Id, CancellationToken.None);
         Assert.Equal(LibraryMoveRequestStatus.AlreadyMoving, second.Status);
+    }
+
+    [Fact]
+    public async Task Request_rejects_a_move_while_a_conversion_is_active()
+    {
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Movie, "Movies HD");
+        var target = await AddCatalogAsync(_targetRoot, CatalogType.Movie, "Movies 4K");
+        var movie = await AddMovieAsync(source, "Inception", 2010, "tmdb", "27205", "bytes");
+        var mediaSource = await _database.MediaSources.SingleAsync(candidate => candidate.MediaItemId == movie.Id);
+
+        _database.TranscodeJobs.Add(new TranscodeJob
+        {
+            Id = Guid.NewGuid(),
+            EngineJobId = "engine-1",
+            MediaSourceId = mediaSource.Id,
+            MediaItemId = movie.Id,
+            CatalogId = source.Id,
+            InputPath = mediaSource.Path,
+            OutputPath = "Inception (2010)/Inception (2010) - hevc.mkv",
+            VideoCodec = "hevc",
+            HardwareAcceleration = "auto",
+            State = TranscodeJobState.Running,
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await _database.SaveChangesAsync();
+
+        var result = await _coordinator.RequestAsync(movie.Id, target.Id, CancellationToken.None);
+
+        Assert.Equal(LibraryMoveRequestStatus.TranscodeActive, result.Status);
+        Assert.Null(result.JobId);
+    }
+
+    [Fact]
+    public async Task Request_rejects_a_series_move_while_an_episode_conversion_is_active()
+    {
+        // Transcodes are movies-only today, but the check must cover the subtree: an episode's conversion
+        // reads files the series move would relocate.
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Series, "Shows");
+        var target = await AddCatalogAsync(_targetRoot, CatalogType.Series, "Shows Archive");
+        var series = await AddSeriesAsync(source, "Severance", "tmdb", "95396", [(1, 1)]);
+        var episode = await _database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Episode && item.SeriesId == series.Id);
+        var mediaSource = await _database.MediaSources.SingleAsync(candidate => candidate.MediaItemId == episode.Id);
+
+        _database.TranscodeJobs.Add(new TranscodeJob
+        {
+            Id = Guid.NewGuid(),
+            EngineJobId = "engine-2",
+            MediaSourceId = mediaSource.Id,
+            MediaItemId = episode.Id,
+            CatalogId = source.Id,
+            InputPath = mediaSource.Path,
+            OutputPath = "Severance (2020)/Season 01/Severance S01E01 - hevc.mkv",
+            VideoCodec = "hevc",
+            HardwareAcceleration = "auto",
+            State = TranscodeJobState.Queued,
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await _database.SaveChangesAsync();
+
+        var result = await _coordinator.RequestAsync(series.Id, target.Id, CancellationToken.None);
+
+        Assert.Equal(LibraryMoveRequestStatus.TranscodeActive, result.Status);
+    }
+
+    [Fact]
+    public async Task Guard_locks_the_item_and_its_sources_while_a_move_is_in_flight()
+    {
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Series, "Shows");
+        var series = await AddSeriesAsync(source, "Severance", "tmdb", "95396", [(1, 1)]);
+        var episode = await _database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Episode && item.SeriesId == series.Id);
+        var mediaSource = await _database.MediaSources.SingleAsync(candidate => candidate.MediaItemId == episode.Id);
+        var guard = new LibraryMoveGuard(_database, _queue);
+
+        Assert.False(await guard.IsItemMovingAsync(series.Id, CancellationToken.None));
+
+        _queue.TryReserve(series.Id); // What RequestAsync does when it admits the move.
+
+        // The reservation is keyed on the series; operations on the episode or its source resolve up to it.
+        Assert.True(await guard.IsItemMovingAsync(series.Id, CancellationToken.None));
+        Assert.True(await guard.IsItemMovingAsync(episode.Id, CancellationToken.None));
+        Assert.True(await guard.IsSourceMovingAsync(mediaSource.Id, CancellationToken.None));
+
+        _queue.Release(series.Id);
+        Assert.False(await guard.IsItemMovingAsync(episode.Id, CancellationToken.None));
+        Assert.False(await guard.IsSourceMovingAsync(mediaSource.Id, CancellationToken.None));
     }
 
     // ---- Seeding ---------------------------------------------------------------------------------------
@@ -439,5 +544,26 @@ public sealed class LibraryMoveServiceTests : IDisposable
             var full = Path.GetFullPath(path);
             return full.StartsWith(Path.GetFullPath(targetRoot), StringComparison.Ordinal) ? "vol-target" : "vol-source";
         }
+    }
+
+    /// <summary>Records the progress values a job broadcasts so a test can assert on the sequence of ticks.</summary>
+    private sealed class RecordingJobNotifier : IRealtimeNotifier
+    {
+        public List<int> JobProgressValues { get; } = [];
+
+        public Task JobChangedAsync(string eventName, JobEvent job, CancellationToken cancellationToken = default)
+        {
+            if (eventName == RealtimeEvents.JobProgress)
+            {
+                JobProgressValues.Add(job.Progress);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task DownloadProgressAsync(DownloadProgress progress, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task DownloadStateChangedAsync(DownloadStateChanged change, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task IngestStageChangedAsync(IngestStageChanged change, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task VpnStatusChangedAsync(VpnStatusChanged status, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

@@ -342,7 +342,34 @@ public sealed class LibraryMoveService(
     private async Task ExecuteFilesAsync(
         IReadOnlyList<SourceMove> moves, Catalog target, bool sameVolume, List<string> crossVolumeSources, Job job, CancellationToken cancellationToken)
     {
+        // Report progress by bytes moved, not by file count: a movie is usually a single (large) file, so
+        // per-file progress would sit at 0% for the whole copy and only jump to 100% at the very end. Summing
+        // the file sizes up front lets a cross-volume copy tick smoothly as bytes land; same-volume renames
+        // are instant, so their bytes are credited in one step.
+        var sizes = new long[moves.Count];
+        var totalBytes = 0L;
+        for (var i = 0; i < moves.Count; i++)
+        {
+            sizes[i] = SafeFileLength(moves[i].OldAbsolute);
+            totalBytes += sizes[i];
+        }
+
+        var copiedBytes = 0L;
         var lastPercent = 0;
+
+        // ProgressAsync persists + broadcasts on every whole-percent change, so only call it when the integer
+        // percent actually advances (a multi-GB copy would otherwise hit the DB and SSE feed thousands of times).
+        async Task ReportAsync()
+        {
+            var percent = totalBytes > 0 ? (int)(copiedBytes * 100L / totalBytes) : 100;
+            if (percent != lastPercent)
+            {
+                lastPercent = percent;
+                await jobs.ProgressAsync(job, percent, cancellationToken);
+            }
+        }
+
+        byte[][]? buffers = null;
         for (var index = 0; index < moves.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -364,26 +391,56 @@ public sealed class LibraryMoveService(
             if (sameVolume)
             {
                 File.Move(move.OldAbsolute, move.NewAbsolute);
+                copiedBytes += sizes[index];
+                await ReportAsync();
             }
             else
             {
                 // Copy asynchronously so a large 4K file doesn't block a thread-pool thread and honours
-                // cancellation (a stopped/cancelled job aborts mid-copy). The source is deleted only after commit.
-                await using (var input = new FileStream(move.OldAbsolute, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1 << 20, useAsync: true))
-                await using (var output = new FileStream(move.NewAbsolute, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 1 << 20, useAsync: true))
+                // cancellation (a stopped/cancelled job aborts mid-copy). Chunked (not one CopyToAsync) so
+                // progress advances within the file, and double-buffered — the next chunk is read while the
+                // previous one writes — so the target disk sees a continuous stream instead of stalling on
+                // every alternate read (visibly smoother on a USB/HDD target). SequentialScan hints the OS
+                // prefetcher; internal FileStream buffering is off since we bring our own buffers. The source
+                // is deleted only after commit.
+                buffers ??= [new byte[1 << 20], new byte[1 << 20]];
+                await using (var input = new FileStream(move.OldAbsolute, FileMode.Open, FileAccess.Read, FileShare.Read,
+                                 bufferSize: 1, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await using (var output = new FileStream(move.NewAbsolute, FileMode.Create, FileAccess.Write, FileShare.None,
+                                 bufferSize: 1, FileOptions.Asynchronous))
                 {
-                    await input.CopyToAsync(output, cancellationToken);
+                    output.SetLength(input.Length); // Preallocate: fewer metadata updates, less fragmentation.
+
+                    var current = 0;
+                    var read = await input.ReadAsync(buffers[current], cancellationToken);
+                    while (read > 0)
+                    {
+                        var next = 1 - current;
+                        var write = output.WriteAsync(buffers[current].AsMemory(0, read), cancellationToken).AsTask();
+                        var readAhead = input.ReadAsync(buffers[next], cancellationToken).AsTask();
+                        await Task.WhenAll(write, readAhead); // Both settle before we touch either buffer again.
+                        copiedBytes += read;
+                        await ReportAsync();
+                        read = await readAhead;
+                        current = next;
+                    }
                 }
 
                 crossVolumeSources.Add(move.OldAbsolute);
             }
+        }
+    }
 
-            var percent = (int)((index + 1) * 100L / moves.Count);
-            if (percent != lastPercent)
-            {
-                lastPercent = percent;
-                await jobs.ProgressAsync(job, percent, cancellationToken);
-            }
+    /// <summary>File length for progress weighting; 0 if it can't be read (the copy itself will then fail).</summary>
+    private static long SafeFileLength(string path)
+    {
+        try
+        {
+            return new FileInfo(path).Length;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return 0;
         }
     }
 

@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { openEventStream } from "@/lib/sse";
-import type { CatalogRefreshJob, Download, VpnStatus } from "@/lib/media-server";
+import type { CatalogRefreshJob, Download, LibraryMoveJob, VpnStatus } from "@/lib/media-server";
 
 // The same-origin BFF route that proxies to the internal `api` SSE endpoint (`/api/events`).
 const STREAM_PATH = "/api/proxy/api/events";
@@ -69,7 +69,7 @@ function useRealtime() {
       // On (re)connect, reconcile anything missed while disconnected.
       onStatus: (connected) => {
         if (connected) {
-          invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"], ["catalog-refresh-jobs"]);
+          invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"], ["catalog-refresh-jobs"], ["library-move-jobs"]);
         }
       },
     });
@@ -113,19 +113,55 @@ function handleJobEvent(queryClient: QueryClient, event: string, job: JobEvent):
   }
 
   if (job.type === LIBRARY_MOVE_JOB) {
-    // A finished move changed which catalog an item lives in (and, on a merge, its id). Refresh the library
-    // grids/rails and the item's detail page (relatedId is the resulting top-level item).
-    if (event === "jobCompleted" || event === "jobFailed") {
-      invalidate(queryClient, ["library"], ["collections"], ["recent"], ["resume"], ["nextup"]);
-      if (job.relatedId) {
-        queryClient.invalidateQueries({ queryKey: ["library-detail", job.relatedId] });
-      }
-    }
-    invalidate(queryClient, ["ingest"]);
+    patchLibraryMove(queryClient, event, job);
     return;
   }
 
   invalidate(queryClient, ["ingest"]);
+}
+
+// Keep the ["library-move-jobs"] cache in step with the live move: upsert its progress while running, drop it
+// when it finishes. The JobEvent carries no title/target, so on start pull the enriched active list; on
+// completion the item changed catalog (and, on a merge, its id), so refresh the library views and its detail.
+function patchLibraryMove(queryClient: QueryClient, event: string, job: JobEvent): void {
+  const done = event === "jobCompleted" || event === "jobFailed";
+  const jobs = queryClient.getQueryData<LibraryMoveJob[]>(["library-move-jobs"]) ?? [];
+  const existing = jobs.find((entry) => entry.jobId === job.jobId);
+  const others = jobs.filter((entry) => entry.jobId !== job.jobId);
+
+  queryClient.setQueryData<LibraryMoveJob[]>(
+    ["library-move-jobs"],
+    done
+      ? others
+      : [
+          ...others,
+          // Preserve the labels a prior seed/tick resolved — the event itself doesn't carry them.
+          {
+            itemId: job.relatedId ?? existing?.itemId ?? "",
+            jobId: job.jobId,
+            progress: job.progress,
+            title: existing?.title ?? null,
+            targetCatalogName: existing?.targetCatalogName ?? null,
+          },
+        ],
+  );
+
+  // A just-started move has no labels in the cache yet; refetch the active list to fill in what's moving where.
+  if (event === "jobStarted") {
+    invalidate(queryClient, ["library-move-jobs"]);
+  }
+
+  if (done) {
+    invalidate(queryClient, ["library"], ["collections"], ["recent"], ["resume"], ["nextup"], ["ingest"]);
+    // relatedId is the resulting top-level item; on a merge it differs from the item the move started on,
+    // whose (now deleted) detail page must also learn its fate — refresh both.
+    if (job.relatedId) {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", job.relatedId] });
+    }
+    if (existing && existing.itemId !== job.relatedId) {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", existing.itemId] });
+    }
+  }
 }
 
 // Keep the ["catalog-refresh-jobs"] cache in step with the live job: upsert while running, drop when it

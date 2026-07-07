@@ -12,6 +12,7 @@ import {
   type Episode,
   type LibraryDetail,
   type LibraryMediaSource,
+  type LibraryMoveJob,
   type MediaStream,
   type Network,
   type Studio,
@@ -48,6 +49,7 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -103,6 +105,7 @@ function DetailTabs({ item }: { item: LibraryDetail }) {
       <TabsContent value="media">
         <div className="flex flex-col gap-3">
           <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
+          <MoveProgress itemId={item.id} />
           {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo item={item} />}
         </div>
       </TabsContent>
@@ -110,6 +113,40 @@ function DetailTabs({ item }: { item: LibraryDetail }) {
         <KeywordTags keywords={item.keywords} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+// The in-flight cross-catalog move for this item, if any. Shares the ["library-move-jobs"] cache with the
+// Activity view: seeded from the admin-only active list, then kept live by RealtimeBridge over SSE.
+function useActiveMove(itemId: string): LibraryMoveJob | undefined {
+  const { role } = useSession();
+  const moves = useQuery({
+    queryKey: ["library-move-jobs"],
+    queryFn: mediaServer.listActiveMoves,
+    enabled: role === "admin",
+  });
+  return (moves.data ?? []).find((move) => move.itemId === itemId);
+}
+
+// A move to another catalog in flight for this item — the Media-tab counterpart of the Conversions block,
+// with a live per-byte progress bar pushed over SSE. While it runs, mutations of the item and its sources
+// are disabled here and rejected by the API (the move is relocating these very files).
+function MoveProgress({ itemId }: { itemId: string }) {
+  const move = useActiveMove(itemId);
+  if (!move) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-dashed p-3">
+      <p className="text-muted-foreground text-xs font-medium">
+        Moving to {move.targetCatalogName ?? "another catalog"}…
+      </p>
+      <div className="flex items-center gap-2">
+        <Progress value={move.progress} className="h-1.5" />
+        <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">{move.progress}%</span>
+      </div>
+    </div>
   );
 }
 
@@ -167,6 +204,9 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [remapOpen, setRemapOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  // While a move is relocating this item's files, everything that mutates the item or reads its files is
+  // locked (the API rejects it with a 409 anyway) — only the provider-side metadata refresh stays usable.
+  const moving = useActiveMove(id) !== undefined;
 
   const remove = useMutation({
     mutationFn: (deleteFiles: boolean) => mediaServer.deleteLibraryItem(id, deleteFiles),
@@ -221,23 +261,23 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
           </DropdownMenuItem>
           {/* Media sources live on the leaf (movie/episode), not the series row. */}
           {kind !== "Series" && (
-            <DropdownMenuItem disabled={refreshMedia.isPending} onClick={() => refreshMedia.mutate()}>
+            <DropdownMenuItem disabled={refreshMedia.isPending || moving} onClick={() => refreshMedia.mutate()}>
               <Clapperboard className={cn(refreshMedia.isPending && "animate-pulse")} aria-hidden />
               Refresh media data
             </DropdownMenuItem>
           )}
           {/* Series are corrected per episode (in the episode list), not at the series level. */}
           {kind !== "Series" && (
-            <DropdownMenuItem onClick={() => setRemapOpen(true)}>
+            <DropdownMenuItem disabled={moving} onClick={() => setRemapOpen(true)}>
               <Wand2 />
               Fix match…
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onClick={() => setMoveOpen(true)}>
+          <DropdownMenuItem disabled={moving} onClick={() => setMoveOpen(true)}>
             <FolderInput />
-            Move to catalog…
+            {moving ? "Moving to catalog…" : "Move to catalog…"}
           </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
+          <DropdownMenuItem variant="destructive" disabled={moving} onClick={() => setConfirmOpen(true)}>
             <Trash2 />
             Delete…
           </DropdownMenuItem>
@@ -282,12 +322,12 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
         open={moveOpen}
         onOpenChange={setMoveOpen}
         onMoveStarted={() => {
-          // The move runs in the background and re-mints the item id (a merge may remove this one), so leave
-          // the detail page; the library refreshes from the job's completion event.
+          // The move runs in the background — stay here and watch it on the Media tab (like a conversion).
+          // The library views refresh now and again from the job's completion event; if a merge removes
+          // this item, its detail refetch after completion surfaces "not found" with the back link.
           for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
             queryClient.invalidateQueries({ queryKey: key });
           }
-          router.push(backHref);
         }}
       />
     </>
@@ -642,8 +682,12 @@ async function copyInfuseLink(deepLink: string) {
 
 function MediaInfo({ item }: { item: LibraryDetail }) {
   const { role } = useSession();
+  const moving = useActiveMove(item.id) !== undefined;
   // Transcoding ("shrink a movie source into a smaller version") is movies-only and admin-only for now.
-  const canManage = item.kind === "Movie" && role === "admin";
+  // Source management (convert/rename/pin/delete) is locked while a move is relocating these very files —
+  // the API rejects those calls with a 409, so don't offer them (the MoveProgress bar above explains why).
+  const admin = item.kind === "Movie" && role === "admin";
+  const canManage = admin && !moving;
   const sources = item.mediaSources;
 
   if (!sources.length && !canManage) {
@@ -652,7 +696,7 @@ function MediaInfo({ item }: { item: LibraryDetail }) {
 
   return (
     <section className="flex flex-col gap-3">
-      {canManage && <MovieConversions itemId={item.id} />}
+      {admin && <MovieConversions itemId={item.id} />}
       {sources.length ? (
         sources.map((source) => (
           <SourceCard
