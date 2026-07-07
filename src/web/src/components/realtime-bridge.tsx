@@ -11,6 +11,9 @@ const STREAM_PATH = "/api/proxy/api/events";
 // The Job.Type the catalog-wide metadata refresh emits (mirrors CatalogMetadataRefreshService.JobType).
 const CATALOG_REFRESH_JOB = "catalog:refresh-metadata";
 
+// The Job.Type a move-between-catalogs emits (mirrors LibraryMoveService.JobType).
+const LIBRARY_MOVE_JOB = "library:move";
+
 // Live torrent progress snapshot pushed on every `downloadProgress` event (mirrors the api DownloadProgress).
 interface DownloadProgressEvent {
   downloadId: string;
@@ -101,14 +104,28 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
   }
 }
 
-// Catalog refresh jobs drive their own UI (a progress bar on the catalog row); every other job type just
-// nudges the activity view to refetch.
+// Catalog refresh jobs drive their own UI (a progress bar on the catalog row); a move relocates an item
+// between catalogs; every other job type just nudges the activity view to refetch.
 function handleJobEvent(queryClient: QueryClient, event: string, job: JobEvent): void {
-  if (job.type !== CATALOG_REFRESH_JOB || !job.relatedId) {
+  if (job.type === CATALOG_REFRESH_JOB && job.relatedId) {
+    patchCatalogRefresh(queryClient, event, job);
+    return;
+  }
+
+  if (job.type === LIBRARY_MOVE_JOB) {
+    // A finished move changed which catalog an item lives in (and, on a merge, its id). Refresh the library
+    // grids/rails and the item's detail page (relatedId is the resulting top-level item).
+    if (event === "jobCompleted" || event === "jobFailed") {
+      invalidate(queryClient, ["library"], ["collections"], ["recent"], ["resume"], ["nextup"]);
+      if (job.relatedId) {
+        queryClient.invalidateQueries({ queryKey: ["library-detail", job.relatedId] });
+      }
+    }
     invalidate(queryClient, ["ingest"]);
     return;
   }
-  patchCatalogRefresh(queryClient, event, job);
+
+  invalidate(queryClient, ["ingest"]);
 }
 
 // Keep the ["catalog-refresh-jobs"] cache in step with the live job: upsert while running, drop when it

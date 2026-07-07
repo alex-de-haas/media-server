@@ -29,6 +29,7 @@ All file access is sandboxed to configured catalog roots (see
 - Resolve catalog-relative paths to absolute paths.
 - Move a completed file from `.incoming/` into its canonical place at the root.
 - Move (rename) the canonical file during remap.
+- Move a published item's file(s) into **another catalog** (see Move Semantics).
 - Clear a download's `.incoming/` staging folder once its file moves out, or when
   the in-flight download is removed.
 - Delete a library item by removing its canonical file.
@@ -52,6 +53,7 @@ Internal endpoints (under `/api`, behind Host identity):
 GET    /api/files/resolve?catalogId={id}&path=...   # internal/debug only
 DELETE /api/library/{id}?deleteFiles={bool}         # removes the published item (and file if asked)
 POST   /api/catalogs/{id}/scan                       # import scan of the catalog root
+POST   /api/library/{id}/move                        # move the item into another catalog → { jobId }
 ```
 
 Paths are expressed relative to a catalog root, never as absolute host paths.
@@ -67,6 +69,30 @@ With one tree, one file backs one item:
   exists (before the download→identify hand-off); it clears the `.incoming/` data
   and the in-flight ingest. After the hand-off there is no download — removal goes
   through the library.
+
+## Move Semantics
+
+**Move to another catalog** (`POST /api/library/{id}/move`, admin) relocates a
+published top-level **movie or series** into another **type-compatible** catalog
+(`movie` items → a `movie` catalog; `series`/`anime` interchange). It runs as a
+background job (its id is returned; progress rides the realtime stream) because a
+cross-volume move copies bytes:
+
+- **Re-point** (the target catalog does not already hold this identity): the
+  existing rows move as-is — `MediaItem.CatalogId` changes and `PublicId` is
+  re-minted (the Jellyfin id changes, clients re-sync), and files move into the
+  target's canonical layout. The internal `Id` is preserved, so
+  `UserData`/metadata/credits survive.
+- **Merge** (the target already holds this identity): the source's media sources are
+  reassigned onto the existing target item as additional versions (edition-labelled
+  to keep paths distinct) — for a series, decided per episode — and the orphaned
+  source rows are pruned, mirroring remap.
+
+A move within one volume is an atomic rename; across volumes it copies then deletes
+the source after the database commit, with a free-space pre-check on the target
+volume (mirroring the torrent add check). The owning `IngestItem.CatalogId` follows
+the item. Only movies and series (not episodes, seasons, or unmatched videos) move
+in v1.
 
 ## Testing Expectations
 

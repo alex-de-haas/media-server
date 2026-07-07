@@ -24,6 +24,10 @@ public sealed record LibraryDetailDto(
     // TMDb id (movie id for a movie, series id for a series) — lets the UI build an Infuse library deep link.
     string? TmdbId,
     Guid CatalogId,
+    // The catalog this item lives in — its name and root host path — shown on the media tab so an operator
+    // can see where it sits on disk.
+    string CatalogName,
+    string CatalogRoot,
     string Kind,
     string Title,
     string? OriginalTitle,
@@ -41,6 +45,9 @@ public sealed record LibraryDetailDto(
     // Title artwork (TMDb "logo": the styled title as a transparent PNG), language-matched when available.
     string? LogoUrl,
     string? LibraryPath,
+    // The catalog-root-relative folder that holds this title's files ("Inception (2010)", "The Show (2020)");
+    // null when the item has no file yet. Shown on the media/episodes tab.
+    string? ContentPath,
     UserItemDataDto? UserData,
     // The source pinned to play by default (first in MediaSources); null when no preference is set.
     Guid? DefaultSourceId,
