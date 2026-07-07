@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ChevronDown, Clapperboard, ExternalLink, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Clapperboard, ExternalLink, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -21,6 +21,7 @@ import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/component
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
 import { RemapDialog } from "@/components/remap-dialog";
+import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { formatBytes, formatRuntime } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import {
@@ -75,7 +76,7 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-2">
         <BackLink href={backHref} label={backLabel} />
-        <AdminControls id={item.id} title={item.title} kind={item.kind} backHref={backHref} />
+        <AdminControls id={item.id} title={item.title} kind={item.kind} catalogId={item.catalogId} backHref={backHref} />
       </div>
       <Hero item={item} />
       <DetailTabs item={item} />
@@ -100,12 +101,42 @@ function DetailTabs({ item }: { item: LibraryDetail }) {
         <CastList cast={item.cast} />
       </TabsContent>
       <TabsContent value="media">
-        {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo item={item} />}
+        <div className="flex flex-col gap-3">
+          <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
+          {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo item={item} />}
+        </div>
       </TabsContent>
       <TabsContent value="tags">
         <KeywordTags keywords={item.keywords} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+// Where the title lives on disk, shown atop the media/episodes tab: the catalog it belongs to, that
+// catalog's root host path, and the catalog-root-relative folder holding its files (when on disk).
+function ContentLocation({
+  catalogName,
+  catalogRoot,
+  path,
+}: {
+  catalogName: string;
+  catalogRoot: string;
+  path: string | null;
+}) {
+  return (
+    <dl className="text-muted-foreground bg-secondary/40 grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-xs">
+      <dt>Catalog</dt>
+      <dd className="text-foreground break-words">{catalogName || "—"}</dd>
+      <dt>Path</dt>
+      <dd className="text-foreground font-mono break-all">{catalogRoot || "—"}</dd>
+      {path && (
+        <>
+          <dt>Folder</dt>
+          <dd className="text-foreground font-mono break-all">{path}</dd>
+        </>
+      )}
+    </dl>
   );
 }
 
@@ -129,12 +160,13 @@ function MediaDetailSkeleton() {
   );
 }
 
-function AdminControls({ id, title, kind, backHref }: { id: string; title: string; kind: string; backHref: string }) {
+function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; title: string; kind: string; catalogId: string; backHref: string }) {
   const { role } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [remapOpen, setRemapOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   const remove = useMutation({
     mutationFn: (deleteFiles: boolean) => mediaServer.deleteLibraryItem(id, deleteFiles),
@@ -201,6 +233,10 @@ function AdminControls({ id, title, kind, backHref }: { id: string; title: strin
               Fix match…
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem onClick={() => setMoveOpen(true)}>
+            <FolderInput />
+            Move to catalog…
+          </DropdownMenuItem>
           <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
             <Trash2 />
             Delete…
@@ -235,6 +271,23 @@ function AdminControls({ id, title, kind, backHref }: { id: string; title: strin
           } else {
             queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
           }
+        }}
+      />
+
+      <MoveToCatalogDialog
+        itemId={id}
+        itemKind={kind}
+        itemTitle={title}
+        currentCatalogId={catalogId}
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        onMoveStarted={() => {
+          // The move runs in the background and re-mints the item id (a merge may remove this one), so leave
+          // the detail page; the library refreshes from the job's completion event.
+          for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
+            queryClient.invalidateQueries({ queryKey: key });
+          }
+          router.push(backHref);
         }}
       />
     </>

@@ -158,6 +158,12 @@ builder.Services.AddScoped<LibraryDeleteService>();
 builder.Services.AddScoped<LibrarySourceService>();
 builder.Services.AddScoped<RemapService>();
 
+// Move a published item between catalogs: a background job (files moved, ids re-minted, sources merged).
+builder.Services.AddSingleton<ILibraryMoveQueue, LibraryMoveQueue>();
+builder.Services.AddScoped<LibraryMoveCoordinator>();
+builder.Services.AddScoped<LibraryMoveService>();
+builder.Services.AddHostedService<LibraryMoveWorker>();
+
 // Scheduled scans (missing-file drift) + on-demand metadata refresh.
 builder.Services.AddScoped<LibraryMaintenanceService>();
 builder.Services.AddHostedService<LibraryScanWorker>();

@@ -266,6 +266,9 @@ export interface LibraryDetail {
   publicId: string | null;
   tmdbId: string | null;
   catalogId: string;
+  // Name and root host path of the catalog this item lives in.
+  catalogName: string;
+  catalogRoot: string;
   kind: string;
   title: string;
   originalTitle: string | null;
@@ -283,6 +286,8 @@ export interface LibraryDetail {
   // TMDb title logo (styled title as a transparent PNG), language-matched when available.
   logoUrl: string | null;
   libraryPath: string | null;
+  // Catalog-root-relative folder that holds this title's files; null when nothing is on disk yet.
+  contentPath: string | null;
   userData: UserItemData | null;
   // The source pinned to play by default (first in `mediaSources`); null when no preference is set.
   defaultSourceId: string | null;
@@ -580,6 +585,14 @@ export const mediaServer = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
+    }),
+  // Move a published movie/series into another type-compatible catalog; runs as a background job (progress
+  // over SSE) and returns its job id.
+  moveLibraryItem: (id: string, targetCatalogId: string) =>
+    apiJson<{ jobId: string }>(`${BASE}/library/${id}/move`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetCatalogId }),
     }),
   scanLibrary: () => apiJson<LibraryScanReport>(`${BASE}/library/scan`, { method: "POST" }),
 

@@ -108,6 +108,12 @@ canonical identity automatically. If a user explicitly remaps a file from one
 movie/episode to another, the media source moves to the target item and the
 Jellyfin item id changes only when the canonical target identity changes.
 
+Because `PublicId` embeds `CatalogId`, **moving an item to another catalog**
+re-mints it (the Jellyfin id changes; clients re-sync). The internal `Id` is
+preserved on a re-point, so `UserData` and cached metadata survive the move; a merge
+into an existing target item folds the sources in and prunes the source row instead.
+See [File and directory management](file-directory-management.md#move-semantics).
+
 Unmatched videos are not exposed to Jellyfin clients — their temporary identity
 stays internal to the review queue and admin UI — so a client-visible `PublicId`
 is assigned once, at publish, and is stable thereafter. First identification fills

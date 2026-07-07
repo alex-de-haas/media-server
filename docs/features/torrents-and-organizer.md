@@ -206,6 +206,19 @@ source-file → `MediaItem` mapping, **moves/renames** the canonical file to mat
 the new identity (no hardlink rebuild), prunes the now-orphaned old item, and
 re-runs downstream probe/enrich/publish as needed.
 
+## Moving Between Catalogs
+
+Moving relocates a published movie/series into another type-compatible catalog. It
+moves the file(s) into the target catalog's canonical layout and repoints every
+durable row (`MediaItem`/`MediaSource`/`SourceFile`/`IngestItem`), re-minting
+`PublicId` (the Jellyfin id changes). When the target catalog has no such identity
+the rows are re-pointed as-is (internal id preserved, so `UserData`/metadata
+survive); when it already holds the identity the sources merge onto the existing
+item as extra versions and the source rows are pruned. A same-volume move is an
+atomic rename; a cross-volume move runs as a background job that copies then deletes
+the source, with a free-space pre-check. See
+[File and directory management](file-directory-management.md#move-semantics).
+
 ## Library Scan (import)
 
 A per-catalog **Scan** action (Catalogs page, admin) lets operators onboard files

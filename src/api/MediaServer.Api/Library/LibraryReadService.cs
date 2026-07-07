@@ -249,6 +249,14 @@ public sealed class LibraryReadService(
             seasons = await LoadSeasonsAsync(item.Id, appUserId, cancellationToken);
         }
 
+        var catalog = await database.Catalogs.AsNoTracking()
+            .Where(candidate => candidate.Id == item.CatalogId)
+            .Select(candidate => new { candidate.Name, candidate.Root })
+            .FirstOrDefaultAsync(cancellationToken);
+        var catalogName = catalog?.Name ?? string.Empty;
+        var catalogRoot = catalog?.Root ?? string.Empty;
+        var contentPath = await ResolveContentPathAsync(item, cancellationToken);
+
         var userDataByItem = await userData.LoadAsync(appUserId, [item], cancellationToken);
         var runtimeTicks = meta?.RuntimeTicks
             ?? (mediaSources.Count > 0 ? mediaSources.Max(source => source.DurationTicks) : null);
@@ -263,6 +271,8 @@ public sealed class LibraryReadService(
             item.PublicId,
             TmdbId(item),
             item.CatalogId,
+            catalogName,
+            catalogRoot,
             item.Kind.ToString(),
             TitleFor(meta, item.Title),
             item.OriginalTitle,
@@ -279,6 +289,7 @@ public sealed class LibraryReadService(
             ImageUrl(images, ImageType.Backdrop),
             LogoUrl(images),
             item.LibraryPath,
+            contentPath,
             userDataByItem.GetValueOrDefault(item.Id),
             item.DefaultSourceId,
             mediaSources,
@@ -297,6 +308,49 @@ public sealed class LibraryReadService(
             rich.Creators,
             rich.Studios,
             rich.Keywords);
+    }
+
+    /// <summary>
+    /// The catalog-root-relative folder that holds the item's files: the parent folder of a movie/episode's
+    /// library path, or the show folder for a series (taken from any of its episodes). Null when nothing is
+    /// on disk yet.
+    /// </summary>
+    private async Task<string?> ResolveContentPathAsync(MediaItem item, CancellationToken cancellationToken)
+    {
+        if (item.Kind == MediaKind.Series)
+        {
+            var episodePath = await database.MediaItems.AsNoTracking()
+                .Where(candidate => candidate.SeriesId == item.Id && candidate.Kind == MediaKind.Episode && candidate.LibraryPath != null)
+                .Select(candidate => candidate.LibraryPath!)
+                .FirstOrDefaultAsync(cancellationToken);
+            return TopFolder(episodePath);
+        }
+
+        return ParentFolder(item.LibraryPath);
+    }
+
+    // Library paths are posix-style (forward slashes); the parent folder is everything before the last slash.
+    private static string? ParentFolder(string? relativePath)
+    {
+        if (string.IsNullOrEmpty(relativePath))
+        {
+            return null;
+        }
+
+        var index = relativePath.LastIndexOf('/');
+        return index > 0 ? relativePath[..index] : null;
+    }
+
+    // The top-level folder of a posix-style path ("Show (2020)/Season 01/x.mkv" → "Show (2020)").
+    private static string? TopFolder(string? relativePath)
+    {
+        if (string.IsNullOrEmpty(relativePath))
+        {
+            return null;
+        }
+
+        var index = relativePath.IndexOf('/');
+        return index > 0 ? relativePath[..index] : relativePath;
     }
 
     /// <summary>Episodes of a series (optionally a single season), ordered by season then episode number.</summary>

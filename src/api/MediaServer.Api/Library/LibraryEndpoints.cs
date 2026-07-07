@@ -157,6 +157,30 @@ public static class LibraryEndpoints
             };
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Move a published top-level movie/series into another type-compatible catalog (admin only). Runs as a
+        // background job (files are moved, ids re-minted); returns the job id so the UI can follow progress.
+        group.MapPost("/{id:guid}/move", async (Guid id, LibraryMoveRequest request, LibraryMoveCoordinator coordinator, CancellationToken cancellationToken) =>
+        {
+            var result = await coordinator.RequestAsync(id, request.TargetCatalogId, cancellationToken);
+            return result.Status switch
+            {
+                LibraryMoveRequestStatus.Started => Results.Accepted($"/api/library/{id}/move", new { jobId = result.JobId }),
+                LibraryMoveRequestStatus.NotFound => Results.NotFound(),
+                LibraryMoveRequestStatus.Unsupported => Results.BadRequest(new { error = "Only a published movie or series can be moved." }),
+                LibraryMoveRequestStatus.SameCatalog => Results.BadRequest(new { error = "The item is already in that catalog." }),
+                LibraryMoveRequestStatus.IncompatibleType => Results.BadRequest(new { error = "The target catalog's type is not compatible with this item." }),
+                LibraryMoveRequestStatus.CatalogOffline => Results.Conflict(new { error = "The source or target catalog root is offline." }),
+                LibraryMoveRequestStatus.InsufficientSpace => Results.Conflict(new { error = "Not enough free space in the target catalog for this move." }),
+                LibraryMoveRequestStatus.AlreadyMoving => Results.Conflict(new { error = "A move is already in progress for this item." }),
+                _ => Results.NotFound(),
+            };
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // The moves currently in flight (admin only), for the UI to show progress.
+        group.MapGet("/move/active", async (LibraryMoveCoordinator coordinator, CancellationToken cancellationToken) =>
+            Results.Ok(await coordinator.ListActiveAsync(cancellationToken)))
+            .RequireAuthorization(AppRoles.AdminPolicy);
+
         // Scan all online catalogs for missing library files (admin only); also runs on a timer.
         group.MapPost("/scan", async (LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
             Results.Ok(await maintenance.ScanAsync(cancellationToken)))
