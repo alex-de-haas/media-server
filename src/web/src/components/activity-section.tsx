@@ -591,7 +591,6 @@ function ActivityGroup({ icon: Icon, label, children }: { icon: LucideIcon; labe
 // within one). Full progress bar with the live speed/ETA below (per-byte, pushed over SSE), mirroring a
 // download card. Labels can be absent for a move stranded by a restart; speed/ETA until the first tick.
 function MoveProgressRow({ move }: { move: LibraryMoveJob }) {
-  const hasRate = move.bytesPerSecond != null || move.etaSeconds != null;
   return (
     <div className="flex flex-col gap-2 rounded-md border p-3">
       <p className="min-w-0 truncate font-medium">
@@ -599,14 +598,11 @@ function MoveProgressRow({ move }: { move: LibraryMoveJob }) {
         {move.targetCatalogName && <span className="text-muted-foreground font-normal"> → {move.targetCatalogName}</span>}
       </p>
       <Progress value={move.progress} />
+      {/* Speed/ETA are each present only mid-copy — the 100% tick has a rate but no ETA — so gate them apart. */}
       <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
         <span>{move.progress}%</span>
-        {hasRate && (
-          <>
-            <span>{formatSpeed(move.bytesPerSecond)}</span>
-            <span>ETA {formatEta(move.etaSeconds)}</span>
-          </>
-        )}
+        {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
+        {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
       </div>
     </div>
   );

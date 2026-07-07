@@ -148,8 +148,9 @@ function MoveProgress({ itemId }: { itemId: string }) {
       </div>
       {(move.bytesPerSecond != null || move.etaSeconds != null) && (
         <div className="text-muted-foreground flex flex-wrap gap-x-3 font-mono text-xs tabular-nums">
-          <span>{formatSpeed(move.bytesPerSecond)}</span>
-          <span>ETA {formatEta(move.etaSeconds)}</span>
+          {/* Each shown only when present — the final 100% tick reports a rate but no ETA. */}
+          {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
+          {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
         </div>
       )}
     </div>
