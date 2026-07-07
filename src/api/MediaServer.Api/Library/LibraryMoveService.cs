@@ -478,6 +478,12 @@ public sealed class LibraryMoveService(
 
         output.SetLength(input.Length); // Preallocate: fewer metadata updates, less fragmentation.
 
+        // A failure on either side must unwind the whole copy even if the other side is parked deep in a
+        // syscall: the drain's catch cancels this linked token, which interrupts a pending source read
+        // (file IO is cancellation-interruptible) so the final `await fill` can't hang on a stuck source.
+        using var aborts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var copyToken = aborts.Token;
+
         var pipe = new Pipe(new PipeOptions(
             pauseWriterThreshold: CopyPipePauseBytes,
             resumeWriterThreshold: CopyPipeResumeBytes,
@@ -493,14 +499,14 @@ public sealed class LibraryMoveService(
             {
                 while (true)
                 {
-                    var read = await input.ReadAsync(pipe.Writer.GetMemory(CopyChunkBytes), cancellationToken);
+                    var read = await input.ReadAsync(pipe.Writer.GetMemory(CopyChunkBytes), copyToken);
                     if (read == 0)
                     {
                         break;
                     }
 
                     pipe.Writer.Advance(read);
-                    var flushed = await pipe.Writer.FlushAsync(cancellationToken);
+                    var flushed = await pipe.Writer.FlushAsync(copyToken);
                     if (flushed.IsCompleted)
                     {
                         break; // Drain side quit; its failure is already propagating, so just stop reading.
@@ -522,10 +528,10 @@ public sealed class LibraryMoveService(
             var unsyncedBytes = 0L;
             while (true)
             {
-                var result = await pipe.Reader.ReadAsync(cancellationToken);
+                var result = await pipe.Reader.ReadAsync(copyToken);
                 foreach (var segment in result.Buffer)
                 {
-                    await output.WriteAsync(segment, cancellationToken);
+                    await output.WriteAsync(segment, copyToken);
                     unsyncedBytes += segment.Length;
                     await onBytesWrittenAsync(segment.Length);
                 }
@@ -537,8 +543,9 @@ public sealed class LibraryMoveService(
                 {
                     unsyncedBytes = 0;
                     // Flush(true) is a synchronous fsync; push it off this thread so a slow target device
-                    // stalls only a pool thread, not the drain loop's async contract.
-                    await Task.Run(() => output.Flush(flushToDisk: true), CancellationToken.None);
+                    // stalls only a pool thread, not the drain loop's async contract. The token stops a new
+                    // fsync from starting once cancellation is requested (an in-flight one can't be cut short).
+                    await Task.Run(() => output.Flush(flushToDisk: true), copyToken);
                 }
 
                 if (final)
@@ -551,7 +558,8 @@ public sealed class LibraryMoveService(
         }
         catch (Exception exception)
         {
-            await pipe.Reader.CompleteAsync(exception); // Unblocks a fill task parked on backpressure.
+            aborts.Cancel(); // Interrupt a fill parked in a pending source read.
+            await pipe.Reader.CompleteAsync(exception); // Unblocks a fill parked on backpressure.
             throw;
         }
         finally
