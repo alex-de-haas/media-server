@@ -21,6 +21,11 @@ public static class TranscodeEndpoints
                 var job = await service.CreateAsync(request, cancellationToken);
                 return Results.Created($"/api/transcode/{job.Id}", job);
             }
+            catch (TranscodeConflictException exception)
+            {
+                // Concurrent state (the movie is mid-move), not a bad request — 409 like the move-locking surface.
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status409Conflict);
+            }
             catch (TranscodeRequestException exception)
             {
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status400BadRequest);

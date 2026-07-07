@@ -70,5 +70,12 @@ public sealed record TranscodeJobResponse(
     }
 }
 
-/// <summary>Raised for invalid transcode requests (bad source, non-movie, missing file, no mount).</summary>
-public sealed class TranscodeRequestException(string message) : Exception(message);
+/// <summary>Raised for invalid transcode requests (bad source, non-movie, missing file, no mount) — a 400.</summary>
+public class TranscodeRequestException(string message) : Exception(message);
+
+/// <summary>
+/// Raised when a valid transcode request loses to concurrent state (the movie is mid-move to another
+/// catalog) — a 409, matching the move-locking surface, so clients can tell "retry later" from "fix the
+/// request".
+/// </summary>
+public sealed class TranscodeConflictException(string message) : TranscodeRequestException(message);

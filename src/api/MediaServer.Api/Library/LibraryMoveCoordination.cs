@@ -128,8 +128,13 @@ public sealed class LibraryMoveCoordinator(
         }
 
         // A queued/running conversion reads the item's files (and writes a sibling into the source catalog);
-        // moving them out from under it would break both. Finish or cancel conversions first.
-        if (await database.TranscodeJobs.AnyAsync(job => job.MediaItemId == itemId &&
+        // moving them out from under it would break both. Transcodes are movies-only today, but check the
+        // whole subtree (series → seasons/episodes) so the guard holds once episodes become transcodable.
+        // Kept as an IQueryable so EF emits one SQL roundtrip with a subquery (mirrors SubtreeSizeAsync).
+        var subtreeIds = database.MediaItems
+            .Where(candidate => candidate.Id == itemId || candidate.SeriesId == itemId || candidate.ParentId == itemId)
+            .Select(candidate => candidate.Id);
+        if (await database.TranscodeJobs.AnyAsync(job => subtreeIds.Contains(job.MediaItemId) &&
                 (job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running), cancellationToken))
         {
             return new LibraryMoveRequestResult(LibraryMoveRequestStatus.TranscodeActive, null);

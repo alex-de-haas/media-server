@@ -278,6 +278,38 @@ public sealed class LibraryMoveServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Request_rejects_a_series_move_while_an_episode_conversion_is_active()
+    {
+        // Transcodes are movies-only today, but the check must cover the subtree: an episode's conversion
+        // reads files the series move would relocate.
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Series, "Shows");
+        var target = await AddCatalogAsync(_targetRoot, CatalogType.Series, "Shows Archive");
+        var series = await AddSeriesAsync(source, "Severance", "tmdb", "95396", [(1, 1)]);
+        var episode = await _database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Episode && item.SeriesId == series.Id);
+        var mediaSource = await _database.MediaSources.SingleAsync(candidate => candidate.MediaItemId == episode.Id);
+
+        _database.TranscodeJobs.Add(new TranscodeJob
+        {
+            Id = Guid.NewGuid(),
+            EngineJobId = "engine-2",
+            MediaSourceId = mediaSource.Id,
+            MediaItemId = episode.Id,
+            CatalogId = source.Id,
+            InputPath = mediaSource.Path,
+            OutputPath = "Severance (2020)/Season 01/Severance S01E01 - hevc.mkv",
+            VideoCodec = "hevc",
+            HardwareAcceleration = "auto",
+            State = TranscodeJobState.Queued,
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await _database.SaveChangesAsync();
+
+        var result = await _coordinator.RequestAsync(series.Id, target.Id, CancellationToken.None);
+
+        Assert.Equal(LibraryMoveRequestStatus.TranscodeActive, result.Status);
+    }
+
+    [Fact]
     public async Task Guard_locks_the_item_and_its_sources_while_a_move_is_in_flight()
     {
         var source = await AddCatalogAsync(_sourceRoot, CatalogType.Series, "Shows");

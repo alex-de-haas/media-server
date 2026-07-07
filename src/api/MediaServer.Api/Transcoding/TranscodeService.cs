@@ -38,7 +38,7 @@ public sealed class TranscodeService(
         // an encode reading them (and writing a sibling into the old catalog) would break both.
         if (await moveGuard.IsItemMovingAsync(item.Id, cancellationToken))
         {
-            throw new TranscodeRequestException(LibraryMoveGuard.MoveInProgressError);
+            throw new TranscodeConflictException(LibraryMoveGuard.MoveInProgressError);
         }
 
         var catalog = item.Catalog ?? throw new TranscodeRequestException("Source's catalog is unavailable.");
