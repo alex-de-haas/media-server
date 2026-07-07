@@ -21,12 +21,17 @@ public enum LibraryMoveRequestStatus
     CatalogOffline,
     InsufficientSpace,
     AlreadyMoving,
+    TranscodeActive,
 }
 
 public sealed record LibraryMoveRequestResult(LibraryMoveRequestStatus Status, Guid? JobId);
 
-/// <summary>The live state of one running move, for the UI.</summary>
-public sealed record LibraryMoveStatus(Guid ItemId, Guid JobId, int Progress);
+/// <summary>The live state of one running move, for the UI. Title/target are best-effort labels captured at
+/// request time (null after a restart, where only progress survives on the persisted job).</summary>
+public sealed record LibraryMoveStatus(Guid ItemId, Guid JobId, int Progress, string? Title, string? TargetCatalogName);
+
+/// <summary>Descriptive labels for an in-flight move, captured at request time so the UI can name what's moving where.</summary>
+public sealed record ActiveMove(Guid JobId, string Title, string TargetCatalogName);
 
 /// <summary>
 /// In-process queue handing move requests to <see cref="LibraryMoveWorker"/>. A single reader drains it so
@@ -37,6 +42,15 @@ public interface ILibraryMoveQueue
 {
     /// <summary>Atomically reserves the item. False when a move is already queued or running for it.</summary>
     bool TryReserve(Guid itemId);
+
+    /// <summary>True while a move is queued or running for the item (the reservation is still held).</summary>
+    bool IsReserved(Guid itemId);
+
+    /// <summary>Attaches display labels to a reserved item, once its job has been opened.</summary>
+    void Describe(Guid itemId, ActiveMove move);
+
+    /// <summary>The display labels for a reserved item, if it has been described yet.</summary>
+    bool TryGetActive(Guid itemId, out ActiveMove? move);
 
     /// <summary>Frees a reservation once its run finishes (success, failure, or shutdown).</summary>
     void Release(Guid itemId);
@@ -50,9 +64,16 @@ public sealed class LibraryMoveQueue : ILibraryMoveQueue
 {
     private readonly Channel<LibraryMoveWorkItem> _channel = Channel.CreateUnbounded<LibraryMoveWorkItem>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
-    private readonly ConcurrentDictionary<Guid, byte> _active = new();
+    // Value is null between the atomic reserve and Describe (the labels aren't known until the job is opened).
+    private readonly ConcurrentDictionary<Guid, ActiveMove?> _active = new();
 
-    public bool TryReserve(Guid itemId) => _active.TryAdd(itemId, 0);
+    public bool TryReserve(Guid itemId) => _active.TryAdd(itemId, null);
+
+    public bool IsReserved(Guid itemId) => _active.ContainsKey(itemId);
+
+    public void Describe(Guid itemId, ActiveMove move) => _active[itemId] = move;
+
+    public bool TryGetActive(Guid itemId, out ActiveMove? move) => _active.TryGetValue(itemId, out move) && move is not null;
 
     public void Release(Guid itemId) => _active.TryRemove(itemId, out _);
 
@@ -106,6 +127,14 @@ public sealed class LibraryMoveCoordinator(
             return new LibraryMoveRequestResult(LibraryMoveRequestStatus.CatalogOffline, null);
         }
 
+        // A queued/running conversion reads the item's files (and writes a sibling into the source catalog);
+        // moving them out from under it would break both. Finish or cancel conversions first.
+        if (await database.TranscodeJobs.AnyAsync(job => job.MediaItemId == itemId &&
+                (job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running), cancellationToken))
+        {
+            return new LibraryMoveRequestResult(LibraryMoveRequestStatus.TranscodeActive, null);
+        }
+
         // Cross-volume moves copy bytes, so pre-check free space on the target volume (mirrors torrent add).
         if (!LibraryMoveService.SameVolume(filesystem, source.Root, target.Root))
         {
@@ -125,6 +154,7 @@ public sealed class LibraryMoveCoordinator(
         try
         {
             var job = await jobs.StartAsync(LibraryMoveService.JobType, "MediaItem", itemId, cancellationToken);
+            queue.Describe(itemId, new ActiveMove(job.Id, item.Title, target.Name));
             queue.Enqueue(new LibraryMoveWorkItem(itemId, targetCatalogId, job.Id));
             return new LibraryMoveRequestResult(LibraryMoveRequestStatus.Started, job.Id);
         }
@@ -135,12 +165,25 @@ public sealed class LibraryMoveCoordinator(
         }
     }
 
-    /// <summary>The items with a move currently in flight, with their job id and progress.</summary>
-    public async Task<IReadOnlyList<LibraryMoveStatus>> ListActiveAsync(CancellationToken cancellationToken) =>
-        await database.Jobs.AsNoTracking()
+    /// <summary>The items with a move currently in flight, with their job id, progress, and display labels.</summary>
+    public async Task<IReadOnlyList<LibraryMoveStatus>> ListActiveAsync(CancellationToken cancellationToken)
+    {
+        // Progress is the persisted, authoritative field; the title/target labels come from the in-memory
+        // registry (populated at request time) — a move stranded by a restart keeps its progress but loses its
+        // labels, which the UI renders as a generic "Moving item".
+        var running = await database.Jobs.AsNoTracking()
             .Where(job => job.Type == LibraryMoveService.JobType && job.Status == JobStatus.Running && job.RelatedId != null)
-            .Select(job => new LibraryMoveStatus(job.RelatedId!.Value, job.Id, job.Progress))
+            .Select(job => new { ItemId = job.RelatedId!.Value, JobId = job.Id, job.Progress })
             .ToListAsync(cancellationToken);
+
+        return running
+            .Select(job =>
+            {
+                var meta = queue.TryGetActive(job.ItemId, out var active) ? active : null;
+                return new LibraryMoveStatus(job.ItemId, job.JobId, job.Progress, meta?.Title, meta?.TargetCatalogName);
+            })
+            .ToList();
+    }
 
     private async Task<long> SubtreeSizeAsync(MediaItem item, CancellationToken cancellationToken)
     {
@@ -247,5 +290,37 @@ public sealed class LibraryMoveWorker(IServiceScopeFactory scopeFactory, ILibrar
         {
             logger.LogWarning(exception, "Failed to reconcile orphaned move jobs on startup.");
         }
+    }
+}
+
+/// <summary>
+/// Answers "is this item locked by an in-flight move?" for the endpoints that mutate an item or its files:
+/// a move relocates files and repoints rows, so a concurrent delete/remap/rename/re-probe/transcode would
+/// race the copy and leave disk and database inconsistent. Keyed on the top-level item (the series for an
+/// episode/season, the item itself otherwise), matching the queue's reservation.
+/// </summary>
+public sealed class LibraryMoveGuard(MediaServerDbContext database, ILibraryMoveQueue queue)
+{
+    /// <summary>The 409 body shared by every endpoint that refuses to touch a moving item.</summary>
+    public const string MoveInProgressError = "This item is being moved to another catalog — try again when the move finishes.";
+
+    /// <summary>True when the item — or the series it belongs to — has a move queued or running.</summary>
+    public async Task<bool> IsItemMovingAsync(Guid itemId, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.AsNoTracking()
+            .Where(candidate => candidate.Id == itemId)
+            .Select(candidate => new { candidate.Id, candidate.SeriesId })
+            .FirstOrDefaultAsync(cancellationToken);
+        return item is not null && queue.IsReserved(item.SeriesId ?? item.Id);
+    }
+
+    /// <summary>True when the media source's owning item has a move queued or running.</summary>
+    public async Task<bool> IsSourceMovingAsync(Guid sourceId, CancellationToken cancellationToken)
+    {
+        var ownerId = await database.MediaSources.AsNoTracking()
+            .Where(candidate => candidate.Id == sourceId)
+            .Select(candidate => (Guid?)candidate.MediaItemId)
+            .FirstOrDefaultAsync(cancellationToken);
+        return ownerId is { } itemId && await IsItemMovingAsync(itemId, cancellationToken);
     }
 }

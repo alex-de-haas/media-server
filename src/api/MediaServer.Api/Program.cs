@@ -162,6 +162,7 @@ builder.Services.AddScoped<RemapService>();
 builder.Services.AddSingleton<ILibraryMoveQueue, LibraryMoveQueue>();
 builder.Services.AddScoped<LibraryMoveCoordinator>();
 builder.Services.AddScoped<LibraryMoveService>();
+builder.Services.AddScoped<LibraryMoveGuard>(); // Blocks item/source mutations while their move is in flight.
 builder.Services.AddHostedService<LibraryMoveWorker>();
 
 // Scheduled scans (missing-file drift) + on-demand metadata refresh.

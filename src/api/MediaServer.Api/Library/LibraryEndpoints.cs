@@ -91,32 +91,53 @@ public static class LibraryEndpoints
             SetFavoriteAsync(id, favorite: false, principal, userData, database, cancellationToken));
 
         // Delete a published item (admin only). `deleteFiles=true` also removes the library/ hardlinks.
-        group.MapDelete("/{id:guid}", async (Guid id, bool? deleteFiles, LibraryDeleteService deleteService, CancellationToken cancellationToken) =>
+        // Refused while the item is moving between catalogs — the move is relocating the very files/rows.
+        group.MapDelete("/{id:guid}", async (Guid id, bool? deleteFiles, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
+            if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
+            {
+                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+            }
+
             var deleted = await deleteService.DeleteAsync(id, deleteFiles ?? false, cancellationToken);
             return deleted ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
         // Delete a single media source / version (admin only). `deleteFile=true` also erases the file from
         // disk — used to drop the original after a verified transcode "replace".
-        group.MapDelete("/sources/{sourceId:guid}", async (Guid sourceId, bool? deleteFile, LibraryDeleteService deleteService, CancellationToken cancellationToken) =>
+        group.MapDelete("/sources/{sourceId:guid}", async (Guid sourceId, bool? deleteFile, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
+            if (await moveGuard.IsSourceMovingAsync(sourceId, cancellationToken))
+            {
+                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+            }
+
             var deleted = await deleteService.DeleteSourceAsync(sourceId, deleteFile ?? false, cancellationToken);
             return deleted ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
         // Pin (or clear, with sourceId=null) the version that plays by default — clients honor the first
         // MediaSource, so this reorders the sources (admin only).
-        group.MapPut("/{id:guid}/default-source", async (Guid id, SetDefaultSourceRequest request, LibrarySourceService sources, CancellationToken cancellationToken) =>
+        group.MapPut("/{id:guid}/default-source", async (Guid id, SetDefaultSourceRequest request, LibrarySourceService sources, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
+            if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
+            {
+                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+            }
+
             var ok = await sources.SetDefaultSourceAsync(id, request.SourceId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
         // Rename (or clear, with versionName=null) a single movie source's version — renaming the file on disk
         // to "Title (Year) - {version}.ext" and syncing the stored label (admin only).
-        group.MapPut("/sources/{sourceId:guid}/version", async (Guid sourceId, SetVersionRequest request, LibrarySourceService sources, CancellationToken cancellationToken) =>
+        group.MapPut("/sources/{sourceId:guid}/version", async (Guid sourceId, SetVersionRequest request, LibrarySourceService sources, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
+            if (await moveGuard.IsSourceMovingAsync(sourceId, cancellationToken))
+            {
+                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+            }
+
             var result = await sources.RenameVersionAsync(sourceId, request.VersionName, cancellationToken);
             return result.Status switch
             {
@@ -136,16 +157,27 @@ public static class LibraryEndpoints
             return refreshed ? Results.Accepted() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
-        // Re-probe the item's media files and replace its stored streams (admin only).
-        group.MapPost("/{id:guid}/refresh-media", async (Guid id, LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
+        // Re-probe the item's media files and replace its stored streams (admin only). Refused mid-move: the
+        // files are relocating, so the probe would race the copy and read paths that are about to change.
+        group.MapPost("/{id:guid}/refresh-media", async (Guid id, LibraryMaintenanceService maintenance, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
+            if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
+            {
+                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+            }
+
             var refreshed = await maintenance.RefreshMediaAsync(id, cancellationToken);
             return refreshed ? Results.Accepted() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
         // Reassign a misidentified leaf (movie/episode) to a corrected identity and rebuild its hardlink (admin only).
-        group.MapPost("/{id:guid}/remap", async (Guid id, RemapRequest request, RemapService remap, CancellationToken cancellationToken) =>
+        group.MapPost("/{id:guid}/remap", async (Guid id, RemapRequest request, RemapService remap, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
+            if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
+            {
+                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+            }
+
             var result = await remap.RemapAsync(id, request, cancellationToken);
             return result.Status switch
             {
@@ -172,6 +204,7 @@ public static class LibraryEndpoints
                 LibraryMoveRequestStatus.CatalogOffline => Results.Conflict(new { error = "The source or target catalog root is offline." }),
                 LibraryMoveRequestStatus.InsufficientSpace => Results.Conflict(new { error = "Not enough free space in the target catalog for this move." }),
                 LibraryMoveRequestStatus.AlreadyMoving => Results.Conflict(new { error = "A move is already in progress for this item." }),
+                LibraryMoveRequestStatus.TranscodeActive => Results.Conflict(new { error = "A conversion is running for this item — wait for it to finish or cancel it first." }),
                 _ => Results.NotFound(),
             };
         }).RequireAuthorization(AppRoles.AdminPolicy);

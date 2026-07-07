@@ -443,6 +443,16 @@ export interface CatalogRefreshJob {
   progress: number;
 }
 
+// A move of a top-level item into another catalog that's currently in flight, with its 0–100 progress and
+// the labels the Activity view shows. title/targetCatalogName are null for a move stranded by a restart.
+export interface LibraryMoveJob {
+  itemId: string;
+  jobId: string;
+  progress: number;
+  title: string | null;
+  targetCatalogName: string | null;
+}
+
 async function send(path: string, method: string, body?: unknown): Promise<void> {
   await apiFetch(`${BASE}${path}`, {
     method,
@@ -594,6 +604,8 @@ export const mediaServer = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ targetCatalogId }),
     }),
+  // In-flight cross-catalog moves; seeds the Activity progress list, then kept live by RealtimeBridge over SSE.
+  listActiveMoves: () => apiJson<LibraryMoveJob[]>(`${BASE}/library/move/active`),
   scanLibrary: () => apiJson<LibraryScanReport>(`${BASE}/library/scan`, { method: "POST" }),
 
   // Person page, keyed by the provider identity its cast members carry (CastMember.provider/providerId).
