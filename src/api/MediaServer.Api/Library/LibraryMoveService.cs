@@ -386,7 +386,18 @@ public sealed class LibraryMoveService(
             {
                 lastPercent = percent;
                 var remaining = totalBytes - copiedBytes;
-                long? eta = bytesPerSecond is > 0 && remaining > 0 ? (long)Math.Ceiling(remaining / bytesPerSecond.Value) : null;
+                // ETA in whole seconds from the smoothed rate. Guard the double→long cast: a near-stalled copy
+                // gives an astronomically large (or infinite) value that would wrap to a negative long, so cap
+                // at a sane ~100 days and report anything beyond (or non-finite) as unknown.
+                long? eta = null;
+                if (bytesPerSecond is > 0 && remaining > 0)
+                {
+                    var seconds = Math.Ceiling(remaining / bytesPerSecond.Value);
+                    if (seconds is > 0 and <= 8_640_000)
+                    {
+                        eta = (long)seconds;
+                    }
+                }
                 await jobs.ProgressAsync(job, percent, cancellationToken, bytesPerSecond is { } rate ? (long)rate : null, eta);
             }
         }
