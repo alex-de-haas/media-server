@@ -193,6 +193,37 @@ public sealed class LibraryMoveServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Move_across_volumes_cancelled_mid_copy_rolls_back_the_partial_destination()
+    {
+        // Cancel while bytes are still flowing: the copy pipe must unwind promptly (not hang on its fill
+        // task), rollback must remove the partial destination, and the source must stay untouched so the
+        // move can simply be retried.
+        _filesystem.CrossVolume = true;
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Movie, "Movies HD");
+        var target = await AddCatalogAsync(_targetRoot, CatalogType.Movie, "Movies 4K");
+        var payload = new string('x', 4 << 20); // 4 copy chunks → several mid-copy progress ticks
+        var movie = await AddMovieAsync(source, "Dune", 2021, "tmdb", "438631", payload);
+
+        using var cancellation = new CancellationTokenSource();
+        _notifier.OnJobProgress = percent =>
+        {
+            if (percent is > 0 and < 100)
+            {
+                cancellation.Cancel();
+            }
+        };
+
+        var job = await _jobs.StartAsync(LibraryMoveService.JobType, "MediaItem", movie.Id, CancellationToken.None);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _service.MoveAsync(movie.Id, target.Id, job, cancellation.Token));
+
+        Assert.False(File.Exists(Path.Combine(_targetRoot, "Dune (2021)", "Dune (2021).mkv")));
+        var oldAbsolute = Path.Combine(_sourceRoot, "Dune (2021)", "Dune (2021).mkv");
+        Assert.True(File.Exists(oldAbsolute));
+        Assert.Equal(payload.Length, new FileInfo(oldAbsolute).Length);
+    }
+
+    [Fact]
     public async Task Request_rejects_an_incompatible_target_type()
     {
         var source = await AddCatalogAsync(_sourceRoot, CatalogType.Movie, "Movies");
@@ -546,16 +577,22 @@ public sealed class LibraryMoveServiceTests : IDisposable
         }
     }
 
-    /// <summary>Records the progress values a job broadcasts so a test can assert on the sequence of ticks.</summary>
+    /// <summary>
+    /// Records the progress values a job broadcasts so a test can assert on the sequence of ticks, and lets
+    /// a test react to a tick (e.g. cancel mid-copy) via <see cref="OnJobProgress"/>.
+    /// </summary>
     private sealed class RecordingJobNotifier : IRealtimeNotifier
     {
         public List<int> JobProgressValues { get; } = [];
+
+        public Action<int>? OnJobProgress { get; set; }
 
         public Task JobChangedAsync(string eventName, JobEvent job, CancellationToken cancellationToken = default)
         {
             if (eventName == RealtimeEvents.JobProgress)
             {
                 JobProgressValues.Add(job.Progress);
+                OnJobProgress?.Invoke(job.Progress);
             }
 
             return Task.CompletedTask;
