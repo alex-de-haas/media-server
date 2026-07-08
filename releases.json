@@ -1,0 +1,11 @@
+{
+  "versions": [
+    {
+      "version": "0.12.0",
+      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/media-server/main/manifest.json"
+    }
+  ],
+  "tags": {
+    "stable": "0.12.0"
+  }
+}
