@@ -136,5 +136,22 @@
     }
   ],
   "telemetry": { "enabled": true, "sampleRatio": 0.1 },
-  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
+  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"],
+  "catalogMetadata": {
+    "publisher": {
+      "name": "Haas",
+      "url": "https://github.com/alex-de-haas",
+      "email": "a.zayats@outlook.com"
+    },
+    "category": "Media",
+    "tags": ["media", "streaming", "jellyfin", "movies", "tv"],
+    "icon": "assets/icon.svg",
+    "license": "AGPL-3.0-only",
+    "links": {
+      "website": "https://github.com/alex-de-haas/media-server",
+      "docs": "https://github.com/alex-de-haas/media-server/blob/main/docs/root.md"
+    },
+    "summary": "Self-hosted media server with torrent ingest, auto-organize, and a Jellyfin-compatible surface.",
+    "descriptionFile": "docs/store.md"
+  }
 }
