@@ -35,6 +35,26 @@ public static class IngestEndpoints
         group.MapPost("/{id:guid}/match", async (Guid id, MatchRequest request, IngestService service, CancellationToken cancellationToken) =>
             await service.MatchAsync(id, request, cancellationToken) ? Results.Accepted() : Results.NotFound());
 
+        // Pin a target identity before/while an item downloads so Identify resolves straight to it (never
+        // routing to review). Rejected with 409 once the item has already been identified — use library remap.
+        group.MapPost("/{id:guid}/pin", async (Guid id, PinIdentityRequest request, IngestService service, CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Provider) || string.IsNullOrWhiteSpace(request.ProviderId) || string.IsNullOrWhiteSpace(request.Title))
+            {
+                return Results.BadRequest(new { error = "provider, providerId and title are required to pin an identity." });
+            }
+
+            return await service.PinAsync(id, request, cancellationToken) switch
+            {
+                PinOutcome.NotFound => Results.NotFound(),
+                PinOutcome.AlreadyIdentified => Results.Conflict(new { error = "This item has already been identified — edit it from its library page instead." }),
+                _ => Results.Accepted(),
+            };
+        });
+
+        group.MapDelete("/{id:guid}/pin", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
+            await service.UnpinAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound());
+
         // Operator safety valve: remove a single pipeline tracking row (e.g. an orphaned/stuck entry).
         // Admin-only and destructive-by-intent, though it only deletes the ingest row itself.
         group.MapDelete("/{id:guid}", async (Guid id, IngestService service, CancellationToken cancellationToken) =>

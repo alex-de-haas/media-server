@@ -257,8 +257,8 @@ export function IngestReviewDialog({
 }
 
 // 2:3 poster thumbnail for a candidate, with a neutral placeholder when the provider returned no poster
-// (or the image fails to load), so every row keeps the same shape.
-function CandidatePoster({ url, title }: { url: string | null; title: string }) {
+// (or the image fails to load), so every row keeps the same shape. Shared with the pin dialog.
+export function CandidatePoster({ url, title }: { url: string | null; title: string }) {
   const [failed, setFailed] = useState(false);
   // Reset the load-error state if this instance is reused for a different candidate (React reconciliation),
   // otherwise a prior failure would wrongly keep showing the placeholder for the new poster.

@@ -25,6 +25,13 @@ public sealed record IngestItemResponse(
     string? DownloadName,
     string? MediaTitle,
     Guid? MediaItemId,
+    // Operator- or acquisition-pinned target identity (all null when nothing is pinned). Lets the UI show a
+    // "will be identified as …" badge and pre-fill the pin dialog. TargetKind is "Movie" or "Series".
+    string? TargetProvider,
+    string? TargetProviderId,
+    string? TargetKind,
+    string? TargetTitle,
+    int? TargetYear,
     string Stage,
     string Status,
     int AttemptCount,
@@ -51,6 +58,11 @@ public sealed record IngestItemResponse(
             downloadName,
             mediaTitle,
             item.MediaItemId,
+            item.TargetProvider,
+            item.TargetProviderId,
+            item.TargetKind?.ToString(),
+            item.TargetTitle,
+            item.TargetYear,
             item.Stage.ToString(),
             item.Status.ToString(),
             item.AttemptCount,
@@ -93,3 +105,19 @@ public sealed record MatchRequest(
 /// the existing pick-to-<c>/match</c> flow; the library filename still derives from the chosen metadata.
 /// </summary>
 public sealed record MetadataSearchRequest(string Title, int? Year, MediaKind? Kind);
+
+/// <summary>
+/// Pins a target identity on an ingest item before/while it downloads, so Identify resolves straight to it
+/// instead of parsing + searching (and never routes to review). <see cref="Kind"/> is <see cref="MediaKind.Movie"/>
+/// for a movie or <see cref="MediaKind.Series"/> for the owning series (per-file season/episode still come from
+/// the file name). Rejected once the item has already been identified — correct a published item via library remap.
+/// </summary>
+public sealed record PinIdentityRequest(string Provider, string ProviderId, MediaKind Kind, string Title, int? Year);
+
+/// <summary>Result of a <c>PinAsync</c> request, mapped to a status code by the endpoint.</summary>
+public enum PinOutcome
+{
+    NotFound,
+    AlreadyIdentified,
+    Pinned,
+}

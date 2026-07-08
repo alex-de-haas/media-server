@@ -126,12 +126,19 @@ public sealed class IdentifyStage(IdentifyService identifyService) : IPipelineSt
         }
 
         var outcome = await identifyService.IdentifyAsync(
-            context.Catalog, context.SourceFiles, context.Download?.Name, cancellationToken);
+            context.Catalog, context.SourceFiles, context.Download?.Name, PinnedTargetOf(context.Item), cancellationToken);
 
         return outcome.AllResolved
             ? StageResult.Done
             : new StageResult.NeedsReview(outcome.ReviewReason ?? "Manual match required.", outcome.Candidates);
     }
+
+    // The operator- or acquisition-pinned identity, or null when nothing is pinned (the default auto-identify
+    // path). The five Target* columns are set and cleared together, so provider + id + kind present them all.
+    private static TargetIdentity? PinnedTargetOf(IngestItem item) =>
+        item is { TargetProvider: { } provider, TargetProviderId: { } providerId, TargetKind: { } kind }
+            ? new TargetIdentity(provider, providerId, kind, item.TargetTitle ?? string.Empty, item.TargetYear)
+            : null;
 }
 
 /// <summary>Moves confirmed files into the canonical catalog layout (rename in place — no copy/hardlink).</summary>

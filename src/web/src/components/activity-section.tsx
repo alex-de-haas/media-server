@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Clock, Loader2, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Trash2, Wand2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Clock, Loader2, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
@@ -28,6 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { EmptyState, ErrorState, Loading } from "@/components/states";
 import { IngestStepper, type StepActivity } from "@/components/ingest-stepper";
 import { IngestReviewDialog } from "@/components/ingest-review-dialog";
+import { IngestPinDialog } from "@/components/ingest-pin-dialog";
 import { AddTorrentDialog } from "@/components/add-torrent-dialog";
 import { TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
 
@@ -429,6 +430,7 @@ function IngestRow({
   });
 
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Derived (no state write needed): pause/resume return before the engine flips the state, so show the
@@ -453,6 +455,13 @@ function IngestRow({
   };
 
   const category = categoryOf(item, download);
+  const isEpisodic = catalog?.type === "Series" || catalog?.type === "Anime";
+  const identifyDone = item.stagesCompleted.includes("identify");
+  // A pin can be set/changed until Identify has run — while downloading, waiting, or queued. A parked
+  // NeedsReview item uses the richer per-file "Resolve match" instead; a Failed/Done item is out of scope.
+  const canPin = category !== "done" && item.status !== "NeedsReview" && item.status !== "Failed" && !identifyDone;
+  // Show the "pinned" marker only while it still governs an upcoming identify (not after publish).
+  const pinned = item.targetTitle != null && item.status !== "Done" && !identifyDone;
   const title = ingestTitle(item);
   const age = formatTimeAgo(item.createdAt);
   const hint = stateHint(item);
@@ -487,6 +496,22 @@ function IngestRow({
             <p className="truncate font-medium" title={title}>
               {title}
             </p>
+            {pinned && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      tabIndex={0}
+                      aria-label="Pinned identity"
+                      className="text-primary shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <Target className="size-3.5" />
+                    </span>
+                  }
+                />
+                <TooltipContent>Pinned — Identify will match this exact {isEpisodic ? "series" : "title"}.</TooltipContent>
+              </Tooltip>
+            )}
             {category === "seeding" && <Badge variant="secondary">Seeding</Badge>}
             {warning && (
               <Tooltip>
@@ -535,6 +560,13 @@ function IngestRow({
           {category === "seeding" && download && (
             <IconAction label="Stop seeding" icon={<Square />} pending={stopSeeding.isPending} onClick={() => stopSeeding.mutate(download.id)} />
           )}
+          {canPin && (
+            <IconAction
+              label={item.targetTitle ? (isEpisodic ? "Change series" : "Change title") : isEpisodic ? "Set series" : "Set title"}
+              icon={<Target />}
+              onClick={() => setPinOpen(true)}
+            />
+          )}
           {item.status === "NeedsReview" && (
             <IconAction label="Resolve match" icon={<SearchCheck />} onClick={() => setReviewOpen(true)} />
           )}
@@ -558,6 +590,19 @@ function IngestRow({
           onOpenChange={setReviewOpen}
           onMatched={() => {
             setReviewOpen(false);
+            invalidate();
+          }}
+        />
+      )}
+
+      {canPin && (
+        <IngestPinDialog
+          item={item}
+          catalog={catalog}
+          open={pinOpen}
+          onOpenChange={setPinOpen}
+          onPinned={() => {
+            setPinOpen(false);
             invalidate();
           }}
         />
@@ -700,10 +745,12 @@ function displayPath(relativePath: string): string {
 
 // The card title is the parsed title the pipeline identifies by — release groups and per-file noise
 // (SxxEyy, codecs, the raw filename) stripped — so it reads the same whether or not the item has been
-// identified yet. Prefer the resolved media title, then the backend's parsed title, and only fall back to
-// the torrent/download name when no files have been parsed yet (e.g. a magnet still fetching metadata).
+// identified yet. Prefer the resolved media title, then an operator-pinned title (the correct name, even
+// before identify runs), then the backend's parsed title, and only fall back to the torrent/download name
+// when no files have been parsed yet (e.g. a magnet still fetching metadata).
 function ingestTitle(item: IngestItem): string {
   if (item.mediaTitle) return item.mediaTitle;
+  if (item.targetTitle) return item.targetTitle;
   const parsed = item.sourceFiles.find((file) => file.parsedTitle?.trim())?.parsedTitle?.trim();
   if (parsed) return parsed;
   if (item.downloadName) return item.downloadName;
