@@ -86,6 +86,33 @@ public sealed class IngestPinTests
     }
 
     [Fact]
+    public async Task Pinned_series_file_without_an_episode_number_routes_to_review_instead_of_inventing_one()
+    {
+        using var harness = new PipelineTestHarness();
+        SearchMustNotRun(harness);
+
+        // A series-catalog file with no SxxEyy parses to a series-level title (episode number null); it cannot
+        // be placed under a specific episode even with the show pinned.
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "Game.of.Thrones.Complete", "Game.of.Thrones.Complete/Game.of.Thrones.1080p.mkv");
+
+        using (var scope = harness.CreateScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+            Assert.Equal(PinOutcome.Pinned, await service.PinAsync(
+                ingestId, new PinIdentityRequest("tmdb", "1399", MediaKind.Series, "Game of Thrones", 2011), CancellationToken.None));
+        }
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var verify = harness.CreateScope();
+        var database = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.NeedsReview, (await database.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
+        // No bogus S01E00 episode (and no series) was invented.
+        Assert.False(await database.MediaItems.AnyAsync());
+    }
+
+    [Fact]
     public async Task Pinning_a_needs_review_item_resolves_it_to_publication_without_re_searching()
     {
         using var harness = new PipelineTestHarness();

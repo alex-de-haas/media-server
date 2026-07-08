@@ -46,12 +46,27 @@ public sealed class IdentifyService(
             MediaItem mediaItem;
             if (target is not null)
             {
-                // Pinned identity: resolve straight to the target, no provider search (and thus no review).
-                // A series pin is the owning show — the file's season/episode still come from its parsed name.
+                // Pinned identity: resolve straight to the target, no provider search (and thus no scoring).
                 var pinned = new MetadataCandidate(new ProviderRef(target.Provider, target.ProviderId), target.Title, target.Year, 1.0);
-                mediaItem = target.Kind == MediaKind.Series
-                    ? await ResolveEpisodeAsync(catalog, pinned, parsed, cancellationToken)
-                    : await ResolveMovieAsync(catalog, pinned, cancellationToken);
+                if (target.Kind == MediaKind.Series)
+                {
+                    // The show is pinned, but each file still needs its own episode number from the name. A file
+                    // with no SxxEyy (parses to a series-level title) can't be placed under a specific episode,
+                    // so route just that file to review rather than silently inventing S01E00.
+                    if (parsed.Episode is null)
+                    {
+                        sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                        sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+                        reviewReasons.Add($"Pinned to '{target.Title}', but no episode number was found in '{parsed.Title}'.");
+                        continue;
+                    }
+
+                    mediaItem = await ResolveEpisodeAsync(catalog, pinned, parsed, cancellationToken);
+                }
+                else
+                {
+                    mediaItem = await ResolveMovieAsync(catalog, pinned, cancellationToken);
+                }
             }
             else
             {

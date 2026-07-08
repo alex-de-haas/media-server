@@ -134,10 +134,11 @@ public sealed class IdentifyStage(IdentifyService identifyService) : IPipelineSt
     }
 
     // The operator- or acquisition-pinned identity, or null when nothing is pinned (the default auto-identify
-    // path). The five Target* columns are set and cleared together, so provider + id + kind present them all.
+    // path). Requires a non-empty title as well as provider/id/kind: a partial pin (e.g. a future ACQ flow that
+    // omits the title) falls back to normal identify rather than creating an empty-titled media item.
     private static TargetIdentity? PinnedTargetOf(IngestItem item) =>
-        item is { TargetProvider: { } provider, TargetProviderId: { } providerId, TargetKind: { } kind }
-            ? new TargetIdentity(provider, providerId, kind, item.TargetTitle ?? string.Empty, item.TargetYear)
+        item is { TargetProvider: { } provider, TargetProviderId: { } providerId, TargetKind: { } kind, TargetTitle: { Length: > 0 } title }
+            ? new TargetIdentity(provider, providerId, kind, title, item.TargetYear)
             : null;
 }
 

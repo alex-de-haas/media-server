@@ -1,3 +1,4 @@
+using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 
 namespace MediaServer.Api.Pipeline;
@@ -42,6 +43,12 @@ public static class IngestEndpoints
             if (string.IsNullOrWhiteSpace(request.Provider) || string.IsNullOrWhiteSpace(request.ProviderId) || string.IsNullOrWhiteSpace(request.Title))
             {
                 return Results.BadRequest(new { error = "provider, providerId and title are required to pin an identity." });
+            }
+
+            // A pin targets a movie or a whole series; Season/Episode/Video aren't valid item-level identities.
+            if (request.Kind is not (MediaKind.Movie or MediaKind.Series))
+            {
+                return Results.BadRequest(new { error = "kind must be Movie or Series." });
             }
 
             return await service.PinAsync(id, request, cancellationToken) switch
