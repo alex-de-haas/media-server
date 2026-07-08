@@ -48,6 +48,7 @@ public static class IngestEndpoints
             {
                 PinOutcome.NotFound => Results.NotFound(),
                 PinOutcome.AlreadyIdentified => Results.Conflict(new { error = "This item has already been identified — edit it from its library page instead." }),
+                PinOutcome.InvalidKind => Results.BadRequest(new { error = "The pinned kind must match the catalog type (Movie for a movie catalog, Series for a series/anime catalog)." }),
                 _ => Results.Accepted(),
             };
         });

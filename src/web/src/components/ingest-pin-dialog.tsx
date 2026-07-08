@@ -118,7 +118,11 @@ export function IngestPinDialog({
             className="flex flex-wrap items-end gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              if (searchTitle.trim()) search.mutate({ title: searchTitle.trim(), year: searchYear.trim() ? Number(searchYear) : null });
+              const trimmed = searchTitle.trim();
+              if (!trimmed) return;
+              // Number.parseInt yields NaN for empty/garbage input; send null rather than a NaN year.
+              const year = Number.parseInt(searchYear, 10);
+              search.mutate({ title: trimmed, year: Number.isNaN(year) ? null : year });
             }}
           >
             <Field className="flex-1">

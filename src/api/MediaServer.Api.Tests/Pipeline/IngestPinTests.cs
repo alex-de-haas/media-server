@@ -168,6 +168,24 @@ public sealed class IngestPinTests
     }
 
     [Fact]
+    public async Task Pinning_a_kind_that_mismatches_the_catalog_is_rejected()
+    {
+        using var harness = new PipelineTestHarness();
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "Some.Show.S01E01", "Some.Show.S01E01/Some.Show.S01E01.mkv");
+
+        using var scope = harness.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+
+        // A movie kind on a series catalog would create a Movie under a Series catalog — reject it.
+        var outcome = await service.PinAsync(
+            ingestId, new PinIdentityRequest("tmdb", "1", MediaKind.Movie, "Wrong Kind", 2011), CancellationToken.None);
+
+        Assert.Equal(PinOutcome.InvalidKind, outcome);
+    }
+
+    [Fact]
     public async Task Pin_and_unpin_report_a_missing_item()
     {
         using var harness = new PipelineTestHarness();

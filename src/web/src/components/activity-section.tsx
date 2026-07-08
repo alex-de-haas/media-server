@@ -457,9 +457,10 @@ function IngestRow({
   const category = categoryOf(item, download);
   const isEpisodic = catalog?.type === "Series" || catalog?.type === "Anime";
   const identifyDone = item.stagesCompleted.includes("identify");
-  // A pin can be set/changed until Identify has run — while downloading, waiting, or queued. A parked
-  // NeedsReview item uses the richer per-file "Resolve match" instead; a Failed/Done item is out of scope.
-  const canPin = category !== "done" && item.status !== "NeedsReview" && item.status !== "Failed" && !identifyDone;
+  // A pin can be set/changed until Identify has run — while downloading, waiting, queued, or parked at
+  // NeedsReview (pinning the whole series/movie resolves a multi-file pack in one step; the backend re-drives
+  // it). A Failed/Done item is out of scope. NeedsReview also keeps the richer per-file "Resolve match".
+  const canPin = category !== "done" && item.status !== "Failed" && !identifyDone;
   // Show the "pinned" marker only while it still governs an upcoming identify (not after publish).
   const pinned = item.targetTitle != null && item.status !== "Done" && !identifyDone;
   const title = ingestTitle(item);

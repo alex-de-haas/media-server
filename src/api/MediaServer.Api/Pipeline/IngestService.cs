@@ -174,6 +174,18 @@ public sealed class IngestService(
             return PinOutcome.AlreadyIdentified;
         }
 
+        // The pinned kind must match the catalog: Series for a series/anime catalog, Movie for a movie catalog.
+        // A mismatch would have IdentifyService create a movie in a series catalog (or vice versa).
+        var catalogType = await database.Catalogs
+            .Where(catalog => catalog.Id == item.CatalogId)
+            .Select(catalog => catalog.Type)
+            .FirstOrDefaultAsync(cancellationToken);
+        var expectedKind = catalogType is CatalogType.Series or CatalogType.Anime ? MediaKind.Series : MediaKind.Movie;
+        if (request.Kind != expectedKind)
+        {
+            return PinOutcome.InvalidKind;
+        }
+
         item.TargetProvider = request.Provider;
         item.TargetProviderId = request.ProviderId;
         item.TargetKind = request.Kind;

@@ -119,5 +119,6 @@ public enum PinOutcome
 {
     NotFound,
     AlreadyIdentified,
+    InvalidKind,
     Pinned,
 }
