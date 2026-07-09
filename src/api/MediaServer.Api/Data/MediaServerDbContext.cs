@@ -297,6 +297,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ingest.HasKey(entity => entity.Id);
         ingest.Property(entity => entity.Stage).HasConversion<int>();
         ingest.Property(entity => entity.Status).HasConversion<int>();
+        ingest.Property(entity => entity.TargetKind).HasConversion<int>();
         ingest.Property(entity => entity.StagesCompleted).HasJsonListConversion();
         ingest.Property(entity => entity.RowVersion).IsConcurrencyToken();
         ingest.HasIndex(entity => entity.Status);

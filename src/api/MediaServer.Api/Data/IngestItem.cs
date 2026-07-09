@@ -19,6 +19,27 @@ public sealed class IngestItem
     /// <summary>Set on publish.</summary>
     public Guid? MediaItemId { get; set; }
 
+    /// <summary>
+    /// Operator- or acquisition-pinned target identity. When set, Identify resolves the media directly from
+    /// this provider reference instead of parsing the file name and searching the metadata provider — so a
+    /// mis-parsed or not-yet-released title can be fixed before/while the download runs, and the item never
+    /// routes to <see cref="IngestStatus.NeedsReview"/>. <see cref="TargetKind"/> is <see cref="MediaKind.Movie"/>
+    /// for a movie or <see cref="MediaKind.Series"/> for the owning series (per-file season/episode still come
+    /// from the file name). The five columns are set and cleared together; all null is the default auto-identify
+    /// path. This is also the field a future acquisition/watchlist flow populates (identity known before the
+    /// download exists).
+    /// </summary>
+    public string? TargetProvider { get; set; }
+
+    public string? TargetProviderId { get; set; }
+
+    public MediaKind? TargetKind { get; set; }
+
+    /// <summary>Display/creation title for the pinned identity (used as the new media item's title).</summary>
+    public string? TargetTitle { get; set; }
+
+    public int? TargetYear { get; set; }
+
     public IngestStage Stage { get; set; }
 
     public IngestStatus Status { get; set; }

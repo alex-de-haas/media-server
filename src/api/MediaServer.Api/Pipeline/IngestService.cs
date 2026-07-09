@@ -153,6 +153,87 @@ public sealed class IngestService(
     }
 
     /// <summary>
+    /// Pins a target identity so Identify resolves the item straight to it (see <see cref="TargetIdentity"/>).
+    /// Works before the download finishes (the pin just persists; Identify honors it after the hand-off) and on
+    /// a parked <see cref="IngestStatus.NeedsReview"/> item (re-driven so Identify re-runs with the pin).
+    /// Rejected once Identify has completed — the files are matched and organized by then, so a change is a
+    /// library remap, not a pin.
+    /// </summary>
+    public async Task<PinOutcome> PinAsync(Guid id, PinIdentityRequest request, CancellationToken cancellationToken)
+    {
+        var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+        if (item is null)
+        {
+            return PinOutcome.NotFound;
+        }
+
+        // "identify" lands in StagesCompleted only on a successful match (a NeedsReview/Deferred park does not
+        // complete the stage), so its presence is the exact boundary past which pinning is no longer valid.
+        if (item.StagesCompleted.Contains("identify"))
+        {
+            return PinOutcome.AlreadyIdentified;
+        }
+
+        // The pinned kind must match the catalog: Series for a series/anime catalog, Movie for a movie catalog.
+        // A mismatch would have IdentifyService create a movie in a series catalog (or vice versa).
+        var catalogType = await database.Catalogs
+            .Where(catalog => catalog.Id == item.CatalogId)
+            .Select(catalog => catalog.Type)
+            .FirstOrDefaultAsync(cancellationToken);
+        var expectedKind = catalogType is CatalogType.Series or CatalogType.Anime ? MediaKind.Series : MediaKind.Movie;
+        if (request.Kind != expectedKind)
+        {
+            return PinOutcome.InvalidKind;
+        }
+
+        item.TargetProvider = request.Provider;
+        item.TargetProviderId = request.ProviderId;
+        item.TargetKind = request.Kind;
+        item.TargetTitle = request.Title;
+        item.TargetYear = request.Year;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // A parked item resolves the moment it's pinned: flip it back to Pending and re-enqueue so Identify
+        // re-runs with the pin. While it's still downloading nothing is parked yet, so just persist the pin.
+        var reDrive = item.Status == IngestStatus.NeedsReview;
+        if (reDrive)
+        {
+            item.Status = IngestStatus.Pending;
+            item.NextAttemptAt = null;
+            item.ReviewCandidates = null;
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
+
+        if (reDrive)
+        {
+            queue.Enqueue(item.Id);
+        }
+
+        return PinOutcome.Pinned;
+    }
+
+    /// <summary>Clears a pinned identity, restoring the default parse-and-search identify path. No re-drive —
+    /// clearing only matters for a not-yet-identified item, which Identify will run normally next time.</summary>
+    public async Task<bool> UnpinAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+        if (item is null)
+        {
+            return false;
+        }
+
+        item.TargetProvider = null;
+        item.TargetProviderId = null;
+        item.TargetKind = null;
+        item.TargetTitle = null;
+        item.TargetYear = null;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
     /// Removes an ingest. The operator is never asked about physical files — deletion is automatic by where
     /// the file sits: an in-flight item delegates to download removal (stops the torrent, clears its
     /// <c>.incoming/</c> staging and the engine's resume cache, drops the download + this ingest); a

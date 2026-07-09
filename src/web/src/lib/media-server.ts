@@ -131,6 +131,13 @@ export interface IngestItem {
   downloadName: string | null;
   mediaTitle: string | null;
   mediaItemId: string | null;
+  // Operator-pinned target identity (null when nothing is pinned): Identify resolves straight to it instead
+  // of parsing + searching. targetKind is "Movie" or "Series".
+  targetProvider: string | null;
+  targetProviderId: string | null;
+  targetKind: string | null;
+  targetTitle: string | null;
+  targetYear: number | null;
   stage: string;
   status: string;
   attemptCount: number;
@@ -158,6 +165,16 @@ export interface MetadataSearchInput {
   title: string;
   year?: number | null;
   kind?: "Movie" | "Series" | "Season" | "Episode" | "Video" | null;
+}
+
+// Pins a target identity on an ingest item before/while it downloads so Identify resolves straight to it.
+// kind is the movie's own kind, or the owning series (per-file season/episode still come from the file name).
+export interface PinInput {
+  provider: string;
+  providerId: string;
+  kind: "Movie" | "Series";
+  title: string;
+  year?: number | null;
 }
 
 // Operator-editable application settings (persisted server-side, distinct from manifest config).
@@ -552,6 +569,9 @@ export const mediaServer = {
   listIngest: () => apiJson<IngestItem[]>(`${BASE}/ingest`),
   retryIngest: (id: string) => send(`/ingest/${id}/retry`, "POST"),
   matchIngest: (id: string, input: MatchInput) => send(`/ingest/${id}/match`, "POST", input),
+  // Pin (or re-pin) the target identity; clear it back to the auto-identify path with unpinIngest.
+  pinIngest: (id: string, input: PinInput) => send(`/ingest/${id}/pin`, "POST", input),
+  unpinIngest: (id: string) => send(`/ingest/${id}/pin`, "DELETE"),
   searchIngest: (id: string, input: MetadataSearchInput) =>
     apiJson<MetadataCandidate[]>(`${BASE}/ingest/${id}/search`, {
       method: "POST",

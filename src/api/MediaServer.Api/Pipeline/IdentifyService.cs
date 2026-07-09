@@ -9,15 +9,25 @@ namespace MediaServer.Api.Pipeline;
 public sealed record IdentifyOutcome(bool AllResolved, string? ReviewReason, IReadOnlyList<MetadataCandidate> Candidates);
 
 /// <summary>
+/// A pinned identity for an ingest item: resolve its files against this provider reference directly, skipping
+/// the name-parse + provider-search + confidence-scoring path (and therefore never routing to review).
+/// <see cref="Kind"/> is <see cref="MediaKind.Movie"/> or <see cref="MediaKind.Series"/> — for a series the pin
+/// is the owning show, and each file's season/episode still come from its parsed name.
+/// </summary>
+public sealed record TargetIdentity(string Provider, string ProviderId, MediaKind Kind, string Title, int? Year);
+
+/// <summary>
 /// Maps playable source files to movies or episodes: parses the name, searches the provider, scores
 /// candidates, and on a high-confidence hit creates/reuses the canonical <see cref="MediaItem"/>
-/// hierarchy and assigns the file. Idempotent — re-identifying reuses existing items by identity.
+/// hierarchy and assigns the file. When the item carries a pinned <see cref="TargetIdentity"/> the search
+/// and scoring are skipped — the file is resolved straight to that identity. Idempotent — re-identifying
+/// reuses existing items by identity.
 /// </summary>
 public sealed class IdentifyService(
     MediaServerDbContext database, INameParser parser, IMetadataProvider provider, AppSettingsService appSettings, ILogger<IdentifyService> logger)
 {
     public async Task<IdentifyOutcome> IdentifyAsync(
-        Catalog catalog, IReadOnlyList<SourceFile> sourceFiles, string? fallbackName, CancellationToken cancellationToken)
+        Catalog catalog, IReadOnlyList<SourceFile> sourceFiles, string? fallbackName, TargetIdentity? target, CancellationToken cancellationToken)
     {
         var unresolved = new List<MetadataCandidate>();
         var reviewReasons = new List<string>();
@@ -32,23 +42,52 @@ public sealed class IdentifyService(
 
             var name = DeriveName(sourceFile.RelativePath, fallbackName);
             var parsed = parser.Parse(name, catalog.Type, releaseGroups);
-            var query = new MediaQuery(parsed.Kind, parsed.Title, parsed.Year, parsed.Season, parsed.Episode);
 
-            var candidates = await provider.SearchAsync(query, cancellationToken);
-            var best = candidates.FirstOrDefault();
-
-            if (best is null || best.Score < TitleScoring.AutoMatchThreshold)
+            MediaItem mediaItem;
+            if (target is not null)
             {
-                sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
-                sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
-                unresolved.AddRange(candidates.Take(5));
-                reviewReasons.Add($"Low-confidence match for '{parsed.Title}'.");
-                continue;
-            }
+                // Pinned identity: resolve straight to the target, no provider search (and thus no scoring).
+                var pinned = new MetadataCandidate(new ProviderRef(target.Provider, target.ProviderId), target.Title, target.Year, 1.0);
+                if (target.Kind == MediaKind.Series)
+                {
+                    // The show is pinned, but each file still needs its own episode number from the name. A file
+                    // with no SxxEyy (parses to a series-level title) can't be placed under a specific episode,
+                    // so route just that file to review rather than silently inventing S01E00.
+                    if (parsed.Episode is null)
+                    {
+                        sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                        sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+                        reviewReasons.Add($"Pinned to '{target.Title}', but no episode number was found in '{parsed.Title}'.");
+                        continue;
+                    }
 
-            var mediaItem = parsed.Kind == MediaKind.Episode
-                ? await ResolveEpisodeAsync(catalog, best, parsed, cancellationToken)
-                : await ResolveMovieAsync(catalog, best, cancellationToken);
+                    mediaItem = await ResolveEpisodeAsync(catalog, pinned, parsed, cancellationToken);
+                }
+                else
+                {
+                    mediaItem = await ResolveMovieAsync(catalog, pinned, cancellationToken);
+                }
+            }
+            else
+            {
+                var query = new MediaQuery(parsed.Kind, parsed.Title, parsed.Year, parsed.Season, parsed.Episode);
+
+                var candidates = await provider.SearchAsync(query, cancellationToken);
+                var best = candidates.FirstOrDefault();
+
+                if (best is null || best.Score < TitleScoring.AutoMatchThreshold)
+                {
+                    sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                    sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+                    unresolved.AddRange(candidates.Take(5));
+                    reviewReasons.Add($"Low-confidence match for '{parsed.Title}'.");
+                    continue;
+                }
+
+                mediaItem = parsed.Kind == MediaKind.Episode
+                    ? await ResolveEpisodeAsync(catalog, best, parsed, cancellationToken)
+                    : await ResolveMovieAsync(catalog, best, cancellationToken);
+            }
 
             sourceFile.MediaItemId = mediaItem.Id;
             sourceFile.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;

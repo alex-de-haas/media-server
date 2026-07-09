@@ -126,12 +126,20 @@ public sealed class IdentifyStage(IdentifyService identifyService) : IPipelineSt
         }
 
         var outcome = await identifyService.IdentifyAsync(
-            context.Catalog, context.SourceFiles, context.Download?.Name, cancellationToken);
+            context.Catalog, context.SourceFiles, context.Download?.Name, PinnedTargetOf(context.Item), cancellationToken);
 
         return outcome.AllResolved
             ? StageResult.Done
             : new StageResult.NeedsReview(outcome.ReviewReason ?? "Manual match required.", outcome.Candidates);
     }
+
+    // The operator- or acquisition-pinned identity, or null when nothing is pinned (the default auto-identify
+    // path). Requires a non-empty title as well as provider/id/kind: a partial pin (e.g. a future ACQ flow that
+    // omits the title) falls back to normal identify rather than creating an empty-titled media item.
+    private static TargetIdentity? PinnedTargetOf(IngestItem item) =>
+        item is { TargetProvider: { } provider, TargetProviderId: { } providerId, TargetKind: { } kind, TargetTitle: { Length: > 0 } title }
+            ? new TargetIdentity(provider, providerId, kind, title, item.TargetYear)
+            : null;
 }
 
 /// <summary>Moves confirmed files into the canonical catalog layout (rename in place — no copy/hardlink).</summary>
