@@ -109,18 +109,7 @@ export function ActivitySection() {
 
   const downloadFor = (item: IngestItem) => (item.downloadId ? downloadsById.get(item.downloadId) : undefined);
 
-  // "Delete all" on the Done tab: drops every published tracking row at once; library files stay put.
-  const clearDone = useMutation({
-    mutationFn: mediaServer.deleteDoneIngest,
-    onSuccess: (removed) => {
-      queryClient.invalidateQueries({ queryKey: ["ingest"] });
-      queryClient.invalidateQueries({ queryKey: ["downloads"] });
-      toast.success(removed > 0 ? `Removed ${removed} item${removed === 1 ? "" : "s"}` : "Nothing to remove");
-    },
-    onError: (error) => toast.error("Couldn’t delete completed items", { description: errorMessage(error) }),
-  });
-
-  // Ingest tallies only — drives the "Delete all" gate on the Done tab (which deletes ingest rows).
+  // Ingest tallies — the done count feeds the "Delete all" gate/dialog alongside finished conversions.
   const counts = useMemo(() => {
     const tally: Record<TabKey, number> = { active: 0, done: 0 };
     for (const item of ingest.data ?? []) {
@@ -133,11 +122,36 @@ export function ActivitySection() {
   const activeTranscodes = useMemo(() => (transcodes.data ?? []).filter(isTranscodeActive), [transcodes.data]);
   const doneTranscodes = useMemo(() => (transcodes.data ?? []).filter((job) => !isTranscodeActive(job)), [transcodes.data]);
 
+  // Everything the Done tab shows: published tracking rows (ingest) plus finished conversions.
+  const doneCount = counts.done + doneTranscodes.length;
+
+  // "Delete all" on the Done tab clears both of those groups in one action — dropping only the ingest rows
+  // (as it used to) left every finished conversion card behind. The ingest rows go in a single bulk call;
+  // each finished conversion is dismissed like its per-card trash button (the encoded file already lives in
+  // the library and is left untouched). Library files always stay put.
+  const clearDone = useMutation({
+    mutationFn: async () => {
+      const conversions = doneTranscodes;
+      const [removedIngest] = await Promise.all([
+        counts.done > 0 ? mediaServer.deleteDoneIngest() : Promise.resolve(0),
+        Promise.all(conversions.map((job) => mediaServer.removeTranscodeJob(job.id))),
+      ]);
+      return removedIngest + conversions.length;
+    },
+    onSuccess: (removed) => {
+      queryClient.invalidateQueries({ queryKey: ["ingest"] });
+      queryClient.invalidateQueries({ queryKey: ["downloads"] });
+      queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
+      toast.success(removed > 0 ? `Removed ${removed} item${removed === 1 ? "" : "s"}` : "Nothing to remove");
+    },
+    onError: (error) => toast.error("Couldn’t delete completed items", { description: errorMessage(error) }),
+  });
+
   // Tab badges cover every category the tab shows, not just ingest: Active also holds moves + running
   // conversions; Done also holds finished conversions.
   const badgeCounts: Record<TabKey, number> = {
     active: counts.active + moveList.length + activeTranscodes.length,
-    done: counts.done + doneTranscodes.length,
+    done: doneCount,
   };
 
   // The published-library history (ingest) filtered to one tab, with the download group header when other
@@ -190,7 +204,7 @@ export function ActivitySection() {
                 </TabsTrigger>
               ))}
             </TabsList>
-            {tab === "done" && role === "admin" && counts.done > 0 && (
+            {tab === "done" && role === "admin" && doneCount > 0 && (
               <Button
                 type="button"
                 variant="ghost"
@@ -242,7 +256,7 @@ export function ActivitySection() {
       <ClearDoneDialog
         open={clearOpen}
         onOpenChange={setClearOpen}
-        count={counts.done}
+        count={doneCount}
         onConfirm={() => {
           clearDone.mutate();
           setClearOpen(false);
@@ -844,7 +858,8 @@ function ClearDoneDialog({
             <span className="text-foreground font-medium">
               {count} completed item{count === 1 ? "" : "s"}
             </span>{" "}
-            from Activity. Published items stay in your library — this only clears the Done list.
+            from Activity, including finished conversions. Published items and converted versions stay in your
+            library — this only clears the Done list.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
