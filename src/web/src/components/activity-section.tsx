@@ -126,25 +126,36 @@ export function ActivitySection() {
   const doneCount = counts.done + doneTranscodes.length;
 
   // "Delete all" on the Done tab clears both of those groups in one action — dropping only the ingest rows
-  // (as it used to) left every finished conversion card behind. The ingest rows go in a single bulk call;
-  // each finished conversion is dismissed like its per-card trash button (the encoded file already lives in
-  // the library and is left untouched). Library files always stay put.
+  // (as it used to) left every finished conversion card behind. The ingest bulk delete always fires (even if
+  // the ingest list hasn't loaded, so completed rows can't be stranded server-side); each finished conversion
+  // is dismissed like its per-card trash button (the encoded file already lives in the library and is left
+  // untouched). A dismiss that fails is tolerated per-job so the rest still go through, and the caches are
+  // invalidated in onSettled so the UI reconciles whether the action succeeds, partly fails, or errors.
+  // Library files always stay put.
   const clearDone = useMutation({
     mutationFn: async () => {
-      const conversions = doneTranscodes;
-      const [removedIngest] = await Promise.all([
-        counts.done > 0 ? mediaServer.deleteDoneIngest() : Promise.resolve(0),
-        Promise.all(conversions.map((job) => mediaServer.removeTranscodeJob(job.id))),
+      const [removedIngest, dismissed] = await Promise.all([
+        mediaServer.deleteDoneIngest(),
+        Promise.all(
+          doneTranscodes.map((job) => mediaServer.removeTranscodeJob(job.id).then(() => true).catch(() => false)),
+        ),
       ]);
-      return removedIngest + conversions.length;
+      const removedConversions = dismissed.filter(Boolean).length;
+      return { removed: removedIngest + removedConversions, failed: dismissed.length - removedConversions };
     },
-    onSuccess: (removed) => {
-      queryClient.invalidateQueries({ queryKey: ["ingest"] });
-      queryClient.invalidateQueries({ queryKey: ["downloads"] });
-      queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
+    onSuccess: ({ removed, failed }) => {
+      if (failed > 0) {
+        toast.error(`Removed ${removed} item${removed === 1 ? "" : "s"}, but ${failed} conversion${failed === 1 ? "" : "s"} couldn’t be dismissed`);
+        return;
+      }
       toast.success(removed > 0 ? `Removed ${removed} item${removed === 1 ? "" : "s"}` : "Nothing to remove");
     },
     onError: (error) => toast.error("Couldn’t delete completed items", { description: errorMessage(error) }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["ingest"] });
+      queryClient.invalidateQueries({ queryKey: ["downloads"] });
+      queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
+    },
   });
 
   // Tab badges cover every category the tab shows, not just ingest: Active also holds moves + running
