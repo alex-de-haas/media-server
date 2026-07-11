@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "app-feeds.0.1",
+  "appId": "com.haas.media-server",
+  "feeds": [
+    {
+      "id": "main",
+      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/media-server/main/manifest.json",
+      "default": true
+    }
+  ]
+}
