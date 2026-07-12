@@ -219,6 +219,11 @@ export interface LibraryItem {
   userData: UserItemData | null;
 }
 
+export interface ListLibraryOptions {
+  kind?: "Movie" | "Series";
+  catalogId?: string;
+}
+
 // A movie franchise/collection tile for the Collections grid (TMDb belongs_to_collection).
 export interface CollectionSummary {
   id: string;
@@ -590,7 +595,14 @@ export const mediaServer = {
   deleteDoneIngest: async () =>
     (await apiJson<{ removed: number }>(`${BASE}/ingest/done`, { method: "DELETE" })).removed,
 
-  listLibrary: () => apiJson<LibraryItem[]>(`${BASE}/library`),
+  listLibrary: ({ kind, catalogId }: ListLibraryOptions = {}) => {
+    const query = new URLSearchParams();
+    if (kind) query.set("kind", kind);
+    if (catalogId) query.set("catalogId", catalogId);
+    const queryString = query.toString();
+    const suffix = queryString ? `?${queryString}` : "";
+    return apiJson<LibraryItem[]>(`${BASE}/library${suffix}`);
+  },
   getLibraryDetail: (id: string) => apiJson<LibraryDetail>(`${BASE}/library/${id}`),
   listEpisodes: (seriesId: string, seasonId?: string) =>
     apiJson<Episode[]>(`${BASE}/library/${seriesId}/episodes${seasonId ? `?seasonId=${seasonId}` : ""}`),

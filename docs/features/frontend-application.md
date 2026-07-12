@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-24
+Updated: 2026-07-12
 
 ## Description
 
@@ -23,13 +23,17 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
 - **Home** (`/`) — overview rails built from playback state: Continue Watching
   (resume), Next Up, and Recently Added, plus an admin-only ops strip (active
   downloads, items needing review, catalog warnings).
-- **Movies / Series** (`/movies`, `/series`) — poster grids (infinite scroll) with
-  detail pages (`/movies/[id]`, `/series/[id]`): backdrop hero, overview,
-  watched/favorite toggles, and detail tabs. Movie detail tabs show Cast, Media
-  (resolution/codec/audio), and Tags. Series detail tabs show Cast, Episodes
-  grouped by season, and Tags. Detail admin controls support metadata refresh,
-  remap where applicable, and deletion. **Playback is not in-browser** — Play
-  deep-links to an Infuse/Jellyfin client.
+- **Movies / Series** (`/movies`, `/series`) — poster grids with an optional
+  catalog selector when more than one applicable catalog exists. The selection
+  is stored in `?catalog=<id>`, applied by the backend, and preserved through
+  detail navigation and refresh. Movies offers `Movie` catalogs; Series offers
+  `Series` and `Anime` catalogs. Offline catalogs remain selectable and are
+  labelled accordingly. Detail pages (`/movies/[id]`, `/series/[id]`) provide a
+  backdrop hero, overview, watched/favorite toggles, and detail tabs. Movie
+  detail tabs show Cast, Media (resolution/codec/audio), and Tags. Series detail
+  tabs show Cast, Episodes grouped by season, and Tags. Detail admin controls
+  support metadata refresh, remap where applicable, and deletion. **Playback is
+  not in-browser** — Play deep-links to an Infuse/Jellyfin client.
 - **Downloads** (`/downloads`) — torrent list with live progress, ratio, and
   seeding status; add (with catalog + `keepSeeding`, showing each catalog's free
   space and refusing oversized `.torrent` downloads), pause, resume, stop seeding,
@@ -38,7 +42,8 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   including the review queue for low-confidence matches, source-file assignments,
   and manual match/remap override.
 - **Catalogs** (`/catalogs`, admin) — configured catalogs (with free space and
-  offline state), scan triggers, browse `library/`.
+  offline state), scan and metadata-refresh triggers, a direct `Browse media`
+  action, and catalog removal.
 - **Settings** (`/settings`) — admin app-owned settings (TMDb key, supported
   languages, server name, torrent limits) and, **per signed-in user**, Infuse
   access credentials (username + PIN).
@@ -88,8 +93,9 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
 - Background task notifications.
 - Admin-only configuration surfaces for catalogs, providers, supported languages,
   and Jellyfin access credentials.
-- Library grids use infinite-scroll (scroll-based) pagination so large catalogs
-  stay responsive.
+- Library grids request only their media kind and optional catalog from the
+  backend. They currently load the complete matching top-level result; pagination
+  and infinite scrolling are not implemented.
 
 The UI does not expose a general file manager in v1. It exposes media-oriented
 actions: add torrent, confirm/remap source files, stop seeding, remove downloads,
@@ -107,3 +113,10 @@ coverage:
 - Routing for primary pages, including refresh and direct navigation.
 - Error, empty, and loading states.
 - Embedded routing and asset loading through the Hosty Shell iframe.
+- Catalog filter routing, applicable catalog types, offline labels, and
+  preservation through detail navigation.
+
+## Links
+
+- [Catalog library browsing idea](../ideas/catalog-library-browsing.md)
+- [Catalogs](catalogs.md)

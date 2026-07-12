@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderSearch, MoreVertical, RotateCw, Trash2 } from "lucide-react";
+import { Clapperboard, FolderSearch, MoreVertical, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type CatalogRefreshJob, type CatalogVolumeUsage } from "@/lib/media-server";
+import { catalogBrowseHref } from "@/lib/catalog-navigation";
 import { formatBytes } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
@@ -249,6 +251,10 @@ function CatalogRow({
               }
             />
             <DropdownMenuContent>
+              <DropdownMenuItem render={<Link href={catalogBrowseHref(catalog)} />}>
+                <Clapperboard />
+                Browse media
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => scan.mutate()} disabled={scan.isPending || !catalog.online}>
                 <FolderSearch />
                 {scan.isPending ? "Scanning…" : "Scan for media"}

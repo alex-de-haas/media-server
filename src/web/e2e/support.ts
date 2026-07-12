@@ -50,14 +50,21 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
   );
 
   await page.route("**/api/proxy/api/**", async (route) => {
-    const path = new URL(route.request().url()).pathname.replace("/api/proxy/api", "");
+    const requestUrl = new URL(route.request().url());
+    const path = requestUrl.pathname.replace("/api/proxy/api", "");
     const method = route.request().method();
 
     if (path === "/library") {
       if (mock.library && !Array.isArray(mock.library)) {
         return route.fulfill({ status: mock.library.status, json: { error: "boom" } });
       }
-      return route.fulfill({ json: mock.library ?? [] });
+      const kind = requestUrl.searchParams.get("kind");
+      const catalogId = requestUrl.searchParams.get("catalogId");
+      const items = (mock.library ?? []).filter((item) => {
+        const record = item as Record<string, unknown>;
+        return (!kind || record.kind === kind) && (!catalogId || record.catalogId === catalogId);
+      });
+      return route.fulfill({ json: items });
     }
     if (path === "/library/recent") return route.fulfill({ json: mock.recent ?? [] });
     if (path === "/library/resume") return route.fulfill({ json: mock.resume ?? [] });
@@ -105,6 +112,25 @@ export const aSeries = (id: string, title: string) => ({
   year: 2022,
   posterUrl: null,
   userData: null,
+});
+
+export const aCatalog = (
+  id: string,
+  name: string,
+  type: "Movie" | "Series" | "Anime",
+  online = true,
+) => ({
+  id,
+  name,
+  type,
+  root: `/media/${id}`,
+  namingTemplate: "{Title} ({Year})",
+  defaultKeepSeeding: false,
+  metadataLanguage: null,
+  freeBytes: 1_000_000,
+  online,
+  createdAt: "2026-07-12T00:00:00Z",
+  updatedAt: "2026-07-12T00:00:00Z",
 });
 
 export const movieDetail = (id: string, title: string, tmdbId: string | null = null) => ({

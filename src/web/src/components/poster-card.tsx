@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
 import type { UserItemData } from "@/lib/media-server";
+import { withCatalog } from "@/lib/catalog-navigation";
 
 /** Detail-page route for a top-level item. Movies and series are separate tabs. */
-export function detailHref(kind: string, id: string): string {
-  return kind === "Series" ? `/series/${id}` : `/movies/${id}`;
+export function detailHref(kind: string, id: string, catalogId?: string): string {
+  return withCatalog(kind === "Series" ? `/series/${id}` : `/movies/${id}`, catalogId);
 }
 
 // The person page is keyed by the provider identity its cast members carry, but the route is a single
