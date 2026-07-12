@@ -126,6 +126,9 @@ Forward-looking designs and epics, kept separate from the roadmap specs:
   standalone, VPN-isolated Hosty app (implemented).
 - [Transcode engine app](ideas/transcode-engine-app.md) — ffmpeg/VAAPI batch
   conversion as a standalone Hosty app (implemented, movies-only v1).
+- [Catalog library browsing](ideas/catalog-library-browsing.md) — filter Movies
+  and Series by their configured catalog without mixing browsing with catalog
+  administration.
 
 ## Feature documentation
 

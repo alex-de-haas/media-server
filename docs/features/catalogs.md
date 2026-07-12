@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-12
 
 ## Description
 
@@ -89,6 +89,21 @@ for the pre-download space check (see
   canonical provider identity, not on physical path or database row id. See
   [Jellyfin compatibility](jellyfin-compatibility.md).
 
+## Browser UI Mapping
+
+- Movies and Series expose catalogs as an optional filter rather than a separate
+  catalog gallery. The filter is shown only when more than one catalog applies to
+  the current media kind.
+- The Movies page offers `movie` catalogs. The Series page offers both `series`
+  and `anime` catalogs because both publish top-level series items.
+- The selected catalog is stored in the `catalog` URL query parameter, applied by
+  the internal library API, and preserved when opening a detail page and returning
+  to the grid.
+- Offline catalogs remain selectable and are labelled `Offline`; their published
+  database items remain browsable even while file-backed actions may be unavailable.
+- The admin Catalogs page keeps its configuration role and provides a
+  `Browse media` action that opens the matching filtered Movies or Series page.
+
 ## Item Model
 
 ```jsonc
@@ -158,3 +173,8 @@ Backend tests should use xUnit and Imposter. Required coverage:
 - Filename parsing for movies, episodes, and anime absolute numbering.
 - Stable public ID assignment from canonical provider identity across rescans.
 - Catalog-to-Jellyfin `CollectionFolder` mapping.
+
+## Links
+
+- [Catalog library browsing idea](../ideas/catalog-library-browsing.md)
+- [Frontend application](frontend-application.md)
