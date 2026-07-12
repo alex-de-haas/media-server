@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useTransition } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { mediaServer } from "@/lib/media-server";
 import { catalogAppliesToKind, withCatalog, type LibraryKind } from "@/lib/catalog-navigation";
@@ -19,6 +19,9 @@ const ALL_CATALOGS = "__all_catalogs__";
 export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: LibraryKind; catalogId?: string }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const search = searchParams.toString();
+  const currentHref = search ? `${pathname}?${search}` : pathname;
   const [navigationPending, startNavigation] = useTransition();
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
   const applicableCatalogs = (catalogs.data ?? []).filter((catalog) => catalogAppliesToKind(catalog.type, kind));
@@ -29,9 +32,9 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
   // proves that context invalid, normalize the route to the unfiltered page instead of leaving an empty trap.
   useEffect(() => {
     if (catalogId && catalogs.isSuccess && !catalogIsValid) {
-      router.replace(pathname, { scroll: false });
+      router.replace(withCatalog(currentHref, undefined), { scroll: false });
     }
-  }, [catalogId, catalogIsValid, catalogs.isSuccess, pathname, router]);
+  }, [catalogId, catalogIsValid, catalogs.isSuccess, currentHref, router]);
 
   // While catalogs are loading, keep honoring the URL and let the API validate the id. Once resolved, an
   // invalid id falls back to All catalogs at the same time as the URL normalization above.
@@ -56,7 +59,7 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
 
   const changeCatalog = (value: string | null) => {
     const nextCatalogId = value && value !== ALL_CATALOGS ? value : undefined;
-    startNavigation(() => router.push(withCatalog(pathname, nextCatalogId), { scroll: false }));
+    startNavigation(() => router.push(withCatalog(currentHref, nextCatalogId), { scroll: false }));
   };
 
   return (

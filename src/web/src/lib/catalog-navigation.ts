@@ -9,12 +9,21 @@ export function catalogSearchParam(value: string | string[] | undefined): string
 
 /** Adds the catalog browsing context to a list or detail route. */
 export function withCatalog(href: string, catalogId: string | undefined): string {
-  if (!catalogId) {
-    return href;
+  const hashIndex = href.indexOf("#");
+  const hash = hashIndex >= 0 ? href.slice(hashIndex) : "";
+  const pathAndSearch = hashIndex >= 0 ? href.slice(0, hashIndex) : href;
+  const searchIndex = pathAndSearch.indexOf("?");
+  const path = searchIndex >= 0 ? pathAndSearch.slice(0, searchIndex) : pathAndSearch;
+  const params = new URLSearchParams(searchIndex >= 0 ? pathAndSearch.slice(searchIndex + 1) : "");
+
+  if (catalogId) {
+    params.set("catalog", catalogId);
+  } else {
+    params.delete("catalog");
   }
 
-  const separator = href.includes("?") ? "&" : "?";
-  return `${href}${separator}catalog=${encodeURIComponent(catalogId)}`;
+  const queryString = params.toString();
+  return `${path}${queryString ? `?${queryString}` : ""}${hash}`;
 }
 
 /** Catalog types that can contribute top-level items to a media-kind page. */

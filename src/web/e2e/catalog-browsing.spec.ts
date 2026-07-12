@@ -20,7 +20,7 @@ test("filters movies by catalog and preserves the filter through detail navigati
     detail: { m2: { ...movieDetail("m2", "Dune"), catalogId: MOVIES_4K } },
   });
 
-  await page.goto("/movies");
+  await page.goto("/movies?search=desert&page=2");
   await expect(page.getByRole("link", { name: /Arrival/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Dune/ })).toBeVisible();
 
@@ -34,7 +34,7 @@ test("filters movies by catalog and preserves the filter through detail navigati
   await page.getByRole("option", { name: "Movies 4K" }).click();
   await filteredRequest;
 
-  await expect(page).toHaveURL(`/movies?catalog=${MOVIES_4K}`);
+  await expect(page).toHaveURL(`/movies?search=desert&page=2&catalog=${MOVIES_4K}`);
   await expect(page.getByRole("combobox", { name: "Filter movies by catalog" })).toContainText("Movies 4K");
   await expect(page.getByRole("link", { name: /Dune/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Arrival/ })).toHaveCount(0);
@@ -82,6 +82,21 @@ test("hides the catalog filter when there is only one applicable catalog", async
   await page.goto("/movies");
   await expect(page.getByRole("link", { name: /Arrival/ })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Filter movies by catalog" })).toHaveCount(0);
+});
+
+test("removes only an invalid catalog from the current URL", async ({ page }) => {
+  await setupApp(page, {
+    catalogs: [
+      aCatalog(MOVIES_HD, "Movies HD", "Movie"),
+      aCatalog(MOVIES_4K, "Movies 4K", "Movie"),
+    ],
+    library: [{ ...aMovie("m1", "Arrival"), catalogId: MOVIES_HD }],
+  });
+
+  await page.goto("/movies?search=arrival&catalog=missing&page=2");
+
+  await expect(page).toHaveURL("/movies?search=arrival&page=2");
+  await expect(page.getByRole("link", { name: /Arrival/ })).toBeVisible();
 });
 
 test("admin opens a catalog directly in its matching media page", async ({ page }) => {

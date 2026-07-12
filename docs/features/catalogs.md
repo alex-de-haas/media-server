@@ -94,8 +94,8 @@ for the pre-download space check (see
 - Movies and Series expose catalogs as an optional filter rather than a separate
   catalog gallery. The filter is shown only when more than one catalog applies to
   the current media kind.
-- The Movies page offers `movie` catalogs. The Series page offers both `series`
-  and `anime` catalogs because both publish top-level series items.
+- The Movies page offers `Movie` catalogs. The Series page offers both `Series`
+  and `Anime` catalogs because both publish top-level series items.
 - The selected catalog is stored in the `catalog` URL query parameter, applied by
   the internal library API, and preserved when opening a detail page and returning
   to the grid.

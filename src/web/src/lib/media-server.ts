@@ -599,7 +599,8 @@ export const mediaServer = {
     const query = new URLSearchParams();
     if (kind) query.set("kind", kind);
     if (catalogId) query.set("catalogId", catalogId);
-    const suffix = query.size > 0 ? `?${query}` : "";
+    const queryString = query.toString();
+    const suffix = queryString ? `?${queryString}` : "";
     return apiJson<LibraryItem[]>(`${BASE}/library${suffix}`);
   },
   getLibraryDetail: (id: string) => apiJson<LibraryDetail>(`${BASE}/library/${id}`),

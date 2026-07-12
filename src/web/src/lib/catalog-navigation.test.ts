@@ -14,8 +14,17 @@ describe("catalog navigation", () => {
   });
 
   it("preserves a catalog on list and detail routes", () => {
-    expect(withCatalog("/movies", "movies 4k")).toBe("/movies?catalog=movies%204k");
+    expect(withCatalog("/movies", "movies 4k")).toBe("/movies?catalog=movies+4k");
     expect(withCatalog("/movies/m1", undefined)).toBe("/movies/m1");
+  });
+
+  it("replaces or removes catalog context without dropping other URL state", () => {
+    expect(withCatalog("/movies?search=arrival&catalog=old&page=2", "new")).toBe(
+      "/movies?search=arrival&catalog=new&page=2",
+    );
+    expect(withCatalog("/movies?search=arrival&catalog=old#results", undefined)).toBe(
+      "/movies?search=arrival#results",
+    );
   });
 
   it("maps movie catalogs to Movies and episodic catalogs to Series", () => {
