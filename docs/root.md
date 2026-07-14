@@ -135,8 +135,10 @@ Forward-looking designs and epics, kept separate from the roadmap specs:
 The specifications below live in `docs/features/` and are the source of truth for
 the product's behavior. Most describe functionality already implemented through M4;
 see the [implementation plan](features/implementation-plan.md) for per-milestone
-status. [Watchlist and discovery](features/watchlist-and-discovery.md) is the main
-still-planned (M5) spec.
+status. The still-planned M5 work lands in two phases: [Release
+tracking](features/release-tracking.md) (near-term — a watchlist and release
+calendar over TMDb dates, no downloading) and [Watchlist and
+discovery](features/watchlist-and-discovery.md) (the acquisition layer on top).
 
 - [Implementation plan](features/implementation-plan.md)
 - [Hosty runtime app](features/hosty-runtime-app.md)
@@ -153,6 +155,7 @@ still-planned (M5) spec.
 - [Frontend application](features/frontend-application.md)
 - [Security](features/security.md)
 - [Build and deployment](features/build-and-deployment.md)
+- [Release tracking](features/release-tracking.md)
 - [Watchlist and discovery](features/watchlist-and-discovery.md)
 - [Hosty platform requests](features/hosty-platform-requests.md)
 
@@ -183,8 +186,11 @@ relevant planning files until implementation is complete.
 - **M4 — Automation polish & Docker delivery.** ✅ Done. Reconciler, retries, review
   queue, manual match override, scheduled scans, metadata refresh, app-data backups,
   GHCR image publishing.
-- **M5 — Watchlist and discovery (future).** Custom content-source providers,
-  watchlist, release calendar.
+- **M5 — Watchlist and discovery (future).** Lands in two phases: **release
+  tracking** (near-term — per-user watchlist and release calendar over TMDb dates,
+  with notifications, no downloading; see [Release
+  tracking](features/release-tracking.md)) then **acquisition** (custom
+  content-source providers, release matching, auto-grab into the pipeline).
 - **M6 — MCP / AI (future).** Use cases exposed as MCP tools for an AI agent.
 
 ## Non-Goals

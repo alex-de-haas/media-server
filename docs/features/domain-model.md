@@ -52,7 +52,7 @@ erDiagram
   AppUser ||--o{ MediaAccessCredential : "creates"
   AppUser ||--o{ AccessToken : "uses"
   AppUser ||--o{ PlaybackSession : "plays"
-  WatchlistItem }o--|| Catalog : "into (future)"
+  AppUser ||--o{ WatchlistEntry : "watchlist (future)"
 ```
 
 ## Entities — Catalog & Media
@@ -354,10 +354,18 @@ by other Hosty runtime apps.
 
 ## Entities — Discovery (future, M5)
 
-**WatchlistItem**: Id, Providers (JSON), Type, CatalogId (FK), Monitored,
-Quality (JSON preferences), CreatedAt.
-**ContentSourceConfig**: Id, Name, Type, Config (JSON without raw secrets),
-SecretRefs (JSON references to Hosty-managed secrets), Enabled.
+The near-term **release-tracking** slice splits this reserved `WatchlistItem`
+sketch into a global title/schedule part (`TrackedTitle`, `TrackedRelease`) and a
+per-user subscription part (`WatchlistEntry`, `ReleaseReminder`,
+`ReminderDelivery`); its `CatalogId`
+and `Quality` fields move to the deferred acquisition layer. See
+[Release tracking](release-tracking.md) for those entities.
+
+**WatchlistItem** *(superseded by the release-tracking split above)*: Id,
+Providers (JSON), Type, CatalogId (FK), Monitored, Quality (JSON preferences),
+CreatedAt.
+**ContentSourceConfig** *(acquisition)*: Id, Name, Type, Config (JSON without raw
+secrets), SecretRefs (JSON references to Hosty-managed secrets), Enabled.
 
 ## Enums
 

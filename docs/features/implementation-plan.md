@@ -2,7 +2,7 @@
 
 Status: Active
 Created: 2026-06-17
-Updated: 2026-07-04
+Updated: 2026-07-14
 
 > **Storage-model change (2026-06-21).** The catalog storage model was reworked
 > from two hardlinked subtrees (`files/` + `library/`) to a **single tree**: a
@@ -496,9 +496,57 @@ workflow (push to main → `:latest`, tags → `:vX.Y.Z`). End-to-end install un
 `docker` profile via Core (mounts/ingress/torrent port) remains a manual on-device
 step.
 
-### M5 — Watchlist & discovery (future)
-Per [watchlist-and-discovery](watchlist-and-discovery.md); deferred. M6 (MCP/AI)
-remains future.
+### M5a — Release tracking (planned)
+**Goal:** per-user release calendar + reminders per
+[release-tracking](release-tracking.md) — tracking only, **no acquisition** (no
+source search, no auto-grab, no `Intake` handoff). Depends on M4.
+
+Build order (each step lands green and independently reviewable):
+
+1. **Domain & migration.** `TrackedTitle`, `TrackedRelease`, `WatchlistEntry`,
+   `ReleaseReminder`, `ReminderDelivery` entities + `ReleaseType` /
+   `SeriesMonitorScope` enums, DbContext wiring, EF migration. Unique keys per
+   spec — `TrackedRelease` uses two **filtered unique indexes** (movie rows where
+   `Region IS NOT NULL`, episode rows where `Region IS NULL`; SQLite treats NULLs
+   as distinct in plain unique constraints); calendar dates (`Date`,
+   `PreviousDate`) are `DateOnly`, not `DateTimeOffset`; JSON columns for
+   `Providers`/`MonitoredSeasons`.
+2. **Typed dates from TMDb.** Parse movie `release_dates` into app-typed,
+   per-region rows (Theatrical merges limited+wide to the earliest; Premiere
+   separate; Digital; Physical/TV dropped); series `next_episode_to_air` on the
+   title fetch; opt-in `/tv/{id}/season/{n}` enumeration (union of monitored
+   seasons). New `WATCH_REGION` manifest setting (ISO-3166-1, default `US`),
+   independent of `SUPPORTED_LANGUAGES`.
+3. **Date-sync loop.** `watchlist:refresh-dates` hosted service: 24h cadence +
+   immediate sync on add/manual refresh, provider-paced, settled-title skip,
+   `PreviousDate` on moves, `EpisodeAir` horizon (−7…+90 d) pruning that spares
+   unsent-reminder rows.
+4. **Reminder dispatch loop.** `watchlist:dispatch-reminders` (~15 min, local
+   only): fire-time resolution (`Date − LeadDays` at `NotifyAt`, app timezone),
+   `ReminderDelivery` ledger, season-drop collapse, recurring series semantics
+   with retire-on-`Ended`/`Canceled`, per-user Hosty Core notifications.
+5. **API.** Watchlist CRUD + `calendar?from&to` + reminders CRUD + per-title
+   refresh; `AppUser` scoping; kind↔type validation; reminder create returns
+   resolved state (`scheduled` / `alreadyReleased` / `pending`).
+6. **Library linking.** `MediaItemId` reconcile on add/publish/delete; owned-vs-
+   aired gap projection in reads and notification bodies.
+7. **Web UI.** "Calendar" nav + page: `date-fns` month grid with rich chips
+   (poster, title, type, bell, in-library), Tracked/Reminders drawers (shadcn
+   base Drawer, name filter, poster rows), shared reminder dialog (type filtered
+   by kind, lead, time default 09:00), detail-page "Track / remind me" control.
+   New web deps: `drawer` component, `date-fns`.
+8. **Manifest & version.** `WATCH_REGION` setting, Calendar nav entry, minor
+   version bump in the shipping change.
+
+**Acceptance:** add a title → its dates appear immediately and refresh daily;
+reminders work in all three states (scheduled / pending binds on announcement /
+already-released reported on create); a series reminder recurs per episode and
+retires when the show ends; notifications arrive per-user at the chosen
+lead/time; xUnit coverage per the spec's Testing Expectations is green.
+
+### M5b — Discovery & acquisition (future)
+Per [watchlist-and-discovery](watchlist-and-discovery.md); deferred. Builds on
+M5a's entities. M6 (MCP/AI) remains future.
 
 ## 6. Cross-cutting
 

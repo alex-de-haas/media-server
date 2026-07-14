@@ -4,9 +4,15 @@ Status: Planned
 Created: 2026-06-15
 Updated: 2026-06-21
 
-> Future scope (M5). This draft documents the design seams reserved now; the
-> implementation is deferred. Custom content-source providers are preferred over
-> a generic indexer protocol.
+> Future scope (M5), **acquisition layer**. This draft documents the design seams
+> reserved now; the implementation is deferred. Custom content-source providers
+> are preferred over a generic indexer protocol.
+>
+> The tracking substrate this builds on — the per-user watchlist, the typed
+> release schedule, and the release calendar/notifications — is specified
+> separately and comes first in [Release tracking](release-tracking.md). This doc
+> covers only what tracking does **not**: searching content sources, matching and
+> scoring releases, and grabbing the best one into `Intake`.
 
 ## Description
 
