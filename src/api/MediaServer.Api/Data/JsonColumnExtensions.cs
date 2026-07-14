@@ -46,6 +46,22 @@ public static class JsonColumnExtensions
         return builder;
     }
 
+    /// <summary>Nullable int-list JSON column (e.g. monitored season numbers); null stays SQL NULL.</summary>
+    public static PropertyBuilder<List<int>?> HasJsonIntListConversion(this PropertyBuilder<List<int>?> builder)
+    {
+        var converter = new ValueConverter<List<int>?, string?>(
+            value => value == null ? null : JsonSerializer.Serialize(value, SerializerOptions),
+            json => json == null ? null : Deserialize<List<int>>(json));
+
+        var comparer = new ValueComparer<List<int>?>(
+            (left, right) => left == null ? right == null : right != null && left.SequenceEqual(right),
+            value => value == null ? 0 : value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item)),
+            value => value == null ? null : value.ToList());
+
+        builder.HasConversion(converter, comparer).HasColumnType("TEXT");
+        return builder;
+    }
+
     private static T? Deserialize<T>(string json) =>
         string.IsNullOrWhiteSpace(json) ? default : JsonSerializer.Deserialize<T>(json, SerializerOptions);
 }

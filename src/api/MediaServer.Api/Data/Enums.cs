@@ -115,3 +115,25 @@ public enum PersonRole
     Cast = 0,
     Crew = 1,
 }
+
+/// <summary>
+/// App-level release types for release tracking. TMDb's raw movie codes bucket into these (Premiere = 1;
+/// Theatrical merges limited 2 + wide 3 to the earliest; Digital = 4; Physical 5 / TV 6 are dropped);
+/// series carry plain episode air dates, so <see cref="EpisodeAir"/> is their only type.
+/// See <c>docs/features/release-tracking.md</c>.
+/// </summary>
+public enum ReleaseType
+{
+    Premiere = 0,
+    Theatrical = 1,
+    Digital = 2,
+    EpisodeAir = 3,
+}
+
+/// <summary>Which episodes of a series a <see cref="WatchlistEntry"/> monitors (episode tracking is opt-in).</summary>
+public enum SeriesMonitorScope
+{
+    WholeShow = 0,
+    Seasons = 1,
+    FutureEpisodes = 2,
+}

@@ -24,6 +24,11 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<JellyfinAccessToken> JellyfinAccessTokens => Set<JellyfinAccessToken>();
     public DbSet<UserItemData> UserItemData => Set<UserItemData>();
     public DbSet<AppSettings> AppSettings => Set<AppSettings>();
+    public DbSet<TrackedTitle> TrackedTitles => Set<TrackedTitle>();
+    public DbSet<TrackedRelease> TrackedReleases => Set<TrackedRelease>();
+    public DbSet<WatchlistEntry> WatchlistEntries => Set<WatchlistEntry>();
+    public DbSet<ReleaseReminder> ReleaseReminders => Set<ReleaseReminder>();
+    public DbSet<ReminderDelivery> ReminderDeliveries => Set<ReminderDelivery>();
 
     /// <summary>
     /// Registers <see cref="UtcDateTimeOffsetConverter"/> for every <see cref="DateTimeOffset"/> and
@@ -54,6 +59,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureJellyfinCredential(modelBuilder);
         ConfigureUserItemData(modelBuilder);
         ConfigureAppSettings(modelBuilder);
+        ConfigureReleaseTracking(modelBuilder);
     }
 
     /// <summary>
@@ -362,6 +368,87 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         // Single fixed-id row; never auto-generate the key so the upsert always targets row 1.
         appSettings.Property(entity => entity.Id).ValueGeneratedNever();
         appSettings.Property(entity => entity.CustomReleaseGroups).HasJsonListConversion();
+    }
+
+    private static void ConfigureReleaseTracking(ModelBuilder modelBuilder)
+    {
+        var title = modelBuilder.Entity<TrackedTitle>();
+        title.HasKey(entity => entity.Id);
+        title.Property(entity => entity.Kind).HasConversion<int>();
+        title.Property(entity => entity.IdentityProvider).IsRequired();
+        title.Property(entity => entity.IdentityProviderId).IsRequired();
+        title.Property(entity => entity.Title).IsRequired();
+        title.Property(entity => entity.Providers).HasJsonDictionaryConversion();
+        // One row per canonical provider identity — a title tracked by several users is stored/synced once.
+        title.HasIndex(entity => new { entity.IdentityProvider, entity.IdentityProviderId }).IsUnique();
+        title.HasIndex(entity => entity.MediaItemId);
+
+        // Deleting the library item unlinks the tracked title back to wishlist state (never deletes it).
+        title.HasOne(entity => entity.MediaItem)
+            .WithMany()
+            .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        var release = modelBuilder.Entity<TrackedRelease>();
+        release.HasKey(entity => entity.Id);
+        release.Property(entity => entity.Type).HasConversion<int>();
+        // Unique release event identity. SQLite treats NULLs as distinct in a unique index, so the sync
+        // upsert also matches on the full tuple in code; the index still guards the common shapes.
+        release.HasIndex(entity => new { entity.TrackedTitleId, entity.Region, entity.Type, entity.Season, entity.Episode }).IsUnique();
+        release.HasIndex(entity => entity.Date);
+
+        release.HasOne(entity => entity.TrackedTitle)
+            .WithMany(entity => entity.Releases)
+            .HasForeignKey(entity => entity.TrackedTitleId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var entry = modelBuilder.Entity<WatchlistEntry>();
+        entry.HasKey(item => item.Id);
+        entry.Property(item => item.MonitorScope).HasConversion<int?>();
+        entry.Property(item => item.MonitoredSeasons).HasJsonIntListConversion();
+        // One subscription per user per title.
+        entry.HasIndex(item => new { item.AppUserId, item.TrackedTitleId }).IsUnique();
+
+        entry.HasOne(item => item.AppUser)
+            .WithMany()
+            .HasForeignKey(item => item.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        entry.HasOne(item => item.TrackedTitle)
+            .WithMany(item => item.Entries)
+            .HasForeignKey(item => item.TrackedTitleId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var reminder = modelBuilder.Entity<ReleaseReminder>();
+        reminder.HasKey(item => item.Id);
+        reminder.Property(item => item.ReleaseType).HasConversion<int>();
+        // A reminder targets a (title, type), not a date — one per user per pair.
+        reminder.HasIndex(item => new { item.AppUserId, item.TrackedTitleId, item.ReleaseType }).IsUnique();
+
+        reminder.HasOne(item => item.AppUser)
+            .WithMany()
+            .HasForeignKey(item => item.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        reminder.HasOne(item => item.TrackedTitle)
+            .WithMany()
+            .HasForeignKey(item => item.TrackedTitleId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var delivery = modelBuilder.Entity<ReminderDelivery>();
+        delivery.HasKey(item => item.Id);
+        // Exactly one notification per (reminder, concrete release event).
+        delivery.HasIndex(item => new { item.ReminderId, item.TrackedReleaseId }).IsUnique();
+
+        delivery.HasOne(item => item.Reminder)
+            .WithMany(item => item.Deliveries)
+            .HasForeignKey(item => item.ReminderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        delivery.HasOne(item => item.TrackedRelease)
+            .WithMany()
+            .HasForeignKey(item => item.TrackedReleaseId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 
     private static void ConfigureUserItemData(ModelBuilder modelBuilder)
