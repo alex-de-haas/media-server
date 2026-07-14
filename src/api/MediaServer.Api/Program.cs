@@ -117,6 +117,7 @@ builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
+builder.Services.AddSingleton<IReleaseScheduleProvider, TmdbReleaseScheduleProvider>();
 
 // Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
 builder.Services.AddScoped<IdentifyService>();

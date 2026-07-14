@@ -13,6 +13,14 @@ public sealed class MediaServerSettings
     /// <summary>Ordered supported languages; the first entry is the fallback (e.g. <c>en-US</c>).</summary>
     public IReadOnlyList<string> SupportedLanguages { get; init; } = ["en-US"];
 
+    /// <summary>
+    /// Watch region for release-date tracking (manifest <c>WATCH_REGION</c>, ISO-3166-1, default <c>US</c>).
+    /// Its own axis, independent of <see cref="SupportedLanguages"/> (a metadata-language axis, not a
+    /// country); a per-entry <c>WatchlistEntry.RegionOverride</c> refines it. Only release-<b>date</b>
+    /// tracking uses this — certification stays region-by-language.
+    /// </summary>
+    public string WatchRegion { get; init; } = "US";
+
     public string JellyfinServerName { get; init; } = "Media Server";
 
     public bool JellyfinDiscoveryEnabled { get; init; }
@@ -65,10 +73,19 @@ public sealed class MediaServerSettings
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        // A watch region must be a bare ISO-3166-1 alpha-2 code; anything else falls back to US rather
+        // than sending TMDb a region it will silently ignore.
+        var watchRegion = Read("WATCH_REGION")?.ToUpperInvariant();
+        if (watchRegion is not { Length: 2 } || !watchRegion.All(char.IsAsciiLetterUpper))
+        {
+            watchRegion = "US";
+        }
+
         return new MediaServerSettings
         {
             TmdbApiKey = Read("TMDB_API_KEY"),
             SupportedLanguages = languages.Length > 0 ? languages : ["en-US"],
+            WatchRegion = watchRegion,
             JellyfinServerName = Read("JELLYFIN_SERVER_NAME") ?? "Media Server",
             JellyfinDiscoveryEnabled = ReadBool("JELLYFIN_DISCOVERY_ENABLED", false),
             FfprobePath = Read("FFPROBE_PATH"),

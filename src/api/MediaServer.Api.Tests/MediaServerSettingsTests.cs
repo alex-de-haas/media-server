@@ -1,4 +1,5 @@
 using MediaServer.Api.Configuration;
+using Microsoft.Extensions.Configuration;
 
 namespace MediaServer.Api.Tests;
 
@@ -51,4 +52,33 @@ public sealed class MediaServerSettingsTests
             MediaServerSettings.ParseMountRoots("media=/mnt/a=x,/mnt/b,other=/mnt/a=x")
                 .Select(mount => (mount.Label, mount.Path)));
     }
+
+    [Fact]
+    public void WatchRegion_defaults_to_US_and_is_independent_of_supported_languages()
+    {
+        // WATCH_REGION is its own axis: ru-RU metadata languages must not move the watch region.
+        var settings = MediaServerSettings.FromConfiguration(Configuration(("SUPPORTED_LANGUAGES", "ru-RU")));
+        Assert.Equal("US", settings.WatchRegion);
+        Assert.Equal(["ru-RU"], settings.SupportedLanguages);
+    }
+
+    [Fact]
+    public void WatchRegion_reads_and_normalizes_the_setting()
+    {
+        Assert.Equal("RU", MediaServerSettings.FromConfiguration(Configuration(("WATCH_REGION", "ru"))).WatchRegion);
+        Assert.Equal("DE", MediaServerSettings.FromConfiguration(Configuration(("WATCH_REGION", " DE "))).WatchRegion);
+    }
+
+    [Fact]
+    public void WatchRegion_falls_back_to_US_for_an_invalid_value()
+    {
+        Assert.Equal("US", MediaServerSettings.FromConfiguration(Configuration(("WATCH_REGION", "USA"))).WatchRegion);
+        Assert.Equal("US", MediaServerSettings.FromConfiguration(Configuration(("WATCH_REGION", "1x"))).WatchRegion);
+        Assert.Equal("US", MediaServerSettings.FromConfiguration(Configuration(("WATCH_REGION", ""))).WatchRegion);
+    }
+
+    private static IConfiguration Configuration(params (string Key, string Value)[] pairs) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(pairs.ToDictionary(pair => pair.Key, pair => (string?)pair.Value))
+            .Build();
 }
