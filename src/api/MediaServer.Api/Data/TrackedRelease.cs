@@ -2,7 +2,10 @@ namespace MediaServer.Api.Data;
 
 /// <summary>
 /// One typed, dated release event of a <see cref="TrackedTitle"/> — a movie's theatrical/digital date in a
-/// region, or a series episode air date. Unique per <c>(TrackedTitleId, Region, Type, Season, Episode)</c>.
+/// region, or a series episode air date. Uniqueness is enforced with two filtered unique indexes (SQLite
+/// treats NULLs as distinct in a plain unique constraint): movie rows on <c>(TrackedTitleId, Region, Type)</c>
+/// where <c>Region IS NOT NULL</c>, episode rows on <c>(TrackedTitleId, Type, Season, Episode)</c> where
+/// <c>Region IS NULL</c>.
 /// </summary>
 public sealed class TrackedRelease
 {
@@ -24,14 +27,18 @@ public sealed class TrackedRelease
 
     public int? Episode { get; set; }
 
-    /// <summary>The release/air date.</summary>
-    public DateTimeOffset Date { get; set; }
+    /// <summary>
+    /// The release/air date — a calendar date (TMDb dates carry no meaningful time). <see cref="DateOnly"/>
+    /// avoids timezone-shift bugs; dispatch composes the fire moment from it + <c>NotifyAt</c> in the app
+    /// timezone.
+    /// </summary>
+    public DateOnly Date { get; set; }
 
     /// <summary>Provider note (e.g. "IMAX", "Netflix") or episode name.</summary>
     public string? Note { get; set; }
 
     /// <summary>Prior value when a date moved, so the UI can show "moved to …".</summary>
-    public DateTimeOffset? PreviousDate { get; set; }
+    public DateOnly? PreviousDate { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

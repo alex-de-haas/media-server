@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    [Migration("20260714155630_AddReleaseTracking")]
+    [Migration("20260714160341_AddReleaseTracking")]
     partial class AddReleaseTracking
     {
         /// <inheritdoc />
@@ -974,8 +974,7 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Date")
-                        .IsRequired()
+                    b.Property<DateOnly>("Date")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("Episode")
@@ -984,7 +983,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("Note")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("PreviousDate")
+                    b.Property<DateOnly?>("PreviousDate")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("RawType")
@@ -1010,8 +1009,15 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("Date");
 
-                    b.HasIndex("TrackedTitleId", "Region", "Type", "Season", "Episode")
-                        .IsUnique();
+                    b.HasIndex("TrackedTitleId", "Region", "Type")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TrackedReleases_MovieIdentity")
+                        .HasFilter("\"Region\" IS NOT NULL");
+
+                    b.HasIndex("TrackedTitleId", "Type", "Season", "Episode")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TrackedReleases_EpisodeIdentity")
+                        .HasFilter("\"Region\" IS NULL");
 
                     b.ToTable("TrackedReleases");
                 });
@@ -1035,6 +1041,15 @@ namespace MediaServer.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly?>("LastAiredDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LastAiredEpisode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("LastAiredSeason")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("LastRefreshedAt")

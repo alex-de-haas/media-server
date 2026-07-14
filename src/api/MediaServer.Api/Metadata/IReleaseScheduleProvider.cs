@@ -2,8 +2,11 @@ using MediaServer.Api.Data;
 
 namespace MediaServer.Api.Metadata;
 
-/// <summary>One app-typed, dated movie release in a region (already bucketed from the provider's raw code).</summary>
-public sealed record TypedReleaseDate(string Region, ReleaseType Type, int RawType, DateTimeOffset Date, string? Note);
+/// <summary>
+/// One app-typed, dated movie release in a region (already bucketed from the provider's raw code).
+/// <paramref name="Date"/> is a calendar date — TMDb release timestamps carry no meaningful time.
+/// </summary>
+public sealed record TypedReleaseDate(string Region, ReleaseType Type, int RawType, DateOnly Date, string? Note);
 
 /// <summary>
 /// A movie's release schedule: typed dates for the requested regions plus a display/status snapshot for
@@ -16,8 +19,8 @@ public sealed record MovieReleaseSchedule(
     string? Status,
     IReadOnlyList<TypedReleaseDate> Dates);
 
-/// <summary>One series episode air date.</summary>
-public sealed record EpisodeAirDate(int Season, int Episode, DateTimeOffset AirDate, string? Name);
+/// <summary>One series episode air date (a calendar date).</summary>
+public sealed record EpisodeAirDate(int Season, int Episode, DateOnly AirDate, string? Name);
 
 /// <summary>
 /// A series' title-level schedule from the single <c>/tv/{id}</c> call: status, the next/last episode to

@@ -74,7 +74,7 @@ public sealed class TmdbReleaseScheduleTests
         var schedule = await Provider(new CannedHandler(MovieJson)).GetMovieScheduleAsync("27205", ["US"], CancellationToken.None);
 
         var theatrical = Assert.Single(schedule!.Dates, date => date.Type == ReleaseType.Theatrical);
-        Assert.Equal(new DateTimeOffset(2010, 7, 13, 0, 0, 0, TimeSpan.Zero), theatrical.Date); // limited (2) is earlier than wide (3)
+        Assert.Equal(new DateOnly(2010, 7, 13), theatrical.Date); // limited (2) is earlier than wide (3)
         Assert.Equal(2, theatrical.RawType); // the winning raw code is kept
         Assert.Equal("IMAX", theatrical.Note);
     }
@@ -85,10 +85,10 @@ public sealed class TmdbReleaseScheduleTests
         var schedule = await Provider(new CannedHandler(MovieJson)).GetMovieScheduleAsync("27205", ["US"], CancellationToken.None);
 
         var premiere = Assert.Single(schedule!.Dates, date => date.Type == ReleaseType.Premiere);
-        Assert.Equal(new DateTimeOffset(2010, 7, 8, 0, 0, 0, TimeSpan.Zero), premiere.Date);
+        Assert.Equal(new DateOnly(2010, 7, 8), premiere.Date);
 
         var digital = Assert.Single(schedule.Dates, date => date.Type == ReleaseType.Digital);
-        Assert.Equal(new DateTimeOffset(2010, 11, 15, 0, 0, 0, TimeSpan.Zero), digital.Date);
+        Assert.Equal(new DateOnly(2010, 11, 15), digital.Date);
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public sealed class TmdbReleaseScheduleTests
         var both = await Provider(new CannedHandler(MovieJson)).GetMovieScheduleAsync("27205", ["US", "RU"], CancellationToken.None);
         var ru = Assert.Single(both!.Dates, date => date.Region == "RU");
         Assert.Equal(ReleaseType.Theatrical, ru.Type);
-        Assert.Equal(new DateTimeOffset(2010, 7, 22, 0, 0, 0, TimeSpan.Zero), ru.Date);
+        Assert.Equal(new DateOnly(2010, 7, 22), ru.Date);
 
         // A region TMDb has no dates for simply yields nothing (never another region's dates).
         var unlisted = await Provider(new CannedHandler(MovieJson)).GetMovieScheduleAsync("27205", ["DE"], CancellationToken.None);
@@ -150,7 +150,7 @@ public sealed class TmdbReleaseScheduleTests
 
         Assert.Equal(2, schedule.NextEpisode!.Season);
         Assert.Equal(5, schedule.NextEpisode.Episode);
-        Assert.Equal(new DateTimeOffset(2009, 4, 5, 0, 0, 0, TimeSpan.Zero), schedule.NextEpisode.AirDate);
+        Assert.Equal(new DateOnly(2009, 4, 5), schedule.NextEpisode.AirDate);
         Assert.Equal("Breakage", schedule.NextEpisode.Name);
         Assert.Equal(4, schedule.LastEpisode!.Episode);
     }
@@ -164,7 +164,7 @@ public sealed class TmdbReleaseScheduleTests
         Assert.Contains("tv/1396/season/2", Assert.Single(handler.Requests));
         Assert.Equal(2, episodes.Count); // the undated episode is not a release event yet
         Assert.Equal(1, episodes[0].Episode);
-        Assert.Equal(new DateTimeOffset(2009, 3, 15, 0, 0, 0, TimeSpan.Zero), episodes[1].AirDate);
+        Assert.Equal(new DateOnly(2009, 3, 15), episodes[1].AirDate);
     }
 
     [Fact]

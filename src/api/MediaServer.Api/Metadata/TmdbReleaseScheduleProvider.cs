@@ -210,8 +210,26 @@ public sealed class TmdbReleaseScheduleProvider(
 
     private static int? ParseYear(string? date) => ParseDate(date)?.Year;
 
-    private static DateTimeOffset? ParseDate(string? date) =>
-        DateTimeOffset.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null;
+    /// <summary>
+    /// Parses a TMDb date as a calendar date. Air dates come as plain <c>yyyy-MM-dd</c>; movie
+    /// release_dates entries as UTC timestamps (<c>…T00:00:00.000Z</c>) whose UTC date is the release day.
+    /// </summary>
+    private static DateOnly? ParseDate(string? date)
+    {
+        if (string.IsNullOrWhiteSpace(date))
+        {
+            return null;
+        }
+
+        if (DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+        {
+            return day;
+        }
+
+        return DateTimeOffset.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+            ? DateOnly.FromDateTime(parsed.UtcDateTime)
+            : null;
+    }
 
     private static string? GetString(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String

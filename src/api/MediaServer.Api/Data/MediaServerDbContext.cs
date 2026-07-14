@@ -392,9 +392,16 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         var release = modelBuilder.Entity<TrackedRelease>();
         release.HasKey(entity => entity.Id);
         release.Property(entity => entity.Type).HasConversion<int>();
-        // Unique release event identity. SQLite treats NULLs as distinct in a unique index, so the sync
-        // upsert also matches on the full tuple in code; the index still guards the common shapes.
-        release.HasIndex(entity => new { entity.TrackedTitleId, entity.Region, entity.Type, entity.Season, entity.Episode }).IsUnique();
+        // Unique release-event identity via two filtered indexes: SQLite treats NULLs as distinct in a
+        // plain unique constraint, so a single (…, Region, …, Season, Episode) key would not deduplicate.
+        release.HasIndex(entity => new { entity.TrackedTitleId, entity.Region, entity.Type })
+            .IsUnique()
+            .HasFilter("\"Region\" IS NOT NULL")
+            .HasDatabaseName("IX_TrackedReleases_MovieIdentity");
+        release.HasIndex(entity => new { entity.TrackedTitleId, entity.Type, entity.Season, entity.Episode })
+            .IsUnique()
+            .HasFilter("\"Region\" IS NULL")
+            .HasDatabaseName("IX_TrackedReleases_EpisodeIdentity");
         release.HasIndex(entity => entity.Date);
 
         release.HasOne(entity => entity.TrackedTitle)

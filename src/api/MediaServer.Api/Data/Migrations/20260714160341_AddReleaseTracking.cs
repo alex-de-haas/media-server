@@ -25,6 +25,9 @@ namespace MediaServer.Api.Data.Migrations
                     Year = table.Column<int>(type: "INTEGER", nullable: true),
                     PosterUrl = table.Column<string>(type: "TEXT", nullable: true),
                     ProductionStatus = table.Column<string>(type: "TEXT", nullable: true),
+                    LastAiredSeason = table.Column<int>(type: "INTEGER", nullable: true),
+                    LastAiredEpisode = table.Column<int>(type: "INTEGER", nullable: true),
+                    LastAiredDate = table.Column<DateOnly>(type: "TEXT", nullable: true),
                     LastRefreshedAt = table.Column<string>(type: "TEXT", nullable: true),
                     CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
                     UpdatedAt = table.Column<string>(type: "TEXT", nullable: false)
@@ -81,9 +84,9 @@ namespace MediaServer.Api.Data.Migrations
                     RawType = table.Column<int>(type: "INTEGER", nullable: true),
                     Season = table.Column<int>(type: "INTEGER", nullable: true),
                     Episode = table.Column<int>(type: "INTEGER", nullable: true),
-                    Date = table.Column<string>(type: "TEXT", nullable: false),
+                    Date = table.Column<DateOnly>(type: "TEXT", nullable: false),
                     Note = table.Column<string>(type: "TEXT", nullable: true),
-                    PreviousDate = table.Column<string>(type: "TEXT", nullable: true),
+                    PreviousDate = table.Column<DateOnly>(type: "TEXT", nullable: true),
                     CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
                     UpdatedAt = table.Column<string>(type: "TEXT", nullable: false)
                 },
@@ -182,10 +185,18 @@ namespace MediaServer.Api.Data.Migrations
                 column: "Date");
 
             migrationBuilder.CreateIndex(
-                name: "IX_TrackedReleases_TrackedTitleId_Region_Type_Season_Episode",
+                name: "IX_TrackedReleases_EpisodeIdentity",
                 table: "TrackedReleases",
-                columns: new[] { "TrackedTitleId", "Region", "Type", "Season", "Episode" },
-                unique: true);
+                columns: new[] { "TrackedTitleId", "Type", "Season", "Episode" },
+                unique: true,
+                filter: "\"Region\" IS NULL");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TrackedReleases_MovieIdentity",
+                table: "TrackedReleases",
+                columns: new[] { "TrackedTitleId", "Region", "Type" },
+                unique: true,
+                filter: "\"Region\" IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_TrackedTitles_IdentityProvider_IdentityProviderId",

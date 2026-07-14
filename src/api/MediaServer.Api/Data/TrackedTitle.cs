@@ -34,6 +34,17 @@ public sealed class TrackedTitle
     /// <summary>Provider production status (Released, Ended, Canceled, …); lets sync cheaply skip a settled title.</summary>
     public string? ProductionStatus { get; set; }
 
+    /// <summary>
+    /// Title-level <c>last_episode_to_air</c> snapshot (series only), refreshed on sync. Reminder creation
+    /// resolves the series already-airing state from these — never from persisted episode rows, which the
+    /// rolling horizon prunes.
+    /// </summary>
+    public int? LastAiredSeason { get; set; }
+
+    public int? LastAiredEpisode { get; set; }
+
+    public DateOnly? LastAiredDate { get; set; }
+
     /// <summary>Last successful provider sync (diagnostics).</summary>
     public DateTimeOffset? LastRefreshedAt { get; set; }
 
