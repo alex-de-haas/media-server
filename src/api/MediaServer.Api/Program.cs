@@ -187,6 +187,8 @@ builder.Services.AddScoped<WatchlistSyncService>();
 builder.Services.AddHostedService<WatchlistSyncWorker>();
 builder.Services.AddScoped<ReminderDispatchService>();
 builder.Services.AddHostedService<ReminderDispatchWorker>();
+builder.Services.AddScoped<WatchlistService>();
+builder.Services.AddScoped<ReminderService>();
 
 // Catalog-wide metadata refresh: an admin-triggered background job that re-enriches every identified item.
 builder.Services.AddSingleton<ICatalogRefreshQueue, CatalogRefreshQueue>();
@@ -335,6 +337,7 @@ app.MapLibraryEndpoints();
 app.MapPersonEndpoints();
 app.MapCollectionEndpoints();
 app.MapMetadataEndpoints();
+app.MapWatchlistEndpoints();
 app.MapSettingsEndpoints();
 app.MapJellyfinCredentialEndpoints();
 app.MapRealtimeEndpoints();

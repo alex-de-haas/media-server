@@ -28,6 +28,9 @@ namespace MediaServer.Api.Data.Migrations
                     LastAiredSeason = table.Column<int>(type: "INTEGER", nullable: true),
                     LastAiredEpisode = table.Column<int>(type: "INTEGER", nullable: true),
                     LastAiredDate = table.Column<DateOnly>(type: "TEXT", nullable: true),
+                    NextAirSeason = table.Column<int>(type: "INTEGER", nullable: true),
+                    NextAirEpisode = table.Column<int>(type: "INTEGER", nullable: true),
+                    NextAirDate = table.Column<DateOnly>(type: "TEXT", nullable: true),
                     LastRefreshedAt = table.Column<string>(type: "TEXT", nullable: true),
                     CreatedAt = table.Column<string>(type: "TEXT", nullable: false),
                     UpdatedAt = table.Column<string>(type: "TEXT", nullable: false)

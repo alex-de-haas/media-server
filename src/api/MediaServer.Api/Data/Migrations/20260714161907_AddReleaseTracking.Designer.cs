@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    [Migration("20260714160341_AddReleaseTracking")]
+    [Migration("20260714161907_AddReleaseTracking")]
     partial class AddReleaseTracking
     {
         /// <inheritdoc />
@@ -1057,6 +1057,15 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.Property<Guid?>("MediaItemId")
                         .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("NextAirDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("NextAirEpisode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("NextAirSeason")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("PosterUrl")
                         .HasColumnType("TEXT");

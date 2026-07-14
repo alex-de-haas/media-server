@@ -45,6 +45,17 @@ public sealed class TrackedTitle
 
     public DateOnly? LastAiredDate { get; set; }
 
+    /// <summary>
+    /// Title-level <c>next_episode_to_air</c> snapshot (series only), refreshed on sync. Identifies which
+    /// episode rows a tracking-off entry surfaces on the calendar ("when it returns"), independent of
+    /// whatever other users' monitor scopes materialized.
+    /// </summary>
+    public int? NextAirSeason { get; set; }
+
+    public int? NextAirEpisode { get; set; }
+
+    public DateOnly? NextAirDate { get; set; }
+
     /// <summary>Last successful provider sync (diagnostics).</summary>
     public DateTimeOffset? LastRefreshedAt { get; set; }
 

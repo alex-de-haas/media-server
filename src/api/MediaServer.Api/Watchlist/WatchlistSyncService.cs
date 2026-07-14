@@ -240,6 +240,9 @@ public sealed class WatchlistSyncService(
         title.LastAiredSeason = schedule.LastEpisode?.Season;
         title.LastAiredEpisode = schedule.LastEpisode?.Episode;
         title.LastAiredDate = schedule.LastEpisode?.AirDate;
+        title.NextAirSeason = schedule.NextEpisode?.Season;
+        title.NextAirEpisode = schedule.NextEpisode?.Episode;
+        title.NextAirDate = schedule.NextEpisode?.AirDate;
 
         var horizonStart = today.AddDays(-(int)HorizonPast.TotalDays);
         var horizonEnd = today.AddDays((int)HorizonFuture.TotalDays);
