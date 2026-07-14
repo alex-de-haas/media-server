@@ -320,6 +320,50 @@ public sealed class ReminderDispatchServiceTests : IDisposable
         Assert.Equal("alice", Assert.Single(_core.Published).Target); // bob's is soft-disabled
     }
 
+    [Fact]
+    public async Task Linked_series_notification_carries_the_owned_vs_aired_context()
+    {
+        using (var database = WatchlistTestData.NewContext(_connection))
+        {
+            var user = WatchlistTestData.SeedUser(database);
+            var title = WatchlistTestData.SeedTitle(database, MediaKind.Series, "1396", "Slow Horses", status: "Returning Series");
+            WatchlistTestData.SeedEntry(database, user, title, scope: SeriesMonitorScope.WholeShow, createdAt: Now.AddDays(-30));
+
+            // Link the title to a library series that owns S1E1 only, while S1E1+S1E2 have aired.
+            var catalog = new Catalog
+            {
+                Id = Guid.NewGuid(), Name = "Series", Type = CatalogType.Series,
+                Root = Path.Combine(Path.GetTempPath(), "ms-dispatch-" + Guid.NewGuid().ToString("N")),
+                CreatedAt = Now, UpdatedAt = Now,
+            };
+            database.Catalogs.Add(catalog);
+            var series = new MediaItem
+            {
+                Id = Guid.NewGuid(), PublicId = "series", CatalogId = catalog.Id, Kind = MediaKind.Series,
+                Title = "Slow Horses", IdentityProvider = "tmdb", IdentityProviderId = "1396",
+                AddedAt = Now, UpdatedAt = Now,
+            };
+            database.MediaItems.Add(series);
+            database.MediaItems.Add(new MediaItem
+            {
+                Id = Guid.NewGuid(), PublicId = "ep1", CatalogId = catalog.Id, Kind = MediaKind.Episode,
+                SeriesId = series.Id, Title = "S1E1", IdentitySeasonNumber = 1, IdentityEpisodeNumber = 1,
+                AddedAt = Now, UpdatedAt = Now,
+            });
+            title.MediaItemId = series.Id;
+            database.SaveChanges();
+
+            WatchlistTestData.SeedRelease(database, title, ReleaseType.EpisodeAir, Today.AddDays(-8), season: 1, episode: 1);
+            WatchlistTestData.SeedRelease(database, title, ReleaseType.EpisodeAir, Today, season: 1, episode: 2);
+            WatchlistTestData.SeedReminder(database, user, title, ReleaseType.EpisodeAir, createdAt: Now.AddDays(-30));
+        }
+
+        await DispatchAsync();
+
+        // Both dues collapse-free (different dates): the bodies carry the "behind by N" library context.
+        Assert.Contains(_core.Published, notification => notification.Body!.Contains("behind by 1 aired episode"));
+    }
+
     private async Task<ReminderDispatchReport> DispatchAsync()
     {
         using var database = WatchlistTestData.NewContext(_connection);
@@ -327,6 +371,7 @@ public sealed class ReminderDispatchServiceTests : IDisposable
             database,
             new MediaServerSettings { WatchRegion = "US" },
             _core,
+            new WatchlistLibraryLinker(database, _clock),
             _clock,
             NullLogger<ReminderDispatchService>.Instance);
         return await service.DispatchAsync(CancellationToken.None);

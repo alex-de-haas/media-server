@@ -35,6 +35,7 @@ public sealed class WatchlistSyncServiceTests : IDisposable
         services.AddSingleton<IRealtimeNotifier, NullNotifier>();
         services.AddSingleton<TimeProvider>(_clock);
         services.AddScoped<JobService>();
+        services.AddScoped<WatchlistLibraryLinker>();
         services.AddScoped<WatchlistSyncService>();
         _provider = services.BuildServiceProvider();
 

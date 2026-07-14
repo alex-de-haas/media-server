@@ -1,5 +1,6 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
+using MediaServer.Api.Watchlist;
 using MediaServer.Api.Media;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.Probe;
@@ -263,7 +264,7 @@ public sealed class EnrichStage(EnrichService enrichService, MediaServerDbContex
 }
 
 /// <summary>Assigns the stable public id and makes the item browsable/playable.</summary>
-public sealed class PublishStage(MediaServerDbContext database) : IPipelineStage
+public sealed class PublishStage(MediaServerDbContext database, WatchlistLibraryLinker watchlistLinker) : IPipelineStage
 {
     public string Key => "publish";
     public PipelinePhase Phase => PipelinePhase.Processing;
@@ -290,6 +291,10 @@ public sealed class PublishStage(MediaServerDbContext database) : IPipelineStage
         }
 
         await database.SaveChangesAsync(cancellationToken);
+
+        // A freshly published identity may satisfy a wishlist title — reconcile the tracked titles so the
+        // watchlist flips to "in library" as part of the publish, not a day later.
+        await watchlistLinker.ReconcileAsync(cancellationToken);
         return StageResult.Done;
     }
 }

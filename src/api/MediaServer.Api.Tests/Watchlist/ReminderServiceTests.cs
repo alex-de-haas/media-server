@@ -230,7 +230,7 @@ public sealed class ReminderServiceTests : IDisposable
     {
         using var database = WatchlistTestData.NewContext(_connection);
         var settings = new MediaServerSettings { WatchRegion = "US" };
-        var watchlist = new WatchlistService(database, settings, _queue, _clock);
+        var watchlist = new WatchlistService(database, settings, _queue, new WatchlistLibraryLinker(database, _clock), _clock);
         var service = new ReminderService(database, settings, watchlist, _queue, _clock);
         return await action(service);
     }

@@ -22,6 +22,7 @@ public sealed class WatchlistSyncService(
     IReleaseScheduleProvider provider,
     MediaServerSettings settings,
     JobService jobs,
+    WatchlistLibraryLinker libraryLinker,
     TimeProvider timeProvider,
     ILogger<WatchlistSyncService> logger)
 {
@@ -42,6 +43,10 @@ public sealed class WatchlistSyncService(
     /// </summary>
     public async Task<WatchlistSyncReport> SyncAllAsync(Job? job, CancellationToken cancellationToken)
     {
+        // Catch library drift the event hooks can't see (item deleted → FK already nulled; item remapped
+        // → identity changed) so "in library" stays truthful without new persisted state.
+        await libraryLinker.ReconcileAsync(cancellationToken);
+
         var titleIds = await ListStaleTitleIdsAsync(cancellationToken);
 
         var total = titleIds.Count;

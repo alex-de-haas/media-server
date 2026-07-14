@@ -189,6 +189,7 @@ builder.Services.AddScoped<ReminderDispatchService>();
 builder.Services.AddHostedService<ReminderDispatchWorker>();
 builder.Services.AddScoped<WatchlistService>();
 builder.Services.AddScoped<ReminderService>();
+builder.Services.AddScoped<WatchlistLibraryLinker>();
 
 // Catalog-wide metadata refresh: an admin-triggered background job that re-enriches every identified item.
 builder.Services.AddSingleton<ICatalogRefreshQueue, CatalogRefreshQueue>();

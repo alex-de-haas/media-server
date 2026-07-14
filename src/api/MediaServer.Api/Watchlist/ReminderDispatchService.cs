@@ -20,6 +20,7 @@ public sealed class ReminderDispatchService(
     MediaServerDbContext database,
     MediaServerSettings settings,
     IHostyCoreClient core,
+    WatchlistLibraryLinker libraryLinker,
     TimeProvider timeProvider,
     ILogger<ReminderDispatchService> logger)
 {
@@ -131,6 +132,10 @@ public sealed class ReminderDispatchService(
     private async Task<int> DeliverAsync(
         ReleaseReminder reminder, TrackedTitle title, List<TrackedRelease> due, DateOnly today, CancellationToken cancellationToken)
     {
+        // Owned-vs-aired context for a linked title: a series body says what the library is missing, a
+        // movie body flags the release as an upgrade rather than a first acquisition.
+        var libraryContext = await LibraryContextAsync(title, cancellationToken);
+
         var sent = 0;
         foreach (var group in due.GroupBy(release => (release.Season, release.Date)))
         {
@@ -141,7 +146,7 @@ public sealed class ReminderDispatchService(
                 published = await PublishAsync(
                     reminder,
                     $"{title.Title} — Season {group.Key.Season} available",
-                    $"{episodes.Count} episodes {Tense(group.Key.Date, today)} {When(group.Key.Date, today)}.",
+                    $"{episodes.Count} episodes {Tense(group.Key.Date, today)} {When(group.Key.Date, today)}.{libraryContext}",
                     dedupeKey: $"media-server:reminder:{reminder.Id}:s{group.Key.Season}:{group.Key.Date:yyyy-MM-dd}",
                     cancellationToken);
             }
@@ -151,7 +156,7 @@ public sealed class ReminderDispatchService(
                 published = await PublishAsync(
                     reminder,
                     NotificationTitle(title, release, today),
-                    NotificationBody(release, today),
+                    NotificationBody(release, today) + libraryContext,
                     dedupeKey: $"media-server:reminder:{reminder.Id}:{release.Id}",
                     cancellationToken);
             }
@@ -203,6 +208,26 @@ public sealed class ReminderDispatchService(
             && entry is not null
             && WatchlistScope.Covers(entry, release.Season.Value, release.Date, timeZone)
             && reminder.Deliveries.All(delivery => delivery.TrackedReleaseId != release.Id));
+    }
+
+    /// <summary>A sentence of library context appended to notification bodies for linked titles.</summary>
+    private async Task<string> LibraryContextAsync(TrackedTitle title, CancellationToken cancellationToken)
+    {
+        if (title.MediaItemId is null)
+        {
+            return string.Empty;
+        }
+
+        if (title.Kind == MediaKind.Movie)
+        {
+            return " Already in your library — this release may be an upgrade.";
+        }
+
+        return await libraryLinker.ComputeGapAsync(title, cancellationToken) is { } gap
+            ? gap.MissingAired > 0
+                ? $" In your library: behind by {gap.MissingAired} aired episode(s) ({gap.OwnedEpisodes} of {gap.AiredEpisodes} owned)."
+                : $" In your library: all {gap.AiredEpisodes} aired episode(s) owned."
+            : string.Empty;
     }
 
     internal static bool IsOver(string? productionStatus) =>

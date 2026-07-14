@@ -260,7 +260,8 @@ public sealed class WatchlistServiceTests : IDisposable
     private async Task<T> ExecuteAsync<T>(Func<WatchlistService, Task<T>> action)
     {
         using var database = WatchlistTestData.NewContext(_connection);
-        var service = new WatchlistService(database, new MediaServerSettings { WatchRegion = "US" }, _queue, _clock);
+        var service = new WatchlistService(
+            database, new MediaServerSettings { WatchRegion = "US" }, _queue, new WatchlistLibraryLinker(database, _clock), _clock);
         return await action(service);
     }
 

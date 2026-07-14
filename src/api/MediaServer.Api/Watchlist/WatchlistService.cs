@@ -16,6 +16,7 @@ public sealed class WatchlistService(
     MediaServerDbContext database,
     MediaServerSettings settings,
     IWatchlistSyncQueue syncQueue,
+    WatchlistLibraryLinker libraryLinker,
     TimeProvider timeProvider)
 {
     public async Task<IReadOnlyList<WatchlistItemDto>> ListAsync(int userId, CancellationToken cancellationToken)
@@ -41,14 +42,19 @@ public sealed class WatchlistService(
             .ToListAsync(cancellationToken);
 
         var today = WatchlistScope.LocalDay(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone);
-        return entries
-            .Select(entry => ToItemDto(
+        var items = new List<WatchlistItemDto>(entries.Count);
+        foreach (var entry in entries)
+        {
+            items.Add(ToItemDto(
                 entry,
                 entry.TrackedTitle!,
                 reminders.Where(reminder => reminder.TrackedTitleId == entry.TrackedTitleId).ToList(),
                 deliveredReminderIds,
-                today))
-            .ToList();
+                await libraryLinker.ComputeGapAsync(entry.TrackedTitle!, cancellationToken),
+                today));
+        }
+
+        return items;
     }
 
     public async Task<WatchlistAddResult> AddAsync(int userId, AddWatchlistRequest request, CancellationToken cancellationToken)
@@ -259,6 +265,9 @@ public sealed class WatchlistService(
             CreatedAt = now,
             UpdatedAt = now,
         };
+
+        // Wishlist-vs-library: the canonical identity may already be published — link right on add.
+        await libraryLinker.TryLinkAsync(tracked, cancellationToken);
         database.TrackedTitles.Add(tracked);
         await database.SaveChangesAsync(cancellationToken);
         return tracked;
@@ -279,7 +288,8 @@ public sealed class WatchlistService(
             .ToListAsync(cancellationToken);
 
         var today = WatchlistScope.LocalDay(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone);
-        return ToItemDto(entry, title, reminders, deliveredReminderIds, today);
+        var gap = await libraryLinker.ComputeGapAsync(title, cancellationToken);
+        return ToItemDto(entry, title, reminders, deliveredReminderIds, gap, today);
     }
 
     private WatchlistItemDto ToItemDto(
@@ -287,6 +297,7 @@ public sealed class WatchlistService(
         TrackedTitle title,
         List<ReleaseReminder> reminders,
         List<Guid> deliveredReminderIds,
+        LibraryGapDto? libraryGap,
         DateOnly today)
     {
         var timeZone = timeProvider.LocalTimeZone;
@@ -312,7 +323,7 @@ public sealed class WatchlistService(
             entry.Note,
             WatchlistReads.NextRelease(title, entry, region, today, timeZone),
             hasDates,
-            LibraryGap: null, // Owned-vs-aired projection lands with the library-linking step.
+            libraryGap,
             reminders
                 .Select(reminder => WatchlistReads.ToReminderDto(
                     reminder, title, entry, settings, today, timeZone, deliveredReminderIds.Contains(reminder.Id)))
