@@ -22,6 +22,7 @@ import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/component
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
 import { RemapDialog } from "@/components/remap-dialog";
+import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
@@ -525,6 +526,15 @@ function Hero({ item }: { item: LibraryDetail }) {
               >
                 <Star className="size-4" aria-hidden /> Favorite
               </Button>
+              {item.tmdbId && (item.kind === "Movie" || item.kind === "Series") && (
+                <TrackTitleControl
+                  tmdbId={item.tmdbId}
+                  kind={item.kind}
+                  title={item.title}
+                  year={item.year}
+                  posterUrl={item.posterUrl}
+                />
+              )}
               {item.trailerUrl && (
                 <Button variant="outline" onClick={() => openExternal(item.trailerUrl!)}>
                   <Clapperboard className="size-4" aria-hidden /> Trailer
