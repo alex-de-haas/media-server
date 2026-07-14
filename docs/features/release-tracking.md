@@ -149,8 +149,11 @@ erDiagram
 | LastRefreshedAt | DateTimeOffset | last successful TMDb sync (diagnostics) |
 | CreatedAt / UpdatedAt | DateTimeOffset | |
 
-**TrackedRelease** — one typed, dated release event. Unique
-`(TrackedTitleId, Region, Type, Season, Episode)`.
+**TrackedRelease** — one typed, dated release event. Uniqueness is enforced with
+**two filtered unique indexes** (SQLite treats NULLs as distinct in a plain unique
+constraint, so a single `(…, Region, …)` key would not deduplicate episode rows):
+movie rows on `(TrackedTitleId, Region, Type)` where `Region IS NOT NULL`, episode
+rows on `(TrackedTitleId, Type, Season, Episode)` where `Region IS NULL`.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -160,9 +163,9 @@ erDiagram
 | Type | ReleaseType | app-level (bucketed at parse time) |
 | RawType | int? | original TMDb code, kept so `Theatrical` can prefer wide/limited over premiere |
 | Season / Episode | int? | set for `EpisodeAir` |
-| Date | DateTimeOffset | the release/air date |
+| Date | DateOnly | the release/air date — a **calendar date** (TMDb dates carry no meaningful time); `DateOnly` avoids timezone-shift bugs, and dispatch composes the fire moment from it + `NotifyAt` in the app timezone |
 | Note | string? | provider note (e.g. "IMAX", "Netflix") |
-| PreviousDate | DateTimeOffset? | prior value when a date moved, so the UI can show "moved to …" |
+| PreviousDate | DateOnly? | prior value when a date moved, so the UI can show "moved to …" |
 | CreatedAt / UpdatedAt | DateTimeOffset | |
 
 **WatchlistEntry** *(layer 1)* — per-user tracking; puts a title on that user's
@@ -262,7 +265,12 @@ A reminder is one dialog — **"remind me about the {type} release of {title},
   it's set."
 - **Already passed** → on creation the API resolves current state and reports
   "already released on {date}" immediately (and can still deliver once, so the user
-  isn't left wondering). No need to look before setting it.
+  isn't left wondering). No need to look before setting it. For a **series**, this
+  resolution comes from the title-level `last_episode_to_air` (not from persisted
+  episode rows): episodes that aired before the reminder was created are summarized
+  in the create response ("already airing — up to S2E10"), never delivered
+  one-by-one retroactively; recurring delivery starts from the next episode within
+  scope.
 
 Details:
 
@@ -277,11 +285,12 @@ Details:
 - **Series reminders are recurring** — an `EpisodeAir` reminder is not one-shot: it
   notifies for each episode covered by the entry's `MonitorScope`, then waits for
   the next, indefinitely — new seasons included as the sync discovers them — until
-  the user removes or deactivates it, or the show is officially over. When the
-  date-sync sees `ProductionStatus` `Ended`/`Canceled` with no remaining future
-  episode and every aired episode already delivered, the reminder is retired
-  (optionally with a final "{title} has ended" notice) so it stops rather than
-  lingering. Creating an `EpisodeAir` reminder turns on episode tracking for that
+  the user removes or deactivates it, or the show is officially over. Retirement is
+  the **reminder-dispatch loop's** job (date-sync stays purely layer 1): when
+  dispatch sees `ProductionStatus` `Ended`/`Canceled` with no remaining future
+  episode and every covered aired episode already delivered, it retires the
+  reminder (optionally with a final "{title} has ended" notice) so it stops rather
+  than lingering. Creating an `EpisodeAir` reminder turns on episode tracking for that
   entry if it was off (default scope `FutureEpisodes`), since it needs `EpisodeAir`
   rows to fire. When a whole season drops on a single date (a streaming season
   release), the coinciding `EpisodeAir` dates collapse into one "Season N available"
@@ -309,6 +318,10 @@ Both run as hosted services in the `CatalogHealthService` /
   provider rate limit. A moved date updates `Date` and records `PreviousDate`.
 - `EpisodeAir` rows are kept only for a rolling horizon (default `−7 … +90` days);
   rows aging out are pruned **unless** they back an unfired `ReminderDelivery` need.
+  Pruning cannot strand anything: movie rows are never age-pruned, and the
+  already-released resolution for series reads the title-level
+  `last_episode_to_air`, not historical episode rows (see
+  [Reminders](#reminders-layer-2)).
 
 **Reminder-dispatch — `watchlist:dispatch-reminders`, ≈ every 15 min, local only.**
 

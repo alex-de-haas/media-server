@@ -356,7 +356,8 @@ by other Hosty runtime apps.
 
 The near-term **release-tracking** slice splits this reserved `WatchlistItem`
 sketch into a global title/schedule part (`TrackedTitle`, `TrackedRelease`) and a
-per-user subscription part (`WatchlistEntry`, `WatchlistAlert`); its `CatalogId`
+per-user subscription part (`WatchlistEntry`, `ReleaseReminder`,
+`ReminderDelivery`); its `CatalogId`
 and `Quality` fields move to the deferred acquisition layer. See
 [Release tracking](release-tracking.md) for those entities.
 

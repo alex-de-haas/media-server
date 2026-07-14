@@ -506,7 +506,11 @@ Build order (each step lands green and independently reviewable):
 1. **Domain & migration.** `TrackedTitle`, `TrackedRelease`, `WatchlistEntry`,
    `ReleaseReminder`, `ReminderDelivery` entities + `ReleaseType` /
    `SeriesMonitorScope` enums, DbContext wiring, EF migration. Unique keys per
-   spec; JSON columns for `Providers`/`MonitoredSeasons`.
+   spec — `TrackedRelease` uses two **filtered unique indexes** (movie rows where
+   `Region IS NOT NULL`, episode rows where `Region IS NULL`; SQLite treats NULLs
+   as distinct in plain unique constraints); calendar dates (`Date`,
+   `PreviousDate`) are `DateOnly`, not `DateTimeOffset`; JSON columns for
+   `Providers`/`MonitoredSeasons`.
 2. **Typed dates from TMDb.** Parse movie `release_dates` into app-typed,
    per-region rows (Theatrical merges limited+wide to the earliest; Premiere
    separate; Digital; Physical/TV dropped); series `next_episode_to_air` on the
