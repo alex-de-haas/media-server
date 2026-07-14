@@ -68,6 +68,8 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddScoped<IPipelineStage, ProbeStage>();
         services.AddScoped<IPipelineStage, EnrichStage>();
         services.AddScoped<IPipelineStage, PublishStage>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<MediaServer.Api.Watchlist.WatchlistLibraryLinker>();
         services.AddSingleton<IngestOrchestrator>();
 
         _provider = services.BuildServiceProvider();

@@ -3,7 +3,7 @@
   "id": "com.haas.media-server",
   "name": "Media Server",
   "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "runtimeProfiles": [
     { "key": "docker", "type": "docker", "default": true },
     { "key": "dev", "type": "localCommand" }
@@ -69,6 +69,7 @@
       { "label": "Movies", "path": "/movies", "iconAsset": "assets/nav/movies.svg" },
       { "label": "Series", "path": "/series", "iconAsset": "assets/nav/series.svg" },
       { "label": "Collections", "path": "/collections", "iconAsset": "assets/nav/collections.svg" },
+      { "label": "Calendar", "path": "/calendar", "iconAsset": "assets/nav/calendar.svg" },
       { "label": "Activity", "path": "/activity", "iconAsset": "assets/nav/activity.svg" },
       { "label": "Catalogs", "path": "/catalogs", "iconAsset": "assets/nav/catalogs.svg" },
       { "label": "Settings", "path": "/settings", "iconAsset": "assets/nav/settings.svg" }
@@ -99,6 +100,13 @@
       "default": "en-US",
       "label": "Supported languages",
       "description": "Comma-separated metadata languages in priority order; the first is the fallback (e.g. en-US,ru-RU)."
+    },
+    {
+      "key": "WATCH_REGION",
+      "type": "string",
+      "default": "US",
+      "label": "Watch region",
+      "description": "ISO-3166-1 country whose release dates the calendar tracks (e.g. US, RU). Independent of the metadata languages; per-title overrides are available on the watchlist."
     },
     {
       "key": "JELLYFIN_SERVER_NAME",

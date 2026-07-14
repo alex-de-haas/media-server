@@ -18,6 +18,7 @@ using MediaServer.Api.Probe;
 using MediaServer.Api.Realtime;
 using MediaServer.Api.Torrents;
 using MediaServer.Api.Transcoding;
+using MediaServer.Api.Watchlist;
 using MediaServer.Api.Jellyfin;
 using MediaServer.Api.Jellyfin.Auth;
 using MediaServer.Api.Jellyfin.Endpoints;
@@ -117,6 +118,7 @@ builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
+builder.Services.AddSingleton<IReleaseScheduleProvider, TmdbReleaseScheduleProvider>();
 
 // Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
 builder.Services.AddScoped<IdentifyService>();
@@ -177,6 +179,17 @@ builder.Services.AddHostedService<CollectionBackfillWorker>();
 
 // Library import: scan a catalog root for orphan media files and ingest them from the identify stage.
 builder.Services.AddScoped<LibraryImportService>();
+
+// Release tracking (M5a): per-user watchlist + reminders. The date-sync loop is the only TMDb caller
+// (24h cadence + on-demand queue); the dispatch loop is local-only and frequent.
+builder.Services.AddSingleton<IWatchlistSyncQueue, WatchlistSyncQueue>();
+builder.Services.AddScoped<WatchlistSyncService>();
+builder.Services.AddHostedService<WatchlistSyncWorker>();
+builder.Services.AddScoped<ReminderDispatchService>();
+builder.Services.AddHostedService<ReminderDispatchWorker>();
+builder.Services.AddScoped<WatchlistService>();
+builder.Services.AddScoped<ReminderService>();
+builder.Services.AddScoped<WatchlistLibraryLinker>();
 
 // Catalog-wide metadata refresh: an admin-triggered background job that re-enriches every identified item.
 builder.Services.AddSingleton<ICatalogRefreshQueue, CatalogRefreshQueue>();
@@ -325,6 +338,7 @@ app.MapLibraryEndpoints();
 app.MapPersonEndpoints();
 app.MapCollectionEndpoints();
 app.MapMetadataEndpoints();
+app.MapWatchlistEndpoints();
 app.MapSettingsEndpoints();
 app.MapJellyfinCredentialEndpoints();
 app.MapRealtimeEndpoints();
