@@ -18,6 +18,7 @@ using MediaServer.Api.Probe;
 using MediaServer.Api.Realtime;
 using MediaServer.Api.Torrents;
 using MediaServer.Api.Transcoding;
+using MediaServer.Api.Watchlist;
 using MediaServer.Api.Jellyfin;
 using MediaServer.Api.Jellyfin.Auth;
 using MediaServer.Api.Jellyfin.Endpoints;
@@ -178,6 +179,12 @@ builder.Services.AddHostedService<CollectionBackfillWorker>();
 
 // Library import: scan a catalog root for orphan media files and ingest them from the identify stage.
 builder.Services.AddScoped<LibraryImportService>();
+
+// Release tracking (M5a): per-user watchlist + reminders. The date-sync loop is the only TMDb caller
+// (24h cadence + on-demand queue); the dispatch loop is local-only and frequent.
+builder.Services.AddSingleton<IWatchlistSyncQueue, WatchlistSyncQueue>();
+builder.Services.AddScoped<WatchlistSyncService>();
+builder.Services.AddHostedService<WatchlistSyncWorker>();
 
 // Catalog-wide metadata refresh: an admin-triggered background job that re-enriches every identified item.
 builder.Services.AddSingleton<ICatalogRefreshQueue, CatalogRefreshQueue>();
