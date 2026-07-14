@@ -134,8 +134,9 @@ public sealed class WatchlistSyncServiceTests : IDisposable
         Guid titleId;
         using (var database = WatchlistTestData.NewContext(_connection))
         {
-            // Released, digital date known and past → nothing left to learn on a periodic pass.
-            var title = WatchlistTestData.SeedTitle(database, MediaKind.Movie, "27205", status: "Released");
+            // Released, digital date known and past, synced before → nothing left to learn on a periodic pass.
+            var title = WatchlistTestData.SeedTitle(
+                database, MediaKind.Movie, "27205", status: "Released", lastRefreshedAt: Now.AddDays(-2));
             WatchlistTestData.SeedRelease(database, title, ReleaseType.Digital, Today.AddDays(-30), region: "US", rawType: 4);
             titleId = title.Id;
         }
@@ -147,6 +148,24 @@ public sealed class WatchlistSyncServiceTests : IDisposable
 
         Assert.Equal(WatchlistSyncService.SyncOutcome.Synced, await SyncAsync(titleId, force: true));
         Assert.Single(_schedule.Calls);
+    }
+
+    [Fact]
+    public async Task Never_synced_title_is_not_settled_even_when_status_looks_final()
+    {
+        Guid titleId;
+        using (var database = WatchlistTestData.NewContext(_connection))
+        {
+            // Status persisted but no successful sync recorded (e.g. a failed first attempt): the empty
+            // release set must read as "not fetched yet", not as "all dates past".
+            var title = WatchlistTestData.SeedTitle(database, MediaKind.Series, "1396", status: "Ended");
+            titleId = title.Id;
+        }
+
+        _schedule.Series["1396"] = new SeriesReleaseSchedule("Breaking Bad", 2008, null, "Ended", null, null, []);
+
+        Assert.Equal(WatchlistSyncService.SyncOutcome.Synced, await SyncAsync(titleId));
+        Assert.Single(_schedule.Calls); // the provider was hit despite the final-looking status
     }
 
     [Fact]

@@ -265,11 +265,13 @@ public sealed class ReminderDispatchServiceTests : IDisposable
         Assert.Equal(1, first.Delivered);
         Assert.Equal(0, first.Retired);
 
-        // The sync marks the show Ended with nothing left ahead → the reminder retires with a final notice.
+        // The sync marks the show Ended (stamping the refresh) with nothing left ahead → the reminder
+        // retires with a final notice.
         using (var database = WatchlistTestData.NewContext(_connection))
         {
             var title = await database.TrackedTitles.SingleAsync(candidate => candidate.Id == titleId);
             title.ProductionStatus = "Ended";
+            title.LastRefreshedAt = Now;
             await database.SaveChangesAsync();
         }
 
@@ -287,11 +289,33 @@ public sealed class ReminderDispatchServiceTests : IDisposable
         using (var database = WatchlistTestData.NewContext(_connection))
         {
             var user = WatchlistTestData.SeedUser(database);
-            var title = WatchlistTestData.SeedTitle(database, MediaKind.Series, "1396", "Breaking Bad", status: "Ended");
+            var title = WatchlistTestData.SeedTitle(
+                database, MediaKind.Series, "1396", "Breaking Bad", status: "Ended", lastRefreshedAt: Now);
             WatchlistTestData.SeedEntry(database, user, title, scope: SeriesMonitorScope.WholeShow, createdAt: Now.AddDays(-30));
             // Announced final episode still ahead.
             WatchlistTestData.SeedRelease(database, title, ReleaseType.EpisodeAir, Today.AddDays(10), season: 5, episode: 16);
             WatchlistTestData.SeedReminder(database, user, title, ReleaseType.EpisodeAir, createdAt: Now.AddDays(-30));
+        }
+
+        var report = await DispatchAsync();
+        Assert.Equal(0, report.Retired);
+
+        using var fresh = WatchlistTestData.NewContext(_connection);
+        Assert.True((await fresh.ReleaseReminders.SingleAsync()).Active);
+    }
+
+    [Fact]
+    public async Task Ended_series_reminder_is_not_retired_before_a_sync_newer_than_the_reminder()
+    {
+        using (var database = WatchlistTestData.NewContext(_connection))
+        {
+            var user = WatchlistTestData.SeedUser(database);
+            // Status is already Ended from an old sync, and no episode rows exist yet: a reminder created
+            // just now must survive until the on-demand sync it queued has actually run.
+            var title = WatchlistTestData.SeedTitle(
+                database, MediaKind.Series, "1396", "Breaking Bad", status: "Ended", lastRefreshedAt: Now.AddDays(-5));
+            WatchlistTestData.SeedEntry(database, user, title, scope: SeriesMonitorScope.WholeShow, createdAt: Now);
+            WatchlistTestData.SeedReminder(database, user, title, ReleaseType.EpisodeAir, createdAt: Now);
         }
 
         var report = await DispatchAsync();

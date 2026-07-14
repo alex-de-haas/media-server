@@ -45,7 +45,7 @@ public sealed class ReminderDispatchWorker(IServiceScopeFactory scopeFactory, IL
                 await jobs.CompleteAsync(job, cancellationToken);
             }
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             logger.LogWarning(exception, "Reminder dispatch tick failed.");
         }

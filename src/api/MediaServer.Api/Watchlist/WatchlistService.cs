@@ -181,9 +181,12 @@ public sealed class WatchlistService(
             return [];
         }
 
-        var reminders = await database.ReleaseReminders.AsNoTracking()
-            .Where(reminder => reminder.AppUserId == userId && reminder.Active)
-            .ToListAsync(cancellationToken);
+        var reminderKeys = (await database.ReleaseReminders.AsNoTracking()
+                .Where(reminder => reminder.AppUserId == userId && reminder.Active)
+                .Select(reminder => new { reminder.TrackedTitleId, reminder.ReleaseType })
+                .ToListAsync(cancellationToken))
+            .Select(reminder => (reminder.TrackedTitleId, reminder.ReleaseType))
+            .ToHashSet();
 
         var timeZone = timeProvider.LocalTimeZone;
         var events = new List<CalendarEventDto>();
@@ -194,8 +197,7 @@ public sealed class WatchlistService(
             foreach (var release in WatchlistReads.VisibleReleases(title, entry, region, timeZone)
                          .Where(release => release.Date >= from && release.Date <= to))
             {
-                var hasReminder = reminders.Any(reminder =>
-                    reminder.TrackedTitleId == title.Id && reminder.ReleaseType == release.Type);
+                var hasReminder = reminderKeys.Contains((title.Id, release.Type));
                 events.Add(new CalendarEventDto(
                     release.Id,
                     entry.Id,

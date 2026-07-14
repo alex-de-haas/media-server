@@ -229,7 +229,7 @@ function DayCell({
   const overflow = events.length - visible.length;
 
   return (
-    <div className={cn("flex min-h-24 flex-col gap-1 border-r p-1 last-of-type:border-r-0 nth-of-type-[7n]:border-r-0", !topRow && "border-t", outside && "bg-secondary/30")}>
+    <div className={cn("flex min-h-24 flex-col gap-1 border-r p-1 last-of-type:border-r-0 [&:nth-of-type(7n)]:border-r-0", !topRow && "border-t", outside && "bg-secondary/30")}>
       <span
         className={cn(
           "flex size-6 items-center justify-center self-end rounded-full text-xs tabular-nums",

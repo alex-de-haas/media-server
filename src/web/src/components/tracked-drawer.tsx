@@ -56,7 +56,13 @@ export function TrackedDrawer({
 
   const refresh = useMutation({
     mutationFn: (item: WatchlistItem) => watchlistApi.refresh(item.id),
-    onSuccess: () => toast.success("Refreshing dates…", { description: "The calendar updates in a moment." }),
+    onSuccess: () => {
+      toast.success("Refreshing dates…", { description: "The calendar updates in a moment." });
+      // The server sync is queued, not synchronous: refetch now for a fast sync and again shortly
+      // after so the promised update actually reaches the screen.
+      invalidate();
+      window.setTimeout(invalidate, 4000);
+    },
     onError: (error) => toast.error("Couldn’t refresh", { description: errorMessage(error) }),
   });
 

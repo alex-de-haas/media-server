@@ -73,8 +73,9 @@ public sealed class WatchlistSyncWorker(
                 await jobs.FailAsync(job, exception.Message, CancellationToken.None);
             }
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            // The filter keeps HttpClient-timeout cancellations (token not signalled) from killing the loop.
             logger.LogWarning(exception, "Watchlist date-sync pass failed to start.");
         }
     }
@@ -90,7 +91,7 @@ public sealed class WatchlistSyncWorker(
                 // Forced: an on-demand sync (add / manual refresh) bypasses the settled-title skip.
                 await service.SyncOneInScopeAsync(trackedTitleId, force: true, stoppingToken);
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
             {
                 logger.LogWarning(exception, "On-demand watchlist sync failed for title {Title}.", trackedTitleId);
             }

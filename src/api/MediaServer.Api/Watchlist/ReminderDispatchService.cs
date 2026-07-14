@@ -117,9 +117,10 @@ public sealed class ReminderDispatchService(
                 && string.Equals(release.Region, region, StringComparison.OrdinalIgnoreCase));
         }
 
+        var delivered = reminder.Deliveries.Select(delivery => delivery.TrackedReleaseId).ToHashSet();
         return candidates
             .Where(release => ReminderTiming.FireAt(release.Date, reminder.LeadDays, reminder.NotifyAt, timeZone) <= now)
-            .Where(release => reminder.Deliveries.All(delivery => delivery.TrackedReleaseId != release.Id))
+            .Where(release => !delivered.Contains(release.Id))
             .OrderBy(release => release.Date).ThenBy(release => release.Season).ThenBy(release => release.Episode)
             .ToList();
     }
@@ -191,6 +192,14 @@ public sealed class ReminderDispatchService(
         ReleaseReminder reminder, TrackedTitle title, WatchlistEntry? entry, DateOnly today, TimeZoneInfo timeZone)
     {
         if (reminder.ReleaseType != ReleaseType.EpisodeAir || !IsOver(title.ProductionStatus))
+        {
+            return false;
+        }
+
+        // Never judge from a snapshot older than the reminder: until a sync has completed after it was
+        // created (the on-demand sync that reminder-create queues), the episode set may simply not be
+        // enumerated yet — an empty set would retire the reminder before it ever had a chance to fire.
+        if (title.LastRefreshedAt is not { } refreshed || refreshed < reminder.CreatedAt)
         {
             return false;
         }

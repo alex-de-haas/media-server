@@ -173,6 +173,13 @@ public sealed class WatchlistSyncService(
     /// </summary>
     internal static bool IsSettled(TrackedTitle title, DateOnly today)
     {
+        // Only a completed sync can settle a title: before one, an empty release set is "not fetched
+        // yet" (vacuously "all past"), and skipping here would mean the periodic pass never retries.
+        if (title.LastRefreshedAt is null)
+        {
+            return false;
+        }
+
         if (title.Kind == MediaKind.Movie)
         {
             // Without a known digital date the movie may still gain one — keep syncing.

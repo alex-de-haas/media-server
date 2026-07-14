@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const titleId = useId();
   const kindId = useId();
+  const yearId = useId();
   const queryClient = useQueryClient();
 
   const [kind, setKind] = useState<TrackedKind>("Movie");
@@ -119,8 +120,8 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               />
             </Field>
             <Field className="w-20">
-              <FieldLabel>Year</FieldLabel>
-              <Input type="number" value={searchYear} onChange={(event) => setSearchYear(event.target.value)} />
+              <FieldLabel htmlFor={yearId}>Year</FieldLabel>
+              <Input id={yearId} type="number" value={searchYear} onChange={(event) => setSearchYear(event.target.value)} />
             </Field>
             <Button type="submit" variant="secondary" size="sm" disabled={!searchTitle.trim() || search.isPending}>
               <Search />
