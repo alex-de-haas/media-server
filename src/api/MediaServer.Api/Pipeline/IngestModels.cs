@@ -106,6 +106,15 @@ public sealed record MatchRequest(
 /// </summary>
 public sealed record SkipRequest(IReadOnlyList<Guid> SourceFileIds);
 
+/// <summary>Result of a <c>SkipAsync</c> request, mapped to a status code by the endpoint.</summary>
+public enum SkipOutcome
+{
+    NotFound,
+    FileNotFound,
+    AlreadyMatched,
+    Skipped,
+}
+
 /// <summary>
 /// Operator re-search with a corrected title for a NeedsReview item. <see cref="Kind"/> defaults to the
 /// catalog's kind (movie vs. series) when omitted. Metadata search only — the resulting candidates feed

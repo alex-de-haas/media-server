@@ -37,7 +37,7 @@ public sealed class IngestSkipTests
                 .SingleAsync();
 
             var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-            Assert.True(await service.SkipAsync(ingestId, new SkipRequest([extraId]), CancellationToken.None));
+            Assert.Equal(SkipOutcome.Skipped, await service.SkipAsync(ingestId, new SkipRequest([extraId]), CancellationToken.None));
         }
 
         await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
@@ -59,21 +59,23 @@ public sealed class IngestSkipTests
     }
 
     [Fact]
-    public async Task Skipping_every_file_completes_the_ingest_without_publishing()
+    public async Task Skipping_every_file_completes_the_ingest_and_clears_staging()
     {
         using var harness = new PipelineTestHarness();
         harness.MetadataProvider.OnSearch = _ => [];
 
-        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+        var (ingestId, catalogId, _) = await harness.SeedCompletedDownloadAsync(
             CatalogType.Series, "FMA Extras", "FMA/Fullmetal Alchemist Brotherhood (Creditless OP 1).mkv");
         await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
 
+        string stagingRelative;
         using (var scope = harness.CreateScope())
         {
             var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
-            var fileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
+            var file = await database.SourceFiles.SingleAsync();
+            stagingRelative = file.RelativePath;
             var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-            Assert.True(await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
+            Assert.Equal(SkipOutcome.Skipped, await service.SkipAsync(ingestId, new SkipRequest([file.Id]), CancellationToken.None));
         }
 
         await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
@@ -84,10 +86,16 @@ public sealed class IngestSkipTests
         Assert.Equal(IngestStatus.Done, ingest.Status);
         Assert.Null(ingest.MediaItemId);
         Assert.False(await verifyDb.MediaItems.AnyAsync());
+
+        // A skip-only torrent ingest must not leave its .incoming/<downloadId>/ staging (and the skipped
+        // file inside it) on disk — nothing was organized, but the staging is still swept.
+        var catalog = await verifyDb.Catalogs.SingleAsync(item => item.Id == catalogId);
+        var stagingAbsolute = Path.Combine(catalog.Root, stagingRelative.Replace('/', Path.DirectorySeparatorChar));
+        Assert.False(File.Exists(stagingAbsolute));
     }
 
     [Fact]
-    public async Task Skipping_a_confirmed_file_is_rejected()
+    public async Task Skipping_a_confirmed_file_reports_already_matched()
     {
         using var harness = new PipelineTestHarness();
         harness.MetadataProvider.OnSearch = query =>
@@ -102,12 +110,12 @@ public sealed class IngestSkipTests
         var fileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
+        Assert.Equal(SkipOutcome.AlreadyMatched,
+            await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
     }
 
     [Fact]
-    public async Task Skipping_an_unknown_file_id_is_rejected()
+    public async Task Skipping_an_unknown_file_id_reports_file_not_found()
     {
         using var harness = new PipelineTestHarness();
         harness.MetadataProvider.OnSearch = _ => [];
@@ -118,8 +126,8 @@ public sealed class IngestSkipTests
 
         using var scope = harness.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.SkipAsync(ingestId, new SkipRequest([Guid.NewGuid()]), CancellationToken.None));
+        Assert.Equal(SkipOutcome.FileNotFound,
+            await service.SkipAsync(ingestId, new SkipRequest([Guid.NewGuid()]), CancellationToken.None));
     }
 
     [Fact]
@@ -139,16 +147,16 @@ public sealed class IngestSkipTests
             var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
             fileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
             var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-            Assert.True(await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
+            Assert.Equal(SkipOutcome.Skipped, await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
             skippedAt = await database.SourceFiles.Where(file => file.Id == fileId).Select(file => file.UpdatedAt).SingleAsync();
         }
 
-        // A second skip of the same (already Skipped) file returns true but must not re-touch the file's
-        // timestamp — proving it took the idempotent early-out rather than re-writing the row.
+        // A second skip of the same (already Skipped) file still reports success but must not re-touch the
+        // file's timestamp — proving it took the idempotent early-out rather than re-writing the row.
         using (var scope = harness.CreateScope())
         {
             var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-            Assert.True(await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
+            Assert.Equal(SkipOutcome.Skipped, await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
         }
 
         using var verifyScope = harness.CreateScope();

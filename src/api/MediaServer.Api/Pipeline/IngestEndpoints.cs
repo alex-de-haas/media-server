@@ -45,7 +45,13 @@ public static class IngestEndpoints
                 return Results.BadRequest(new { error = "At least one source file id is required to skip." });
             }
 
-            return await service.SkipAsync(id, request, cancellationToken) ? Results.Accepted() : Results.NotFound();
+            return await service.SkipAsync(id, request, cancellationToken) switch
+            {
+                SkipOutcome.NotFound => Results.NotFound(),
+                SkipOutcome.FileNotFound => Results.NotFound(new { error = "One or more source files were not found on this ingest." }),
+                SkipOutcome.AlreadyMatched => Results.Conflict(new { error = "Can't skip a file that's already matched — remap it from its library page instead." }),
+                _ => Results.Accepted(),
+            };
         });
 
         // Pin a target identity before/while an item downloads so Identify resolves straight to it (never

@@ -158,12 +158,12 @@ public sealed class IngestService(
     /// The files stay unmapped: Organize/Probe ignore them and the staging cleanup removes them from disk
     /// once the confirmed files move out. Re-enqueues the item so Identify re-evaluates the batch.
     /// </summary>
-    public async Task<bool> SkipAsync(Guid id, SkipRequest request, CancellationToken cancellationToken)
+    public async Task<SkipOutcome> SkipAsync(Guid id, SkipRequest request, CancellationToken cancellationToken)
     {
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
-            return false;
+            return SkipOutcome.NotFound;
         }
 
         var requestedIds = request.SourceFileIds.Distinct().ToList();
@@ -172,14 +172,14 @@ public sealed class IngestService(
             .ToListAsync(cancellationToken);
         if (files.Count != requestedIds.Count)
         {
-            throw new InvalidOperationException("Source file not found.");
+            return SkipOutcome.FileNotFound;
         }
 
         // A confirmed file is already matched and (possibly) organized — skipping it here would strand a
         // published assignment. Unmatching a file is a library remap, not a skip.
         if (files.Any(file => file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed))
         {
-            throw new InvalidOperationException("Cannot skip a file that is already matched.");
+            return SkipOutcome.AlreadyMatched;
         }
 
         // Idempotent: a re-skip of files that are already Skipped changes nothing, so don't bump timestamps,
@@ -187,7 +187,7 @@ public sealed class IngestService(
         var toSkip = files.Where(file => file.AssignmentStatus != SourceFileAssignmentStatus.Skipped).ToList();
         if (toSkip.Count == 0)
         {
-            return true;
+            return SkipOutcome.Skipped;
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -204,7 +204,7 @@ public sealed class IngestService(
         await database.SaveChangesAsync(cancellationToken);
 
         queue.Enqueue(item.Id);
-        return true;
+        return SkipOutcome.Skipped;
     }
 
     /// <summary>
