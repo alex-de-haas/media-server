@@ -174,7 +174,7 @@ export function IngestReviewDialog({
                 <div key={file.id} className="flex flex-col gap-1.5">
                   <div className="bg-muted/60 flex min-w-0 items-start gap-2 rounded-md px-2.5 py-2" title={file.relativePath}>
                     <FileVideo2 className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 [overflow-wrap:anywhere] font-mono text-xs leading-relaxed font-medium">
+                    <span className="min-w-0 wrap-anywhere font-mono text-xs leading-relaxed font-medium">
                       {fileName}
                     </span>
                   </div>
@@ -265,7 +265,7 @@ export function IngestReviewDialog({
 function fileNameOf(relativePath: string | undefined): string | null {
   const normalized = relativePath?.replace(/\\/g, "/").replace(/\/+$/, "");
   if (!normalized) return null;
-  return normalized.slice(normalized.lastIndexOf("/") + 1) || normalized;
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
 }
 
 // 2:3 poster thumbnail for a candidate, with a neutral placeholder when the provider returned no poster
