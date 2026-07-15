@@ -412,7 +412,7 @@ export function IngestReviewDialog({
             </span>
             <Button type="button" disabled={busy || changeCount === 0 || needsIdentity} onClick={() => apply.mutate()}>
               {busy && <Loader2 className="animate-spin" />}
-              {busy ? "Applying…" : changeCount > 0 ? `Apply (${changeCount})` : "Apply"}
+              {busy ? "Approving…" : changeCount > 0 ? `Approve (${changeCount})` : "Approve"}
             </Button>
           </div>
         </div>

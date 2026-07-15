@@ -66,7 +66,7 @@ test("resolve match dialog shows the movie filename and metadata candidates", as
   const matchRequest = page.waitForRequest(
     (request) => request.url().includes("/ingest/ingest-1/match") && request.method() === "POST",
   );
-  await dialog.getByRole("button", { name: "Apply (1)" }).click();
+  await dialog.getByRole("button", { name: "Approve (1)" }).click();
   const body = (await matchRequest).postDataJSON() as {
     kind: string;
     providerId: string;
@@ -238,10 +238,10 @@ test("resolve match dialog shows mapped files and lets the operator re-decide th
 
   // The classified extra pre-selects the Extra decision; only it counts as a pending change.
   await expect(dialog.getByRole("button", { name: "Extra", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(dialog.getByRole("button", { name: "Apply (1)" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Approve (1)" })).toBeEnabled();
 
   // Change flips the mapped file into an editable decision, seeded from its current mapping.
   await dialog.getByRole("button", { name: "Change" }).click();
   await expect(dialog.getByLabel("Episode")).toHaveValue("1");
-  await expect(dialog.getByRole("button", { name: "Apply (2)" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Approve (2)" })).toBeEnabled();
 });
