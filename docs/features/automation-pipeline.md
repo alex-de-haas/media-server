@@ -43,6 +43,7 @@ flowchart LR
 | `Intake` | torrent + chosen catalog | creates an ingest item; resolves catalog paths, naming, seeding policy; reads torrent metadata/file list where available |
 | `Identify` | torrent name/file list + catalog type | suggests or confirms provider identities; maps playable source files to movies or episodes |
 | `Download` | torrent | file(s) in `<catalog.root>/.incoming/<downloadId>/`; progress events; on completion the download→identify hand-off drops the `Download` row (files kept) |
+| `Mux` | confirmed files still in staging | merges external audio tracks (a release's separate `.mka`/`.ac3` dubs, matched to their episode/movie by Identify) into the video by a stream-copy ffmpeg remux — the staged video becomes a single `.mkv` carrying every track; consumed audio rows flip to `Merged` |
 | `Organize` | confirmed files | **moves** the main media into the canonical layout at the catalog root (rename, no hardlink) and clears the `.incoming/` staging folder |
 | `Probe` | library file | `ffprobe` → media sources and streams |
 | `Enrich` | matched id | fetches and caches metadata in all supported languages |

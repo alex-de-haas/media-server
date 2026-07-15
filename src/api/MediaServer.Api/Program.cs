@@ -10,6 +10,7 @@ using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Library;
+using MediaServer.Api.Mux;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.People;
 using MediaServer.Api.Pipeline;
@@ -112,6 +113,8 @@ builder.Services.AddScoped<TranscodeOutputImporter>();
 // Identify / probe / enrich building blocks.
 builder.Services.AddSingleton<INameParser, NameParser>();
 builder.Services.AddSingleton<IMediaProbe, FfprobeMediaProbe>();
+builder.Services.AddSingleton<IAudioMuxer, FfmpegAudioMuxer>();
+builder.Services.AddScoped<AudioMuxService>();
 builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
 {
     client.BaseAddress = new Uri("https://api.themoviedb.org/");
@@ -129,6 +132,7 @@ builder.Services.AddScoped<JobService>();
 builder.Services.AddScoped<IPipelineStage, IntakeStage>();
 builder.Services.AddScoped<IPipelineStage, DownloadStage>();
 builder.Services.AddScoped<IPipelineStage, IdentifyStage>();
+builder.Services.AddScoped<IPipelineStage, MuxStage>();
 builder.Services.AddScoped<IPipelineStage, OrganizeStage>();
 builder.Services.AddScoped<IPipelineStage, ProbeStage>();
 builder.Services.AddScoped<IPipelineStage, EnrichStage>();

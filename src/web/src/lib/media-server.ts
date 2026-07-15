@@ -119,6 +119,9 @@ export interface IngestSourceFile {
   sizeBytes: number;
   assignmentStatus: string;
   mediaItemId: string | null;
+  // External audio track (an .mka/.ac3 dub riding alongside the videos): matching it to an episode/movie
+  // means "merge into that item's video file" rather than importing it as content of its own.
+  isAudio: boolean;
   // The current mapping for a Confirmed file (shown and re-decidable while the batch is in review).
   assigned: IngestAssignedMedia | null;
   // Name-parsed hints from the backend (computed from relativePath) used to pre-fill the review dialog:

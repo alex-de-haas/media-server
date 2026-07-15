@@ -102,6 +102,10 @@ public enum SourceFileAssignmentStatus
     /// provider identity). Counts as resolved so the rest of the batch can proceed; the file is never
     /// organized or probed and is cleaned up with the staging leftovers.</summary>
     Skipped = 4,
+    /// <summary>An external audio track whose streams were muxed into its video file (see
+    /// <c>MediaServer.Api.Mux.AudioMuxService</c>). Terminal like <see cref="Skipped"/>: the standalone
+    /// audio file is never organized or probed and is cleaned up with the staging leftovers.</summary>
+    Merged = 5,
 }
 
 /// <summary>Status of an observable background <see cref="Job"/>.</summary>

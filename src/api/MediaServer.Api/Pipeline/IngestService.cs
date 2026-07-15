@@ -1,6 +1,7 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Media;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Torrents;
 using Microsoft.EntityFrameworkCore;
@@ -279,6 +280,13 @@ public sealed class IngestService(
         if (files.Count != requestedIds.Count)
         {
             return AssignExtrasOutcome.FileNotFound;
+        }
+
+        // An audio track kept as an extra would publish an item with no playable source (Organize/Probe
+        // only handle video payloads) — it belongs to an episode, where the mux stage merges it in.
+        if (files.Any(file => MediaFormats.IsCompanionAudio(file.RelativePath)))
+        {
+            return AssignExtrasOutcome.AudioFile;
         }
 
         var seriesCandidate = new MetadataCandidate(new ProviderRef(request.Provider, request.ProviderId), request.Title, request.Year, 1.0);

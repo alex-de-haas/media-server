@@ -159,6 +159,42 @@ When a file enters identify (post-download, or via scan):
 - Low-confidence matches park the item at `NeedsReview`; the operator confirms a
   match (or remaps later). Identify is idempotent — re-running reuses items by
   identity.
+- **External audio tracks** (`.mka`, `.ac3`, `.eac3`, `.dts`, `.flac`, `.aac`,
+  `.opus`, `.mp3` — see `MediaFormats.AudioExtensions`) are admitted alongside the
+  videos but never searched against the provider. After the videos resolve, each
+  track matches the batch's own items: the single movie for a movie batch,
+  otherwise the episode whose number the track's file name parses to (the season
+  disambiguates when two seasons share a number). An unplaceable track parks the
+  batch — in review the operator matches it to its episode (Extra is rejected for
+  audio: it would publish an item with no playable source) or skips it.
+
+## External audio tracks (mux)
+
+Releases often ship dubs as separate per-episode audio files (a "Rus Sound"
+folder of `.mka`s next to the episodes). Playback clients that direct-play one
+container (Infuse plays `MediaSources[0]` as a single file) would never see them,
+so before Organize the `Mux` stage merges each matched track into its video:
+
+- A **stream-copy ffmpeg remux** (`-map 0 -map i:a -c copy`) into Matroska — no
+  re-encode, I/O bound, run in-process (not on the transcode-engine). `-map 0`
+  keeps everything the video already has (subtitles, chapters, attached fonts);
+  only audio streams are taken from the track files (never an mp3's cover art).
+  The staged video's extension becomes `.mkv`; Probe later sees all tracks in the
+  one file, so nothing downstream changes.
+- Appended streams keep their own language/title tags when present; untagged
+  streams get a language inferred from unambiguous path tokens ("Rus Sound",
+  `…rus.mka` → `rus`) and the dub folder's name as the track title
+  (`AudioTrackLabeler`).
+- Consumed audio rows flip to `Merged` (terminal, like `Skipped`) — persisted per
+  item, so a re-driven stage never appends the same tracks twice. The freed audio
+  files are swept with the `.incoming/` staging leftovers.
+- Only staged (torrent) files are muxed — a scan-imported file is the operator's
+  own library file and is never rewritten. A dub-only batch (tracks matched to
+  episodes with no video in the ingest) logs a warning and discards the tracks:
+  merging into already-published library files is a separate feature.
+- The ffmpeg binary comes from `FFMPEG_PATH`, falling back to a PATH lookup (the
+  Docker image installs the full ffmpeg package for ffprobe already). A mux
+  failure parks the item as a retryable failure with the ffmpeg error.
 
 ## Organize (move/rename)
 
@@ -168,8 +204,9 @@ hardlink:
 1. Skip non-playable payload (samples/junk; archives are not extracted in v1).
 2. For each assigned playable file, build the canonical catalog-root-relative path
    from the confirmed metadata (movie template, or `Show/Season NN/Show SxxEyy`),
-   preserving the original extension (the container is never changed — playback is
-   Direct Play/Stream only).
+   preserving the file's extension (organize never changes the container — playback
+   is Direct Play/Stream only; a video that had external audio muxed in arrives
+   here already as `.mkv`).
 3. **Move** the file there. For torrent items the source is `.incoming/...`; for
    scanned items the source is wherever it currently sits in the root. The
    `SourceFile` path and the `MediaItem.LibraryPath` are updated to the canonical

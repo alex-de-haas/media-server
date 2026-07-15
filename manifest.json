@@ -3,7 +3,7 @@
   "id": "com.haas.media-server",
   "name": "Media Server",
   "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "runtimeProfiles": [
     { "key": "docker", "type": "docker", "default": true },
     { "key": "dev", "type": "localCommand" }
@@ -127,6 +127,12 @@
       "type": "string",
       "label": "ffprobe path",
       "description": "Override path to the ffprobe binary. Leave empty to use the one found on PATH."
+    },
+    {
+      "key": "FFMPEG_PATH",
+      "type": "string",
+      "label": "ffmpeg path",
+      "description": "Override path to the ffmpeg binary, used to merge external audio tracks into their videos during ingest. Leave empty to use the one found on PATH."
     },
     {
       "key": "TORRENT_MAX_DOWNLOAD_SPEED",

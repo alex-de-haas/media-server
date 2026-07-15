@@ -28,6 +28,9 @@ public sealed class MediaServerSettings
     /// <summary>Override path to the <c>ffprobe</c> binary; falls back to PATH lookup when null.</summary>
     public string? FfprobePath { get; init; }
 
+    /// <summary>Override path to the <c>ffmpeg</c> binary (external-audio muxing); falls back to PATH lookup when null.</summary>
+    public string? FfmpegPath { get; init; }
+
     /// <summary>Per-download rate limits forwarded to the torrent-engine; bytes/sec, 0 means unlimited.</summary>
     public int TorrentMaxDownloadSpeed { get; init; }
 
@@ -89,6 +92,7 @@ public sealed class MediaServerSettings
             JellyfinServerName = Read("JELLYFIN_SERVER_NAME") ?? "Media Server",
             JellyfinDiscoveryEnabled = ReadBool("JELLYFIN_DISCOVERY_ENABLED", false),
             FfprobePath = Read("FFPROBE_PATH"),
+            FfmpegPath = Read("FFMPEG_PATH"),
             TorrentMaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),
             TorrentMaxUploadSpeed = ReadInt("TORRENT_MAX_UPLOAD_SPEED", 0),
             TorrentEngineUrl = Read("HOSTY_DEPENDENCY_TORRENT_ENGINE_URL"),

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MediaServer.Api.Data;
+using MediaServer.Api.Media;
 using MediaServer.Api.Metadata;
 
 namespace MediaServer.Api.Pipeline;
@@ -26,6 +27,9 @@ public sealed record IngestSourceFileResponse(
     long SizeBytes,
     string AssignmentStatus,
     Guid? MediaItemId,
+    // External audio track (an .mka/.ac3 dub riding alongside the videos): matching it to an episode/movie
+    // means "merge into that item's video file" rather than importing it as content of its own.
+    bool IsAudio,
     // The current mapping for a Confirmed file (what the review UI shows and lets the operator change
     // while the batch is still in review), null while unmapped.
     IngestAssignedMedia? Assigned,
@@ -105,10 +109,15 @@ public sealed record IngestItemResponse(
                 }
 
                 var parsed = parser.Parse(name, catalogType, releaseGroups);
-                var extra = ExtraClassifier.Classify(file.RelativePath, catalogType);
+                // Extras classification never applies to audio tracks — a dub in an extras-looking folder
+                // must not pre-suggest "keep as extra" (audio can't be one; see AssignExtrasOutcome.AudioFile).
+                var extra = MediaFormats.IsCompanionAudio(file.RelativePath)
+                    ? null
+                    : ExtraClassifier.Classify(file.RelativePath, catalogType);
                 var assigned = file.MediaItemId is { } mediaItemId ? assignedMedia.GetValueOrDefault(mediaItemId) : null;
                 return new IngestSourceFileResponse(
-                    file.Id, file.RelativePath, file.SizeBytes, file.AssignmentStatus.ToString(), file.MediaItemId, assigned,
+                    file.Id, file.RelativePath, file.SizeBytes, file.AssignmentStatus.ToString(), file.MediaItemId,
+                    MediaFormats.IsCompanionAudio(file.RelativePath), assigned,
                     parsed.Title, parsed.Year, parsed.Season, parsed.Episode,
                     extra?.Kind.ToString(), extra?.Title, extra?.SuggestSkip ?? false);
             }).ToList(),
@@ -182,6 +191,9 @@ public enum AssignExtrasOutcome
     NotFound,
     FileNotFound,
     MovieCatalog,
+    /// <summary>An external audio track can't be a playable extra of its own — Organize/Probe only handle
+    /// video payloads, so the item would publish with no source. Match it to its episode instead.</summary>
+    AudioFile,
     AlreadyOrganized,
     Assigned,
 }

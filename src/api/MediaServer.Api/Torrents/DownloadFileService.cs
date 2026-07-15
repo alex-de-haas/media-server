@@ -29,9 +29,11 @@ public sealed class DownloadFileService(MediaServerDbContext database)
         var incomingPrefix = CatalogPaths.IncomingRelative(downloadId);
 
         // De-duplicate the incoming list by relative path defensively (an engine file list shouldn't
-        // repeat a path, but the upsert must never create two rows for one file).
+        // repeat a path, but the upsert must never create two rows for one file). External audio tracks
+        // ride along with the videos: Identify matches them to their episode and the mux stage merges
+        // them into the video file before Organize.
         var playable = files
-            .Where(file => MediaFormats.IsPlayableMedia(file.RelativePath, file.Length))
+            .Where(file => MediaFormats.IsPlayableMedia(file.RelativePath, file.Length) || MediaFormats.IsCompanionAudio(file.RelativePath))
             .GroupBy(file => file.RelativePath, StringComparer.Ordinal)
             .Select(group => group.First())
             .ToList();

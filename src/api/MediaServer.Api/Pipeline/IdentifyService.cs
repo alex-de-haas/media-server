@@ -33,7 +33,16 @@ public sealed class IdentifyService(
         var reviewReasons = new List<string>();
         var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
 
-        foreach (var sourceFile in sourceFiles)
+        // Videos resolve first; external audio tracks then match against the videos' items (they carry no
+        // searchable identity of their own — "[Group] Show 05.mka" is a dub of this batch's episode 5).
+        var videoFiles = sourceFiles.Where(file => !MediaFormats.IsCompanionAudio(file.RelativePath)).ToList();
+        var audioFiles = sourceFiles.Where(file => MediaFormats.IsCompanionAudio(file.RelativePath)).ToList();
+
+        // The items this run resolves, collected as we go: movies added by ResolveMovieAsync aren't flushed
+        // until the final save, so a store query couldn't see them for the audio pass below.
+        var assignedItems = new Dictionary<Guid, MediaItem>();
+
+        foreach (var sourceFile in videoFiles)
         {
             if (sourceFile.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && sourceFile.MediaItemId is not null)
             {
@@ -110,17 +119,108 @@ public sealed class IdentifyService(
             sourceFile.MediaItemId = mediaItem.Id;
             sourceFile.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
             sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+            assignedItems[mediaItem.Id] = mediaItem;
 
             logger.LogInformation("Matched {File} → {Kind} '{Title}' ({Provider}:{Id}).",
                 sourceFile.RelativePath, mediaItem.Kind, mediaItem.Title, mediaItem.IdentityProvider, mediaItem.IdentityProviderId);
+        }
+
+        if (audioFiles.Count > 0)
+        {
+            // Videos confirmed before this run (an operator match, or a prior drive) skipped the loop above;
+            // load their items so the audio pass can match against the whole batch.
+            var priorIds = videoFiles
+                .Where(file => file is { AssignmentStatus: SourceFileAssignmentStatus.Confirmed, MediaItemId: { } id } && !assignedItems.ContainsKey(id))
+                .Select(file => file.MediaItemId!.Value)
+                .Distinct()
+                .ToList();
+            foreach (var item in await database.MediaItems.Where(item => priorIds.Contains(item.Id)).ToListAsync(cancellationToken))
+            {
+                assignedItems[item.Id] = item;
+            }
+
+            MatchAudioTracks(catalog, audioFiles, assignedItems.Values, releaseGroups, reviewReasons);
         }
 
         await database.SaveChangesAsync(cancellationToken);
 
         var allResolved = sourceFiles.All(file =>
             (file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && file.MediaItemId is not null) ||
-            file.AssignmentStatus == SourceFileAssignmentStatus.Skipped);
+            file.AssignmentStatus is SourceFileAssignmentStatus.Skipped or SourceFileAssignmentStatus.Merged);
         return new IdentifyOutcome(allResolved, allResolved ? null : string.Join(" ", reviewReasons.Distinct()), unresolved);
+    }
+
+    /// <summary>
+    /// Matches external audio tracks to this batch's resolved videos: the single movie for a movie batch,
+    /// otherwise by the episode number parsed from the track's file name (the season disambiguates when
+    /// two seasons share an episode number). Matching assigns the video's own media item — the mux stage
+    /// later merges the track into that item's video file. A track that can't be placed routes to review,
+    /// where the operator matches it to its episode or skips it.
+    /// </summary>
+    private void MatchAudioTracks(
+        Catalog catalog, IReadOnlyList<SourceFile> audioFiles, IReadOnlyCollection<MediaItem> videoItems,
+        IReadOnlyCollection<string> releaseGroups, List<string> reviewReasons)
+    {
+        var movies = videoItems.Where(item => item.Kind == MediaKind.Movie).ToList();
+        var episodes = videoItems.Where(item => item.Kind == MediaKind.Episode).ToList();
+
+        foreach (var audio in audioFiles)
+        {
+            if ((audio.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && audio.MediaItemId is not null) ||
+                audio.AssignmentStatus is SourceFileAssignmentStatus.Skipped or SourceFileAssignmentStatus.Merged)
+            {
+                continue;
+            }
+
+            var name = Path.GetFileName(audio.RelativePath);
+            MediaItem? matched = null;
+            string? failure = null;
+
+            if (movies.Count == 1 && episodes.Count == 0)
+            {
+                matched = movies[0];
+            }
+            else if (catalog.Type == CatalogType.Movie)
+            {
+                failure = movies.Count == 0
+                    ? $"'{name}' looks like an audio track, but no movie is matched in this batch yet"
+                    : $"'{name}' looks like an audio track, but this batch has several movies";
+            }
+            else if (parser.Parse(name, catalog.Type, releaseGroups) is not { Episode: { } episode } parsed)
+            {
+                failure = $"'{name}' looks like an audio track, but no episode number was found in its name";
+            }
+            else
+            {
+                var candidates = episodes.Where(item => item.IndexNumber == episode).ToList();
+                if (candidates.Count > 1 && parsed.Season is not null)
+                {
+                    candidates = candidates.Where(item => item.ParentIndexNumber == parsed.Season).ToList();
+                }
+
+                (matched, failure) = candidates switch
+                {
+                    [var single] => (single, (string?)null),
+                    [] => (null, $"'{name}' looks like an audio track, but episode {episode} has no video in this batch"),
+                    _ => (null, $"'{name}' looks like an audio track, but episode {episode} is ambiguous in this batch"),
+                };
+            }
+
+            if (matched is not null)
+            {
+                audio.MediaItemId = matched.Id;
+                audio.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
+                audio.UpdatedAt = DateTimeOffset.UtcNow;
+                logger.LogInformation("Matched audio track {File} → {Kind} '{Title}' for muxing.",
+                    audio.RelativePath, matched.Kind, matched.Title);
+            }
+            else
+            {
+                audio.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                audio.UpdatedAt = DateTimeOffset.UtcNow;
+                reviewReasons.Add($"{failure} — match it to its episode (the track is merged into that video), or skip it.");
+            }
+        }
     }
 
     public async Task<MediaItem> ResolveMovieAsync(Catalog catalog, MetadataCandidate candidate, CancellationToken cancellationToken)
