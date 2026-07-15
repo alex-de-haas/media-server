@@ -143,8 +143,12 @@ export function IngestReviewDialog({
       seededFor.current = null;
       return;
     }
-    if (seededFor.current === item.id) return;
-    seededFor.current = item.id;
+    // Key the guard on the catalog kind too: if the dialog opens before the catalog query resolves,
+    // isEpisodic starts false and the extra modes (and search kind) seed as if for a movie — re-seed once
+    // the catalog arrives instead of staying stale.
+    const seedKey = `${item.id}:${isEpisodic}`;
+    if (seededFor.current === seedKey) return;
+    seededFor.current = seedKey;
 
     const first = unresolved[0];
     const parsedTitle = first?.parsedTitle?.trim() ?? "";
@@ -165,9 +169,10 @@ export function IngestReviewDialog({
     if (item.reviewCandidates.length === 0 && parsedTitle) {
       searchMutate({ title: parsedTitle, year: parsedYear });
     }
-    // unresolved is derived from item each render; keying the effect on item.id keeps it to one run per open.
+    // unresolved is derived from item each render; keying the effect on item.id (+ the catalog kind via
+    // isEpisodic) keeps it to one run per open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, item.id]);
+  }, [open, item.id, isEpisodic]);
 
   const numbersFor = (file: IngestSourceFile) =>
     episodeNumbers[file.id] ?? { season: file.parsedSeason ?? 1, episode: file.parsedEpisode ?? 1 };
@@ -297,6 +302,7 @@ export function IngestReviewDialog({
                         type="button"
                         variant={extra ? "secondary" : "ghost"}
                         size="sm"
+                        aria-pressed={extra}
                         className={`-my-1 h-7 shrink-0 px-2 ${extra ? "" : "text-muted-foreground"}`}
                         title={extra ? "Will be kept as a playable extra of the series — click to match an episode instead" : "Keep as a playable extra of the series instead of matching an episode"}
                         disabled={busy}

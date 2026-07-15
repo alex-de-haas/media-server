@@ -179,7 +179,9 @@ public sealed class IdentifyService(
     /// Gets or creates the extra (a playable non-episode <see cref="MediaKind.Video"/>) with the given title
     /// under a series — optionally scoped to a season. Extras carry no provider identity of their own (the
     /// provider has no entry for a creditless OP/ED); their stable identity is the series + title, so a
-    /// re-imported extra with the same title becomes another version of the existing item.
+    /// re-imported extra with the same title becomes another version of the existing item. A created extra
+    /// is only added to the context — persistence rides the caller's <c>SaveChangesAsync</c> (callers keep
+    /// batch titles unique, so an unflushed sibling can never be a lookup target).
     /// </summary>
     public async Task<MediaItem> ResolveExtraAsync(
         Catalog catalog, MediaItem series, string title, int? seasonNumber, CancellationToken cancellationToken)
@@ -229,7 +231,6 @@ public sealed class IdentifyService(
             UpdatedAt = now,
         };
         database.MediaItems.Add(extra);
-        await database.SaveChangesAsync(cancellationToken);
         return extra;
     }
 
