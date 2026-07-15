@@ -33,8 +33,29 @@ public static class IngestEndpoints
             return candidates is null ? Results.NotFound() : Results.Ok(candidates);
         });
 
+        // Match source files to one confirmed identity (the series for episodes, the movie otherwise) —
+        // single and bulk share the endpoint since a batch never mixes titles. Files that were auto-matched
+        // may be re-matched here while the item is still in review.
         group.MapPost("/{id:guid}/match", async (Guid id, MatchRequest request, IngestService service, CancellationToken cancellationToken) =>
-            await service.MatchAsync(id, request, cancellationToken) ? Results.Accepted() : Results.NotFound());
+        {
+            if (request.Files is not { Count: > 0 })
+            {
+                return Results.BadRequest(new { error = "At least one source file is required to match." });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Provider) || string.IsNullOrWhiteSpace(request.ProviderId) || string.IsNullOrWhiteSpace(request.Title))
+            {
+                return Results.BadRequest(new { error = "An identity (provider, id, title) is required to match." });
+            }
+
+            return await service.MatchAsync(id, request, cancellationToken) switch
+            {
+                MatchOutcome.NotFound => Results.NotFound(),
+                MatchOutcome.FileNotFound => Results.NotFound(new { error = "One or more source files were not found on this ingest." }),
+                MatchOutcome.AlreadyOrganized => Results.Conflict(new { error = "This item has already been identified — remap it from its library page instead." }),
+                _ => Results.Accepted(),
+            };
+        });
 
         // Skip unmatchable files (creditless OP/EDs and other extras absent from the provider) so the rest
         // of the batch can proceed without them. Skipped files are never imported.
@@ -49,7 +70,7 @@ public static class IngestEndpoints
             {
                 SkipOutcome.NotFound => Results.NotFound(),
                 SkipOutcome.FileNotFound => Results.NotFound(new { error = "One or more source files were not found on this ingest." }),
-                SkipOutcome.AlreadyMatched => Results.Conflict(new { error = "Can't skip a file that's already matched — remap it from its library page instead." }),
+                SkipOutcome.AlreadyOrganized => Results.Conflict(new { error = "This item has already been identified — remap it from its library page instead." }),
                 _ => Results.Accepted(),
             };
         });
@@ -68,7 +89,14 @@ public static class IngestEndpoints
                 return Results.BadRequest(new { error = "A series identity (provider, id, title) is required." });
             }
 
-            return await service.AssignExtrasAsync(id, request, cancellationToken) ? Results.Accepted() : Results.NotFound();
+            return await service.AssignExtrasAsync(id, request, cancellationToken) switch
+            {
+                AssignExtrasOutcome.NotFound => Results.NotFound(),
+                AssignExtrasOutcome.FileNotFound => Results.NotFound(new { error = "One or more source files were not found on this ingest." }),
+                AssignExtrasOutcome.MovieCatalog => Results.BadRequest(new { error = "Extras attach to a series; this is a movie catalog." }),
+                AssignExtrasOutcome.AlreadyOrganized => Results.Conflict(new { error = "This item has already been identified — remap it from its library page instead." }),
+                _ => Results.Accepted(),
+            };
         });
 
         // Pin a target identity before/while an item downloads so Identify resolves straight to it (never

@@ -4,12 +4,31 @@ using MediaServer.Api.Metadata;
 
 namespace MediaServer.Api.Pipeline;
 
+/// <summary>
+/// Where an already-mapped source file points: the media item's kind and title plus, for episodes, the
+/// season/episode numbers and owning series. <see cref="Provider"/>/<see cref="ProviderId"/> carry the
+/// identity used for the mapping (an episode's identity is its series' provider reference), so the review
+/// UI can pre-select the same series when offering to re-map the batch. Null for extras, which carry no
+/// provider identity of their own.
+/// </summary>
+public sealed record IngestAssignedMedia(
+    string Kind,
+    string Title,
+    int? Season,
+    int? Episode,
+    string? SeriesTitle,
+    string? Provider,
+    string? ProviderId);
+
 public sealed record IngestSourceFileResponse(
     Guid Id,
     string RelativePath,
     long SizeBytes,
     string AssignmentStatus,
     Guid? MediaItemId,
+    // The current mapping for a Confirmed file (what the review UI shows and lets the operator change
+    // while the batch is still in review), null while unmapped.
+    IngestAssignedMedia? Assigned,
     // Name-parsed hints surfaced to the review UI so it can pre-fill the corrected title and the
     // per-file season/episode without the operator retyping them. Computed on read from RelativePath
     // (no persisted column); null season/episode for movie catalogs or when the name has no SxxEyy.
@@ -51,7 +70,8 @@ public sealed record IngestItemResponse(
 {
     public static IngestItemResponse From(
         IngestItem item, IReadOnlyList<SourceFile> sourceFiles, string? downloadName, string? mediaTitle,
-        INameParser parser, CatalogType catalogType, IReadOnlyCollection<string> releaseGroups)
+        INameParser parser, CatalogType catalogType, IReadOnlyCollection<string> releaseGroups,
+        IReadOnlyDictionary<Guid, IngestAssignedMedia> assignedMedia)
     {
         var candidates = string.IsNullOrEmpty(item.ReviewCandidates)
             ? []
@@ -86,8 +106,9 @@ public sealed record IngestItemResponse(
 
                 var parsed = parser.Parse(name, catalogType, releaseGroups);
                 var extra = ExtraClassifier.Classify(file.RelativePath, catalogType);
+                var assigned = file.MediaItemId is { } mediaItemId ? assignedMedia.GetValueOrDefault(mediaItemId) : null;
                 return new IngestSourceFileResponse(
-                    file.Id, file.RelativePath, file.SizeBytes, file.AssignmentStatus.ToString(), file.MediaItemId,
+                    file.Id, file.RelativePath, file.SizeBytes, file.AssignmentStatus.ToString(), file.MediaItemId, assigned,
                     parsed.Title, parsed.Year, parsed.Season, parsed.Episode,
                     extra?.Kind.ToString(), extra?.Title, extra?.SuggestSkip ?? false);
             }).ToList(),
@@ -96,16 +117,32 @@ public sealed record IngestItemResponse(
     }
 }
 
-/// <summary>Operator manual-match for a NeedsReview source file (resumes the pipeline).</summary>
+/// <summary>
+/// Operator manual-match for source files of an item in review (resumes the pipeline). One provider
+/// identity — the series for episodes, the movie itself otherwise — applies to every file in
+/// <see cref="Files"/>; a batch never mixes titles, so the operator confirms the identity once and only
+/// the per-file season/episode vary. Files already auto-matched may be re-matched this way while the item
+/// is still in review (nothing has been organized yet).
+/// </summary>
 public sealed record MatchRequest(
-    Guid SourceFileId,
     MediaKind Kind,
     string Provider,
     string ProviderId,
     string Title,
     int? Year,
-    int? Season,
-    int? Episode);
+    IReadOnlyList<MatchFileRequest> Files);
+
+/// <summary>One file of a <see cref="MatchRequest"/>. Season/episode apply to episode matches only.</summary>
+public sealed record MatchFileRequest(Guid SourceFileId, int? Season, int? Episode);
+
+/// <summary>Result of a <c>MatchAsync</c> request, mapped to a status code by the endpoint.</summary>
+public enum MatchOutcome
+{
+    NotFound,
+    FileNotFound,
+    AlreadyOrganized,
+    Matched,
+}
 
 /// <summary>
 /// Operator skip for NeedsReview source files that have no matchable identity (creditless OP/EDs, menus,
@@ -119,7 +156,7 @@ public enum SkipOutcome
 {
     NotFound,
     FileNotFound,
-    AlreadyMatched,
+    AlreadyOrganized,
     Skipped,
 }
 
@@ -138,6 +175,16 @@ public sealed record AssignExtrasRequest(
     string Title,
     int? Year,
     int? Season);
+
+/// <summary>Result of an <c>AssignExtrasAsync</c> request, mapped to a status code by the endpoint.</summary>
+public enum AssignExtrasOutcome
+{
+    NotFound,
+    FileNotFound,
+    MovieCatalog,
+    AlreadyOrganized,
+    Assigned,
+}
 
 /// <summary>
 /// Operator re-search with a corrected title for a NeedsReview item. <see cref="Kind"/> defaults to the

@@ -36,7 +36,7 @@ public sealed class IngestExtrasTests
                 .SingleAsync();
 
             var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-            Assert.True(await service.AssignExtrasAsync(ingestId,
+            Assert.Equal(AssignExtrasOutcome.Assigned, await service.AssignExtrasAsync(ingestId,
                 new AssignExtrasRequest([extraFileId], "tmdb", "31911", "Fullmetal Alchemist Brotherhood", 2009, null),
                 CancellationToken.None));
         }
@@ -86,7 +86,7 @@ public sealed class IngestExtrasTests
             var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
             var fileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
             var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-            Assert.True(await service.AssignExtrasAsync(ingestId,
+            Assert.Equal(AssignExtrasOutcome.Assigned, await service.AssignExtrasAsync(ingestId,
                 new AssignExtrasRequest([fileId], "tmdb", "31911", "Fullmetal Alchemist Brotherhood", 2009, Season: 1),
                 CancellationToken.None));
         }
@@ -126,7 +126,7 @@ public sealed class IngestExtrasTests
             var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
             var fileIds = await database.SourceFiles.Select(file => file.Id).ToListAsync();
             var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-            Assert.True(await service.AssignExtrasAsync(ingestId,
+            Assert.Equal(AssignExtrasOutcome.Assigned, await service.AssignExtrasAsync(ingestId,
                 new AssignExtrasRequest(fileIds, "tmdb", "31911", "Fullmetal Alchemist Brotherhood", 2009, null),
                 CancellationToken.None));
         }
@@ -176,7 +176,7 @@ public sealed class IngestExtrasTests
     }
 
     [Fact]
-    public async Task Attaching_a_confirmed_file_is_rejected()
+    public async Task Attaching_a_file_of_an_identified_item_is_rejected()
     {
         using var harness = new PipelineTestHarness();
         harness.MetadataProvider.OnSearch = query => query.Episode is not null ? [FmaSeries] : [];
@@ -190,9 +190,43 @@ public sealed class IngestExtrasTests
         var fileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.AssignExtrasAsync(
+        Assert.Equal(AssignExtrasOutcome.AlreadyOrganized, await service.AssignExtrasAsync(
             ingestId, new AssignExtrasRequest([fileId], "tmdb", "31911", "Fullmetal Alchemist Brotherhood", 2009, null),
             CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Attaching_an_auto_matched_file_while_the_item_is_in_review_overrides_the_mapping()
+    {
+        using var harness = new PipelineTestHarness();
+        // "S01E00" auto-matches as an episode even though it's really an OVA the operator wants as an
+        // extra; the creditless ED parks the batch in review, leaving the mis-match still overridable.
+        harness.MetadataProvider.OnSearch = query => query.Episode is not null ? [FmaSeries] : [];
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "FMA Brotherhood S01",
+            "FMA/Fullmetal Alchemist Brotherhood S01E00.mkv",
+            additionalSourceRelativePaths: ["FMA/Fullmetal Alchemist Brotherhood (Creditless ED 1).mkv"]);
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using (var scope = harness.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            Assert.Equal(IngestStatus.NeedsReview, (await database.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
+            var confirmed = await database.SourceFiles.SingleAsync(file => file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed);
+            var autoMatchedItemId = confirmed.MediaItemId;
+
+            var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+            Assert.Equal(AssignExtrasOutcome.Assigned, await service.AssignExtrasAsync(
+                ingestId, new AssignExtrasRequest([confirmed.Id], "tmdb", "31911", "Fullmetal Alchemist Brotherhood", 2009, null),
+                CancellationToken.None));
+
+            // The file now points at a Video extra instead of the auto-matched episode.
+            var reassigned = await database.SourceFiles.SingleAsync(file => file.Id == confirmed.Id);
+            Assert.NotEqual(autoMatchedItemId, reassigned.MediaItemId);
+            var extra = await database.MediaItems.SingleAsync(item => item.Id == reassigned.MediaItemId);
+            Assert.Equal(MediaKind.Video, extra.Kind);
+        }
     }
 
     [Fact]
@@ -210,7 +244,7 @@ public sealed class IngestExtrasTests
         var fileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.AssignExtrasAsync(
+        Assert.Equal(AssignExtrasOutcome.MovieCatalog, await service.AssignExtrasAsync(
             ingestId, new AssignExtrasRequest([fileId], "tmdb", "31911", "Fullmetal Alchemist Brotherhood", 2009, null),
             CancellationToken.None));
     }

@@ -100,12 +100,27 @@ export interface VpnStatus {
   checkedAt: string;
 }
 
+// Where an already-mapped source file points. provider/providerId carry the identity used for the
+// mapping (an episode's identity is its series' provider reference) so the review dialog can pre-select
+// the same series; null for extras, which have no provider identity of their own.
+export interface IngestAssignedMedia {
+  kind: string;
+  title: string;
+  season: number | null;
+  episode: number | null;
+  seriesTitle: string | null;
+  provider: string | null;
+  providerId: string | null;
+}
+
 export interface IngestSourceFile {
   id: string;
   relativePath: string;
   sizeBytes: number;
   assignmentStatus: string;
   mediaItemId: string | null;
+  // The current mapping for a Confirmed file (shown and re-decidable while the batch is in review).
+  assigned: IngestAssignedMedia | null;
   // Name-parsed hints from the backend (computed from relativePath) used to pre-fill the review dialog:
   // the corrected title to search, and per-file season/episode. season/episode are null for movies or
   // when the filename has no SxxEyy pattern.
@@ -156,15 +171,16 @@ export interface IngestItem {
   updatedAt: string;
 }
 
+// One confirmed identity (the series for episodes, the movie itself otherwise) applied to every file in
+// the batch — only the per-file season/episode vary. Files already auto-matched may be re-matched this
+// way while the item is still in review.
 export interface MatchInput {
-  sourceFileId: string;
   kind: "Movie" | "Series" | "Season" | "Episode" | "Video";
   provider: string;
   providerId: string;
   title: string;
   year?: number | null;
-  season?: number | null;
-  episode?: number | null;
+  files: { sourceFileId: string; season?: number | null; episode?: number | null }[];
 }
 
 export interface MetadataSearchInput {
