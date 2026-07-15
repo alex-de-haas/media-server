@@ -100,6 +100,22 @@ public sealed record MatchRequest(
     int? Episode);
 
 /// <summary>
+/// Operator skip for NeedsReview source files that have no matchable identity (creditless OP/EDs, menus,
+/// and other extras absent from the metadata provider). Skipped files count as resolved so the rest of the
+/// batch proceeds; they are never organized or probed and are cleaned up with the staging leftovers.
+/// </summary>
+public sealed record SkipRequest(IReadOnlyList<Guid> SourceFileIds);
+
+/// <summary>Result of a <c>SkipAsync</c> request, mapped to a status code by the endpoint.</summary>
+public enum SkipOutcome
+{
+    NotFound,
+    FileNotFound,
+    AlreadyMatched,
+    Skipped,
+}
+
+/// <summary>
 /// Operator re-search with a corrected title for a NeedsReview item. <see cref="Kind"/> defaults to the
 /// catalog's kind (movie vs. series) when omitted. Metadata search only — the resulting candidates feed
 /// the existing pick-to-<c>/match</c> flow; the library filename still derives from the chosen metadata.

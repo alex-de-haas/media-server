@@ -98,6 +98,10 @@ public enum SourceFileAssignmentStatus
     Suggested = 1,
     Confirmed = 2,
     NeedsReview = 3,
+    /// <summary>Operator excluded the file from the ingest (e.g. a creditless OP/ED or other extra with no
+    /// provider identity). Counts as resolved so the rest of the batch can proceed; the file is never
+    /// organized or probed and is cleaned up with the staging leftovers.</summary>
+    Skipped = 4,
 }
 
 /// <summary>Status of an observable background <see cref="Job"/>.</summary>

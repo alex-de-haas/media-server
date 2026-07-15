@@ -134,6 +134,20 @@ public sealed class OrganizerService(
 
         await database.SaveChangesAsync(cancellationToken);
 
+        // Skipped files (unmatchable extras the operator excluded) are never grouped/organized above, so a
+        // skip-only torrent ingest would otherwise leave its whole .incoming/<downloadId>/ staging — and the
+        // skipped files inside it — on disk forever. Note their staging roots here so the recursive cleanup
+        // below sweeps them. Scan-imported files sit outside .incoming/ (StagingRootOf → null) and are left
+        // in place; the operator's own on-disk file is never deleted by a skip.
+        foreach (var skipped in sourceFiles.Where(file => file.AssignmentStatus == SourceFileAssignmentStatus.Skipped))
+        {
+            if (StagingRootOf(skipped.RelativePath) is { } stagingRoot &&
+                sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
+            {
+                stagingToClean.Add(stagingAbsolute);
+            }
+        }
+
         // Remove emptied .incoming/<downloadId>/ staging folders (torrent leftovers: samples, .nfo, extras).
         foreach (var staging in stagingToClean)
         {

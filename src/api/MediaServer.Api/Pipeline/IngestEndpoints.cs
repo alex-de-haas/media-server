@@ -36,6 +36,24 @@ public static class IngestEndpoints
         group.MapPost("/{id:guid}/match", async (Guid id, MatchRequest request, IngestService service, CancellationToken cancellationToken) =>
             await service.MatchAsync(id, request, cancellationToken) ? Results.Accepted() : Results.NotFound());
 
+        // Skip unmatchable files (creditless OP/EDs and other extras absent from the provider) so the rest
+        // of the batch can proceed without them. Skipped files are never imported.
+        group.MapPost("/{id:guid}/skip", async (Guid id, SkipRequest? request, IngestService service, CancellationToken cancellationToken) =>
+        {
+            if (request?.SourceFileIds is not { Count: > 0 })
+            {
+                return Results.BadRequest(new { error = "At least one source file id is required to skip." });
+            }
+
+            return await service.SkipAsync(id, request, cancellationToken) switch
+            {
+                SkipOutcome.NotFound => Results.NotFound(),
+                SkipOutcome.FileNotFound => Results.NotFound(new { error = "One or more source files were not found on this ingest." }),
+                SkipOutcome.AlreadyMatched => Results.Conflict(new { error = "Can't skip a file that's already matched — remap it from its library page instead." }),
+                _ => Results.Accepted(),
+            };
+        });
+
         // Pin a target identity before/while an item downloads so Identify resolves straight to it (never
         // routing to review). Rejected with 409 once the item has already been identified — use library remap.
         group.MapPost("/{id:guid}/pin", async (Guid id, PinIdentityRequest request, IngestService service, CancellationToken cancellationToken) =>

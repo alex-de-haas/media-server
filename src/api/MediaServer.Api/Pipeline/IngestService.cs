@@ -153,6 +153,61 @@ public sealed class IngestService(
     }
 
     /// <summary>
+    /// Marks source files as <see cref="SourceFileAssignmentStatus.Skipped"/> so an item parked over
+    /// unmatchable extras (creditless OP/EDs, specials missing from the provider) can proceed without them.
+    /// The files stay unmapped: Organize/Probe ignore them and the staging cleanup removes them from disk
+    /// once the confirmed files move out. Re-enqueues the item so Identify re-evaluates the batch.
+    /// </summary>
+    public async Task<SkipOutcome> SkipAsync(Guid id, SkipRequest request, CancellationToken cancellationToken)
+    {
+        var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+        if (item is null)
+        {
+            return SkipOutcome.NotFound;
+        }
+
+        var requestedIds = request.SourceFileIds.Distinct().ToList();
+        var files = await database.SourceFiles
+            .Where(file => file.IngestItemId == id && requestedIds.Contains(file.Id))
+            .ToListAsync(cancellationToken);
+        if (files.Count != requestedIds.Count)
+        {
+            return SkipOutcome.FileNotFound;
+        }
+
+        // A confirmed file is already matched and (possibly) organized — skipping it here would strand a
+        // published assignment. Unmatching a file is a library remap, not a skip.
+        if (files.Any(file => file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed))
+        {
+            return SkipOutcome.AlreadyMatched;
+        }
+
+        // Idempotent: a re-skip of files that are already Skipped changes nothing, so don't bump timestamps,
+        // flip the item back to Pending, or re-enqueue a needless drive.
+        var toSkip = files.Where(file => file.AssignmentStatus != SourceFileAssignmentStatus.Skipped).ToList();
+        if (toSkip.Count == 0)
+        {
+            return SkipOutcome.Skipped;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var file in toSkip)
+        {
+            file.AssignmentStatus = SourceFileAssignmentStatus.Skipped;
+            file.MediaItemId = null;
+            file.UpdatedAt = now;
+        }
+
+        item.Status = IngestStatus.Pending;
+        item.NextAttemptAt = null;
+        item.UpdatedAt = now;
+        await database.SaveChangesAsync(cancellationToken);
+
+        queue.Enqueue(item.Id);
+        return SkipOutcome.Skipped;
+    }
+
+    /// <summary>
     /// Pins a target identity so Identify resolves the item straight to it (see <see cref="TargetIdentity"/>).
     /// Works before the download finishes (the pin just persists; Identify honors it after the hand-off) and on
     /// a parked <see cref="IngestStatus.NeedsReview"/> item (re-driven so Identify re-runs with the pin).
