@@ -122,6 +122,13 @@ public sealed class IngestService(
 
     public async Task<MatchOutcome> MatchAsync(Guid id, MatchRequest request, CancellationToken cancellationToken)
     {
+        // The endpoint rejects an empty batch too; guarded here as well so an internal caller can't flip
+        // the item to Pending and re-drive it having matched nothing.
+        if (request.Files is not { Count: > 0 })
+        {
+            return MatchOutcome.FileNotFound;
+        }
+
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -239,6 +246,12 @@ public sealed class IngestService(
     /// </summary>
     public async Task<AssignExtrasOutcome> AssignExtrasAsync(Guid id, AssignExtrasRequest request, CancellationToken cancellationToken)
     {
+        // Same defensive guard as MatchAsync: an empty batch must not resolve the series or re-drive.
+        if (request.SourceFileIds is not { Count: > 0 })
+        {
+            return AssignExtrasOutcome.FileNotFound;
+        }
+
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {

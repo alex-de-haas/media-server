@@ -230,6 +230,28 @@ public sealed class IngestExtrasTests
     }
 
     [Fact]
+    public async Task Attaching_with_no_files_is_rejected_without_re_driving_the_item()
+    {
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [];
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Anime, "FMA Extras", "FMA/Fullmetal Alchemist Brotherhood NCOP1.mkv");
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+        Assert.Equal(AssignExtrasOutcome.FileNotFound, await service.AssignExtrasAsync(
+            ingestId, new AssignExtrasRequest([], "tmdb", "31911", "Fullmetal Alchemist Brotherhood", 2009, null),
+            CancellationToken.None));
+
+        // No series container may appear and the parked item must stay parked.
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.False(await database.MediaItems.AnyAsync(item => item.Kind == MediaKind.Series));
+        Assert.Equal(IngestStatus.NeedsReview, (await database.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
+    }
+
+    [Fact]
     public async Task Attaching_extras_in_a_movie_catalog_is_rejected()
     {
         using var harness = new PipelineTestHarness();

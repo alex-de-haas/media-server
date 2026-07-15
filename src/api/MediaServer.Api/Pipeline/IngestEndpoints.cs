@@ -43,6 +43,13 @@ public static class IngestEndpoints
                 return Results.BadRequest(new { error = "At least one source file is required to match." });
             }
 
+            // A manual match resolves files to a movie or to episodes of a series — the other kinds are
+            // containers/extras and would silently be treated as a movie by the resolver.
+            if (request.Kind is not (MediaKind.Movie or MediaKind.Episode))
+            {
+                return Results.BadRequest(new { error = "kind must be Movie or Episode." });
+            }
+
             if (string.IsNullOrWhiteSpace(request.Provider) || string.IsNullOrWhiteSpace(request.ProviderId) || string.IsNullOrWhiteSpace(request.Title))
             {
                 return Results.BadRequest(new { error = "An identity (provider, id, title) is required to match." });

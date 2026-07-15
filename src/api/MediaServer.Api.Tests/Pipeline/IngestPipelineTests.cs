@@ -118,6 +118,26 @@ public sealed class IngestPipelineTests
     }
 
     [Fact]
+    public async Task Match_with_no_files_is_rejected_without_re_driving_the_item()
+    {
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [];
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Obscure.Release.2021", "Obscure.Release.2021/movie.mkv");
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var ingestService = scope.ServiceProvider.GetRequiredService<IngestService>();
+        Assert.Equal(MatchOutcome.FileNotFound, await ingestService.MatchAsync(ingestId,
+            new MatchRequest(MediaKind.Movie, "tmdb", "27205", "Inception", 2010, []), CancellationToken.None));
+
+        // The parked item must not have been flipped back to Pending by an empty batch.
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.NeedsReview, (await database.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
+    }
+
+    [Fact]
     public async Task Bulk_match_resolves_a_whole_series_pack_with_one_confirmed_identity()
     {
         using var harness = new PipelineTestHarness();

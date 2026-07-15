@@ -466,7 +466,13 @@ function FileRow({
               className="text-muted-foreground -my-1 h-7 shrink-0 px-2"
               title="Re-decide this file (re-match, keep as extra, or skip)"
               disabled={busy}
-              onClick={() => onDecision(file.assigned?.kind === "Video" ? "extra" : "match")}
+              // Seed from the current mapping — a skipped file opens with Skip active (no fake pending
+              // change), an extra with Extra, an episode/movie with the match editor.
+              onClick={() =>
+                onDecision(
+                  file.assignmentStatus === "Skipped" ? "skip" : file.assigned?.kind === "Video" ? "extra" : "match",
+                )
+              }
             >
               Change
             </Button>
