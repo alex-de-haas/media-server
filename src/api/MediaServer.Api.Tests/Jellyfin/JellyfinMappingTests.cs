@@ -135,6 +135,40 @@ public sealed class JellyfinMappingTests : IDisposable
         Assert.Equal("Breaking Bad", episode.SeriesName);
     }
 
+    [Fact]
+    public async Task Series_extras_surface_as_playable_special_features()
+    {
+        var extras = await _library.GetSpecialFeaturesAsync(_seriesPublicId, appUserId: null, CancellationToken.None);
+
+        var extra = Assert.Single(extras);
+        Assert.Equal("Creditless Opening 1", extra.Name);
+        Assert.Equal("Video", extra.Type);
+        Assert.Equal("Clip", extra.ExtraType);
+        Assert.Equal(_seriesPublicId, extra.SeriesId);
+        Assert.Equal(_seriesPublicId, extra.ParentId);
+        Assert.Equal("Breaking Bad", extra.SeriesName);
+
+        // Sources ride along so clients can play the extra straight from the list.
+        var source = Assert.Single(extra.MediaSources!);
+        Assert.Equal("mkv", source.Container);
+        Assert.Equal("Breaking Bad (2008)/extras/Creditless Opening 1.mkv", source.Path);
+    }
+
+    [Fact]
+    public async Task Series_advertises_extras_without_counting_them_as_children()
+    {
+        var series = await _library.GetItemAsync(_seriesPublicId, includeMediaSources: false, appUserId: null, CancellationToken.None);
+
+        Assert.NotNull(series);
+        Assert.Equal(1, series!.SpecialFeatureCount);
+        // The extra hangs off the series but browsing shape is unchanged: one season child.
+        Assert.Equal(1, series.ChildCount);
+
+        // Episodes/seasons don't leak extras either (guarded by kind filters).
+        var episodes = await _library.GetEpisodesAsync(_seriesPublicId, null, null, appUserId: null, CancellationToken.None);
+        Assert.Single(episodes.Items);
+    }
+
     private void Seed()
     {
         var now = DateTimeOffset.UtcNow;
@@ -221,6 +255,32 @@ public sealed class JellyfinMappingTests : IDisposable
         _seriesPublicId = series.PublicId!;
         _seasonPublicId = season.PublicId!;
         context.MediaItems.AddRange(series, season, episode);
+
+        // ---- Series extra (a creditless OP imported as a playable non-episode video) ----
+        var extra = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            PublicId = Guid.NewGuid().ToString("N"),
+            CatalogId = seriesCatalog.Id,
+            Kind = MediaKind.Video,
+            Title = "Creditless Opening 1",
+            ParentId = series.Id,
+            SeriesId = series.Id,
+            LibraryPath = "Breaking Bad (2008)/extras/Creditless Opening 1.mkv",
+            AddedAt = now,
+            UpdatedAt = now,
+        };
+        context.MediaItems.Add(extra);
+        context.MediaSources.Add(new MediaSource
+        {
+            Id = Guid.NewGuid(),
+            MediaItemId = extra.Id,
+            Container = "matroska",
+            Path = "Breaking Bad (2008)/extras/Creditless Opening 1.mkv",
+            SizeBytes = 100_000_000,
+            DurationTicks = TimeSpan.FromMinutes(2).Ticks,
+            CreatedAt = now,
+        });
 
         context.SaveChanges();
     }

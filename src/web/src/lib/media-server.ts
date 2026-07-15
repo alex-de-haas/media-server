@@ -113,6 +113,12 @@ export interface IngestSourceFile {
   parsedYear: number | null;
   parsedSeason: number | null;
   parsedEpisode: number | null;
+  // Extras classification (creditless OP/EDs, PVs, menus, …), null for regular content. When set, the
+  // review dialog pre-suggests attaching the file to its series as an extra titled extraTitle — or
+  // skipping it when extraSuggestSkip is true (disc menus, commercials).
+  extraKind: string | null;
+  extraTitle: string | null;
+  extraSuggestSkip: boolean;
 }
 
 export interface MetadataCandidate {
@@ -165,6 +171,17 @@ export interface MetadataSearchInput {
   title: string;
   year?: number | null;
   kind?: "Movie" | "Series" | "Season" | "Episode" | "Video" | null;
+}
+
+// Attaches NeedsReview files to a series (by provider identity) as playable extras. season optionally
+// parents them under that season; each file's own title derives server-side from its classification.
+export interface AssignExtrasInput {
+  sourceFileIds: string[];
+  provider: string;
+  providerId: string;
+  title: string;
+  year?: number | null;
+  season?: number | null;
 }
 
 // Pins a target identity on an ingest item before/while it downloads so Identify resolves straight to it.
@@ -577,6 +594,9 @@ export const mediaServer = {
   // Skip files with no matchable identity (creditless OP/EDs and other extras) so the batch proceeds
   // without them; skipped files are never imported.
   skipIngestFiles: (id: string, sourceFileIds: string[]) => send(`/ingest/${id}/skip`, "POST", { sourceFileIds }),
+  // Attach files to a series as playable extras (the keep-it alternative to skipping): each file becomes
+  // a non-episode video under the series' extras/ folder, titled from its classification.
+  assignIngestExtras: (id: string, input: AssignExtrasInput) => send(`/ingest/${id}/extras`, "POST", input),
   // Pin (or re-pin) the target identity; clear it back to the auto-identify path with unpinIngest.
   pinIngest: (id: string, input: PinInput) => send(`/ingest/${id}/pin`, "POST", input),
   unpinIngest: (id: string) => send(`/ingest/${id}/pin`, "DELETE"),

@@ -187,15 +187,26 @@ public sealed class OrganizerService(
     private async Task<string> BuildLibraryPathAsync(
         Catalog catalog, MediaItem item, string extension, string? edition, CancellationToken cancellationToken)
     {
-        if (item.Kind == MediaKind.Episode)
+        if (item.Kind is MediaKind.Episode or MediaKind.Video)
         {
             var series = item.SeriesId is { } seriesId
                 ? await database.MediaItems.FirstOrDefaultAsync(media => media.Id == seriesId, cancellationToken)
                 : null;
 
-            // Fall back to the episode's own title if the series row is missing.
-            series ??= item;
-            return LibraryNaming.ForEpisode(series, item, extension, edition);
+            // A series extra lives in the show's extras/ folder; a Video without a series (not produced by
+            // the ingest flow, but tolerated) falls through to the movie template below.
+            if (item.Kind == MediaKind.Video)
+            {
+                if (series is not null)
+                {
+                    return LibraryNaming.ForExtra(series, item, extension, edition);
+                }
+            }
+            else
+            {
+                // Fall back to the episode's own title if the series row is missing.
+                return LibraryNaming.ForEpisode(series ?? item, item, extension, edition);
+            }
         }
 
         return LibraryNaming.ForMovie(catalog, item, extension, edition);

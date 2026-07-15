@@ -85,7 +85,8 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         UserItemDataDto userData,
         ItemParents parents,
         bool includeMediaSources,
-        int? childCount = null)
+        int? childCount = null,
+        int? specialFeatureCount = null)
     {
         var (type, isFolder, mediaType) = ShapeFor(item.Kind);
         var name = !string.IsNullOrWhiteSpace(meta?.Title) ? meta!.Title! : item.Title;
@@ -125,6 +126,10 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             DateCreated = item.AddedAt,
             ChildCount = childCount,
             RecursiveItemCount = childCount,
+            // A Video parented to a series is an extra (creditless OP/ED, PV, …); "Clip" is the closest
+            // Jellyfin ExtraType for the generic case and groups them under the client's Extras section.
+            ExtraType = item.Kind == MediaKind.Video && item.SeriesId is not null ? "Clip" : null,
+            SpecialFeatureCount = specialFeatureCount,
             ImageTags = PrimaryImageTags(images),
             BackdropImageTags = BackdropTags(images),
             ProviderIds = ProviderIds(item),

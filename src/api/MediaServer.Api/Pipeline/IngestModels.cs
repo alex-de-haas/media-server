@@ -16,7 +16,13 @@ public sealed record IngestSourceFileResponse(
     string ParsedTitle,
     int? ParsedYear,
     int? ParsedSeason,
-    int? ParsedEpisode);
+    int? ParsedEpisode,
+    // Extras classification (see ExtraClassifier), likewise computed on read. When set, the review UI
+    // pre-suggests attaching the file to its series as an extra titled ExtraTitle — or skipping it when
+    // ExtraSuggestSkip is true (disc menus, commercials). All null/false for regular content.
+    string? ExtraKind,
+    string? ExtraTitle,
+    bool ExtraSuggestSkip);
 
 public sealed record IngestItemResponse(
     Guid Id,
@@ -79,9 +85,11 @@ public sealed record IngestItemResponse(
                 }
 
                 var parsed = parser.Parse(name, catalogType, releaseGroups);
+                var extra = ExtraClassifier.Classify(file.RelativePath, catalogType);
                 return new IngestSourceFileResponse(
                     file.Id, file.RelativePath, file.SizeBytes, file.AssignmentStatus.ToString(), file.MediaItemId,
-                    parsed.Title, parsed.Year, parsed.Season, parsed.Episode);
+                    parsed.Title, parsed.Year, parsed.Season, parsed.Episode,
+                    extra?.Kind.ToString(), extra?.Title, extra?.SuggestSkip ?? false);
             }).ToList(),
             item.CreatedAt,
             item.UpdatedAt);
@@ -114,6 +122,22 @@ public enum SkipOutcome
     AlreadyMatched,
     Skipped,
 }
+
+/// <summary>
+/// Operator attach of NeedsReview source files to a series as playable extras — the richer alternative to
+/// skipping for content worth keeping (creditless OP/EDs, PVs, specials the provider doesn't list). The
+/// series is the usual provider identity (get-or-create, like a match); each file becomes its own
+/// <see cref="MediaKind.Video"/> item titled from its extras classification (file name as fallback) and then
+/// flows through Organize (the series' <c>extras/</c> folder), Probe, and Publish like any other leaf.
+/// <see cref="Season"/> optionally parents the extras under that season instead of the series root.
+/// </summary>
+public sealed record AssignExtrasRequest(
+    IReadOnlyList<Guid> SourceFileIds,
+    string Provider,
+    string ProviderId,
+    string Title,
+    int? Year,
+    int? Season);
 
 /// <summary>
 /// Operator re-search with a corrected title for a NeedsReview item. <see cref="Kind"/> defaults to the

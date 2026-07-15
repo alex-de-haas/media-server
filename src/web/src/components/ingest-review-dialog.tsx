@@ -22,8 +22,10 @@ import { Input } from "@/components/ui/input";
  * and (for series/anime) each file's season/episode from the backend's name-parsed hints, and auto-runs a
  * search when no auto-identified candidates exist — so the operator usually just picks a match. The title
  * and per-file season/episode stay editable for the cases the parser got wrong. Files that have no
- * matchable identity at all (creditless OP/EDs and other extras absent from the provider) can be skipped —
- * per file or all at once — so the rest of the batch proceeds without them.
+ * matchable identity at all (creditless OP/EDs and other extras absent from the provider) can be kept as
+ * playable extras of their series — pre-suggested from the backend's filename classification, per file or
+ * in bulk against a pinned series — or skipped (per file or all at once, pre-suggested for junk like disc
+ * menus) so the rest of the batch proceeds without them.
  */
 export function IngestReviewDialog({
   item,
@@ -50,6 +52,11 @@ export function IngestReviewDialog({
   // Per-file season/episode, keyed by source-file id and seeded from each file's parsed SxxEyy. A whole
   // season pack therefore pre-fills the right number on every file instead of a shared "1/1".
   const [episodeNumbers, setEpisodeNumbers] = useState<Record<string, { season: number; episode: number }>>({});
+  // Per-file "import as extra" mode, seeded from the backend's filename classification (creditless OP/EDs
+  // pre-select it; junk-leaning kinds like menus don't — Skip stays the suggested action for those). In
+  // extra mode picking a series candidate attaches the file under that series' extras instead of matching
+  // it to an episode. Only meaningful for episodic catalogs.
+  const [extraModes, setExtraModes] = useState<Record<string, boolean>>({});
   // Results from a manual re-search override the (possibly empty/wrong) auto-identified candidates.
   const [searchResults, setSearchResults] = useState<MetadataCandidate[] | null>(null);
 
@@ -104,7 +111,28 @@ export function IngestReviewDialog({
     onError: (error) => toast.error("Couldn’t skip", { description: errorMessage(error) }),
   });
 
-  const busy = match.isPending || skip.isPending;
+  // Attach = keep the file as a playable extra of its series (creditless OP/EDs, PVs, …): the backend
+  // creates a non-episode video under the series' extras/ folder and re-drives the batch.
+  const attachExtras = useMutation({
+    mutationFn: (variables: {
+      sourceFileIds: string[];
+      provider: string;
+      providerId: string;
+      title: string;
+      year: number | null;
+    }) => mediaServer.assignIngestExtras(item.id, variables),
+    onSuccess: (_, variables) => {
+      toast.success(
+        variables.sourceFileIds.length === 1
+          ? `Extra attached to ${variables.title}`
+          : `${variables.sourceFileIds.length} extras attached to ${variables.title}`,
+      );
+      onMatched();
+    },
+    onError: (error) => toast.error("Couldn’t attach extra", { description: errorMessage(error) }),
+  });
+
+  const busy = match.isPending || skip.isPending || attachExtras.isPending;
 
   // Re-seed the editable fields whenever the dialog opens for an item: corrected title/year from the first
   // unresolved file (the series title for packs), and per-file season/episode from each file's parse.
@@ -115,8 +143,12 @@ export function IngestReviewDialog({
       seededFor.current = null;
       return;
     }
-    if (seededFor.current === item.id) return;
-    seededFor.current = item.id;
+    // Key the guard on the catalog kind too: if the dialog opens before the catalog query resolves,
+    // isEpisodic starts false and the extra modes (and search kind) seed as if for a movie — re-seed once
+    // the catalog arrives instead of staying stale.
+    const seedKey = `${item.id}:${isEpisodic}`;
+    if (seededFor.current === seedKey) return;
+    seededFor.current = seedKey;
 
     const first = unresolved[0];
     const parsedTitle = first?.parsedTitle?.trim() ?? "";
@@ -127,20 +159,38 @@ export function IngestReviewDialog({
     setEpisodeNumbers(
       Object.fromEntries(unresolved.map((file) => [file.id, { season: file.parsedSeason ?? 1, episode: file.parsedEpisode ?? 1 }])),
     );
+    // Classified extras open in extra mode (menus and other junk-leaning kinds stay off — Skip is their
+    // suggested action); the operator can flip any file either way.
+    setExtraModes(
+      Object.fromEntries(unresolved.map((file) => [file.id, isEpisodic && file.extraKind != null && !file.extraSuggestSkip])),
+    );
 
     // No auto-identified candidates to show? Run the search up-front so variants appear without a click.
     if (item.reviewCandidates.length === 0 && parsedTitle) {
       searchMutate({ title: parsedTitle, year: parsedYear });
     }
-    // unresolved is derived from item each render; keying the effect on item.id keeps it to one run per open.
+    // unresolved is derived from item each render; keying the effect on item.id (+ the catalog kind via
+    // isEpisodic) keeps it to one run per open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, item.id]);
+  }, [open, item.id, isEpisodic]);
 
   const numbersFor = (file: IngestSourceFile) =>
     episodeNumbers[file.id] ?? { season: file.parsedSeason ?? 1, episode: file.parsedEpisode ?? 1 };
 
   const setNumbers = (file: IngestSourceFile, patch: Partial<{ season: number; episode: number }>) =>
     setEpisodeNumbers((prev) => ({ ...prev, [file.id]: { ...numbersFor(file), ...patch } }));
+
+  const isExtra = (file: IngestSourceFile) =>
+    extraModes[file.id] ?? (isEpisodic && file.extraKind != null && !file.extraSuggestSkip);
+
+  const extraFiles = unresolved.filter(isExtra);
+
+  // A pinned series identity makes bulk-attaching all extra-mode files a one-click action; without a pin
+  // the operator picks the series per file from the candidate list.
+  const pinnedSeries =
+    item.targetKind === "Series" && item.targetProvider && item.targetProviderId && item.targetTitle
+      ? { provider: item.targetProvider, providerId: item.targetProviderId, title: item.targetTitle, year: item.targetYear }
+      : null;
 
   const candidates = searchResults ?? item.reviewCandidates;
   const title = item.downloadName ?? fileNameOf(item.sourceFiles[0]?.relativePath) ?? "Untitled item";
@@ -184,9 +234,13 @@ export function IngestReviewDialog({
           </form>
 
           {/* Extras that don't exist on the provider (creditless openings, menus, …) can't ever match —
-              skipping them is the intended way to unblock the rest of the batch. */}
+              attach them to their series as playable extras, or skip them to unblock the rest of the batch. */}
           <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
-            <span>Files without a match can be skipped — skipped files aren’t imported.</span>
+            <span>
+              {isEpisodic
+                ? "Files without a match can be kept as extras of their series, or skipped (not imported)."
+                : "Files without a match can be skipped — skipped files aren’t imported."}
+            </span>
             {unresolved.length > 1 && (
               <Button
                 type="button"
@@ -201,12 +255,41 @@ export function IngestReviewDialog({
             )}
           </div>
 
+          {/* One-click bulk attach when the series is already pinned — the common anime-pack case. */}
+          {pinnedSeries && extraFiles.length > 0 && (
+            <div className="bg-muted/40 flex items-center justify-between gap-2 rounded-md px-2.5 py-2 text-xs">
+              <span className="min-w-0">
+                {extraFiles.length === 1 ? "1 file looks like an extra of " : `${extraFiles.length} files look like extras of `}
+                <span className="font-medium">{pinnedSeries.title}</span>.
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                disabled={busy}
+                onClick={() =>
+                  attachExtras.mutate({
+                    sourceFileIds: extraFiles.map((file) => file.id),
+                    provider: pinnedSeries.provider,
+                    providerId: pinnedSeries.providerId,
+                    title: pinnedSeries.title,
+                    year: pinnedSeries.year ?? null,
+                  })
+                }
+              >
+                {attachExtras.isPending ? "Attaching…" : extraFiles.length === 1 ? "Attach as extra" : `Attach all ${extraFiles.length}`}
+              </Button>
+            </div>
+          )}
+
           {/* Bounded scroll container: max-height + overflow on the same element scrolls reliably (a
               max-height on a ScrollArea root can't bound its height:100% viewport, so the list spilled out). */}
           <div className="-mr-2 flex max-h-[55vh] flex-col gap-3 overflow-y-auto pr-2">
             {unresolved.map((file) => {
               const numbers = numbersFor(file);
               const fileName = fileNameOf(file.relativePath) ?? file.relativePath;
+              const extra = isExtra(file);
               return (
                 <div key={file.id} className="flex flex-col gap-1.5">
                   <div className="bg-muted/60 flex min-w-0 items-start gap-2 rounded-md px-2.5 py-2" title={file.relativePath}>
@@ -214,6 +297,20 @@ export function IngestReviewDialog({
                     <span className="min-w-0 flex-1 wrap-anywhere font-mono text-xs leading-relaxed font-medium">
                       {fileName}
                     </span>
+                    {isEpisodic && (
+                      <Button
+                        type="button"
+                        variant={extra ? "secondary" : "ghost"}
+                        size="sm"
+                        aria-pressed={extra}
+                        className={`-my-1 h-7 shrink-0 px-2 ${extra ? "" : "text-muted-foreground"}`}
+                        title={extra ? "Will be kept as a playable extra of the series — click to match an episode instead" : "Keep as a playable extra of the series instead of matching an episode"}
+                        disabled={busy}
+                        onClick={() => setExtraModes((prev) => ({ ...prev, [file.id]: !extra }))}
+                      >
+                        Extra
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       variant="ghost"
@@ -226,8 +323,24 @@ export function IngestReviewDialog({
                       Skip
                     </Button>
                   </div>
+                  {/* Classification verdict: what the file looks like and what the pre-suggested action is. */}
+                  {isEpisodic && file.extraKind != null && (
+                    <span className="text-muted-foreground text-xs">
+                      Looks like <span className="font-medium">{file.extraTitle ?? "an extra"}</span>
+                      {file.extraSuggestSkip
+                        ? " — usually junk; Skip is suggested, or keep it via Extra."
+                        : extra
+                          ? " — pick a series below to attach it under that series’ extras."
+                          : "."}
+                    </span>
+                  )}
+                  {extra && file.extraKind == null && (
+                    <span className="text-muted-foreground text-xs">
+                      Will be kept as an extra — pick a series below to attach it to.
+                    </span>
+                  )}
                   {/* Per-file season/episode, pre-filled from this file's name. */}
-                  {isEpisodic && (
+                  {isEpisodic && !extra && (
                     <div className="text-muted-foreground flex items-center gap-3">
                       <label className="flex items-center gap-1.5">
                         Season
@@ -255,24 +368,36 @@ export function IngestReviewDialog({
                     {candidates.length ? (
                       candidates.map((candidate) => {
                         const matching =
-                          match.isPending &&
-                          match.variables?.sourceFileId === file.id &&
-                          match.variables?.providerId === candidate.reference.id;
+                          (match.isPending &&
+                            match.variables?.sourceFileId === file.id &&
+                            match.variables?.providerId === candidate.reference.id) ||
+                          (attachExtras.isPending &&
+                            attachExtras.variables?.sourceFileIds.length === 1 &&
+                            attachExtras.variables?.sourceFileIds[0] === file.id &&
+                            attachExtras.variables?.providerId === candidate.reference.id);
                         return (
                           <button
                             key={`${candidate.reference.provider}:${candidate.reference.id}`}
                             type="button"
                             disabled={busy}
                             onClick={() =>
-                              match.mutate({
-                                sourceFileId: file.id,
-                                provider: candidate.reference.provider,
-                                providerId: candidate.reference.id,
-                                title: candidate.title,
-                                year: candidate.year,
-                                season: numbers.season,
-                                episode: numbers.episode,
-                              })
+                              extra
+                                ? attachExtras.mutate({
+                                    sourceFileIds: [file.id],
+                                    provider: candidate.reference.provider,
+                                    providerId: candidate.reference.id,
+                                    title: candidate.title,
+                                    year: candidate.year,
+                                  })
+                                : match.mutate({
+                                    sourceFileId: file.id,
+                                    provider: candidate.reference.provider,
+                                    providerId: candidate.reference.id,
+                                    title: candidate.title,
+                                    year: candidate.year,
+                                    season: numbers.season,
+                                    episode: numbers.episode,
+                                  })
                             }
                             className="hover:bg-accent focus-visible:ring-ring flex items-center gap-2.5 rounded-md border px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-60"
                           >

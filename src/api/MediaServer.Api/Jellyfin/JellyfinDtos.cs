@@ -112,6 +112,10 @@ public sealed record BaseItemDto
     public int? ChildCount { get; init; }
     public int? RecursiveItemCount { get; init; }
     public string PlayAccess { get; init; } = "Full";
+    // Series extras (creditless OP/EDs, PVs, …). ExtraType marks an extra item itself; SpecialFeatureCount
+    // on a parent advertises that /Items/{id}/SpecialFeatures has content.
+    public string? ExtraType { get; init; }
+    public int? SpecialFeatureCount { get; init; }
     public IReadOnlyDictionary<string, string>? ImageTags { get; init; }
     public IReadOnlyList<string>? BackdropImageTags { get; init; }
     public IReadOnlyDictionary<string, string>? ProviderIds { get; init; }

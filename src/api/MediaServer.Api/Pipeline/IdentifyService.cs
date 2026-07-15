@@ -45,6 +45,19 @@ public sealed class IdentifyService(
                 continue; // Operator excluded it (an unmatchable extra) — leave it unmapped, don't re-search.
             }
 
+            // A recognizable extra (creditless OP/ED, PV, menu, …) has no provider identity — searching for
+            // it is wasted at best and a false match at worst. Park it for review with a concrete hint; the
+            // review dialog pre-suggests attaching it to its series as an extra (or skipping it).
+            if (ExtraClassifier.Classify(sourceFile.RelativePath, catalog.Type) is { } extra)
+            {
+                sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+                reviewReasons.Add(
+                    $"'{DeriveName(sourceFile.RelativePath, fallbackName)}' looks like an extra ({extra.Title}) — " +
+                    (extra.SuggestSkip ? "skip it, or attach it to its series." : "attach it to its series, or skip it."));
+                continue;
+            }
+
             var name = DeriveName(sourceFile.RelativePath, fallbackName);
             var parsed = parser.Parse(name, catalog.Type, releaseGroups);
 
@@ -141,15 +154,14 @@ public sealed class IdentifyService(
         return movie;
     }
 
-    public async Task<MediaItem> ResolveEpisodeAsync(
-        Catalog catalog, MetadataCandidate seriesCandidate, ParsedName parsed, CancellationToken cancellationToken)
+    /// <summary>Gets or creates the series container for a provider identity (no season/episode).</summary>
+    public async Task<MediaItem> ResolveSeriesAsync(
+        Catalog catalog, MetadataCandidate seriesCandidate, CancellationToken cancellationToken)
     {
-        var season = parsed.Season ?? 1;
-        var episode = parsed.Episode ?? 0;
         var provider = seriesCandidate.Reference.Provider;
         var seriesId = seriesCandidate.Reference.Id;
 
-        var series = await GetOrCreateContainerAsync(catalog, MediaKind.Series, provider, seriesId,
+        return await GetOrCreateContainerAsync(catalog, MediaKind.Series, provider, seriesId,
             () => new MediaItem
             {
                 Id = Guid.NewGuid(),
@@ -161,6 +173,76 @@ public sealed class IdentifyService(
                 IdentityProviderId = seriesId,
                 Providers = new Dictionary<string, string> { [provider] = seriesId },
             }, seasonNumber: null, episodeNumber: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets or creates the extra (a playable non-episode <see cref="MediaKind.Video"/>) with the given title
+    /// under a series — optionally scoped to a season. Extras carry no provider identity of their own (the
+    /// provider has no entry for a creditless OP/ED); their stable identity is the series + title, so a
+    /// re-imported extra with the same title becomes another version of the existing item. A created extra
+    /// is only added to the context — persistence rides the caller's <c>SaveChangesAsync</c> (callers keep
+    /// batch titles unique, so an unflushed sibling can never be a lookup target).
+    /// </summary>
+    public async Task<MediaItem> ResolveExtraAsync(
+        Catalog catalog, MediaItem series, string title, int? seasonNumber, CancellationToken cancellationToken)
+    {
+        MediaItem? seasonItem = null;
+        if (seasonNumber is { } season && series is { IdentityProvider: { } provider, IdentityProviderId: { } providerId })
+        {
+            seasonItem = await GetOrCreateContainerAsync(catalog, MediaKind.Season, provider, providerId,
+                () => new MediaItem
+                {
+                    Id = Guid.NewGuid(),
+                    CatalogId = catalog.Id,
+                    Kind = MediaKind.Season,
+                    Title = $"Season {season}",
+                    ParentId = series.Id,
+                    SeriesId = series.Id,
+                    IdentityProvider = provider,
+                    IdentityProviderId = providerId,
+                    IdentitySeasonNumber = season,
+                    ParentIndexNumber = season,
+                    IndexNumber = season,
+                    Providers = new Dictionary<string, string> { [provider] = providerId },
+                }, seasonNumber: season, episodeNumber: null, cancellationToken);
+        }
+
+        var existing = await database.MediaItems.FirstOrDefaultAsync(item =>
+            item.CatalogId == catalog.Id &&
+            item.Kind == MediaKind.Video &&
+            item.SeriesId == series.Id &&
+            item.Title == title, cancellationToken);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var extra = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            CatalogId = catalog.Id,
+            Kind = MediaKind.Video,
+            Title = title,
+            ParentId = seasonItem?.Id ?? series.Id,
+            SeriesId = series.Id,
+            SeasonId = seasonItem?.Id,
+            AddedAt = now,
+            UpdatedAt = now,
+        };
+        database.MediaItems.Add(extra);
+        return extra;
+    }
+
+    public async Task<MediaItem> ResolveEpisodeAsync(
+        Catalog catalog, MetadataCandidate seriesCandidate, ParsedName parsed, CancellationToken cancellationToken)
+    {
+        var season = parsed.Season ?? 1;
+        var episode = parsed.Episode ?? 0;
+        var provider = seriesCandidate.Reference.Provider;
+        var seriesId = seriesCandidate.Reference.Id;
+
+        var series = await ResolveSeriesAsync(catalog, seriesCandidate, cancellationToken);
 
         var seasonItem = await GetOrCreateContainerAsync(catalog, MediaKind.Season, provider, seriesId,
             () => new MediaItem
