@@ -21,7 +21,9 @@ import { Input } from "@/components/ui/input";
  * The metadata-resolution popup for a NeedsReview ingest item. On open it pre-fills the corrected title
  * and (for series/anime) each file's season/episode from the backend's name-parsed hints, and auto-runs a
  * search when no auto-identified candidates exist — so the operator usually just picks a match. The title
- * and per-file season/episode stay editable for the cases the parser got wrong.
+ * and per-file season/episode stay editable for the cases the parser got wrong. Files that have no
+ * matchable identity at all (creditless OP/EDs and other extras absent from the provider) can be skipped —
+ * per file or all at once — so the rest of the batch proceeds without them.
  */
 export function IngestReviewDialog({
   item,
@@ -37,7 +39,9 @@ export function IngestReviewDialog({
   onMatched: () => void;
 }) {
   const isEpisodic = catalog?.type === "Series" || catalog?.type === "Anime";
-  const unresolved = item.sourceFiles.filter((file) => file.assignmentStatus === "NeedsReview" || file.mediaItemId == null);
+  const unresolved = item.sourceFiles.filter(
+    (file) => file.assignmentStatus !== "Skipped" && (file.assignmentStatus === "NeedsReview" || file.mediaItemId == null),
+  );
 
   const titleId = useId();
   const yearId = useId();
@@ -86,6 +90,21 @@ export function IngestReviewDialog({
     },
     onError: (error) => toast.error("Couldn’t apply match", { description: errorMessage(error) }),
   });
+
+  // Skip = "don't import this file": for extras with no provider identity (creditless OP/EDs, menus).
+  // The backend re-drives the item, so the batch proceeds once every file is matched or skipped.
+  const skip = useMutation({
+    mutationFn: (sourceFileIds: string[]) => mediaServer.skipIngestFiles(item.id, sourceFileIds),
+    onSuccess: (_, sourceFileIds) => {
+      toast.success(sourceFileIds.length === 1 ? "File skipped" : `Skipped ${sourceFileIds.length} files`, {
+        description: "Skipped files won’t be imported.",
+      });
+      onMatched();
+    },
+    onError: (error) => toast.error("Couldn’t skip", { description: errorMessage(error) }),
+  });
+
+  const busy = match.isPending || skip.isPending;
 
   // Re-seed the editable fields whenever the dialog opens for an item: corrected title/year from the first
   // unresolved file (the series title for packs), and per-file season/episode from each file's parse.
@@ -164,6 +183,24 @@ export function IngestReviewDialog({
             </Button>
           </form>
 
+          {/* Extras that don't exist on the provider (creditless openings, menus, …) can't ever match —
+              skipping them is the intended way to unblock the rest of the batch. */}
+          <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
+            <span>Files without a match can be skipped — skipped files aren’t imported.</span>
+            {unresolved.length > 1 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                disabled={busy}
+                onClick={() => skip.mutate(unresolved.map((file) => file.id))}
+              >
+                {skip.isPending ? "Skipping…" : `Skip all ${unresolved.length}`}
+              </Button>
+            )}
+          </div>
+
           {/* Bounded scroll container: max-height + overflow on the same element scrolls reliably (a
               max-height on a ScrollArea root can't bound its height:100% viewport, so the list spilled out). */}
           <div className="-mr-2 flex max-h-[55vh] flex-col gap-3 overflow-y-auto pr-2">
@@ -174,9 +211,20 @@ export function IngestReviewDialog({
                 <div key={file.id} className="flex flex-col gap-1.5">
                   <div className="bg-muted/60 flex min-w-0 items-start gap-2 rounded-md px-2.5 py-2" title={file.relativePath}>
                     <FileVideo2 className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 wrap-anywhere font-mono text-xs leading-relaxed font-medium">
+                    <span className="min-w-0 flex-1 wrap-anywhere font-mono text-xs leading-relaxed font-medium">
                       {fileName}
                     </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground -my-1 h-7 shrink-0 px-2"
+                      title="Don’t import this file"
+                      disabled={busy}
+                      onClick={() => skip.mutate([file.id])}
+                    >
+                      Skip
+                    </Button>
                   </div>
                   {/* Per-file season/episode, pre-filled from this file's name. */}
                   {isEpisodic && (
@@ -214,7 +262,7 @@ export function IngestReviewDialog({
                           <button
                             key={`${candidate.reference.provider}:${candidate.reference.id}`}
                             type="button"
-                            disabled={match.isPending}
+                            disabled={busy}
                             onClick={() =>
                               match.mutate({
                                 sourceFileId: file.id,

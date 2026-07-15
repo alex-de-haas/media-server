@@ -40,6 +40,11 @@ public sealed class IdentifyService(
                 continue; // Already mapped (operator confirm or a prior run).
             }
 
+            if (sourceFile.AssignmentStatus == SourceFileAssignmentStatus.Skipped)
+            {
+                continue; // Operator excluded it (an unmatchable extra) — leave it unmapped, don't re-search.
+            }
+
             var name = DeriveName(sourceFile.RelativePath, fallbackName);
             var parsed = parser.Parse(name, catalog.Type, releaseGroups);
 
@@ -99,7 +104,9 @@ public sealed class IdentifyService(
 
         await database.SaveChangesAsync(cancellationToken);
 
-        var allResolved = sourceFiles.All(file => file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && file.MediaItemId is not null);
+        var allResolved = sourceFiles.All(file =>
+            (file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && file.MediaItemId is not null) ||
+            file.AssignmentStatus == SourceFileAssignmentStatus.Skipped);
         return new IdentifyOutcome(allResolved, allResolved ? null : string.Join(" ", reviewReasons.Distinct()), unresolved);
     }
 

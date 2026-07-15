@@ -574,6 +574,9 @@ export const mediaServer = {
   listIngest: () => apiJson<IngestItem[]>(`${BASE}/ingest`),
   retryIngest: (id: string) => send(`/ingest/${id}/retry`, "POST"),
   matchIngest: (id: string, input: MatchInput) => send(`/ingest/${id}/match`, "POST", input),
+  // Skip files with no matchable identity (creditless OP/EDs and other extras) so the batch proceeds
+  // without them; skipped files are never imported.
+  skipIngestFiles: (id: string, sourceFileIds: string[]) => send(`/ingest/${id}/skip`, "POST", { sourceFileIds }),
   // Pin (or re-pin) the target identity; clear it back to the auto-identify path with unpinIngest.
   pinIngest: (id: string, input: PinInput) => send(`/ingest/${id}/pin`, "POST", input),
   unpinIngest: (id: string) => send(`/ingest/${id}/pin`, "DELETE"),
