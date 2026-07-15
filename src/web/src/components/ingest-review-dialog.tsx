@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Film, Loader2, Search } from "lucide-react";
+import { FileVideo2, Film, Loader2, Search } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type IngestSourceFile, type MetadataCandidate } from "@/lib/media-server";
 import { errorMessage } from "@/lib/ui";
@@ -124,7 +124,7 @@ export function IngestReviewDialog({
     setEpisodeNumbers((prev) => ({ ...prev, [file.id]: { ...numbersFor(file), ...patch } }));
 
   const candidates = searchResults ?? item.reviewCandidates;
-  const title = item.downloadName ?? item.sourceFiles[0]?.relativePath ?? "Untitled item";
+  const title = item.downloadName ?? fileNameOf(item.sourceFiles[0]?.relativePath) ?? "Untitled item";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -169,11 +169,15 @@ export function IngestReviewDialog({
           <div className="-mr-2 flex max-h-[55vh] flex-col gap-3 overflow-y-auto pr-2">
             {unresolved.map((file) => {
               const numbers = numbersFor(file);
+              const fileName = fileNameOf(file.relativePath) ?? file.relativePath;
               return (
                 <div key={file.id} className="flex flex-col gap-1.5">
-                  <span className="text-muted-foreground truncate font-mono text-xs" title={file.relativePath}>
-                    {file.relativePath}
-                  </span>
+                  <div className="bg-muted/60 flex min-w-0 items-start gap-2 rounded-md px-2.5 py-2" title={file.relativePath}>
+                    <FileVideo2 className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 wrap-anywhere font-mono text-xs leading-relaxed font-medium">
+                      {fileName}
+                    </span>
+                  </div>
                   {/* Per-file season/episode, pre-filled from this file's name. */}
                   {isEpisodic && (
                     <div className="text-muted-foreground flex items-center gap-3">
@@ -254,6 +258,14 @@ export function IngestReviewDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+// Source paths include the private staging prefix and can be much longer than the dialog. The basename is
+// the operator-facing identity here: it keeps episode markers and release suffixes visible for every row.
+function fileNameOf(relativePath: string | undefined): string | null {
+  const normalized = relativePath?.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!normalized) return null;
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
 }
 
 // 2:3 poster thumbnail for a candidate, with a neutral placeholder when the provider returned no poster
