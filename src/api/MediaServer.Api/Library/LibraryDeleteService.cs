@@ -49,11 +49,13 @@ public sealed class LibraryDeleteService(
             await database.ImageAssets.Where(image => ids.Contains(image.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
             await database.UserItemData.Where(data => ids.Contains(data.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
 
-            // Items child→parent: the self-FK on ParentId is Restrict, so episodes, then seasons, then the root.
-            await database.MediaItems.Where(media => ids.Contains(media.Id) && media.Kind == MediaKind.Episode).ExecuteDeleteAsync(cancellationToken);
+            // Items child→parent: the self-FK on ParentId is Restrict, so leaves first — episodes and
+            // extras (Videos parent to their series or season) — then seasons, then the root.
+            await database.MediaItems.Where(media => ids.Contains(media.Id) &&
+                (media.Kind == MediaKind.Episode || media.Kind == MediaKind.Video)).ExecuteDeleteAsync(cancellationToken);
             await database.MediaItems.Where(media => ids.Contains(media.Id) && media.Kind == MediaKind.Season).ExecuteDeleteAsync(cancellationToken);
             await database.MediaItems.Where(media => ids.Contains(media.Id) &&
-                (media.Kind == MediaKind.Series || media.Kind == MediaKind.Movie || media.Kind == MediaKind.Video)).ExecuteDeleteAsync(cancellationToken);
+                (media.Kind == MediaKind.Series || media.Kind == MediaKind.Movie)).ExecuteDeleteAsync(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
         }

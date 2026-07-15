@@ -479,8 +479,26 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Delete_series_cascades_to_its_seasons_and_episodes()
+    public async Task Delete_series_cascades_to_its_seasons_episodes_and_extras()
     {
+        // An extra (a Video parented straight to the series, as the ingest extras flow creates them) must
+        // be deleted before the series row — the self-FK on ParentId is Restrict, so a series-with-extras
+        // delete used to trip a FOREIGN KEY violation.
+        Guid extraId;
+        await using (var seed = _db.Create())
+        {
+            var seriesCatalogId = await seed.MediaItems.Where(item => item.Id == _seriesId).Select(item => item.CatalogId).SingleAsync();
+            var extra = new MediaItem
+            {
+                Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = seriesCatalogId,
+                Kind = MediaKind.Video, Title = "Creditless Opening 1", ParentId = _seriesId, SeriesId = _seriesId,
+                AddedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            seed.MediaItems.Add(extra);
+            await seed.SaveChangesAsync();
+            extraId = extra.Id;
+        }
+
         var service = new LibraryDeleteService(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
         var deleted = await service.DeleteAsync(_seriesId, deleteFiles: false, CancellationToken.None);
@@ -488,7 +506,7 @@ public sealed class LibraryReadServiceTests : IDisposable
         Assert.True(deleted);
         await using var verify = _db.Create();
         Assert.False(await verify.MediaItems.AnyAsync(item =>
-            item.Id == _seriesId || item.Id == _seasonId || item.Id == _episodeId || item.Id == _episode2Id));
+            item.Id == _seriesId || item.Id == _seasonId || item.Id == _episodeId || item.Id == _episode2Id || item.Id == extraId));
     }
 
     [Fact]
