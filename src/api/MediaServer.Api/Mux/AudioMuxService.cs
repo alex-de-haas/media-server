@@ -54,10 +54,21 @@ public sealed class AudioMuxService(
             if (videos.Count == 0)
             {
                 // E.g. a dub-only torrent whose tracks the operator matched to episodes that have no video
-                // in this batch. Merging into already-published library files is a separate feature.
+                // in this batch. Merging into already-published library files is a separate feature, so the
+                // tracks are skipped (mirroring an operator skip) — a Confirmed row that never organizes
+                // wouldn't reach the staging sweep, leaking its .incoming/ folder until the ingest is deleted.
                 logger.LogWarning(
-                    "Audio tracks for item {MediaItem} have no video file in this ingest; they will be discarded with the staging leftovers.",
+                    "Audio tracks for item {MediaItem} have no video file in this ingest; skipping them (they are discarded with the staging leftovers).",
                     group.Key);
+                var skippedAt = DateTimeOffset.UtcNow;
+                foreach (var audio in audios)
+                {
+                    audio.AssignmentStatus = SourceFileAssignmentStatus.Skipped;
+                    audio.MediaItemId = null;
+                    audio.UpdatedAt = skippedAt;
+                }
+
+                await database.SaveChangesAsync(cancellationToken);
                 continue;
             }
 
@@ -146,11 +157,21 @@ public sealed class AudioMuxService(
             var title = AudioTrackLabeler.InferTitle(audio.RelativePath, videoRelativePath);
             inputs.Add(new AudioMuxInput(
                 absolute,
-                streams.Select(stream => new AudioMuxStreamTag(stream.Language ?? language, stream.Title ?? title)).ToList()));
+                streams.Select(stream => new AudioMuxStreamTag(
+                    TaggedLanguage(stream.Language) ?? language, Tagged(stream.Title) ?? title)).ToList()));
         }
 
         return inputs;
     }
+
+    /// <summary>A stream tag that's actually usable — ffprobe reports absent tags as null but sometimes as
+    /// empty strings, either of which must yield to the path-inferred fallback.</summary>
+    private static string? Tagged(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>Like <see cref="Tagged"/>, plus <c>und</c> (Matroska's "undetermined", the default many
+    /// muxers write) counts as untagged so the inferred language can replace it.</summary>
+    private static string? TaggedLanguage(string? value) =>
+        Tagged(value) is { } language && !language.Equals("und", StringComparison.OrdinalIgnoreCase) ? language : null;
 
     /// <summary>
     /// Muxes one video: writes to a temp sibling, then takes over the target path (the extension becomes

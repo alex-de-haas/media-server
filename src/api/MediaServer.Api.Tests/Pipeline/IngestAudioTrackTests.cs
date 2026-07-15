@@ -20,10 +20,11 @@ public sealed class IngestAudioTrackTests
     private static readonly MetadataCandidate SomeMovie =
         new(new ProviderRef("tmdb", "603"), "Some Movie", 2020, 1.0);
 
-    /// <summary>An audio-only file with untagged streams, so the path-inferred language/title apply.</summary>
+    /// <summary>An audio-only file with unusable stream tags — Matroska's default "und" language and an
+    /// empty title, both of which must yield to the path-inferred fallbacks.</summary>
     private static ProbeResult UntaggedAudioProbe() =>
         new("mka", TimeSpan.FromMinutes(24).Ticks, 320_000, 50_000_000,
-            [new ProbedStream(StreamType.Audio, 0, "ac3", null, null, null, null, null, null, null, 6, 48000, true, false, null)]);
+            [new ProbedStream(StreamType.Audio, 0, "ac3", null, "und", null, null, null, null, null, 6, 48000, true, false, "")]);
 
     [Fact]
     public async Task Audio_tracks_match_their_episodes_and_are_muxed_into_the_videos()
@@ -157,6 +158,45 @@ public sealed class IngestAudioTrackTests
         Assert.Equal(IngestStatus.Done, (await verifyDb.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
         Assert.Equal(SourceFileAssignmentStatus.Merged, (await verifyDb.SourceFiles.SingleAsync(file => file.Id == audioFileId)).AssignmentStatus);
         Assert.Single(harness.AudioMuxer.Plans);
+    }
+
+    [Fact]
+    public async Task A_dub_only_batch_skips_its_tracks_and_sweeps_the_staging()
+    {
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [];
+
+        // Only the track, no video: the operator matches it to an episode anyway (merging into published
+        // library files is future work), so the mux stage must skip it rather than strand its staging.
+        var (ingestId, catalogId, downloadId) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "FMA Rus Sound",
+            "Rus Sound/Fullmetal Alchemist Brotherhood 01.mka");
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        Guid audioFileId;
+        using (var scope = harness.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            audioFileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
+            var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+            Assert.Equal(MatchOutcome.Matched, await service.MatchAsync(ingestId, new MatchRequest(
+                MediaKind.Episode, "tmdb", "31911", "Fullmetal Alchemist Brotherhood", 2009,
+                [new MatchFileRequest(audioFileId, 1, 1)]), CancellationToken.None));
+        }
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var verifyScope = harness.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.Done, (await verifyDb.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
+
+        var audio = await verifyDb.SourceFiles.SingleAsync(file => file.Id == audioFileId);
+        Assert.Equal(SourceFileAssignmentStatus.Skipped, audio.AssignmentStatus);
+        Assert.Null(audio.MediaItemId);
+        Assert.Empty(harness.AudioMuxer.Plans);
+
+        var catalog = await verifyDb.Catalogs.SingleAsync(item => item.Id == catalogId);
+        Assert.False(Directory.Exists(Path.Combine(catalog.Root, ".incoming", downloadId.ToString("N"))));
     }
 
     [Fact]

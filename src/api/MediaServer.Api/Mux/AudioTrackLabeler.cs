@@ -3,8 +3,8 @@ namespace MediaServer.Api.Mux;
 /// <summary>
 /// Infers a language tag and a display title for an external audio track from its path, for streams that
 /// carry no tags of their own: releases put dubs in folders like <c>Rus Sound [AniLibria]</c> or name
-/// files <c>Show.S01E05.rus.mka</c>. Tokens are matched whole (the path is split on non-alphanumerics),
-/// so e.g. "rus" never fires inside a real word.
+/// files <c>Show.S01E05.rus.mka</c>. Tokens are whole runs of letters (digits and punctuation break a
+/// token), so e.g. "rus" never fires inside a real word.
 /// </summary>
 internal static class AudioTrackLabeler
 {
