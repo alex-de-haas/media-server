@@ -119,6 +119,30 @@ internal static class JellyfinItemsEndpoints
             return item is null ? Results.NotFound() : JellyfinJson.Ok(item);
         });
 
+        // Series extras (creditless OP/EDs, PVs, …) imported as playable Video items. Jellyfin returns a
+        // bare BaseItemDto array; both the legacy per-user route and the newer /Items form are served.
+        secured.MapGet("/Items/{itemId}/SpecialFeatures", async (string itemId, HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        {
+            var actingUserId = await ResolveQueryUserAsync(request, principal, database, cancellationToken);
+            if (actingUserId is null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            return JellyfinJson.Ok(await library.GetSpecialFeaturesAsync(itemId, actingUserId, cancellationToken));
+        });
+
+        secured.MapGet("/Users/{userId}/Items/{itemId}/SpecialFeatures", async (string userId, string itemId, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        {
+            var actingUserId = await JellyfinPrincipal.ResolveActingUserIdAsync(principal, userId, database, cancellationToken);
+            if (actingUserId is null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            return JellyfinJson.Ok(await library.GetSpecialFeaturesAsync(itemId, actingUserId, cancellationToken));
+        });
+
         // Endpoints Infuse probes that we have no data for. They must return an empty result, not 404 —
         // Infuse's search fans out to /Persons first and treats its 404 as a hard failure ("Nothing
         // Found"), so a movie that IS in the library never surfaces. LocalTrailers/MediaSegments are

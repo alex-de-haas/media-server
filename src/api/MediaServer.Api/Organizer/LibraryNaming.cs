@@ -30,7 +30,7 @@ public static class LibraryNaming
     /// </summary>
     public static string ForEpisode(MediaItem series, MediaItem episode, string extension, string? edition = null)
     {
-        var showFolder = Sanitize(series.Year is { } year ? $"{series.Title} ({year})" : series.Title);
+        var showFolder = ShowFolder(series);
         var season = episode.ParentIndexNumber ?? 1;
         var episodeNumber = episode.IndexNumber ?? 0;
 
@@ -41,6 +41,20 @@ public static class LibraryNaming
         var fileName = Sanitize($"{series.Title} S{season:D2}{episodeToken}{EditionSuffix(edition)}") + NormalizeExtension(extension);
         return Combine(showFolder, $"Season {season:D2}", fileName);
     }
+
+    /// <summary>
+    /// Builds the canonical path for a series extra (a <c>MediaKind.Video</c> attached to the series, e.g.
+    /// a creditless OP/ED): the Jellyfin-style <c>extras/</c> folder under the show folder, named by the
+    /// extra's own title. All extras live at the series level regardless of an optional season parent.
+    /// </summary>
+    public static string ForExtra(MediaItem series, MediaItem extra, string extension, string? edition = null)
+    {
+        var fileName = Sanitize(extra.Title + EditionSuffix(edition)) + NormalizeExtension(extension);
+        return Combine(ShowFolder(series), "extras", fileName);
+    }
+
+    private static string ShowFolder(MediaItem series) =>
+        Sanitize(series.Year is { } year ? $"{series.Title} ({year})" : series.Title);
 
     private static string EditionSuffix(string? edition) =>
         string.IsNullOrWhiteSpace(edition) ? string.Empty : $" - {edition}";

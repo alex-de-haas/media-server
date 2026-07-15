@@ -48,6 +48,23 @@ public static class IngestEndpoints
             return await service.SkipAsync(id, request, cancellationToken) ? Results.Accepted() : Results.NotFound();
         });
 
+        // Attach files to a series as playable extras (creditless OP/EDs, PVs, …) — the keep-it alternative
+        // to /skip for content the provider has no identity for. Single and bulk share one endpoint.
+        group.MapPost("/{id:guid}/extras", async (Guid id, AssignExtrasRequest request, IngestService service, CancellationToken cancellationToken) =>
+        {
+            if (request.SourceFileIds is not { Count: > 0 })
+            {
+                return Results.BadRequest(new { error = "At least one source file id is required." });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Provider) || string.IsNullOrWhiteSpace(request.ProviderId) || string.IsNullOrWhiteSpace(request.Title))
+            {
+                return Results.BadRequest(new { error = "A series identity (provider, id, title) is required." });
+            }
+
+            return await service.AssignExtrasAsync(id, request, cancellationToken) ? Results.Accepted() : Results.NotFound();
+        });
+
         // Pin a target identity before/while an item downloads so Identify resolves straight to it (never
         // routing to review). Rejected with 409 once the item has already been identified — use library remap.
         group.MapPost("/{id:guid}/pin", async (Guid id, PinIdentityRequest request, IngestService service, CancellationToken cancellationToken) =>

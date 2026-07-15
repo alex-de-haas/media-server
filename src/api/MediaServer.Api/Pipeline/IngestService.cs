@@ -200,6 +200,92 @@ public sealed class IngestService(
     }
 
     /// <summary>
+    /// Attaches source files to a series as playable extras (see <see cref="AssignExtrasRequest"/>): the
+    /// series container is resolved by provider identity (created if new), each file gets its own
+    /// <see cref="MediaKind.Video"/> item titled from its extras classification, and the files are confirmed
+    /// so the re-driven pipeline organizes them into the series' <c>extras/</c> folder, probes, and
+    /// publishes them. Extras carry no provider identity of their own.
+    /// </summary>
+    public async Task<bool> AssignExtrasAsync(Guid id, AssignExtrasRequest request, CancellationToken cancellationToken)
+    {
+        var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+        if (item is null)
+        {
+            return false;
+        }
+
+        var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == item.CatalogId, cancellationToken)
+            ?? throw new InvalidOperationException("Catalog not found for ingest item.");
+        if (catalog.Type == CatalogType.Movie)
+        {
+            throw new InvalidOperationException("Extras attach to a series; this is a movie catalog.");
+        }
+
+        var requestedIds = request.SourceFileIds.Distinct().ToList();
+        var files = await database.SourceFiles
+            .Where(file => file.IngestItemId == id && requestedIds.Contains(file.Id))
+            .ToListAsync(cancellationToken);
+        if (files.Count != requestedIds.Count)
+        {
+            throw new InvalidOperationException("Source file not found.");
+        }
+
+        // Same boundary as skip: a confirmed file is already matched (and possibly organized) — changing
+        // its assignment is a library remap, not a review action.
+        if (files.Any(file => file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed))
+        {
+            throw new InvalidOperationException("Cannot attach a file that is already matched.");
+        }
+
+        var seriesCandidate = new MetadataCandidate(new ProviderRef(request.Provider, request.ProviderId), request.Title, request.Year, 1.0);
+        var series = await identifyService.ResolveSeriesAsync(catalog, seriesCandidate, cancellationToken);
+
+        // One Video item per file. Titles come from the extras classification (cleaned file name as
+        // fallback) and are uniquified within the batch — same-titled files from *other* ingests
+        // intentionally resolve to the same item and become alternate versions of it.
+        var usedTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var file in files.OrderBy(file => file.TorrentFileIndex ?? int.MaxValue).ThenBy(file => file.RelativePath, StringComparer.Ordinal))
+        {
+            var title = ExtraTitleFor(file.RelativePath, catalog.Type);
+            var unique = title;
+            for (var ordinal = 2; !usedTitles.Add(unique); ordinal++)
+            {
+                unique = $"{title} {ordinal}";
+            }
+
+            var extra = await identifyService.ResolveExtraAsync(catalog, series, unique, request.Season, cancellationToken);
+            file.MediaItemId = extra.Id;
+            file.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
+            file.UpdatedAt = now;
+
+            logger.LogInformation("Attached {File} as extra '{Title}' of '{Series}'.", file.RelativePath, unique, series.Title);
+        }
+
+        item.Status = IngestStatus.Pending;
+        item.NextAttemptAt = null;
+        item.UpdatedAt = now;
+        await database.SaveChangesAsync(cancellationToken);
+
+        queue.Enqueue(item.Id);
+        return true;
+    }
+
+    /// <summary>The library title for an extra: its classification title ("Creditless Opening 2"), or the
+    /// cleaned file name when the classifier has no opinion (operator attached an unrecognized file).</summary>
+    private static string ExtraTitleFor(string relativePath, CatalogType catalogType)
+    {
+        if (ExtraClassifier.Classify(relativePath, catalogType) is { } extra)
+        {
+            return extra.Title;
+        }
+
+        var name = Path.GetFileNameWithoutExtension(relativePath).Replace('.', ' ').Replace('_', ' ');
+        var cleaned = string.Join(' ', name.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim(' ', '-');
+        return cleaned.Length > 0 ? cleaned : "Extra";
+    }
+
+    /// <summary>
     /// Pins a target identity so Identify resolves the item straight to it (see <see cref="TargetIdentity"/>).
     /// Works before the download finishes (the pin just persists; Identify honors it after the hand-off) and on
     /// a parked <see cref="IngestStatus.NeedsReview"/> item (re-driven so Identify re-runs with the pin).
@@ -519,9 +605,13 @@ public sealed class IngestService(
         return media is null ? null : ComposeTitle(media);
     }
 
-    private static string ComposeTitle(MediaTitleParts media) => media.Kind == MediaKind.Episode
-        ? FormatEpisodeTitle(media.SeriesTitle, media.ParentIndexNumber, media.IndexNumber, media.Title)
-        : media.Title;
+    private static string ComposeTitle(MediaTitleParts media) => media.Kind switch
+    {
+        MediaKind.Episode => FormatEpisodeTitle(media.SeriesTitle, media.ParentIndexNumber, media.IndexNumber, media.Title),
+        // A series extra ("Creditless Opening 1") is context-free on its own — prefix the owning series.
+        MediaKind.Video when !string.IsNullOrWhiteSpace(media.SeriesTitle) => $"{media.SeriesTitle} · {media.Title}",
+        _ => media.Title,
+    };
 
     /// <summary>
     /// "Breaking Bad · S01E05". When the season/episode numbers are missing the episode's own title is used

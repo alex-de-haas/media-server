@@ -43,7 +43,7 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         }
 
         var leafIds = items
-            .Where(item => item.Kind is MediaKind.Movie or MediaKind.Episode)
+            .Where(item => item.Kind is MediaKind.Movie or MediaKind.Episode or MediaKind.Video)
             .Select(item => item.Id)
             .ToList();
         var seriesIds = items.Where(item => item.Kind == MediaKind.Series).Select(item => item.Id).ToList();
@@ -79,7 +79,7 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
             {
                 MediaKind.Series => FolderDto(item, children.Where(child => child.SeriesId == item.Id), rowByItem),
                 MediaKind.Season => FolderDto(item, children.Where(child => child.SeasonId == item.Id), rowByItem),
-                MediaKind.Movie or MediaKind.Episode => LeafDto(
+                MediaKind.Movie or MediaKind.Episode or MediaKind.Video => LeafDto(
                     item.PublicId!, rowByItem.GetValueOrDefault(item.Id), runtimeByItem.GetValueOrDefault(item.Id)),
                 _ => new UserItemDataDto(Key: item.PublicId ?? item.Id.ToString("N")),
             };
@@ -93,7 +93,7 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         int appUserId, string itemPublicId, long positionTicks, bool isStopped, CancellationToken cancellationToken)
     {
         var item = await FindItemAsync(itemPublicId, cancellationToken);
-        if (item is null || item.Kind is not (MediaKind.Movie or MediaKind.Episode))
+        if (item is null || item.Kind is not (MediaKind.Movie or MediaKind.Episode or MediaKind.Video))
         {
             return;
         }

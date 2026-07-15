@@ -349,6 +349,32 @@ public sealed class JellyfinLibraryService(
         return new QueryResult<BaseItemDto>(dtos, dtos.Count);
     }
 
+    /// <summary>
+    /// The published extras (playable <see cref="MediaKind.Video"/> children — creditless OP/EDs, PVs, …)
+    /// of an item: everything under a series (season-scoped ones included), a season's own, or direct
+    /// children otherwise. Sources are included so clients can play an extra straight from the list.
+    /// </summary>
+    public async Task<IReadOnlyList<BaseItemDto>> GetSpecialFeaturesAsync(
+        string publicId, int? appUserId, CancellationToken cancellationToken)
+    {
+        var item = await FindByPublicIdAsync(publicId, cancellationToken);
+        if (item is null)
+        {
+            return [];
+        }
+
+        var query = database.MediaItems.AsNoTracking().Where(extra => extra.Kind == MediaKind.Video && extra.PublicId != null);
+        query = item.Kind switch
+        {
+            MediaKind.Series => query.Where(extra => extra.SeriesId == item.Id),
+            MediaKind.Season => query.Where(extra => extra.SeasonId == item.Id),
+            _ => query.Where(extra => extra.ParentId == item.Id),
+        };
+
+        var extras = await query.OrderBy(extra => extra.Title).ToListAsync(cancellationToken);
+        return await MapManyAsync(extras, includeMediaSources: true, appUserId, cancellationToken);
+    }
+
     /// <summary>Resolves a published item by public id to its on-disk source for streaming.</summary>
     public async Task<(MediaItem Item, MediaSource Source, Catalog Catalog)?> ResolvePlayableAsync(
         string publicId, string? mediaSourceId, CancellationToken cancellationToken)
@@ -512,6 +538,7 @@ public sealed class JellyfinLibraryService(
 
         var parents = await LoadParentsAsync(items, cancellationToken);
         var childCounts = await LoadChildCountsAsync(items, cancellationToken);
+        var extrasCounts = await LoadExtrasCountsAsync(items, cancellationToken);
         var userDataByItem = await userData.LoadAsync(appUserId, items, cancellationToken);
 
         var result = new List<BaseItemDto>(items.Count);
@@ -526,7 +553,8 @@ public sealed class JellyfinLibraryService(
                 userDataByItem.GetValueOrDefault(item.Id, new UserItemDataDto(Key: item.PublicId!)),
                 BuildParents(item, parents),
                 includeMediaSources,
-                childCounts.GetValueOrDefault(item.Id)));
+                childCounts.GetValueOrDefault(item.Id),
+                extrasCounts.TryGetValue(item.Id, out var extras) ? extras : null));
         }
 
         return result;
@@ -564,12 +592,38 @@ public sealed class JellyfinLibraryService(
             return [];
         }
 
+        // Extras (Kind == Video) hang off the series/season too, but they are not "children" in the
+        // browsing sense — a series' ChildCount stays its season count.
         var counts = await database.MediaItems.AsNoTracking()
-            .Where(item => item.ParentId != null && folderIds.Contains(item.ParentId.Value) && item.PublicId != null)
+            .Where(item => item.ParentId != null && folderIds.Contains(item.ParentId.Value) &&
+                item.PublicId != null && item.Kind != MediaKind.Video)
             .GroupBy(item => item.ParentId!.Value)
             .Select(group => new { ParentId = group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
         return counts.ToDictionary(entry => entry.ParentId, entry => entry.Count);
+    }
+
+    /// <summary>Published-extras counts for the series in the batch, so their DTOs can advertise
+    /// <c>SpecialFeatureCount</c> and clients know to fetch <c>/SpecialFeatures</c>.</summary>
+    private async Task<Dictionary<Guid, int>> LoadExtrasCountsAsync(
+        IReadOnlyList<MediaItem> items, CancellationToken cancellationToken)
+    {
+        var seriesIds = items
+            .Where(item => item.Kind == MediaKind.Series)
+            .Select(item => item.Id)
+            .ToList();
+        if (seriesIds.Count == 0)
+        {
+            return [];
+        }
+
+        var counts = await database.MediaItems.AsNoTracking()
+            .Where(item => item.Kind == MediaKind.Video && item.PublicId != null &&
+                item.SeriesId != null && seriesIds.Contains(item.SeriesId.Value))
+            .GroupBy(item => item.SeriesId!.Value)
+            .Select(group => new { SeriesId = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+        return counts.ToDictionary(entry => entry.SeriesId, entry => entry.Count);
     }
 
     private static ItemParents BuildParents(MediaItem item, Dictionary<Guid, (string? PublicId, string Title)> parents)
@@ -585,6 +639,14 @@ public sealed class JellyfinLibraryService(
                 SeriesName: Lookup(item.SeriesId)?.Title),
             MediaKind.Episode => new ItemParents(
                 ParentId: Lookup(item.SeasonId ?? item.ParentId)?.PublicId,
+                SeriesId: Lookup(item.SeriesId)?.PublicId,
+                SeriesName: Lookup(item.SeriesId)?.Title,
+                SeasonId: Lookup(item.SeasonId)?.PublicId,
+                SeasonName: Lookup(item.SeasonId)?.Title),
+            // A series extra links back to its series (and season, when scoped) like an episode does; a
+            // parentless Video falls back to its catalog.
+            MediaKind.Video when item.SeriesId is not null => new ItemParents(
+                ParentId: Lookup(item.ParentId)?.PublicId,
                 SeriesId: Lookup(item.SeriesId)?.PublicId,
                 SeriesName: Lookup(item.SeriesId)?.Title,
                 SeasonId: Lookup(item.SeasonId)?.PublicId,
