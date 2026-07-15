@@ -2,6 +2,7 @@ using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Watchlist;
 using MediaServer.Api.Media;
+using MediaServer.Api.Mux;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Torrents;
@@ -141,6 +142,27 @@ public sealed class IdentifyStage(IdentifyService identifyService) : IPipelineSt
         item is { TargetProvider: { } provider, TargetProviderId: { } providerId, TargetKind: { } kind, TargetTitle: { Length: > 0 } title }
             ? new TargetIdentity(provider, providerId, kind, title, item.TargetYear)
             : null;
+}
+
+/// <summary>
+/// Merges matched external audio tracks (a torrent's separate <c>.mka</c>/<c>.ac3</c> dubs) into their
+/// video files while everything still sits in staging — a stream-copy remux, no re-encode (see
+/// <see cref="AudioMuxService"/>). Runs before Organize so the canonical library file lands complete.
+/// </summary>
+public sealed class MuxStage(AudioMuxService muxService) : IPipelineStage
+{
+    public string Key => "mux";
+    public PipelinePhase Phase => PipelinePhase.Processing;
+    public int Order => 350;
+    public IngestStage Stage => IngestStage.Organize;
+
+    public bool ShouldRun(IngestContext context) => !context.Item.StagesCompleted.Contains(Key);
+
+    public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
+    {
+        await muxService.MuxAsync(context.SourceFiles, context.Catalog, cancellationToken);
+        return StageResult.Done;
+    }
 }
 
 /// <summary>Moves confirmed files into the canonical catalog layout (rename in place — no copy/hardlink).</summary>

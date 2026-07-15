@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Check, FileVideo2, Film, Loader2, Search } from "lucide-react";
+import { Check, FileAudio2, FileVideo2, Film, Loader2, Search } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type IngestSourceFile, type MetadataCandidate } from "@/lib/media-server";
 import { errorMessage } from "@/lib/ui";
@@ -448,7 +448,11 @@ function FileRow({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="bg-muted/60 flex min-w-0 items-start gap-2 rounded-md px-2.5 py-2" title={file.relativePath}>
-        <FileVideo2 className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        {file.isAudio ? (
+          <FileAudio2 className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        ) : (
+          <FileVideo2 className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        )}
         <span className="min-w-0 flex-1 wrap-anywhere font-mono text-xs leading-relaxed font-medium">{fileName}</span>
 
         {decision === "keep" ? (
@@ -485,7 +489,7 @@ function FileRow({
               disabled={busy}
               onClick={() => onDecision("match")}
             />
-            {isEpisodic && (
+            {isEpisodic && !file.isAudio && (
               <DecisionButton label="Extra" active={decision === "extra"} disabled={busy} onClick={() => onDecision("extra")} />
             )}
             <DecisionButton label="Skip" active={decision === "skip"} disabled={busy} onClick={() => onDecision("skip")} />
@@ -501,6 +505,11 @@ function FileRow({
         <span className="text-muted-foreground text-xs">
           Looks like <span className="font-medium">{file.extraTitle ?? "an extra"}</span>
           {file.extraSuggestSkip ? " — usually junk; Skip is suggested." : "."}
+        </span>
+      )}
+      {decision !== "keep" && file.isAudio && (
+        <span className="text-muted-foreground text-xs">
+          Audio track — matched to {isEpisodic ? "an episode" : "the movie"}, it merges into that video file.
         </span>
       )}
 
@@ -564,6 +573,7 @@ const sameIdentity = (a: SelectedIdentity, b: SelectedIdentity) => a.provider ==
 // The compact chip for a resolved file: where it currently points.
 function mappingLabel(file: IngestSourceFile): string {
   if (file.assignmentStatus === "Skipped") return "Skipped";
+  if (file.assignmentStatus === "Merged") return "Merged";
   const assigned = file.assigned;
   if (!assigned) return "Mapped";
   if (assigned.kind === "Episode" && assigned.season != null && assigned.episode != null) {
@@ -575,6 +585,7 @@ function mappingLabel(file: IngestSourceFile): string {
 
 function mappingTooltip(file: IngestSourceFile): string {
   if (file.assignmentStatus === "Skipped") return "This file won’t be imported.";
+  if (file.assignmentStatus === "Merged") return "This audio track was merged into its video file.";
   const assigned = file.assigned;
   if (!assigned) return "Mapped";
   return [assigned.seriesTitle, assigned.title].filter(Boolean).join(" · ");

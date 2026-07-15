@@ -134,7 +134,9 @@ public sealed partial class NameParser : INameParser
     private static string StripExtension(string name)
     {
         var extension = Path.GetExtension(name);
-        return Media.MediaFormats.VideoExtensions.Contains(extension) ? Path.GetFileNameWithoutExtension(name) : name;
+        return Media.MediaFormats.VideoExtensions.Contains(extension) || Media.MediaFormats.AudioExtensions.Contains(extension)
+            ? Path.GetFileNameWithoutExtension(name)
+            : name;
     }
 
     private static string Clean(string value) =>

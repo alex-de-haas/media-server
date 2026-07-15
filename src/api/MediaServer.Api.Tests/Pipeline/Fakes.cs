@@ -1,5 +1,6 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.Mux;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Realtime;
@@ -34,15 +35,32 @@ public sealed class FakeMetadataProvider : IMetadataProvider
         Task.FromResult(OnFetchPerson(reference));
 }
 
-/// <summary>Returns a fixed probe result without invoking ffprobe.</summary>
+/// <summary>Returns a fixed probe result without invoking ffprobe; override <see cref="OnProbe"/> to vary
+/// the result by path (e.g. an untagged audio track).</summary>
 public sealed class FakeMediaProbe : IMediaProbe
 {
-    public Task<ProbeResult> ProbeAsync(string absolutePath, CancellationToken cancellationToken) =>
-        Task.FromResult(new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 8_000_000, 1_000_000,
+    public Func<string, ProbeResult> OnProbe { get; set; } = _ =>
+        new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 8_000_000, 1_000_000,
         [
             new ProbedStream(StreamType.Video, 0, "h264", "High", null, 1920, 1080, 23.976, 8, null, null, null, true, false, null),
             new ProbedStream(StreamType.Audio, 1, "aac", null, "en", null, null, null, null, null, 6, 48000, true, false, null),
-        ]));
+        ]);
+
+    public Task<ProbeResult> ProbeAsync(string absolutePath, CancellationToken cancellationToken) =>
+        Task.FromResult(OnProbe(absolutePath));
+}
+
+/// <summary>Records each mux plan and writes a stub output file, so the service's finalize (move/rename,
+/// row updates) runs for real without invoking ffmpeg.</summary>
+public sealed class FakeAudioMuxer : IAudioMuxer
+{
+    public List<AudioMuxPlan> Plans { get; } = [];
+
+    public async Task MuxAsync(AudioMuxPlan plan, CancellationToken cancellationToken)
+    {
+        Plans.Add(plan);
+        await File.WriteAllBytesAsync(plan.OutputAbsolutePath, new byte[2048], cancellationToken);
+    }
 }
 
 /// <summary>No-op torrent engine: the pipeline reads <see cref="Download.State"/>, not the engine.</summary>
