@@ -121,4 +121,40 @@ public sealed class IngestSkipTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => service.SkipAsync(ingestId, new SkipRequest([Guid.NewGuid()]), CancellationToken.None));
     }
+
+    [Fact]
+    public async Task Re_skipping_an_already_skipped_file_is_a_no_op()
+    {
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [];
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "FMA Extras", "FMA/Fullmetal Alchemist Brotherhood (Creditless OP 1).mkv");
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        Guid fileId;
+        DateTimeOffset skippedAt;
+        using (var scope = harness.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            fileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
+            var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+            Assert.True(await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
+            skippedAt = await database.SourceFiles.Where(file => file.Id == fileId).Select(file => file.UpdatedAt).SingleAsync();
+        }
+
+        // A second skip of the same (already Skipped) file returns true but must not re-touch the file's
+        // timestamp — proving it took the idempotent early-out rather than re-writing the row.
+        using (var scope = harness.CreateScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+            Assert.True(await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
+        }
+
+        using var verifyScope = harness.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var file = await verifyDb.SourceFiles.SingleAsync(candidate => candidate.Id == fileId);
+        Assert.Equal(SourceFileAssignmentStatus.Skipped, file.AssignmentStatus);
+        Assert.Equal(skippedAt, file.UpdatedAt);
+    }
 }

@@ -182,8 +182,16 @@ public sealed class IngestService(
             throw new InvalidOperationException("Cannot skip a file that is already matched.");
         }
 
+        // Idempotent: a re-skip of files that are already Skipped changes nothing, so don't bump timestamps,
+        // flip the item back to Pending, or re-enqueue a needless drive.
+        var toSkip = files.Where(file => file.AssignmentStatus != SourceFileAssignmentStatus.Skipped).ToList();
+        if (toSkip.Count == 0)
+        {
+            return true;
+        }
+
         var now = DateTimeOffset.UtcNow;
-        foreach (var file in files)
+        foreach (var file in toSkip)
         {
             file.AssignmentStatus = SourceFileAssignmentStatus.Skipped;
             file.MediaItemId = null;

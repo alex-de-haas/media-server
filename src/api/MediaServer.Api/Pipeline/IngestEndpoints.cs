@@ -38,9 +38,9 @@ public static class IngestEndpoints
 
         // Skip unmatchable files (creditless OP/EDs and other extras absent from the provider) so the rest
         // of the batch can proceed without them. Skipped files are never imported.
-        group.MapPost("/{id:guid}/skip", async (Guid id, SkipRequest request, IngestService service, CancellationToken cancellationToken) =>
+        group.MapPost("/{id:guid}/skip", async (Guid id, SkipRequest? request, IngestService service, CancellationToken cancellationToken) =>
         {
-            if (request.SourceFileIds is not { Count: > 0 })
+            if (request?.SourceFileIds is not { Count: > 0 })
             {
                 return Results.BadRequest(new { error = "At least one source file id is required to skip." });
             }
