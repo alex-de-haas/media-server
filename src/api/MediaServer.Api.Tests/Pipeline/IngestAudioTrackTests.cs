@@ -80,16 +80,18 @@ public sealed class IngestAudioTrackTests
     }
 
     [Fact]
-    public async Task A_movie_batch_muxes_its_track_with_a_filename_inferred_language()
+    public async Task A_movie_batch_muxes_its_track_and_rewraps_a_non_mkv_container()
     {
         using var harness = new PipelineTestHarness();
         harness.MetadataProvider.OnSearch = _ => [SomeMovie];
         var defaultProbe = harness.MediaProbe.OnProbe;
         harness.MediaProbe.OnProbe = path => path.EndsWith(".ac3", StringComparison.Ordinal) ? UntaggedAudioProbe() : defaultProbe(path);
 
-        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+        // An .avi source exercises the extension-change path: the muxed staging file becomes .mkv and the
+        // replaced original is removed (after the rows land), so organize moves the Matroska output.
+        var (ingestId, catalogId, _) = await harness.SeedCompletedDownloadAsync(
             CatalogType.Movie, "Some Movie 2020",
-            "Some Movie 2020/Some Movie 2020.mkv",
+            "Some Movie 2020/Some Movie 2020.avi",
             additionalSourceRelativePaths: ["Some Movie 2020/Some Movie 2020 rus.ac3"]);
 
         await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
@@ -99,11 +101,17 @@ public sealed class IngestAudioTrackTests
         Assert.Equal(IngestStatus.Done, (await database.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
 
         var plan = Assert.Single(harness.AudioMuxer.Plans);
+        Assert.EndsWith(".avi", plan.VideoAbsolutePath);
         var stream = Assert.Single(Assert.Single(plan.AudioInputs).Streams);
         Assert.Equal("rus", stream.Language);
         Assert.Null(stream.Title); // Same folder as the movie — no dub-folder name to use.
 
         Assert.Equal(1, await database.SourceFiles.CountAsync(file => file.AssignmentStatus == SourceFileAssignmentStatus.Merged));
+
+        var movie = await database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Movie);
+        Assert.EndsWith(".mkv", movie.LibraryPath);
+        var catalog = await database.Catalogs.SingleAsync(item => item.Id == catalogId);
+        Assert.True(File.Exists(Path.Combine(catalog.Root, movie.LibraryPath!.Replace('/', Path.DirectorySeparatorChar))));
     }
 
     [Fact]

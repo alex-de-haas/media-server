@@ -77,9 +77,15 @@ public sealed class AudioMuxService(
             }
 
             var muxedAny = false;
+            var replacedOriginals = new List<string>();
             foreach (var video in videos)
             {
-                muxedAny |= await MuxOneAsync(catalog, video, inputs, cancellationToken);
+                var (muxed, replacedOriginal) = await MuxOneAsync(catalog, video, inputs, cancellationToken);
+                muxedAny |= muxed;
+                if (replacedOriginal is not null)
+                {
+                    replacedOriginals.Add(replacedOriginal);
+                }
             }
 
             // The tracks are consumed only once a mux actually happened; otherwise leave them Confirmed so
@@ -95,6 +101,22 @@ public sealed class AudioMuxService(
             }
 
             await database.SaveChangesAsync(cancellationToken);
+
+            // Replaced originals (the extension-change path) are removed only after the rows land: had the
+            // save failed, the rows still point at an original that still exists, so a re-drive re-muxes
+            // cleanly instead of finding its video gone. Deleting is best-effort — a leftover original is
+            // swept with the staging folder anyway.
+            foreach (var original in replacedOriginals)
+            {
+                try
+                {
+                    File.Delete(original);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    logger.LogWarning(exception, "Failed to remove the replaced original after mux: {Path}", original);
+                }
+            }
         }
     }
 
@@ -131,18 +153,19 @@ public sealed class AudioMuxService(
     }
 
     /// <summary>
-    /// Muxes one video: writes to a temp sibling, then replaces the original (the extension becomes
-    /// <c>.mkv</c>, deleting a differently-named original last so a crash can't lose the only copy) and
-    /// updates the row. Returns false when the video is skipped — missing on disk, or a different file
-    /// already owns the target <c>.mkv</c> path.
+    /// Muxes one video: writes to a temp sibling, then takes over the target path (the extension becomes
+    /// <c>.mkv</c>) and updates the row. A differently-named original is not deleted here — it comes back
+    /// as <c>ReplacedOriginal</c> for the caller to remove after the rows are saved, so a failed save can't
+    /// leave the database pointing at a file that is gone. <c>Muxed</c> is false when the video is skipped —
+    /// missing on disk, or a different file already owns the target <c>.mkv</c> path.
     /// </summary>
-    private async Task<bool> MuxOneAsync(
+    private async Task<(bool Muxed, string? ReplacedOriginal)> MuxOneAsync(
         Catalog catalog, SourceFile video, IReadOnlyList<AudioMuxInput> inputs, CancellationToken cancellationToken)
     {
         if (!sandbox.TryResolve(catalog, video.RelativePath, out var videoAbsolute) || !File.Exists(videoAbsolute))
         {
             logger.LogWarning("Video missing on disk, audio not muxed: {Path}", video.RelativePath);
-            return false;
+            return (false, null);
         }
 
         var finalAbsolute = Path.ChangeExtension(videoAbsolute, ".mkv");
@@ -152,7 +175,7 @@ public sealed class AudioMuxService(
             // "ep01.avi" next to an unrelated "ep01.mkv" — never clobber a sibling payload file.
             logger.LogWarning(
                 "Refusing to mux {Video}: {Target} already exists.", video.RelativePath, Path.GetFileName(finalAbsolute));
-            return false;
+            return (false, null);
         }
 
         var videoProbe = await probe.ProbeAsync(videoAbsolute, cancellationToken);
@@ -164,10 +187,6 @@ public sealed class AudioMuxService(
             new AudioMuxPlan(videoAbsolute, existingAudioStreams, inputs, tempAbsolute), cancellationToken);
 
         File.Move(tempAbsolute, finalAbsolute, overwrite: sameContainer);
-        if (!sameContainer)
-        {
-            File.Delete(videoAbsolute);
-        }
 
         var slash = video.RelativePath.LastIndexOf('/');
         var fileName = Path.GetFileName(finalAbsolute);
@@ -177,6 +196,6 @@ public sealed class AudioMuxService(
 
         logger.LogInformation(
             "Muxed {Count} audio track(s) into {Video}.", inputs.Sum(input => input.Streams.Count), video.RelativePath);
-        return true;
+        return (true, sameContainer ? null : videoAbsolute);
     }
 }

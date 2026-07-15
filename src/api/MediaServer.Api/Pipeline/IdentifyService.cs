@@ -216,8 +216,14 @@ public sealed class IdentifyService(
             }
             else
             {
-                audio.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
-                audio.UpdatedAt = DateTimeOffset.UtcNow;
+                // The reason is re-reported every drive, but an already-parked row isn't re-written —
+                // no redundant UPDATE/broadcast when identify re-runs over a parked batch.
+                if (audio.AssignmentStatus != SourceFileAssignmentStatus.NeedsReview)
+                {
+                    audio.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                    audio.UpdatedAt = DateTimeOffset.UtcNow;
+                }
+
                 reviewReasons.Add($"{failure} — match it to its episode (the track is merged into that video), or skip it.");
             }
         }
