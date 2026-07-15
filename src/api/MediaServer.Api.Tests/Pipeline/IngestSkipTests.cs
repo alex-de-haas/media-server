@@ -95,7 +95,7 @@ public sealed class IngestSkipTests
     }
 
     [Fact]
-    public async Task Skipping_a_confirmed_file_reports_already_matched()
+    public async Task Skipping_a_file_of_an_identified_item_reports_already_organized()
     {
         using var harness = new PipelineTestHarness();
         harness.MetadataProvider.OnSearch = query =>
@@ -110,8 +110,37 @@ public sealed class IngestSkipTests
         var fileId = await database.SourceFiles.Select(file => file.Id).SingleAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IngestService>();
-        Assert.Equal(SkipOutcome.AlreadyMatched,
+        Assert.Equal(SkipOutcome.AlreadyOrganized,
             await service.SkipAsync(ingestId, new SkipRequest([fileId]), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Skipping_an_auto_matched_file_while_the_item_is_in_review_overrides_the_mapping()
+    {
+        using var harness = new PipelineTestHarness();
+        // The episode auto-matches; the creditless ED routes to review and parks the batch pre-Organize —
+        // the window in which the operator may still override the auto-match with a skip.
+        harness.MetadataProvider.OnSearch = query => query.Episode is not null
+            ? [new MetadataCandidate(new ProviderRef("tmdb", "31911"), "Fullmetal Alchemist: Brotherhood", 2009, 1.0)]
+            : [];
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "FMA Brotherhood S01",
+            "FMA/Fullmetal Alchemist Brotherhood S01E01.mkv",
+            additionalSourceRelativePaths: ["FMA/Fullmetal Alchemist Brotherhood (Creditless ED 1).mkv"]);
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var confirmed = await database.SourceFiles.SingleAsync(file => file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed);
+        Assert.NotNull(confirmed.MediaItemId);
+
+        var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+        Assert.Equal(SkipOutcome.Skipped, await service.SkipAsync(ingestId, new SkipRequest([confirmed.Id]), CancellationToken.None));
+
+        var overridden = await database.SourceFiles.SingleAsync(file => file.Id == confirmed.Id);
+        Assert.Equal(SourceFileAssignmentStatus.Skipped, overridden.AssignmentStatus);
+        Assert.Null(overridden.MediaItemId);
     }
 
     [Fact]

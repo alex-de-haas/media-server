@@ -58,7 +58,23 @@ test("resolve match dialog shows the movie filename and metadata candidates", as
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(fileName, { exact: true }).last()).toBeVisible();
   await expect(dialog.getByText(relativePath, { exact: true })).toHaveCount(0);
+  // The identity is confirmed once at the top — and a 100%-score candidate comes pre-selected.
   await expect(dialog.getByRole("button", { name: /Zootopia 2 \(2025\).*100%/ })).toHaveCount(1);
+  await expect(dialog.getByRole("button", { name: /Zootopia 2 \(2025\).*100%/ })).toHaveAttribute("aria-pressed", "true");
+
+  // Apply sends one bulk match request carrying the confirmed identity and the file list.
+  const matchRequest = page.waitForRequest(
+    (request) => request.url().includes("/ingest/ingest-1/match") && request.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "Approve (1)" }).click();
+  const body = (await matchRequest).postDataJSON() as {
+    kind: string;
+    providerId: string;
+    files: { sourceFileId: string }[];
+  };
+  expect(body.kind).toBe("Movie");
+  expect(body.providerId).toBe("1084242");
+  expect(body.files.map((file) => file.sourceFileId)).toEqual(["source-1"]);
 });
 
 test("resolve match dialog shows full filenames for every episode in a series pack", async ({ page }) => {
@@ -127,6 +143,105 @@ test("resolve match dialog shows full filenames for every episode in a series pa
   await expect(dialog.getByText(firstFileName, { exact: true })).toBeVisible();
   await expect(dialog.getByText(secondFileName, { exact: true })).toBeVisible();
   await expect(dialog.getByText(stagingRoot, { exact: false })).toHaveCount(0);
+  // The series candidate appears once at the top, not per file.
+  await expect(dialog.getByRole("button", { name: /Fullmetal Alchemist: Brotherhood \(2009\).*100%/ })).toHaveCount(1);
   await expect(dialog.getByLabel("Episode").nth(0)).toHaveValue("1");
   await expect(dialog.getByLabel("Episode").nth(1)).toHaveValue("2");
+});
+
+// Already-mapped files stay visible with their current mapping (verifiable by the operator) and can be
+// re-decided via Change while the batch is still in review; the series is confirmed once for the batch.
+test("resolve match dialog shows mapped files and lets the operator re-decide them", async ({ page }) => {
+  const mappedFileName = "Fullmetal Alchemist Brotherhood - 01 [1080p].mkv";
+  const extraFileName = "Fullmetal Alchemist Brotherhood (Creditless ED 1) [1080p].mkv";
+  const stagingRoot = ".incoming/47d8d8cd10ee4fd681f4afcb30796b59/Fullmetal Alchemist Brotherhood";
+  const candidate = {
+    reference: { provider: "tmdb", id: "31911" },
+    title: "Fullmetal Alchemist: Brotherhood",
+    year: 2009,
+    score: 1,
+    posterUrl: null,
+  };
+
+  await setupApp(page, {
+    catalogs: [{ id: "c1", name: "Series", type: "Series" }],
+    ingest: [
+      {
+        id: "ingest-1",
+        catalogId: "c1",
+        downloadId: null,
+        downloadName: "Fullmetal Alchemist Brotherhood",
+        mediaTitle: null,
+        mediaItemId: null,
+        stage: "Identify",
+        status: "NeedsReview",
+        attemptCount: 0,
+        stagesCompleted: ["Intake", "Download"],
+        lastError: null,
+        nextAttemptAt: null,
+        reviewCandidates: [candidate],
+        sourceFiles: [
+          {
+            id: "source-1",
+            relativePath: `${stagingRoot}/${mappedFileName}`,
+            sizeBytes: 1024,
+            assignmentStatus: "Confirmed",
+            mediaItemId: "m1",
+            assigned: {
+              kind: "Episode",
+              title: "Episode 1",
+              season: 1,
+              episode: 1,
+              seriesTitle: "Fullmetal Alchemist: Brotherhood",
+              provider: "tmdb",
+              providerId: "31911",
+            },
+            parsedTitle: "Fullmetal Alchemist Brotherhood",
+            parsedYear: null,
+            parsedSeason: 1,
+            parsedEpisode: 1,
+          },
+          {
+            id: "source-2",
+            relativePath: `${stagingRoot}/${extraFileName}`,
+            sizeBytes: 1024,
+            assignmentStatus: "NeedsReview",
+            mediaItemId: null,
+            assigned: null,
+            parsedTitle: "Fullmetal Alchemist Brotherhood",
+            parsedYear: null,
+            parsedSeason: null,
+            parsedEpisode: null,
+            extraKind: "CreditlessEnding",
+            extraTitle: "Creditless Ending 1",
+            extraSuggestSkip: false,
+          },
+        ],
+        createdAt: "2026-06-24T10:00:00Z",
+        updatedAt: "2026-06-24T10:00:00Z",
+      },
+    ],
+  });
+
+  await page.goto("/activity");
+  await page.getByRole("button", { name: "Resolve match" }).click();
+  const dialog = page.getByRole("dialog", { name: "Resolve match" });
+
+  // The mapped file is visible with its current mapping, and the series it resolved against is the
+  // pre-selected identity for the whole batch.
+  await expect(dialog.getByText("Already mapped (1)", { exact: false })).toBeVisible();
+  await expect(dialog.getByText("S01E01", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Fullmetal Alchemist: Brotherhood.*Current match/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  // The classified extra pre-selects the Extra decision; only it counts as a pending change.
+  await expect(dialog.getByRole("button", { name: "Extra", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByRole("button", { name: "Approve (1)" })).toBeEnabled();
+
+  // Change flips the mapped file into an editable decision, seeded from its current mapping.
+  await dialog.getByRole("button", { name: "Change" }).click();
+  await expect(dialog.getByLabel("Episode")).toHaveValue("1");
+  await expect(dialog.getByRole("button", { name: "Approve (2)" })).toBeEnabled();
 });

@@ -35,10 +35,11 @@ public sealed class IngestService(
         var mediaTitles = await LoadMediaTitlesAsync(items, cancellationToken);
         var catalogTypes = await LoadCatalogTypesAsync(items, cancellationToken);
         var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
+        var assignedMedia = await LoadAssignedMediaAsync(sourceFilesByDownload.Values.SelectMany(files => files), cancellationToken);
         return items
             .Select(item => IngestItemResponse.From(
                 item, SourceFilesFor(item, sourceFilesByDownload), DownloadNameFor(item, downloadNames), MediaTitleFor(item, mediaTitles),
-                nameParser, CatalogTypeFor(item, catalogTypes), releaseGroups))
+                nameParser, CatalogTypeFor(item, catalogTypes), releaseGroups, assignedMedia))
             .ToList();
     }
 
@@ -59,7 +60,8 @@ public sealed class IngestService(
         var catalogType = await database.Catalogs.AsNoTracking()
             .Where(catalog => catalog.Id == item.CatalogId).Select(catalog => catalog.Type).FirstOrDefaultAsync(cancellationToken);
         var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
-        return IngestItemResponse.From(item, sourceFiles, downloadName, mediaTitle, nameParser, catalogType, releaseGroups);
+        var assignedMedia = await LoadAssignedMediaAsync(sourceFiles, cancellationToken);
+        return IngestItemResponse.From(item, sourceFiles, downloadName, mediaTitle, nameParser, catalogType, releaseGroups, assignedMedia);
     }
 
     public async Task<bool> RetryAsync(Guid id, CancellationToken cancellationToken)
@@ -118,38 +120,64 @@ public sealed class IngestService(
         return results;
     }
 
-    public async Task<bool> MatchAsync(Guid id, MatchRequest request, CancellationToken cancellationToken)
+    public async Task<MatchOutcome> MatchAsync(Guid id, MatchRequest request, CancellationToken cancellationToken)
     {
+        // The endpoint rejects an empty batch too; guarded here as well so an internal caller can't flip
+        // the item to Pending and re-drive it having matched nothing.
+        if (request.Files is not { Count: > 0 })
+        {
+            return MatchOutcome.FileNotFound;
+        }
+
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
-            return false;
+            return MatchOutcome.NotFound;
+        }
+
+        // Once Identify has completed, Organize may already have moved files into the library — re-pointing
+        // a mapping here would leave the moved file behind. Changing a published assignment is a library remap.
+        if (item.StagesCompleted.Contains("identify"))
+        {
+            return MatchOutcome.AlreadyOrganized;
         }
 
         var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == item.CatalogId, cancellationToken)
             ?? throw new InvalidOperationException("Catalog not found for ingest item.");
 
-        var sourceFile = await database.SourceFiles.FirstOrDefaultAsync(file => file.Id == request.SourceFileId, cancellationToken)
-            ?? throw new InvalidOperationException("Source file not found.");
+        var requestedIds = request.Files.Select(file => file.SourceFileId).Distinct().ToList();
+        var sourceFiles = await database.SourceFiles
+            .Where(file => file.IngestItemId == id && requestedIds.Contains(file.Id))
+            .ToDictionaryAsync(file => file.Id, cancellationToken);
+        if (sourceFiles.Count != requestedIds.Count)
+        {
+            return MatchOutcome.FileNotFound;
+        }
 
+        // One confirmed identity for the whole batch (a torrent never mixes titles): the series for
+        // episodes — each file keeping its own season/episode — or the movie every file is a version of.
         var candidate = new MetadataCandidate(new ProviderRef(request.Provider, request.ProviderId), request.Title, request.Year, 1.0);
+        var movie = request.Kind == MediaKind.Episode ? null : await identifyService.ResolveMovieAsync(catalog, candidate, cancellationToken);
 
-        var mediaItem = request.Kind == MediaKind.Episode
-            ? await identifyService.ResolveEpisodeAsync(catalog,
-                candidate, new ParsedName(MediaKind.Episode, request.Title, request.Year, request.Season, request.Episode, null), cancellationToken)
-            : await identifyService.ResolveMovieAsync(catalog, candidate, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var fileRequest in request.Files)
+        {
+            var mediaItem = movie ?? await identifyService.ResolveEpisodeAsync(catalog,
+                candidate, new ParsedName(MediaKind.Episode, request.Title, request.Year, fileRequest.Season, fileRequest.Episode, null), cancellationToken);
 
-        sourceFile.MediaItemId = mediaItem.Id;
-        sourceFile.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
-        sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+            var sourceFile = sourceFiles[fileRequest.SourceFileId];
+            sourceFile.MediaItemId = mediaItem.Id;
+            sourceFile.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
+            sourceFile.UpdatedAt = now;
+        }
 
         item.Status = IngestStatus.Pending;
         item.NextAttemptAt = null;
-        item.UpdatedAt = DateTimeOffset.UtcNow;
+        item.UpdatedAt = now;
         await database.SaveChangesAsync(cancellationToken);
 
         queue.Enqueue(item.Id);
-        return true;
+        return MatchOutcome.Matched;
     }
 
     /// <summary>
@@ -166,6 +194,15 @@ public sealed class IngestService(
             return SkipOutcome.NotFound;
         }
 
+        // Once Identify has completed, Organize may already have moved confirmed files into the library —
+        // skipping anything at that point is a library operation, not a review action. While the item is
+        // still in review nothing has been organized, so even an auto-matched (Confirmed) file may be
+        // skipped: the operator is overriding a mapping the pipeline got wrong.
+        if (item.StagesCompleted.Contains("identify"))
+        {
+            return SkipOutcome.AlreadyOrganized;
+        }
+
         var requestedIds = request.SourceFileIds.Distinct().ToList();
         var files = await database.SourceFiles
             .Where(file => file.IngestItemId == id && requestedIds.Contains(file.Id))
@@ -173,13 +210,6 @@ public sealed class IngestService(
         if (files.Count != requestedIds.Count)
         {
             return SkipOutcome.FileNotFound;
-        }
-
-        // A confirmed file is already matched and (possibly) organized — skipping it here would strand a
-        // published assignment. Unmatching a file is a library remap, not a skip.
-        if (files.Any(file => file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed))
-        {
-            return SkipOutcome.AlreadyMatched;
         }
 
         // Idempotent: a re-skip of files that are already Skipped changes nothing, so don't bump timestamps,
@@ -214,19 +244,32 @@ public sealed class IngestService(
     /// so the re-driven pipeline organizes them into the series' <c>extras/</c> folder, probes, and
     /// publishes them. Extras carry no provider identity of their own.
     /// </summary>
-    public async Task<bool> AssignExtrasAsync(Guid id, AssignExtrasRequest request, CancellationToken cancellationToken)
+    public async Task<AssignExtrasOutcome> AssignExtrasAsync(Guid id, AssignExtrasRequest request, CancellationToken cancellationToken)
     {
+        // Same defensive guard as MatchAsync: an empty batch must not resolve the series or re-drive.
+        if (request.SourceFileIds is not { Count: > 0 })
+        {
+            return AssignExtrasOutcome.FileNotFound;
+        }
+
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
-            return false;
+            return AssignExtrasOutcome.NotFound;
+        }
+
+        // Same boundary as skip and match: while the item is in review nothing has been organized, so an
+        // auto-matched file may still be re-decided into an extra; after Identify completes it can't.
+        if (item.StagesCompleted.Contains("identify"))
+        {
+            return AssignExtrasOutcome.AlreadyOrganized;
         }
 
         var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == item.CatalogId, cancellationToken)
             ?? throw new InvalidOperationException("Catalog not found for ingest item.");
         if (catalog.Type == CatalogType.Movie)
         {
-            throw new InvalidOperationException("Extras attach to a series; this is a movie catalog.");
+            return AssignExtrasOutcome.MovieCatalog;
         }
 
         var requestedIds = request.SourceFileIds.Distinct().ToList();
@@ -235,14 +278,7 @@ public sealed class IngestService(
             .ToListAsync(cancellationToken);
         if (files.Count != requestedIds.Count)
         {
-            throw new InvalidOperationException("Source file not found.");
-        }
-
-        // Same boundary as skip: a confirmed file is already matched (and possibly organized) — changing
-        // its assignment is a library remap, not a review action.
-        if (files.Any(file => file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed))
-        {
-            throw new InvalidOperationException("Cannot attach a file that is already matched.");
+            return AssignExtrasOutcome.FileNotFound;
         }
 
         var seriesCandidate = new MetadataCandidate(new ProviderRef(request.Provider, request.ProviderId), request.Title, request.Year, 1.0);
@@ -276,7 +312,7 @@ public sealed class IngestService(
         await database.SaveChangesAsync(cancellationToken);
 
         queue.Enqueue(item.Id);
-        return true;
+        return AssignExtrasOutcome.Assigned;
     }
 
     /// <summary>The library title for an extra: its classification title ("Creditless Opening 2"), or the
@@ -570,6 +606,48 @@ public sealed class IngestService(
 
     private static CatalogType CatalogTypeFor(IngestItem item, Dictionary<Guid, CatalogType> byCatalog) =>
         byCatalog.TryGetValue(item.CatalogId, out var type) ? type : CatalogType.Movie;
+
+    /// <summary>
+    /// The current mapping of every already-assigned source file (keyed by <see cref="SourceFile.MediaItemId"/>),
+    /// so the review UI can show what each file resolved to and let the operator re-decide it. The series
+    /// title rides along via a correlated subquery, same as <see cref="LoadMediaTitlesAsync"/>. Episode
+    /// identity (provider + id) is the owning series' reference — exactly what a re-match would send back.
+    /// </summary>
+    private async Task<Dictionary<Guid, IngestAssignedMedia>> LoadAssignedMediaAsync(
+        IEnumerable<SourceFile> sourceFiles, CancellationToken cancellationToken)
+    {
+        var mediaItemIds = sourceFiles.Select(file => file.MediaItemId).OfType<Guid>().Distinct().ToList();
+        if (mediaItemIds.Count == 0)
+        {
+            return new Dictionary<Guid, IngestAssignedMedia>();
+        }
+
+        var media = await database.MediaItems.AsNoTracking()
+            .Where(item => mediaItemIds.Contains(item.Id))
+            .Select(item => new
+            {
+                item.Id,
+                item.Kind,
+                item.Title,
+                Season = item.ParentIndexNumber,
+                Episode = item.IndexNumber,
+                item.IdentityProvider,
+                item.IdentityProviderId,
+                SeriesTitle = item.SeriesId == null
+                    ? null
+                    : database.MediaItems.Where(series => series.Id == item.SeriesId).Select(series => series.Title).FirstOrDefault(),
+            })
+            .ToListAsync(cancellationToken);
+
+        return media.ToDictionary(item => item.Id, item => new IngestAssignedMedia(
+            item.Kind.ToString(),
+            item.Title,
+            item.Kind == MediaKind.Episode ? item.Season : null,
+            item.Kind == MediaKind.Episode ? item.Episode : null,
+            item.SeriesTitle,
+            item.IdentityProvider,
+            item.IdentityProviderId));
+    }
 
     private async Task<Dictionary<Guid, string>> LoadMediaTitlesAsync(
         IReadOnlyList<IngestItem> items, CancellationToken cancellationToken)

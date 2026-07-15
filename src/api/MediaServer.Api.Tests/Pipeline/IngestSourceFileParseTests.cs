@@ -29,7 +29,9 @@ public sealed class IngestSourceFileParseTests
             })
             .ToList();
 
-        return IngestItemResponse.From(item, files, downloadName: null, mediaTitle: null, Parser, catalogType, releaseGroups: []);
+        return IngestItemResponse.From(
+            item, files, downloadName: null, mediaTitle: null, Parser, catalogType, releaseGroups: [],
+            assignedMedia: new Dictionary<Guid, IngestAssignedMedia>());
     }
 
     [Fact]

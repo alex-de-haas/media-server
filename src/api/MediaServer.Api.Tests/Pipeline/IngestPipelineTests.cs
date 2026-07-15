@@ -103,8 +103,9 @@ public sealed class IngestPipelineTests
 
             var ingestService = scope.ServiceProvider.GetRequiredService<IngestService>();
             var matched = await ingestService.MatchAsync(ingestId,
-                new MatchRequest(sourceFileId, MediaKind.Movie, "tmdb", "27205", "Inception", 2010, null, null), CancellationToken.None);
-            Assert.True(matched);
+                new MatchRequest(MediaKind.Movie, "tmdb", "27205", "Inception", 2010,
+                    [new MatchFileRequest(sourceFileId, null, null)]), CancellationToken.None);
+            Assert.Equal(MatchOutcome.Matched, matched);
         }
 
         await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
@@ -114,6 +115,105 @@ public sealed class IngestPipelineTests
         var ingest = await verifyDb.IngestItems.SingleAsync(item => item.Id == ingestId);
         Assert.Equal(IngestStatus.Done, ingest.Status);
         Assert.True(await verifyDb.MediaItems.AnyAsync(item => item.Title == "Inception" && item.PublicId != null));
+    }
+
+    [Fact]
+    public async Task Match_with_no_files_is_rejected_without_re_driving_the_item()
+    {
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [];
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Obscure.Release.2021", "Obscure.Release.2021/movie.mkv");
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var ingestService = scope.ServiceProvider.GetRequiredService<IngestService>();
+        Assert.Equal(MatchOutcome.FileNotFound, await ingestService.MatchAsync(ingestId,
+            new MatchRequest(MediaKind.Movie, "tmdb", "27205", "Inception", 2010, []), CancellationToken.None));
+
+        // The parked item must not have been flipped back to Pending by an empty batch.
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.NeedsReview, (await database.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
+    }
+
+    [Fact]
+    public async Task Bulk_match_resolves_a_whole_series_pack_with_one_confirmed_identity()
+    {
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [new MetadataCandidate(new ProviderRef("tmdb", "1"), "Wrong", 1999, 0.1)];
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "Obscure.Show.S01",
+            "Obscure.Show.S01/Obscure.Show.S01E01.mkv",
+            additionalSourceRelativePaths: ["Obscure.Show.S01/Obscure.Show.S01E02.mkv"]);
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using (var scope = harness.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            Assert.Equal(IngestStatus.NeedsReview, (await database.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
+            var files = await database.SourceFiles.OrderBy(file => file.RelativePath).ToListAsync();
+
+            // One request: the operator confirmed the series once; only season/episode vary per file.
+            var ingestService = scope.ServiceProvider.GetRequiredService<IngestService>();
+            Assert.Equal(MatchOutcome.Matched, await ingestService.MatchAsync(ingestId,
+                new MatchRequest(MediaKind.Episode, "tmdb", "4242", "Obscure Show", 2020,
+                    [new MatchFileRequest(files[0].Id, 1, 1), new MatchFileRequest(files[1].Id, 1, 2)]),
+                CancellationToken.None));
+        }
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var verifyScope = harness.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.Done, (await verifyDb.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
+        var episodes = await verifyDb.MediaItems
+            .Where(item => item.Kind == MediaKind.Episode).OrderBy(item => item.IndexNumber).ToListAsync();
+        Assert.Equal([1, 2], episodes.Select(episode => episode.IndexNumber ?? 0));
+        Assert.All(episodes, episode => Assert.NotNull(episode.PublicId));
+    }
+
+    [Fact]
+    public async Task Auto_matched_file_can_be_rematched_while_in_review_and_surfaces_its_mapping()
+    {
+        using var harness = new PipelineTestHarness();
+        // The episode auto-matches (to E05 per its name); the creditless ED parks the batch in review.
+        harness.MetadataProvider.OnSearch = query => query.Episode is not null
+            ? [new MetadataCandidate(new ProviderRef("tmdb", "31911"), "Fullmetal Alchemist: Brotherhood", 2009, 1.0)]
+            : [];
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "FMA Brotherhood S01",
+            "FMA/Fullmetal Alchemist Brotherhood S01E05.mkv",
+            additionalSourceRelativePaths: ["FMA/Fullmetal Alchemist Brotherhood (Creditless ED 1).mkv"]);
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var ingestService = scope.ServiceProvider.GetRequiredService<IngestService>();
+
+        // The review response shows where the auto-matched file currently points — series identity included,
+        // so the dialog can pre-select the same series.
+        var response = await ingestService.GetAsync(ingestId, CancellationToken.None);
+        Assert.NotNull(response);
+        var mapped = Assert.Single(response.SourceFiles, file => file.Assigned is not null);
+        Assert.Equal("Episode", mapped.Assigned!.Kind);
+        Assert.Equal(1, mapped.Assigned.Season);
+        Assert.Equal(5, mapped.Assigned.Episode);
+        Assert.Equal("Fullmetal Alchemist: Brotherhood", mapped.Assigned.SeriesTitle);
+        Assert.Equal("tmdb", mapped.Assigned.Provider);
+        Assert.Equal("31911", mapped.Assigned.ProviderId);
+
+        // The operator corrects the episode number (the release was mislabeled) while the item is parked.
+        Assert.Equal(MatchOutcome.Matched, await ingestService.MatchAsync(ingestId,
+            new MatchRequest(MediaKind.Episode, "tmdb", "31911", "Fullmetal Alchemist: Brotherhood", 2009,
+                [new MatchFileRequest(mapped.Id, 1, 6)]),
+            CancellationToken.None));
+
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var rematched = await database.MediaItems.SingleAsync(item =>
+            item.Kind == MediaKind.Episode && item.IdentityEpisodeNumber == 6);
+        Assert.Equal(rematched.Id, (await database.SourceFiles.SingleAsync(file => file.Id == mapped.Id)).MediaItemId);
     }
 
     [Fact]
