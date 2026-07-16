@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Check, FileAudio2, FileVideo2, Film, Loader2, Search } from "lucide-react";
+import { Check, Combine, FileAudio2, FileVideo2, Film, Loader2, Search } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type IngestSourceFile, type MetadataCandidate } from "@/lib/media-server";
 import { errorMessage } from "@/lib/ui";
@@ -20,6 +20,11 @@ import { Input } from "@/components/ui/input";
 // What Apply should do with a file. Resolved files (already mapped or skipped) default to "keep" — shown
 // with their current mapping, untouched unless the operator explicitly re-decides them via Change.
 type FileDecision = "keep" | "match" | "extra" | "skip";
+
+// How an audio track relates to the mux that runs after approval: rendered inside a merge group with its
+// video ("grouped"), merging into a video listed in the other section ("linked"), or matched to an
+// episode/movie no video here targets — the mux stage drops such tracks ("orphan").
+type MergeState = "grouped" | "linked" | "orphan" | null;
 
 // The one identity the whole batch resolves against — a torrent never mixes titles, so the operator
 // confirms the series (or movie) once and only the per-file season/episode vary.
@@ -246,6 +251,117 @@ export function IngestReviewDialog({
 
   const title = item.downloadName ?? fileNameOf(item.sourceFiles[0]?.relativePath) ?? "Untitled item";
 
+  // The mux pairing target a file's current decision points it at, or null when the decision doesn't land
+  // it on a media item. `key` mirrors the MediaItemId the file resolves to after Apply — provider identity
+  // plus episode/movie — which is exactly what the mux stage groups by (AudioMuxService merges confirmed
+  // staged files sharing a MediaItemId); `label` is the episode part shown in a group header. Match files
+  // key on the batch's selected identity — grouping them together is correct even while it's unpicked
+  // (they all receive the same one on Apply) — while keep files key on their existing mapping's identity,
+  // so a kept file only pairs with re-matched ones when the operator selected the series/movie it's
+  // already mapped to. Already-merged tracks are done and stay out of the preview.
+  const targetOf = (file: IngestSourceFile): { key: string; label: string } | null => {
+    const decision = decisionFor(file);
+    if (decision === "match") {
+      const identity = selected ? `${selected.provider}:${selected.providerId}` : "unselected";
+      if (!isEpisodic) return { key: `${identity}|Movie`, label: "Movie" };
+      const numbers = numbersFor(file);
+      const label = `S${String(numbers.season).padStart(2, "0")}E${String(numbers.episode).padStart(2, "0")}`;
+      return { key: `${identity}|${label}`, label };
+    }
+    if (decision === "keep" && file.mediaItemId != null && file.assignmentStatus !== "Merged") {
+      const assigned = file.assigned;
+      if (!assigned?.provider || !assigned.providerId) return null;
+      const identity = `${assigned.provider}:${assigned.providerId}`;
+      if (!isEpisodic) return assigned.kind === "Movie" ? { key: `${identity}|Movie`, label: "Movie" } : null;
+      if (assigned.kind !== "Episode" || assigned.season == null || assigned.episode == null) return null;
+      const label = `S${String(assigned.season).padStart(2, "0")}E${String(assigned.episode).padStart(2, "0")}`;
+      return { key: `${identity}|${label}`, label };
+    }
+    return null;
+  };
+
+  // A section's rows, with audio+video files that target the same episode/movie collapsed into one merge
+  // group (rendered at the first member's position). Buckets with only one kind stay as plain rows — an
+  // audio-only bucket means the track has nothing to merge into.
+  const rowsOf = (files: IngestSourceFile[]): (IngestSourceFile | IngestSourceFile[])[] => {
+    const buckets = new Map<string, IngestSourceFile[]>();
+    for (const file of files) {
+      const key = targetOf(file)?.key;
+      if (key == null) continue;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(file);
+      else buckets.set(key, [file]);
+    }
+    const rows: (IngestSourceFile | IngestSourceFile[])[] = [];
+    const claimed = new Set<string>();
+    for (const file of files) {
+      if (claimed.has(file.id)) continue;
+      const key = targetOf(file)?.key;
+      const bucket = key != null ? buckets.get(key) : undefined;
+      if (bucket && bucket.some((member) => member.isAudio) && bucket.some((member) => !member.isAudio)) {
+        for (const member of bucket) claimed.add(member.id);
+        rows.push(bucket);
+      } else {
+        rows.push(file);
+      }
+    }
+    return rows;
+  };
+
+  // Merge state for an audio row rendered outside a group: its video may still exist in the other section
+  // (pending vs. already-mapped are listed separately, so they can't share a group), or nowhere at all —
+  // then the mux stage will drop the track, which the row warns about.
+  const mergeStateOf = (file: IngestSourceFile): { merge: MergeState; mergeIntoName?: string } => {
+    if (!file.isAudio) return { merge: null };
+    const key = targetOf(file)?.key;
+    if (key == null) return { merge: null };
+    const video = item.sourceFiles.find((candidate) => !candidate.isAudio && targetOf(candidate)?.key === key);
+    return video
+      ? { merge: "linked", mergeIntoName: fileNameOf(video.relativePath) ?? video.relativePath }
+      : { merge: "orphan" };
+  };
+
+  const renderRow = (file: IngestSourceFile, merge: MergeState, mergeIntoName?: string) => (
+    <FileRow
+      key={file.id}
+      file={file}
+      isEpisodic={isEpisodic}
+      decision={decisionFor(file)}
+      numbers={numbersFor(file)}
+      busy={busy}
+      merge={merge}
+      mergeIntoName={mergeIntoName}
+      onDecision={(decision) => setDecisions((prev) => ({ ...prev, [file.id]: decision }))}
+      onNumbers={(patch) => setNumbers(file, patch)}
+    />
+  );
+
+  const renderFileRows = (files: IngestSourceFile[]) =>
+    rowsOf(files).map((row) => {
+      if (!Array.isArray(row)) {
+        const { merge, mergeIntoName } = mergeStateOf(row);
+        return renderRow(row, merge, mergeIntoName);
+      }
+      // A merge group: the video(s) first, then the track(s) that mux into them, boxed together so the
+      // pairing is visible before Approve. Groups follow the decisions live — retargeting an episode
+      // number moves the file in or out.
+      const videos = row.filter((file) => !file.isAudio);
+      const audios = row.filter((file) => file.isAudio);
+      return (
+        <div key={row[0].id} className="flex flex-col gap-1.5 rounded-lg border border-dashed p-1.5">
+          <div className="text-muted-foreground flex items-center gap-1.5 px-1 text-xs">
+            <Combine className="size-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              {isEpisodic && <span className="font-medium">{targetOf(row[0])?.label} — </span>}
+              {audios.length === 1 ? "the audio track merges" : `${audios.length} audio tracks merge`} into{" "}
+              {videos.length === 1 ? "the video file" : "each video file"} on import.
+            </span>
+          </div>
+          {[...videos, ...audios].map((file) => renderRow(file, "grouped"))}
+        </div>
+      );
+    });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-xl overflow-hidden">
@@ -361,36 +477,14 @@ export function IngestReviewDialog({
           {/* The flexing scroll region: it takes whatever height the capped dialog has left (min-h-0 up
               the tree makes that boundable) and scrolls its overflow, so the footer below never spills. */}
           <div className="-mr-2 flex min-h-20 flex-1 flex-col gap-2 overflow-y-auto pr-2">
-            {pendingFiles.map((file) => (
-              <FileRow
-                key={file.id}
-                file={file}
-                isEpisodic={isEpisodic}
-                decision={decisionFor(file)}
-                numbers={numbersFor(file)}
-                busy={busy}
-                onDecision={(decision) => setDecisions((prev) => ({ ...prev, [file.id]: decision }))}
-                onNumbers={(patch) => setNumbers(file, patch)}
-              />
-            ))}
+            {renderFileRows(pendingFiles)}
 
             {resolvedFiles.length > 0 && (
               <div className="text-muted-foreground mt-1 text-xs font-medium">
                 Already mapped ({resolvedFiles.length}) — verify below, Change re-decides a file.
               </div>
             )}
-            {resolvedFiles.map((file) => (
-              <FileRow
-                key={file.id}
-                file={file}
-                isEpisodic={isEpisodic}
-                decision={decisionFor(file)}
-                numbers={numbersFor(file)}
-                busy={busy}
-                onDecision={(decision) => setDecisions((prev) => ({ ...prev, [file.id]: decision }))}
-                onNumbers={(patch) => setNumbers(file, patch)}
-              />
-            ))}
+            {renderFileRows(resolvedFiles)}
           </div>
 
           {/* One Apply for the whole batch. */}
@@ -431,6 +525,8 @@ function FileRow({
   decision,
   numbers,
   busy,
+  merge,
+  mergeIntoName,
   onDecision,
   onNumbers,
 }: {
@@ -439,6 +535,8 @@ function FileRow({
   decision: FileDecision;
   numbers: { season: number; episode: number };
   busy: boolean;
+  merge: MergeState;
+  mergeIntoName?: string;
   onDecision: (decision: FileDecision) => void;
   onNumbers: (patch: Partial<{ season: number; episode: number }>) => void;
 }) {
@@ -507,7 +605,21 @@ function FileRow({
           {file.extraSuggestSkip ? " — usually junk; Skip is suggested." : "."}
         </span>
       )}
-      {decision !== "keep" && file.isAudio && (
+      {/* Mux preview for an audio row outside a merge group: where the track ends up ("linked" — its
+          video is listed in the other section), or that it ends up nowhere — the mux stage drops tracks
+          whose episode/movie has no video in the batch. Grouped rows say this via the group header. */}
+      {file.isAudio && merge === "orphan" && (
+        <span className="text-xs text-amber-600 dark:text-amber-500">
+          No video file here targets the same {isEpisodic ? "episode" : "movie"} — the track has nothing to
+          merge into and will be dropped.
+        </span>
+      )}
+      {file.isAudio && merge === "linked" && (
+        <span className="text-muted-foreground text-xs">
+          Merges into <span className="font-medium">{mergeIntoName}</span> on import.
+        </span>
+      )}
+      {decision !== "keep" && file.isAudio && merge == null && (
         <span className="text-muted-foreground text-xs">
           Audio track — matched to {isEpisodic ? "an episode" : "the movie"}, it merges into that video file.
         </span>
@@ -556,10 +668,10 @@ function DecisionButton({
   return (
     <Button
       type="button"
-      variant={active ? "secondary" : "ghost"}
+      variant={active ? "default" : "ghost"}
       size="sm"
       aria-pressed={active}
-      className={`h-7 px-2 ${active ? "" : "text-muted-foreground"}`}
+      className={`h-7 px-2 ${active ? "font-semibold" : "text-muted-foreground"}`}
       disabled={disabled}
       onClick={onClick}
     >
