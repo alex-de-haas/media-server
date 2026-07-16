@@ -251,23 +251,31 @@ export function IngestReviewDialog({
 
   const title = item.downloadName ?? fileNameOf(item.sourceFiles[0]?.relativePath) ?? "Untitled item";
 
-  // The episode/movie a file's current decision points it at — the mux pairing key. Files with the same
-  // key land on the same media item after Apply, which is exactly when the mux stage merges an external
-  // audio track into a video (AudioMuxService groups confirmed staged files by MediaItemId). Already-merged
-  // tracks are done and stay out of the preview.
-  const targetKeyOf = (file: IngestSourceFile): string | null => {
+  // The mux pairing target a file's current decision points it at, or null when the decision doesn't land
+  // it on a media item. `key` mirrors the MediaItemId the file resolves to after Apply — provider identity
+  // plus episode/movie — which is exactly what the mux stage groups by (AudioMuxService merges confirmed
+  // staged files sharing a MediaItemId); `label` is the episode part shown in a group header. Match files
+  // key on the batch's selected identity — grouping them together is correct even while it's unpicked
+  // (they all receive the same one on Apply) — while keep files key on their existing mapping's identity,
+  // so a kept file only pairs with re-matched ones when the operator selected the series/movie it's
+  // already mapped to. Already-merged tracks are done and stay out of the preview.
+  const targetOf = (file: IngestSourceFile): { key: string; label: string } | null => {
     const decision = decisionFor(file);
     if (decision === "match") {
-      if (!isEpisodic) return "Movie";
+      const identity = selected ? `${selected.provider}:${selected.providerId}` : "unselected";
+      if (!isEpisodic) return { key: `${identity}|Movie`, label: "Movie" };
       const numbers = numbersFor(file);
-      return `S${String(numbers.season).padStart(2, "0")}E${String(numbers.episode).padStart(2, "0")}`;
+      const label = `S${String(numbers.season).padStart(2, "0")}E${String(numbers.episode).padStart(2, "0")}`;
+      return { key: `${identity}|${label}`, label };
     }
     if (decision === "keep" && file.mediaItemId != null && file.assignmentStatus !== "Merged") {
       const assigned = file.assigned;
-      if (!isEpisodic) return assigned?.kind === "Movie" ? "Movie" : null;
-      return assigned?.kind === "Episode" && assigned.season != null && assigned.episode != null
-        ? `S${String(assigned.season).padStart(2, "0")}E${String(assigned.episode).padStart(2, "0")}`
-        : null;
+      if (!assigned?.provider || !assigned.providerId) return null;
+      const identity = `${assigned.provider}:${assigned.providerId}`;
+      if (!isEpisodic) return assigned.kind === "Movie" ? { key: `${identity}|Movie`, label: "Movie" } : null;
+      if (assigned.kind !== "Episode" || assigned.season == null || assigned.episode == null) return null;
+      const label = `S${String(assigned.season).padStart(2, "0")}E${String(assigned.episode).padStart(2, "0")}`;
+      return { key: `${identity}|${label}`, label };
     }
     return null;
   };
@@ -278,7 +286,7 @@ export function IngestReviewDialog({
   const rowsOf = (files: IngestSourceFile[]): (IngestSourceFile | IngestSourceFile[])[] => {
     const buckets = new Map<string, IngestSourceFile[]>();
     for (const file of files) {
-      const key = targetKeyOf(file);
+      const key = targetOf(file)?.key;
       if (key == null) continue;
       const bucket = buckets.get(key);
       if (bucket) bucket.push(file);
@@ -288,7 +296,7 @@ export function IngestReviewDialog({
     const claimed = new Set<string>();
     for (const file of files) {
       if (claimed.has(file.id)) continue;
-      const key = targetKeyOf(file);
+      const key = targetOf(file)?.key;
       const bucket = key != null ? buckets.get(key) : undefined;
       if (bucket && bucket.some((member) => member.isAudio) && bucket.some((member) => !member.isAudio)) {
         for (const member of bucket) claimed.add(member.id);
@@ -305,9 +313,9 @@ export function IngestReviewDialog({
   // then the mux stage will drop the track, which the row warns about.
   const mergeStateOf = (file: IngestSourceFile): { merge: MergeState; mergeIntoName?: string } => {
     if (!file.isAudio) return { merge: null };
-    const key = targetKeyOf(file);
+    const key = targetOf(file)?.key;
     if (key == null) return { merge: null };
-    const video = item.sourceFiles.find((candidate) => !candidate.isAudio && targetKeyOf(candidate) === key);
+    const video = item.sourceFiles.find((candidate) => !candidate.isAudio && targetOf(candidate)?.key === key);
     return video
       ? { merge: "linked", mergeIntoName: fileNameOf(video.relativePath) ?? video.relativePath }
       : { merge: "orphan" };
@@ -344,7 +352,7 @@ export function IngestReviewDialog({
           <div className="text-muted-foreground flex items-center gap-1.5 px-1 text-xs">
             <Combine className="size-3.5 shrink-0" aria-hidden="true" />
             <span>
-              {isEpisodic && <span className="font-medium">{targetKeyOf(row[0])} — </span>}
+              {isEpisodic && <span className="font-medium">{targetOf(row[0])?.label} — </span>}
               {audios.length === 1 ? "the audio track merges" : `${audios.length} audio tracks merge`} into{" "}
               {videos.length === 1 ? "the video file" : "each video file"} on import.
             </span>
