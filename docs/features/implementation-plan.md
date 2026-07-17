@@ -200,7 +200,7 @@ the internal management surface from the public Jellyfin surface.
     { "key": "TORRENT_MAX_DOWNLOAD_SPEED",  "type": "number",  "default": "0" },
     { "key": "TORRENT_MAX_UPLOAD_SPEED",    "type": "number",  "default": "0" }
   ],
-  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
+  "capabilities": ["backup", "logs"]
 }
 ```
 

@@ -3,7 +3,7 @@
   "id": "com.haas.media-server",
   "name": "Media Server",
   "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "runtimeProfiles": [
     { "key": "docker", "type": "docker", "default": true },
     { "key": "dev", "type": "localCommand" }
@@ -150,7 +150,7 @@
     }
   ],
   "telemetry": { "enabled": true, "sampleRatio": 0.1 },
-  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"],
+  "capabilities": ["backup", "logs"],
   "catalogMetadata": {
     "publisher": {
       "name": "Haas",

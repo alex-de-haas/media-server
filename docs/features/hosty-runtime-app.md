@@ -206,7 +206,7 @@ per-service `runtimes` keyed by profile key:
     "catalogRoots": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "api", "required": true }
   },
   "settings": [ /* TMDB_API_KEY (secret, required), SUPPORTED_LANGUAGES, JELLYFIN_*, FFPROBE_PATH, TORRENT_MAX_DOWNLOAD_SPEED, TORRENT_MAX_UPLOAD_SPEED */ ],
-  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
+  "capabilities": ["backup", "logs"]
 }
 ```
 
@@ -242,7 +242,9 @@ The `web` UI runs inside the Hosty Shell sandboxed iframe. It must:
 
 ## Capabilities
 
-`["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]`.
+`["backup", "logs"]` — the optional features this app offers a client. Lifecycle
+verbs (open/update/restart/stop/remove) are inherent to Core managing the app and
+are not declared here.
 
 ## Local Validation
 
