@@ -25,7 +25,9 @@ function userData(overrides: Record<string, unknown> = {}) {
 }
 
 export interface AppMock {
-  role?: "admin" | "user" | null; // null → unauthenticated (401)
+  role?: "admin" | "user" | null; // null → unauthenticated (401, or sessionStatus)
+  sessionStatus?: 401 | 403; // failure status when role is null (default 401)
+  recoveryOrigin?: string; // browser-reachable Core origin in the failure body (default null)
   library?: unknown[] | { status: number };
   recent?: unknown[];
   resume?: unknown[];
@@ -46,7 +48,16 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
   await page.route("**/api/auth/session", (route) =>
     role
       ? route.fulfill({ json: session(role) })
-      : route.fulfill({ status: 401, json: { error: "unauthenticated" } }),
+      : route.fulfill({
+          status: mock.sessionStatus ?? 401,
+          json: {
+            error: mock.sessionStatus === 403 ? "forbidden" : "unauthenticated",
+            recovery: {
+              appId: "com.haas.media-server",
+              corePublicOrigin: mock.recoveryOrigin ?? null,
+            },
+          },
+        }),
   );
 
   await page.route("**/api/proxy/api/**", async (route) => {

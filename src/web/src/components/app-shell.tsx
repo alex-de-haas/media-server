@@ -8,6 +8,8 @@ import { Activity, CalendarDays, Film, FolderTree, Home, Layers, Settings, Tv, t
 import { apiJson, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RealtimeBridge } from "@/components/realtime-bridge";
+import { SessionRecovery } from "@/components/session-recovery";
+import type { SessionFailureStatus } from "@/lib/host-auth";
 
 export interface Session {
   userId: string;
@@ -44,14 +46,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   if (session.isError) {
-    const unauthenticated = session.error instanceof ApiError && session.error.status === 401;
-    return (
-      <ShellMessage>
-        {unauthenticated
-          ? "No active session. Open this app from the Hosty Shell to authenticate."
-          : "Could not load your session. Try reloading."}
-      </ShellMessage>
-    );
+    const failure = sessionFailureStatus(session.error);
+    if (failure) {
+      const recovery = readRecoveryParams(session.error instanceof ApiError ? session.error.body : null);
+      return (
+        <SessionRecovery
+          status={failure}
+          // The session route always sends the app id; the literal mirrors hostyServerEnv's own
+          // fallback for the pathological case of a failure body without it.
+          appId={recovery.appId ?? "com.haas.media-server"}
+          corePublicOrigin={recovery.corePublicOrigin}
+        />
+      );
+    }
+    return <ShellMessage>Could not load your session. Try reloading.</ShellMessage>;
   }
 
   return (
@@ -66,6 +74,41 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
     </SessionContext.Provider>
   );
+}
+
+// Maps the session route's status-code contract back onto the recovery classification:
+// 401 recoverable / 403 terminal / 503 transient / 500+misconfigured operator error. Anything
+// else (network failure before a response, a genuine 500 bug) falls back to the generic message.
+function sessionFailureStatus(error: unknown): SessionFailureStatus | null {
+  if (!(error instanceof ApiError)) {
+    return null;
+  }
+  if (error.status === 401) {
+    return "expired";
+  }
+  if (error.status === 403) {
+    return "denied";
+  }
+  if (error.status === 503) {
+    return "unavailable";
+  }
+  if (error.status === 500 && error.code === "misconfigured") {
+    return "misconfigured";
+  }
+  return null;
+}
+
+function readRecoveryParams(body: unknown): { appId: string | null; corePublicOrigin: string | null } {
+  const recovery = body && typeof body === "object" ? (body as { recovery?: unknown }).recovery : null;
+  if (!recovery || typeof recovery !== "object") {
+    return { appId: null, corePublicOrigin: null };
+  }
+  const { appId, corePublicOrigin } = recovery as { appId?: unknown; corePublicOrigin?: unknown };
+  return {
+    appId: typeof appId === "string" && appId.length > 0 ? appId : null,
+    corePublicOrigin:
+      typeof corePublicOrigin === "string" && corePublicOrigin.length > 0 ? corePublicOrigin : null,
+  };
 }
 
 function ShellMessage({ children }: { children: React.ReactNode }) {

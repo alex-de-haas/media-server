@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { setBearerToken } from "@/lib/api";
+import { clearRecoveryGuard } from "@/components/session-recovery";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -41,6 +42,8 @@ function useAppCodeExchange(): boolean {
             if (data.accessToken) {
               setBearerToken(data.accessToken);
             }
+            // A fresh session means the next standalone recovery may auto-redirect again.
+            clearRecoveryGuard();
           }
         } catch {
           // Ignore: the session query will surface the unauthenticated state.
