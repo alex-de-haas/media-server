@@ -38,8 +38,27 @@ test("non-admin cannot see or use Catalogs", async ({ page }) => {
   await expect(page.getByText(/administrators only/)).toBeVisible();
 });
 
-test("an unauthenticated session shows the sign-in hint", async ({ page }) => {
+test("an expired session without a reachable Core shows the sign-in card", async ({ page }) => {
   await setupApp(page, { role: null });
   await page.goto("/");
-  await expect(page.getByText(/Open this app from the Hosty Shell/)).toBeVisible();
+  await expect(page.getByText("Your Hosty session ended.")).toBeVisible();
+  await expect(page.getByText(/machine running Hosty/)).toBeVisible();
+});
+
+test("an expired session auto-redirects to Core /open for a fresh code", async ({ page }) => {
+  await setupApp(page, { role: null, recoveryOrigin: "http://core.local:7070" });
+  await page.route("http://core.local:7070/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<h1>Core login</h1>" }),
+  );
+
+  await page.goto("/");
+  await page.waitForURL(/core\.local:7070\/api\/apps\/com\.haas\.media-server\/open\?redirectUri=/);
+  await expect(page.getByRole("heading", { name: "Core login" })).toBeVisible();
+});
+
+test("a denied session shows access denied with no sign-in affordance", async ({ page }) => {
+  await setupApp(page, { role: null, sessionStatus: 403 });
+  await page.goto("/");
+  await expect(page.getByText(/not allowed to use this app/)).toBeVisible();
+  await expect(page.getByRole("link", { name: /Sign in/ })).toHaveCount(0);
 });
