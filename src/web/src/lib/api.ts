@@ -31,6 +31,10 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    /** Machine-readable `error` field from a JSON error body, when present. */
+    public readonly code: string | null = null,
+    /** The parsed JSON error body, when the response carried one. */
+    public readonly body: unknown = null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -47,9 +51,25 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   const response = await fetch(path, { ...init, headers, credentials: "include" });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new ApiError(response.status, problemMessage(body) || response.statusText);
+    const parsed = parseJsonBody(body);
+    const code = parsed && typeof (parsed as { error?: unknown }).error === "string"
+      ? ((parsed as { error: string }).error || null)
+      : null;
+    throw new ApiError(response.status, problemMessage(body) || response.statusText, code, parsed);
   }
   return response;
+}
+
+function parseJsonBody(body: string): unknown {
+  const trimmed = body.trim();
+  if (!trimmed.startsWith("{")) {
+    return null;
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 // ASP.NET errors come back as RFC 9457 problem+json (`{ title, detail, status }`); surface the

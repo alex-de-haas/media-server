@@ -5,12 +5,37 @@ import { type AppRole, identityCookieAttributes, mapHostRole } from "@/lib/ident
 /** App-origin HttpOnly cookie holding the Host identity token. */
 export const IDENTITY_COOKIE = "hosty_identity";
 
+// Core runs on the same host as the app services, so a short budget is plenty; a stalled call
+// must not hold the session route open indefinitely.
+const CORE_AUTH_TIMEOUT_MS = 1_500;
+
 export interface HostSession {
   userId: string;
   email: string | null;
   displayName: string | null;
   role: AppRole;
 }
+
+/**
+ * Classified outcome of revalidating the identity token against Core, following the platform
+ * identity error contract (401 recoverable / 403 terminal):
+ * - `expired`: recoverable — no token, Core 401, or an unusable grant; re-authorize via Shell
+ *   or Core `/open`.
+ * - `denied`: terminal — Core 403 or a token minted for a different app; never auto-redirect
+ *   (it would loop).
+ * - `unavailable`: transient — Core unreachable, slow, or answering garbage; keep the cookie
+ *   and let the user retry.
+ * - `misconfigured`: operator problem — the app service token is missing; signing in cannot
+ *   fix it, so the UI must not offer a login.
+ */
+export type SessionResolution =
+  | { status: "active"; session: HostSession }
+  | { status: "expired" }
+  | { status: "denied" }
+  | { status: "unavailable" }
+  | { status: "misconfigured" };
+
+export type SessionFailureStatus = Exclude<SessionResolution["status"], "active">;
 
 /**
  * Reads the identity token from (in priority order) the Authorization bearer header — the
@@ -58,13 +83,18 @@ interface RevalidateResponse {
 }
 
 /**
- * Revalidates a forwarded identity token against Core with the app service token. Core identity
- * tokens are HS256 (symmetric), so this round-trip is the only trustworthy validation.
+ * Revalidates a forwarded identity token against Core with the app service token and classifies
+ * the outcome. Core identity tokens are opaque (`hostyg_` grants), so this round-trip is the
+ * only trustworthy validation.
  */
-export async function revalidateIdentity(token: string): Promise<HostSession | null> {
+export async function resolveHostSession(token: string | null): Promise<SessionResolution> {
+  if (!token) {
+    return { status: "expired" };
+  }
+
   const env = hostyServerEnv();
   if (!env.serviceToken) {
-    return null;
+    return { status: "misconfigured" };
   }
 
   let response: Response;
@@ -77,31 +107,45 @@ export async function revalidateIdentity(token: string): Promise<HostSession | n
       },
       body: JSON.stringify({ accessToken: token }),
       cache: "no-store",
+      signal: AbortSignal.timeout(CORE_AUTH_TIMEOUT_MS),
     });
   } catch {
-    return null;
+    // Network failure or timeout — transient either way; keep the cookie.
+    return { status: "unavailable" };
   }
 
   if (!response.ok) {
-    return null;
+    return {
+      status: response.status === 401 ? "expired" : response.status === 403 ? "denied" : "unavailable",
+    };
   }
 
   let data: RevalidateResponse;
   try {
     data = (await response.json()) as RevalidateResponse;
   } catch {
-    // A non-JSON / truncated body means the session is unverifiable, not a server error.
-    return null;
+    // A non-JSON / truncated body means the session is unverifiable, not proof it is invalid.
+    return { status: "unavailable" };
   }
 
-  if (!data || !data.active || !data.userId || data.appId !== env.appId) {
-    return null;
+  if (data?.appId && data.appId !== env.appId) {
+    // A token minted for a different app is Core's token_app_mismatch — terminal, like a 403.
+    return { status: "denied" };
+  }
+
+  // An "active" grant without a subject is unusable; classify it as recoverable so the probe
+  // and the real auth path can never disagree about the same token.
+  if (!data || data.active !== true || !data.userId) {
+    return { status: "expired" };
   }
 
   return {
-    userId: data.userId,
-    email: data.email ?? null,
-    displayName: data.displayName ?? null,
-    role: mapHostRole(data.hostRole),
+    status: "active",
+    session: {
+      userId: data.userId,
+      email: data.email ?? null,
+      displayName: data.displayName ?? null,
+      role: mapHostRole(data.hostRole),
+    },
   };
 }
