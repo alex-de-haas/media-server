@@ -5,6 +5,7 @@ using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Diagnostics;
+using HostySdk.App;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
@@ -225,18 +226,24 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromSeconds(30), QueueLimit = 0 }));
 });
 
-// Identity validation against Core, with a short-TTL positive cache.
-builder.Services.AddMemoryCache();
-builder.Services.AddHttpClient(CoreIdentityValidator.HttpClientName, client =>
-{
-    client.BaseAddress = new Uri(hosty.CoreOrigin);
-    client.Timeout = TimeSpan.FromSeconds(10);
-});
-builder.Services.AddSingleton<CoreIdentityValidator>();
-builder.Services.AddSingleton<IHostyIdentityValidator>(serviceProvider => new CachingIdentityValidator(
-    serviceProvider.GetRequiredService<CoreIdentityValidator>(),
-    serviceProvider.GetRequiredService<IMemoryCache>(),
-    TimeSpan.FromSeconds(30)));
+// Identity validation against Core (HostySdk.App): validators, the platform-decided 30s
+// positive cache, the hosty-core HttpClient, and the Hosty authentication scheme. The role
+// mapper turns the raw Host role into this app's admin/user claim.
+var hostyAuth = builder.Services.AddHostyAppAuthentication(
+    new HostyAppOptions
+    {
+        AppId = hosty.AppId,
+        CoreOrigin = hosty.CoreOrigin,
+        CorePublicOrigin = hosty.CorePublicOrigin,
+        ServiceToken = hosty.ServiceToken,
+        AppDataDir = hosty.AppDataDir,
+        RunningInContainer = hosty.RunningInContainer,
+    },
+    configure: options =>
+    {
+        options.MapHostRole = role =>
+            string.Equals(role, "host.admin", StringComparison.OrdinalIgnoreCase) ? AppRoles.Admin : AppRoles.User;
+    });
 
 // Talks to Core's internal app APIs (backups, notifications, directory) with the service token bearer.
 builder.Services.AddSingleton<IHostyCoreClient, HostyCoreClient>();
@@ -245,10 +252,7 @@ builder.Services.AddSingleton<IHostyCoreClient, HostyCoreClient>();
 builder.Services.AddScoped<DirectoryReconcileService>();
 builder.Services.AddHostedService<DirectoryReconcileWorker>();
 
-builder.Services
-    .AddAuthentication(HostyAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, HostyAuthenticationHandler>(HostyAuthenticationHandler.SchemeName, null)
-    .AddScheme<AuthenticationSchemeOptions, JellyfinAuthenticationHandler>(JellyfinAuthenticationHandler.SchemeName, null);
+hostyAuth.AddScheme<AuthenticationSchemeOptions, JellyfinAuthenticationHandler>(JellyfinAuthenticationHandler.SchemeName, null);
 builder.Services.AddAuthorization(options =>
 {
     // The Jellyfin surface authenticates only with Media Server-owned tokens, never Host identity.
