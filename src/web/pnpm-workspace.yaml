@@ -4,3 +4,6 @@
 allowBuilds:
   sharp: true
   unrs-resolver: true
+minimumReleaseAgeExclude:
+  # First-party Hosty SDK: our own releases, no quarantine window needed.
+  - "@hosty-sdk/*"

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
+    "@hosty-sdk/app": "^0.1.2",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.219.0",
     "@opentelemetry/exporter-logs-otlp-proto": "^0.219.0",
