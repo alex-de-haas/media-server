@@ -2,6 +2,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 
+using HostySdk.App;
+
 namespace MediaServer.Api.Hosty;
 
 /// <summary>Operator notification severity; serialized lowercase to match the Core contract.</summary>

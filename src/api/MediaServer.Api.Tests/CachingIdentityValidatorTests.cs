@@ -1,5 +1,5 @@
 using Imposter.Abstractions;
-using MediaServer.Api.Hosty;
+using HostySdk.App;
 using Microsoft.Extensions.Caching.Memory;
 
 [assembly: GenerateImposter(typeof(IHostyIdentityValidator))]

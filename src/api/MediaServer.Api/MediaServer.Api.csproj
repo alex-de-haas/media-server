@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="HostySdk.App" Version="0.1.0" />
     <InternalsVisibleTo Include="MediaServer.Api.Tests" />
   </ItemGroup>
 
