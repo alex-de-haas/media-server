@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildCoreOpenUrl } from "@/lib/identity";
+import { buildCoreOpenUrl } from "@hosty-sdk/app";
 import type { SessionFailureStatus } from "@/lib/host-auth";
 
 // Once-per-tab guard so a standalone tab that comes back from Core still unauthorized does not
@@ -62,7 +62,7 @@ export function SessionRecovery({
   const [expired, setExpired] = useState<ExpiredPhase>({ kind: "recovering" });
 
   useEffect(() => {
-    if (status !== "expired") {
+    if (status !== "expired" && status !== "not-present") {
       return;
     }
 
@@ -99,7 +99,7 @@ export function SessionRecovery({
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
       <h1 className="text-2xl font-semibold tracking-tight">Media Server</h1>
-      {status === "denied" ? (
+      {status === "forbidden" ? (
         <p className="text-muted-foreground text-sm">
           You are signed in to Hosty but are not allowed to use this app.
         </p>

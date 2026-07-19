@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { RealtimeBridge } from "@/components/realtime-bridge";
 import { SessionRecovery } from "@/components/session-recovery";
 import type { SessionFailureStatus } from "@/lib/host-auth";
+import { readRecoveryParams } from "@hosty-sdk/app";
 
 export interface Session {
   userId: string;
@@ -87,7 +88,7 @@ function sessionFailureStatus(error: unknown): SessionFailureStatus | null {
     return "expired";
   }
   if (error.status === 403) {
-    return "denied";
+    return "forbidden";
   }
   if (error.status === 503) {
     return "unavailable";
@@ -98,18 +99,6 @@ function sessionFailureStatus(error: unknown): SessionFailureStatus | null {
   return null;
 }
 
-function readRecoveryParams(body: unknown): { appId: string | null; corePublicOrigin: string | null } {
-  const recovery = body && typeof body === "object" ? (body as { recovery?: unknown }).recovery : null;
-  if (!recovery || typeof recovery !== "object") {
-    return { appId: null, corePublicOrigin: null };
-  }
-  const { appId, corePublicOrigin } = recovery as { appId?: unknown; corePublicOrigin?: unknown };
-  return {
-    appId: typeof appId === "string" && appId.length > 0 ? appId : null,
-    corePublicOrigin:
-      typeof corePublicOrigin === "string" && corePublicOrigin.length > 0 ? corePublicOrigin : null,
-  };
-}
 
 function ShellMessage({ children }: { children: React.ReactNode }) {
   return (

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readIdentityToken, resolveHostSession, type SessionFailureStatus } from "@/lib/host-auth";
-import { hostyServerEnv } from "@/lib/hosty";
+import {
+  readIdentityToken,
+  readSessionRecoveryParams,
+  resolveHostSession,
+  type SessionFailureStatus,
+} from "@/lib/host-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,8 +12,9 @@ export const dynamic = "force-dynamic";
 // One HTTP status per failure class so the client recovery flow can tell recoverable (401) from
 // terminal (403) from transient (503) from operator error (500) without parsing prose.
 const FAILURE_RESPONSES: Record<SessionFailureStatus, { status: number; error: string }> = {
+  "not-present": { status: 401, error: "unauthenticated" },
   expired: { status: 401, error: "unauthenticated" },
-  denied: { status: 403, error: "forbidden" },
+  forbidden: { status: 403, error: "forbidden" },
   unavailable: { status: 503, error: "core_unavailable" },
   misconfigured: { status: 500, error: "misconfigured" },
 };
@@ -27,12 +32,8 @@ export async function GET(request: NextRequest) {
 
   if (resolution.status !== "active") {
     const failure = FAILURE_RESPONSES[resolution.status];
-    const env = hostyServerEnv();
     return NextResponse.json(
-      {
-        error: failure.error,
-        recovery: { appId: env.appId, corePublicOrigin: env.corePublicOrigin },
-      },
+      { error: failure.error, recovery: readSessionRecoveryParams() },
       { status: failure.status, headers: { "cache-control": "no-store" } },
     );
   }
