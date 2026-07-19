@@ -56,7 +56,9 @@ export async function resolveHostSession(token: string | null): Promise<SessionR
       userId: resolution.identity.userId,
       email: resolution.identity.email,
       displayName: resolution.identity.displayName,
-      role: (resolution.identity.appRole as AppRole) ?? "user",
+      // The app's own role mapper applied to the raw host role: no assertion needed, and
+      // an unexpected SDK appRole value can never leak into the session contract.
+      role: mapHostRole(resolution.identity.hostRole),
     },
   };
 }
