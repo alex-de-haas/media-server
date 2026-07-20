@@ -1,0 +1,55 @@
+# Keeps dependencies current and surfaces security advisories across every ecosystem here:
+# the Next.js web app (npm), the .NET API (nuget), both Dockerfiles, and the CI actions.
+#
+# Grouping policy, applied per ecosystem: minor and patch bumps arrive as one weekly PR so
+# routine churn costs a single review, while majors arrive individually because each needs
+# its own judgement call and must not block the rest of the group.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /src/web
+    schedule:
+      interval: weekly
+    groups:
+      # The Hosty App SDK gets its own group so a release reaches this repo on its own
+      # merit — the platform's update model (docs/ideas/hosty-app-sdk.md, decision 13)
+      # expects SDK bumps to flow continuously rather than wait behind an unrelated
+      # failing dependency. It is also the group to enable auto-merge on first.
+      # Note: @hosty-sdk/app is pre-1.0, so a 0.1.x -> 0.2.0 release is a semver-MINOR
+      # bump that no `^0.1` range can reach on its own; this group is what delivers it.
+      hosty-sdk:
+        patterns: ["@hosty-sdk/*"]
+      npm:
+        patterns: ["*"]
+        exclude-patterns: ["@hosty-sdk/*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: nuget
+    directories:
+      - /src/api/MediaServer.Api
+      - /src/api/MediaServer.Api.Tests
+    schedule:
+      interval: weekly
+    groups:
+      # Same rationale as the npm hosty-sdk group above — HostySdk.App is the .NET half
+      # of the same SDK and follows the same release cadence.
+      hosty-sdk:
+        patterns: ["HostySdk.*"]
+      nuget:
+        patterns: ["*"]
+        exclude-patterns: ["HostySdk.*"]
+
+  - package-ecosystem: docker
+    directories:
+      - /src/web
+      - /src/api
+    schedule:
+      interval: weekly
