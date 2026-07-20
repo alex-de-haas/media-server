@@ -1,9 +1,11 @@
 # Keeps dependencies current and surfaces security advisories across every ecosystem here:
 # the Next.js web app (npm), the .NET API (nuget), both Dockerfiles, and the CI actions.
 #
-# Grouping policy, applied per ecosystem: minor and patch bumps arrive as one weekly PR so
-# routine churn costs a single review, while majors arrive individually because each needs
-# its own judgement call and must not block the rest of the group.
+# Grouping policy for the package ecosystems (npm, nuget): minor and patch bumps arrive as
+# one weekly PR so routine churn costs a single review, while majors arrive individually
+# because each needs its own judgement call and must not block the rest of the group.
+# Actions group wholesale, majors included -- an action major is normally a mechanical
+# `@v4 -> @v5` bump rather than a migration.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -25,8 +27,12 @@ updates:
       # failing dependency. It is also the group to enable auto-merge on first.
       # Note: @hosty-sdk/app is pre-1.0, so a 0.1.x -> 0.2.0 release is a semver-MINOR
       # bump that no `^0.1` range can reach on its own; this group is what delivers it.
+      # Restricted to minor/patch on purpose: when auto-merge is enabled on this group,
+      # a future 1.0 major must not ride in on it. A major falls outside the group and
+      # arrives as its own reviewable PR, which is the intended handling.
       hosty-sdk:
         patterns: ["@hosty-sdk/*"]
+        update-types: ["minor", "patch"]
       npm:
         patterns: ["*"]
         exclude-patterns: ["@hosty-sdk/*"]
@@ -43,9 +49,11 @@ updates:
       # of the same SDK and follows the same release cadence.
       hosty-sdk:
         patterns: ["HostySdk.*"]
+        update-types: ["minor", "patch"]
       nuget:
         patterns: ["*"]
         exclude-patterns: ["HostySdk.*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: docker
     directories:
