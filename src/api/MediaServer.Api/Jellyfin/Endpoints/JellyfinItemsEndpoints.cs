@@ -17,7 +17,7 @@ internal static class JellyfinItemsEndpoints
         // (the per-user path form lives below). Literal segment wins over /Items/{itemId} in routing.
         secured.MapGet("/Items/Latest", async (HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            var actingUserId = await ResolveQueryUserAsync(request, principal, database, cancellationToken);
+            var actingUserId = await JellyfinPrincipal.ResolveQueryUserIdAsync(request, principal, database, cancellationToken);
             if (actingUserId is null)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -80,7 +80,7 @@ internal static class JellyfinItemsEndpoints
         // Newer Jellyfin route Infuse calls instead of /Users/{userId}/Items/Resume.
         secured.MapGet("/UserItems/Resume", async (HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            var actingUserId = await ResolveQueryUserAsync(request, principal, database, cancellationToken);
+            var actingUserId = await JellyfinPrincipal.ResolveQueryUserIdAsync(request, principal, database, cancellationToken);
             if (actingUserId is null)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -95,7 +95,7 @@ internal static class JellyfinItemsEndpoints
         secured.MapGet("/Shows/NextUp", async (HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
             // NextUp targets the caller unless an explicit (authorized) UserId is supplied.
-            var actingUserId = await ResolveQueryUserAsync(request, principal, database, cancellationToken);
+            var actingUserId = await JellyfinPrincipal.ResolveQueryUserIdAsync(request, principal, database, cancellationToken);
             if (actingUserId is null)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -123,7 +123,7 @@ internal static class JellyfinItemsEndpoints
         // bare BaseItemDto array; both the legacy per-user route and the newer /Items form are served.
         secured.MapGet("/Items/{itemId}/SpecialFeatures", async (string itemId, HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            var actingUserId = await ResolveQueryUserAsync(request, principal, database, cancellationToken);
+            var actingUserId = await JellyfinPrincipal.ResolveQueryUserIdAsync(request, principal, database, cancellationToken);
             if (actingUserId is null)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -162,20 +162,6 @@ internal static class JellyfinItemsEndpoints
                 seriesId, string.IsNullOrEmpty(seasonId) ? null : seasonId, seasonNumber,
                 JellyfinPrincipal.AppUserId(principal), cancellationToken));
         });
-    }
-
-    /// <summary>
-    /// Resolves the acting app-user for a query-string route: the explicit (authorized) <c>UserId</c>
-    /// query parameter, or the authenticated caller when it is absent. Null means the caller may not act
-    /// as the requested user.
-    /// </summary>
-    private static async Task<int?> ResolveQueryUserAsync(
-        HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
-    {
-        var requestedUserId = request.Query["UserId"].ToString();
-        return string.IsNullOrEmpty(requestedUserId)
-            ? JellyfinPrincipal.AppUserId(principal)
-            : await JellyfinPrincipal.ResolveActingUserIdAsync(principal, requestedUserId, database, cancellationToken);
     }
 
     private static JellyfinItemsQuery ParseQuery(HttpRequest request)

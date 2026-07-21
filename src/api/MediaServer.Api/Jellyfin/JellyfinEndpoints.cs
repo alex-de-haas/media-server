@@ -62,6 +62,20 @@ internal static class JellyfinPrincipal
     /// authorization: the caller for their own id, or (admin only) another user resolved from the hashed
     /// route id. Returns null when the caller may not act as the target or the id is unknown.
     /// </summary>
+    /// <summary>
+    /// Resolves the acting app-user for the newer query-string route forms (<c>/UserItems/…</c>,
+    /// <c>/UserPlayedItems/…</c>): the explicit (authorized) <c>UserId</c> query parameter, or the
+    /// authenticated caller when it is absent. Null means the caller may not act as the requested user.
+    /// </summary>
+    public static async Task<int?> ResolveQueryUserIdAsync(
+        HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
+    {
+        var requestedUserId = request.Query["UserId"].ToString();
+        return string.IsNullOrEmpty(requestedUserId)
+            ? AppUserId(principal)
+            : await ResolveActingUserIdAsync(principal, requestedUserId, database, cancellationToken);
+    }
+
     public static async Task<int?> ResolveActingUserIdAsync(
         ClaimsPrincipal principal, string routeUserId, MediaServerDbContext database, CancellationToken cancellationToken)
     {
