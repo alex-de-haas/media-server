@@ -161,7 +161,10 @@ Playback state:
 - `POST /Sessions/Playing/Progress`
 - `POST /Sessions/Playing/Stopped`
 - `POST|DELETE /Users/{userId}/PlayedItems/{itemId}`
+- `POST|DELETE /UserPlayedItems/{itemId}` (10.9+ form; acting user from the
+  optional `userId` query parameter — Infuse uses this one)
 - `POST|DELETE /Users/{userId}/FavoriteItems/{itemId}`
+- `POST|DELETE /UserFavoriteItems/{itemId}` (10.9+ form)
 
 Deferred compatibility endpoints:
 
