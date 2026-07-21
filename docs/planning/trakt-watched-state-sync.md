@@ -228,7 +228,9 @@ The observation matrix covers:
 - Infuse auto-advance from episode N to episode N+1, including Stopped/Playing
   ordering;
 - a multi-episode file and the item ID reported for its progress;
-- the same completion/manual/rewatch cases through the web player.
+- the same completion/manual/rewatch cases through the web player;
+- starting and resuming playback directly at or above 90%, to confirm that a
+  session's first above-threshold report never creates an exact play.
 
 The resulting trace must answer:
 
