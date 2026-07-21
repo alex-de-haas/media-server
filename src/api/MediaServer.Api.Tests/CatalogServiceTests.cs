@@ -4,6 +4,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.IO;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace MediaServer.Api.Tests;
 
@@ -11,13 +12,17 @@ public sealed class CatalogServiceTests : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly MediaServerDbContext _database;
+    private readonly List<string> _commands = [];
     private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), "ms-catalog-" + Guid.NewGuid().ToString("N"));
 
     public CatalogServiceTests()
     {
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
-        _database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        _database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>()
+            .UseSqlite(_connection)
+            .LogTo(_commands.Add, [DbLoggerCategory.Database.Command.Name], LogLevel.Information)
+            .Options);
         _database.Database.Migrate();
         Directory.CreateDirectory(_tempRoot);
     }
@@ -111,6 +116,39 @@ public sealed class CatalogServiceTests : IDisposable
         // …but the physical files (and the catalog directory) are left untouched on disk.
         Assert.True(File.Exists(libraryFile));
         Assert.True(Directory.Exists(_tempRoot));
+    }
+
+    [Fact]
+    public async Task Delete_does_not_scale_its_parameters_with_the_size_of_the_catalog()
+    {
+        var service = CreateService();
+        var catalog = await service.CreateAsync(Request(_tempRoot), CancellationToken.None);
+
+        var now = DateTimeOffset.UtcNow;
+        for (var index = 0; index < 300; index++)
+        {
+            var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = $"Movie {index}", Year = 2000, AddedAt = now, UpdatedAt = now };
+            _database.Add(movie);
+            _database.Add(new MediaSource { Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "mkv", Path = $"Movie {index}/Movie {index}.mkv", SizeBytes = 5, DurationTicks = 0, CreatedAt = now });
+        }
+
+        await _database.SaveChangesAsync();
+        _commands.Clear();
+
+        var deleted = await service.DeleteAsync(catalog.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        Assert.Empty(await _database.Catalogs.ToListAsync());
+        Assert.Empty(await _database.MediaItems.ToListAsync());
+        Assert.Empty(await _database.MediaSources.ToListAsync());
+
+        // A catalog is unbounded, so the ids must never leave the database: materializing them makes EF
+        // expand Contains into one host parameter per id, which SQLite caps (and wastes a round trip at any
+        // size). Assert the shape rather than the row count — the cap is high enough that a functional test
+        // would not fail until tens of thousands of items.
+        var sourceDelete = Assert.Single(_commands, entry => entry.Contains("DELETE FROM \"MediaSources\"", StringComparison.Ordinal));
+        Assert.Contains("SELECT", sourceDelete, StringComparison.Ordinal);
+        Assert.DoesNotContain("@ids", sourceDelete, StringComparison.Ordinal);
     }
 
     [Fact]
