@@ -114,6 +114,29 @@ public sealed class CatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_clears_a_series_hierarchy_without_tripping_the_parent_foreign_key()
+    {
+        var service = CreateService();
+        var catalog = await service.CreateAsync(Request(_tempRoot), CancellationToken.None);
+
+        // Series → Season → Episode: MediaItem.ParentId is Restrict, so the rows must go leaves-first.
+        var now = DateTimeOffset.UtcNow;
+        var series = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Series, Title = "Breaking Bad", AddedAt = now, UpdatedAt = now };
+        var season = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Season, Title = "Season 1", ParentId = series.Id, SeriesId = series.Id, IndexNumber = 1, AddedAt = now, UpdatedAt = now };
+        var episode = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Episode, Title = "Pilot", ParentId = season.Id, SeriesId = series.Id, ParentIndexNumber = 1, IndexNumber = 1, AddedAt = now, UpdatedAt = now };
+        var source = new MediaSource { Id = Guid.NewGuid(), MediaItemId = episode.Id, Container = "mkv", Path = "Breaking Bad/S01/E01.mkv", SizeBytes = 5, DurationTicks = 0, CreatedAt = now };
+        _database.AddRange(series, season, episode, source);
+        await _database.SaveChangesAsync();
+
+        var deleted = await service.DeleteAsync(catalog.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        Assert.Empty(await _database.Catalogs.ToListAsync());
+        Assert.Empty(await _database.MediaItems.ToListAsync());
+        Assert.Empty(await _database.MediaSources.ToListAsync());
+    }
+
+    [Fact]
     public async Task Delete_is_blocked_while_a_download_references_the_catalog()
     {
         var service = CreateService();
