@@ -175,8 +175,8 @@ public sealed class CatalogService(
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
-        var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
-        if (catalog is null)
+        var exists = await database.Catalogs.AnyAsync(candidate => candidate.Id == id, cancellationToken);
+        if (!exists)
         {
             return false;
         }
@@ -192,8 +192,55 @@ public sealed class CatalogService(
         }
 
         // Removing a catalog drops its DB rows only; on-disk media in the root is never deleted here.
-        database.Catalogs.Remove(catalog);
-        await database.SaveChangesAsync(cancellationToken);
+        // MediaItem→Catalog is Cascade, but we cannot lean on it: the DB would delete the catalog's items
+        // in arbitrary order and the self-FK on MediaItem.ParentId is Restrict, so a series deleted ahead
+        // of its seasons trips "FOREIGN KEY constraint failed". Clear the items explicitly, child→parent.
+        await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
+        {
+            // Composable subqueries, never materialized id lists: a catalog is unbounded, and EF expands an
+            // in-memory Contains into one host parameter per id (SQLite caps them, and shipping thousands of
+            // ids to the server and back is wasted work either way). These stay IQueryable so the ids never
+            // leave the database. Each is evaluated where it is used, before the rows it selects are deleted.
+            var itemIds = database.MediaItems
+                .Where(item => item.CatalogId == id)
+                .Select(item => item.Id);
+            var sourceIds = database.MediaSources
+                .Where(source => itemIds.Contains(source.MediaItemId))
+                .Select(source => source.Id);
+
+            // Keep the download's files; just unassign them from the items about to disappear.
+            await database.SourceFiles
+                .Where(file => file.MediaItemId != null && itemIds.Contains(file.MediaItemId.Value))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(file => file.MediaItemId, (Guid?)null), cancellationToken);
+
+            // Dependents first (explicit, so we don't depend on DB cascade being enabled). Transcode jobs
+            // hold a Restrict FK straight to the catalog, so they have to go regardless of their media link.
+            await database.TranscodeJobs.Where(job => job.CatalogId == id).ExecuteDeleteAsync(cancellationToken);
+            // Streams before sources: sourceIds reads MediaSources, so it must run while those rows still exist.
+            await database.MediaStreams.Where(stream => sourceIds.Contains(stream.MediaSourceId)).ExecuteDeleteAsync(cancellationToken);
+            await database.MediaSources.Where(source => itemIds.Contains(source.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+            await database.MetadataRecords.Where(record => itemIds.Contains(record.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+            await database.ImageAssets.Where(image => itemIds.Contains(image.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+            await database.MediaItemPersons.Where(credit => itemIds.Contains(credit.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+            await database.UserItemData.Where(data => itemIds.Contains(data.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+
+            // Items child→parent: leaves first — episodes and extras (Videos parent to their series,
+            // season or movie) — then seasons, then the roots. Filtered on CatalogId directly: itemIds reads
+            // the very table being deleted, so each pass would narrow the set out from under the next.
+            await database.MediaItems.Where(media => media.CatalogId == id &&
+                (media.Kind == MediaKind.Episode || media.Kind == MediaKind.Video)).ExecuteDeleteAsync(cancellationToken);
+            await database.MediaItems.Where(media => media.CatalogId == id && media.Kind == MediaKind.Season).ExecuteDeleteAsync(cancellationToken);
+            await database.MediaItems.Where(media => media.CatalogId == id &&
+                (media.Kind == MediaKind.Series || media.Kind == MediaKind.Movie)).ExecuteDeleteAsync(cancellationToken);
+
+            // ExecuteDelete throughout, including the catalog itself: a tracked Remove would make the change
+            // tracker re-issue cascade deletes for items these statements already dropped, which then fails
+            // the "expected to affect 1 row" concurrency check.
+            await database.Catalogs.Where(candidate => candidate.Id == id).ExecuteDeleteAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         return true;
     }
 
