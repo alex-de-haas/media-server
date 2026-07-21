@@ -129,6 +129,17 @@ Forward-looking designs and epics, kept separate from the roadmap specs:
 - [Catalog library browsing](ideas/catalog-library-browsing.md) — filter Movies
   and Series by their configured catalog without mixing browsing with catalog
   administration.
+- [Watched-history providers: Trakt](ideas/trakt-watched-state-sync.md) — a
+  provider-neutral watched-history subsystem with Trakt as its first optional
+  per-user provider.
+
+## Planning
+
+Approved or draft work that remains to be implemented:
+
+- [Watched-history providers: Trakt](planning/trakt-watched-state-sync.md) — Draft
+  design for provider-neutral watched-history sync/outbox behavior, conditional
+  per-play history after Infuse validation, and the first Trakt adapter.
 
 ## Feature documentation
 
