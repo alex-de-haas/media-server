@@ -25,6 +25,17 @@ public sealed class OrganizerService(
 
         var organized = new List<OrganizedFile>();
         var stagingToClean = new HashSet<string>(StringComparer.Ordinal);
+        // Staging roots still holding a file the organizer refused to move. The cleanup below is recursive,
+        // so a root must be spared even when a sibling file did organize out of it successfully.
+        var stagingKept = new HashSet<string>(StringComparer.Ordinal);
+
+        void KeepStaging(SourceFile file)
+        {
+            if (StagingRootOf(file.RelativePath) is { } root && sandbox.TryResolve(catalog, root, out var absolute))
+            {
+                stagingKept.Add(absolute);
+            }
+        }
 
         // Group by assigned media item so that when several files map to one movie/episode (e.g. a
         // black-and-white and a regular cut of the same episode) each gets a distinct canonical path —
@@ -68,17 +79,22 @@ public sealed class OrganizerService(
                 var extension = Path.GetExtension(sourceFile.RelativePath);
                 var canonicalRelative = await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
 
+                // A file scanned from an already-organized library can already sit at its canonical path for a
+                // non-null edition — "<canonical stem> - <label>.<ext>", exactly what LibraryNaming writes for a
+                // version and what transcode-engine emits. Alone in its ingest (which is how a scan queues every
+                // file) there is no sibling for EditionLabeler to diff against, so the name on disk is the only
+                // evidence of the label. Recover it instead of renaming the file onto the plain canonical name,
+                // which belongs to a different version.
+                if (edition is null && RecoverEdition(sourceFile.RelativePath, canonicalRelative) is { } recovered)
+                {
+                    edition = recovered;
+                    canonicalRelative = await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
+                }
+
                 if (!sandbox.TryResolve(catalog, canonicalRelative, out var canonicalAbsolute))
                 {
                     logger.LogWarning("Refusing to organize outside catalog root: {Path}", canonicalRelative);
                     continue;
-                }
-
-                // Remember the staging folder so it can be removed once its file(s) move out.
-                if (StagingRootOf(sourceFile.RelativePath) is { } stagingRoot &&
-                    sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
-                {
-                    stagingToClean.Add(stagingAbsolute);
                 }
 
                 // A case-only path change on a case-insensitive filesystem maps to the same file — skip the move.
@@ -101,11 +117,23 @@ public sealed class OrganizerService(
                             existing => existing.MediaItem!.CatalogId == catalog.Id &&
                                 existing.Path == canonicalRelative && existing.SourceFileId != sourceFile.Id,
                             cancellationToken);
-                        if (backsAnotherSource)
+
+                        // A published MediaSource is not the only claim on a path. Scanning a pre-existing
+                        // library queues one ingest per file, so the original and its " - <edition>" transcode
+                        // outputs identify as the same item while MediaSources is still empty — whichever
+                        // organizes first would delete the others. A file another ingest still owns is a real
+                        // library file, never a leftover.
+                        var ownedByAnotherIngest = !backsAnotherSource && await database.SourceFiles.AnyAsync(
+                            other => other.IngestItem!.CatalogId == catalog.Id &&
+                                other.Id != sourceFile.Id && other.RelativePath == canonicalRelative,
+                            cancellationToken);
+
+                        if (backsAnotherSource || ownedByAnotherIngest)
                         {
                             logger.LogWarning(
                                 "Refusing to organize {Source} onto {Target}: that path already backs another version.",
                                 sourceFile.RelativePath, canonicalRelative);
+                            KeepStaging(sourceFile);
                             continue;
                         }
 
@@ -113,6 +141,15 @@ public sealed class OrganizerService(
                     }
 
                     File.Move(sourceAbsolute, canonicalAbsolute);
+
+                    // The staging folder may go now that its file actually moved out. Recorded here rather
+                    // than before the move so a refused file never has its staging root swept from under it —
+                    // the sweep is recursive and would delete the very file the refusal above preserved.
+                    if (StagingRootOf(sourceFile.RelativePath) is { } stagingRoot &&
+                        sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
+                    {
+                        stagingToClean.Add(stagingAbsolute);
+                    }
                 }
 
                 sourceFile.RelativePath = canonicalRelative;
@@ -148,8 +185,9 @@ public sealed class OrganizerService(
             }
         }
 
-        // Remove emptied .incoming/<downloadId>/ staging folders (torrent leftovers: samples, .nfo, extras).
-        foreach (var staging in stagingToClean)
+        // Remove emptied .incoming/<downloadId>/ staging folders (torrent leftovers: samples, .nfo, extras),
+        // except any still holding a file the organizer deliberately left alone.
+        foreach (var staging in stagingToClean.Except(stagingKept))
         {
             TryDeleteDirectory(staging);
         }
@@ -182,6 +220,38 @@ public sealed class OrganizerService(
         {
             logger.LogWarning(exception, "Failed to remove staging folder {Path}", absolute);
         }
+    }
+
+    /// <summary>
+    /// Reads back the <c> - {edition}</c> suffix <see cref="LibraryNaming"/> writes: returns the label when
+    /// <paramref name="actualRelative"/> is <paramref name="canonicalRelative"/> with a suffix appended to the
+    /// filename stem, otherwise null. Requires the same folder and differs only by the suffix, so a title that
+    /// itself contains " - " (e.g. "Mission Impossible - Fallout") is not mistaken for a version — its
+    /// canonical stem already carries the hyphen and matches exactly.
+    /// </summary>
+    private static string? RecoverEdition(string actualRelative, string canonicalRelative)
+    {
+        if (!string.Equals(FolderOf(actualRelative), FolderOf(canonicalRelative), PathComparison))
+        {
+            return null;
+        }
+
+        var actualStem = Path.GetFileNameWithoutExtension(actualRelative);
+        var prefix = Path.GetFileNameWithoutExtension(canonicalRelative) + " - ";
+        if (!actualStem.StartsWith(prefix, PathComparison))
+        {
+            return null;
+        }
+
+        var label = actualStem[prefix.Length..].Trim();
+        return label.Length == 0 ? null : label;
+    }
+
+    // Catalog-relative paths are posix-style (see ToRelative in LibraryImportService).
+    private static string FolderOf(string relativePath)
+    {
+        var separator = relativePath.LastIndexOf('/');
+        return separator < 0 ? string.Empty : relativePath[..separator];
     }
 
     private async Task<string> BuildLibraryPathAsync(

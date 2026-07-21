@@ -1,8 +1,11 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
+using MediaServer.Api.Library;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Pipeline;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MediaServer.Api.Tests.Pipeline;
 
@@ -319,5 +322,78 @@ public sealed class IngestPipelineTests
         var items = await ingestService.ListAsync(CancellationToken.None);
 
         Assert.Equal(2, items.Count);
+    }
+
+    [Fact]
+    public async Task Scanning_a_pre_existing_library_keeps_the_original_alongside_its_transcoded_version()
+    {
+        using var harness = new PipelineTestHarness();
+        StrongMatch(harness);
+
+        // A catalog pointed at a library organized by an earlier install: the original plus a
+        // transcode-engine output. Neither has a MediaSource or a TranscodeJob row in this database.
+        var root = Path.Combine(harness.Root, "catalog-" + Guid.NewGuid().ToString("N"));
+        CatalogPaths.For(root).EnsureCreated();
+        const string original = "Inception (2010)/Inception (2010).mkv";
+        const string transcoded = "Inception (2010)/Inception (2010) - HEVC 1080p.mkv";
+        WriteMedia(root, original);
+        WriteMedia(root, transcoded);
+
+        Guid catalogId;
+        List<Guid> ordered;
+        using (var scope = harness.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var catalog = new Catalog
+            {
+                Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = root,
+                NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now,
+            };
+            database.Catalogs.Add(catalog);
+            await database.SaveChangesAsync();
+            catalogId = catalog.Id;
+
+            var import = new LibraryImportService(database, harness.GetService<IPipelineQueue>(), NullLogger<LibraryImportService>.Instance);
+            var report = await import.ImportAsync(catalogId, CancellationToken.None);
+            Assert.Equal(2, report!.Imported);
+
+            // Drive the transcode output first: it is the order that used to delete the original, and
+            // filesystem enumeration order is not guaranteed, so pin it rather than hope for it.
+            var files = await database.SourceFiles
+                .Where(file => file.IngestItem!.CatalogId == catalogId)
+                .Select(file => new { file.RelativePath, file.IngestItemId })
+                .ToListAsync();
+            ordered = files
+                .OrderByDescending(file => file.RelativePath == transcoded)
+                .Select(file => file.IngestItemId)
+                .ToList();
+        }
+
+        foreach (var ingestId in ordered)
+        {
+            await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+        }
+
+        using var verify = harness.CreateScope();
+        var db = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+
+        // Both files are still on disk — neither was renamed over the other.
+        Assert.True(File.Exists(Path.Combine(root, original.Replace('/', Path.DirectorySeparatorChar))));
+        Assert.True(File.Exists(Path.Combine(root, transcoded.Replace('/', Path.DirectorySeparatorChar))));
+
+        // …and they land as two versions of one movie, the transcode output keeping its label.
+        var movie = await db.MediaItems.SingleAsync(item => item.Kind == MediaKind.Movie);
+        var sources = await db.MediaSources.Where(source => source.MediaItemId == movie.Id).ToListAsync();
+        Assert.Equal(2, sources.Count);
+        Assert.Contains(sources, source => source.Path == original && source.VersionName is null);
+        Assert.Contains(sources, source => source.Path == transcoded && source.VersionName == "HEVC 1080p");
+    }
+
+    private static void WriteMedia(string root, string relativePath)
+    {
+        var absolute = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        File.WriteAllBytes(absolute, new byte[1024]);
     }
 }

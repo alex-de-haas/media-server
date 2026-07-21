@@ -111,7 +111,7 @@ Stages (skipped individually via `IngestItem.StagesCompleted` for resume):
 | `intake` | ✓ | – | Ensure catalog layout exists. |
 | `download` | ✓ | – | Wait for the torrent. While `keepSeeding`, the item **parks here** (file stays seedable in `.incoming/`) until the operator stops seeding. |
 | `identify` | ✓ | ✓ (entry) | Parse name → provider search → create/reuse `MediaItem`. Low-confidence → `NeedsReview`. |
-| `organize` | ✓ | ✓ | **Move** each file from its current path to the canonical root path derived from the confirmed metadata (rename in place — no copy, no hardlink). Several files mapped to one item (e.g. a black-and-white and a regular cut of an episode) get distinct version-tagged names. |
+| `organize` | ✓ | ✓ | **Move** each file from its current path to the canonical root path derived from the confirmed metadata (rename in place — no copy, no hardlink). Several files mapped to one item (e.g. a black-and-white and a regular cut of an episode) get distinct version-tagged names. See *Version collisions* below. |
 | `probe` | ✓ | ✓ | ffprobe each file in place → one `MediaSource` (+ `MediaStream`s) per file; multiple sources surface as selectable versions. |
 | `enrich` | ✓ | ✓ | Fetch/cache provider metadata + images. |
 | `publish` | ✓ | ✓ | Assign the stable public id; the item becomes browsable/playable. |
@@ -217,6 +217,24 @@ hardlink:
 A move within one filesystem is atomic and frees no extra space (one copy exists
 throughout). If a destination already exists from a prior run, organize is
 idempotent (re-derives the same path; replace if needed).
+
+### Version collisions
+
+Version labels normally come from `EditionLabeler`, which diffs the names of files that share one
+ingest. A **scan** queues one ingest per file, so files that identify as the same item never meet in
+one group and each would derive the same unlabelled canonical name — the second one organized would
+rename over the first. Two rules keep that from destroying media:
+
+- **Recover the label from the name.** A file already sitting at `<canonical stem> - <label>.<ext>`
+  is already canonical for that edition, so the organizer adopts `<label>` and leaves it in place
+  instead of renaming it onto the plain canonical name. This is the exact suffix `LibraryNaming`
+  writes and transcode-engine emits, read back. A title that itself contains `" - "` is unaffected:
+  its canonical stem carries the hyphen and matches exactly.
+- **Never overwrite a claimed path.** The organizer refuses to move onto a path that backs a
+  published `MediaSource` *or* that another ingest's `SourceFile` still owns — the latter is what a
+  scan over a pre-existing library looks like before anything reaches probe, when `MediaSources` is
+  still empty. A refused file also pins its `.incoming/` staging root against the recursive cleanup,
+  which would otherwise delete the file the refusal just preserved.
 
 ## Removal Semantics
 
