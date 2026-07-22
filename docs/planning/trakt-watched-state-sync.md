@@ -98,8 +98,11 @@ until the user approves a different history model or reduced behavior.
 - Jellyfin `PlayedItems` accepts optional `DatePlayed`; Media Server currently uses
   it as `LastPlayedDate`, but it does not establish why the client changed the
   state.
-- Development builds already write method, path, query, status, and duration for
-  every request to `requests.log`. JSON playback-body fields are not included.
+- Route-level request logging (`requests.log`: method, path, query, status,
+  duration) is written in Development **and** whenever the operator enables the
+  `PLAYBACK_DIAGNOSTICS` setting. It carries no JSON playback-body fields.
+- `PLAYBACK_DIAGNOSTICS` additionally writes one structured JSON line per
+  playback-state request to `logs/playback-diagnostics.log`.
 - Local state is aggregate-only in SQLite. There is no per-play history or exact
   dedicated `LastWatchedAt` value.
 - No external watched-history provider connection exists today.
@@ -212,11 +215,19 @@ The route-level classification hypothesis is defined before observation:
 - PlayedItems DELETE is an explicit manual unwatch.
 
 Phase 0 confirms or refutes this concrete hypothesis; it does not search for an
-undefined signal. A small diagnostic change records Infuse's Jellyfin calls without
-changing playback behavior.
-The existing development `requests.log` already captures routes and query strings;
-the playback endpoints additionally need structured diagnostic fields from the
-parsed body:
+undefined signal. The diagnostics record Infuse's Jellyfin calls without changing
+playback behavior.
+
+They are gated on the operator setting `PLAYBACK_DIAGNOSTICS`, not on the ASP.NET
+environment. The original design assumed a Development-only log, which does not
+survive contact with how the app is actually run: the shipped runtime is `docker`,
+which is never Development, so the observation matrix could not be captured on a
+real install — confirmed on 2026-07-22, when a manual watched/unwatch through
+Infuse left the local database changed and `requests.log` untouched. An operator
+toggle works in every runtime profile and can be turned off again afterwards.
+
+`requests.log` captures routes and query strings; the playback endpoints
+additionally record structured fields from the parsed body:
 
 - server timestamp and route kind (`Playing`, `Progress`, `Stopped`,
   `PlayedItemsPost`, or `PlayedItemsDelete`);
@@ -228,8 +239,13 @@ parsed body:
 - `Played` before and after the operation, without changing the operation.
 
 Diagnostics must not log authorization headers, access tokens, raw request bodies,
-file paths, media titles, or provider credentials. The logging is Development-only
-and should use bounded structured values so it cannot affect request success.
+file paths, media titles, or provider credentials — what remains is opaque ids,
+numbers, and flags. That applies to the route log too: Jellyfin accepts a reusable
+access token as the `api_key` query parameter on media and image URLs (clients open
+those without custom headers), so `requests.log` masks credential-shaped query
+values rather than persisting working tokens in a file the operator reads and may
+share. Writes are bounded, serialized, and failure-tolerant: a broken log path
+disables the sink with one warning rather than failing playback requests.
 
 The observation matrix covers:
 
@@ -823,8 +839,9 @@ it cannot read a stale remote snapshot while older local events are pending.
 
 ### Phase 0: Observe and Finalize the Contract
 
-- [ ] Add Development-only structured playback diagnostics without changing
-  current playback behavior.
+- [x] Add operator-gated (`PLAYBACK_DIAGNOSTICS`) structured playback diagnostics
+  without changing current playback behavior — shipped, works under the `docker`
+  runtime rather than Development only.
 - [ ] Run the Infuse observation matrix and collect the request sequences.
 - [ ] Mark each predefined session hypothesis confirmed/refuted and select the
   primary/fallback session key plus correlation-window duration.

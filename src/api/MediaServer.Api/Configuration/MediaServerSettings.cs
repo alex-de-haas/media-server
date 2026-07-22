@@ -25,6 +25,16 @@ public sealed class MediaServerSettings
 
     public bool JellyfinDiscoveryEnabled { get; init; }
 
+    /// <summary>
+    /// Records one structured line per playback-state request to <c>logs/playback-diagnostics.log</c>
+    /// (manifest <c>PLAYBACK_DIAGNOSTICS</c>, default off). An operator toggle rather than an
+    /// environment check, so the observation can be captured under the <c>docker</c> runtime the app
+    /// actually ships with. Also turns on the route-level <c>requests.log</c>. Off by default: it is a
+    /// diagnostic for a specific investigation, not everyday logging. See
+    /// <see cref="MediaServer.Api.Jellyfin.PlaybackDiagnostics"/>.
+    /// </summary>
+    public bool PlaybackDiagnosticsEnabled { get; init; }
+
     /// <summary>Override path to the <c>ffprobe</c> binary; falls back to PATH lookup when null.</summary>
     public string? FfprobePath { get; init; }
 
@@ -91,6 +101,7 @@ public sealed class MediaServerSettings
             WatchRegion = watchRegion,
             JellyfinServerName = Read("JELLYFIN_SERVER_NAME") ?? "Media Server",
             JellyfinDiscoveryEnabled = ReadBool("JELLYFIN_DISCOVERY_ENABLED", false),
+            PlaybackDiagnosticsEnabled = ReadBool("PLAYBACK_DIAGNOSTICS", false),
             FfprobePath = Read("FFPROBE_PATH"),
             FfmpegPath = Read("FFMPEG_PATH"),
             TorrentMaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),

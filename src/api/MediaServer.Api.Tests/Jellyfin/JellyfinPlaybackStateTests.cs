@@ -1,9 +1,11 @@
+using System.Text.Json;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
 using MediaServer.Api.Library;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MediaServer.Api.Tests.Jellyfin;
 
@@ -344,6 +346,209 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         DurationTicks = runtimeTicks,
         CreatedAt = now,
     };
+
+    // ---- Phase 0 playback diagnostics (docs/planning/trakt-watched-state-sync.md) ----
+
+    [Fact]
+    public async Task PlaybackDiagnostics_AreOffByDefault_AndRecordNothing()
+    {
+        var diagnostics = new PlaybackDiagnostics(writer: null);
+
+        Assert.False(diagnostics.Enabled);
+        diagnostics.BeginRequest(PlaybackRouteKinds.Progress, _userId, _moviePublicId, 1, null, null, null, false, null, false);
+        // Completing without a writer must be a no-op rather than throwing: diagnostics can never be
+        // allowed to fail a playback request.
+        await diagnostics.CompleteAsync(204, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ProgressReport_RecordsBeforeAndAfterState_WithoutChangingBehaviour()
+    {
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            var position = (long)(MovieRuntime * 0.95);
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.Progress, _userId, _moviePublicId, position,
+                playSessionId: "session-1", mediaSourceId: "source-1", isPaused: false, isStopped: false,
+                datePlayed: null, datePlayedSupplied: false);
+
+            await _userData.ReportPlaybackAsync(_userId, _moviePublicId, position, isStopped: false, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(204, CancellationToken.None);
+
+            var record = ReadSingleRecord(path);
+            Assert.Equal("Progress", record.GetProperty("route").GetString());
+            Assert.Equal(204, record.GetProperty("status").GetInt32());
+            Assert.Equal("session-1", record.GetProperty("playSessionId").GetString());
+            Assert.Equal("source-1", record.GetProperty("mediaSourceId").GetString());
+            Assert.Equal(MovieRuntime, record.GetProperty("runtimeTicks").GetInt64());
+            Assert.Equal(0.95, record.GetProperty("positionFraction").GetDouble(), 2);
+            // Crossing the threshold: not watched before, watched after, count incremented once.
+            Assert.False(record.GetProperty("playedBefore").GetBoolean());
+            Assert.True(record.GetProperty("playedAfter").GetBoolean());
+            Assert.Equal(0, record.GetProperty("playCountBefore").GetInt32());
+            Assert.Equal(1, record.GetProperty("playCountAfter").GetInt32());
+
+            // The observed operation still applied exactly as it does without diagnostics.
+            var row = await _context.UserItemData.AsNoTracking()
+                .SingleAsync(data => data.AppUserId == _userId && data.MediaItemId == _movieId);
+            Assert.True(row.Played);
+            Assert.Equal(0, row.PlaybackPositionTicks);
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task ManualMarkThenUnmark_RecordsTheRetainedPlayCount()
+    {
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsPost, _userId, _moviePublicId, null, null, null, null, false,
+                datePlayed: null, datePlayedSupplied: false);
+            await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsDelete, _userId, _moviePublicId, null, null, null, null, false,
+                datePlayed: null, datePlayedSupplied: false);
+            await _userData.SetPlayedAsync(_userId, _moviePublicId, played: false, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            var records = ReadRecords(path);
+            Assert.Equal(2, records.Count);
+
+            Assert.Equal("PlayedItemsPost", records[0].GetProperty("route").GetString());
+            Assert.False(records[0].GetProperty("playedBefore").GetBoolean());
+            Assert.True(records[0].GetProperty("playedAfter").GetBoolean());
+            Assert.Equal(1, records[0].GetProperty("playCountAfter").GetInt32());
+
+            // The unmark leaves PlayCount at 1 — the Played=false/PlayCount>0 residue the Trakt plan
+            // must not export. Seeing it in the trace is the point of the exercise.
+            Assert.Equal("PlayedItemsDelete", records[1].GetProperty("route").GetString());
+            Assert.True(records[1].GetProperty("playedBefore").GetBoolean());
+            Assert.False(records[1].GetProperty("playedAfter").GetBoolean());
+            Assert.Equal(1, records[1].GetProperty("playCountBefore").GetInt32());
+            Assert.Equal(1, records[1].GetProperty("playCountAfter").GetInt32());
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task Records_CarryNoTitlesPathsOrCredentials()
+    {
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsPost, _userId, _moviePublicId, null, null, null, null, false,
+                datePlayed: new DateTimeOffset(2026, 7, 22, 17, 54, 0, TimeSpan.Zero), datePlayedSupplied: true);
+            await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            var line = File.ReadAllText(path);
+            Assert.DoesNotContain("Interstellar", line, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("/media", line, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("token", line, StringComparison.OrdinalIgnoreCase);
+
+            var record = ReadSingleRecord(path);
+            Assert.True(record.GetProperty("datePlayedSupplied").GetBoolean());
+            Assert.Equal(_userId, record.GetProperty("appUserId").GetInt32());
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task SeasonMark_RecordsTheFanOut_NotAMisleadingFolderRow()
+    {
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsPost, _userId, _seasonPublicId, null, null, null, null, false,
+                datePlayed: null, datePlayedSupplied: false);
+            await _userData.SetPlayedAsync(_userId, _seasonPublicId, played: true, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            var record = ReadSingleRecord(path);
+            Assert.Equal("PlayedItemsPost", record.GetProperty("route").GetString());
+            // The mark applied to the season's episodes, and the record says so.
+            Assert.Equal(_episodeIds.Length, record.GetProperty("affectedItems").GetInt32());
+
+            // A folder has no row of its own, so no leaf state is claimed. Absent beats a convincing
+            // played=false/playCount=0 that never happened.
+            Assert.False(record.TryGetProperty("playedBefore", out _));
+            Assert.False(record.TryGetProperty("playedAfter", out _));
+            Assert.False(record.TryGetProperty("playCountBefore", out _));
+
+            // The operation itself still fanned out exactly as it does without diagnostics.
+            var episodes = await _context.UserItemData.AsNoTracking()
+                .Where(data => data.AppUserId == _userId && _episodeIds.Contains(data.MediaItemId))
+                .ToListAsync();
+            Assert.Equal(_episodeIds.Length, episodes.Count);
+            Assert.All(episodes, row => Assert.True(row.Played));
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task LeafMark_RecordsNoFanOut()
+    {
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsPost, _userId, _moviePublicId, null, null, null, null, false,
+                datePlayed: null, datePlayedSupplied: false);
+            await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            var record = ReadSingleRecord(path);
+            Assert.False(record.TryGetProperty("affectedItems", out _));
+            Assert.True(record.GetProperty("playedAfter").GetBoolean());
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    private static (PlaybackDiagnostics Diagnostics, string Path) CreateDiagnostics()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"playback-diagnostics-{Guid.NewGuid():N}.log");
+        var writer = new PlaybackDiagnosticsWriter(path, NullLogger<PlaybackDiagnosticsWriter>.Instance);
+        return (new PlaybackDiagnostics(writer), path);
+    }
+
+    private static List<JsonElement> ReadRecords(string path) =>
+        File.ReadAllLines(path)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(line => JsonDocument.Parse(line).RootElement.Clone())
+            .ToList();
+
+    private static JsonElement ReadSingleRecord(string path) => Assert.Single(ReadRecords(path));
+
+    private static void Cleanup(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+
 
     public void Dispose()
     {

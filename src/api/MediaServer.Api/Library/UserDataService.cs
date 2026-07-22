@@ -1,4 +1,5 @@
 using MediaServer.Api.Data;
+using MediaServer.Api.Jellyfin;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Library;
@@ -89,8 +90,16 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
     }
 
     /// <summary>Records a Jellyfin playback start/progress/stopped report against the resume + watched policy.</summary>
+    public Task ReportPlaybackAsync(
+        int appUserId, string itemPublicId, long positionTicks, bool isStopped, CancellationToken cancellationToken) =>
+        ReportPlaybackAsync(appUserId, itemPublicId, positionTicks, isStopped, diagnostics: null, cancellationToken);
+
+    /// <summary>
+    /// Same, additionally reporting the before/after row state to an open Phase 0 diagnostic record.
+    /// The observation is write-only: it cannot change what this method does.
+    /// </summary>
     public async Task ReportPlaybackAsync(
-        int appUserId, string itemPublicId, long positionTicks, bool isStopped, CancellationToken cancellationToken)
+        int appUserId, string itemPublicId, long positionTicks, bool isStopped, PlaybackDiagnostics? diagnostics, CancellationToken cancellationToken)
     {
         var item = await FindItemAsync(itemPublicId, cancellationToken);
         if (item is null || item.Kind is not (MediaKind.Movie or MediaKind.Episode or MediaKind.Video))
@@ -100,6 +109,9 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
 
         var runtime = await RuntimeTicksAsync(item.Id, cancellationToken);
         var row = await GetOrCreateRowAsync(appUserId, item.Id, cancellationToken);
+        var playedBefore = row.Played;
+        var playCountBefore = row.PlayCount;
+        var positionBefore = row.PlaybackPositionTicks;
         var now = time.GetUtcNow();
         row.LastPlayedDate = now;
 
@@ -127,31 +139,50 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         }
 
         await database.SaveChangesAsync(cancellationToken);
+        diagnostics?.ObserveState(
+            runtime, playedBefore, row.Played, playCountBefore, row.PlayCount, positionBefore, row.PlaybackPositionTicks);
     }
 
     /// <summary>Marks an item played/unplayed (recursively for season/series folders) by public id (Jellyfin).</summary>
     public async Task<UserItemDataDto?> SetPlayedAsync(
         int appUserId, string itemPublicId, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken) =>
-        await SetPlayedCoreAsync(appUserId, await FindItemAsync(itemPublicId, cancellationToken), played, playedAt, cancellationToken);
+        await SetPlayedCoreAsync(appUserId, await FindItemAsync(itemPublicId, cancellationToken), played, playedAt, diagnostics: null, cancellationToken);
+
+    /// <summary>Same, additionally reporting before/after state to an open Phase 0 diagnostic record.</summary>
+    public async Task<UserItemDataDto?> SetPlayedAsync(
+        int appUserId, string itemPublicId, bool played, DateTimeOffset? playedAt, PlaybackDiagnostics? diagnostics, CancellationToken cancellationToken) =>
+        await SetPlayedCoreAsync(appUserId, await FindItemAsync(itemPublicId, cancellationToken), played, playedAt, diagnostics, cancellationToken);
 
     /// <summary>Same, keyed by the internal item id (UI surface).</summary>
     public async Task<UserItemDataDto?> SetPlayedAsync(
         int appUserId, Guid mediaItemId, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken) =>
-        await SetPlayedCoreAsync(appUserId, await FindItemByIdAsync(mediaItemId, cancellationToken), played, playedAt, cancellationToken);
+        await SetPlayedCoreAsync(appUserId, await FindItemByIdAsync(mediaItemId, cancellationToken), played, playedAt, diagnostics: null, cancellationToken);
 
     private async Task<UserItemDataDto?> SetPlayedCoreAsync(
-        int appUserId, MediaItem? item, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken)
+        int appUserId, MediaItem? item, bool played, DateTimeOffset? playedAt, PlaybackDiagnostics? diagnostics, CancellationToken cancellationToken)
     {
         if (item is null)
         {
             return null;
         }
 
+        // A folder mark writes descendant episode rows, never the folder's own, so there is no leaf
+        // before/after to compare for one — reporting its absent row would log a convincing
+        // `played=false, playCount=0` that never happened. Folders report their fan-out instead.
+        var isFolder = item.Kind is MediaKind.Series or MediaKind.Season;
+        var observeRow = diagnostics is not null && !isFolder;
+        var before = observeRow
+            ? await database.UserItemData.AsNoTracking()
+                .FirstOrDefaultAsync(data => data.AppUserId == appUserId && data.MediaItemId == item.Id, cancellationToken)
+            : null;
+        var runtime = observeRow ? await RuntimeTicksAsync(item.Id, cancellationToken) : 0;
+
         var now = playedAt ?? time.GetUtcNow();
-        if (item.Kind is MediaKind.Series or MediaKind.Season)
+        if (isFolder)
         {
             var episodeIds = await DescendantEpisodeIdsAsync(item, cancellationToken);
             await ApplyPlayedAsync(appUserId, episodeIds, played, now, cancellationToken);
+            diagnostics?.ObserveFanOut(episodeIds.Count);
         }
         else
         {
@@ -159,6 +190,21 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         }
 
         await database.SaveChangesAsync(cancellationToken);
+
+        if (observeRow)
+        {
+            var after = await database.UserItemData.AsNoTracking()
+                .FirstOrDefaultAsync(data => data.AppUserId == appUserId && data.MediaItemId == item.Id, cancellationToken);
+            diagnostics!.ObserveState(
+                runtime,
+                before?.Played ?? false,
+                after?.Played ?? false,
+                before?.PlayCount ?? 0,
+                after?.PlayCount ?? 0,
+                before?.PlaybackPositionTicks ?? 0,
+                after?.PlaybackPositionTicks ?? 0);
+        }
+
         return await LoadOneAsync(appUserId, item, cancellationToken);
     }
 
