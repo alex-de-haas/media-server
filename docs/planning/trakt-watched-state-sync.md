@@ -90,11 +90,20 @@ until the user approves a different history model or reduced behavior.
   `UserDataService`.
 - `PlaybackInfo` already returns a fresh server-generated `PlaySessionId`, but
   Media Server does not currently retain or correlate it with later reports.
-- A first playback report at or above 90% currently calls `MarkWatched` even though
-  no below-to-above threshold crossing was observed.
-- One playback session can currently increment `PlayCount` twice: crossing 90%,
-  rewinding to meaningful progress below 90% (which clears `Played`), then crossing
-  90% again.
+- A first playback report at or above 90% still calls `MarkWatched` — seeking to
+  the end is a legitimate way to mark an item — but no longer counts a play,
+  since no crossing was observed. Reaching that state through normal playback is
+  near-impossible anyway: crossing the threshold clears the resume point, and Infuse
+  resumes from the server's position (verified twice), so a stored resume above
+  90% cannot normally exist. The one path that produces it is an item whose
+  runtime was still unknown when the position was stored.
+- One playback session can no longer inflate `PlayCount`. Observed on 2026-07-22:
+  a single continuous session took an episode from 0 to 3 plays by crossing 90%,
+  rewinding below it and climbing back twice. Fixed by a `PlaybackSession` row
+  keyed on the client's `PlaySessionId`, which counts the first crossing per
+  session and ignores later ones. A session that never reports below the
+  threshold (the client resumed into the final stretch) marks the item watched
+  without counting a viewing.
 - Jellyfin `PlayedItems` accepts optional `DatePlayed`; Media Server currently uses
   it as `LastPlayedDate`, but it does not establish why the client changed the
   state.

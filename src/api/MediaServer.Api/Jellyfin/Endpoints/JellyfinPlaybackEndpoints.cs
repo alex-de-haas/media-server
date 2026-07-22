@@ -90,7 +90,10 @@ internal static class JellyfinPlaybackEndpoints
             return await CompleteAsync(diagnostics, Results.NoContent(), StatusCodes.Status204NoContent, cancellationToken);
         }
 
-        await userData.ReportPlaybackAsync(userId, itemId, Math.Max(0, position ?? 0), isStopped, diagnostics, cancellationToken);
+        // The session id is what keeps one viewing from counting several times when the user rewinds
+        // past the watched threshold and watches forward again.
+        await userData.ReportPlaybackAsync(
+            userId, itemId, Math.Max(0, position ?? 0), isStopped, body?.PlaySessionId, diagnostics, cancellationToken);
         return await CompleteAsync(diagnostics, Results.NoContent(), StatusCodes.Status204NoContent, cancellationToken);
     }
 
