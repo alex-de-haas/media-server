@@ -64,9 +64,26 @@ public sealed class PlaybackDiagnostics(PlaybackDiagnosticsWriter? writer)
     }
 
     /// <summary>
+    /// Records that the operation fanned out to descendant episodes instead of touching one row —
+    /// a season or series mark. Reported instead of, not alongside, <see cref="ObserveState"/>:
+    /// the folder has no row of its own to compare, and reporting its absent row as
+    /// <c>played=false, playCount=0</c> would put a plausible-looking lie in the trace.
+    /// </summary>
+    public void ObserveFanOut(int affectedItems)
+    {
+        if (pending is null)
+        {
+            return;
+        }
+
+        pending.AffectedItems = affectedItems;
+    }
+
+    /// <summary>
     /// Fills in the state half from <see cref="Library.UserDataService"/>: what the row looked like
-    /// before the operation and after it. Ignored when no record is open, so the service stays usable
-    /// from surfaces that never begin one (the web UI).
+    /// before the operation and after it. Only meaningful for a leaf item (movie, episode, video);
+    /// folder marks report <see cref="ObserveFanOut"/> instead. Ignored when no record is open, so
+    /// the service stays usable from surfaces that never begin one (the web UI).
     /// </summary>
     public void ObserveState(
         long runtimeTicks,
@@ -215,6 +232,12 @@ public sealed class PlaybackDiagnosticRecord
     public long? PositionBefore { get; set; }
 
     public long? PositionAfter { get; set; }
+
+    /// <summary>
+    /// Number of descendant episodes a season/series mark applied to. Present only for folder
+    /// operations, which carry no leaf before/after state.
+    /// </summary>
+    public int? AffectedItems { get; set; }
 }
 
 /// <summary>

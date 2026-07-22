@@ -166,19 +166,23 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
             return null;
         }
 
-        // Only a leaf carries one row worth observing; a season/series mark fans out to descendants,
-        // so its before/after is reported for the folder's own row and read as a rollup instead.
-        var before = diagnostics is null
-            ? null
-            : await database.UserItemData.AsNoTracking()
-                .FirstOrDefaultAsync(data => data.AppUserId == appUserId && data.MediaItemId == item.Id, cancellationToken);
-        var runtime = diagnostics is null ? 0 : await RuntimeTicksAsync(item.Id, cancellationToken);
+        // A folder mark writes descendant episode rows, never the folder's own, so there is no leaf
+        // before/after to compare for one — reporting its absent row would log a convincing
+        // `played=false, playCount=0` that never happened. Folders report their fan-out instead.
+        var isFolder = item.Kind is MediaKind.Series or MediaKind.Season;
+        var observeRow = diagnostics is not null && !isFolder;
+        var before = observeRow
+            ? await database.UserItemData.AsNoTracking()
+                .FirstOrDefaultAsync(data => data.AppUserId == appUserId && data.MediaItemId == item.Id, cancellationToken)
+            : null;
+        var runtime = observeRow ? await RuntimeTicksAsync(item.Id, cancellationToken) : 0;
 
         var now = playedAt ?? time.GetUtcNow();
-        if (item.Kind is MediaKind.Series or MediaKind.Season)
+        if (isFolder)
         {
             var episodeIds = await DescendantEpisodeIdsAsync(item, cancellationToken);
             await ApplyPlayedAsync(appUserId, episodeIds, played, now, cancellationToken);
+            diagnostics?.ObserveFanOut(episodeIds.Count);
         }
         else
         {
@@ -187,11 +191,11 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
 
         await database.SaveChangesAsync(cancellationToken);
 
-        if (diagnostics is not null)
+        if (observeRow)
         {
             var after = await database.UserItemData.AsNoTracking()
                 .FirstOrDefaultAsync(data => data.AppUserId == appUserId && data.MediaItemId == item.Id, cancellationToken);
-            diagnostics.ObserveState(
+            diagnostics!.ObserveState(
                 runtime,
                 before?.Played ?? false,
                 after?.Played ?? false,

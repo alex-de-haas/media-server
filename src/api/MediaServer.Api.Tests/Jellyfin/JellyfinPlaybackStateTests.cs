@@ -468,6 +468,64 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task SeasonMark_RecordsTheFanOut_NotAMisleadingFolderRow()
+    {
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsPost, _userId, _seasonPublicId, null, null, null, null, false,
+                datePlayed: null, datePlayedSupplied: false);
+            await _userData.SetPlayedAsync(_userId, _seasonPublicId, played: true, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            var record = ReadSingleRecord(path);
+            Assert.Equal("PlayedItemsPost", record.GetProperty("route").GetString());
+            // The mark applied to the season's episodes, and the record says so.
+            Assert.Equal(_episodeIds.Length, record.GetProperty("affectedItems").GetInt32());
+
+            // A folder has no row of its own, so no leaf state is claimed. Absent beats a convincing
+            // played=false/playCount=0 that never happened.
+            Assert.False(record.TryGetProperty("playedBefore", out _));
+            Assert.False(record.TryGetProperty("playedAfter", out _));
+            Assert.False(record.TryGetProperty("playCountBefore", out _));
+
+            // The operation itself still fanned out exactly as it does without diagnostics.
+            var episodes = await _context.UserItemData.AsNoTracking()
+                .Where(data => data.AppUserId == _userId && _episodeIds.Contains(data.MediaItemId))
+                .ToListAsync();
+            Assert.Equal(_episodeIds.Length, episodes.Count);
+            Assert.All(episodes, row => Assert.True(row.Played));
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task LeafMark_RecordsNoFanOut()
+    {
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsPost, _userId, _moviePublicId, null, null, null, null, false,
+                datePlayed: null, datePlayedSupplied: false);
+            await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            var record = ReadSingleRecord(path);
+            Assert.False(record.TryGetProperty("affectedItems", out _));
+            Assert.True(record.GetProperty("playedAfter").GetBoolean());
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
     private static (PlaybackDiagnostics Diagnostics, string Path) CreateDiagnostics()
     {
         var path = Path.Combine(Path.GetTempPath(), $"playback-diagnostics-{Guid.NewGuid():N}.log");
