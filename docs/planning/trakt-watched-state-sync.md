@@ -24,7 +24,8 @@ until the user approves a different history model or reduced behavior.
 - Deployment-level Trakt application configuration through Media Server's Hosty
   app settings, beside the existing TMDb credential configuration.
 - One per-user Trakt account connection through OAuth Device Code flow.
-- Encrypted access and refresh token storage and automatic token refresh.
+- Per-connection token storage in the Hosty Core app secrets store, with
+  automatic token refresh.
 - A Settings section named **Watch history providers**, placed near Infuse Access.
 - An explicit **Sync with Trakt** action with a preview popup and catalog/media-kind
   scope selection.
@@ -132,42 +133,39 @@ the Trakt adapter. Simultaneous multi-provider fan-out is deferred.
 
 ### Deployment Configuration and Per-User OAuth
 
-**Platform dependency (2026-07-22).** The preferred storage for the per-user
-OAuth tokens in this plan is the planned Hosty Core app secrets store
-([docker-host promoted design](https://github.com/alex-de-haas/docker-host/blob/main/docs/ideas/app-secrets-store.md);
-[platform request #15](../features/hosty-platform-requests.md)). If it ships
-before implementation starts, `TRAKT_TOKEN_ENCRYPTION_KEY` and the local
-AES-256-GCM credential envelope are dropped: tokens are stored in the Core
-keychain under per-connection keys, a missing or invalid secret maps to
-`RequiresReconnect`, and a database restore no longer rolls tokens back — Trakt
-refresh tokens rotate, so tokens embedded in a backup are usually stale by
-restore time, while the live keychain keeps connections working. The
-encryption-key design described in this plan remains the fallback contract if
-implementation begins first; the affected pieces are marked below.
+**Token storage (settled 2026-07-22).** Per-user OAuth tokens live in the Hosty
+Core app secrets store, which shipped in Core 0.60.0
+([feature](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/app-secrets-store.md);
+[platform request #15](../features/hosty-platform-requests.md)). Media Server
+stores one secret per connection through `HostySecretsClient`
+(`HostySdk.App` 0.2.0) and keeps only the key reference in SQLite. There is no
+app-side credential encryption: Core holds the values in
+`apps/<id>/secrets.json`, outside the backed-up `data/` directory, so a database
+backup never carries live Trakt access.
+
+Two consequences shape the design below. A database restore rolls the app's rows
+back but not its secrets — which is what we want, because Trakt refresh tokens
+rotate on every refresh, so a token embedded in a backup would usually be stale
+by restore time while the live keychain keeps the connection working. And a
+missing secret is an expected state, not an error: it means the app was restored
+onto a new host (Core state does not migrate) or the connection was never
+completed, and it maps to `RequiresReconnect`.
 
 The Media Server Hosty app settings add:
 
 - `TRAKT_CLIENT_ID`;
-- secret `TRAKT_CLIENT_SECRET`;
-- secret `TRAKT_TOKEN_ENCRYPTION_KEY`, a base64-encoded 32-byte key used only for
-  credential encryption (fallback only — dropped when the Core secrets store is
-  adopted).
+- secret `TRAKT_CLIENT_SECRET`.
+
+No operator-generated encryption key is required.
 
 The instance operator creates one Trakt API application for the Media Server
 instance, then enters these values through the same deployment settings surface
 that currently contains the TMDb API token. Missing or invalid Trakt configuration
 does not prevent Media Server from starting.
 
-The admin-only setup help links to `https://docs.trakt.tv/docs/create-an-app`, names
-all required settings, and provides this key-generation command:
-
-```sh
-openssl rand -base64 32
-```
-
-The command is documentation only; Media Server does not execute a shell. Saved
-secrets are never displayed. Regular users see only that the provider needs
-operator configuration.
+The admin-only setup help links to `https://docs.trakt.tv/docs/create-an-app` and
+names both required settings. Saved secrets are never displayed. Regular users
+see only that the provider needs operator configuration.
 
 After instance configuration, each Media Server user connects their own Trakt
 account from the Trakt card in **Watch history providers**, near Infuse Access:
@@ -175,7 +173,8 @@ account from the Trakt card in **Watch history providers**, near Infuse Access:
 1. Start Trakt Device OAuth for the current authenticated user.
 2. Display the activation URL/code and poll only at Trakt's returned interval.
 3. Represent pending, denied, expired, used, invalid, and slow-down responses.
-4. Encrypt the returned access and refresh credentials.
+4. Store the returned access and refresh credentials in the Core secrets store
+   under this connection's key.
 5. Retrieve and display the connected Trakt identity.
 6. Refresh tokens serially before expiry; move to `RequiresReconnect` after a
    permanent refresh failure without discarding pending outbound operations.
@@ -190,8 +189,7 @@ Under the Core secrets store, "stored credentials" means the per-connection
 keychain secret: disconnect issues the keychain `DELETE` for that key **before**
 removing the connection row, so a failed best-effort revocation can never leave
 a live refresh token orphaned in the Core store with no database reference to
-clean it up. Under the fallback design it means the encrypted envelope, which is
-deleted with the row. Disconnect never deletes local playback state.
+clean it up. Disconnect never deletes local playback state.
 User-directory reconciliation applies the same credential cleanup — including
 the keychain `DELETE` — when a user becomes unassigned or disabled.
 
@@ -478,7 +476,7 @@ Next.js BFF, adds current-user endpoints:
 - `POST /api/watch-history/connections/{providerKey}/sync/apply`;
 - `DELETE /api/watch-history/connections/{providerKey}`.
 
-No response contains plaintext credentials, encryption material, or Trakt device
+No response contains plaintext credentials, keychain values, or Trakt device
 secrets. Mutations use the existing authenticated same-origin app session.
 
 ### Data Model
@@ -487,7 +485,7 @@ secrets. Mutations use the existing authenticated same-origin app session.
 
 - connection ID, `AppUserId`, and stable `ProviderKey`;
 - provider account ID and display identity;
-- versioned encrypted provider credential envelope;
+- the Core secrets-store key holding the provider credentials (never the value);
 - optional credential expiry and connection status;
 - connected, last delivery, and last explicit sync timestamps;
 - bounded sanitized error state.
@@ -497,7 +495,8 @@ enforces at most one active provider connection for a user.
 
 `WatchHistoryProviderAuthorization` stores one short-lived authorization attempt:
 
-- encrypted provider state/device code;
+- provider state/device code, held in the Core secrets store for the attempt's
+  short lifetime;
 - safe user-facing activation code and URL;
 - issue, expiry, polling interval, next poll time, and status.
 
@@ -570,11 +569,12 @@ deletion is permitted only when that entry is explicitly marked as created by
 Media Server; an imported or pre-existing provider entry is never inferred to be
 owned merely because its identity/timestamp matches.
 
-Credential envelopes use AES-256-GCM with a random nonce, authentication tag,
-version, and app-user/connection associated data. Plaintext credentials exist only
-for an outbound request and are never logged. (Fallback only: when the Core app
-secrets store is adopted, the envelope column is replaced by a keychain key
-reference on the connection row — see the platform dependency note above.)
+Credentials live in the Core secrets store under a per-connection key such as
+`trakt.connection.{id}.tokens`; SQLite holds only that key. Media Server performs
+no credential encryption of its own — the store is outside backup scope, which is
+what the encryption was for. Plaintext credentials exist only in memory for an
+outbound request and are never logged. The SDK client caches reads, so a briefly
+unavailable Core does not stall delivery for a connection already in use.
 
 ### Service Design
 
@@ -611,7 +611,8 @@ reference on the connection row — see the platform dependency note above.)
   absent or Trakt is unavailable.
 - [ ] The instance operator configures one Trakt application through Hosty Media
   Server settings; each user connects only their own Trakt account from Settings.
-- [ ] Tokens and device codes are encrypted at rest and never returned or logged.
+- [ ] Tokens and device codes live in the Core secrets store, never in Media
+  Server's own database, and are never returned or logged.
 - [ ] The preliminary diagnostics capture the required Infuse fields without raw
   bodies/secrets or changes to playback behavior.
 - [ ] The expanded Infuse/web test matrix confirms or refutes every predefined
@@ -687,7 +688,8 @@ reference on the connection row — see the platform dependency note above.)
 - [ ] Hosty Trakt settings, validation, and administrator onboarding.
 - [ ] Provider connection, authorization, outbox, sync-run, state-revision,
   provider-history ownership link, schema, constraints, and EF Core migration.
-- [ ] Versioned credential encryption.
+- [ ] Core secrets-store integration for credentials (`HostySecretsClient`),
+  including the missing-secret reconnect path.
 - [ ] Typed Trakt API client and adapter with Device Code, refresh, profile,
   watched-summary, paginated full history, item-history, history-add/remove, and
   revoke operations.
@@ -723,7 +725,7 @@ flowchart LR
   SETTINGS --> SYNC["Explicit scoped sync job"]
   SYNC --> TRAKT_ADAPTER
   SYNC -->|"replace full scoped history"| LOCAL
-  SETTINGS --> CONNECTION[("Encrypted provider connection")]
+  SETTINGS --> CONNECTION[("Provider connection<br/>(keychain key reference)")]
   OUTBOX --> CONNECTION
 ```
 
@@ -760,10 +762,10 @@ it cannot read a stale remote snapshot while older local events are pending.
   unless every row is guarded by its captured state revision.
 - TMDb identities are not globally unique locally. Updating every duplicate can
   clear another edition's resume, while selecting one is arbitrary.
-- Changing or losing the encryption key makes stored tokens unreadable. The
-  connection must move to `RequiresReconnect` without exposing ciphertext details.
-  (Fallback-design risk only; the Core secrets store removes the key entirely,
-  leaving a missing keychain secret as the equivalent `RequiresReconnect` trigger.)
+- Secrets do not follow a backup to a new host (Core state is not backed up), and
+  a restore rolls local rows back without rolling the keychain back. Both are
+  intended, but the connection must detect a missing or mismatched secret and move
+  to `RequiresReconnect` rather than retrying with nothing.
 - Directory reconciliation must preserve its existing rule not to revoke
   credentials when directory state is uncertain.
 - Development diagnostics must not become a permanent high-volume or sensitive
@@ -827,7 +829,8 @@ it cannot read a stale remote snapshot while older local events are pending.
   schema.
 - [ ] When Phase 0 succeeds, add `PlaybackHistoryEntry`, `PlaybackSessionState`,
   provider ownership/link state, aggregate projection, and legacy migration.
-- [ ] Implement credential encryption.
+- [ ] Integrate `HostySecretsClient` for credential storage and the
+  missing-secret reconnect path.
 - [ ] Implement typed Trakt HTTP/OAuth/profile/refresh/revoke operations.
 - [ ] Add current-user connection endpoints and tests.
 
@@ -930,8 +933,10 @@ Live Trakt verification uses a dedicated non-production application and account:
 - disconnect/unassign a user and confirm local playback data remains and, under
   the Core secrets store, the per-connection keychain secret is gone — including
   when the best-effort Trakt revocation fails;
-- restore the database with the correct encryption key, then verify a changed key
-  requires reconnect without exposing credential material.
+- restore an older database and confirm the connection keeps working (the
+  keychain is not rolled back), then delete the connection's secret out of band
+  and confirm the connection reports `RequiresReconnect` without exposing
+  credential material.
 
 ## Links
 
