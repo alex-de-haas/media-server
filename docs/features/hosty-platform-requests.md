@@ -2,7 +2,7 @@
 
 Status: Active (partially implemented — see per-item status)
 Created: 2026-06-15
-Updated: 2026-07-04
+Updated: 2026-07-22
 
 ## Description
 
@@ -471,3 +471,60 @@ all host interfaces, a security regression.
 - Cross-app `dependencies` semantics are unchanged; the two mechanisms remain
   documented as separate concerns (ordering + intra-app discovery vs cross-app
   endpoint resolution).
+
+## 15. Core-managed app secrets store (runtime keychain) — High
+
+**Status.** Planned — the docker-host
+[promoted design](https://github.com/alex-de-haas/docker-host/blob/main/docs/ideas/app-secrets-store.md)
+and its [Ready implementation plan](https://github.com/alex-de-haas/docker-host/blob/main/docs/planning/app-secrets-store.md)
+were ratified on 2026-07-22: contract, storage, lifecycle semantics, SDK
+clients in both packages, and phased implementation are locked. The
+[Trakt plan](../planning/trakt-watched-state-sync.md) prefers this mechanism
+and keeps its own encryption-key design as the fallback contract until the
+store ships.
+
+**Problem.** The Trakt integration must persist per-user OAuth access/refresh
+tokens acquired at runtime. They cannot be hashed — the app has to present them
+to Trakt — so they must be stored recoverably, but Hosty backups are directory
+copies of `data/` containing the SQLite file, so plaintext tokens would make
+every backup archive live access to every connected Trakt account. Every future
+OAuth or API-token integration repeats the same problem.
+
+**Proposed contract.** An app-callable bounded keychain:
+
+```text
+PUT    {HOSTY_CORE_ORIGIN}/api/internal/apps/{appId}/secrets/{key}
+Authorization: Bearer <HOSTY_APP_SERVICE_TOKEN>
+{ "value": "..." }                → 204
+GET    .../secrets/{key}          → 200 { "value": "..." } | 404
+DELETE .../secrets/{key}          → 204
+GET    .../secrets                → 200 { "keys": [...] }   // names only
+```
+
+Core persists to Core-owned `<app-dir>/secrets.json` — outside the backed-up
+`data/` directory, the same posture as `secret: true` settings in `state.json` —
+so no container-mount change in either runtime profile.
+
+**How Media Server uses it.** Stores Trakt tokens under per-connection keys
+(e.g. `trakt.connection.{id}.tokens`) and drops `TRAKT_TOKEN_ENCRYPTION_KEY`,
+the operator `openssl rand` step, and the local AES-256-GCM envelope. A missing
+secret maps to the existing `RequiresReconnect` state. Restore semantics
+improve: a database restore rolls back rows but not tokens — Trakt refresh
+tokens rotate, so tokens embedded in a backup are usually stale by restore time,
+while the live keychain keeps connections working.
+
+**Workaround.** As specced in the Trakt plan: an operator-generated 32-byte key
+in a secret app setting plus a versioned AES-256-GCM credential envelope in
+SQLite. Limits: key loss or rotation kills every connection, the operator must
+manage the key outside backups manually, restored backups carry stale rotating
+refresh tokens, and every app repeats the crypto.
+
+**Acceptance criteria.**
+- App can PUT/GET/DELETE its own secrets with its service token; tokens issued
+  for another app are rejected.
+- Values live outside the backed-up `data/` directory and survive app update,
+  restart, runtime-switch, and Core restart.
+- Values are never returned by Shell/admin APIs and are redacted from logs;
+  listing returns names only.
+- Bounded value size and per-app key count; documented removal semantics on app
+  remove.
