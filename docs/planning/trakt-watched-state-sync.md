@@ -138,7 +138,7 @@ Core app secrets store, which shipped in Core 0.60.0
 ([feature](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/app-secrets-store.md);
 [platform request #15](../features/hosty-platform-requests.md)). Media Server
 stores one secret per connection through `HostySecretsClient`
-(`HostySdk.App` 0.2.0) and keeps only the key reference in SQLite. There is no
+(`HostySdk.App` 0.3.0) and keeps only the key reference in SQLite. There is no
 app-side credential encryption: Core holds the values in
 `apps/<id>/secrets.json`, outside the backed-up `data/` directory, so a database
 backup never carries live Trakt access.
@@ -146,7 +146,7 @@ backup never carries live Trakt access.
 Two consequences shape the design below. A database restore rolls the app's rows
 back but not its secrets — which is what we want, because Trakt refresh tokens
 rotate on every refresh, so a token embedded in a backup would usually be stale
-by restore time while the live keychain keeps the connection working. And a
+by restore time while the live store keeps the connection working. And a
 missing secret is an expected state, not an error: it means the app was restored
 onto a new host (Core state does not migrate) or the connection was never
 completed, and it maps to `RequiresReconnect`.
@@ -185,13 +185,12 @@ behalf or retrieve that user's tokens.
 
 Disconnect revokes the token on a best-effort basis, then deletes that connection's
 stored credentials, authorization attempt, sync jobs, and pending operations.
-Under the Core secrets store, "stored credentials" means the per-connection
-keychain secret: disconnect issues the keychain `DELETE` for that key **before**
-removing the connection row, so a failed best-effort revocation can never leave
-a live refresh token orphaned in the Core store with no database reference to
-clean it up. Disconnect never deletes local playback state.
-User-directory reconciliation applies the same credential cleanup — including
-the keychain `DELETE` — when a user becomes unassigned or disabled.
+"Stored credentials" means the connection's secrets-store entry, and any
+in-flight authorization attempt's entry: disconnect deletes both **before**
+removing the rows that reference them, so a failed best-effort revocation can
+never leave a live refresh token in the store with nothing in SQLite pointing at
+it. Disconnect never deletes local playback state. User-directory reconciliation
+applies the same cleanup when a user becomes unassigned or disabled.
 
 ### Preliminary Infuse/Jellyfin Observation
 
@@ -476,8 +475,8 @@ Next.js BFF, adds current-user endpoints:
 - `POST /api/watch-history/connections/{providerKey}/sync/apply`;
 - `DELETE /api/watch-history/connections/{providerKey}`.
 
-No response contains plaintext credentials, keychain values, or Trakt device
-secrets. Mutations use the existing authenticated same-origin app session.
+No response contains plaintext credentials, secrets-store values, or Trakt
+device secrets. Mutations use the existing authenticated same-origin app session.
 
 ### Data Model
 
@@ -496,9 +495,20 @@ enforces at most one active provider connection for a user.
 `WatchHistoryProviderAuthorization` stores one short-lived authorization attempt:
 
 - provider state/device code, held in the Core secrets store for the attempt's
-  short lifetime;
+  short lifetime under the **derivable** key
+  `trakt.authorization.{authorizationId}.device`;
 - safe user-facing activation code and URL;
 - issue, expiry, polling interval, next poll time, and status.
+
+The authorization key is derived from the row id rather than stored, so cleanup
+never depends on reading the row first. The attempt's secret is deleted on every
+terminal path — success, denial, expiry, abandonment, disconnect, and
+user-directory reconciliation — and always **before** the row is removed. Because
+a crash can still strand one between those two steps, a periodic reconciliation
+lists the app's secret keys (the list endpoint returns names only), matches
+`trakt.authorization.*` against live rows, and deletes the orphans. Without both
+halves, a denied or abandoned attempt would leave its device code in Core
+permanently, with nothing left in SQLite pointing at it.
 
 When Phase 0 validates reliable completion detection, `PlaybackHistoryEntry`
 stores the local per-play source of truth:
@@ -570,7 +580,9 @@ Media Server; an imported or pre-existing provider entry is never inferred to be
 owned merely because its identity/timestamp matches.
 
 Credentials live in the Core secrets store under a per-connection key such as
-`trakt.connection.{id}.tokens`; SQLite holds only that key. Media Server performs
+`trakt.connection.{id}.tokens`; SQLite holds only that key. Every secret Media
+Server writes is deleted on the terminal path of whatever owns it, so nothing
+outlives its row (see the connection and authorization entities above). Media Server performs
 no credential encryption of its own — the store is outside backup scope, which is
 what the encryption was for. Plaintext credentials exist only in memory for an
 outbound request and are never logged. The SDK client caches reads, so a briefly
@@ -612,7 +624,8 @@ unavailable Core does not stall delivery for a connection already in use.
 - [ ] The instance operator configures one Trakt application through Hosty Media
   Server settings; each user connects only their own Trakt account from Settings.
 - [ ] Tokens and device codes live in the Core secrets store, never in Media
-  Server's own database, and are never returned or logged.
+  Server's own database, are never returned or logged, and are deleted on every
+  terminal path so no secret outlives the row that referenced it.
 - [ ] The preliminary diagnostics capture the required Infuse fields without raw
   bodies/secrets or changes to playback behavior.
 - [ ] The expanded Infuse/web test matrix confirms or refutes every predefined
@@ -666,9 +679,9 @@ unavailable Core does not stall delivery for a connection already in use.
   terminal failures follow the documented policies.
 - [ ] User removal/reconciliation deletes provider credentials without deleting
   local playback data; under the Core secrets store, disconnect and
-  reconciliation issue the keychain `DELETE` for the per-connection secret
-  before removing the connection row, so no orphaned token survives in the
-  Core store.
+  reconciliation delete the per-connection secret before removing the connection
+  row, and an authorization attempt's secret is deleted on every terminal path,
+  so no orphaned credential survives in the Core store.
 - [ ] Existing Jellyfin credential, PlaybackInfo, playback state, Continue
   Watching, Next Up, Settings, backup, restore, and directory-reconciliation tests
   still pass.
@@ -689,7 +702,8 @@ unavailable Core does not stall delivery for a connection already in use.
 - [ ] Provider connection, authorization, outbox, sync-run, state-revision,
   provider-history ownership link, schema, constraints, and EF Core migration.
 - [ ] Core secrets-store integration for credentials (`HostySecretsClient`),
-  including the missing-secret reconnect path.
+  including the missing-secret reconnect path and orphan reconciliation for
+  authorization secrets.
 - [ ] Typed Trakt API client and adapter with Device Code, refresh, profile,
   watched-summary, paginated full history, item-history, history-add/remove, and
   revoke operations.
@@ -725,7 +739,7 @@ flowchart LR
   SETTINGS --> SYNC["Explicit scoped sync job"]
   SYNC --> TRAKT_ADAPTER
   SYNC -->|"replace full scoped history"| LOCAL
-  SETTINGS --> CONNECTION[("Provider connection<br/>(keychain key reference)")]
+  SETTINGS --> CONNECTION[("Provider connection<br/>(secrets-store key reference)")]
   OUTBOX --> CONNECTION
 ```
 
@@ -763,7 +777,7 @@ it cannot read a stale remote snapshot while older local events are pending.
 - TMDb identities are not globally unique locally. Updating every duplicate can
   clear another edition's resume, while selecting one is arbitrary.
 - Secrets do not follow a backup to a new host (Core state is not backed up), and
-  a restore rolls local rows back without rolling the keychain back. Both are
+  a restore rolls local rows back without rolling the secrets store back. Both are
   intended, but the connection must detect a missing or mismatched secret and move
   to `RequiresReconnect` rather than retrying with nothing.
 - Directory reconciliation must preserve its existing rule not to revoke
@@ -931,12 +945,14 @@ Live Trakt verification uses a dedicated non-production application and account:
 - unwatch an item with exact remote history, then Sync and confirm it becomes
   locally watched again with clear UI explanation;
 - disconnect/unassign a user and confirm local playback data remains and, under
-  the Core secrets store, the per-connection keychain secret is gone — including
+  the Core secrets store, the per-connection secret is gone — including
   when the best-effort Trakt revocation fails;
 - restore an older database and confirm the connection keeps working (the
-  keychain is not rolled back), then delete the connection's secret out of band
-  and confirm the connection reports `RequiresReconnect` without exposing
-  credential material.
+  secrets store is not rolled back), then delete the connection's secret out of
+  band and confirm the connection reports `RequiresReconnect` without exposing
+  credential material;
+- deny an authorization attempt, let another expire, and abandon a third, then
+  confirm no `trakt.authorization.*` key remains in the app's secret listing.
 
 ## Links
 

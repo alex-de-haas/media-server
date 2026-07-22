@@ -477,9 +477,9 @@ all host interfaces, a security regression.
 **Status.** Implemented in Hosty Core 0.60.0 as four service-token routes under
 `/api/internal/apps/{appId}/secrets`, with Core persisting values in
 `apps/<id>/secrets.json` beside `state.json` — outside the backed-up `data/`
-directory. SDK clients ship in `HostySdk.App` 0.2.0 (`HostySecretsClient`,
-`AddHostySecrets`) and `@hosty-sdk/app` 0.3.0 (server-only), both with a
-write-through cache. See the
+directory. SDK clients ship in `HostySdk.App` 0.3.0 (`HostySecretsClient`,
+`AddHostySecrets`) and `@hosty-sdk/app` 0.4.0 (server-only), both with a
+write-through cache and classified errors. See the
 [feature document](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/app-secrets-store.md).
 The [Trakt plan](../planning/trakt-watched-state-sync.md) now stores its OAuth
 tokens here and no longer specs an app-side encryption key.
@@ -491,7 +491,7 @@ copies of `data/` containing the SQLite file, so plaintext tokens would make
 every backup archive live access to every connected Trakt account. Every future
 OAuth or API-token integration repeats the same problem.
 
-**Proposed contract.** An app-callable bounded keychain:
+**Proposed contract.** An app-callable bounded secrets store:
 
 ```text
 PUT    {HOSTY_CORE_ORIGIN}/api/internal/apps/{appId}/secrets/{key}
@@ -512,7 +512,7 @@ the operator `openssl rand` step, and the local AES-256-GCM envelope. A missing
 secret maps to the existing `RequiresReconnect` state. Restore semantics
 improve: a database restore rolls back rows but not tokens — Trakt refresh
 tokens rotate, so tokens embedded in a backup are usually stale by restore time,
-while the live keychain keeps connections working.
+while the live secrets store keeps connections working.
 
 **Workaround (historical).** The Trakt plan originally specced an
 operator-generated 32-byte key in a secret app setting plus a versioned
