@@ -53,6 +53,18 @@ builder.Services.AddSingleton(settings);
 // Operator-editable settings persisted in the DB (e.g. custom release groups stripped before identify).
 builder.Services.AddScoped<AppSettingsService>();
 
+// Phase 0 playback observation (docs/planning/trakt-watched-state-sync.md). Off unless the operator
+// turns it on, and the writer simply does not exist then, so the recorder short-circuits.
+if (settings.PlaybackDiagnosticsEnabled)
+{
+    builder.Services.AddSingleton(serviceProvider => new PlaybackDiagnosticsWriter(
+        Path.Combine(ResolveLogsDirectory(hosty), "playback-diagnostics.log"),
+        serviceProvider.GetRequiredService<ILogger<PlaybackDiagnosticsWriter>>()));
+}
+
+builder.Services.AddScoped<PlaybackDiagnostics>(serviceProvider =>
+    new PlaybackDiagnostics(serviceProvider.GetService<PlaybackDiagnosticsWriter>()));
+
 // Filesystem primitives + catalog management.
 builder.Services.AddSingleton<IFilesystemInspector, FilesystemInspector>();
 builder.Services.AddSingleton<ICatalogPathSandbox, CatalogPathSandbox>();
@@ -319,16 +331,20 @@ using (var scope = app.Services.CreateScope())
 
 // Diagnostic: append every incoming request (incl. 404s) to a dedicated file next to the Hosty logs,
 // so we can see exactly which routes clients like Infuse call. Outermost so it records the final status.
-if (app.Environment.IsDevelopment())
+// Development gets it implicitly; PLAYBACK_DIAGNOSTICS turns it on in any runtime, because the docker
+// runtime the app ships with is never Development and so could never be observed.
+if (app.Environment.IsDevelopment() || settings.PlaybackDiagnosticsEnabled)
 {
-    var appRoot = Path.GetDirectoryName(hosty.AppDataDir);
-    var logsDir = appRoot is not null && Directory.Exists(Path.Combine(appRoot, "logs"))
-        ? Path.Combine(appRoot, "logs")
-        : hosty.AppDataDir;
-    Directory.CreateDirectory(logsDir);
-    var requestLogPath = Path.Combine(logsDir, "requests.log");
+    var requestLogPath = Path.Combine(ResolveLogsDirectory(hosty), "requests.log");
     app.UseMiddleware<RequestLoggingMiddleware>(requestLogPath);
     app.Logger.LogInformation("Request logging enabled -> {Path}", requestLogPath);
+}
+
+if (settings.PlaybackDiagnosticsEnabled)
+{
+    app.Logger.LogInformation(
+        "Playback diagnostics enabled -> {Path}",
+        app.Services.GetRequiredService<PlaybackDiagnosticsWriter>().Path);
 }
 
 app.UseAuthentication();
@@ -406,3 +422,15 @@ app.MapGet("/api/me", async (ClaimsPrincipal principal, MediaServerDbContext dat
 }).RequireAuthorization();
 
 app.Run();
+
+// Hosty keeps app logs beside the data directory (apps/<id>/logs); fall back to the data directory
+// itself when that layout is absent, e.g. a standalone local run outside Core.
+static string ResolveLogsDirectory(HostyOptions hosty)
+{
+    var appRoot = Path.GetDirectoryName(hosty.AppDataDir);
+    var logsDir = appRoot is not null && Directory.Exists(Path.Combine(appRoot, "logs"))
+        ? Path.Combine(appRoot, "logs")
+        : hosty.AppDataDir;
+    Directory.CreateDirectory(logsDir);
+    return logsDir;
+}

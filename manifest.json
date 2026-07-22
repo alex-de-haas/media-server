@@ -3,7 +3,7 @@
   "id": "com.haas.media-server",
   "name": "Media Server",
   "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "runtimeProfiles": [
     { "key": "docker", "type": "docker", "default": true },
     { "key": "dev", "type": "localCommand" }
@@ -121,6 +121,13 @@
       "default": "false",
       "label": "Jellyfin auto-discovery",
       "description": "Broadcast the server on the local network so Jellyfin clients can find it automatically."
+    },
+    {
+      "key": "PLAYBACK_DIAGNOSTICS",
+      "type": "boolean",
+      "default": "false",
+      "label": "Playback diagnostics",
+      "description": "Log every playback-state request from clients like Infuse to logs/playback-diagnostics.log, for investigating watched-state behaviour. Records ids, positions and flags only - no titles, paths or tokens. Leave off for normal use."
     },
     {
       "key": "FFPROBE_PATH",
