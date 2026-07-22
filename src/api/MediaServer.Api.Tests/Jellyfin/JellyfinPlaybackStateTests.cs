@@ -526,6 +526,74 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task DiagnosticsLog_IsPlainJsonLines_WithoutAByteOrderMark()
+    {
+        // The first observation run produced a file ordinary JSON-lines tooling refused to read:
+        // Encoding.UTF8 writes a BOM when it creates the file, and json.loads rejects line 1.
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsPost, _userId, _moviePublicId, null, null, null, null, false, null, false);
+            await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            var bytes = await File.ReadAllBytesAsync(path);
+            Assert.NotEmpty(bytes);
+            Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF, "log starts with a UTF-8 BOM");
+            Assert.Equal((byte)'{', bytes[0]);
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task DisabledDiagnostics_DoNotChangeTheResultOfAPlayedToggle()
+    {
+        // DI always injects a recorder, so the disabled path runs through the same code. It must
+        // behave — and cost — exactly like passing none: no observation, no extra reads.
+        var disabled = new PlaybackDiagnostics(writer: null);
+        Assert.False(disabled.Enabled);
+
+        var data = await _userData.SetPlayedAsync(_userId, _movieId, played: true, playedAt: null, disabled, CancellationToken.None);
+
+        Assert.NotNull(data);
+        Assert.True(data!.Played);
+        var row = await _context.UserItemData.AsNoTracking()
+            .SingleAsync(entry => entry.AppUserId == _userId && entry.MediaItemId == _movieId);
+        Assert.True(row.Played);
+        Assert.Equal(1, row.PlayCount);
+    }
+
+    [Fact]
+    public async Task WebToggle_IsRecorded_SoTheMatrixCanCompareSurfaces()
+    {
+        // The Phase 0 matrix compares Infuse against the web player; the internal id overload had no
+        // recorder, so the web half of the matrix was invisible during the first run.
+        var (diagnostics, path) = CreateDiagnostics();
+        try
+        {
+            diagnostics.BeginRequest(
+                PlaybackRouteKinds.PlayedItemsPost, _userId, _movieId.ToString("N"), null, null, null, null, false, null, false);
+            await _userData.SetPlayedAsync(_userId, _movieId, played: true, playedAt: null, diagnostics, CancellationToken.None);
+            await diagnostics.CompleteAsync(200, CancellationToken.None);
+
+            var record = ReadSingleRecord(path);
+            Assert.Equal("PlayedItemsPost", record.GetProperty("route").GetString());
+            Assert.True(record.GetProperty("playedAfter").GetBoolean());
+            Assert.Equal(1, record.GetProperty("playCountAfter").GetInt32());
+            // No session id: that absence is how a web toggle reads apart from an Infuse one.
+            Assert.False(record.TryGetProperty("playSessionId", out _));
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
     private static (PlaybackDiagnostics Diagnostics, string Path) CreateDiagnostics()
     {
         var path = Path.Combine(Path.GetTempPath(), $"playback-diagnostics-{Guid.NewGuid():N}.log");

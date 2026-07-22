@@ -143,6 +143,8 @@ public sealed class PlaybackDiagnosticsWriter(string path, ILogger<PlaybackDiagn
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+
     private readonly SemaphoreSlim mutex = new(1, 1);
     private bool failed;
 
@@ -163,7 +165,9 @@ public sealed class PlaybackDiagnosticsWriter(string path, ILogger<PlaybackDiagn
             await mutex.WaitAsync(cancellationToken);
             try
             {
-                await File.AppendAllTextAsync(path, line, Encoding.UTF8, cancellationToken);
+                // No BOM: Encoding.UTF8 emits one when it creates the file, which makes the first
+                // line unparseable to ordinary JSON-lines tooling (`json.loads` rejects it outright).
+                await File.AppendAllTextAsync(path, line, Utf8WithoutBom, cancellationToken);
             }
             finally
             {
