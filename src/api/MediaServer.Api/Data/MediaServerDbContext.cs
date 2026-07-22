@@ -23,6 +23,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<JellyfinCredential> JellyfinCredentials => Set<JellyfinCredential>();
     public DbSet<JellyfinAccessToken> JellyfinAccessTokens => Set<JellyfinAccessToken>();
     public DbSet<UserItemData> UserItemData => Set<UserItemData>();
+    public DbSet<PlaybackSession> PlaybackSessions => Set<PlaybackSession>();
     public DbSet<AppSettings> AppSettings => Set<AppSettings>();
     public DbSet<TrackedTitle> TrackedTitles => Set<TrackedTitle>();
     public DbSet<TrackedRelease> TrackedReleases => Set<TrackedRelease>();
@@ -471,6 +472,25 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
 
         userData.HasOne(entity => entity.MediaItem)
+            .WithMany()
+            .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var session = modelBuilder.Entity<PlaybackSession>();
+        session.HasKey(entity => entity.Id);
+        // One row per (user, item, client session): the progress path looks a session up on this
+        // triple on every report, and the uniqueness is what makes "count this viewing once" hold.
+        session.HasIndex(entity => new { entity.AppUserId, entity.MediaItemId, entity.SessionKey }).IsUnique();
+        // Age-based cleanup scans this.
+        session.HasIndex(entity => entity.LastReportAt);
+        session.Property(entity => entity.SessionKey).HasMaxLength(200);
+
+        session.HasOne<AppUser>()
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        session.HasOne<MediaItem>()
             .WithMany()
             .HasForeignKey(entity => entity.MediaItemId)
             .OnDelete(DeleteBehavior.Cascade);

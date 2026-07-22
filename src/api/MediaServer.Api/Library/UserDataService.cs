@@ -19,6 +19,11 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
     /// <summary>On stop, a position below this fraction is treated as "not started" — no resume point kept.</summary>
     internal const double MinResumeThreshold = 0.05;
 
+    /// <summary>How long a playback session row is kept after its last report before cleanup.</summary>
+    internal static readonly TimeSpan SessionRetention = TimeSpan.FromHours(24);
+
+    private const int SessionKeyMaxLength = 200;
+
     /// <summary>
     /// Projects user data for a batch of items keyed by internal id. Leaf items (movie/episode) carry their
     /// own row; season/series folders carry a rollup (played when every child episode is played, with an
@@ -92,14 +97,16 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
     /// <summary>Records a Jellyfin playback start/progress/stopped report against the resume + watched policy.</summary>
     public Task ReportPlaybackAsync(
         int appUserId, string itemPublicId, long positionTicks, bool isStopped, CancellationToken cancellationToken) =>
-        ReportPlaybackAsync(appUserId, itemPublicId, positionTicks, isStopped, diagnostics: null, cancellationToken);
+        ReportPlaybackAsync(appUserId, itemPublicId, positionTicks, isStopped, playSessionId: null, diagnostics: null, cancellationToken);
 
     /// <summary>
-    /// Same, additionally reporting the before/after row state to an open Phase 0 diagnostic record.
-    /// The observation is write-only: it cannot change what this method does.
+    /// Same, with the client's <c>PlaySessionId</c> (so one viewing counts once however many times it
+    /// crosses the threshold) and an optional Phase 0 diagnostic record. The observation is
+    /// write-only: it cannot change what this method does.
     /// </summary>
     public async Task ReportPlaybackAsync(
-        int appUserId, string itemPublicId, long positionTicks, bool isStopped, PlaybackDiagnostics? diagnostics, CancellationToken cancellationToken)
+        int appUserId, string itemPublicId, long positionTicks, bool isStopped, string? playSessionId,
+        PlaybackDiagnostics? diagnostics, CancellationToken cancellationToken)
     {
         var item = await FindItemAsync(itemPublicId, cancellationToken);
         if (item is null || item.Kind is not (MediaKind.Movie or MediaKind.Episode or MediaKind.Video))
@@ -116,9 +123,24 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         row.LastPlayedDate = now;
 
         var fraction = runtime > 0 ? (double)positionTicks / runtime : 0d;
-        if (runtime > 0 && fraction >= WatchedThreshold)
+        var atOrAboveThreshold = runtime > 0 && fraction >= WatchedThreshold;
+        var session = await TrackSessionAsync(appUserId, item.Id, playSessionId, atOrAboveThreshold, now, cancellationToken);
+
+        if (atOrAboveThreshold)
         {
-            MarkWatched(row, now);
+            // Count the viewing only the first time this session crosses, and only if the session ever
+            // saw playback below the threshold. Without the first condition a rewind past 90% and a
+            // second climb counts twice (observed: one session took an episode from 0 to 3 plays);
+            // without the second, resuming straight into the final 10% counts a viewing nobody watched.
+            // `Played` is still set either way — seeking to the end is a legitimate way to mark an item.
+            var counts = session is null
+                ? !row.Played
+                : session.CompletedAt is null && session.ObservedBelowThreshold;
+            MarkWatched(row, now, counts);
+            if (counts && session is not null)
+            {
+                session.CompletedAt = now;
+            }
         }
         else if (positionTicks <= 0)
         {
@@ -280,9 +302,70 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         }
     }
 
-    private static void MarkWatched(UserItemData row, DateTimeOffset now)
+    /// <summary>
+    /// Upserts the session row for this report and records whether playback has been seen below the
+    /// watched threshold. Returns null when the client sent no <c>PlaySessionId</c>, in which case the
+    /// caller keeps the historical flag-based rule — Infuse always sends one, so inventing a synthetic
+    /// session for the rest would add correlation guesswork for no observed consumer.
+    /// </summary>
+    private async Task<PlaybackSession?> TrackSessionAsync(
+        int appUserId, Guid mediaItemId, string? playSessionId, bool atOrAboveThreshold, DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
-        if (!row.Played)
+        var key = playSessionId?.Trim();
+        if (string.IsNullOrEmpty(key))
+        {
+            return null;
+        }
+
+        if (key.Length > SessionKeyMaxLength)
+        {
+            key = key[..SessionKeyMaxLength];
+        }
+
+        var session = await database.PlaybackSessions.FirstOrDefaultAsync(
+            entry => entry.AppUserId == appUserId && entry.MediaItemId == mediaItemId && entry.SessionKey == key,
+            cancellationToken);
+
+        if (session is null)
+        {
+            session = new PlaybackSession
+            {
+                Id = Guid.NewGuid(),
+                AppUserId = appUserId,
+                MediaItemId = mediaItemId,
+                SessionKey = key,
+                StartedAt = now,
+            };
+            database.PlaybackSessions.Add(session);
+            await PurgeStaleSessionsAsync(now, cancellationToken);
+        }
+
+        session.LastReportAt = now;
+        if (!atOrAboveThreshold)
+        {
+            session.ObservedBelowThreshold = true;
+        }
+
+        return session;
+    }
+
+    // Sessions are only interesting while their playback is live, so they are dropped on age rather
+    // than on an explicit end (a client that vanishes never sends one). Runs when a session is
+    // created, which bounds the table without a background job.
+    private async Task PurgeStaleSessionsAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var cutoff = now - SessionRetention;
+        await database.PlaybackSessions
+            .Where(entry => entry.LastReportAt < cutoff)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
+
+    // `countsAsPlay` is decided by the caller: within a playback session the flag alone cannot tell a
+    // first completion from a re-crossing after a rewind, because the rewind clears the flag.
+    private static void MarkWatched(UserItemData row, DateTimeOffset now, bool countsAsPlay = true)
+    {
+        if (countsAsPlay)
         {
             row.PlayCount++;
         }
