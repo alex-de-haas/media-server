@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
+using MediaServer.Api.Jellyfin;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Library;
@@ -81,10 +82,10 @@ public static class LibraryEndpoints
         });
 
         // Per-user playback-state mutations (return the updated user data).
-        group.MapPost("/{id:guid}/played", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
-            SetPlayedAsync(id, played: true, principal, userData, database, cancellationToken));
-        group.MapDelete("/{id:guid}/played", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
-            SetPlayedAsync(id, played: false, principal, userData, database, cancellationToken));
+        group.MapPost("/{id:guid}/played", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, PlaybackDiagnostics diagnostics, CancellationToken cancellationToken) =>
+            SetPlayedAsync(id, played: true, principal, userData, database, diagnostics, cancellationToken));
+        group.MapDelete("/{id:guid}/played", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, PlaybackDiagnostics diagnostics, CancellationToken cancellationToken) =>
+            SetPlayedAsync(id, played: false, principal, userData, database, diagnostics, cancellationToken));
         group.MapPost("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
             SetFavoriteAsync(id, favorite: true, principal, userData, database, cancellationToken));
         group.MapDelete("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
@@ -240,14 +241,34 @@ public static class LibraryEndpoints
     }
 
     private static async Task<IResult> SetPlayedAsync(
-        Guid id, bool played, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken)
+        Guid id, bool played, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database,
+        PlaybackDiagnostics diagnostics, CancellationToken cancellationToken)
     {
-        if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+        // The Phase 0 matrix compares Infuse against the web player, so the web toggle is recorded
+        // through the same instrument. The route kind stays PlayedItems*: it is the same intent, and
+        // the absent playSessionId/itemId shape already distinguishes the surfaces.
+        var userId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+        diagnostics.BeginRequest(
+            played ? PlaybackRouteKinds.PlayedItemsPost : PlaybackRouteKinds.PlayedItemsDelete,
+            userId,
+            id.ToString("N"),
+            positionTicks: null,
+            playSessionId: null,
+            mediaSourceId: null,
+            isPaused: null,
+            isStopped: false,
+            datePlayed: null,
+            datePlayedSupplied: false);
+
+        if (userId is null)
         {
+            await diagnostics.CompleteAsync(StatusCodes.Status401Unauthorized, cancellationToken);
             return Results.Unauthorized();
         }
 
-        var data = await userData.SetPlayedAsync(userId, id, played, null, cancellationToken);
+        var data = await userData.SetPlayedAsync(userId.Value, id, played, null, diagnostics, cancellationToken);
+        await diagnostics.CompleteAsync(
+            data is null ? StatusCodes.Status404NotFound : StatusCodes.Status200OK, cancellationToken);
         return data is null ? Results.NotFound() : Results.Ok(data);
     }
 

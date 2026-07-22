@@ -158,6 +158,11 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         int appUserId, Guid mediaItemId, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken) =>
         await SetPlayedCoreAsync(appUserId, await FindItemByIdAsync(mediaItemId, cancellationToken), played, playedAt, diagnostics: null, cancellationToken);
 
+    /// <summary>Same, additionally reporting before/after state to an open Phase 0 diagnostic record.</summary>
+    public async Task<UserItemDataDto?> SetPlayedAsync(
+        int appUserId, Guid mediaItemId, bool played, DateTimeOffset? playedAt, PlaybackDiagnostics? diagnostics, CancellationToken cancellationToken) =>
+        await SetPlayedCoreAsync(appUserId, await FindItemByIdAsync(mediaItemId, cancellationToken), played, playedAt, diagnostics, cancellationToken);
+
     private async Task<UserItemDataDto?> SetPlayedCoreAsync(
         int appUserId, MediaItem? item, bool played, DateTimeOffset? playedAt, PlaybackDiagnostics? diagnostics, CancellationToken cancellationToken)
     {
