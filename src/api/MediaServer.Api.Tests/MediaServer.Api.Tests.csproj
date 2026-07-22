@@ -28,4 +28,12 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- The API's shipped settings, so LoggingConfigurationTests asserts against the real files rather
+       than a copy that can drift. Linked into a subfolder so they never shadow the test host's own config. -->
+  <ItemGroup>
+    <None Include="..\MediaServer.Api\appsettings.json;..\MediaServer.Api\appsettings.Development.json"
+          Link="ApiSettings\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
