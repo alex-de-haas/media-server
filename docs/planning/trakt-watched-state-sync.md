@@ -60,6 +60,8 @@ until the user approves a different history model or reduced behavior.
 - Trakt scrobble start, pause, or stop calls.
 - Live watching status or resume-position synchronization with Trakt.
 - Automatic inbound polling or provider-to-provider replication.
+- Detecting or suppressing another Trakt client's writes to the same account.
+- More than one provider link per local play (see the Provider Boundary note).
 - Ratings, favorites, comments, collection, lists, watchlist, recommendations, or
   catalog acquisition from Trakt.
 - Synchronizing media that is not present in the local library.
@@ -142,6 +144,18 @@ timestamp or falls back to a broader destructive operation.
 Although the schema identifies connections by `(AppUserId, ProviderKey)`, the first
 version permits only one active watched-history connection per user and ships only
 the Trakt adapter. Simultaneous multi-provider fan-out is deferred.
+
+The boundary is provider-neutral, but one storage detail is not: `PlaybackHistoryEntry`
+carries a **single** provider key / history ID / ownership slot, so one local play can
+be linked to exactly one remote history entry. That is sufficient while only one
+connection can be active, and it is the one schema change a second simultaneous
+provider requires — the identity snapshot, the outbox, and the sync run are already
+keyed by provider and need no rework. The migration is additive rather than a
+redesign: move the link into a child table keyed `(HistoryEntryId, ProviderKey)`
+holding the remote history ID, ownership flag, and link status, and read it through
+the provider key the caller already has. Recording it here so the second integration
+does not discover the limit halfway in; implementing it before a second provider
+exists would be speculative structure with no consumer.
 
 ### Deployment Configuration and Per-User OAuth
 
@@ -425,6 +439,39 @@ exact plays remain. The next explicit Sync with Trakt will consequently set the
 matching local item back to watched. Settings help and the unwatch result must
 explain this behavior.
 
+### Coexisting With Another Trakt Client
+
+Infuse ships its own Trakt integration, and it is the client this app's whole
+Jellyfin surface exists for. An operator who enables Trakt in Infuse *and* connects
+Trakt here has two independent writers for the same viewing, so one watch produces
+two Trakt history entries. The same applies to any other scrobbler pointed at the
+same account — a Plex agent, the Trakt app itself.
+
+Media Server does not break in that situation, by construction rather than by
+accident: outbound writes are additive, and removal is permitted only for entries
+whose remote history ID this app resolved and stored as its own, so a duplicate
+from another client is retained rather than deleted (already covered by the
+`RemoveOwnedTimelessEntries` rules and the live-verification matrix). Inbound Sync
+normalizes any number of remote timeless entries for one identity down to a single
+local one, so duplicates do not multiply locally either.
+
+What Media Server cannot do is *prevent* the duplication: Trakt does not
+deduplicate history by item and timestamp, and two clients reporting the same watch
+seconds apart are indistinguishable from a genuine rewatch. Scrobbling therefore
+has to be enabled in exactly one place, and this is a product decision rather than
+a technical one:
+
+- the Trakt card in Settings states plainly that Trakt should be enabled either in
+  Media Server or in the player, not both, and names Infuse explicitly;
+- connecting Trakt here surfaces that note at connection time, not buried in help;
+- Media Server is the better place to own it when the library is served from here —
+  it sees catalogs, canonical identities, manual marks and the web surface, whereas
+  a player only sees what it plays — but the operator makes the call.
+
+Detecting the other writer automatically is deliberately out of scope. It would
+mean inferring intent from timing on a service whose API cannot distinguish a
+duplicate from a rewatch, and a wrong guess would silently drop a real play.
+
 ### Playback Completion and Exact Time
 
 The desired behavior is to send an exact server UTC `watched_at` only when Media
@@ -487,7 +534,10 @@ card shows:
 - pending/failed operation counts;
 - last successful delivery and explicit sync;
 - Connect, Reconnect, Sync with Trakt, and Disconnect actions;
-- concise help for timeless watched marks, unwatch, and exact-play retention.
+- concise help for timeless watched marks, unwatch, and exact-play retention;
+- a plain statement that Trakt should be enabled here **or** in the player, not
+  both, naming Infuse's own Trakt integration, shown at connect time rather than
+  only in help.
 
 The provider-keyed internal API, exposed to the browser through the existing
 Next.js BFF, adds current-user endpoints:
@@ -696,6 +746,11 @@ unavailable Core does not stall delivery for a connection already in use.
   not one read and one mutation per episode.
 - [ ] The next Sync can restore local watched state after unwatch when exact Trakt
   history remains, and Settings explains why.
+- [ ] Settings tells the operator to enable Trakt here or in the player but not
+  both, naming Infuse, at connect time.
+- [ ] A duplicate created by another Trakt client is retained by unwatch and
+  normalized to one local entry by Sync, so a second writer degrades the history
+  rather than corrupting it.
 - [ ] Missing or unsafe mappings never block local state changes and surface a
   bounded issue without exposing private data.
 - [ ] Duplicate local identity behavior is explicitly resolved before `Ready` and
@@ -776,6 +831,10 @@ it cannot read a stale remote snapshot while older local events are pending.
 
 ## Risks
 
+- Another Trakt client writing to the same account (notably Infuse's own Trakt
+  integration) duplicates history entries for one viewing. Ownership-scoped removal
+  keeps this from corrupting anything, and inbound normalization keeps it from
+  multiplying locally, but only operator guidance prevents the duplicate itself.
 - Trakt may not expose a newly added history entry immediately. Owned timeless
   deletion depends on read-before/write/read-after ID resolution, so the worker
   needs bounded eventual-consistency reconciliation and an unresolved terminal
