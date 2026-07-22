@@ -520,8 +520,8 @@ manage the key outside backups manually, restored backups carry stale rotating
 refresh tokens, and every app repeats the crypto.
 
 **Acceptance criteria.**
-- App can PUT/GET/DELETE its own secrets with its service token; tokens issued
-  for another app are rejected.
+- App can PUT/GET/DELETE its own secrets with its service token; requests
+  authenticated with another app's service token are rejected.
 - Values live outside the backed-up `data/` directory and survive app update,
   restart, runtime-switch, and Core restart.
 - Values are never returned by Shell/admin APIs and are redacted from logs;

@@ -185,9 +185,15 @@ the instance application but cannot connect a Trakt account on another user's
 behalf or retrieve that user's tokens.
 
 Disconnect revokes the token on a best-effort basis, then deletes that connection's
-encrypted credentials, authorization attempt, sync jobs, and pending operations.
-It never deletes local playback state. User-directory reconciliation applies the
-same local credential cleanup when a user becomes unassigned or disabled.
+stored credentials, authorization attempt, sync jobs, and pending operations.
+Under the Core secrets store, "stored credentials" means the per-connection
+keychain secret: disconnect issues the keychain `DELETE` for that key **before**
+removing the connection row, so a failed best-effort revocation can never leave
+a live refresh token orphaned in the Core store with no database reference to
+clean it up. Under the fallback design it means the encrypted envelope, which is
+deleted with the row. Disconnect never deletes local playback state.
+User-directory reconciliation applies the same credential cleanup — including
+the keychain `DELETE` — when a user becomes unassigned or disabled.
 
 ### Preliminary Infuse/Jellyfin Observation
 
@@ -658,7 +664,10 @@ reference on the connection row — see the platform dependency note above.)
 - [ ] Trakt rate limits, refresh, retries, process restart, ambiguous responses, and
   terminal failures follow the documented policies.
 - [ ] User removal/reconciliation deletes provider credentials without deleting
-  local playback data.
+  local playback data; under the Core secrets store, disconnect and
+  reconciliation issue the keychain `DELETE` for the per-connection secret
+  before removing the connection row, so no orphaned token survives in the
+  Core store.
 - [ ] Existing Jellyfin credential, PlaybackInfo, playback state, Continue
   Watching, Next Up, Settings, backup, restore, and directory-reconciliation tests
   still pass.
@@ -918,7 +927,9 @@ Live Trakt verification uses a dedicated non-production application and account:
   process restart, and terminal identity errors;
 - unwatch an item with exact remote history, then Sync and confirm it becomes
   locally watched again with clear UI explanation;
-- disconnect/unassign a user and confirm local playback data remains;
+- disconnect/unassign a user and confirm local playback data remains and, under
+  the Core secrets store, the per-connection keychain secret is gone — including
+  when the best-effort Trakt revocation fails;
 - restore the database with the correct encryption key, then verify a changed key
   requires reconnect without exposing credential material.
 
