@@ -124,7 +124,12 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
 
         var fraction = runtime > 0 ? (double)positionTicks / runtime : 0d;
         var atOrAboveThreshold = runtime > 0 && fraction >= WatchedThreshold;
-        var session = await TrackSessionAsync(appUserId, item.Id, playSessionId, atOrAboveThreshold, now, cancellationToken);
+        // Not simply !atOrAboveThreshold: with an unknown runtime the threshold is not computable, so
+        // such a report is no evidence of watching. Conflating the two would let a session started
+        // before the item was probed count a play the moment the runtime appears — the very case the
+        // below-threshold requirement exists to catch.
+        var observedBelow = runtime > 0 && fraction < WatchedThreshold;
+        var session = await TrackSessionAsync(appUserId, item.Id, playSessionId, observedBelow, now, cancellationToken);
 
         if (atOrAboveThreshold)
         {
@@ -292,7 +297,9 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
 
             if (played)
             {
-                MarkWatched(row, now);
+                // An explicit mark is idempotent: marking an already-watched item again is a no-op,
+                // not another viewing. Only playback reports decide counting per session.
+                MarkWatched(row, now, countsAsPlay: !row.Played);
             }
             else
             {
@@ -309,18 +316,15 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
     /// session for the rest would add correlation guesswork for no observed consumer.
     /// </summary>
     private async Task<PlaybackSession?> TrackSessionAsync(
-        int appUserId, Guid mediaItemId, string? playSessionId, bool atOrAboveThreshold, DateTimeOffset now,
+        int appUserId, Guid mediaItemId, string? playSessionId, bool observedBelowThreshold, DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         var key = playSessionId?.Trim();
-        if (string.IsNullOrEmpty(key))
+        // An overlong key falls back to the historical rule rather than being truncated: two ids
+        // sharing a prefix would then share one session row and silently swallow a real play.
+        if (string.IsNullOrEmpty(key) || key.Length > SessionKeyMaxLength)
         {
             return null;
-        }
-
-        if (key.Length > SessionKeyMaxLength)
-        {
-            key = key[..SessionKeyMaxLength];
         }
 
         var session = await database.PlaybackSessions.FirstOrDefaultAsync(
@@ -336,13 +340,33 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
                 MediaItemId = mediaItemId,
                 SessionKey = key,
                 StartedAt = now,
+                // Set before the insert, not after: the cleanup below runs straight against the
+                // database, so a row persisted with a default LastReportAt would be immediately
+                // eligible for its own purge.
+                LastReportAt = now,
             };
             database.PlaybackSessions.Add(session);
+
+            // Insert eagerly, like GetOrCreateRowAsync: a session's first two reports can overlap
+            // (Playing and Progress from one client), and without this both would reach the caller's
+            // SaveChanges and one would trip the unique index with a 500.
+            try
+            {
+                await database.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                database.Entry(session).State = EntityState.Detached;
+                session = await database.PlaybackSessions.FirstAsync(
+                    entry => entry.AppUserId == appUserId && entry.MediaItemId == mediaItemId && entry.SessionKey == key,
+                    cancellationToken);
+            }
+
             await PurgeStaleSessionsAsync(now, cancellationToken);
         }
 
         session.LastReportAt = now;
-        if (!atOrAboveThreshold)
+        if (observedBelowThreshold)
         {
             session.ObservedBelowThreshold = true;
         }
@@ -361,9 +385,10 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
             .ExecuteDeleteAsync(cancellationToken);
     }
 
-    // `countsAsPlay` is decided by the caller: within a playback session the flag alone cannot tell a
-    // first completion from a re-crossing after a rewind, because the rewind clears the flag.
-    private static void MarkWatched(UserItemData row, DateTimeOffset now, bool countsAsPlay = true)
+    // `countsAsPlay` is decided by the caller and deliberately has no default: within a playback
+    // session the flag alone cannot tell a first completion from a re-crossing after a rewind (the
+    // rewind clears it), while for an explicit mark the flag is exactly the right test.
+    private static void MarkWatched(UserItemData row, DateTimeOffset now, bool countsAsPlay)
     {
         if (countsAsPlay)
         {

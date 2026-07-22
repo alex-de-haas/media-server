@@ -336,6 +336,35 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         context.SaveChanges();
     }
 
+    // A movie whose file has been catalogued but not yet probed: a source with no duration, so the
+    // watched threshold is not computable for it.
+    private async Task<MediaItem> SeedRuntimelessMovieAsync()
+    {
+        var now = _time.GetUtcNow();
+        var catalog = await _context.Catalogs.AsNoTracking().FirstAsync(entry => entry.Type == CatalogType.Movie);
+        var movie = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            PublicId = Guid.NewGuid().ToString("N"),
+            CatalogId = catalog.Id,
+            Kind = MediaKind.Movie,
+            Title = "Unprobed",
+            AddedAt = now,
+            UpdatedAt = now,
+        };
+        _context.MediaItems.Add(movie);
+        _context.MediaSources.Add(NewSource(movie.Id, runtimeTicks: 0, now));
+        await _context.SaveChangesAsync();
+        return movie;
+    }
+
+    private async Task AddRuntimeAsync(Guid mediaItemId, long runtimeTicks)
+    {
+        var source = await _context.MediaSources.FirstAsync(entry => entry.MediaItemId == mediaItemId);
+        source.DurationTicks = runtimeTicks;
+        await _context.SaveChangesAsync();
+    }
+
     private static MediaSource NewSource(Guid itemId, long runtimeTicks, DateTimeOffset now) => new()
     {
         Id = Guid.NewGuid(),
@@ -447,6 +476,70 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         Assert.Equal("session-x", session.SessionKey);
         Assert.True(session.ObservedBelowThreshold);
         Assert.Null(session.CompletedAt);
+    }
+
+    [Fact]
+    public async Task MarkingAnAlreadyWatchedItemAgain_DoesNotCountAnotherViewing()
+    {
+        // Clients retry, and a user can hit the button twice; an explicit mark must stay idempotent.
+        await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
+        await _userData.SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
+        await _userData.SetPlayedAsync(_userId, _movieId, played: true, playedAt: null, CancellationToken.None);
+
+        var row = await _context.UserItemData.AsNoTracking()
+            .SingleAsync(data => data.AppUserId == _userId && data.MediaItemId == _movieId);
+        Assert.Equal(1, row.PlayCount);
+        Assert.True(row.Played);
+    }
+
+    [Fact]
+    public async Task MarkingASeasonTwice_DoesNotCountItsEpisodesTwice()
+    {
+        await _userData.SetPlayedAsync(_userId, _seasonPublicId, played: true, playedAt: null, CancellationToken.None);
+        await _userData.SetPlayedAsync(_userId, _seasonPublicId, played: true, playedAt: null, CancellationToken.None);
+
+        var episodes = await _context.UserItemData.AsNoTracking()
+            .Where(data => data.AppUserId == _userId && _episodeIds.Contains(data.MediaItemId))
+            .ToListAsync();
+        Assert.All(episodes, row => Assert.Equal(1, row.PlayCount));
+    }
+
+    [Fact]
+    public async Task ReportsBeforeTheRuntimeIsKnown_DoNotCountAsWatchingBelowTheThreshold()
+    {
+        // A report with no runtime cannot be compared to the threshold, so it is no evidence anyone
+        // watched. Once the runtime appears, a report past 90% must not bank a play on those.
+        var unprobed = await SeedRuntimelessMovieAsync();
+
+        await _userData.ReportPlaybackAsync(_userId, unprobed.PublicId, 500_000_000, false, "session-unprobed", null, CancellationToken.None);
+        await _userData.ReportPlaybackAsync(_userId, unprobed.PublicId, 900_000_000, false, "session-unprobed", null, CancellationToken.None);
+
+        var session = await _context.PlaybackSessions.AsNoTracking()
+            .SingleAsync(entry => entry.SessionKey == "session-unprobed");
+        Assert.False(session.ObservedBelowThreshold);
+
+        await AddRuntimeAsync(unprobed.Id, MovieRuntime);
+        await _userData.ReportPlaybackAsync(
+            _userId, unprobed.PublicId, (long)(MovieRuntime * 0.95), false, "session-unprobed", null, CancellationToken.None);
+
+        var row = await _context.UserItemData.AsNoTracking()
+            .SingleAsync(data => data.AppUserId == _userId && data.MediaItemId == unprobed.Id);
+        Assert.True(row.Played);
+        Assert.Equal(0, row.PlayCount);
+    }
+
+    [Fact]
+    public async Task AnOverlongSessionId_FallsBackInsteadOfSharingARowWithItsPrefix()
+    {
+        // Truncating would let two ids with a common prefix share one session and swallow a real play.
+        var overlong = new string('s', 400);
+        await _userData.ReportPlaybackAsync(_userId, _moviePublicId, (long)(MovieRuntime * 0.5), false, overlong, null, CancellationToken.None);
+        await _userData.ReportPlaybackAsync(_userId, _moviePublicId, (long)(MovieRuntime * 0.95), false, overlong, null, CancellationToken.None);
+
+        Assert.Empty(await _context.PlaybackSessions.AsNoTracking().ToListAsync());
+        var row = await _context.UserItemData.AsNoTracking()
+            .SingleAsync(data => data.AppUserId == _userId && data.MediaItemId == _movieId);
+        Assert.Equal(1, row.PlayCount);
     }
 
     // ---- Phase 0 playback diagnostics (docs/planning/trakt-watched-state-sync.md) ----
