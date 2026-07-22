@@ -240,8 +240,12 @@ additionally record structured fields from the parsed body:
 
 Diagnostics must not log authorization headers, access tokens, raw request bodies,
 file paths, media titles, or provider credentials — what remains is opaque ids,
-numbers, and flags. Writes are bounded, serialized, and failure-tolerant: a broken
-log path disables the sink with one warning rather than failing playback requests.
+numbers, and flags. That applies to the route log too: Jellyfin accepts a reusable
+access token as the `api_key` query parameter on media and image URLs (clients open
+those without custom headers), so `requests.log` masks credential-shaped query
+values rather than persisting working tokens in a file the operator reads and may
+share. Writes are bounded, serialized, and failure-tolerant: a broken log path
+disables the sink with one warning rather than failing playback requests.
 
 The observation matrix covers:
 
