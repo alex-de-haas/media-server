@@ -2,7 +2,7 @@
 
 Status: Promoted
 Created: 2026-07-21
-Updated: 2026-07-21
+Updated: 2026-07-22
 
 ## Motivation
 
@@ -128,7 +128,10 @@ Cons:
   exact plays and is never a safe fallback.
 - Applying one Trakt identity to every local duplicate can erase another edition's
   resume point; selecting one by query order is arbitrary.
-- Token encryption keys must stay outside SQLite and survive backup/restore.
+- Credentials must live outside the backed-up SQLite file. Resolved by the Hosty
+  Core app secrets store (Core 0.60.0), which holds them beside `state.json`
+  rather than in the app's `data/` directory, so Media Server needs no
+  encryption key of its own.
 - A generic provider contract can leak Trakt-specific OAuth, `unknown`, or history
   ID concepts unless capabilities and adapter-owned DTOs are enforced.
 

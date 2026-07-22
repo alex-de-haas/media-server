@@ -472,25 +472,26 @@ all host interfaces, a security regression.
   documented as separate concerns (ordering + intra-app discovery vs cross-app
   endpoint resolution).
 
-## 15. Core-managed app secrets store (runtime keychain) — High
+## 15. Core-managed app secrets store (runtime keychain) — Implemented (2026-07-22)
 
-**Status.** Planned — the docker-host
-[promoted design](https://github.com/alex-de-haas/docker-host/blob/main/docs/ideas/app-secrets-store.md)
-and its [Ready implementation plan](https://github.com/alex-de-haas/docker-host/blob/main/docs/planning/app-secrets-store.md)
-were ratified on 2026-07-22: contract, storage, lifecycle semantics, SDK
-clients in both packages, and phased implementation are locked. The
-[Trakt plan](../planning/trakt-watched-state-sync.md) prefers this mechanism
-and keeps its own encryption-key design as the fallback contract until the
-store ships.
+**Status.** Implemented in Hosty Core 0.60.0 as four service-token routes under
+`/api/internal/apps/{appId}/secrets`, with Core persisting values in
+`apps/<id>/secrets.json` beside `state.json` — outside the backed-up `data/`
+directory. SDK clients ship in `HostySdk.App` 0.3.0 (`HostySecretsClient`,
+`AddHostySecrets`) and `@hosty-sdk/app` 0.4.0 (server-only), both with a
+write-through cache and classified errors. See the
+[feature document](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/app-secrets-store.md).
+The [Trakt plan](../planning/trakt-watched-state-sync.md) now stores its OAuth
+tokens here and no longer specs an app-side encryption key.
 
-**Problem.** The Trakt integration must persist per-user OAuth access/refresh
+**Problem (historical).** The Trakt integration must persist per-user OAuth access/refresh
 tokens acquired at runtime. They cannot be hashed — the app has to present them
 to Trakt — so they must be stored recoverably, but Hosty backups are directory
 copies of `data/` containing the SQLite file, so plaintext tokens would make
 every backup archive live access to every connected Trakt account. Every future
 OAuth or API-token integration repeats the same problem.
 
-**Proposed contract.** An app-callable bounded keychain:
+**Proposed contract.** An app-callable bounded secrets store:
 
 ```text
 PUT    {HOSTY_CORE_ORIGIN}/api/internal/apps/{appId}/secrets/{key}
@@ -511,13 +512,14 @@ the operator `openssl rand` step, and the local AES-256-GCM envelope. A missing
 secret maps to the existing `RequiresReconnect` state. Restore semantics
 improve: a database restore rolls back rows but not tokens — Trakt refresh
 tokens rotate, so tokens embedded in a backup are usually stale by restore time,
-while the live keychain keeps connections working.
+while the live secrets store keeps connections working.
 
-**Workaround.** As specced in the Trakt plan: an operator-generated 32-byte key
-in a secret app setting plus a versioned AES-256-GCM credential envelope in
-SQLite. Limits: key loss or rotation kills every connection, the operator must
-manage the key outside backups manually, restored backups carry stale rotating
-refresh tokens, and every app repeats the crypto.
+**Workaround (historical).** The Trakt plan originally specced an
+operator-generated 32-byte key in a secret app setting plus a versioned
+AES-256-GCM credential envelope in SQLite. Its limits are why this request
+existed: key loss or rotation killed every connection, the operator had to keep
+the key outside backups by hand, restored backups carried stale rotating refresh
+tokens anyway, and every future OAuth integration would repeat the crypto.
 
 **Acceptance criteria.**
 - App can PUT/GET/DELETE its own secrets with its service token; requests
