@@ -2,7 +2,7 @@
 
 Status: Draft
 Created: 2026-07-21
-Updated: 2026-07-21
+Updated: 2026-07-22
 
 ## Goal
 
@@ -132,12 +132,26 @@ the Trakt adapter. Simultaneous multi-provider fan-out is deferred.
 
 ### Deployment Configuration and Per-User OAuth
 
+**Platform dependency (2026-07-22).** The preferred storage for the per-user
+OAuth tokens in this plan is the planned Hosty Core app secrets store
+([docker-host promoted design](https://github.com/alex-de-haas/docker-host/blob/main/docs/ideas/app-secrets-store.md);
+[platform request #15](../features/hosty-platform-requests.md)). If it ships
+before implementation starts, `TRAKT_TOKEN_ENCRYPTION_KEY` and the local
+AES-256-GCM credential envelope are dropped: tokens are stored in the Core
+keychain under per-connection keys, a missing or invalid secret maps to
+`RequiresReconnect`, and a database restore no longer rolls tokens back — Trakt
+refresh tokens rotate, so tokens embedded in a backup are usually stale by
+restore time, while the live keychain keeps connections working. The
+encryption-key design described in this plan remains the fallback contract if
+implementation begins first; the affected pieces are marked below.
+
 The Media Server Hosty app settings add:
 
 - `TRAKT_CLIENT_ID`;
 - secret `TRAKT_CLIENT_SECRET`;
 - secret `TRAKT_TOKEN_ENCRYPTION_KEY`, a base64-encoded 32-byte key used only for
-  credential encryption.
+  credential encryption (fallback only — dropped when the Core secrets store is
+  adopted).
 
 The instance operator creates one Trakt API application for the Media Server
 instance, then enters these values through the same deployment settings surface
@@ -171,9 +185,15 @@ the instance application but cannot connect a Trakt account on another user's
 behalf or retrieve that user's tokens.
 
 Disconnect revokes the token on a best-effort basis, then deletes that connection's
-encrypted credentials, authorization attempt, sync jobs, and pending operations.
-It never deletes local playback state. User-directory reconciliation applies the
-same local credential cleanup when a user becomes unassigned or disabled.
+stored credentials, authorization attempt, sync jobs, and pending operations.
+Under the Core secrets store, "stored credentials" means the per-connection
+keychain secret: disconnect issues the keychain `DELETE` for that key **before**
+removing the connection row, so a failed best-effort revocation can never leave
+a live refresh token orphaned in the Core store with no database reference to
+clean it up. Under the fallback design it means the encrypted envelope, which is
+deleted with the row. Disconnect never deletes local playback state.
+User-directory reconciliation applies the same credential cleanup — including
+the keychain `DELETE` — when a user becomes unassigned or disabled.
 
 ### Preliminary Infuse/Jellyfin Observation
 
@@ -552,7 +572,9 @@ owned merely because its identity/timestamp matches.
 
 Credential envelopes use AES-256-GCM with a random nonce, authentication tag,
 version, and app-user/connection associated data. Plaintext credentials exist only
-for an outbound request and are never logged.
+for an outbound request and are never logged. (Fallback only: when the Core app
+secrets store is adopted, the envelope column is replaced by a keychain key
+reference on the connection row — see the platform dependency note above.)
 
 ### Service Design
 
@@ -642,7 +664,10 @@ for an outbound request and are never logged.
 - [ ] Trakt rate limits, refresh, retries, process restart, ambiguous responses, and
   terminal failures follow the documented policies.
 - [ ] User removal/reconciliation deletes provider credentials without deleting
-  local playback data.
+  local playback data; under the Core secrets store, disconnect and
+  reconciliation issue the keychain `DELETE` for the per-connection secret
+  before removing the connection row, so no orphaned token survives in the
+  Core store.
 - [ ] Existing Jellyfin credential, PlaybackInfo, playback state, Continue
   Watching, Next Up, Settings, backup, restore, and directory-reconciliation tests
   still pass.
@@ -737,6 +762,8 @@ it cannot read a stale remote snapshot while older local events are pending.
   clear another edition's resume, while selecting one is arbitrary.
 - Changing or losing the encryption key makes stored tokens unreadable. The
   connection must move to `RequiresReconnect` without exposing ciphertext details.
+  (Fallback-design risk only; the Core secrets store removes the key entirely,
+  leaving a missing keychain secret as the equivalent `RequiresReconnect` trigger.)
 - Directory reconciliation must preserve its existing rule not to revoke
   credentials when directory state is uncertain.
 - Development diagnostics must not become a permanent high-volume or sensitive
@@ -900,13 +927,17 @@ Live Trakt verification uses a dedicated non-production application and account:
   process restart, and terminal identity errors;
 - unwatch an item with exact remote history, then Sync and confirm it becomes
   locally watched again with clear UI explanation;
-- disconnect/unassign a user and confirm local playback data remains;
+- disconnect/unassign a user and confirm local playback data remains and, under
+  the Core secrets store, the per-connection keychain secret is gone — including
+  when the best-effort Trakt revocation fails;
 - restore the database with the correct encryption key, then verify a changed key
   requires reconnect without exposing credential material.
 
 ## Links
 
 - [Originating idea](../ideas/trakt-watched-state-sync.md)
+- [Hosty platform request #15: Core-managed app secrets store](../features/hosty-platform-requests.md)
+- [docker-host idea: App Secrets Store](https://github.com/alex-de-haas/docker-host/blob/main/docs/ideas/app-secrets-store.md)
 - [Jellyfin compatibility](../features/jellyfin-compatibility.md)
 - [Storage and data](../features/storage-and-data.md)
 - [Security](../features/security.md)
