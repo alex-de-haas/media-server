@@ -174,8 +174,12 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         // A folder mark writes descendant episode rows, never the folder's own, so there is no leaf
         // before/after to compare for one — reporting its absent row would log a convincing
         // `played=false, playCount=0` that never happened. Folders report their fan-out instead.
+        //
+        // Gate on Enabled, not on non-null: DI always injects a recorder, so testing for null would
+        // buy the before-row read, the runtime lookup and the after-row read on every played toggle
+        // even with diagnostics off — which is the default, and the path the UI uses constantly.
         var isFolder = item.Kind is MediaKind.Series or MediaKind.Season;
-        var observeRow = diagnostics is not null && !isFolder;
+        var observeRow = diagnostics is { Enabled: true } && !isFolder;
         var before = observeRow
             ? await database.UserItemData.AsNoTracking()
                 .FirstOrDefaultAsync(data => data.AppUserId == appUserId && data.MediaItemId == item.Id, cancellationToken)

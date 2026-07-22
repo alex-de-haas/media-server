@@ -540,6 +540,7 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
             await diagnostics.CompleteAsync(200, CancellationToken.None);
 
             var bytes = await File.ReadAllBytesAsync(path);
+            Assert.NotEmpty(bytes);
             Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF, "log starts with a UTF-8 BOM");
             Assert.Equal((byte)'{', bytes[0]);
         }
@@ -547,6 +548,24 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         {
             Cleanup(path);
         }
+    }
+
+    [Fact]
+    public async Task DisabledDiagnostics_DoNotChangeTheResultOfAPlayedToggle()
+    {
+        // DI always injects a recorder, so the disabled path runs through the same code. It must
+        // behave — and cost — exactly like passing none: no observation, no extra reads.
+        var disabled = new PlaybackDiagnostics(writer: null);
+        Assert.False(disabled.Enabled);
+
+        var data = await _userData.SetPlayedAsync(_userId, _movieId, played: true, playedAt: null, disabled, CancellationToken.None);
+
+        Assert.NotNull(data);
+        Assert.True(data!.Played);
+        var row = await _context.UserItemData.AsNoTracking()
+            .SingleAsync(entry => entry.AppUserId == _userId && entry.MediaItemId == _movieId);
+        Assert.True(row.Played);
+        Assert.Equal(1, row.PlayCount);
     }
 
     [Fact]
