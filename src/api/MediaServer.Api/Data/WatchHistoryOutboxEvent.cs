@@ -31,11 +31,18 @@ public sealed class WatchHistoryOutboxEvent
     public DateTimeOffset? OccurredAt { get; set; }
 
     /// <summary>
-    /// The remote history ids seen **before** a timeless add, bounded (JSON). After the add, the new
-    /// id is the set difference. Persisted so a crash between writing and reading back can still
-    /// resolve ownership instead of leaving an entry we can never safely delete.
+    /// A bounded list of provider history ids (JSON), captured when the event was staged or during
+    /// its first attempt. What it means depends on the operation:
+    /// <list type="bullet">
+    /// <item>for <see cref="WatchHistoryOutboxOperation.EnsureTimelessWatched"/>, the ids present
+    /// <b>before</b> the add, so the new one is the set difference afterwards;</item>
+    /// <item>for <see cref="WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries"/>, the ids to
+    /// remove — captured before the local entries are deleted, because after that there is nothing
+    /// left to read them from.</item>
+    /// </list>
+    /// Persisted either way so a crash cannot leave the worker unable to finish what it started.
     /// </summary>
-    public string? PreCreateRemoteIds { get; set; }
+    public string? RemoteIdSnapshot { get; set; }
 
     /// <summary>
     /// Derived from connection, item, operation, local state revision and session key. Makes a

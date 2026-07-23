@@ -156,6 +156,8 @@ builder.Services.AddScoped<IWatchHistoryProviderAuthorization>(provider =>
 builder.Services.AddScoped<IWatchHistoryProvider, TraktWatchHistoryProvider>();
 builder.Services.AddScoped<WatchHistoryIdentityMapper>();
 builder.Services.AddScoped<WatchHistoryRecorder>();
+builder.Services.AddScoped<WatchHistoryDeliveryService>();
+builder.Services.AddHostedService<WatchHistoryDeliveryWorker>();
 // An abandoned device flow is never polled again, so nothing else would remove its row or its stored
 // device code.
 builder.Services.AddScoped<WatchHistoryAuthorizationCleanupService>();
