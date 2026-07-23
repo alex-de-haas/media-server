@@ -40,4 +40,12 @@ public sealed class PlaybackSession
 
     /// <summary>Set when this session already counted a viewing; a later crossing must not count another.</summary>
     public DateTimeOffset? CompletedAt { get; set; }
+
+    /// <summary>
+    /// The <see cref="PlaybackHistoryEntry"/> this session's completion created, once per-play history
+    /// exists. Lets a restart or a repeated report reuse the same decision rather than merely
+    /// suppressing a second count — the difference matters once a completion also enqueues outbound
+    /// work, because re-deriving it would enqueue twice.
+    /// </summary>
+    public Guid? HistoryEntryId { get; set; }
 }

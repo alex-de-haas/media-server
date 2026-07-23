@@ -21,6 +21,23 @@ public sealed class UserItemData
     /// <summary>Times the item has been watched to completion.</summary>
     public int PlayCount { get; set; }
 
+    /// <summary>
+    /// When the item was last watched to completion, projected from per-play history. Distinct from
+    /// <see cref="LastPlayedDate"/>, which any playback report moves and which is never populated from
+    /// a provider — otherwise imported history would reshuffle Continue Watching and Next Up.
+    /// </summary>
+    public DateTimeOffset? LastWatchedAt { get; set; }
+
+    /// <summary>When <see cref="Played"/> last changed, either way.</summary>
+    public DateTimeOffset? WatchedStateChangedAt { get; set; }
+
+    /// <summary>
+    /// Bumped on every local change to this row. A long-running sync captures it before reading the
+    /// provider and re-checks it before applying, so a play recorded while the sync was running is
+    /// skipped rather than overwritten by a snapshot taken before it happened.
+    /// </summary>
+    public int StateRevision { get; set; }
+
     public bool Played { get; set; }
 
     public bool IsFavorite { get; set; }
