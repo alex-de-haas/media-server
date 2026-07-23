@@ -24,7 +24,7 @@ import { personHref } from "@/components/poster-card";
 import { RemapDialog } from "@/components/remap-dialog";
 import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
-import { formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
+import { episodeLabel, formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import {
   AlertDialog,
@@ -1259,7 +1259,9 @@ function EpisodeRow({ episode, seriesId }: { episode: Episode; seriesId: string 
   const isPlayed = episode.userData?.played ?? false;
   const resume = !isPlayed && episode.userData?.playedPercentage ? Math.min(episode.userData.playedPercentage, 100) : null;
   const runtime = formatRuntime(episode.runtimeTicks);
-  const label = `S${String(episode.seasonNumber ?? 0).padStart(2, "0")}E${String(episode.episodeNumber ?? 0).padStart(2, "0")}`;
+  // A double-episode file reads "S01E01-E02", so the season no longer looks like it skipped an episode.
+  // The title stays the first episode's — TMDb has no combined title for the range and one is not invented.
+  const label = episodeLabel(episode.seasonNumber, episode.episodeNumber, episode.episodeNumberEnd);
   const deepLink = infuseDeepLink(
     { kind: "episode", seriesTmdbId: episode.seriesTmdbId, season: episode.seasonNumber, episode: episode.episodeNumber },
     { play: true },

@@ -338,6 +338,8 @@ export interface LibraryDetail {
   communityRating: number | null;
   runtimeTicks: number | null;
   indexNumber: number | null;
+  // Last episode covered when one file holds a consecutive range (S01E01-E02); null for a single episode.
+  indexNumberEnd: number | null;
   parentIndexNumber: number | null;
   posterUrl: string | null;
   backdropUrl: string | null;
@@ -444,6 +446,10 @@ export interface Episode {
   seriesTmdbId: string | null;
   seasonNumber: number | null;
   episodeNumber: number | null;
+  // Last episode covered when this one file holds a consecutive range (a "double episode"): the item is
+  // numbered 1 with `episodeNumberEnd` 2 and there is no separate item for episode 2. Null otherwise.
+  // `title` stays the first episode's — the provider has no combined title for the range.
+  episodeNumberEnd: number | null;
   title: string;
   overview: string | null;
   runtimeTicks: number | null;

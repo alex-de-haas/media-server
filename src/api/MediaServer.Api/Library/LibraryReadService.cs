@@ -190,7 +190,7 @@ public sealed class LibraryReadService(
         {
             if (leaf.Kind == MediaKind.Episode && leaf.SeriesId is { } seriesId && seriesById.TryGetValue(seriesId, out var series))
             {
-                var label = $"S{(leaf.ParentIndexNumber ?? 0):00}E{(leaf.IndexNumber ?? 0):00}";
+                var label = EpisodeLabel(leaf);
                 var episodeTitle = TitleFor(metaByLeaf.GetValueOrDefault(leaf.Id), leaf.Title);
                 result.Add(new LibraryRailItemDto(
                     leaf.Id, "Episode", series.Id, "Series",
@@ -211,6 +211,17 @@ public sealed class LibraryReadService(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// The rail's episode code: "S01E03", or "S01E01-E02" when one file holds a consecutive range. Mirrors
+    /// the range convention the organizer uses for file names (see <c>LibraryNaming.ForEpisode</c>).
+    /// </summary>
+    private static string EpisodeLabel(MediaItem episode)
+    {
+        var number = episode.IndexNumber ?? 0;
+        var episodeToken = episode.IndexNumberEnd is { } end && end > number ? $"E{number:00}-E{end:00}" : $"E{number:00}";
+        return $"S{episode.ParentIndexNumber ?? 0:00}{episodeToken}";
     }
 
     /// <summary>Detail for a single item by internal id. Movies/episodes carry media sources; series carry seasons.</summary>
@@ -284,6 +295,7 @@ public sealed class LibraryReadService(
             meta?.CommunityRating,
             runtimeTicks,
             item.IndexNumber,
+            item.IndexNumberEnd,
             item.ParentIndexNumber,
             ImageUrl(images, ImageType.Primary),
             ImageUrl(images, ImageType.Backdrop),
@@ -394,6 +406,7 @@ public sealed class LibraryReadService(
                 TmdbId(episode),
                 episode.ParentIndexNumber,
                 episode.IndexNumber,
+                episode.IndexNumberEnd,
                 TitleFor(meta, episode.Title),
                 meta?.Overview,
                 meta?.RuntimeTicks,

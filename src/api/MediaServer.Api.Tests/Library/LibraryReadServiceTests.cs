@@ -386,6 +386,34 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Episodes_and_rails_expose_the_range_a_double_episode_file_covers()
+    {
+        // One file holding S01E02-E03: the row keeps IndexNumber 2 and carries the end — there is no row
+        // for episode 3, so without the end the season would read "1, 2" and episode 3 would look missing.
+        await using (var context = _db.Create())
+        {
+            var doubleEpisode = await context.MediaItems.FirstAsync(item => item.Id == _episode2Id);
+            doubleEpisode.IndexNumberEnd = 3;
+            await context.SaveChangesAsync();
+        }
+
+        var episodes = await _library.GetEpisodesAsync(_seriesId, seasonId: null, appUserId: null, CancellationToken.None);
+
+        Assert.Null(episodes[0].EpisodeNumberEnd);  // a single-episode file carries no end
+        Assert.Equal(2, episodes[1].EpisodeNumber);
+        Assert.Equal(3, episodes[1].EpisodeNumberEnd);
+
+        var detail = await _library.GetDetailAsync(_episode2Id, appUserId: null, CancellationToken.None);
+        Assert.Equal(3, detail!.IndexNumberEnd);
+
+        // The Home rails render their own episode code server-side, so it carries the range too.
+        SeedUserData(_episode2Id, position: TimeSpan.FromMinutes(5).Ticks);
+        var resume = await _library.GetResumeAsync(_userId, limit: 10, CancellationToken.None);
+        var rail = Assert.Single(resume, item => item.Kind == "Episode");
+        Assert.StartsWith("S01E02-E03", rail.Subtitle!);
+    }
+
+    [Fact]
     public async Task Detail_and_episodes_expose_the_tmdb_id_for_infuse_deep_links()
     {
         var movie = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);

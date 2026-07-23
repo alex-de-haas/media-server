@@ -31,7 +31,10 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   labelled accordingly. Detail pages (`/movies/[id]`, `/series/[id]`) provide a
   backdrop hero, overview, watched/favorite toggles, and detail tabs. Movie
   detail tabs show Cast, Media (resolution/codec/audio), and Tags. Series detail
-  tabs show Cast, Episodes grouped by season, and Tags. Detail admin controls
+  tabs show Cast, Episodes grouped by season, and Tags; an episode whose file
+  holds a consecutive range is labelled `S01E01-E02` (matching the on-disk name)
+  so the season does not look like it skipped an episode — the title stays the
+  first episode's, as that is all the provider has. Detail admin controls
   support metadata refresh, remap where applicable, and deletion. **Playback is
   not in-browser** — Play deep-links to an Infuse/Jellyfin client.
 - **Downloads** (`/downloads`) — torrent list with live progress, ratio, and
