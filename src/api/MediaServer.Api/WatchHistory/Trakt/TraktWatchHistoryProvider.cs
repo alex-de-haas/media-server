@@ -103,7 +103,13 @@ public sealed class TraktWatchHistoryProvider(
 
         if (episodes.Count > 0)
         {
-            payload["shows"] = episodes.GroupBy(play => play.Identity.TmdbId ?? 0).Select(ShowPayload).ToList();
+            // Composite key: IsResolvable accepts an imdb-only identity, and grouping on TmdbId alone
+            // would collapse every such show into one bucket and post one series' episodes under
+            // another series' ids.
+            payload["shows"] = episodes
+                .GroupBy(play => (play.Identity.TmdbId, play.Identity.ImdbId))
+                .Select(ShowPayload)
+                .ToList();
         }
 
         using var content = JsonContent.Create(payload);
@@ -130,14 +136,11 @@ public sealed class TraktWatchHistoryProvider(
     public async Task<WatchHistoryResult<int>> RemoveEntriesAsync(
         int appUserId, IReadOnlyCollection<string> remoteIds, CancellationToken cancellationToken)
     {
-        var ids = remoteIds
-            .Select(id => long.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : (long?)null)
-            .Where(id => id is not null)
-            .Select(id => id!.Value)
-            .Distinct()
+        var parsed = remoteIds
+            .Select(id => long.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : (long?)null)
             .ToList();
 
-        if (ids.Count != remoteIds.Count)
+        if (parsed.Any(id => id is null))
         {
             // Never fall back to a broader removal because an id looked wrong. Trakt's media-object
             // removal form deletes *every* play of that item, including other clients' and every exact
@@ -146,6 +149,10 @@ public sealed class TraktWatchHistoryProvider(
                 WatchHistoryFailure.ContractViolation,
                 "Refusing to remove history: one or more stored Trakt entry ids are unusable.");
         }
+
+        // De-duplicate only for the payload: the same id twice is a harmless caller quirk, not the
+        // unparseable-id case above.
+        var ids = parsed.Select(id => id!.Value).Distinct().ToList();
 
         if (ids.Count == 0)
         {
@@ -217,11 +224,17 @@ public sealed class TraktWatchHistoryProvider(
             // header we cannot see through this client's abstraction.
             if (count < PageSize)
             {
-                break;
+                return WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Success(plays);
             }
         }
 
-        return WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Success(plays);
+        // Still full pages at the ceiling: the history is longer than we are willing to walk. Failing
+        // is the safe answer — returning a truncated list as success would let reconciliation conclude
+        // that the plays it never saw do not exist, and act on that.
+        logger.LogWarning("Trakt history for one work exceeded {MaxPages} pages; refusing to report a partial result.", MaxPages);
+        return WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Failed(
+            WatchHistoryFailure.ContractViolation,
+            $"Trakt returned more than {MaxPages * PageSize} history entries for a single item.");
     }
 
     private static WatchHistoryPlay? ToPlay(
@@ -273,7 +286,7 @@ public sealed class TraktWatchHistoryProvider(
         ids = Ids(play.Identity),
     };
 
-    private static object ShowPayload(IGrouping<int, WatchHistoryPlay> show) => new
+    private static object ShowPayload(IGrouping<(int? Tmdb, string? Imdb), WatchHistoryPlay> show) => new
     {
         ids = Ids(show.First().Identity),
         seasons = show
@@ -312,11 +325,13 @@ public sealed class TraktWatchHistoryProvider(
                 WatchHistoryFailure.AuthenticationRequired, "This user has no Trakt connection.");
         }
 
+        // Propagate the failure kind rather than flattening it: a refresh that failed because Trakt was
+        // briefly unavailable is retryable, and reporting it as AuthenticationRequired would send the
+        // user to reconnect an account that is still perfectly connected.
         var credentials = await authorization.ReadCredentialsAsync(connection, cancellationToken);
-        return credentials is null
-            ? WatchHistoryResult<string>.Failed(
-                WatchHistoryFailure.AuthenticationRequired, connection.LastError ?? "The Trakt credentials are unavailable.")
-            : WatchHistoryResult<string>.Success(credentials.AccessToken);
+        return credentials.Succeeded
+            ? WatchHistoryResult<string>.Success(credentials.Value!.AccessToken)
+            : WatchHistoryResult<string>.Failed(credentials.Failure!.Value, credentials.Detail, credentials.RetryAfter);
     }
 
     private static int CountNotFound(JsonElement root)

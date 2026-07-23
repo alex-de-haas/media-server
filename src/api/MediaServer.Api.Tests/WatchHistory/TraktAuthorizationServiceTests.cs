@@ -321,7 +321,7 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
         var result = await Service().ReadCredentialsAsync(
             await _database.WatchHistoryConnections.SingleAsync(), CancellationToken.None);
 
-        Assert.Null(result);
+        Assert.Equal(WatchHistoryFailure.AuthenticationRequired, result.Failure);
         var reloaded = await _database.WatchHistoryConnections.AsNoTracking().SingleAsync();
         Assert.Equal(WatchHistoryConnectionStatus.RequiresReconnect, reloaded.Status);
     }
@@ -338,7 +338,7 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
         var fresh = await Service().ReadCredentialsAsync(
             await _database.WatchHistoryConnections.SingleAsync(), CancellationToken.None);
 
-        Assert.Equal("access-2", fresh!.AccessToken);
+        Assert.Equal("access-2", fresh.Value!.AccessToken);
         Assert.Contains("refresh-2", _credentials.Values[connection.SecretKey]);
     }
 
@@ -352,7 +352,7 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
         var result = await Service().ReadCredentialsAsync(
             await _database.WatchHistoryConnections.SingleAsync(), CancellationToken.None);
 
-        Assert.Null(result);
+        Assert.Equal(WatchHistoryFailure.AuthenticationRequired, result.Failure);
         Assert.Equal(
             WatchHistoryConnectionStatus.RequiresReconnect,
             (await _database.WatchHistoryConnections.AsNoTracking().SingleAsync()).Status);
@@ -369,7 +369,10 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
         var result = await Service().ReadCredentialsAsync(
             await _database.WatchHistoryConnections.SingleAsync(), CancellationToken.None);
 
-        Assert.Null(result);
+        // The kind is what matters: a worker retries a Transient failure and gives up on an
+        // AuthenticationRequired one.
+        Assert.Equal(WatchHistoryFailure.Transient, result.Failure);
+        Assert.True(result.IsRetryable);
         Assert.Equal(
             WatchHistoryConnectionStatus.Connected,
             (await _database.WatchHistoryConnections.AsNoTracking().SingleAsync()).Status);

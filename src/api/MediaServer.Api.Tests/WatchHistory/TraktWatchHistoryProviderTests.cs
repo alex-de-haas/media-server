@@ -350,6 +350,60 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
         Assert.Contains("page=2", _handler.Requests[1].Path);
     }
 
+    [Fact]
+    public async Task ImdbOnlyShowsAreNotCollapsedIntoOneSeries()
+    {
+        // IsResolvable accepts an imdb-only identity, so grouping on TmdbId alone would post one
+        // series' episodes under another series' ids.
+        _handler.Enqueue(HttpStatusCode.OK, new { added = new { episodes = 2 } });
+
+        WatchHistoryIdentity ByImdb(string imdb) => new()
+        {
+            Kind = WatchHistoryMediaKind.Episode,
+            ImdbId = imdb,
+            SeasonNumber = 1,
+            EpisodeNumber = 1,
+        };
+
+        await Provider().AddPlaysAsync(
+            _userId,
+            [new WatchHistoryPlay(ByImdb("tt0001"), null), new WatchHistoryPlay(ByImdb("tt0002"), null)],
+            CancellationToken.None);
+
+        var shows = JsonDocument.Parse(_handler.Requests.Single().Body!).RootElement.GetProperty("shows");
+        Assert.Equal(2, shows.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task RepeatingAnIdIsNotMistakenForAnUnusableOne()
+    {
+        // Distinct() used to shrink the count and trip the unparseable-id guard, refusing a perfectly
+        // valid removal.
+        _handler.Enqueue(HttpStatusCode.OK, new { deleted = new { movies = 1 } });
+
+        var result = await Provider().RemoveEntriesAsync(_userId, ["101", "101"], CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("\"ids\":[101]", _handler.Requests.Single().Body);
+    }
+
+    [Fact]
+    public async Task AHistoryLongerThanThePageCeilingFailsInsteadOfTruncating()
+    {
+        // Reporting a partial list as success would let reconciliation conclude that the plays it
+        // never saw do not exist — and act on that.
+        for (var page = 0; page <= 200; page++)
+        {
+            _handler.Enqueue(HttpStatusCode.OK, Enumerable.Range(1, 100)
+                .Select(i => new { id = (long)(page * 100 + i), watched_at = "2026-07-20T10:00:00.000Z" }).ToArray());
+        }
+
+        var result = await Provider().GetHistoryAsync(_userId, [Movie()], CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(WatchHistoryFailure.ContractViolation, result.Failure);
+    }
+
     // ---- Credentials ----
 
     [Fact]
@@ -367,6 +421,26 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
             WatchHistoryFailure.AuthenticationRequired,
             (await provider.RemoveEntriesAsync(_userId, ["1"], CancellationToken.None)).Failure);
         Assert.Empty(_handler.Requests);
+    }
+
+    [Fact]
+    public async Task ATransientRefreshFailureStaysRetryableInsteadOfDemandingReconnect()
+    {
+        // A Trakt outage during refresh must not tell a worker to give up and send the user to
+        // reconnect an account that was never disconnected.
+        var provider = Provider();
+        var connection = await _database.WatchHistoryConnections.SingleAsync();
+        _credentials.Values[connection.SecretKey] = JsonSerializer.Serialize(
+            new TraktCredentials("access-1", "refresh-1", _time.GetUtcNow().AddMinutes(1)));
+        _handler.Enqueue(HttpStatusCode.ServiceUnavailable); // the refresh
+
+        var result = await provider.GetHistoryAsync(_userId, [Movie()], CancellationToken.None);
+
+        Assert.Equal(WatchHistoryFailure.Transient, result.Failure);
+        Assert.True(result.IsRetryable);
+        Assert.Equal(
+            WatchHistoryConnectionStatus.Connected,
+            (await _database.WatchHistoryConnections.AsNoTracking().SingleAsync()).Status);
     }
 
     [Fact]
