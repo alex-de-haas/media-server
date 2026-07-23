@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
@@ -47,12 +48,18 @@ public sealed record WatchHistorySyncEntry(
     int RemotePlayCount);
 
 /// <summary>The read-only comparison the user approves before anything is written.</summary>
+/// <remarks>
+/// There is deliberately no "remote items not in this library" count. Reporting one needs an
+/// account-wide history read, and <see cref="IWatchHistoryProvider.GetHistoryAsync"/> answers only
+/// for the identities it is given — which here come from local items, so such a count could only
+/// ever be zero. Publishing a field that is structurally always zero is worse than not having it;
+/// the plan records the capability this would need.
+/// </remarks>
 public sealed record WatchHistorySyncPreview(
     Guid RunId,
     WatchHistorySyncScope Scope,
     IReadOnlyDictionary<WatchHistorySyncClassification, int> Counts,
     IReadOnlyList<WatchHistorySyncEntry> Sample,
-    int RemoteItemsNotInLibrary,
     bool HasPendingOutboundWork,
     bool HasTerminalOutboundWork,
     bool AggregateCountsMayCollapse);
@@ -136,12 +143,20 @@ public sealed class WatchHistorySyncPreviewService(
             .ToHashSet(StringComparer.Ordinal);
 
         var entries = new List<WatchHistorySyncEntry>(mapped.Count);
-        var matchedRemoteKeys = new HashSet<string>(StringComparer.Ordinal);
+        var collapseRisk = false;
 
         foreach (var (item, identity) in mapped)
         {
             var row = localRows.GetValueOrDefault(item.Id);
-            var localPlays = localHistory.GetValueOrDefault(item.Id, []).Count;
+            var localPlays = localHistory.TryGetValue(item.Id, out var plays) ? plays.Count : 0;
+
+            // The one case that actually loses information: a pre-migration row whose aggregate count
+            // has no per-play rows behind it can export at most one timeless mark, so a count of N
+            // becomes 1. An ordinary unwatched item has nothing to collapse.
+            if (row is { PlayCount: > 1 } && localPlays == 0)
+            {
+                collapseRisk = true;
+            }
 
             if (!identity.Resolved)
             {
@@ -151,8 +166,7 @@ public sealed class WatchHistorySyncPreviewService(
             }
 
             var key = IdentityKey(identity.Identity!);
-            matchedRemoteKeys.Add(key);
-            var remotePlays = remoteByIdentity.GetValueOrDefault(key, []).Count;
+            var remotePlays = remoteByIdentity.TryGetValue(key, out var remote2) ? remote2.Count : 0;
 
             var classification = duplicateIdentities.Contains(key)
                 ? WatchHistorySyncClassification.AmbiguousLocalIdentity
@@ -173,6 +187,7 @@ public sealed class WatchHistorySyncPreviewService(
             .GroupBy(entry => entry.Classification)
             .ToDictionary(group => group.Key, group => group.Count());
 
+        var now = time.GetUtcNow();
         var run = new WatchHistorySyncRun
         {
             Id = Guid.NewGuid(),
@@ -187,8 +202,8 @@ public sealed class WatchHistorySyncPreviewService(
             CapturedRevisions = JsonSerializer.Serialize(
                 localRows.ToDictionary(pair => pair.Key.ToString("N"), pair => pair.Value.StateRevision)),
             HasPendingOutboundWork = outbound.Any(status => status != WatchHistoryOutboxStatus.Terminal),
-            CreatedAt = time.GetUtcNow(),
-            ExpiresAt = time.GetUtcNow().Add(PreviewLifetime),
+            CreatedAt = now,
+            ExpiresAt = now.Add(PreviewLifetime),
         };
         database.WatchHistorySyncRuns.Add(run);
         await database.SaveChangesAsync(cancellationToken);
@@ -202,15 +217,9 @@ public sealed class WatchHistorySyncPreviewService(
             scope,
             counts,
             [.. entries.Where(IsIssue).Take(SampleSize)],
-            // Remote history for identities that are not in the selected library at all. Apply never
-            // creates library items, so these are reported and skipped.
-            remoteByIdentity.Keys.Count(key => !matchedRemoteKeys.Contains(key)),
             run.HasPendingOutboundWork,
             outbound.Contains(WatchHistoryOutboxStatus.Terminal),
-            // A pre-migration row with several plays but no per-play rows can only export one
-            // timeless mark, so its count collapses. The user is warned before, not after.
-            entries.Any(entry => entry.Classification == WatchHistorySyncClassification.LocalUnwatchedWithHistory
-                || (entry.LocalPlayCount == 0 && entry.RemotePlayCount == 0))));
+            collapseRisk));
     }
 
     private static bool IsIssue(WatchHistorySyncEntry entry) =>
@@ -250,24 +259,51 @@ public sealed class WatchHistorySyncPreviewService(
         return await query.ToListAsync(cancellationToken);
     }
 
+    // A whole-library scope can name more items than SQLite will accept parameters for, so id lists
+    // are chunked here as they are elsewhere in the codebase.
+    private const int IdChunkSize = 500;
+
     private async Task<Dictionary<Guid, List<PlaybackHistoryEntry>>> LoadLocalHistoryAsync(
         int appUserId, IEnumerable<Guid> itemIds, CancellationToken cancellationToken)
     {
-        var ids = itemIds.ToList();
-        var entries = await database.PlaybackHistoryEntries.AsNoTracking()
-            .Where(entry => entry.AppUserId == appUserId && ids.Contains(entry.MediaItemId))
-            .ToListAsync(cancellationToken);
+        var byItem = new Dictionary<Guid, List<PlaybackHistoryEntry>>();
+        foreach (var chunk in itemIds.Chunk(IdChunkSize))
+        {
+            var entries = await database.PlaybackHistoryEntries.AsNoTracking()
+                .Where(entry => entry.AppUserId == appUserId && chunk.Contains(entry.MediaItemId))
+                .ToListAsync(cancellationToken);
 
-        return entries.GroupBy(entry => entry.MediaItemId).ToDictionary(group => group.Key, group => group.ToList());
+            foreach (var entry in entries)
+            {
+                if (!byItem.TryGetValue(entry.MediaItemId, out var list))
+                {
+                    byItem[entry.MediaItemId] = list = [];
+                }
+
+                list.Add(entry);
+            }
+        }
+
+        return byItem;
     }
 
     private async Task<Dictionary<Guid, UserItemData>> LoadRowsAsync(
         int appUserId, IEnumerable<Guid> itemIds, CancellationToken cancellationToken)
     {
-        var ids = itemIds.ToList();
-        return await database.UserItemData.AsNoTracking()
-            .Where(row => row.AppUserId == appUserId && ids.Contains(row.MediaItemId))
-            .ToDictionaryAsync(row => row.MediaItemId, cancellationToken);
+        var rows = new Dictionary<Guid, UserItemData>();
+        foreach (var chunk in itemIds.Chunk(IdChunkSize))
+        {
+            var loaded = await database.UserItemData.AsNoTracking()
+                .Where(row => row.AppUserId == appUserId && chunk.Contains(row.MediaItemId))
+                .ToListAsync(cancellationToken);
+
+            foreach (var row in loaded)
+            {
+                rows[row.MediaItemId] = row;
+            }
+        }
+
+        return rows;
     }
 
     /// <summary>
@@ -277,7 +313,9 @@ public sealed class WatchHistorySyncPreviewService(
     private static string IdentityKey(WatchHistoryIdentity identity) => string.Join(
         ':',
         identity.Kind,
-        identity.TmdbId?.ToString() ?? identity.ImdbId ?? "?",
-        identity.SeasonNumber?.ToString() ?? "-",
-        identity.EpisodeNumber?.ToString() ?? "-");
+        // Invariant throughout: under a culture with different digit shapes the same identity would
+        // key differently on two machines, and matching would silently stop working.
+        identity.TmdbId?.ToString(CultureInfo.InvariantCulture) ?? identity.ImdbId ?? "?",
+        identity.SeasonNumber?.ToString(CultureInfo.InvariantCulture) ?? "-",
+        identity.EpisodeNumber?.ToString(CultureInfo.InvariantCulture) ?? "-");
 }

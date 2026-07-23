@@ -234,15 +234,47 @@ public sealed class WatchHistorySyncPreviewServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoteHistoryForItemsNotInTheLibraryIsCountedButNotImported()
+    public async Task RemoteHistoryForItemsNotInTheLibraryIsSimplyIgnored()
     {
-        // Apply never creates library items, so these are reported and skipped.
-        AddMovie("27205");
+        // The preview compares only what the library contains: apply never creates items, and
+        // GetHistoryAsync answers for the identities it is given, so unrelated remote history cannot
+        // change any local item's classification.
+        var movie = AddMovie("27205");
+        MarkWatchedLocally(movie.Id);
         _provider.History.Add(new WatchHistoryPlay(Movie(99999), _time.GetUtcNow(), "1"));
 
         var preview = await PreviewAsync();
 
-        Assert.Equal(1, preview.RemoteItemsNotInLibrary);
+        var entry = Assert.Single(preview.Sample);
+        Assert.Equal(movie.Id, entry.MediaItemId);
+        Assert.Equal(WatchHistorySyncClassification.LocalOnly, entry.Classification);
+        Assert.Equal(0, entry.RemotePlayCount);
+    }
+
+    [Fact]
+    public async Task OnlyALegacyRowWithNoPerPlayHistoryWarnsAboutACollapsingCount()
+    {
+        // A count of N with no per-play rows can export at most one timeless mark, so N becomes 1.
+        var movie = AddMovie("27205");
+        _database.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = movie.Id, Played = true, PlayCount = 4,
+        });
+        await _database.SaveChangesAsync();
+
+        Assert.True((await PreviewAsync()).AggregateCountsMayCollapse);
+    }
+
+    [Fact]
+    public async Task AnOrdinaryLibraryDoesNotWarnAboutCollapsingCounts()
+    {
+        // An unwatched item has no aggregate history to lose; warning here would cry wolf on every
+        // preview and train the user to click through it.
+        var watched = AddMovie("27205");
+        MarkWatchedLocally(watched.Id);
+        AddMovie("1375666", title: "Unwatched");
+
+        Assert.False((await PreviewAsync()).AggregateCountsMayCollapse);
     }
 
     [Fact]
