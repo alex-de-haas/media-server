@@ -345,7 +345,13 @@ The popup first creates a read-only preview. It reports:
 - watched only in Trakt;
 - currently watched only in Media Server;
 - local rows that are currently unwatched but retain historical `PlayCount`;
-- remote items absent from the selected local library;
+- remote items absent from the selected local library — **not implemented, and blocked
+  on a capability that does not exist**: `IWatchHistoryProvider.GetHistoryAsync`
+  answers only for the identities it is given, and those are derived from local
+  items, so this count could structurally only ever be zero. Reporting it needs an
+  account-wide history read (`AggregateWatchedReads`, or a new paginated
+  whole-account read) plus a bound on how much history that may pull. Recorded
+  here rather than shipped as a field that is always zero;
 - missing or ambiguous identities;
 - pending or terminal outbound operations;
 - local rows whose state revision must remain unchanged until application;
