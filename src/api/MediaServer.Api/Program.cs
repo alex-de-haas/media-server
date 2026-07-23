@@ -9,6 +9,7 @@ using HostySdk.App;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.WatchHistory;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Library;
 using MediaServer.Api.Mux;
@@ -134,6 +135,11 @@ builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
+
+// Watched-history providers resolve by stable key, like the metadata providers above. The registry is
+// registered with no adapters yet — Describe() simply returns an empty list, which Settings renders as
+// "no providers", so the surface is inert rather than broken until the Trakt adapter lands.
+builder.Services.AddSingleton<IWatchHistoryProviderRegistry, WatchHistoryProviderRegistry>();
 builder.Services.AddSingleton<IReleaseScheduleProvider, TmdbReleaseScheduleProvider>();
 
 // Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
