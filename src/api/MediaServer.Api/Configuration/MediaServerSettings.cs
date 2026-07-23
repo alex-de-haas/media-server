@@ -10,6 +10,20 @@ public sealed class MediaServerSettings
     /// <summary>TMDb API key (manifest <c>TMDB_API_KEY</c>, secret).</summary>
     public string? TmdbApiKey { get; init; }
 
+    /// <summary>Client ID of this instance's Trakt application; blank leaves the integration off.</summary>
+    public string? TraktClientId { get; init; }
+
+    /// <summary>Client secret of the same application.</summary>
+    public string? TraktClientSecret { get; init; }
+
+    /// <summary>
+    /// True only when both halves are present. Either one alone cannot complete an OAuth exchange, so
+    /// a half-configured instance must present as unconfigured rather than let a user start a device
+    /// flow that can only fail at the last step.
+    /// </summary>
+    public bool IsTraktConfigured =>
+        !string.IsNullOrWhiteSpace(TraktClientId) && !string.IsNullOrWhiteSpace(TraktClientSecret);
+
     /// <summary>Ordered supported languages; the first entry is the fallback (e.g. <c>en-US</c>).</summary>
     public IReadOnlyList<string> SupportedLanguages { get; init; } = ["en-US"];
 
@@ -97,6 +111,8 @@ public sealed class MediaServerSettings
         return new MediaServerSettings
         {
             TmdbApiKey = Read("TMDB_API_KEY"),
+            TraktClientId = Read("TRAKT_CLIENT_ID"),
+            TraktClientSecret = Read("TRAKT_CLIENT_SECRET"),
             SupportedLanguages = languages.Length > 0 ? languages : ["en-US"],
             WatchRegion = watchRegion,
             JellyfinServerName = Read("JELLYFIN_SERVER_NAME") ?? "Media Server",
