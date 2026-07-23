@@ -184,6 +184,28 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ARejectedApplicationKeyStillMovesThePollGate()
+    {
+        // The UI stops on an error, but nothing forces a caller to. Without a fresh NextPollAt an
+        // immediate retry would pass the local gate and hit Trakt on every call, with no backoff.
+        EnqueueDeviceCode();
+        _handler.Enqueue(HttpStatusCode.Forbidden);
+
+        var service = Service();
+        await service.StartAsync(_userId, CancellationToken.None);
+        _time.Advance(TimeSpan.FromSeconds(6));
+        var failed = await service.PollAsync(_userId, CancellationToken.None);
+        var retried = await service.PollAsync(_userId, CancellationToken.None);
+
+        Assert.False(failed.Succeeded);
+        // The immediate retry is answered locally as "wait" -- Trakt saw only the code request and
+        // the one poll.
+        Assert.True(retried.Succeeded);
+        Assert.Equal(WatchHistoryAuthorizationState.Pending, retried.Value!.State);
+        Assert.Equal(2, _handler.Paths.Count);
+    }
+
+    [Fact]
     public async Task WithoutOperatorConfiguration_TheProviderReportsUnconfiguredAndStartsNothing()
     {
         // Either half alone cannot complete the exchange, so a user must not be sent through a device
