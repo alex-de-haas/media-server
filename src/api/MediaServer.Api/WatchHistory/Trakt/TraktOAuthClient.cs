@@ -286,19 +286,22 @@ public sealed class TraktOAuthClient(
                 return WatchHistoryResult<JsonDocument>.Failed(failure, $"Trakt returned HTTP {(int)response.StatusCode}.");
             }
 
-            // 204 and an empty body are legitimate for the mutation endpoints.
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            if (stream.CanSeek && stream.Length == 0)
+            // 204 and an empty body are legitimate for the mutation endpoints. Decide that from the
+            // status and content length rather than the stream: HTTP content streams are usually not
+            // seekable, so probing Length would misread a real 204 and report a contract violation.
+            if (response.StatusCode == HttpStatusCode.NoContent || response.Content.Headers.ContentLength == 0)
             {
                 return WatchHistoryResult<JsonDocument>.Success(JsonDocument.Parse("null"));
             }
 
             try
             {
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 return WatchHistoryResult<JsonDocument>.Success(await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken));
             }
             catch (JsonException)
             {
+                // Also covers a body-less 200 with no content-length header: nothing to parse.
                 return WatchHistoryResult<JsonDocument>.Failed(
                     WatchHistoryFailure.ContractViolation, "Trakt returned a body that could not be parsed.");
             }

@@ -28,7 +28,11 @@ public sealed class TraktAuthorizationService(
 
     public bool IsConfigured => settings.IsTraktConfigured;
 
-    /// <summary>Secrets-store key holding one connection's tokens. Derived, never stored.</summary>
+    /// <summary>
+    /// Secrets-store key holding one connection's tokens. Derived from the connection id when the
+    /// connection is created, then persisted on the row — unlike the authorization key, which is
+    /// recomputed on demand so cleanup never needs to read the row first.
+    /// </summary>
     internal static string ConnectionSecretKey(Guid connectionId) => $"{ProviderKeyValue}.connection.{connectionId:N}.tokens";
 
     public async Task<WatchHistoryResult<WatchHistoryAuthorizationPrompt>> StartAsync(int appUserId, CancellationToken cancellationToken)
@@ -227,15 +231,10 @@ public sealed class TraktAuthorizationService(
         int appUserId, WatchHistoryProviderAuthorization attempt, string attemptSecretKey,
         TraktCredentials tokens, CancellationToken cancellationToken)
     {
-        var account = await oauth.GetAccountAsync(tokens.AccessToken, cancellationToken);
-        if (!account.Succeeded)
-        {
-            // We hold usable tokens but cannot name the account. Keep the attempt open rather than
-            // storing a connection we cannot describe; the next poll retries.
-            return WatchHistoryResult<WatchHistoryAuthorizationOutcome>.Failed(
-                account.Failure!.Value, account.Detail, account.RetryAfter);
-        }
-
+        // The device code is spent the moment Trakt returns tokens: polling again earns a 409, which
+        // reads as "denied". So the tokens must be persisted before anything else is attempted —
+        // discarding them because a *later* call failed would tell a user who did approve that they
+        // did not, and make them start over.
         var now = time.GetUtcNow();
         var connection = await database.WatchHistoryConnections
             .FirstOrDefaultAsync(entry => entry.AppUserId == appUserId && entry.ProviderKey == ProviderKeyValue, cancellationToken);
@@ -253,8 +252,6 @@ public sealed class TraktAuthorizationService(
             database.WatchHistoryConnections.Add(connection);
         }
 
-        connection.ProviderAccountId = account.Value!.Id;
-        connection.ProviderAccountName = account.Value.Username;
         connection.Status = WatchHistoryConnectionStatus.Connected;
         connection.CredentialExpiresAt = tokens.ExpiresAt;
         connection.LastError = null;
@@ -266,7 +263,25 @@ public sealed class TraktAuthorizationService(
         database.WatchHistoryAuthorizations.Remove(attempt);
         await database.SaveChangesAsync(cancellationToken);
 
-        return Outcome(WatchHistoryAuthorizationState.Approved, account.Value.Id, account.Value.Username);
+        // The display name is cosmetic, so it must not gate the connection. If Trakt is briefly
+        // unavailable the account stays unnamed until something asks again — a connection that works
+        // but is unlabelled beats one the user has to re-authorize.
+        var account = await oauth.GetAccountAsync(tokens.AccessToken, cancellationToken);
+        if (account.Succeeded)
+        {
+            connection.ProviderAccountId = account.Value!.Id;
+            connection.ProviderAccountName = account.Value.Username;
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            logger.LogInformation("Connected to Trakt, but its account name could not be read yet.");
+        }
+
+        return Outcome(
+            WatchHistoryAuthorizationState.Approved,
+            connection.ProviderAccountId,
+            connection.ProviderAccountName);
     }
 
     private async Task StoreCredentialsAsync(

@@ -413,6 +413,29 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
         Assert.Empty(_credentials.Values);
     }
 
+    [Fact]
+    public async Task AFailedAccountLookupStillKeepsTheConnection()
+    {
+        // The device code is spent once Trakt returns tokens: discarding them because the *next* call
+        // failed would tell a user who did approve that they did not, and the retry would hit 409 →
+        // "denied". The account name is cosmetic and can arrive later.
+        EnqueueDeviceCode();
+        await Service().StartAsync(_userId, CancellationToken.None);
+        EnqueueTokens();
+        _handler.Enqueue(HttpStatusCode.ServiceUnavailable); // users/settings
+        _time.Advance(TimeSpan.FromSeconds(10));
+
+        var result = await Service().PollAsync(_userId, CancellationToken.None);
+
+        Assert.Equal(WatchHistoryAuthorizationState.Approved, result.Value!.State);
+        var connection = await _database.WatchHistoryConnections.AsNoTracking().SingleAsync();
+        Assert.Equal(WatchHistoryConnectionStatus.Connected, connection.Status);
+        Assert.Null(connection.ProviderAccountName);
+        // The tokens — the thing that cannot be re-obtained — were kept.
+        Assert.Contains("access-1", _credentials.Values[connection.SecretKey]);
+        Assert.Empty(_database.WatchHistoryAuthorizations);
+    }
+
     private async Task<WatchHistoryProviderConnection> ConnectAsync()
     {
         EnqueueDeviceCode();
@@ -422,6 +445,170 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
         _time.Advance(TimeSpan.FromSeconds(10));
         await Service().PollAsync(_userId, CancellationToken.None);
         return await _database.WatchHistoryConnections.AsNoTracking().SingleAsync();
+    }
+
+    public void Dispose()
+    {
+        _database.Dispose();
+        _connection.Dispose();
+    }
+}
+
+public sealed class WatchHistoryAuthorizationCleanupServiceTests : IDisposable
+{
+    private readonly SqliteConnection _connection;
+    private readonly MediaServerDbContext _database;
+    private readonly TestTimeProvider _time = new(DateTimeOffset.Parse("2026-07-23T12:00:00Z"));
+    private readonly StubStore _credentials = new();
+    private readonly int _userId;
+
+    public WatchHistoryAuthorizationCleanupServiceTests()
+    {
+        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection.Open();
+        _database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        _database.Database.Migrate();
+
+        var user = new AppUser
+        {
+            HostUserId = "host-1",
+            Email = "alex@example.com",
+            DisplayName = "Alex",
+            Role = AppUserRole.User,
+            CreatedAt = _time.GetUtcNow(),
+            LastSeenAt = _time.GetUtcNow(),
+        };
+        _database.AppUsers.Add(user);
+        _database.SaveChanges();
+        _userId = user.Id;
+    }
+
+    private sealed class StubStore : IWatchHistoryCredentialStore
+    {
+        public Dictionary<string, string> Values { get; } = new(StringComparer.Ordinal);
+
+        public bool ListFails { get; set; }
+
+        public Task<string?> GetAsync(string key, CancellationToken cancellationToken) =>
+            Task.FromResult(Values.GetValueOrDefault(key));
+
+        public Task SetAsync(string key, string value, CancellationToken cancellationToken)
+        {
+            Values[key] = value;
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(string key, CancellationToken cancellationToken)
+        {
+            Values.Remove(key);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<string>> ListKeysAsync(CancellationToken cancellationToken) =>
+            ListFails
+                ? throw new WatchHistoryCredentialStoreException("store offline")
+                : Task.FromResult<IReadOnlyList<string>>([.. Values.Keys]);
+    }
+
+    private WatchHistoryAuthorizationCleanupService Service() =>
+        new(_database, _credentials, _time, NullLogger<WatchHistoryAuthorizationCleanupService>.Instance);
+
+    private Guid SeedAttempt(TimeSpan expiresIn)
+    {
+        var attempt = new WatchHistoryProviderAuthorization
+        {
+            Id = Guid.NewGuid(),
+            AppUserId = _userId,
+            ProviderKey = "trakt",
+            UserCode = "CODE",
+            VerificationUrl = "https://trakt.tv/activate",
+            CreatedAt = _time.GetUtcNow(),
+            ExpiresAt = _time.GetUtcNow().Add(expiresIn),
+            PollIntervalSeconds = 5,
+            NextPollAt = _time.GetUtcNow(),
+            Status = WatchHistoryAuthorizationStatus.Pending,
+        };
+        _database.WatchHistoryAuthorizations.Add(attempt);
+        _database.SaveChanges();
+        _credentials.Values[WatchHistoryProviderAuthorization.SecretKeyFor("trakt", attempt.Id)] = "device-code";
+        return attempt.Id;
+    }
+
+    [Fact]
+    public async Task AnAbandonedAttemptAndItsDeviceCodeAreRemovedOnceExpired()
+    {
+        // Nothing else would ever collect these: the user closed the page and will never poll again.
+        SeedAttempt(TimeSpan.FromMinutes(10));
+        _time.Advance(TimeSpan.FromMinutes(11));
+
+        var result = await Service().CleanupAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.AttemptsRemoved);
+        Assert.Empty(_database.WatchHistoryAuthorizations);
+        Assert.Empty(_credentials.Values);
+    }
+
+    [Fact]
+    public async Task AnAttemptStillInFlightIsLeftAlone()
+    {
+        SeedAttempt(TimeSpan.FromMinutes(10));
+
+        var result = await Service().CleanupAsync(CancellationToken.None);
+
+        Assert.Equal(0, result.AttemptsRemoved);
+        Assert.Single(_database.WatchHistoryAuthorizations);
+        Assert.Single(_credentials.Values);
+    }
+
+    [Fact]
+    public async Task ASecretLeftBehindByACrashIsCollected()
+    {
+        // The secret and its row are deleted in two steps; an interruption between them strands one.
+        _credentials.Values["trakt.authorization.deadbeefdeadbeefdeadbeefdeadbeef.device"] = "orphan";
+
+        var result = await Service().CleanupAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.OrphanedSecretsRemoved);
+        Assert.Empty(_credentials.Values);
+    }
+
+    [Fact]
+    public async Task ALiveAttemptsSecretIsNotMistakenForAnOrphan()
+    {
+        SeedAttempt(TimeSpan.FromMinutes(10));
+
+        var result = await Service().CleanupAsync(CancellationToken.None);
+
+        Assert.Equal(0, result.OrphanedSecretsRemoved);
+        Assert.Single(_credentials.Values);
+    }
+
+    [Fact]
+    public async Task ConnectionCredentialsAreNeverTouched()
+    {
+        // Only authorization secrets are in scope; deleting a connection's tokens here would log a
+        // user out of Trakt for no reason.
+        _credentials.Values["trakt.connection.abcdef.tokens"] = "live-tokens";
+
+        var result = await Service().CleanupAsync(CancellationToken.None);
+
+        Assert.Equal(0, result.OrphanedSecretsRemoved);
+        Assert.Single(_credentials.Values);
+    }
+
+    [Fact]
+    public async Task AnUnavailableStoreSkipsOrphanCleanupRatherThanGuessing()
+    {
+        // Without a listing we cannot tell an orphan from a live credential, and guessing wrong logs
+        // someone out of their provider.
+        _credentials.ListFails = true;
+        SeedAttempt(TimeSpan.FromMinutes(10));
+        _time.Advance(TimeSpan.FromMinutes(11));
+
+        var result = await Service().CleanupAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.AttemptsRemoved);
+        Assert.Equal(0, result.OrphanedSecretsRemoved);
     }
 
     public void Dispose()

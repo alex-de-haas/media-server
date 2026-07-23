@@ -26,7 +26,7 @@ public sealed record CoreDirectoryUser(string Id, string? DisplayName, string? E
 
 /// <summary>
 /// Raised when Core's secrets store could not be reached or refused a request. A *missing* secret is
-/// not this — that is a null from <see cref="IHostyCoreClient.GetSecretAsync"/>.
+/// not this — that is a null from <see cref="IHostyCoreSecrets.GetSecretAsync"/>.
 /// </summary>
 public sealed class CoreSecretsUnavailableException : Exception
 {

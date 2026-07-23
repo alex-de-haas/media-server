@@ -153,6 +153,10 @@ builder.Services.AddScoped<TraktOAuthClient>();
 builder.Services.AddScoped<TraktAuthorizationService>();
 builder.Services.AddScoped<IWatchHistoryProviderAuthorization>(provider =>
     provider.GetRequiredService<TraktAuthorizationService>());
+// An abandoned device flow is never polled again, so nothing else would remove its row or its stored
+// device code.
+builder.Services.AddScoped<WatchHistoryAuthorizationCleanupService>();
+builder.Services.AddHostedService<WatchHistoryAuthorizationCleanupWorker>();
 builder.Services.AddSingleton<IReleaseScheduleProvider, TmdbReleaseScheduleProvider>();
 
 // Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
