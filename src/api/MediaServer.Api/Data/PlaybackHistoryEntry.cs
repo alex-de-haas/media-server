@@ -42,8 +42,17 @@ public sealed class PlaybackHistoryEntry
     /// </summary>
     public string? IdentitySnapshot { get; set; }
 
-    /// <summary>Provider this entry is linked to, when it is. One link per entry in v1.</summary>
-    public string? ProviderKey { get; set; }
+    /// <summary>
+    /// Provider this entry is linked to, when it is. One link per entry in v1. Stored canonically, so
+    /// resolving a remote id back to its local entry cannot miss rows on casing.
+    /// </summary>
+    public string? ProviderKey
+    {
+        get => providerKey;
+        set => providerKey = WatchHistoryProviderKey.Normalize(value);
+    }
+
+    private string? providerKey;
 
     /// <summary>The provider's own id for the corresponding remote entry, once resolved.</summary>
     public string? ProviderHistoryId { get; set; }

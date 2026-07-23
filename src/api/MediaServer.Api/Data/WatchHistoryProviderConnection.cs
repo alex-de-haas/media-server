@@ -16,8 +16,18 @@ public sealed class WatchHistoryProviderConnection
 
     public int AppUserId { get; set; }
 
-    /// <summary>Stable provider key (e.g. <c>trakt</c>), matching the registry.</summary>
-    public string ProviderKey { get; set; } = string.Empty;
+    /// <summary>
+    /// Stable provider key (e.g. <c>trakt</c>), matching the registry. Stored canonically — see
+    /// <see cref="WatchHistoryProviderKey"/> — because the unique index below is case-sensitive while
+    /// the registry is not.
+    /// </summary>
+    public string ProviderKey
+    {
+        get => providerKey;
+        set => providerKey = WatchHistoryProviderKey.NormalizeRequired(value);
+    }
+
+    private string providerKey = string.Empty;
 
     /// <summary>The provider's own account id, for display and for detecting a switched account.</summary>
     public string? ProviderAccountId { get; set; }

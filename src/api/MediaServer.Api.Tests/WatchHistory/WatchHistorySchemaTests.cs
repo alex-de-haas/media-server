@@ -144,6 +144,56 @@ public sealed class WatchHistorySchemaTests : IDisposable
     }
 
     [Fact]
+    public void ProviderKeysAreStoredCanonically()
+    {
+        // The unique index below is case-sensitive in SQLite while the registry resolves keys without
+        // regard to case; storing the raw string would let the two disagree about identity.
+        var connection = Connection("  TRAKT  ");
+        _database.WatchHistoryConnections.Add(connection);
+        _database.SaveChanges();
+
+        Assert.Equal("trakt", _database.WatchHistoryConnections.AsNoTracking().Single().ProviderKey);
+    }
+
+    [Fact]
+    public void ACasingVariantIsTheSameConnection()
+    {
+        // Otherwise one user could hold two connections to a single account, and Settings would show
+        // whichever the query happened to match.
+        _database.WatchHistoryConnections.Add(Connection("trakt"));
+        _database.SaveChanges();
+
+        _database.WatchHistoryConnections.Add(Connection("Trakt"));
+
+        Assert.Throws<DbUpdateException>(() => _database.SaveChanges());
+    }
+
+    [Fact]
+    public void AHistoryEntrysProviderLinkIsStoredCanonically()
+    {
+        var entry = Entry("session-1", DateTimeOffset.UnixEpoch);
+        entry.ProviderKey = "Trakt";
+        entry.ProviderHistoryId = "9001";
+        _database.PlaybackHistoryEntries.Add(entry);
+        _database.SaveChanges();
+
+        Assert.Equal("trakt", _database.PlaybackHistoryEntries.AsNoTracking().Single().ProviderKey);
+    }
+
+    [Fact]
+    public void AnUnlinkedHistoryEntryKeepsANullProviderKey()
+    {
+        // Blank must collapse to null rather than to an empty string, or the provider index would
+        // carry rows that are not linked to anything.
+        var entry = Entry("session-1");
+        entry.ProviderKey = "   ";
+        _database.PlaybackHistoryEntries.Add(entry);
+        _database.SaveChanges();
+
+        Assert.Null(_database.PlaybackHistoryEntries.AsNoTracking().Single().ProviderKey);
+    }
+
+    [Fact]
     public void OutboxEventsAreUniquePerIdempotencyKey()
     {
         // Trakt does not deduplicate history by item and timestamp, so a duplicate enqueue would show

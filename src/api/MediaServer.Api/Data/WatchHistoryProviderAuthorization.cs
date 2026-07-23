@@ -16,7 +16,14 @@ public sealed class WatchHistoryProviderAuthorization
 
     public int AppUserId { get; set; }
 
-    public string ProviderKey { get; set; } = string.Empty;
+    /// <summary>Stable provider key, stored canonically so the uniqueness below matches the registry.</summary>
+    public string ProviderKey
+    {
+        get => providerKey;
+        set => providerKey = WatchHistoryProviderKey.NormalizeRequired(value);
+    }
+
+    private string providerKey = string.Empty;
 
     /// <summary>Short code the user types on the provider's site. Safe to display and to log.</summary>
     public string UserCode { get; set; } = string.Empty;
