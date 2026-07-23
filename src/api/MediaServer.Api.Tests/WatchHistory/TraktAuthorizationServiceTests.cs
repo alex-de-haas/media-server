@@ -49,11 +49,14 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
 
         public List<string> Paths { get; } = [];
 
+        public List<string?> UserAgents { get; } = [];
+
         public void Enqueue(HttpStatusCode status, object? body = null) => _responses.Enqueue((status, body));
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Paths.Add(request.RequestUri!.AbsolutePath);
+            UserAgents.Add(request.Headers.UserAgent.Count > 0 ? request.Headers.UserAgent.ToString() : null);
             var (status, body) = _responses.Count > 0 ? _responses.Dequeue() : (HttpStatusCode.InternalServerError, null);
             var response = new HttpResponseMessage(status);
             if (body is not null)
@@ -139,6 +142,68 @@ public sealed class TraktAuthorizationServiceTests : IDisposable
     {
         user = new { username = "alex", ids = new { slug = "alex-slug" } },
     });
+
+    [Fact]
+    public async Task EveryTraktRequestCarriesAUserAgent()
+    {
+        // api.trakt.tv sits behind Cloudflare, which answers 403 to any request without a User-Agent
+        // -- and HttpClient sends none by default. Verified live: the same application key passes
+        // with any UA and fails without one, so a missing header here breaks every Trakt call.
+        EnqueueDeviceCode();
+        _handler.Enqueue(HttpStatusCode.BadRequest); // poll: still pending
+
+        var service = Service();
+        await service.StartAsync(_userId, CancellationToken.None);
+        _time.Advance(TimeSpan.FromSeconds(6));
+        await service.PollAsync(_userId, CancellationToken.None);
+
+        Assert.Equal(2, _handler.UserAgents.Count);
+        Assert.All(_handler.UserAgents, agent => Assert.False(string.IsNullOrWhiteSpace(agent)));
+    }
+
+    [Fact]
+    public async Task ARejectedApplicationKeyDuringPollIsAnErrorNotPending()
+    {
+        // 401/403 on the token poll means Trakt rejected this instance's client id or secret. Waiting
+        // cannot fix operator configuration, so filing it under "keep polling" would spin the connect
+        // dialog forever with no hint that anything is wrong.
+        EnqueueDeviceCode();
+        _handler.Enqueue(HttpStatusCode.Forbidden);
+
+        var service = Service();
+        await service.StartAsync(_userId, CancellationToken.None);
+        _time.Advance(TimeSpan.FromSeconds(6));
+        var result = await service.PollAsync(_userId, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(WatchHistoryFailure.Unsupported, result.Failure);
+        Assert.Contains("client ID and client secret", result.Detail, StringComparison.Ordinal);
+        // The attempt survives: fixing the settings and connecting again replaces it anyway, and
+        // deleting it here would turn a configuration problem into "no authorization in progress".
+        Assert.Single(_database.WatchHistoryAuthorizations);
+    }
+
+    [Fact]
+    public async Task ARejectedApplicationKeyStillMovesThePollGate()
+    {
+        // The UI stops on an error, but nothing forces a caller to. Without a fresh NextPollAt an
+        // immediate retry would pass the local gate and hit Trakt on every call, with no backoff.
+        EnqueueDeviceCode();
+        _handler.Enqueue(HttpStatusCode.Forbidden);
+
+        var service = Service();
+        await service.StartAsync(_userId, CancellationToken.None);
+        _time.Advance(TimeSpan.FromSeconds(6));
+        var failed = await service.PollAsync(_userId, CancellationToken.None);
+        var retried = await service.PollAsync(_userId, CancellationToken.None);
+
+        Assert.False(failed.Succeeded);
+        // The immediate retry is answered locally as "wait" -- Trakt saw only the code request and
+        // the one poll.
+        Assert.True(retried.Succeeded);
+        Assert.Equal(WatchHistoryAuthorizationState.Pending, retried.Value!.State);
+        Assert.Equal(2, _handler.Paths.Count);
+    }
 
     [Fact]
     public async Task WithoutOperatorConfiguration_TheProviderReportsUnconfiguredAndStartsNothing()
