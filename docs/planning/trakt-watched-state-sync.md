@@ -11,11 +11,10 @@ provider. Media Server remains offline-first and keeps its current local playbac
 state, while an explicit user-driven sync makes watched movies and episodes
 portable through Trakt.
 
-The preliminary phase determines whether Infuse exposes a reliable distinction
-between actual completion and a manual watched mark. If it does,
-`PlaybackHistoryEntry` and exact per-play synchronization are mandatory parts of
-this feature, not deferred follow-up work. If it does not, the plan remains `Draft`
-until the user approves a different history model or reduced behavior.
+The preliminary phase asked whether Infuse exposes a reliable distinction between
+actual completion and a manual watched mark. **It does** (observed 2026-07-22, see
+the observation results), so `PlaybackHistoryEntry` and exact per-play
+synchronization are mandatory parts of this feature rather than deferred work.
 
 ## Scope
 
@@ -29,7 +28,7 @@ until the user approves a different history model or reduced behavior.
 - A Settings section named **Watch history providers**, placed near Infuse Access.
 - An explicit **Sync with Trakt** action with a preview popup and catalog/media-kind
   scope selection.
-- Full-history two-way reconciliation after successful Phase 0 validation: Trakt
+- Full-history two-way reconciliation: Trakt
   history replaces safely matched local history, while reliable local exact plays
   and one timeless legacy/manual mark missing from Trakt are added first.
 - No periodic or automatic Trakt-to-local synchronization.
@@ -43,11 +42,9 @@ until the user approves a different history model or reduced behavior.
 - Movie, episode, season/series bulk, and multi-episode-file mapping through
   existing TMDb identities plus canonical season and episode numbers.
 - Explicit handling of missing and non-unique identities.
-- A preliminary Infuse/Jellyfin observation phase before choosing the exact
-  playback-completion timestamp contract.
-- Conditional implementation of `PlaybackHistoryEntry`: when the observation
-  confirms a reliable completion signal, store every local and imported Trakt play
-  as an exact or timeless history entry and make Sync use full Trakt history.
+- `PlaybackHistoryEntry`: store every local and imported Trakt play as an exact or
+  timeless history entry, and make Sync use full Trakt history. The observation
+  phase that gated this is complete.
 - Backend xUnit tests using Imposter where dependencies are mocked, SQLite
   integration tests, frontend tests, and live contract verification with a
   dedicated Trakt test account.
@@ -106,9 +103,9 @@ until the user approves a different history model or reduced behavior.
   session and ignores later ones. A session that never reports below the
   threshold (the client resumed into the final stretch) marks the item watched
   without counting a viewing.
-- Jellyfin `PlayedItems` accepts optional `DatePlayed`; Media Server currently uses
-  it as `LastPlayedDate`, but it does not establish why the client changed the
-  state.
+- Jellyfin `PlayedItems` accepts optional `DatePlayed`; Media Server uses it as
+  `LastPlayedDate` when present. Infuse never sends it (zero of 635 observed
+  records), so it plays no part in this feature.
 - Route-level request logging (`requests.log`: method, path, query, status,
   duration) is written in Development **and** whenever the operator enables the
   `PLAYBACK_DIAGNOSTICS` setting. It carries no JSON playback-body fields.
@@ -218,102 +215,119 @@ never leave a live refresh token in the store with nothing in SQLite pointing at
 it. Disconnect never deletes local playback state. User-directory reconciliation
 applies the same cleanup when a user becomes unassigned or disabled.
 
-### Preliminary Infuse/Jellyfin Observation
+### Infuse/Jellyfin Observation — Results
 
-The route-level classification hypothesis is defined before observation:
+Phase 0 ran on 2026-07-22 against a live install (`docker` runtime, Infuse on
+Apple TV) and produced **635 diagnostic records over 14 playback sessions**. The
+hypothesis below was stated before observing, then confirmed or corrected against
+the trace. Every claim in this section is an observation, not a prediction.
 
-- `Sessions/Playing*` represents real playback and is the only source of an exact
-  local completion;
-- the first observed crossing from below 90% to at least 90% in one playback
-  session creates one exact play, even when the user reached it by seeking;
-- a first report already at or above 90% is not a crossing and creates no exact
-  play;
-- one session can increment `PlayCount` and create an outbox event at most once,
-  even after rewinding below 90% and crossing again;
-- a PlayedItems POST outside an active/recent matching playback session is a manual
-  watched action and creates a timeless mark;
-- a PlayedItems POST for the same item inside the active/recent session correlation
-  window is a duplicate completion signal and creates neither a timeless mark nor
-  a second exact play;
-- PlayedItems DELETE is an explicit manual unwatch.
+The diagnostics are gated on the operator setting `PLAYBACK_DIAGNOSTICS`, not on
+the ASP.NET environment. The original design assumed a Development-only log, which
+did not survive contact with how the app is run: the shipped runtime is `docker`,
+which is never Development, so the matrix could not have been captured at all —
+confirmed when a manual watched/unwatch through Infuse left the database changed
+and `requests.log` untouched. The setting should be turned off once observation is
+finished; it also enables the route log, which records every request including
+streaming.
 
-Phase 0 confirms or refutes this concrete hypothesis; it does not search for an
-undefined signal. The diagnostics record Infuse's Jellyfin calls without changing
-playback behavior.
+#### Confirmed
 
-They are gated on the operator setting `PLAYBACK_DIAGNOSTICS`, not on the ASP.NET
-environment. The original design assumed a Development-only log, which does not
-survive contact with how the app is actually run: the shipped runtime is `docker`,
-which is never Development, so the observation matrix could not be captured on a
-real install — confirmed on 2026-07-22, when a manual watched/unwatch through
-Infuse left the local database changed and `requests.log` untouched. An operator
-toggle works in every runtime profile and can be turned off again afterwards.
+**The client session id is reliable.** All **631** playback reports carried a
+`PlaySessionId`, echoed from our `PlaybackInfo` response and stable across
+`Playing`, `Progress` and `Stopped` within a session. This is the load-bearing
+result: the primary key works, so **the server-derived fallback session, its
+inactivity window, and the window-duration measurement are all removed from this
+plan**. A report without a session id keeps the historical aggregate rule rather
+than being correlated by guesswork.
+
+**A manual mark is trivially distinguishable from playback.** All 4 observed
+`PlayedItems` requests carried **no** session id, and no `PlayedItems` POST ever
+followed a natural completion — Infuse marks watched by the progress stream alone.
+**The active/recent correlation window is therefore removed**: route plus the
+presence of a session id separates the two cases exactly, with no timing heuristic.
+
+**`DatePlayed` is never supplied.** Zero of 635 records carried it. **Its handling
+is removed from the plan**; the field stays a diagnostic curiosity, and server UTC
+at the crossing is the only completion timestamp.
+
+**A Progress crossing survives a missing `Stopped`.** A session killed mid-playback
+after crossing 90% kept its completion, with no `Stopped` ever arriving. Requiring
+`Stopped` would have lost the play.
+
+**Auto-advance closes and opens sessions in a stable order.** At episode end the
+outgoing session's `Stopped` (fraction 1.0) and the next episode's `Playing` arrive
+in the same second, in that order, with distinct session ids. No special handling
+is needed.
+
+**A rewatch is detectable.** Watching an item again from the start clears `Played`
+at the minimum-resume threshold and the next crossing counts normally. Merely
+reopening an already-watched item and seeking near the end does *not* count a
+second play, because `Played` is still true — the asymmetry that decides when a
+rewatch is exported.
+
+#### Corrected — a bug the observation found
+
+The hypothesis said one session could increment `PlayCount` at most once. **It could
+not.** One continuous session took an episode from 0 to 3 plays: crossing 90% counts
+a play, rewinding below clears `Played` (correctly — it is a genuine resume point),
+and the next crossing looks like a fresh completion. Any rewind near the end
+inflated the count, and it would have exported three watch events to Trakt for one
+viewing.
+
+Fixed before this plan proceeds (media-server 0.21.2): a `PlaybackSession` row keyed
+on the client session id counts the first crossing per session and ignores later
+ones. Verified on the multi-episode run — one crossing counted, the following 19
+reports did not. **The plan's session gate is therefore partly built already** as
+`PlaybackSession`; see the Data Model section for what remains.
+
+#### Ruled out as unreachable
+
+A first report already at or above 90% cannot normally happen. Crossing the
+threshold clears the resume point, and Infuse resumes from the *server's* position
+(observed twice), so a stored resume above 90% cannot exist. The rule that such a
+report marks watched without counting a play is implemented anyway, because one
+path still produces it: an item whose runtime was unknown when its position was
+stored. It is guarded by tests rather than by observation.
+
+#### Multi-episode files
+
+Observed with a real `S01E01-E02` file. Infuse reports **the combined item's own
+id** — there is no per-episode identity to report, and Infuse ignores
+`IndexNumberEnd` for display too. The reported `runtime` is the **whole file**, so
+the 90% mark falls roughly 80% into the second episode: watching only the first
+episode records nothing at all, and one completion covers both.
+
+Splitting such files at ingest was considered and **declined** (2026-07-22): the
+only reliable automatic split point would come from black-frame/silence detection,
+which needs a full decode pass, and the one affected series here has no credits or
+intro between the episodes for it to find. Outbound export therefore expands the
+local inclusive range into one Trakt event per episode, both carrying the same
+completion timestamp — the best available answer, and the plan states the limit
+rather than implying per-episode precision.
+
+#### Not applicable
+
+The matrix asked for the same completion cases "through the web player". **There is
+no web player** — the web UI has no video element and reports no playback. Its
+watched toggle is instrumented (0.21.1) and follows the same `SetPlayedAsync` path
+as the Jellyfin route, so there is no second completion contract to verify.
+
+#### What the diagnostics record
 
 `requests.log` captures routes and query strings; the playback endpoints
-additionally record structured fields from the parsed body:
-
-- server timestamp and route kind (`Playing`, `Progress`, `Stopped`,
-  `PlayedItemsPost`, or `PlayedItemsDelete`);
-- internal app user ID and Jellyfin item ID;
-- `PlaySessionId` and `MediaSourceId` when supplied;
-- `PositionTicks`, resolved runtime ticks, and calculated percentage;
-- `IsPaused` and whether the request is a stop;
-- parsed `DatePlayed` and whether it was supplied at all;
-- `Played` before and after the operation, without changing the operation.
+additionally record structured fields from the parsed body: route kind, app user
+and item id, session and media-source ids, position/runtime/percentage, paused and
+stopped flags, `DatePlayed` presence, and `Played` before and after.
 
 Diagnostics must not log authorization headers, access tokens, raw request bodies,
 file paths, media titles, or provider credentials — what remains is opaque ids,
 numbers, and flags. That applies to the route log too: Jellyfin accepts a reusable
-access token as the `api_key` query parameter on media and image URLs (clients open
-those without custom headers), so `requests.log` masks credential-shaped query
-values rather than persisting working tokens in a file the operator reads and may
-share. Writes are bounded, serialized, and failure-tolerant: a broken log path
-disables the sink with one warning rather than failing playback requests.
-
-The observation matrix covers:
-
-- ordinary movie playback beyond 90%;
-- ordinary episode playback beyond 90%;
-- stopping below 90%;
-- manually marking watched without playback;
-- manually marking unwatched;
-- rewatching an already-watched item;
-- seeking across 90%;
-- repeated progress and stopped calls for one playback session;
-- a session that ends by network loss/client termination without Stopped;
-- Infuse auto-advance from episode N to episode N+1, including Stopped/Playing
-  ordering;
-- a multi-episode file and the item ID reported for its progress;
-- the same completion/manual/rewatch cases through the web player;
-- starting and resuming playback directly at or above 90%, to confirm that a
-  session's first above-threshold report never creates an exact play.
-
-The resulting trace must answer:
-
-- Does Infuse return the `PlaySessionId` generated by PlaybackInfo, and is it stable
-  across Playing/Progress/Stopped?
-- Does actual completion call `PlayedItems`, and does a manual watched toggle use
-  the same route?
-- When is `DatePlayed` present, and can actual playback be distinguished from a
-  manual mark by route sequence and fields?
-- Can one completion be deduplicated reliably across progress and stopped calls?
-- Can a rewatch be identified while the aggregate `Played` flag remains true?
-- Does a Progress report crossing 90% arrive even when Stopped is missing?
-- Does auto-advance close and start distinct sessions in a stable order?
-- Which item identity does Infuse report for a multi-episode file?
-- Does the web player follow the same server-side completion contract?
-
-The primary session key is the echoed `PlaySessionId`. If Infuse does not echo it,
-the fallback is a server-derived session keyed by app user plus item: a Playing
-start opens a new generated session, Progress/Stopped attach while it remains
-active, and an inactivity/correlation window closes it. Phase 0 measures and fixes
-the window duration; a time bucket alone is not used as a durable identity.
-
-Phase 0 succeeds when the trace confirms the route split, either the echoed or
-fallback session key, one detectable below-to-above crossing, duplicate
-PlayedItems correlation, and deterministic handling of the expanded matrix. On
-success, `PlaybackHistoryEntry` is implemented. A failed criterion keeps the plan
-Draft and records exactly which assumption was refuted.
+access token as the `api_key` query parameter on media and image URLs, so
+`requests.log` masks credential-shaped query values rather than persisting working
+tokens in a file the operator reads and may share. Writes are bounded, serialized,
+and failure-tolerant: a broken log path disables the sink with one warning rather
+than failing playback requests.
 
 ### Sync with Trakt
 
@@ -334,7 +348,7 @@ The popup first creates a read-only preview. It reports:
 - local rows whose state revision must remain unchanged until application;
 - local history entries and aggregate values that will be replaced.
 
-When Phase 0 confirms reliable actual-playback detection, Apply runs as one
+Apply runs as one
 asynchronous, per-user/provider-serialized full-history job:
 
 1. Drain pending outbound operations for the selected scope. If they cannot be
@@ -388,10 +402,6 @@ the imported full history becomes authoritative and replaces the legacy count.
 Applying the same completed sync again is idempotent at the play level: exact
 identity/timestamp matches are not reposted, and an item that already has any
 timeless history receives no additional `unknown` entry.
-
-If Phase 0 does not validate reliable actual-playback detection, this full-history
-behavior is not silently replaced with aggregate-only Sync. The plan remains Draft
-and returns to the user for a new storage/sync decision.
 
 ### Manual Watched and Unwatched
 
@@ -479,17 +489,17 @@ Server can establish that playback actually crossed the local 90% threshold. A
 manual state change must use `unknown`.
 
 The exact source is the first below-to-at-least-90% crossing in
-`Sessions/Playing*`, keyed by echoed `PlaySessionId` or the Phase 0 fallback
-session. Server UTC at that crossing is `WatchedAt`. `DatePlayed` remains a
-diagnostic field and is never sufficient by itself because it is client supplied.
-When Phase 0 confirms the hypothesis:
+`Sessions/Playing*`, keyed by the client's `PlaySessionId`. Server UTC at that
+crossing is `WatchedAt`; `DatePlayed` is never used, having been observed as never
+supplied. Phase 0 confirmed the hypothesis, so:
 
-- insert one exact `PlaybackHistoryEntry` with server UTC at the crossing and the
-  unique session key established by Phase 0;
-- increment `PlayCount` once per proven completion, including a rewatch;
+- insert one exact `PlaybackHistoryEntry` with server UTC at the crossing, keyed by
+  the client session id;
+- increment `PlayCount` once per proven completion, including a rewatch — already
+  shipped and observed holding across 19 further reports in one session;
 - enqueue one exact UTC history addition in the same SQLite transaction;
-- mark the session completion durably so rewinds, repeated Progress/Stopped, a
-  correlated PlayedItems POST, and process restarts cannot create another play.
+- keep the session's completion durable so rewinds, repeated Progress/Stopped and
+  process restarts cannot create another play.
 
 The rule intentionally accepts seeking across 90% as completion, matching the
 existing threshold policy. It does not require Stopped, so a Progress crossing is
@@ -585,33 +595,34 @@ lists the app's secret keys (the list endpoint returns names only), matches
 halves, a denied or abandoned attempt would leave its device code in Core
 permanently, with nothing left in SQLite pointing at it.
 
-When Phase 0 validates reliable completion detection, `PlaybackHistoryEntry`
-stores the local per-play source of truth:
+`PlaybackHistoryEntry` stores the local per-play source of truth:
 
 - entry ID, app user ID, media item ID, and creation time;
 - nullable `WatchedAt`, where null represents one normalized timeless/unknown mark;
 - origin: `LocalPlayback`, `Manual`, `TraktSync`, or `Legacy`;
-- optional playback/session idempotency key selected by Phase 0;
+- the client `PlaySessionId` of the session that produced it, for idempotency;
 - immutable canonical identity snapshot for durable outbound delivery;
 - optional provider key/history ID, ownership flag, and link status
   (`None`, `Pending`, `Resolved`, or `Unresolved`).
 
 Exact entries are not deduplicated merely by media item and timestamp because two
-real plays can share the same timestamp precision. Phase 0 defines the uniqueness
-rule for locally observed playback sessions. At most one local timeless entry is
+real plays can share the same timestamp precision. For locally observed playback,
+the client session id is the uniqueness rule. At most one local timeless entry is
 retained per user/media identity.
 
-`PlaybackSessionState` durably gates threshold crossings:
+`PlaybackSession` durably gates threshold crossings. **It already exists**
+(media-server 0.21.2, shipped to fix the play-count inflation Phase 0 found) with:
 
-- app user, media item, optional client `PlaySessionId`, and server session key;
-- start, last-report, completion, and expiry timestamps;
-- last observed position/fraction and whether a below-90% value has been observed;
-- completion-recorded flag and the resulting history-entry ID;
-- uniqueness on the server session key and, when present, the client session key.
+- app user, media item, and the client `PlaySessionId` as `SessionKey`;
+- start and last-report timestamps;
+- whether a below-threshold position has been observed;
+- a completion timestamp;
+- uniqueness on `(AppUserId, MediaItemId, SessionKey)`, and age-based cleanup.
 
-The row lets a restart, rewind, repeated Progress/Stopped, or correlated
-PlayedItems POST reuse the same completion decision. Expired session rows are
-cleaned after a bounded diagnostic/idempotency retention period.
+This feature adds one column: the resulting `PlaybackHistoryEntry` id, so a
+restart or repeated report reuses the same completion decision rather than merely
+suppressing a second count. No server-derived session key is needed — the client
+id was observed on every playback report.
 
 `WatchHistoryOutboxEvent` stores provider-neutral outbound intent:
 
@@ -706,13 +717,13 @@ unavailable Core does not stall delivery for a connection already in use.
 - [ ] The expanded Infuse/web test matrix confirms or refutes every predefined
   route/session hypothesis before this plan becomes `Ready`.
 - [ ] When the hypothesis succeeds, every first below-to-at-least-90% crossing in
-  one echoed or fallback session
+  one client session
   creates exactly one exact `PlaybackHistoryEntry` and one idempotent outbound
   operation in the same transaction.
 - [ ] A first report already at or above 90% creates no exact play; rewinding and
   crossing again in the same session cannot increment `PlayCount` or enqueue again.
-- [ ] A PlayedItems POST correlated to an active/recent matching session is
-  deduplicated; the same route outside that window is a manual timeless mark.
+- [ ] A PlayedItems request is always a manual mark: it carries no session id and
+  never follows a natural completion, so no timing correlation is involved.
 - [ ] Progress crossing is sufficient without Stopped, seeking across 90% follows
   the accepted completion policy, and auto-advance uses distinct sessions.
 - [ ] Sync with Trakt is explicit, scoped by catalogs/media kind, previewable,
@@ -774,9 +785,9 @@ unavailable Core does not stall delivery for a connection already in use.
 - [ ] Final approved completion timestamp and idempotency contract based on those
   results.
 - [ ] Conditional `PlaybackHistoryEntry` entity, constraints, migration, aggregate
-  projection, and exact/manual/Trakt/legacy origins when Phase 0 succeeds.
-- [ ] Durable `PlaybackSessionState`, echoed/fallback correlation, one-completion
-  gate, PlayedItems deduplication, and bounded cleanup.
+  projection, and exact/manual/Trakt/legacy origins.
+- [ ] Link the existing `PlaybackSession` gate to the created history entry (the
+  gate, its cleanup, and the one-completion rule already shipped in 0.21.2).
 - [ ] Provider-neutral registry, contracts, descriptors, and capability model.
 - [ ] Hosty Trakt settings, validation, and administrator onboarding.
 - [ ] Provider connection, authorization, outbox, sync-run, state-revision,
@@ -792,7 +803,7 @@ unavailable Core does not stall delivery for a connection already in use.
 - [ ] Read-before/write/read-after remote ID resolution with eventual-consistency
   reconciliation and owned-only removal.
 - [ ] Grouped and batched season/series watched/unwatched delivery.
-- [ ] Previewable, scoped, full-history Sync with Trakt job when Phase 0 succeeds.
+- [ ] Previewable, scoped, full-history Sync with Trakt job.
 - [ ] Movie, episode, bulk, multi-episode, missing, and duplicate identity handling.
 - [ ] Watch history providers Settings section near Infuse Access.
 - [ ] Directory reconciliation and operational telemetry.
@@ -810,7 +821,7 @@ unavailable Core does not stall delivery for a connection already in use.
 ```mermaid
 flowchart LR
   PLAYER["Web UI / Infuse"] --> UDS["UserDataService"]
-  UDS -->|"state + history + intent in one transaction"| LOCAL[("UserItemData + PlaybackHistoryEntry + PlaybackSessionState + Outbox")]
+  UDS -->|"state + history + intent in one transaction"| LOCAL[("UserItemData + PlaybackHistoryEntry + PlaybackSession + Outbox")]
   OUTBOX["Provider delivery worker"] --> REGISTRY["Provider registry"]
   LOCAL --> OUTBOX
   REGISTRY --> TRAKT_ADAPTER["Trakt adapter"]
@@ -848,9 +859,10 @@ it cannot read a stale remote snapshot while older local events are pending.
 - Infuse may emit PlayedItems after natural completion. Incorrect correlation would
   create an extra unknown play; the active/recent session window must be measured
   and tested.
-- If Infuse omits `PlaySessionId`, the fallback inactivity window can accidentally
-  join two close playbacks or split one delayed session. Playing start, item/user
-  identity, and deterministic expiry reduce but do not eliminate this risk.
+- A client that omits `PlaySessionId` falls back to the aggregate flag rule and can
+  therefore still count a rewind as a second play. Infuse supplies one on every
+  report, so this affects only hypothetical future clients; correlating them by
+  timing was rejected as guesswork.
 - Full Trakt history can be large and paginated. Full-history Sync must stream or
   page through it as a background job with bounded previews; unwatch fetches only
   the one item's history.
@@ -871,13 +883,18 @@ it cannot read a stale remote snapshot while older local events are pending.
 
 ## Open Questions
 
-- **Question:** Does Infuse echo the server-generated `PlaySessionId`, and what
-  fallback correlation window is safe if it does not?
-  **Current answer:** PlaybackInfo already returns a GUID, but later reports are not
-  logged or correlated today.
-  **Recommendation:** Prefer the echoed ID. Otherwise open a server session on
-  Playing and attach same-user/item reports until measured inactivity closes it.
-  Phase 0 must record the chosen duration and verify manual PlayedItems outside it.
+- **Resolved 2026-07-22 — Does Infuse echo the server-generated `PlaySessionId`?**
+  Yes, on all 631 observed playback reports, stable within a session. The fallback
+  server-derived session and its correlation window are removed from the plan; a
+  client without one keeps the aggregate rule rather than being correlated by
+  timing.
+
+- **Resolved 2026-07-22 — Which local identity does Infuse report for a
+  multi-episode file?** The combined item's own id; there is no per-episode
+  identity, and Infuse ignores `IndexNumberEnd` even for display. Outbound export
+  expands the local inclusive range into one Trakt event per episode, sharing the
+  completion timestamp. Splitting such files at ingest was considered and declined
+  (see the observation results).
 
 - **Question:** Can the owned Trakt history ID be resolved reliably after adding
   `watched_at: "unknown"`?
@@ -887,12 +904,6 @@ it cannot read a stale remote snapshot while older local events are pending.
   **Recommendation:** Serialize per user/item, persist the pre-create set in the
   outbox event, retry delayed reads, and store the ID only for a unique difference.
   A non-unique/unresolved result is visible and never permits deletion or repost.
-
-- **Question:** Which local identity does Infuse report for a multi-episode file?
-  **Current answer:** Media Server expands the local represented range, but the
-  actual progress item ID from Infuse is not yet observed.
-  **Recommendation:** Include a multi-episode playback in Phase 0 and lock the
-  exact history expansion rule from the trace before approval.
 
 - **Question:** How should Sync apply one Trakt identity to multiple selected local
   copies?
@@ -910,13 +921,17 @@ it cannot read a stale remote snapshot while older local events are pending.
 - [x] Add operator-gated (`PLAYBACK_DIAGNOSTICS`) structured playback diagnostics
   without changing current playback behavior — shipped, works under the `docker`
   runtime rather than Development only.
-- [ ] Run the Infuse observation matrix and collect the request sequences.
-- [ ] Mark each predefined session hypothesis confirmed/refuted and select the
-  primary/fallback session key plus correlation-window duration.
+- [x] Run the Infuse observation matrix and collect the request sequences — 635
+  records over 14 sessions, 2026-07-22.
+- [x] Mark each predefined session hypothesis confirmed/refuted: the client session
+  id is the key (no fallback needed), one hypothesis was refuted and its bug fixed
+  in 0.21.2, and `DatePlayed`/PlayedItems correlation were removed as unnecessary.
+- [x] Resolve the observation-dependent open questions (session key, multi-episode
+  identity); the two remaining questions are Trakt-side and belong to Phase 2.
 - [ ] Verify Trakt read-before/write/read-after ID resolution, eventual-consistency
-  retries, and owned-ID deletion with a test account.
-- [ ] Resolve every open question; if actual-playback detection is reliable, lock
-  `PlaybackHistoryEntry` and full-history Sync into the approved design.
+  retries, and owned-ID deletion with a test account. **This is the last Phase 0
+  item**, and it needs a Trakt application plus a test account, which do not exist
+  yet.
 - [ ] Receive explicit user approval and change status from `Draft` to `Ready`.
 
 ### Phase 1: Provider Core, Configuration, and OAuth
@@ -926,7 +941,7 @@ it cannot read a stale remote snapshot while older local events are pending.
 - [ ] Add Hosty settings, typed validation, admin guidance, and unavailable states.
 - [ ] Add connection, authorization, outbox, sync-run, and aggregate state-revision
   schema.
-- [ ] When Phase 0 succeeds, add `PlaybackHistoryEntry`, `PlaybackSessionState`,
+- [ ] Add `PlaybackHistoryEntry`, the session-to-entry link,
   provider ownership/link state, aggregate projection, and legacy migration.
 - [ ] Integrate `HostySecretsClient` for credential storage and the
   missing-secret reconnect path.
@@ -937,8 +952,8 @@ it cannot read a stale remote snapshot while older local events are pending.
 
 - [ ] Add mutation origin/state revision and atomic outbox recording to
   `UserDataService`.
-- [ ] Implement first-crossing completion, primary/fallback session idempotency,
-  PlayedItems correlation, and rewind/restart deduplication from Phase 0.
+- [ ] Extend the shipped session gate to record the created history entry, so a
+  restart or repeated report reuses the completion decision.
 - [ ] Implement `EnsureTimelessWatched` and `RemoveOwnedTimelessEntries` with
   read-before/write/read-after ID reconciliation.
 - [ ] Implement grouped history reads and batched/chunked bulk mutations.
@@ -990,21 +1005,27 @@ pnpm --dir src/web test
 pnpm --dir src/web build
 ```
 
-Pre-approval observation:
+Observation — complete (2026-07-22, 635 records / 14 sessions):
 
-- capture the full ordered request sequence for every Infuse test-matrix case;
-- compare `PlaySessionId`, `PositionTicks`, `DatePlayed`, and Played before/after;
-- confirm a first report already above 90% is not accepted as a crossing;
-- rewind below 90% after completion and cross again, verifying one session-level
-  completion decision;
-- verify natural completion with and without an additional PlayedItems POST;
-- terminate playback without Stopped and verify a Progress crossing remains usable;
-- verify Infuse auto-advance session ordering and multi-episode item identity;
-- run the same threshold/manual/rewatch cases through the web player;
-- confirm diagnostics contain no secrets, raw bodies, titles, or paths;
-- restart during a playback session to expose any idempotency dependency;
-- record each predefined hypothesis as confirmed/refuted and fix any fallback
-  correlation-window duration.
+- captured the ordered request sequence for the Infuse matrix; compared
+  `PlaySessionId`, `PositionTicks` and `Played` before/after — **done**;
+- rewound below 90% after completion and crossed again — **done, and it refuted
+  the hypothesis**: the count inflated, fixed in 0.21.2;
+- natural completion with and without an additional PlayedItems POST — **done**;
+  Infuse never sends one;
+- terminated playback without `Stopped` and confirmed the Progress crossing holds —
+  **done**;
+- auto-advance session ordering and multi-episode item identity — **done**;
+- confirmed the diagnostics carry no secrets, raw bodies, titles or paths, and that
+  the route log masks credential-shaped query values — **done**;
+- a first report already above 90% — **not observable**: the threshold clears the
+  resume point and Infuse resumes from the server position, so the state cannot
+  normally be reached. Covered by unit tests instead;
+- the same cases "through the web player" — **not applicable**: there is no web
+  player, only a watched toggle, which shares the `SetPlayedAsync` path;
+- restart mid-session — **not exercised**. The session row is persisted in SQLite,
+  so the completion decision survives a restart by construction; worth a test in
+  Phase 2 rather than another observation run.
 
 Live Trakt verification uses a dedicated non-production application and account:
 
@@ -1064,10 +1085,17 @@ Live Trakt verification uses a dedicated non-production application and account:
 
 ## Notes
 
-This document must remain `Draft` until the Infuse session observations and Trakt
-owned-history-ID reconciliation test are complete, every open question is resolved,
-and the user explicitly approves the resulting contract. Implementation of the
-integration must not start while the plan is `Draft`.
+The Infuse observation is complete (2026-07-22) and its results are recorded
+above. Two things still gate `Ready`:
+
+1. the Trakt owned-history-ID reconciliation test, which needs a Trakt application
+   and a dedicated test account that do not exist yet;
+2. explicit user approval of the resulting contract.
+
+Implementation of the integration must not start while the plan is `Draft`. The
+playback-side work already merged (diagnostics 0.21.0–0.21.1, the play-count fix
+0.21.2) is deliberately outside that rule: it fixed current behavior and does not
+depend on Trakt.
 
 Trakt documentation was reviewed on 2026-07-21. External contracts and rate limits
 must be rechecked immediately before implementation.
