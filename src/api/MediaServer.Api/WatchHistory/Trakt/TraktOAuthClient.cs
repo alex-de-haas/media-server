@@ -22,6 +22,10 @@ internal sealed record TraktDeviceCode(string DeviceCode, string UserCode, strin
 /// <summary>The identity of the account that just authorized.</summary>
 internal sealed record TraktAccount(string Id, string Username);
 
+/// <summary>One round of the device-token poll: where the attempt stands, and the tokens on approval.</summary>
+internal sealed record TraktDevicePoll(
+    WatchHistoryAuthorizationState State, TraktCredentials? Credentials, TimeSpan? RetryAfter);
+
 /// <summary>
 /// Trakt's OAuth device flow and token lifecycle. Everything Trakt-shaped about authentication lives
 /// here: endpoint paths, the <c>trakt-api-version</c>/<c>trakt-api-key</c> headers, and the status
@@ -75,9 +79,11 @@ public sealed class TraktOAuthClient(
 
     /// <summary>
     /// Exchanges a device code for credentials. The device flow overloads HTTP status codes rather
-    /// than returning an error body, so each one is mapped to a state the caller can act on.
+    /// than returning an error body, so each one is mapped to a state the caller can act on. A
+    /// rejection of this instance's application credentials is a failure, not a state: no amount of
+    /// waiting fixes a bad client id or secret, so reporting it as Pending would spin forever.
     /// </summary>
-    internal async Task<(WatchHistoryAuthorizationState State, TraktCredentials? Credentials, TimeSpan? RetryAfter)> PollDeviceTokenAsync(
+    internal async Task<WatchHistoryResult<TraktDevicePoll>> PollDeviceTokenAsync(
         string deviceCode, CancellationToken cancellationToken)
     {
         using var content = JsonContent.Create(new
@@ -101,7 +107,7 @@ public sealed class TraktOAuthClient(
         {
             // A transport failure is not a decision by the user; keep the attempt pending.
             logger.LogDebug("Polling the Trakt device token failed transiently.");
-            return (WatchHistoryAuthorizationState.Pending, null, null);
+            return Poll(WatchHistoryAuthorizationState.Pending);
         }
 
         using (response)
@@ -111,29 +117,45 @@ public sealed class TraktOAuthClient(
                 case HttpStatusCode.OK:
                     var credentials = await ReadCredentialsAsync(response, cancellationToken);
                     return credentials is null
-                        ? (WatchHistoryAuthorizationState.Pending, null, null)
-                        : (WatchHistoryAuthorizationState.Approved, credentials, null);
+                        ? Poll(WatchHistoryAuthorizationState.Pending)
+                        : WatchHistoryResult<TraktDevicePoll>.Success(
+                            new TraktDevicePoll(WatchHistoryAuthorizationState.Approved, credentials, null));
 
                 // Trakt's documented device-flow vocabulary.
                 case HttpStatusCode.BadRequest:
-                    return (WatchHistoryAuthorizationState.Pending, null, null);
+                    return Poll(WatchHistoryAuthorizationState.Pending);
                 case HttpStatusCode.NotFound:
-                    return (WatchHistoryAuthorizationState.Denied, null, null);
+                    return Poll(WatchHistoryAuthorizationState.Denied);
                 case HttpStatusCode.Conflict:
                     // Already used: someone completed this code. Treat as approved-elsewhere, which is
                     // terminal for this attempt.
-                    return (WatchHistoryAuthorizationState.Denied, null, null);
+                    return Poll(WatchHistoryAuthorizationState.Denied);
                 case HttpStatusCode.Gone:
-                    return (WatchHistoryAuthorizationState.Expired, null, null);
+                    return Poll(WatchHistoryAuthorizationState.Expired);
                 case (HttpStatusCode)418:
-                    return (WatchHistoryAuthorizationState.Denied, null, null);
+                    return Poll(WatchHistoryAuthorizationState.Denied);
                 case HttpStatusCode.TooManyRequests:
-                    return (WatchHistoryAuthorizationState.SlowDown, null, RetryAfterOf(response));
+                    return WatchHistoryResult<TraktDevicePoll>.Success(new TraktDevicePoll(
+                        WatchHistoryAuthorizationState.SlowDown, null, RetryAfterOf(response)));
+
+                case HttpStatusCode.Unauthorized:
+                case HttpStatusCode.Forbidden:
+                    // Trakt rejected this instance's application credentials, not the user's approval.
+                    // Waiting cannot fix a bad client id or secret, so this must surface as an error
+                    // rather than be filed under "keep polling".
+                    return WatchHistoryResult<TraktDevicePoll>.Failed(
+                        WatchHistoryFailure.Unsupported,
+                        $"Trakt rejected this instance's application credentials (HTTP {(int)response.StatusCode}). "
+                        + "Check the Trakt client ID and client secret in the app settings.");
+
                 default:
                     logger.LogDebug("Trakt device token poll returned {StatusCode}.", (int)response.StatusCode);
-                    return (WatchHistoryAuthorizationState.Pending, null, null);
+                    return Poll(WatchHistoryAuthorizationState.Pending);
             }
         }
+
+        static WatchHistoryResult<TraktDevicePoll> Poll(WatchHistoryAuthorizationState state) =>
+            WatchHistoryResult<TraktDevicePoll>.Success(new TraktDevicePoll(state, null, null));
     }
 
     /// <summary>
@@ -310,6 +332,11 @@ public sealed class TraktOAuthClient(
 
     private void AddApiHeaders(HttpRequestMessage request, string? accessToken)
     {
+        // Trakt sits behind Cloudflare, which answers 403 to any request without a User-Agent — and
+        // HttpClient sends none by default. Verified live: the same key and headers pass with any UA
+        // and fail without one. Set per-request, beside the other Trakt headers, so no future call
+        // path can miss it.
+        request.Headers.UserAgent.ParseAdd("HaasMediaServer/1.0 (+https://github.com/alex-de-haas/media-server)");
         request.Headers.Add("trakt-api-version", "2");
         if (!string.IsNullOrWhiteSpace(settings.TraktClientId))
         {

@@ -116,7 +116,17 @@ public sealed class TraktAuthorizationService(
             return Outcome(WatchHistoryAuthorizationState.Expired);
         }
 
-        var (state, tokens, retryAfter) = await oauth.PollDeviceTokenAsync(deviceCode, cancellationToken);
+        var polled = await oauth.PollDeviceTokenAsync(deviceCode, cancellationToken);
+        if (!polled.Succeeded)
+        {
+            // An operator-level rejection (bad client id/secret). The attempt is left in place: fixing
+            // the settings and pressing Connect again replaces it anyway, and deleting it here would
+            // turn a configuration problem into a phantom "no authorization in progress".
+            return WatchHistoryResult<WatchHistoryAuthorizationOutcome>.Failed(
+                polled.Failure!.Value, polled.Detail, polled.RetryAfter);
+        }
+
+        var (state, tokens, retryAfter) = polled.Value!;
 
         switch (state)
         {
