@@ -24,6 +24,11 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<JellyfinAccessToken> JellyfinAccessTokens => Set<JellyfinAccessToken>();
     public DbSet<UserItemData> UserItemData => Set<UserItemData>();
     public DbSet<PlaybackSession> PlaybackSessions => Set<PlaybackSession>();
+    public DbSet<PlaybackHistoryEntry> PlaybackHistoryEntries => Set<PlaybackHistoryEntry>();
+    public DbSet<WatchHistoryProviderConnection> WatchHistoryConnections => Set<WatchHistoryProviderConnection>();
+    public DbSet<WatchHistoryProviderAuthorization> WatchHistoryAuthorizations => Set<WatchHistoryProviderAuthorization>();
+    public DbSet<WatchHistoryOutboxEvent> WatchHistoryOutboxEvents => Set<WatchHistoryOutboxEvent>();
+    public DbSet<WatchHistorySyncRun> WatchHistorySyncRuns => Set<WatchHistorySyncRun>();
     public DbSet<AppSettings> AppSettings => Set<AppSettings>();
     public DbSet<TrackedTitle> TrackedTitles => Set<TrackedTitle>();
     public DbSet<TrackedRelease> TrackedReleases => Set<TrackedRelease>();
@@ -493,6 +498,98 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         session.HasOne<MediaItem>()
             .WithMany()
             .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var history = modelBuilder.Entity<PlaybackHistoryEntry>();
+        history.HasKey(entity => entity.Id);
+        // The projection reads a user's plays for an item, newest first.
+        history.HasIndex(entity => new { entity.AppUserId, entity.MediaItemId, entity.WatchedAt });
+        // One session yields one play: this is what stops a rewind past the threshold recording a
+        // second. Filtered, because every non-playback origin leaves the session id null and SQLite
+        // would otherwise treat those nulls as distinct and let duplicates through unnoticed.
+        history.HasIndex(entity => new { entity.AppUserId, entity.MediaItemId, entity.PlaySessionId })
+            .IsUnique()
+            .HasFilter("\"PlaySessionId\" IS NOT NULL");
+        // Resolving a remote id back to its local entry during sync.
+        history.HasIndex(entity => new { entity.ProviderKey, entity.ProviderHistoryId });
+        history.Property(entity => entity.Origin).HasConversion<int>();
+        history.Property(entity => entity.LinkStatus).HasConversion<int>();
+        history.Property(entity => entity.PlaySessionId).HasMaxLength(200);
+        history.Property(entity => entity.ProviderKey).HasMaxLength(64);
+        history.Property(entity => entity.ProviderHistoryId).HasMaxLength(128);
+
+        history.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // History follows the item: a deleted item's plays cannot be projected or exported.
+        history.HasOne(entity => entity.MediaItem)
+            .WithMany()
+            .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var connection = modelBuilder.Entity<WatchHistoryProviderConnection>();
+        connection.HasKey(entity => entity.Id);
+        connection.HasIndex(entity => new { entity.AppUserId, entity.ProviderKey }).IsUnique();
+        connection.Property(entity => entity.ProviderKey).HasMaxLength(64);
+        connection.Property(entity => entity.SecretKey).HasMaxLength(200);
+        connection.Property(entity => entity.ProviderAccountId).HasMaxLength(128);
+        connection.Property(entity => entity.ProviderAccountName).HasMaxLength(256);
+        connection.Property(entity => entity.LastError).HasMaxLength(1024);
+        connection.Property(entity => entity.Status).HasConversion<int>();
+
+        connection.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var authorization = modelBuilder.Entity<WatchHistoryProviderAuthorization>();
+        authorization.HasKey(entity => entity.Id);
+        // At most one attempt in flight per user and provider; starting again replaces it.
+        authorization.HasIndex(entity => new { entity.AppUserId, entity.ProviderKey }).IsUnique();
+        authorization.Property(entity => entity.ProviderKey).HasMaxLength(64);
+        authorization.Property(entity => entity.UserCode).HasMaxLength(64);
+        authorization.Property(entity => entity.VerificationUrl).HasMaxLength(512);
+        authorization.Property(entity => entity.Status).HasConversion<int>();
+
+        authorization.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var outbox = modelBuilder.Entity<WatchHistoryOutboxEvent>();
+        outbox.HasKey(entity => entity.Id);
+        // A duplicate enqueue must be a no-op: Trakt does not deduplicate history by item and
+        // timestamp, so a retried add would surface as a second viewing.
+        outbox.HasIndex(entity => entity.IdempotencyKey).IsUnique();
+        // The worker's claim query.
+        outbox.HasIndex(entity => new { entity.Status, entity.NextAttemptAt });
+        outbox.Property(entity => entity.IdempotencyKey).HasMaxLength(256);
+        outbox.Property(entity => entity.LastError).HasMaxLength(1024);
+        outbox.Property(entity => entity.Operation).HasConversion<int>();
+        outbox.Property(entity => entity.Status).HasConversion<int>();
+
+        // Deleting a connection drops its undelivered work: there is no longer an account to send it to.
+        outbox.HasOne(entity => entity.Connection)
+            .WithMany()
+            .HasForeignKey(entity => entity.ConnectionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var syncRun = modelBuilder.Entity<WatchHistorySyncRun>();
+        syncRun.HasKey(entity => entity.Id);
+        syncRun.HasIndex(entity => new { entity.AppUserId, entity.CreatedAt });
+        syncRun.Property(entity => entity.Status).HasConversion<int>();
+        syncRun.Property(entity => entity.LastError).HasMaxLength(1024);
+
+        syncRun.HasOne(entity => entity.Connection)
+            .WithMany()
+            .HasForeignKey(entity => entity.ConnectionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        syncRun.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
