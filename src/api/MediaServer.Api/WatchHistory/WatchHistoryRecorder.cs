@@ -80,9 +80,10 @@ public sealed class WatchHistoryRecorder(
             entry => entry.AppUserId == appUserId && entry.MediaItemId == item.Id, cancellationToken);
 
         var identity = await identities.MapAsync(item, cancellationToken);
+        PlaybackHistoryEntry? timeless = null;
         if (!hasHistory)
         {
-            database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+            timeless = new PlaybackHistoryEntry
             {
                 Id = Guid.NewGuid(),
                 AppUserId = appUserId,
@@ -93,13 +94,30 @@ public sealed class WatchHistoryRecorder(
                 Origin = PlaybackHistoryOrigin.Manual,
                 IdentitySnapshot = Snapshot(identity),
                 LinkStatus = PlaybackHistoryLinkStatus.None,
-            });
+            };
+            database.PlaybackHistoryEntries.Add(timeless);
+        }
+        else
+        {
+            // No new entry, but the event still needs somewhere to record the remote id it may
+            // create. An existing timeless entry is the one this app can own; exact plays are not
+            // what a timeless remote mark corresponds to.
+            timeless = await database.PlaybackHistoryEntries.FirstOrDefaultAsync(
+                entry => entry.AppUserId == appUserId
+                    && entry.MediaItemId == item.Id
+                    && entry.WatchedAt == null
+                    && (entry.Origin == PlaybackHistoryOrigin.Manual || entry.Origin == PlaybackHistoryOrigin.Legacy),
+                cancellationToken);
         }
 
         // The provider still has to be told, even when local history already existed: it may hold
         // nothing for this item. The worker decides that with a read-before-write.
+        //
+        // The entry travels with the event so the worker has a stable place to persist the remote id
+        // it resolves. Without it, a mark undone before delivery would leave a remote timeless mark
+        // with no local owner — and ownership is the only thing that permits removing it later.
         await StageOutboxAsync(
-            appUserId, item, row, entry: null, WatchHistoryOutboxOperation.EnsureTimelessWatched,
+            appUserId, item, row, timeless, WatchHistoryOutboxOperation.EnsureTimelessWatched,
             identity, occurredAt: null, sessionKey: null, cancellationToken);
     }
 

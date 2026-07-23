@@ -12,7 +12,11 @@ namespace MediaServer.Api.Library;
 /// report/mark methods apply the watched threshold and resume-reset policy. See
 /// <c>docs/features/jellyfin-compatibility.md</c> ("Playback Progress and User Data").
 /// </summary>
-public sealed class UserDataService(MediaServerDbContext database, TimeProvider time, WatchHistoryRecorder? watchHistory = null)
+public sealed class UserDataService(
+    MediaServerDbContext database,
+    TimeProvider time,
+    WatchHistoryRecorder? watchHistory = null,
+    ILogger<UserDataService>? logger = null)
 {
     /// <summary>Crossing this fraction of the runtime marks the item watched and clears its resume point.</summary>
     internal const double WatchedThreshold = 0.90;
@@ -178,9 +182,47 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
             row.Played = false;
         }
 
-        await database.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Two progress reports for one session can both pass the completion pre-check before
+            // either commits; the loser trips the (user, item, session) unique index. That index is
+            // doing its job — one session, one play — so the loser discards its work rather than
+            // returning a 500 to the player for a completion that was in fact recorded. Anything
+            // else is a real failure and propagates.
+            if (!await AnotherReportRecordedThisCompletionAsync(appUserId, item.Id, playSessionId, cancellationToken))
+            {
+                throw;
+            }
+
+            logger?.LogDebug("A concurrent report already recorded this session's completion.");
+            return;
+        }
+
         diagnostics?.ObserveState(
             runtime, playedBefore, row.Played, playCountBefore, row.PlayCount, positionBefore, row.PlaybackPositionTicks);
+    }
+
+    // Distinguishes the benign race above from a genuine write failure: only a completion that is now
+    // present for this exact session justifies swallowing the exception.
+    private async Task<bool> AnotherReportRecordedThisCompletionAsync(
+        int appUserId, Guid mediaItemId, string? playSessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(playSessionId))
+        {
+            return false;
+        }
+
+        // The failed save left the context tracking rejected changes; a fresh read has to bypass it.
+        database.ChangeTracker.Clear();
+        return await database.PlaybackHistoryEntries.AsNoTracking().AnyAsync(
+            entry => entry.AppUserId == appUserId
+                && entry.MediaItemId == mediaItemId
+                && entry.PlaySessionId == playSessionId,
+            cancellationToken);
     }
 
     /// <summary>Marks an item played/unplayed (recursively for season/series folders) by public id (Jellyfin).</summary>

@@ -371,6 +371,39 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         Assert.All(queued, item => Assert.Equal(WatchHistoryOutboxOperation.EnsureTimelessWatched, item.Operation));
     }
 
+    [Fact]
+    public async Task TheEnsureEventCarriesTheEntryItMustRecordOwnershipOn()
+    {
+        // Without it, a mark undone before delivery leaves a remote timeless mark with no local
+        // owner — and ownership is the only thing that permits removing it later.
+        Connect();
+
+        await Service().SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
+
+        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
+        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
+        Assert.Equal(entry.Id, queued.HistoryEntryId);
+    }
+
+    [Fact]
+    public async Task AMarkWithExistingHistoryStillPointsAtAnOwnableEntry()
+    {
+        // No new entry is created, but the event may still add a remote mark that needs an owner.
+        Connect();
+        _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = _movieId,
+            CreatedAt = _time.GetUtcNow(), WatchedAt = null,
+            Origin = PlaybackHistoryOrigin.Manual, LinkStatus = PlaybackHistoryLinkStatus.None,
+        });
+        await _database.SaveChangesAsync();
+
+        await Service().SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
+
+        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
+        Assert.NotNull(queued.HistoryEntryId);
+    }
+
     // ---- Idempotency ----
 
     [Fact]
