@@ -153,9 +153,9 @@ public sealed class TraktAuthorizationService(
             // Revoke first, best effort. Whether Trakt answers or not, the local credential goes: the
             // user asked to disconnect, and leaving a working token behind is the worse failure.
             var stored = await ReadCredentialsAsync(connection, cancellationToken);
-            if (stored is not null)
+            if (stored.Succeeded)
             {
-                await oauth.RevokeAsync(stored.AccessToken, cancellationToken);
+                await oauth.RevokeAsync(stored.Value!.AccessToken, cancellationToken);
             }
 
             await DeleteSecretQuietlyAsync(connection.SecretKey, cancellationToken);
@@ -180,14 +180,15 @@ public sealed class TraktAuthorizationService(
     /// comes back — Trakt rotates the refresh token on every exchange, so not storing it would strand
     /// the connection at the next refresh.
     /// </summary>
-    internal async Task<TraktCredentials?> ReadCredentialsAsync(
+    internal async Task<WatchHistoryResult<TraktCredentials>> ReadCredentialsAsync(
         WatchHistoryProviderConnection connection, CancellationToken cancellationToken)
     {
         var stored = await credentials.GetAsync(connection.SecretKey, cancellationToken);
         if (stored is null)
         {
             await MarkRequiresReconnectAsync(connection, "The stored Trakt credentials are missing.", cancellationToken);
-            return null;
+            return WatchHistoryResult<TraktCredentials>.Failed(
+                WatchHistoryFailure.AuthenticationRequired, "The stored Trakt credentials are missing.");
         }
 
         TraktCredentials? parsed;
@@ -203,7 +204,8 @@ public sealed class TraktAuthorizationService(
         if (parsed is null)
         {
             await MarkRequiresReconnectAsync(connection, "The stored Trakt credentials could not be read.", cancellationToken);
-            return null;
+            return WatchHistoryResult<TraktCredentials>.Failed(
+                WatchHistoryFailure.ContractViolation, "The stored Trakt credentials could not be read.");
         }
 
         var fresh = await oauth.EnsureFreshAsync(parsed, cancellationToken);
@@ -212,11 +214,12 @@ public sealed class TraktAuthorizationService(
             if (fresh.Failure == WatchHistoryFailure.AuthenticationRequired)
             {
                 await MarkRequiresReconnectAsync(connection, fresh.Detail, cancellationToken);
-                return null;
             }
 
-            // A transient refresh failure leaves the connection alone; the worker will try again.
-            return null;
+            // Otherwise the connection is left alone and the failure keeps its kind: a Trakt outage
+            // during refresh must stay retryable, or a worker would give up and ask the user to
+            // reconnect an account that was never disconnected.
+            return WatchHistoryResult<TraktCredentials>.Failed(fresh.Failure!.Value, fresh.Detail, fresh.RetryAfter);
         }
 
         if (!ReferenceEquals(fresh.Value, parsed))
@@ -224,7 +227,7 @@ public sealed class TraktAuthorizationService(
             await StoreCredentialsAsync(connection, fresh.Value!, cancellationToken);
         }
 
-        return fresh.Value;
+        return WatchHistoryResult<TraktCredentials>.Success(fresh.Value!);
     }
 
     private async Task<WatchHistoryResult<WatchHistoryAuthorizationOutcome>> CompleteAsync(
