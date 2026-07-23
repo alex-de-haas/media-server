@@ -51,9 +51,13 @@ public sealed class WatchHistoryIdentityMapperTests : IDisposable
             UpdatedAt = DateTimeOffset.UnixEpoch,
         };
 
-    private MediaItem AddMovie(Dictionary<string, string>? providers, Guid? catalogId = null)
+    private MediaItem AddMovie(
+        Dictionary<string, string>? providers, Guid? catalogId = null,
+        string? identityProvider = null, string? identityProviderId = null)
     {
         var movie = Item(Guid.NewGuid(), MediaKind.Movie, catalogId ?? _movieCatalogId, "Inception", providers);
+        movie.IdentityProvider = identityProvider;
+        movie.IdentityProviderId = identityProviderId;
         _database.MediaItems.Add(movie);
         _database.SaveChanges();
         return movie;
@@ -196,14 +200,6 @@ public sealed class WatchHistoryIdentityMapperTests : IDisposable
     }
 
     [Fact]
-    public async Task AMissingItemReportsRatherThanThrows()
-    {
-        var result = await Mapper().MapAsync(Guid.NewGuid(), CancellationToken.None);
-
-        Assert.False(result.Resolved);
-    }
-
-    [Fact]
     public async Task ASeasonExpandsToItsEpisodesInOrder()
     {
         AddEpisode(index: 2);
@@ -240,6 +236,77 @@ public sealed class WatchHistoryIdentityMapperTests : IDisposable
 
         Assert.Equal(2, mapped.Count);
         Assert.Contains(mapped, entry => !entry.Result.Resolved);
+    }
+
+    [Fact]
+    public async Task TheCanonicalIdentityWinsOverTheProviderMap()
+    {
+        // Identification records the id it actually chose; the provider map is display-facing and can
+        // lag behind it.
+        var movie = AddMovie(new() { ["tmdb"] = "111" }, identityProvider: "tmdb", identityProviderId: "27205");
+
+        var result = await Mapper().MapAsync(movie, CancellationToken.None);
+
+        Assert.Equal(27205, result.Identity!.TmdbId);
+    }
+
+    [Fact]
+    public async Task CanonicalEpisodeNumbersWinOverTheDisplayNumbering()
+    {
+        // Identification re-maps some releases — anime absolute numbering, for instance — onto the
+        // provider's season and episode, and that is what a provider must be told.
+        var episode = AddEpisode(index: 37, parentIndex: 1);
+        episode.IdentitySeasonNumber = 2;
+        episode.IdentityEpisodeNumber = 11;
+        _database.SaveChanges();
+
+        var result = await Mapper().MapAsync(episode, CancellationToken.None);
+
+        Assert.Equal(2, result.Identity!.SeasonNumber);
+        Assert.Equal(11, result.Identity.EpisodeNumber);
+    }
+
+    [Fact]
+    public async Task ARangeIsOffsetFromTheCanonicalFirstEpisode()
+    {
+        // The range width is a fact about the file; its start is the canonical number.
+        var episode = AddEpisode(index: 37, parentIndex: 1, indexEnd: 38);
+        episode.IdentitySeasonNumber = 2;
+        episode.IdentityEpisodeNumber = 11;
+        _database.SaveChanges();
+
+        var result = await Mapper().MapAsync(episode, CancellationToken.None);
+
+        Assert.Equal(11, result.Identity!.EpisodeNumber);
+        Assert.Equal(12, result.Identity.EpisodeNumberEnd);
+    }
+
+    [Fact]
+    public async Task ADeletedItemIsDistinguishedFromAnUnidentifiedOne()
+    {
+        // Different remedies: one is "re-identify this file", the other is "this row is gone".
+        var result = await Mapper().MapAsync(Guid.NewGuid(), CancellationToken.None);
+
+        Assert.Equal(WatchHistoryIdentityIssue.ItemNotFound, result.Issue);
+    }
+
+    [Fact]
+    public async Task TwoEditionsAreFlaggedThroughTheCanonicalIdentityToo()
+    {
+        var first = AddMovie(null, identityProvider: "tmdb", identityProviderId: "27205");
+        AddMovie(null, identityProvider: "tmdb", identityProviderId: "27205");
+
+        Assert.True(await Mapper().HasAmbiguousLocalIdentityAsync(first, catalogScope: null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ARowWithoutACanonicalIdentityIsStillCompared()
+    {
+        // Older rows carry only the provider map; declaring them unique would miss a real duplicate.
+        var first = AddMovie(new() { ["tmdb"] = "27205" }, identityProvider: "tmdb", identityProviderId: "27205");
+        AddMovie(new() { ["tmdb"] = "27205" });
+
+        Assert.True(await Mapper().HasAmbiguousLocalIdentityAsync(first, catalogScope: null, CancellationToken.None));
     }
 
     [Fact]

@@ -20,6 +20,12 @@ public enum WatchHistoryIdentityIssue
     MissingEpisodeNumbering,
 
     /// <summary>
+    /// The item is gone — deleted, or a stale id in queued work. Distinct from being unidentified,
+    /// because the remedy is different: nothing about re-identifying a row that no longer exists.
+    /// </summary>
+    ItemNotFound,
+
+    /// <summary>
     /// More than one local item resolves to the same provider identity. Acting on one of them would
     /// be arbitrary and could clear another edition's resume point, so the caller is told instead.
     /// </summary>
@@ -54,7 +60,7 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
             .FirstOrDefaultAsync(entry => entry.Id == mediaItemId, cancellationToken);
 
         return item is null
-            ? WatchHistoryIdentityResult.Failed(WatchHistoryIdentityIssue.MissingExternalId)
+            ? WatchHistoryIdentityResult.Failed(WatchHistoryIdentityIssue.ItemNotFound)
             : await MapAsync(item, cancellationToken);
     }
 
@@ -88,7 +94,12 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
 
     private async Task<WatchHistoryIdentityResult> MapEpisodeAsync(MediaItem episode, CancellationToken cancellationToken)
     {
-        if (episode.IndexNumber is null || episode.ParentIndexNumber is null)
+        // Canonical numbering first: identification re-maps some releases (anime absolute numbering,
+        // for instance) onto the provider's season/episode, and that mapping is what a provider must
+        // be told. Same precedence as PublicIdFactory.
+        var season = episode.IdentitySeasonNumber ?? episode.ParentIndexNumber;
+        var number = episode.IdentityEpisodeNumber ?? episode.IndexNumber;
+        if (season is null || number is null)
         {
             return WatchHistoryIdentityResult.Failed(WatchHistoryIdentityIssue.MissingEpisodeNumbering);
         }
@@ -116,11 +127,14 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
             Kind = WatchHistoryMediaKind.Episode,
             TmdbId = tmdb,
             ImdbId = imdb,
-            SeasonNumber = episode.ParentIndexNumber,
-            EpisodeNumber = episode.IndexNumber,
+            SeasonNumber = season,
+            EpisodeNumber = number,
             // Only a genuine range: a file holding one episode leaves this null so nothing downstream
-            // has to re-interpret a degenerate value.
-            EpisodeNumberEnd = episode.IndexNumberEnd > episode.IndexNumber ? episode.IndexNumberEnd : null,
+            // has to re-interpret a degenerate value. The range end is a file-level fact, so it is
+            // offset from the canonical first episode rather than read from the display numbering.
+            EpisodeNumberEnd = episode.IndexNumberEnd > episode.IndexNumber
+                ? number + (episode.IndexNumberEnd - episode.IndexNumber)
+                : null,
         };
 
         return identity.IsResolvable
@@ -137,23 +151,30 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
     {
         var episodes = folder.Kind switch
         {
-            MediaKind.Series => await database.MediaItems.AsNoTracking()
-                .Where(entry => entry.Kind == MediaKind.Episode && entry.SeriesId == folder.Id)
+            MediaKind.Series => await Ordered(database.MediaItems.AsNoTracking()
+                .Where(entry => entry.Kind == MediaKind.Episode && entry.SeriesId == folder.Id))
                 .ToListAsync(cancellationToken),
-            MediaKind.Season => await database.MediaItems.AsNoTracking()
-                .Where(entry => entry.Kind == MediaKind.Episode && entry.ParentId == folder.Id)
+            MediaKind.Season => await Ordered(database.MediaItems.AsNoTracking()
+                .Where(entry => entry.Kind == MediaKind.Episode && entry.ParentId == folder.Id))
                 .ToListAsync(cancellationToken),
             _ => [],
         };
 
         var mapped = new List<(Guid, WatchHistoryIdentityResult)>(episodes.Count);
-        foreach (var episode in episodes.OrderBy(entry => entry.ParentIndexNumber).ThenBy(entry => entry.IndexNumber))
+        foreach (var episode in episodes)
         {
             mapped.Add((episode.Id, await MapAsync(episode, cancellationToken)));
         }
 
         return mapped;
     }
+
+    // Ordered in the database rather than after loading: a long-running series is a lot of rows to
+    // sort in memory for no reason.
+    private static IQueryable<MediaItem> Ordered(IQueryable<MediaItem> episodes) =>
+        episodes
+            .OrderBy(entry => entry.IdentitySeasonNumber ?? entry.ParentIndexNumber)
+            .ThenBy(entry => entry.IdentityEpisodeNumber ?? entry.IndexNumber);
 
     /// <summary>
     /// True when another local item in the same catalog scope resolves to the same provider identity.
@@ -181,6 +202,23 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
             candidates = candidates.Where(entry => catalogScope.Contains(entry.CatalogId));
         }
 
+        // The canonical identity is indexed by (CatalogId, IdentityProvider, IdentityProviderId), so
+        // the common case is an index probe rather than reading every movie in the library.
+        if (!string.IsNullOrWhiteSpace(item.IdentityProvider) && !string.IsNullOrWhiteSpace(item.IdentityProviderId))
+        {
+            if (await candidates.AnyAsync(
+                    entry => entry.IdentityProvider == item.IdentityProvider
+                        && entry.IdentityProviderId == item.IdentityProviderId,
+                    cancellationToken))
+            {
+                return true;
+            }
+
+            // Rows written before identification recorded a canonical id still carry the provider map,
+            // so fall through to compare those rather than declare them unique.
+            candidates = candidates.Where(entry => entry.IdentityProviderId == null);
+        }
+
         var identity = mapped.Identity!;
         foreach (var candidate in await candidates.ToListAsync(cancellationToken))
         {
@@ -200,6 +238,23 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
         int? tmdb = null;
         string? imdb = null;
 
+        // The canonical identity chosen at identification time wins over the display-facing provider
+        // map — it is the field the rest of the pipeline keys on (see PublicIdFactory) and, for an
+        // episode, it holds the *series* id, which is precisely what a provider needs.
+        if (!string.IsNullOrWhiteSpace(item.IdentityProviderId))
+        {
+            if (string.Equals(item.IdentityProvider, "tmdb", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(item.IdentityProviderId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var canonical)
+                && canonical > 0)
+            {
+                tmdb = canonical;
+            }
+            else if (string.Equals(item.IdentityProvider, "imdb", StringComparison.OrdinalIgnoreCase))
+            {
+                imdb = item.IdentityProviderId.Trim();
+            }
+        }
+
         foreach (var (key, value) in item.Providers)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -209,13 +264,14 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
 
             // Provider keys are stored lowercase by the pipeline but compared case-insensitively so a
             // hand-edited row cannot silently stop resolving.
-            if (string.Equals(key, "tmdb", StringComparison.OrdinalIgnoreCase)
+            if (tmdb is null
+                && string.Equals(key, "tmdb", StringComparison.OrdinalIgnoreCase)
                 && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
                 && parsed > 0)
             {
                 tmdb = parsed;
             }
-            else if (string.Equals(key, "imdb", StringComparison.OrdinalIgnoreCase))
+            else if (imdb is null && string.Equals(key, "imdb", StringComparison.OrdinalIgnoreCase))
             {
                 imdb = value.Trim();
             }
