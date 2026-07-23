@@ -392,6 +392,7 @@ app.MapMetadataEndpoints();
 app.MapWatchlistEndpoints();
 app.MapSettingsEndpoints();
 app.MapJellyfinCredentialEndpoints();
+app.MapWatchHistoryEndpoints();
 app.MapRealtimeEndpoints();
 
 // Jellyfin-compatible surface served on the public `jellyfin` endpoint.
