@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
@@ -193,12 +195,16 @@ public sealed class WatchHistoryRecorder(
             ?? row.WatchedStateChangedAt?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
             ?? string.Empty;
 
+        // The discriminator is hashed rather than embedded: a session key may be up to 200 characters,
+        // which together with the ids and the operation name overruns the column's 256. Silent
+        // truncation would be the worst outcome here — two different changes could collide on a
+        // truncated key and the second would be swallowed as a duplicate.
         var idempotencyKey = string.Join(
             ':',
             connection.Id.ToString("N"),
             item.Id.ToString("N"),
             operation.ToString(),
-            discriminator);
+            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(discriminator))));
 
         if (await database.WatchHistoryOutboxEvents.AnyAsync(
                 existing => existing.IdempotencyKey == idempotencyKey, cancellationToken))

@@ -151,9 +151,13 @@ public sealed class UserDataService(
             {
                 // Staged, not saved: the row change, the history entry and the outbound intent commit
                 // together in the SaveChangesAsync below, so a crash cannot separate them.
+                // The gate's key, not the raw one: it trims and rejects overlong values, and history
+                // keyed on a value the gate refused would sit outside the uniqueness the gate relies
+                // on. A session the gate declined leaves this null, which is correct — that report
+                // falls back to the historical rule.
                 var entry = watchHistory is null
                     ? null
-                    : await watchHistory.StageCompletionAsync(appUserId, item, row, playSessionId, now, cancellationToken);
+                    : await watchHistory.StageCompletionAsync(appUserId, item, row, session?.SessionKey, now, cancellationToken);
 
                 if (session is not null)
                 {
@@ -193,7 +197,7 @@ public sealed class UserDataService(
             // doing its job — one session, one play — so the loser discards its work rather than
             // returning a 500 to the player for a completion that was in fact recorded. Anything
             // else is a real failure and propagates.
-            if (!await AnotherReportRecordedThisCompletionAsync(appUserId, item.Id, playSessionId, cancellationToken))
+            if (!await AnotherReportRecordedThisCompletionAsync(appUserId, item.Id, session?.SessionKey, cancellationToken))
             {
                 throw;
             }

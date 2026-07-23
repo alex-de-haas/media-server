@@ -128,12 +128,11 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         return connection;
     }
 
-    private Task WatchToCompletionAsync(string session = "session-1") =>
-        Task.Run(async () =>
-        {
-            await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * 0.5), false, session, null, CancellationToken.None);
-            await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * 0.95), false, session, null, CancellationToken.None);
-        });
+    private async Task WatchToCompletionAsync(string session = "session-1")
+    {
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * 0.5), false, session, null, CancellationToken.None);
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * 0.95), false, session, null, CancellationToken.None);
+    }
 
     // ---- Completion ----
 
@@ -402,6 +401,34 @@ public sealed class WatchHistoryRecorderTests : IDisposable
 
         var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
         Assert.NotNull(queued.HistoryEntryId);
+    }
+
+    [Fact]
+    public async Task AnOverlongSessionKeyLeavesHistoryUnkeyedRatherThanStoringOneTheGateRefused()
+    {
+        // The gate declines a key over 200 characters and falls back to the historical rule; history
+        // must not then be keyed on the value the gate refused.
+        var overlong = new string('s', 400);
+
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * 0.5), false, overlong, null, CancellationToken.None);
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * 0.95), false, overlong, null, CancellationToken.None);
+
+        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
+        Assert.Null(entry.PlaySessionId);
+        Assert.Empty(_database.PlaybackSessions);
+    }
+
+    [Fact]
+    public async Task TheIdempotencyKeyFitsItsColumn()
+    {
+        // A 200-character session key plus two ids and the longest operation name overruns 256, and
+        // silent truncation would let two different changes collide and the second be swallowed.
+        Connect();
+
+        await WatchToCompletionAsync(new string('s', 200));
+
+        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
+        Assert.True(queued.IdempotencyKey.Length <= 256, $"key was {queued.IdempotencyKey.Length} characters");
     }
 
     // ---- Idempotency ----
