@@ -219,8 +219,11 @@ applies the same cleanup when a user becomes unassigned or disabled.
 
 Phase 0 ran on 2026-07-22 against a live install (`docker` runtime, Infuse on
 Apple TV) and produced **635 diagnostic records over 14 playback sessions**. The
-hypothesis below was stated before observing, then confirmed or corrected against
-the trace. Every claim in this section is an observation, not a prediction.
+route-level hypothesis this section reports on was written down before any
+observation — that `Sessions/Playing*` is the only source of an exact completion,
+that the first below-to-90% crossing in a session is that completion, that one
+session counts at most one play, and that PlayedItems is a manual action. Each
+claim below is an observation against that hypothesis, not a prediction.
 
 The diagnostics are gated on the operator setting `PLAYBACK_DIAGNOSTICS`, not on
 the ASP.NET environment. The original design assumed a Development-only log, which
@@ -268,8 +271,8 @@ rewatch is exported.
 
 #### Corrected — a bug the observation found
 
-The hypothesis said one session could increment `PlayCount` at most once. **It could
-not.** One continuous session took an episode from 0 to 3 plays: crossing 90% counts
+The hypothesis said one session could increment `PlayCount` at most once. **That
+was false.** One continuous session took an episode from 0 to 3 plays: crossing 90% counts
 a play, rewinding below clears `Played` (correctly — it is a genuine resume point),
 and the next crossing looks like a fresh completion. Any rewind near the end
 inflated the count, and it would have exported three watch events to Trakt for one
@@ -856,9 +859,14 @@ it cannot read a stale remote snapshot while older local events are pending.
 - Pre-migration aggregate-only rows cannot reconstruct historical plays. Their
   local `PlayCount` can intentionally collapse after exporting one unknown mark and
   replacing the scope with full Trakt history.
-- Infuse may emit PlayedItems after natural completion. Incorrect correlation would
-  create an extra unknown play; the active/recent session window must be measured
-  and tested.
+- A client could emit PlayedItems right after a natural completion (Infuse does not
+  — observed), which under the "PlayedItems is always a manual mark" rule would look
+  like a manual mark seconds after a play. It cannot produce a duplicate anyway:
+  `EnsureTimelessWatched` adds nothing when local history already contains an entry
+  and nothing remotely when the item already has Trakt history, and the completion
+  has just created both. That guard is state-based rather than timing-based, which
+  is why it holds for clients whose behaviour was never observed — the reason no
+  correlation window is needed rather than merely not measured.
 - A client that omits `PlaySessionId` falls back to the aggregate flag rule and can
   therefore still count a rewind as a second play. Infuse supplies one on every
   report, so this affects only hypothetical future clients; correlating them by
