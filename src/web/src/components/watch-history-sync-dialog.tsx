@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, RefreshCw } from "lucide-react";
 import {
@@ -10,6 +10,7 @@ import {
   type WatchHistorySyncResult,
   type WatchHistorySyncSkip,
 } from "@/lib/media-server";
+import { buildScopeRequest, canApply, canPreview, changeCount, hasBlockingWork } from "@/lib/watch-history";
 import { errorMessage } from "@/lib/ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -110,21 +111,13 @@ export function WatchHistorySyncDialog({
     }
   }
 
-  const kinds = useMemo(() => {
-    const selected: Array<"Movie" | "Episode"> = [];
-    if (includeMovies) selected.push("Movie");
-    if (includeEpisodes) selected.push("Episode");
-    return selected;
-  }, [includeMovies, includeEpisodes]);
-
   const runPreview = async () => {
     setPhase({ kind: "previewing" });
     try {
-      const preview = await mediaServer.previewWatchHistorySync(providerKey, {
-        // Empty means "all" on that axis; only send a list when the user narrowed it.
-        catalogIds: catalogIds.length > 0 ? catalogIds : undefined,
-        kinds: kinds.length > 0 && kinds.length < 2 ? kinds : undefined,
-      });
+      const preview = await mediaServer.previewWatchHistorySync(
+        providerKey,
+        buildScopeRequest(includeMovies, includeEpisodes, catalogIds),
+      );
       setPhase({ kind: "preview", preview });
     } catch (error) {
       setPhase({ kind: "error", message: errorMessage(error) });
@@ -215,7 +208,7 @@ export function WatchHistorySyncDialog({
           <SyncFooter
             phase={phase}
             providerName={providerName}
-            canPreview={kinds.length > 0}
+            canPreview={canPreview(includeMovies, includeEpisodes)}
             onPreview={runPreview}
             onApply={runApply}
             onClose={() => onOpenChange(false)}
@@ -225,11 +218,6 @@ export function WatchHistorySyncDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-/** True when local changes are still queued for the provider, which apply refuses to run over. */
-function hasBlockingWork(preview: WatchHistorySyncPreview): boolean {
-  return preview.hasPendingOutboundWork || preview.hasTerminalOutboundWork;
 }
 
 function PreviewBody({
@@ -242,7 +230,7 @@ function PreviewBody({
   const rows = CLASSIFICATIONS.map((entry) => ({ ...entry, count: preview.counts[entry.key] ?? 0 })).filter(
     (entry) => entry.count > 0,
   );
-  const willChange = (preview.counts.RemoteOnly ?? 0) + (preview.counts.LocalOnly ?? 0);
+  const willChange = changeCount(preview);
 
   return (
     <div className="flex flex-col gap-3 text-sm">
@@ -365,10 +353,7 @@ function SyncFooter({
           Cancel
         </Button>
       );
-    case "preview": {
-      const willChange =
-        (phase.preview.counts.RemoteOnly ?? 0) + (phase.preview.counts.LocalOnly ?? 0);
-      const blocked = hasBlockingWork(phase.preview);
+    case "preview":
       return (
         <>
           <Button variant="ghost" size="sm" onClick={onBack}>
@@ -376,14 +361,13 @@ function SyncFooter({
           </Button>
           <Button
             size="sm"
-            disabled={blocked || willChange === 0}
+            disabled={!canApply(phase.preview)}
             onClick={() => onApply(phase.preview.runId)}
           >
             {`Apply to ${providerName}`}
           </Button>
         </>
       );
-    }
     case "result":
       return (
         <Button size="sm" onClick={onClose}>

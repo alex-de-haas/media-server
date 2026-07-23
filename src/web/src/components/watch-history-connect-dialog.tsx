@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { mediaServer, type WatchHistoryAuthorization } from "@/lib/media-server";
+import { DEFAULT_POLL_MS, nextPollStep } from "@/lib/watch-history";
 import { errorMessage } from "@/lib/ui";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -14,9 +15,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
-
-// The default cadence if the provider does not name one; Trakt's device flow asks for ~5s.
-const DEFAULT_POLL_MS = 5000;
 
 type Phase =
   | { kind: "starting" }
@@ -90,21 +88,20 @@ export function WatchHistoryConnectDialog({
       if (cancelled) {
         return;
       }
-      switch (result.state) {
-        case "Approved":
+      const step = nextPollStep(result.state, result.pollIntervalSeconds);
+      switch (step.kind) {
+        case "approved":
           callbacks.current.onConnected();
           callbacks.current.onOpenChange(false);
           return;
-        case "Denied":
+        case "denied":
           setPhase({ kind: "error", message: `You declined the request on ${providerName}.` });
           return;
-        case "Expired":
+        case "expired":
           setPhase({ kind: "error", message: "The activation code expired before it was approved." });
           return;
-        case "SlowDown":
-        case "Pending":
-        default:
-          schedule((result.pollIntervalSeconds ?? DEFAULT_POLL_MS / 1000) * 1000);
+        case "wait":
+          schedule(step.delayMs);
       }
     };
 

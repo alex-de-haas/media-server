@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { History, RefreshCw } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type WatchHistoryProvider } from "@/lib/media-server";
+import { connectionBadge } from "@/lib/watch-history";
 import { errorMessage } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,7 +70,8 @@ function ProviderRow({ provider }: { provider: WatchHistoryProvider }) {
   });
 
   const connection = provider.connection;
-  const needsReconnect = connection?.status === "RequiresReconnect";
+  const badge = connectionBadge(connection);
+  const needsReconnect = badge === "reconnect";
 
   return (
     <div className="flex flex-col gap-3">
@@ -77,15 +79,9 @@ function ProviderRow({ provider }: { provider: WatchHistoryProvider }) {
         <div className="flex items-center gap-2">
           <History className="size-4 text-muted-foreground" />
           <span className="font-medium">{provider.displayName}</span>
-          {connection ? (
-            needsReconnect ? (
-              <Badge variant="destructive">Reconnect needed</Badge>
-            ) : (
-              <Badge variant="secondary">Connected</Badge>
-            )
-          ) : (
-            <Badge variant="outline">Not connected</Badge>
-          )}
+          {badge === "reconnect" && <Badge variant="destructive">Reconnect needed</Badge>}
+          {badge === "connected" && <Badge variant="secondary">Connected</Badge>}
+          {badge === "none" && <Badge variant="outline">Not connected</Badge>}
         </div>
       </div>
 
@@ -102,6 +98,9 @@ function ProviderRow({ provider }: { provider: WatchHistoryProvider }) {
             </span>
           )}
           <span>Last sync: {when(connection.lastSyncAt)}</span>
+          {/* Delivery health is distinct from an explicit sync — a change can reach the provider in
+              the background without a sync ever having run. */}
+          <span>Last delivery: {when(connection.lastDeliveryAt)}</span>
           {needsReconnect && connection.lastError && (
             <span className="text-destructive">{connection.lastError}</span>
           )}

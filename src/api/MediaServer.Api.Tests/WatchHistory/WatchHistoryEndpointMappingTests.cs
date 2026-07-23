@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using MediaServer.Api.Data;
 using MediaServer.Api.WatchHistory;
 using Microsoft.AspNetCore.Http;
@@ -12,6 +14,13 @@ namespace MediaServer.Api.Tests.WatchHistory;
 /// </summary>
 public sealed class WatchHistoryEndpointMappingTests
 {
+    // The instance-wide JSON config registers this converter, so both preview counts and apply skip
+    // reasons reach the browser as enum names. Mirror it here to pin the wire shape.
+    private static readonly JsonSerializerOptions EnumNamed = new()
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
+
     private static int StatusOf(IResult result) => result switch
     {
         ProblemHttpResult problem => problem.StatusCode,
@@ -116,14 +125,30 @@ public sealed class WatchHistoryEndpointMappingTests
 
         Assert.Equal(preview.RunId, response.RunId);
         Assert.Equal(3, response.Counts[WatchHistorySyncClassification.RemoteOnly]);
-        var serialized = System.Text.Json.JsonSerializer.Serialize(
-            response,
-            new System.Text.Json.JsonSerializerOptions
-            {
-                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
-            });
+        var serialized = JsonSerializer.Serialize(response, EnumNamed);
         Assert.Contains("\"RemoteOnly\":3", serialized, StringComparison.Ordinal);
         Assert.Contains("The Matrix", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnApplyResultKeysItsSkipsBySkipReasonName()
+    {
+        // The apply endpoint returns this record directly; the Sync popup switches on the skip-reason
+        // names, so an index here would silently mislabel why items were set aside.
+        var result = new WatchHistorySyncApplyResult(
+            Imported: 2,
+            Exported: 1,
+            Unchanged: 5,
+            Skipped: new Dictionary<WatchHistorySyncSkip, int>
+            {
+                [WatchHistorySyncSkip.ExportFailed] = 3,
+                [WatchHistorySyncSkip.AmbiguousLocalIdentity] = 1,
+            });
+
+        var serialized = JsonSerializer.Serialize(result, EnumNamed);
+
+        Assert.Contains("\"ExportFailed\":3", serialized, StringComparison.Ordinal);
+        Assert.Contains("\"AmbiguousLocalIdentity\":1", serialized, StringComparison.Ordinal);
     }
 
     [Fact]
