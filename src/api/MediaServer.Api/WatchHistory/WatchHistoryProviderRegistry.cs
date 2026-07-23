@@ -70,7 +70,16 @@ public sealed class WatchHistoryProviderRegistry : IWatchHistoryProviderRegistry
                 throw new InvalidOperationException($"A registered {what} has an empty provider key.");
             }
 
-            if (!lookup.TryAdd(itemKey.Trim(), item))
+            // A padded key is a typo in the adapter, not something to paper over: accepting it would
+            // leak the untrimmed form through Describe() into settings and API responses, while
+            // lookups matched the trimmed one. Reject it where it can still be fixed cheaply.
+            if (itemKey != itemKey.Trim())
+            {
+                throw new InvalidOperationException(
+                    $"The provider key '{itemKey}' registered for a {what} has leading or trailing whitespace.");
+            }
+
+            if (!lookup.TryAdd(itemKey, item))
             {
                 throw new InvalidOperationException($"More than one {what} is registered for provider key '{itemKey}'.");
             }

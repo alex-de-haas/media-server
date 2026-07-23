@@ -34,15 +34,26 @@ public sealed record WatchHistoryIdentity
     /// </summary>
     public int? EpisodeNumberEnd { get; init; }
 
-    /// <summary>True when this identity is complete enough to send anywhere.</summary>
+    /// <summary>
+    /// True when this identity is complete and well-formed enough to send anywhere. This is the guard
+    /// outbound delivery relies on, so it rejects impossible coordinates as well as missing ones —
+    /// nonsense numbering must surface as an issue rather than reach the provider.
+    /// </summary>
+    /// <remarks>
+    /// Season 0 is valid: it is the specials season by TMDb convention, which Trakt shares. Episode
+    /// numbering starts at 1, and negative values are meaningless in either position.
+    /// </remarks>
     public bool IsResolvable => Kind switch
     {
-        WatchHistoryMediaKind.Movie => TmdbId is not null || ImdbId is not null,
-        WatchHistoryMediaKind.Episode => (TmdbId is not null || ImdbId is not null)
-            && SeasonNumber is not null
-            && EpisodeNumber is not null,
+        WatchHistoryMediaKind.Movie => HasExternalId,
+        WatchHistoryMediaKind.Episode => HasExternalId
+            && SeasonNumber is >= 0
+            && EpisodeNumber is >= 1
+            && EpisodeNumberEnd is null or >= 1,
         _ => false,
     };
+
+    private bool HasExternalId => TmdbId is not null || !string.IsNullOrWhiteSpace(ImdbId);
 
     /// <summary>
     /// Expands a multi-episode range into one identity per episode; every other identity yields itself.
@@ -52,7 +63,10 @@ public sealed record WatchHistoryIdentity
         var last = EpisodeNumberEnd;
         if (Kind is not WatchHistoryMediaKind.Episode || EpisodeNumber is not { } first || last is null || last <= first)
         {
-            yield return this;
+            // Clear a degenerate end rather than passing it on: `end == start` and `end < start` are
+            // not ranges, and letting either reach a snapshot or a provider propagates malformed data
+            // that later readers would have to re-interpret.
+            yield return EpisodeNumberEnd is null ? this : this with { EpisodeNumberEnd = null };
             yield break;
         }
 

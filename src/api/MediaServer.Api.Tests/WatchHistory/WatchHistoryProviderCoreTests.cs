@@ -51,10 +51,45 @@ public sealed class WatchHistoryIdentityTests
     [Theory]
     [InlineData(2, 2)]   // end == start: not a range
     [InlineData(2, 1)]   // end < start: malformed
-    public void ADegenerateRangeExpandsToItself(int first, int end)
+    public void ADegenerateRangeExpandsToOneEpisodeWithTheEndCleared(int first, int end)
     {
+        // Passing the bad end on would put malformed data into snapshots and provider payloads that
+        // later readers would have to re-interpret.
         var expanded = Assert.Single(Episode(episode: first, end: end).Expand());
+
         Assert.Equal(first, expanded.EpisodeNumber);
+        Assert.Null(expanded.EpisodeNumberEnd);
+    }
+
+    [Fact]
+    public void SeasonZeroIsResolvable()
+    {
+        // Season 0 is the specials season by TMDb convention, which Trakt shares — rejecting it would
+        // silently drop every special from sync.
+        Assert.True(Episode(season: 0, episode: 1).IsResolvable);
+    }
+
+    [Theory]
+    [InlineData(-1, 1)]
+    [InlineData(1, 0)]
+    [InlineData(1, -3)]
+    public void ImpossibleCoordinatesAreNotResolvable(int season, int episode)
+    {
+        // IsResolvable is the guard outbound delivery leans on, so nonsense numbering has to surface
+        // as an issue rather than reach the provider.
+        Assert.False(Episode(season: season, episode: episode).IsResolvable);
+    }
+
+    [Fact]
+    public void ANonPositiveRangeEndIsNotResolvable()
+    {
+        Assert.False(Episode(episode: 1, end: 0).IsResolvable);
+    }
+
+    [Fact]
+    public void AWhitespaceImdbIdDoesNotCountAsAnExternalId()
+    {
+        Assert.False(new WatchHistoryIdentity { Kind = WatchHistoryMediaKind.Movie, ImdbId = "   " }.IsResolvable);
     }
 }
 
@@ -223,5 +258,15 @@ public sealed class WatchHistoryProviderRegistryTests
     {
         Assert.Throws<InvalidOperationException>(() =>
             Registry(providers: [new StubProvider("  ")], authorizations: []));
+    }
+
+    [Fact]
+    public void APaddedProviderKeyFailsAtStartupRatherThanLeakingThroughDescribe()
+    {
+        // Lookups would match the trimmed key while Describe() published the padded one.
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            Registry(providers: [new StubProvider(" trakt ")], authorizations: []));
+
+        Assert.Contains("whitespace", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

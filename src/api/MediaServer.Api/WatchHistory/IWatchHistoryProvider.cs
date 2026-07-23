@@ -23,13 +23,26 @@ public sealed record WatchHistoryCapabilities
     /// <summary>Can record a play whose time is unknown.</summary>
     public required bool TimelessWrites { get; init; }
 
-    /// <summary>Can report which items are watched, without per-play detail.</summary>
+    /// <summary>
+    /// Can report which items are watched without per-play detail. Nothing consumes this yet; the
+    /// sync preview that will use it lands in a later slice. It stays here because it is a real
+    /// question about a provider, which an adapter author can answer today.
+    /// </summary>
     public required bool AggregateWatchedReads { get; init; }
 
-    /// <summary>Can report every individual play, paginated.</summary>
+    /// <summary>
+    /// Can report every individual play, which is what <see cref="IWatchHistoryProvider.GetHistoryAsync"/>
+    /// returns. Paging is the adapter's business: the contract hands back the whole list for the
+    /// identities asked about, so a provider that paginates does so internally.
+    /// </summary>
     public required bool FullHistoryReads { get; init; }
 
-    /// <summary>Can delete one identified history entry, leaving others intact.</summary>
+    /// <summary>
+    /// Can delete one identified history entry, leaving others intact — what
+    /// <see cref="IWatchHistoryProvider.RemoveEntriesAsync"/> needs. A provider that can only remove
+    /// everything for an item declares false here rather than having the core substitute the broader
+    /// call, which would take other clients' plays with it.
+    /// </summary>
     public required bool IndividualEntryRemoval { get; init; }
 }
 
