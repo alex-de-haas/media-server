@@ -67,13 +67,15 @@ public sealed class WatchHistorySyncApplyService(
             return Failed(WatchHistoryFailure.ContractViolation, "This preview has expired; take a new one.");
         }
 
-        if (await HasUndeliverableWorkAsync(appUserId, cancellationToken))
+        var undelivered = await UndeliveredWorkAsync(appUserId, cancellationToken);
+        if (undelivered is not null)
         {
-            // Applying over work that cannot be delivered would read a remote snapshot that will never
-            // reflect those local changes, and then overwrite them with it.
-            return Failed(
-                WatchHistoryFailure.ContractViolation,
-                "Outbound work is stuck; resolve it before syncing so local changes are not overwritten.");
+            // Any undelivered local change means the provider's snapshot does not yet reflect it, and
+            // this job would then import the pre-change state back over it. Concretely: unmark an item,
+            // sync before the removal is delivered, and the still-present remote mark reimports as
+            // watched — silently undoing the unwatch, after which the queued removal strips the remote
+            // entry too and the two sides disagree in both directions.
+            return Failed(WatchHistoryFailure.ContractViolation, undelivered);
         }
 
         var connection = await database.WatchHistoryConnections
@@ -91,6 +93,19 @@ public sealed class WatchHistorySyncApplyService(
         try
         {
             var result = await RunAsync(appUserId, run, provider, cancellationToken);
+
+            if (!result.Succeeded)
+            {
+                // A provider read that failed means nothing was projected. Recording it as a completed
+                // sync would tell the user their library is reconciled when it is not, and move
+                // LastSyncAt to prove it.
+                run.Status = WatchHistorySyncStatus.Failed;
+                run.CompletedAt = time.GetUtcNow();
+                run.LastError = result.Detail;
+                await database.SaveChangesAsync(cancellationToken);
+                return result;
+            }
+
             run.Status = WatchHistorySyncStatus.Completed;
             run.CompletedAt = time.GetUtcNow();
             connection!.LastSyncAt = run.CompletedAt;
@@ -184,12 +199,18 @@ public sealed class WatchHistorySyncApplyService(
 
             // The row may have moved since the preview — a play recorded while this job was running.
             // Its own outbound work will carry it; overwriting it here would lose a real viewing.
-            if (row is not null
-                && captured.TryGetValue(item.Id.ToString("N"), out var capturedRevision)
-                && row.StateRevision != capturedRevision)
+            //
+            // A row that exists now but was not captured is the same situation and easy to miss: the
+            // item had no state at preview time, so playback started in between. Treating "absent from
+            // the capture" as unchanged would clear the resume point that activity just created.
+            if (row is not null)
             {
-                Count(skipped, WatchHistorySyncSkip.LocalStateChangedDuringSync);
-                continue;
+                if (!captured.TryGetValue(item.Id.ToString("N"), out var capturedRevision)
+                    || row.StateRevision != capturedRevision)
+                {
+                    Count(skipped, WatchHistorySyncSkip.LocalStateChangedDuringSync);
+                    continue;
+                }
             }
 
             if (Project(appUserId, item, identity, row, localHistory.GetValueOrDefault(item.Id) ?? [],
@@ -376,10 +397,26 @@ public sealed class WatchHistorySyncApplyService(
         return row;
     }
 
-    private async Task<bool> HasUndeliverableWorkAsync(int appUserId, CancellationToken cancellationToken) =>
-        await database.WatchHistoryOutboxEvents.AsNoTracking().AnyAsync(
-            queued => queued.AppUserId == appUserId && queued.Status == WatchHistoryOutboxStatus.Terminal,
-            cancellationToken);
+    /// <summary>The reason apply cannot start yet, or null when the queue is clear.</summary>
+    private async Task<string?> UndeliveredWorkAsync(int appUserId, CancellationToken cancellationToken)
+    {
+        var statuses = await database.WatchHistoryOutboxEvents.AsNoTracking()
+            .Where(queued => queued.AppUserId == appUserId
+                && queued.Status != WatchHistoryOutboxStatus.Completed)
+            .Select(queued => queued.Status)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (statuses.Contains(WatchHistoryOutboxStatus.Terminal))
+        {
+            // Waiting will not clear these, so the user has to act.
+            return "Some outbound changes could not be delivered; resolve them before syncing.";
+        }
+
+        return statuses.Count > 0
+            ? "Local changes are still being sent to the provider; try again once they have."
+            : null;
+    }
 
     private async Task<List<MediaItem>> LoadCandidatesAsync(WatchHistorySyncScope scope, CancellationToken cancellationToken)
     {
@@ -387,7 +424,9 @@ public sealed class WatchHistorySyncApplyService(
             ? new[] { MediaKind.Movie, MediaKind.Episode }
             : [.. scope.Kinds.Select(kind => kind == WatchHistoryMediaKind.Movie ? MediaKind.Movie : MediaKind.Episode)];
 
-        var query = database.MediaItems.Where(item => kinds.Contains(item.Kind));
+        // Read-only here: apply never modifies a MediaItem, and a whole-library scope would otherwise
+        // load every row into the change tracker.
+        var query = database.MediaItems.AsNoTracking().Where(item => kinds.Contains(item.Kind));
         if (scope.CatalogIds.Count > 0)
         {
             query = query.Where(item => scope.CatalogIds.Contains(item.CatalogId));

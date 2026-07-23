@@ -57,6 +57,8 @@ public sealed class WatchHistorySyncApplyServiceTests : IDisposable
 
         public WatchHistoryFailure? FailAdds { get; set; }
 
+        public WatchHistoryFailure? FailReads { get; set; }
+
         public string Key => "fake";
 
         public string DisplayName => "Fake";
@@ -69,7 +71,9 @@ public sealed class WatchHistorySyncApplyServiceTests : IDisposable
 
         public Task<WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>> GetHistoryAsync(
             int appUserId, IReadOnlyCollection<WatchHistoryIdentity> identities, CancellationToken cancellationToken) =>
-            Task.FromResult(WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Success([.. History]));
+            Task.FromResult(FailReads is { } failure
+                ? WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Failed(failure, "stub")
+                : WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Success([.. History]));
 
         public Task<WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>> AddPlaysAsync(
             int appUserId, IReadOnlyCollection<WatchHistoryPlay> plays, CancellationToken cancellationToken)
@@ -414,6 +418,66 @@ public sealed class WatchHistorySyncApplyServiceTests : IDisposable
         var result = await Apply().ApplyAsync(_userId, runId, CancellationToken.None);
 
         Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task UndeliveredOutboundWorkBlocksApply()
+    {
+        // The user unmarked a movie, so a removal is queued but not sent yet. Until it is, the provider
+        // still reports the old mark, and applying would import it back and silently restore Played --
+        // after which the queued removal strips the remote entry and the two sides disagree both ways.
+        var movie = AddMovie("27205");
+        AddRow(movie.Id, played: false, playCount: 1);
+        _provider.History.Add(new WatchHistoryPlay(Movie(27205), null, "1"));
+        var runId = await PreviewRunAsync();
+        var connection = await _database.WatchHistoryConnections.FirstAsync();
+        _database.WatchHistoryOutboxEvents.Add(new WatchHistoryOutboxEvent
+        {
+            Id = Guid.NewGuid(), ConnectionId = connection.Id, AppUserId = _userId, MediaItemId = movie.Id,
+            Operation = WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries, IdempotencyKey = "k",
+            Status = WatchHistoryOutboxStatus.Pending, CreatedAt = _time.GetUtcNow(),
+        });
+        await _database.SaveChangesAsync();
+
+        var result = await Apply().ApplyAsync(_userId, runId, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False((await _database.UserItemData.AsNoTracking().SingleAsync()).Played);
+    }
+
+    [Fact]
+    public async Task AStateRowCreatedAfterThePreviewIsLeftAlone()
+    {
+        // Nothing was captured for this item because it had no state at preview time. Playback started
+        // in between, so the remote snapshot predates it: projecting would clear the resume point that
+        // activity just created.
+        var movie = AddMovie("27205");
+        _provider.History.Add(new WatchHistoryPlay(Movie(27205), _time.GetUtcNow(), "1"));
+        var runId = await PreviewRunAsync();
+        AddRow(movie.Id, played: false, playCount: 0, resumeTicks: 600_000_000);
+
+        await ApplyAsync(runId);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync();
+        Assert.False(row.Played);
+        Assert.Equal(600_000_000, row.PlaybackPositionTicks);
+    }
+
+    [Fact]
+    public async Task AFailedProviderReadDoesNotCompleteTheRun()
+    {
+        // Nothing was projected, so reporting a completed sync would claim a reconciliation that never
+        // happened -- and move LastSyncAt to back the claim up.
+        AddMovie("27205");
+        var runId = await PreviewRunAsync();
+        _provider.FailReads = WatchHistoryFailure.Transient;
+
+        var result = await Apply().ApplyAsync(_userId, runId, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        var run = await _database.WatchHistorySyncRuns.AsNoTracking().SingleAsync();
+        Assert.Equal(WatchHistorySyncStatus.Failed, run.Status);
+        Assert.Null((await _database.WatchHistoryConnections.AsNoTracking().SingleAsync()).LastSyncAt);
     }
 
     [Fact]
