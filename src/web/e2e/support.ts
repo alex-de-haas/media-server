@@ -160,6 +160,7 @@ export const movieDetail = (id: string, title: string, tmdbId: string | null = n
   communityRating: 8.0,
   runtimeTicks: 70_560_000_000,
   indexNumber: null,
+  indexNumberEnd: null,
   parentIndexNumber: null,
   posterUrl: null,
   backdropUrl: null,
@@ -196,12 +197,20 @@ export const seriesDetail = (id: string, title: string, tmdbId: string | null = 
   creators: [],
 });
 
-export const anEpisode = (id: string, seasonNumber: number, episodeNumber: number, title: string) => ({
+// `episodeNumberEnd` is set only for a file that holds a consecutive range (a "double episode").
+export const anEpisode = (
+  id: string,
+  seasonNumber: number,
+  episodeNumber: number,
+  title: string,
+  episodeNumberEnd: number | null = null,
+) => ({
   id,
   publicId: id,
   seriesTmdbId: "123",
   seasonNumber,
   episodeNumber,
+  episodeNumberEnd,
   title,
   overview: null,
   runtimeTicks: 2_400_000_000,

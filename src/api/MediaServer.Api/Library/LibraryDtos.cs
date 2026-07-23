@@ -39,6 +39,8 @@ public sealed record LibraryDetailDto(
     double? CommunityRating,
     long? RuntimeTicks,
     int? IndexNumber,
+    // Last episode covered when one file holds a consecutive range (S01E01-E02); null for a single episode.
+    int? IndexNumberEnd,
     int? ParentIndexNumber,
     string? PosterUrl,
     string? BackdropUrl,
@@ -142,6 +144,10 @@ public sealed record EpisodeDto(
     string? SeriesTmdbId,
     int? SeasonNumber,
     int? EpisodeNumber,
+    // Last episode covered by this file when it holds a consecutive range (a "double episode"): the row is
+    // one item numbered 1 with EpisodeNumberEnd 2, and no separate row exists for episode 2. Null otherwise.
+    // Title stays the first episode's — the provider has no combined title and none is invented.
+    int? EpisodeNumberEnd,
     string Title,
     string? Overview,
     long? RuntimeTicks,

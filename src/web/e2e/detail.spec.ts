@@ -136,6 +136,26 @@ test("shows series cast, episodes, and tags as ordered detail tabs", async ({ pa
   await expect(page.getByText(/S01E01/)).toBeVisible();
 });
 
+test("labels a double-episode file with the range it covers", async ({ page }) => {
+  await setupApp(page, {
+    library: [aSeries("s1", "Warehouse 13")],
+    detail: { s1: seriesDetail("s1", "Warehouse 13", "18164") },
+    // One file holds S01E01-E02, so there is no separate item for episode 2 — the row must say so, or the
+    // season reads "1, 3" and episode 2 looks lost.
+    episodes: {
+      s1: [anEpisode("e1", 1, 1, "Pilot", 2), anEpisode("e3", 1, 3, "Magnetism")],
+    },
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  // The title stays the first episode's; only the code carries the range.
+  await expect(page.getByText("S01E01-E02")).toBeVisible();
+  await expect(page.getByText("Pilot")).toBeVisible();
+  await expect(page.getByText("S01E03")).toBeVisible();
+});
+
 test("admin fixes a misidentified movie and lands on the corrected item", async ({ page }) => {
   await setupApp(page, {
     role: "admin",

@@ -30,6 +30,22 @@ export function formatRuntime(ticks: number | null | undefined): string | null {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+/**
+ * The zero-padded episode code shown beside an episode title: "S01E03", or "S01E01-E02" when a single
+ * file holds a consecutive range (a "double episode" — one library item, no separate item for the second
+ * episode). Follows the same range convention as the on-disk names the organizer writes.
+ */
+export function episodeLabel(
+  seasonNumber: number | null | undefined,
+  episodeNumber: number | null | undefined,
+  episodeNumberEnd?: number | null,
+): string {
+  const season = String(seasonNumber ?? 0).padStart(2, "0");
+  const episode = String(episodeNumber ?? 0).padStart(2, "0");
+  const end = episodeNumberEnd != null && episodeNumberEnd > (episodeNumber ?? 0) ? episodeNumberEnd : null;
+  return end == null ? `S${season}E${episode}` : `S${season}E${episode}-E${String(end).padStart(2, "0")}`;
+}
+
 // ISO timestamp → coarse "just now" / "5m ago" / "3h ago" / "2d ago". Null when unparseable.
 export function formatTimeAgo(iso: string | null | undefined): string | null {
   if (!iso) {
