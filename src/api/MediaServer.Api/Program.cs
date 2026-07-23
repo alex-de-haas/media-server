@@ -10,6 +10,7 @@ using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.WatchHistory;
+using MediaServer.Api.WatchHistory.Trakt;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Library;
 using MediaServer.Api.Mux;
@@ -136,10 +137,26 @@ builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
 });
 builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
 
-// Watched-history providers resolve by stable key, like the metadata providers above. The registry is
-// registered with no adapters yet — Describe() simply returns an empty list, which Settings renders as
-// "no providers", so the surface is inert rather than broken until the Trakt adapter lands.
-builder.Services.AddSingleton<IWatchHistoryProviderRegistry, WatchHistoryProviderRegistry>();
+// Watched-history providers resolve by stable key, like the metadata providers above.
+// Scoped rather than singleton: the adapters it resolves hold a DbContext, and a singleton registry
+// would capture one for the process lifetime.
+builder.Services.AddScoped<IWatchHistoryProviderRegistry, WatchHistoryProviderRegistry>();
+builder.Services.AddSingleton<IWatchHistoryCredentialStore, HostyCoreCredentialStore>();
+builder.Services.AddHttpClient(TraktOAuthClient.HttpClientName, client =>
+{
+    client.BaseAddress = new Uri("https://api.trakt.tv/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddScoped<TraktOAuthClient>();
+// Scoped, not singleton: it holds a DbContext. Registered against the interface as well so the
+// registry picks it up without naming the concrete type.
+builder.Services.AddScoped<TraktAuthorizationService>();
+builder.Services.AddScoped<IWatchHistoryProviderAuthorization>(provider =>
+    provider.GetRequiredService<TraktAuthorizationService>());
+// An abandoned device flow is never polled again, so nothing else would remove its row or its stored
+// device code.
+builder.Services.AddScoped<WatchHistoryAuthorizationCleanupService>();
+builder.Services.AddHostedService<WatchHistoryAuthorizationCleanupWorker>();
 builder.Services.AddSingleton<IReleaseScheduleProvider, TmdbReleaseScheduleProvider>();
 
 // Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
@@ -264,7 +281,11 @@ var hostyAuth = builder.Services.AddHostyAppAuthentication(
     });
 
 // Talks to Core's internal app APIs (backups, notifications, directory) with the service token bearer.
-builder.Services.AddSingleton<IHostyCoreClient, HostyCoreClient>();
+builder.Services.AddSingleton<HostyCoreClient>();
+builder.Services.AddSingleton<IHostyCoreClient>(provider => provider.GetRequiredService<HostyCoreClient>());
+// Same object behind both contracts; the secrets half is separate because its failures must not be
+// folded into null the way the fire-and-forget calls are.
+builder.Services.AddSingleton<IHostyCoreSecrets>(provider => provider.GetRequiredService<HostyCoreClient>());
 
 // Polls Core's scoped directory (no webhooks): upserts assigned users, revokes Jellyfin access on unassign/disable.
 builder.Services.AddScoped<DirectoryReconcileService>();

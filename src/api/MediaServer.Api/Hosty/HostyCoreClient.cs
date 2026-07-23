@@ -25,6 +25,60 @@ public sealed record CoreBackupResult(string Status, string? BackupId)
 public sealed record CoreDirectoryUser(string Id, string? DisplayName, string? Email, string HostRole);
 
 /// <summary>
+/// Raised when Core's secrets store could not be reached or refused a request. A *missing* secret is
+/// not this — that is a null from <see cref="IHostyCoreSecrets.GetSecretAsync"/>.
+/// </summary>
+public sealed class CoreSecretsUnavailableException : Exception
+{
+    public CoreSecretsUnavailableException(string message)
+        : base(message)
+    {
+    }
+
+    public CoreSecretsUnavailableException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// Hosty Core's app secrets store: durable credentials kept outside this app's data directory, and so
+/// outside Hosty's backups.
+/// </summary>
+/// <remarks>
+/// Separate from <see cref="IHostyCoreClient"/> on purpose. Everything there folds failure into null
+/// because a missed notification or backup is survivable; here, "no secret" and "Core unreachable"
+/// mean opposite things to a caller holding a credential — the first says the user must reconnect,
+/// the second says try again shortly — so failures throw rather than collapse into an absence.
+/// </remarks>
+public interface IHostyCoreSecrets
+{
+    /// <summary>
+    /// Reads one of this app's stored secrets, or null when none is stored under that key.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the other calls here, secrets do **not** fold failure into null. "No secret" and "Core
+    /// could not be reached" mean opposite things to a caller holding a credential: the first says
+    /// the user must reconnect, the second says try again shortly. Collapsing them would make a brief
+    /// Core outage look like a revoked account and send users to re-authorize for nothing.
+    /// </remarks>
+    /// <exception cref="CoreSecretsUnavailableException">Core was unreachable or refused the request.</exception>
+    Task<string?> GetSecretAsync(string key, CancellationToken cancellationToken);
+
+    /// <summary>Stores or replaces one of this app's secrets.</summary>
+    /// <exception cref="CoreSecretsUnavailableException">Core was unreachable or refused the request.</exception>
+    Task SetSecretAsync(string key, string value, CancellationToken cancellationToken);
+
+    /// <summary>Deletes one of this app's secrets. Deleting an absent key succeeds.</summary>
+    /// <exception cref="CoreSecretsUnavailableException">Core was unreachable or refused the request.</exception>
+    Task DeleteSecretAsync(string key, CancellationToken cancellationToken);
+
+    /// <summary>Names of this app's stored secrets — names only, never values.</summary>
+    /// <exception cref="CoreSecretsUnavailableException">Core was unreachable or refused the request.</exception>
+    Task<IReadOnlyList<string>> ListSecretKeysAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// Talks to Hosty Core's internal app APIs using the injected <c>HOSTY_APP_SERVICE_TOKEN</c> as bearer:
 /// on-demand backups, operator notifications, and the scoped user directory. Contracts verified against
 /// the sibling <c>docker-host</c> repo. All calls no-op (return null/false) when the app is not Core
@@ -37,6 +91,7 @@ public interface IHostyCoreClient
 
     /// <summary>Requests an on-demand snapshot before a risky local operation (e.g. EF migrations).</summary>
     Task<CoreBackupResult?> CreateBackupAsync(string? note, CancellationToken cancellationToken);
+
 
     /// <summary>
     /// Publishes a user-audience operator notification. <paramref name="target"/> defaults to
@@ -60,7 +115,7 @@ public sealed class HostyCoreClient(
     IHttpClientFactory httpClientFactory,
     HostyOptions options,
     ILogger<HostyCoreClient> logger)
-    : IHostyCoreClient
+    : IHostyCoreClient, IHostyCoreSecrets
 {
     public const string BroadcastTarget = "broadcast";
 
@@ -141,6 +196,96 @@ public sealed class HostyCoreClient(
             return payload?.Users ?? [];
         }
     }
+
+    public async Task<string?> GetSecretAsync(string key, CancellationToken cancellationToken)
+    {
+        using var response = await SendSecretsAsync(HttpMethod.Get, SecretPath(key), payload: null, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        EnsureSecretsSuccess(response, "read");
+        var payload = await response.Content.ReadFromJsonAsync<SecretValueResponse>(ReadOptions, cancellationToken);
+        return payload?.Value;
+    }
+
+    public async Task SetSecretAsync(string key, string value, CancellationToken cancellationToken)
+    {
+        using var response = await SendSecretsAsync(HttpMethod.Put, SecretPath(key), new { value }, cancellationToken);
+        EnsureSecretsSuccess(response, "write");
+    }
+
+    public async Task DeleteSecretAsync(string key, CancellationToken cancellationToken)
+    {
+        using var response = await SendSecretsAsync(HttpMethod.Delete, SecretPath(key), payload: null, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return;
+        }
+
+        EnsureSecretsSuccess(response, "delete");
+    }
+
+    public async Task<IReadOnlyList<string>> ListSecretKeysAsync(CancellationToken cancellationToken)
+    {
+        using var response = await SendSecretsAsync(
+            HttpMethod.Get, $"/api/internal/apps/{options.AppId}/secrets", payload: null, cancellationToken);
+        EnsureSecretsSuccess(response, "list");
+        var payload = await response.Content.ReadFromJsonAsync<SecretKeysResponse>(ReadOptions, cancellationToken);
+        return payload?.Keys ?? [];
+    }
+
+    private string SecretPath(string key) =>
+        $"/api/internal/apps/{options.AppId}/secrets/{Uri.EscapeDataString(key)}";
+
+    // Deliberately does not reuse TrySendAsync: that folds every failure into null, which is right for
+    // fire-and-forget calls and wrong here, where "absent" and "unreachable" lead to opposite actions.
+    private async Task<HttpResponseMessage> SendSecretsAsync(
+        HttpMethod method, string path, object? payload, CancellationToken cancellationToken)
+    {
+        if (!IsEnabled)
+        {
+            throw new CoreSecretsUnavailableException(
+                "The app secrets store is only available when running under Hosty Core.");
+        }
+
+        var client = httpClientFactory.CreateClient(CoreIdentityValidator.HttpClientName);
+        using var request = new HttpRequestMessage(method, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ServiceToken);
+        if (payload is not null)
+        {
+            request.Content = JsonContent.Create(payload);
+        }
+
+        try
+        {
+            return await client.SendAsync(request, cancellationToken);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new CoreSecretsUnavailableException("Hosty Core could not be reached for the app secrets store.", exception);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new CoreSecretsUnavailableException("The app secrets request to Hosty Core timed out.", exception);
+        }
+    }
+
+    private static void EnsureSecretsSuccess(HttpResponseMessage response, string operation)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            // The status is safe to surface; Core's secret error bodies carry codes and limits, never
+            // the stored value.
+            throw new CoreSecretsUnavailableException(
+                $"Hosty Core returned HTTP {(int)response.StatusCode} for an app secrets {operation}.");
+        }
+    }
+
+    private sealed record SecretValueResponse(string? Value);
+
+    private sealed record SecretKeysResponse(IReadOnlyList<string>? Keys);
 
     /// <summary>
     /// Sends an authenticated request to Core, returning the response only on success. Returns null

@@ -3,10 +3,17 @@
   "id": "com.haas.media-server",
   "name": "Media Server",
   "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "runtimeProfiles": [
-    { "key": "docker", "type": "docker", "default": true },
-    { "key": "dev", "type": "localCommand" }
+    {
+      "key": "docker",
+      "type": "docker",
+      "default": true
+    },
+    {
+      "key": "dev",
+      "type": "localCommand"
+    }
   ],
   "defaultRuntime": "docker",
   "services": [
@@ -15,10 +22,23 @@
       "runtimes": {
         "docker": {
           "type": "docker",
-          "image": { "repository": "ghcr.io/alex-de-haas/media-server-api", "tag": "latest", "pullPolicy": "always" },
+          "image": {
+            "repository": "ghcr.io/alex-de-haas/media-server-api",
+            "tag": "latest",
+            "pullPolicy": "always"
+          },
           "ports": [
-            { "key": "internal", "containerPort": 8080, "protocol": "http" },
-            { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true }
+            {
+              "key": "internal",
+              "containerPort": 8080,
+              "protocol": "http"
+            },
+            {
+              "key": "jellyfin",
+              "containerPort": 8096,
+              "protocol": "http",
+              "public": true
+            }
           ]
         },
         "dev": {
@@ -26,21 +46,41 @@
           "workingDirectory": "src/api",
           "command": "dotnet run --project MediaServer.Api",
           "ports": [
-            { "key": "internal", "containerPort": 8080, "protocol": "http" },
-            { "key": "jellyfin", "containerPort": 8096, "protocol": "http", "public": true }
+            {
+              "key": "internal",
+              "containerPort": 8080,
+              "protocol": "http"
+            },
+            {
+              "key": "jellyfin",
+              "containerPort": 8096,
+              "protocol": "http",
+              "public": true
+            }
           ]
         }
       }
     },
     {
       "key": "web",
-      "dependsOn": ["api"],
+      "dependsOn": [
+        "api"
+      ],
       "runtimes": {
         "docker": {
           "type": "docker",
-          "image": { "repository": "ghcr.io/alex-de-haas/media-server-web", "tag": "latest", "pullPolicy": "always" },
+          "image": {
+            "repository": "ghcr.io/alex-de-haas/media-server-web",
+            "tag": "latest",
+            "pullPolicy": "always"
+          },
           "ports": [
-            { "key": "http", "containerPort": 3000, "protocol": "http", "public": true }
+            {
+              "key": "http",
+              "containerPort": 3000,
+              "protocol": "http",
+              "public": true
+            }
           ]
         },
         "dev": {
@@ -48,42 +88,126 @@
           "workingDirectory": "src/web",
           "command": "pnpm dev",
           "ports": [
-            { "key": "http", "containerPort": 3000, "protocol": "http", "public": true }
+            {
+              "key": "http",
+              "containerPort": 3000,
+              "protocol": "http",
+              "public": true
+            }
           ]
         }
       }
     }
   ],
   "endpoints": [
-    { "key": "ui", "service": "web", "port": "http", "protocol": "http", "public": true },
-    { "key": "jellyfin", "service": "api", "port": "jellyfin", "protocol": "http", "public": true }
+    {
+      "key": "ui",
+      "service": "web",
+      "port": "http",
+      "protocol": "http",
+      "public": true
+    },
+    {
+      "key": "jellyfin",
+      "service": "api",
+      "port": "jellyfin",
+      "protocol": "http",
+      "public": true
+    }
   ],
   "dependencies": [
-    { "id": "com.haas.torrent-engine", "required": true, "endpoints": [{ "key": "control", "as": "torrent-engine" }] },
-    { "id": "com.haas.transcode-engine", "required": false, "endpoints": [{ "key": "control", "as": "transcode-engine" }] }
+    {
+      "id": "com.haas.torrent-engine",
+      "required": true,
+      "endpoints": [
+        {
+          "key": "control",
+          "as": "torrent-engine"
+        }
+      ]
+    },
+    {
+      "id": "com.haas.transcode-engine",
+      "required": false,
+      "endpoints": [
+        {
+          "key": "control",
+          "as": "transcode-engine"
+        }
+      ]
+    }
   ],
   "ui": {
-    "entrypoint": { "endpoint": "ui", "path": "/" },
+    "entrypoint": {
+      "endpoint": "ui",
+      "path": "/"
+    },
     "navigation": [
-      { "label": "Home", "path": "/", "iconAsset": "assets/nav/home.svg" },
-      { "label": "Movies", "path": "/movies", "iconAsset": "assets/nav/movies.svg" },
-      { "label": "Series", "path": "/series", "iconAsset": "assets/nav/series.svg" },
-      { "label": "Collections", "path": "/collections", "iconAsset": "assets/nav/collections.svg" },
-      { "label": "Calendar", "path": "/calendar", "iconAsset": "assets/nav/calendar.svg" },
-      { "label": "Activity", "path": "/activity", "iconAsset": "assets/nav/activity.svg" },
-      { "label": "Catalogs", "path": "/catalogs", "iconAsset": "assets/nav/catalogs.svg" },
-      { "label": "Settings", "path": "/settings", "iconAsset": "assets/nav/settings.svg" }
+      {
+        "label": "Home",
+        "path": "/",
+        "iconAsset": "assets/nav/home.svg"
+      },
+      {
+        "label": "Movies",
+        "path": "/movies",
+        "iconAsset": "assets/nav/movies.svg"
+      },
+      {
+        "label": "Series",
+        "path": "/series",
+        "iconAsset": "assets/nav/series.svg"
+      },
+      {
+        "label": "Collections",
+        "path": "/collections",
+        "iconAsset": "assets/nav/collections.svg"
+      },
+      {
+        "label": "Calendar",
+        "path": "/calendar",
+        "iconAsset": "assets/nav/calendar.svg"
+      },
+      {
+        "label": "Activity",
+        "path": "/activity",
+        "iconAsset": "assets/nav/activity.svg"
+      },
+      {
+        "label": "Catalogs",
+        "path": "/catalogs",
+        "iconAsset": "assets/nav/catalogs.svg"
+      },
+      {
+        "label": "Settings",
+        "path": "/settings",
+        "iconAsset": "assets/nav/settings.svg"
+      }
     ]
   },
   "data": {
     "enabled": true,
     "targets": [
-      { "runtime": "docker", "service": "api", "containerPath": "/app/data", "environment": "HOSTY_APP_DATA_DIR" },
-      { "runtime": "dev", "environment": "HOSTY_APP_DATA_DIR" }
+      {
+        "runtime": "docker",
+        "service": "api",
+        "containerPath": "/app/data",
+        "environment": "HOSTY_APP_DATA_DIR"
+      },
+      {
+        "runtime": "dev",
+        "environment": "HOSTY_APP_DATA_DIR"
+      }
     ]
   },
   "externalMounts": {
-    "catalogRoots": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "api", "required": true }
+    "catalogRoots": {
+      "kind": "host-path",
+      "multiple": true,
+      "mode": "rw",
+      "service": "api",
+      "required": true
+    }
   },
   "settings": [
     {
@@ -93,6 +217,19 @@
       "required": true,
       "label": "TMDb API key",
       "description": "API key for The Movie Database, used to identify and fetch metadata for your media."
+    },
+    {
+      "key": "TRAKT_CLIENT_ID",
+      "type": "string",
+      "label": "Trakt client ID",
+      "description": "Client ID of the Trakt API application for this instance. Create one at https://trakt.tv/oauth/applications; leave blank to keep the Trakt integration switched off."
+    },
+    {
+      "key": "TRAKT_CLIENT_SECRET",
+      "type": "string",
+      "secret": true,
+      "label": "Trakt client secret",
+      "description": "Client secret of the same Trakt application. Required alongside the client ID before any user can connect their Trakt account."
     },
     {
       "key": "SUPPORTED_LANGUAGES",
@@ -156,8 +293,14 @@
       "description": "Per-download upload rate limit forwarded to the torrent engine, in bytes per second. 0 means unlimited."
     }
   ],
-  "telemetry": { "enabled": true, "sampleRatio": 0.1 },
-  "capabilities": ["backup", "logs"],
+  "telemetry": {
+    "enabled": true,
+    "sampleRatio": 0.1
+  },
+  "capabilities": [
+    "backup",
+    "logs"
+  ],
   "catalogMetadata": {
     "publisher": {
       "name": "Haas",
@@ -165,7 +308,13 @@
       "email": "a.zayats@outlook.com"
     },
     "category": "Media",
-    "tags": ["media", "streaming", "jellyfin", "movies", "tv"],
+    "tags": [
+      "media",
+      "streaming",
+      "jellyfin",
+      "movies",
+      "tv"
+    ],
     "icon": "assets/icon.svg",
     "license": "AGPL-3.0-only",
     "links": {
