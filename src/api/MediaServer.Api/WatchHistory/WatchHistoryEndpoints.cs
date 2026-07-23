@@ -31,6 +31,26 @@ public sealed record WatchHistoryAuthorizationResponse(
     int? PollIntervalSeconds,
     WatchHistoryConnectionResponse? Connection);
 
+/// <summary>Which catalogs and media kinds a sync should touch. Empty on either axis means "all".</summary>
+public sealed record WatchHistorySyncScopeRequest(
+    IReadOnlyList<Guid>? CatalogIds,
+    IReadOnlyList<WatchHistoryMediaKind>? Kinds);
+
+/// <summary>The one previewed run the caller is choosing to apply.</summary>
+public sealed record WatchHistorySyncApplyRequest(Guid RunId);
+
+/// <summary>
+/// The read-only comparison the user approves before anything is written. Counts and sample carry
+/// enum keys/values that serialize as their names, so the UI reads "RemoteOnly" rather than an index.
+/// </summary>
+public sealed record WatchHistorySyncPreviewResponse(
+    Guid RunId,
+    IReadOnlyDictionary<WatchHistorySyncClassification, int> Counts,
+    IReadOnlyList<WatchHistorySyncEntry> Sample,
+    bool HasPendingOutboundWork,
+    bool HasTerminalOutboundWork,
+    bool AggregateCountsMayCollapse);
+
 /// <summary>
 /// Internal UI endpoints (Hosty identity) for a signed-in user to manage their own watched-history
 /// provider connections.
@@ -160,6 +180,49 @@ public static class WatchHistoryEndpoints
             return connection is null ? Results.NotFound() : Results.Ok(ToResponse(connection));
         });
 
+        group.MapPost("/connections/{providerKey}/sync/preview", async (
+            string providerKey,
+            WatchHistorySyncScopeRequest? request,
+            ClaimsPrincipal principal,
+            IWatchHistoryProviderRegistry registry,
+            WatchHistorySyncPreviewService preview,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var context = await ResolveAsync(principal, providerKey, registry, database, cancellationToken);
+            if (context.Problem is not null)
+            {
+                return context.Problem;
+            }
+
+            var result = await preview.BuildAsync(context.User!.Id, ToScope(request), cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(ToResponse(result.Value!))
+                : ToProblem(result.Failure!.Value, result.Detail);
+        });
+
+        group.MapPost("/connections/{providerKey}/sync/apply", async (
+            string providerKey,
+            WatchHistorySyncApplyRequest request,
+            ClaimsPrincipal principal,
+            IWatchHistoryProviderRegistry registry,
+            WatchHistorySyncApplyService apply,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var context = await ResolveAsync(principal, providerKey, registry, database, cancellationToken);
+            if (context.Problem is not null)
+            {
+                return context.Problem;
+            }
+
+            // The run carries its own scope and captured revisions; the caller only names which one.
+            var result = await apply.ApplyAsync(context.User!.Id, request.RunId, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.Value!)
+                : ToProblem(result.Failure!.Value, result.Detail);
+        });
+
         group.MapDelete("/connections/{providerKey}", async (
             string providerKey,
             ClaimsPrincipal principal,
@@ -179,6 +242,20 @@ public static class WatchHistoryEndpoints
             return Results.NoContent();
         });
     }
+
+    /// <summary>A null request, or empty on either axis, means "everything" — the same as an unscoped sync.</summary>
+    internal static WatchHistorySyncScope ToScope(WatchHistorySyncScopeRequest? request) =>
+        request is null
+            ? WatchHistorySyncScope.Everything
+            : new WatchHistorySyncScope(request.CatalogIds ?? [], request.Kinds ?? []);
+
+    internal static WatchHistorySyncPreviewResponse ToResponse(WatchHistorySyncPreview preview) => new(
+        preview.RunId,
+        preview.Counts,
+        preview.Sample,
+        preview.HasPendingOutboundWork,
+        preview.HasTerminalOutboundWork,
+        preview.AggregateCountsMayCollapse);
 
     private sealed record ResolvedContext(
         AppUser? User, IWatchHistoryProviderAuthorization? Authorization, string ProviderKey, IResult? Problem);

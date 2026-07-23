@@ -1,5 +1,6 @@
 import { InfuseAccessSection } from "@/components/infuse-access-section";
 import { ReleaseGroupSettingsSection } from "@/components/release-group-settings-section";
+import { WatchHistorySection } from "@/components/watch-history-section";
 
 export default function SettingsPage() {
   return (
@@ -8,6 +9,7 @@ export default function SettingsPage() {
       <div className="flex flex-col gap-6">
         <ReleaseGroupSettingsSection />
         <InfuseAccessSection />
+        <WatchHistorySection />
       </div>
     </>
   );

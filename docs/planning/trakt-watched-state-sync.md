@@ -2,7 +2,7 @@
 
 Status: Draft
 Created: 2026-07-21
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 ## Goal
 
@@ -991,13 +991,21 @@ it cannot read a stale remote snapshot while older local events are pending.
 
 ### Phase 4: Settings and Operations
 
-- [ ] Add provider-keyed BFF contracts and Watch history providers UI near Infuse
+- [x] Add provider-keyed BFF contracts and Watch history providers UI near Infuse
   Access.
-- [ ] Add Device OAuth, connection status, Sync popup, progress/result, issues,
+- [x] Add Device OAuth, connection status, Sync popup, progress/result, issues,
   reconnect, and disconnect states.
-- [ ] Add admin onboarding and unknown/unwatch help.
-- [ ] Extend directory reconciliation and add structured telemetry.
+- [x] Add admin onboarding and unknown/unwatch help. A not-configured provider
+  names the operator step; the disconnected card warns to enable Trakt in only
+  one app; the Sync preview labels every set-aside classification with its reason.
+- [ ] Extend directory reconciliation and add structured telemetry. Deferred: this
+  is server-side observability, not a Settings surface, and is better sized on its
+  own alongside the delivery worker.
 - [ ] Verify keyboard, narrow-screen, Hosty iframe, and secret-redaction behavior.
+  Secret redaction is covered by a test (no token, refresh token, device code, or
+  secrets-store key reaches any response); the card and dialogs wrap on narrow
+  widths and use the standard dialog primitives for focus and keyboard. Live
+  iframe verification remains, with the live Trakt run below.
 
 ### Phase 5: Verification, Documentation, and Release Preparation
 
