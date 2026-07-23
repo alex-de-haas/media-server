@@ -155,7 +155,8 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
         new() { Kind = WatchHistoryMediaKind.Movie, TmdbId = 27205 };
 
     private WatchHistoryOutboxEvent Queue(
-        WatchHistoryOutboxOperation operation, DateTimeOffset? occurredAt = null, Guid? historyEntryId = null)
+        WatchHistoryOutboxOperation operation, DateTimeOffset? occurredAt = null, Guid? historyEntryId = null,
+        string[]? remoteIds = null)
     {
         var item = new WatchHistoryOutboxEvent
         {
@@ -167,6 +168,7 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
             Operation = operation,
             IdentitySnapshot = JsonSerializer.Serialize(Identity()),
             OccurredAt = occurredAt,
+            RemoteIdSnapshot = remoteIds is null ? null : JsonSerializer.Serialize(remoteIds),
             IdempotencyKey = Guid.NewGuid().ToString("N"),
             Status = WatchHistoryOutboxStatus.Pending,
             CreatedAt = _time.GetUtcNow(),
@@ -240,12 +242,31 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task AnEntryTheProviderHasNotSurfacedYetIsLeftUnowned()
+    public async Task AnEntryTheProviderHasNotSurfacedYetIsReadAgainRatherThanGuessed()
     {
-        // Guessing which entry is ours would license deleting one this app did not create.
+        // Providers can be eventually consistent, so an empty difference is not yet an answer.
         var entry = AddLocalEntry(null, PlaybackHistoryOrigin.Manual);
         _provider.HideNextWrite = true;
-        Queue(WatchHistoryOutboxOperation.EnsureTimelessWatched, historyEntryId: entry.Id);
+        var queued = Queue(WatchHistoryOutboxOperation.EnsureTimelessWatched, historyEntryId: entry.Id);
+
+        var result = await Service().DeliverAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Retried);
+        Assert.Equal(WatchHistoryOutboxStatus.Pending, (await Reload(queued)).Status);
+        var linked = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync(row => row.Id == entry.Id);
+        Assert.Equal(PlaybackHistoryLinkStatus.None, linked.LinkStatus);
+    }
+
+    [Fact]
+    public async Task AnEntryThatNeverSurfacesEndsUnownedRatherThanGuessed()
+    {
+        // At the ceiling the honest answer is "we cannot prove this is ours" — guessing would license
+        // deleting an entry this app never created.
+        var entry = AddLocalEntry(null, PlaybackHistoryOrigin.Manual);
+        var queued = Queue(WatchHistoryOutboxOperation.EnsureTimelessWatched, historyEntryId: entry.Id);
+        queued.RemoteIdSnapshot = JsonSerializer.Serialize(Array.Empty<string>());
+        queued.Attempts = WatchHistoryDeliveryService.MaxAttempts - 1;
+        await _database.SaveChangesAsync();
 
         await Service().DeliverAsync(CancellationToken.None);
 
@@ -255,12 +276,29 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ARetryDoesNotAddASecondMarkWhenTheFirstMayHaveLanded()
+    {
+        // The snapshot is written before the add, so its presence cannot prove the add landed. Adding
+        // again would be a duplicate viewing; a mark that never landed is recovered by the next sync.
+        var entry = AddLocalEntry(null, PlaybackHistoryOrigin.Manual);
+        var queued = Queue(WatchHistoryOutboxOperation.EnsureTimelessWatched, historyEntryId: entry.Id);
+        queued.RemoteIdSnapshot = JsonSerializer.Serialize(Array.Empty<string>());
+        queued.Attempts = WatchHistoryDeliveryService.MaxAttempts - 1;
+        await _database.SaveChangesAsync();
+
+        await Service().DeliverAsync(CancellationToken.None);
+
+        Assert.DoesNotContain("add", _provider.Calls);
+        Assert.Empty(_provider.History);
+    }
+
+    [Fact]
     public async Task AConcurrentWriteThatMuddiesTheDifferenceLeavesItUnowned()
     {
         var entry = AddLocalEntry(null, PlaybackHistoryOrigin.Manual);
         var queued = Queue(WatchHistoryOutboxOperation.EnsureTimelessWatched, historyEntryId: entry.Id);
         // Two new ids appear between the reads; neither can be claimed as ours.
-        queued.PreCreateRemoteIds = JsonSerializer.Serialize(Array.Empty<string>());
+        queued.RemoteIdSnapshot = JsonSerializer.Serialize(Array.Empty<string>());
         _provider.History.Add(new WatchHistoryPlay(Identity(), null, "701"));
         _provider.History.Add(new WatchHistoryPlay(Identity(), null, "702"));
         await _database.SaveChangesAsync();
@@ -278,7 +316,7 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
         // read must not add a second mark on the next pass.
         var entry = AddLocalEntry(null, PlaybackHistoryOrigin.Manual);
         var queued = Queue(WatchHistoryOutboxOperation.EnsureTimelessWatched, historyEntryId: entry.Id);
-        queued.PreCreateRemoteIds = JsonSerializer.Serialize(Array.Empty<string>());
+        queued.RemoteIdSnapshot = JsonSerializer.Serialize(Array.Empty<string>());
         _provider.History.Add(new WatchHistoryPlay(Identity(), null, "801"));
         await _database.SaveChangesAsync();
 
@@ -308,11 +346,11 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
     [Fact]
     public async Task RemovalTouchesOnlyTheEntriesThisAppOwns()
     {
-        AddLocalEntry(null, PlaybackHistoryOrigin.Manual, remoteId: "111", owned: true);
-        AddLocalEntry(null, PlaybackHistoryOrigin.ProviderSync, remoteId: "222", owned: false);
+        // The ids ride on the event because the local entries are deleted in the same transaction as
+        // the unwatch — reading them at delivery time would find nothing.
         _provider.History.Add(new WatchHistoryPlay(Identity(), null, "111"));
         _provider.History.Add(new WatchHistoryPlay(Identity(), null, "222"));
-        Queue(WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries);
+        Queue(WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries, remoteIds: ["111"]);
 
         await Service().DeliverAsync(CancellationToken.None);
 
@@ -324,7 +362,7 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
     public async Task RemovalWithNothingOwnedCompletesWithoutCallingTheProvider()
     {
         // Retrying would never find anything to remove.
-        AddLocalEntry(null, PlaybackHistoryOrigin.ProviderSync, remoteId: "222", owned: false);
+        _provider.History.Add(new WatchHistoryPlay(Identity(), null, "222"));
         var queued = Queue(WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries);
 
         await Service().DeliverAsync(CancellationToken.None);
@@ -336,14 +374,68 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
     [Fact]
     public async Task AProviderThatCannotRemoveOneEntryIsNotAskedToRemoveEverything()
     {
-        AddLocalEntry(null, PlaybackHistoryOrigin.Manual, remoteId: "111", owned: true);
         _provider.Overrides = _provider.Overrides with { IndividualEntryRemoval = false };
-        var queued = Queue(WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries);
+        var queued = Queue(WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries, remoteIds: ["111"]);
 
         await Service().DeliverAsync(CancellationToken.None);
 
         Assert.Equal(WatchHistoryOutboxStatus.Terminal, (await Reload(queued)).Status);
         Assert.Empty(_provider.Removed);
+    }
+
+    [Fact]
+    public async Task ARetryDoesNotRepostAnExactPlayThatAlreadyLanded()
+    {
+        // The provider may have accepted the first attempt before the process died. Providers do not
+        // deduplicate by item and timestamp, so a blind re-post is a second viewing on the profile.
+        var watchedAt = _time.GetUtcNow();
+        _provider.History.Add(new WatchHistoryPlay(Identity(), watchedAt, "600"));
+        var queued = Queue(WatchHistoryOutboxOperation.AddExactWatch, watchedAt);
+        queued.Attempts = 1;
+        await _database.SaveChangesAsync();
+
+        var result = await Service().DeliverAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Delivered);
+        Assert.DoesNotContain("add", _provider.Calls);
+        Assert.Single(_provider.History);
+    }
+
+    [Fact]
+    public async Task AFirstAttemptDoesNotPayForTheDuplicateCheck()
+    {
+        // A first attempt cannot be a duplicate of itself, so it goes straight to the write.
+        Queue(WatchHistoryOutboxOperation.AddExactWatch, _time.GetUtcNow());
+
+        await Service().DeliverAsync(CancellationToken.None);
+
+        Assert.Equal(["add"], _provider.Calls);
+    }
+
+    [Fact]
+    public async Task AnExactWatchWithoutATimeIsTerminalRatherThanSentAsTimeless()
+    {
+        // Sending it as timeless would quietly turn a proven completion into "watched, time unknown".
+        var queued = Queue(WatchHistoryOutboxOperation.AddExactWatch, occurredAt: null);
+
+        await Service().DeliverAsync(CancellationToken.None);
+
+        Assert.Equal(WatchHistoryOutboxStatus.Terminal, (await Reload(queued)).Status);
+        Assert.Empty(_provider.Calls);
+    }
+
+    [Fact]
+    public async Task AProviderThatCannotReportHistoryCannotBeAskedToEnsureAMark()
+    {
+        // Without a history read there is no way to know whether a mark is needed, nor which entry
+        // we created.
+        _provider.Overrides = _provider.Overrides with { FullHistoryReads = false };
+        var queued = Queue(WatchHistoryOutboxOperation.EnsureTimelessWatched);
+
+        await Service().DeliverAsync(CancellationToken.None);
+
+        Assert.Equal(WatchHistoryOutboxStatus.Terminal, (await Reload(queued)).Status);
+        Assert.Empty(_provider.Calls);
     }
 
     // ---- Retries and terminal failures ----

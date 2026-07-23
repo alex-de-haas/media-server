@@ -142,6 +142,15 @@ public sealed class WatchHistoryRecorder(
                 && (entry.Origin == PlaybackHistoryOrigin.Manual || entry.Origin == PlaybackHistoryOrigin.Legacy))
             .ToListAsync(cancellationToken);
 
+        // Captured before the rows go: after this transaction there is nowhere left to read them
+        // from, and without them the worker would have nothing to remove — the remote mark would
+        // survive an unwatch forever.
+        var remoteIds = owned
+            .Where(entry => entry.ProviderEntryOwned && entry.ProviderHistoryId is not null)
+            .Select(entry => entry.ProviderHistoryId!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
         if (owned.Count > 0)
         {
             database.PlaybackHistoryEntries.RemoveRange(owned);
@@ -150,7 +159,8 @@ public sealed class WatchHistoryRecorder(
         var identity = await identities.MapAsync(item, cancellationToken);
         await StageOutboxAsync(
             appUserId, item, row, entry: null, WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries,
-            identity, occurredAt: null, sessionKey: null, cancellationToken);
+            identity, occurredAt: null, sessionKey: null, cancellationToken,
+            remoteIdSnapshot: remoteIds.Count > 0 ? JsonSerializer.Serialize(remoteIds) : null);
     }
 
     private async Task StageOutboxAsync(
@@ -162,7 +172,8 @@ public sealed class WatchHistoryRecorder(
         WatchHistoryIdentityResult identity,
         DateTimeOffset? occurredAt,
         string? sessionKey,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? remoteIdSnapshot = null)
     {
         var connection = await database.WatchHistoryConnections
             .FirstOrDefaultAsync(link => link.AppUserId == appUserId && link.Status == WatchHistoryConnectionStatus.Connected, cancellationToken);
@@ -222,6 +233,7 @@ public sealed class WatchHistoryRecorder(
             Operation = operation,
             IdentitySnapshot = Snapshot(identity),
             OccurredAt = occurredAt,
+            RemoteIdSnapshot = remoteIdSnapshot,
             IdempotencyKey = idempotencyKey,
             Status = WatchHistoryOutboxStatus.Pending,
             CreatedAt = time.GetUtcNow(),

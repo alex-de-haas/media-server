@@ -141,13 +141,43 @@ public sealed class WatchHistoryDeliveryService(
             return (WatchHistoryFailure.Unsupported, "This provider cannot record an exact time.", null);
         }
 
+        if (item.OccurredAt is not { } occurredAt)
+        {
+            // Sending this as a timeless write would quietly turn a proven completion into "watched,
+            // time unknown". A queued exact watch without its time is a bug upstream, not a retry.
+            return (WatchHistoryFailure.ContractViolation, "An exact watch was queued without a time.", null);
+        }
+
+        // On a retry the previous attempt may have reached the provider before the process died.
+        // Providers do not deduplicate history by item and timestamp, so a blind re-post becomes a
+        // second viewing on the user's profile. Only retries pay for this read — a first attempt
+        // cannot be a duplicate of itself.
+        if (item.Attempts > 1 && provider.Capabilities.FullHistoryReads)
+        {
+            var existing = await provider.GetHistoryAsync(item.AppUserId, [identity], cancellationToken);
+            if (!existing.Succeeded)
+            {
+                return (existing.Failure, existing.Detail, existing.RetryAfter);
+            }
+
+            if (existing.Value!.Any(play => play.WatchedAt is { } watched && SameInstant(watched, occurredAt)))
+            {
+                logger.LogDebug("An earlier attempt already recorded this exact play; not sending it again.");
+                return (null, null, null);
+            }
+        }
+
         var added = await provider.AddPlaysAsync(
-            item.AppUserId, [new WatchHistoryPlay(identity, item.OccurredAt)], cancellationToken);
+            item.AppUserId, [new WatchHistoryPlay(identity, occurredAt)], cancellationToken);
 
         return added.Succeeded
             ? (null, null, null)
             : (added.Failure, added.Detail, added.RetryAfter);
     }
+
+    // Providers round stored timestamps, so compare at second precision rather than tick equality.
+    private static bool SameInstant(DateTimeOffset left, DateTimeOffset right) =>
+        Math.Abs((left - right).TotalSeconds) < 1;
 
     /// <summary>
     /// Adds one timeless mark, but only if the provider holds nothing for the item — and records
@@ -168,26 +198,32 @@ public sealed class WatchHistoryDeliveryService(
             return (WatchHistoryFailure.Unsupported, "This provider cannot record a play without a time.", null);
         }
 
-        var before = await provider.GetHistoryAsync(item.AppUserId, [identity], cancellationToken);
-        if (!before.Succeeded)
+        if (!provider.Capabilities.FullHistoryReads)
         {
-            return (before.Failure, before.Detail, before.RetryAfter);
+            // Without a history read there is no way to tell whether a mark is even needed, nor which
+            // entry we created — and ownership is what permits removing it later.
+            return (WatchHistoryFailure.Unsupported, "This provider cannot report its history.", null);
         }
 
-        var alreadyRecorded = ParseRemoteIds(item.PreCreateRemoteIds);
-        if (alreadyRecorded is null)
+        var current = await provider.GetHistoryAsync(item.AppUserId, [identity], cancellationToken);
+        if (!current.Succeeded)
         {
-            // First attempt: remember what was there before touching anything.
-            if (before.Value!.Count > 0)
+            return (current.Failure, current.Detail, current.RetryAfter);
+        }
+
+        var before = ParseRemoteIds(item.RemoteIdSnapshot);
+        if (before is null)
+        {
+            // First attempt.
+            if (current.Value!.Count > 0)
             {
                 // The provider already knows this was watched. Adding a second mark would put an extra
                 // viewing on the user's profile for a toggle.
                 return (null, null, null);
             }
 
-            item.PreCreateRemoteIds = JsonSerializer.Serialize(Array.Empty<string>());
+            item.RemoteIdSnapshot = JsonSerializer.Serialize(Array.Empty<string>());
             await database.SaveChangesAsync(cancellationToken);
-            alreadyRecorded = [];
 
             var added = await provider.AddPlaysAsync(
                 item.AppUserId, [new WatchHistoryPlay(identity, WatchedAt: null)], cancellationToken);
@@ -195,20 +231,41 @@ public sealed class WatchHistoryDeliveryService(
             {
                 return (added.Failure, added.Detail, added.RetryAfter);
             }
+
+            var after = await provider.GetHistoryAsync(item.AppUserId, [identity], cancellationToken);
+            if (!after.Succeeded)
+            {
+                return (after.Failure, after.Detail, after.RetryAfter);
+            }
+
+            return await ResolveOwnershipAsync(item, new HashSet<string>(StringComparer.Ordinal), after.Value!, cancellationToken);
         }
 
-        // Read after write — on a retry this is the only step that runs, which is what makes an
-        // interrupted attempt resolvable rather than lost.
-        var after = await provider.GetHistoryAsync(item.AppUserId, [identity], cancellationToken);
-        if (!after.Succeeded)
-        {
-            return (after.Failure, after.Detail, after.RetryAfter);
-        }
+        // A retry. The snapshot is written *before* the add, so its presence cannot prove the add
+        // landed — only the difference can. Deliberately not re-adding: if the earlier attempt did
+        // land, a second mark is a duplicate viewing on the user's profile, whereas a mark that never
+        // landed is recovered by the next explicit sync. The duplicate is the harm worth avoiding.
+        return await ResolveOwnershipAsync(item, before, current.Value!, cancellationToken);
+    }
 
-        var created = after.Value!
-            .Where(play => play.RemoteId is not null && !alreadyRecorded.Contains(play.RemoteId))
+    private async Task<(WatchHistoryFailure?, string?, TimeSpan?)> ResolveOwnershipAsync(
+        WatchHistoryOutboxEvent item,
+        IReadOnlySet<string> before,
+        IReadOnlyList<WatchHistoryPlay> after,
+        CancellationToken cancellationToken)
+    {
+        var created = after
+            .Where(play => play.RemoteId is not null && !before.Contains(play.RemoteId))
             .Select(play => play.RemoteId!)
             .ToList();
+
+        if (created.Count == 0 && item.Attempts < MaxAttempts)
+        {
+            // Nothing new yet: either the provider has not surfaced the entry, or the add never
+            // landed. Read again shortly rather than deciding now; the attempt ceiling ends this and
+            // leaves ownership unresolved rather than guessed.
+            return (WatchHistoryFailure.Transient, "The created entry is not visible yet.", null);
+        }
 
         await LinkOwnedEntryAsync(item, created, cancellationToken);
         return (null, null, null);
@@ -267,15 +324,10 @@ public sealed class WatchHistoryDeliveryService(
             return (WatchHistoryFailure.Unsupported, "This provider cannot remove a single history entry.", null);
         }
 
-        // The local entries are already gone — the recorder removed them in the same transaction as
-        // the unwatch — so the ids come from the event's own link.
-        var owned = await database.PlaybackHistoryEntries.AsNoTracking()
-            .Where(entry => entry.AppUserId == item.AppUserId
-                && entry.MediaItemId == item.MediaItemId
-                && entry.ProviderEntryOwned
-                && entry.ProviderHistoryId != null)
-            .Select(entry => entry.ProviderHistoryId!)
-            .ToListAsync(cancellationToken);
+        // Read from the event, not from the entries: the recorder deleted those in the same
+        // transaction as the unwatch, so by the time this runs there is nothing local left to read.
+        // The ids were captured onto the event before that deletion for exactly this reason.
+        var owned = ParseRemoteIds(item.RemoteIdSnapshot)?.ToList() ?? [];
 
         if (owned.Count == 0)
         {
