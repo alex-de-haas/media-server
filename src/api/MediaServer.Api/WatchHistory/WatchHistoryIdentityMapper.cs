@@ -155,7 +155,7 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
                 .Where(entry => entry.Kind == MediaKind.Episode && entry.SeriesId == folder.Id))
                 .ToListAsync(cancellationToken),
             MediaKind.Season => await Ordered(database.MediaItems.AsNoTracking()
-                .Where(entry => entry.Kind == MediaKind.Episode && entry.ParentId == folder.Id))
+                .Where(entry => entry.Kind == MediaKind.Episode && entry.SeasonId == folder.Id))
                 .ToListAsync(cancellationToken),
             _ => [],
         };

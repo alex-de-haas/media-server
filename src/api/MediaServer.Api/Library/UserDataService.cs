@@ -1,4 +1,5 @@
 using MediaServer.Api.Data;
+using MediaServer.Api.WatchHistory;
 using MediaServer.Api.Jellyfin;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +12,7 @@ namespace MediaServer.Api.Library;
 /// report/mark methods apply the watched threshold and resume-reset policy. See
 /// <c>docs/features/jellyfin-compatibility.md</c> ("Playback Progress and User Data").
 /// </summary>
-public sealed class UserDataService(MediaServerDbContext database, TimeProvider time)
+public sealed class UserDataService(MediaServerDbContext database, TimeProvider time, WatchHistoryRecorder? watchHistory = null)
 {
     /// <summary>Crossing this fraction of the runtime marks the item watched and clears its resume point.</summary>
     internal const double WatchedThreshold = 0.90;
@@ -142,9 +143,21 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
                 ? !row.Played
                 : session.CompletedAt is null && session.ObservedBelowThreshold;
             MarkWatched(row, now, counts);
-            if (counts && session is not null)
+            if (counts)
             {
-                session.CompletedAt = now;
+                // Staged, not saved: the row change, the history entry and the outbound intent commit
+                // together in the SaveChangesAsync below, so a crash cannot separate them.
+                var entry = watchHistory is null
+                    ? null
+                    : await watchHistory.StageCompletionAsync(appUserId, item, row, playSessionId, now, cancellationToken);
+
+                if (session is not null)
+                {
+                    session.CompletedAt = now;
+                    // Lets a restart or a repeated report reuse this completion rather than merely
+                    // suppressing a second count.
+                    session.HistoryEntryId = entry?.Id;
+                }
             }
         }
         else if (positionTicks <= 0)
@@ -293,6 +306,8 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
             {
                 row = new UserItemData { Id = Guid.NewGuid(), AppUserId = appUserId, MediaItemId = itemId };
                 database.UserItemData.Add(row);
+                // The staging loop below reads this map; a row created here is not yet queryable.
+                existingByItem[itemId] = row;
             }
 
             if (played)
@@ -303,8 +318,44 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
             }
             else
             {
+                if (row.Played)
+                {
+                    row.WatchedStateChangedAt = now;
+                }
+
                 row.Played = false;
                 row.PlaybackPositionTicks = 0;
+                // PlayCount and LastWatchedAt survive: unwatch is a statement about current state, not
+                // a claim that the viewings never happened.
+            }
+        }
+
+        if (watchHistory is null)
+        {
+            return;
+        }
+
+        // The rows above are the leaves a folder mark fanned out to, so each one gets its own history
+        // and outbound intent — providers know episodes, not seasons. Staged here and committed by the
+        // caller's SaveChangesAsync along with the state change.
+        var items = await database.MediaItems
+            .Where(entry => itemIds.Contains(entry.Id))
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            if (!existingByItem.TryGetValue(item.Id, out var row))
+            {
+                continue;
+            }
+
+            if (played)
+            {
+                await watchHistory.StageManualWatchedAsync(appUserId, item, row, cancellationToken);
+            }
+            else
+            {
+                await watchHistory.StageUnwatchedAsync(appUserId, item, row, cancellationToken);
             }
         }
     }
@@ -393,6 +444,14 @@ public sealed class UserDataService(MediaServerDbContext database, TimeProvider 
         if (countsAsPlay)
         {
             row.PlayCount++;
+            // Distinct from LastPlayedDate, which any report moves: this one only advances on a
+            // completion, and is never written from a provider's imported history.
+            row.LastWatchedAt = now;
+        }
+
+        if (!row.Played)
+        {
+            row.WatchedStateChangedAt = now;
         }
 
         row.Played = true;

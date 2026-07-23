@@ -43,6 +43,9 @@ public sealed class WatchHistoryIdentityMapperTests : IDisposable
             Title = title,
             Providers = providers ?? [],
             ParentId = parentId,
+            // Season membership is SeasonId across the codebase (see DescendantEpisodeIdsAsync);
+            // ParentId is the generic tree link and the two must agree for episodes.
+            SeasonId = kind == MediaKind.Episode ? parentId : null,
             SeriesId = seriesId,
             IndexNumber = index,
             ParentIndexNumber = parentIndex,

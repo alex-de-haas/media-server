@@ -69,10 +69,15 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     }
 
     /// <summary>
-    /// Bumps the optimistic-concurrency token on every persisted <see cref="IngestItem"/> change.
-    /// SQLite has no native rowversion, so the orchestrator relies on this application-managed token
-    /// to detect concurrent edits between the reconciler and operator actions.
+    /// Bumps the application-managed concurrency tokens SQLite cannot provide: the
+    /// <see cref="IngestItem"/> row version, and the <see cref="UserItemData.StateRevision"/> a
+    /// long-running sync captures before reading a provider and re-checks before applying.
     /// </summary>
+    /// <remarks>
+    /// Done here rather than at each mutation site so a future code path cannot forget it. Forgetting
+    /// would be quiet and expensive: a sync would apply a stale remote snapshot over a play recorded
+    /// while it was running, and nothing would look wrong at the time.
+    /// </remarks>
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         foreach (var entry in ChangeTracker.Entries<IngestItem>())
@@ -80,6 +85,14 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
             if (entry.State is EntityState.Added or EntityState.Modified)
             {
                 entry.Entity.RowVersion = Guid.NewGuid().ToByteArray();
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<UserItemData>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.StateRevision++;
             }
         }
 
