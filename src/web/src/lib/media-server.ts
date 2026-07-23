@@ -486,6 +486,92 @@ export interface JellyfinCredentialSecret {
   serverUrl: string | null;
 }
 
+// Watch-history provider connections (Trakt today), managed by the signed-in user. No response on
+// any of these ever carries a token, refresh token, or device code — only display material.
+export type WatchHistoryConnectionStatus = "Connected" | "RequiresReconnect";
+
+export interface WatchHistoryConnection {
+  providerKey: string;
+  status: WatchHistoryConnectionStatus;
+  accountName: string | null;
+  connectedAt: string;
+  lastDeliveryAt: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+export interface WatchHistoryProvider {
+  key: string;
+  displayName: string;
+  // The operator has supplied this provider's application settings; without it, Connect is unavailable.
+  isConfigured: boolean;
+  supportsExactTimestamps: boolean;
+  connection: WatchHistoryConnection | null;
+}
+
+export type WatchHistoryAuthorizationState =
+  | "Pending"
+  | "Approved"
+  | "Denied"
+  | "Expired"
+  | "SlowDown";
+
+export interface WatchHistoryAuthorization {
+  state: WatchHistoryAuthorizationState;
+  // Safe to display by design: the activation code the user types on the provider's site, and where.
+  userCode: string | null;
+  verificationUrl: string | null;
+  expiresAt: string | null;
+  pollIntervalSeconds: number | null;
+  connection: WatchHistoryConnection | null;
+}
+
+// How one local item compares with the provider. Mirrors the API's classification enum names.
+export type WatchHistorySyncClassification =
+  | "InSync"
+  | "RemoteOnly"
+  | "LocalOnly"
+  | "LocalUnwatchedWithHistory"
+  | "UnidentifiedLocally"
+  | "AmbiguousLocalIdentity";
+
+export interface WatchHistorySyncEntry {
+  mediaItemId: string;
+  title: string;
+  classification: WatchHistorySyncClassification;
+  localPlayCount: number;
+  remotePlayCount: number;
+}
+
+export interface WatchHistorySyncPreview {
+  runId: string;
+  // Keyed by classification name; a key is absent when its tally is zero.
+  counts: Partial<Record<WatchHistorySyncClassification, number>>;
+  sample: WatchHistorySyncEntry[];
+  hasPendingOutboundWork: boolean;
+  hasTerminalOutboundWork: boolean;
+  aggregateCountsMayCollapse: boolean;
+}
+
+// Why an item was left untouched during apply. Mirrors the API's skip-reason enum names.
+export type WatchHistorySyncSkip =
+  | "LocalStateChangedDuringSync"
+  | "AmbiguousLocalIdentity"
+  | "UnidentifiedLocally"
+  | "ExportFailed";
+
+export interface WatchHistorySyncResult {
+  imported: number;
+  exported: number;
+  unchanged: number;
+  skipped: Partial<Record<WatchHistorySyncSkip, number>>;
+}
+
+export interface WatchHistorySyncScope {
+  catalogIds?: string[];
+  kinds?: Array<"Movie" | "Episode">;
+}
+
 export interface LibraryScanReport {
   catalogsScanned: number;
   sourcesChecked: number;
@@ -714,4 +800,38 @@ export const mediaServer = {
       body: JSON.stringify({ pin: pin && pin.length > 0 ? pin : null }),
     }),
   revokeJellyfinCredential: () => send(`/jellyfin/credential`, "DELETE"),
+
+  // Watch-history providers. Every route acts on the caller; none takes an app-user id.
+  listWatchHistoryProviders: () =>
+    apiJson<WatchHistoryProvider[]>(`${BASE}/watch-history/providers`),
+  startWatchHistoryAuthorization: (providerKey: string) =>
+    apiJson<WatchHistoryAuthorization>(
+      `${BASE}/watch-history/connections/${providerKey}/authorization/start`,
+      { method: "POST" },
+    ),
+  pollWatchHistoryAuthorization: (providerKey: string) =>
+    apiJson<WatchHistoryAuthorization>(
+      `${BASE}/watch-history/connections/${providerKey}/authorization/poll`,
+      { method: "POST" },
+    ),
+  previewWatchHistorySync: (providerKey: string, scope?: WatchHistorySyncScope) =>
+    apiJson<WatchHistorySyncPreview>(
+      `${BASE}/watch-history/connections/${providerKey}/sync/preview`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(scope ?? {}),
+      },
+    ),
+  applyWatchHistorySync: (providerKey: string, runId: string) =>
+    apiJson<WatchHistorySyncResult>(
+      `${BASE}/watch-history/connections/${providerKey}/sync/apply`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId }),
+      },
+    ),
+  disconnectWatchHistoryProvider: (providerKey: string) =>
+    send(`/watch-history/connections/${providerKey}`, "DELETE"),
 };

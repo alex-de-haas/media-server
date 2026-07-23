@@ -61,7 +61,69 @@ public sealed class WatchHistoryEndpointMappingTests
     public void AMissingConnectionMapsToNull()
     {
         // Settings renders "not connected" from this rather than from a sentinel row.
-        Assert.Null(WatchHistoryEndpoints.ToResponse(null));
+        Assert.Null(WatchHistoryEndpoints.ToResponse((WatchHistoryProviderConnection?)null));
+    }
+
+    [Fact]
+    public void AnAbsentScopeMeansEverything()
+    {
+        // The popup's default — sync the whole library — arrives as no body at all.
+        var scope = WatchHistoryEndpoints.ToScope(null);
+        Assert.Empty(scope.CatalogIds);
+        Assert.Empty(scope.Kinds);
+    }
+
+    [Fact]
+    public void AScopeWithNullAxesIsTreatedAsEmptyNotNull()
+    {
+        // A JSON body that names neither axis must not reach the service as a null list.
+        var scope = WatchHistoryEndpoints.ToScope(new WatchHistorySyncScopeRequest(null, null));
+        Assert.Empty(scope.CatalogIds);
+        Assert.Empty(scope.Kinds);
+    }
+
+    [Fact]
+    public void AScopeCarriesItsCatalogsAndKindsThrough()
+    {
+        var catalog = Guid.NewGuid();
+        var scope = WatchHistoryEndpoints.ToScope(
+            new WatchHistorySyncScopeRequest([catalog], [WatchHistoryMediaKind.Episode]));
+        Assert.Equal(catalog, Assert.Single(scope.CatalogIds));
+        Assert.Equal(WatchHistoryMediaKind.Episode, Assert.Single(scope.Kinds));
+    }
+
+    [Fact]
+    public void APreviewResponseKeysItsCountsByClassificationName()
+    {
+        // The UI switches on these names; an index would silently mislabel the tallies.
+        var preview = new WatchHistorySyncPreview(
+            RunId: Guid.NewGuid(),
+            Scope: WatchHistorySyncScope.Everything,
+            Counts: new Dictionary<WatchHistorySyncClassification, int>
+            {
+                [WatchHistorySyncClassification.RemoteOnly] = 3,
+            },
+            Sample:
+            [
+                new WatchHistorySyncEntry(
+                    Guid.NewGuid(), "The Matrix", WatchHistorySyncClassification.RemoteOnly, 0, 1),
+            ],
+            HasPendingOutboundWork: false,
+            HasTerminalOutboundWork: false,
+            AggregateCountsMayCollapse: false);
+
+        var response = WatchHistoryEndpoints.ToResponse(preview);
+
+        Assert.Equal(preview.RunId, response.RunId);
+        Assert.Equal(3, response.Counts[WatchHistorySyncClassification.RemoteOnly]);
+        var serialized = System.Text.Json.JsonSerializer.Serialize(
+            response,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+            });
+        Assert.Contains("\"RemoteOnly\":3", serialized, StringComparison.Ordinal);
+        Assert.Contains("The Matrix", serialized, StringComparison.Ordinal);
     }
 
     [Fact]
