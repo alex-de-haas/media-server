@@ -486,6 +486,42 @@ function IngestRow({
   // NeedsReview (pinning the whole series/movie resolves a multi-file pack in one step; the backend re-drives
   // it). A Failed/Done item is out of scope. NeedsReview also keeps the richer per-file "Resolve match".
   const canPin = category !== "done" && item.status !== "Failed" && !identifyDone;
+  // A movie download carrying several videos is a pack of different films far more often than several cuts
+  // of one, and its file list is already known — so the identity action opens the per-file matching dialog
+  // instead of the single-movie pin (which would import every video as a version of one film). The same
+  // dialog handles the "several cuts" case: put those files in one group. Series packs keep the pin — there
+  // the show is the identity and each file still resolves to its own episode.
+  // Keyed on the catalog being known to be a Movie one, not merely "not episodic": while the catalogs
+  // query is still loading `catalog` is undefined, and treating that as a movie would route a series pack
+  // to the per-movie dialog for the first render.
+  const canPreMatch =
+    canPin && catalog?.type === "Movie" && item.sourceFiles.filter((file) => !file.isAudio).length > 1;
+
+  // One identity action, never two: "what is this?" is a single question, so the row offers a single
+  // control and picks the surface that can answer it here.
+  //   parked      → the matching dialog, which is strictly richer than a pin (per-file decisions, skip,
+  //                 extras) and is the action the item is waiting for;
+  //   movie pack  → the same dialog, ahead of the download (a pin would collapse it to one movie);
+  //   otherwise   → the single-identity pin, the only option when no file list exists yet (a magnet whose
+  //                 metadata hasn't arrived) and the right one for a series pack, where the pin is the
+  //                 show and identify still derives each episode from its file name.
+  const identityAction = !canPin
+    ? null
+    : item.status === "NeedsReview"
+      ? { label: "Resolve match", dialog: "match" as const, parked: true }
+      : canPreMatch
+        ? { label: "Set titles", dialog: "match" as const, parked: false }
+        : {
+            label: item.targetTitle
+              ? isEpisodic
+                ? "Change series"
+                : "Change title"
+              : isEpisodic
+                ? "Set series"
+                : "Set title",
+            dialog: "pin" as const,
+            parked: false,
+          };
   // Show the "pinned" marker only while it still governs an upcoming identify (not after publish).
   const pinned = item.targetTitle != null && item.status !== "Done" && !identifyDone;
   const title = ingestTitle(item);
@@ -587,15 +623,12 @@ function IngestRow({
             {category === "seeding" && download && (
               <IconAction label="Stop seeding" icon={<Square />} pending={stopSeeding.isPending} onClick={() => stopSeeding.mutate(download.id)} />
             )}
-            {canPin && (
+            {identityAction && (
               <IconAction
-                label={item.targetTitle ? (isEpisodic ? "Change series" : "Change title") : isEpisodic ? "Set series" : "Set title"}
-                icon={<Target />}
-                onClick={() => setPinOpen(true)}
+                label={identityAction.label}
+                icon={identityAction.parked ? <SearchCheck /> : <Target />}
+                onClick={() => (identityAction.dialog === "match" ? setReviewOpen(true) : setPinOpen(true))}
               />
-            )}
-            {item.status === "NeedsReview" && (
-              <IconAction label="Resolve match" icon={<SearchCheck />} onClick={() => setReviewOpen(true)} />
             )}
             {(item.status === "Failed" || (item.status === "NeedsReview" && role === "admin")) && (
               <IconAction label="Retry" icon={<RotateCw />} pending={retry.isPending} onClick={() => retry.mutate()} />
@@ -610,10 +643,12 @@ function IngestRow({
       {category === "active" && transferring && download && <DownloadProgress download={download} vpnDown={vpnDown} />}
       {category === "seeding" && download && <SeedingStats download={download} />}
 
-      {item.status === "NeedsReview" && (
+      {identityAction?.dialog === "match" && (
         <IngestReviewDialog
           item={item}
           catalog={catalog}
+          // A parked item is being resolved; anything else reaching this dialog is matched ahead of time.
+          mode={item.status === "NeedsReview" ? "resolve" : "prematch"}
           open={reviewOpen}
           onOpenChange={setReviewOpen}
           onMatched={() => {
@@ -623,7 +658,7 @@ function IngestRow({
         />
       )}
 
-      {canPin && (
+      {identityAction?.dialog === "pin" && (
         <IngestPinDialog
           item={item}
           catalog={catalog}

@@ -65,13 +65,23 @@ export function IngestReviewDialog({
   open,
   onOpenChange,
   onMatched,
+  mode = "resolve",
 }: {
   item: IngestItem;
   catalog: Catalog | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onMatched: () => void;
+  /**
+   * "resolve" — the item is parked at NeedsReview and this dialog is how it proceeds.
+   * "prematch" — the same matching, run early: a movie pack's file list is known as soon as the torrent's
+   * metadata arrives, so the operator can set a movie per file while the transfer is still running. The
+   * matching itself is identical (the backend accepts it until Identify completes); only the copy differs,
+   * because nothing is parked and the import happens when the download finishes.
+   */
+  mode?: "resolve" | "prematch";
 }) {
+  const isPreMatch = mode === "prematch";
   const isEpisodic = catalog?.type === "Series" || catalog?.type === "Anime";
 
   // A file is resolved once it's mapped (Confirmed with a media item) or skipped; everything else still
@@ -291,7 +301,9 @@ export function IngestReviewDialog({
         result.extras > 0 ? `${result.extras} kept as extras` : null,
         result.skipped > 0 ? `${result.skipped} skipped` : null,
       ].filter(Boolean);
-      toast.success("Changes applied", { description: parts.join(", ") });
+      toast.success(isPreMatch ? "Titles set" : "Changes applied", {
+        description: isPreMatch ? `${parts.join(", ")} — imports when the download finishes` : parts.join(", "),
+      });
       onMatched();
     },
     onError: (error) => toast.error("Couldn’t apply changes", { description: errorMessage(error) }),
@@ -634,7 +646,7 @@ export function IngestReviewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-xl overflow-hidden">
         <DialogHeader className="shrink-0">
-          <DialogTitle>Resolve match</DialogTitle>
+          <DialogTitle>{isPreMatch ? "Set titles" : "Resolve match"}</DialogTitle>
           <DialogDescription className="truncate" title={title}>
             {title}
           </DialogDescription>
@@ -643,6 +655,13 @@ export function IngestReviewDialog({
         {/* min-h-0 lets the file list flex-shrink inside the height-capped dialog, keeping the Apply
             footer pinned inside the card instead of overflowing past it. */}
         <div className="flex min-h-0 flex-col gap-3 text-sm">
+          {isPreMatch && (
+            <p className="text-muted-foreground shrink-0 text-xs">
+              Set a movie per file now — the pack imports as those movies when the download finishes. Files left
+              unset are identified from their names as usual. Two cuts of one film? Put them in the same group.
+            </p>
+          )}
+
           {/* Series: one identity for the whole batch (an episodic torrent never mixes shows), confirmed
               once here instead of per file. Movie batches pick identities inside each group below. */}
           {isEpisodic && (

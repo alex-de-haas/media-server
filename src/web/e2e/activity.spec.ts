@@ -28,7 +28,7 @@ test("resolve match dialog shows the movie filename and metadata candidates", as
         stage: "Identify",
         status: "NeedsReview",
         attemptCount: 0,
-        stagesCompleted: ["Intake", "Download"],
+        stagesCompleted: ["intake", "download"],
         lastError: null,
         nextAttemptAt: null,
         reviewCandidates: [candidate],
@@ -97,7 +97,7 @@ test("resolve match dialog maps a franchise pack to one movie per group", async 
         stage: "Identify",
         status: "NeedsReview",
         attemptCount: 0,
-        stagesCompleted: ["Intake", "Download"],
+        stagesCompleted: ["intake", "download"],
         lastError: null,
         nextAttemptAt: null,
         reviewCandidates: [],
@@ -132,6 +132,10 @@ test("resolve match dialog maps a franchise pack to one movie per group", async 
   });
 
   await page.goto("/activity");
+
+  // One identity action, never two: a parked pack offers only "Resolve match" — the pre-download
+  // "Set titles" would open the very same dialog, so it must not double up beside it.
+  await expect(page.getByRole("button", { name: "Set titles" })).toHaveCount(0);
   await page.getByRole("button", { name: "Resolve match" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Resolve match" });
@@ -180,7 +184,7 @@ test("a superseded group search cannot overwrite newer candidates", async ({ pag
         stage: "Identify",
         status: "NeedsReview",
         attemptCount: 0,
-        stagesCompleted: ["Intake", "Download"],
+        stagesCompleted: ["intake", "download"],
         lastError: null,
         nextAttemptAt: null,
         reviewCandidates: [],
@@ -269,7 +273,7 @@ test("resolve match dialog shows full filenames for every episode in a series pa
         stage: "Identify",
         status: "NeedsReview",
         attemptCount: 0,
-        stagesCompleted: ["Intake", "Download"],
+        stagesCompleted: ["intake", "download"],
         lastError: null,
         nextAttemptAt: null,
         reviewCandidates: [candidate],
@@ -343,7 +347,7 @@ test("resolve match dialog shows mapped files and lets the operator re-decide th
         stage: "Identify",
         status: "NeedsReview",
         attemptCount: 0,
-        stagesCompleted: ["Intake", "Download"],
+        stagesCompleted: ["intake", "download"],
         lastError: null,
         nextAttemptAt: null,
         reviewCandidates: [candidate],
@@ -411,4 +415,109 @@ test("resolve match dialog shows mapped files and lets the operator re-decide th
   await dialog.getByRole("button", { name: "Change" }).click();
   await expect(dialog.getByLabel("Episode")).toHaveValue("1");
   await expect(dialog.getByRole("button", { name: "Approve (2)" })).toBeEnabled();
+});
+
+// The same per-group matching, reached before the download finishes: a movie pack's file list is known as
+// soon as the torrent's metadata arrives, so the identity action on a still-downloading item opens the
+// matching dialog (not the single-movie pin, which would import every video as a version of one film).
+test("a downloading movie pack matches per file ahead of the transfer finishing", async ({ page }) => {
+  const dieHard = { reference: { provider: "tmdb", id: "562" }, title: "Die Hard", year: 1988, score: 0.6, posterUrl: null };
+  const dieHard2 = { reference: { provider: "tmdb", id: "1573" }, title: "Die Hard 2", year: 1990, score: 0.6, posterUrl: null };
+
+  await setupApp(page, {
+    catalogs: [{ id: "c1", name: "Movies", type: "Movie" }],
+    metadataSearch: [dieHard, dieHard2],
+    downloads: [
+      {
+        id: "d1",
+        infoHash: "abc",
+        name: "Die.Hard.Quadrilogy",
+        catalogId: "c1",
+        state: "Downloading",
+        progress: 12,
+        downloadSpeed: 0,
+        uploadSpeed: 0,
+        peers: 0,
+        sizeBytes: 4096,
+        downloadedBytes: 512,
+        keepSeeding: false,
+        addedAt: "2026-07-24T10:00:00Z",
+        completedAt: null,
+      },
+    ],
+    ingest: [
+      {
+        id: "ingest-1",
+        catalogId: "c1",
+        downloadId: "d1",
+        downloadName: "Die.Hard.Quadrilogy",
+        mediaTitle: null,
+        mediaItemId: null,
+        // Still transferring: Identify has not run, which is exactly when pre-matching is allowed.
+        stage: "Download",
+        status: "Pending",
+        attemptCount: 0,
+        stagesCompleted: ["intake"],
+        lastError: null,
+        nextAttemptAt: null,
+        reviewCandidates: [],
+        sourceFiles: [
+          {
+            id: "source-1",
+            relativePath: ".incoming/d1/Die.Hard.Quadrilogy/Die.Hard.1988.mkv",
+            sizeBytes: 1024,
+            assignmentStatus: "Unassigned",
+            mediaItemId: null,
+            // Explicit: the row counts videos as `!isAudio`, which is what routes this pack to the
+            // matching dialog rather than the single-movie pin.
+            isAudio: false,
+            parsedTitle: "Die Hard",
+            parsedYear: 1988,
+            parsedSeason: null,
+            parsedEpisode: null,
+          },
+          {
+            id: "source-2",
+            relativePath: ".incoming/d1/Die.Hard.Quadrilogy/Die.Hard.2.1990.mkv",
+            sizeBytes: 1024,
+            assignmentStatus: "Unassigned",
+            mediaItemId: null,
+            isAudio: false,
+            parsedTitle: "Die Hard 2",
+            parsedYear: 1990,
+            parsedSeason: null,
+            parsedEpisode: null,
+          },
+        ],
+        createdAt: "2026-07-24T10:00:00Z",
+        updatedAt: "2026-07-24T10:00:00Z",
+      },
+    ],
+  });
+
+  await page.goto("/activity");
+
+  // The multi-video movie pack offers "Set titles" (the matching dialog), never the single-movie pin.
+  await expect(page.getByRole("button", { name: "Set title", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Set titles" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Set titles" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Movie 1 — pick below")).toBeVisible();
+  await expect(dialog.getByText("Movie 2 — pick below")).toBeVisible();
+
+  await dialog.getByRole("button", { name: /Die Hard \(1988\)/ }).first().click();
+  await dialog.getByRole("button", { name: /Die Hard 2 \(1990\)/ }).last().click();
+
+  const matchRequest = page.waitForRequest(
+    (request) => request.url().includes("/ingest/ingest-1/match") && request.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "Approve (2)" }).click();
+  const body = (await matchRequest).postDataJSON() as {
+    groups: { providerId: string; files: { sourceFileId: string }[] }[];
+  };
+
+  // The same grouped contract the review flow sends — issued while the torrent is still downloading.
+  expect(body.groups.map((group) => group.providerId)).toEqual(["562", "1573"]);
+  expect(body.groups.map((group) => group.files.map((file) => file.sourceFileId))).toEqual([["source-1"], ["source-2"]]);
 });
