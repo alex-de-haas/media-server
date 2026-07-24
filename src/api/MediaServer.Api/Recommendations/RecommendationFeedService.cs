@@ -7,8 +7,10 @@ namespace MediaServer.Api.Recommendations;
 /// <param name="Kind">Movie or series.</param>
 /// <param name="TmdbId">The shared coordinate every source and the library agree on.</param>
 /// <param name="InLibrary">Whether this instance holds it — the difference between "play" and "discover".</param>
-/// <param name="MediaItemId">The local item, when held.</param>
-/// <param name="PublicId">Its public id, for a detail link.</param>
+/// <param name="MediaItemId">
+/// The local item, when held — and what a detail link must use: those routes are declared
+/// <c>{id:guid}</c> and resolve by <see cref="MediaItem.Id"/>, so a public id would never match.
+/// </param>
 /// <param name="Sources">Which providers suggested it; more than one means they agreed.</param>
 public sealed record RecommendationDto(
     string Kind,
@@ -18,7 +20,6 @@ public sealed record RecommendationDto(
     string? PosterUrl,
     bool InLibrary,
     Guid? MediaItemId,
-    string? PublicId,
     IReadOnlyList<string> Sources);
 
 /// <summary>The feed plus what the UI needs to render its controls honestly.</summary>
@@ -111,7 +112,7 @@ public sealed class RecommendationFeedService(
                 continue;
             }
 
-            var held = library.GetValueOrDefault(entry.Identity);
+            var held = library.GetValueOrDefault(entry.Identity)?.Representative;
             items.Add(new RecommendationDto(
                 entry.Identity.Kind.ToString(),
                 entry.Identity.TmdbId,
@@ -122,7 +123,6 @@ public sealed class RecommendationFeedService(
                 entry.PosterUrl,
                 held is not null,
                 held?.Id,
-                held?.PublicId,
                 entry.Sources));
 
             if (items.Count == limit)
@@ -177,15 +177,25 @@ public sealed class RecommendationFeedService(
         return [.. rows.Select(row => new RecommendationIdentity(row.Kind, row.TmdbId))];
     }
 
+    /// <summary>
+    /// One title the library holds: every local copy of it, plus the one whose id the card links to.
+    /// </summary>
+    /// <remarks>
+    /// Several catalogs can hold the same title (a 4K edition beside a regular one). Keeping only one
+    /// copy would be enough to say "you have this", but not enough to say "you watched this" — a play
+    /// recorded against the other copy would be missed and the title recommended anyway.
+    /// </remarks>
+    private sealed record LibraryTitle(MediaItem Representative, IReadOnlyList<Guid> CopyIds);
+
     /// <summary>Every movie and series the library holds, keyed by the coordinate the feed speaks.</summary>
-    private async Task<Dictionary<RecommendationIdentity, MediaItem>> LibraryByTmdbIdAsync(
+    private async Task<Dictionary<RecommendationIdentity, LibraryTitle>> LibraryByTmdbIdAsync(
         CancellationToken cancellationToken)
     {
         var items = await database.MediaItems.AsNoTracking()
             .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series)
             .ToListAsync(cancellationToken);
 
-        var byIdentity = new Dictionary<RecommendationIdentity, MediaItem>();
+        var copies = new Dictionary<RecommendationIdentity, List<MediaItem>>();
         foreach (var item in items)
         {
             if (RecommendationSeedSelector.TmdbIdOf(item) is not { } tmdbId)
@@ -194,11 +204,24 @@ public sealed class RecommendationFeedService(
             }
 
             var kind = item.Kind == MediaKind.Movie ? RecommendationKind.Movie : RecommendationKind.Series;
-            // Several catalogs can hold the same title; the first is enough to say "you have this".
-            byIdentity.TryAdd(new RecommendationIdentity(kind, tmdbId), item);
+            var identity = new RecommendationIdentity(kind, tmdbId);
+            if (copies.TryGetValue(identity, out var existing))
+            {
+                existing.Add(item);
+            }
+            else
+            {
+                copies[identity] = [item];
+            }
         }
 
-        return byIdentity;
+        return copies.ToDictionary(
+            pair => pair.Key,
+            // Oldest copy as the representative, so the link a user follows does not change when a
+            // second edition is added.
+            pair => new LibraryTitle(
+                pair.Value.OrderBy(item => item.AddedAt).First(),
+                [.. pair.Value.Select(item => item.Id)]));
     }
 
     /// <summary>
@@ -207,7 +230,7 @@ public sealed class RecommendationFeedService(
     /// </summary>
     private async Task<HashSet<RecommendationIdentity>> WatchedAsync(
         int appUserId,
-        Dictionary<RecommendationIdentity, MediaItem> library,
+        Dictionary<RecommendationIdentity, LibraryTitle> library,
         CancellationToken cancellationToken)
     {
         if (library.Count == 0)
@@ -215,7 +238,8 @@ public sealed class RecommendationFeedService(
             return [];
         }
 
-        var itemIds = library.Values.Select(item => item.Id).ToHashSet();
+        // Every copy, not just the representative: watching the 4K edition counts.
+        var itemIds = library.Values.SelectMany(title => title.CopyIds).ToHashSet();
 
         var playedItemIds = await database.UserItemData.AsNoTracking()
             .Where(row => row.AppUserId == appUserId && row.Played)
@@ -235,7 +259,9 @@ public sealed class RecommendationFeedService(
 
         var seen = playedItemIds.Concat(playedSeriesIds).Where(itemIds.Contains).ToHashSet();
 
-        return [.. library.Where(pair => seen.Contains(pair.Value.Id)).Select(pair => pair.Key)];
+        return [.. library
+            .Where(pair => pair.Value.CopyIds.Any(seen.Contains))
+            .Select(pair => pair.Key)];
     }
 
     private async Task<HashSet<string>> SelectedSourcesAsync(

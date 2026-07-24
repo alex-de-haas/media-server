@@ -80,11 +80,16 @@ Asks the available providers (narrowed by the user's source preference), fuses
 generously — four times the limit — and only then filters, so excluding watched
 and hidden titles shortens nothing.
 
-- **In library** is resolved by TMDb id across every movie and series; a held
-  title carries its local ids, and the **library's own title wins**, because
-  that is the name shown everywhere else in the app.
+- **In library** is resolved by TMDb id across every movie and series. Several
+  catalogs can hold the same title (a 4K edition beside a regular one); all
+  copies are kept, and the oldest is the one a card links to, so adding a second
+  edition does not change a link a user already follows. The **library's own
+  title wins**, because that is the name shown everywhere else in the app. The
+  link carries the **media-item id**: the detail routes are declared
+  `{id:guid}` and resolve by it, so a public id would never match.
 - **Watched** excludes a played movie, and a series once *any* episode has been
-  played — a part-watched show belongs to Next Up, not to discovery.
+  played — a part-watched show belongs to Next Up, not to discovery. A play
+  against *any* copy counts: watching the 4K edition means you watched it.
 - **Hidden** titles are per user and keyed by TMDb identity rather than by
   local item, so a hide survives the title later being added or removed.
 - **Posters** are backfilled from TMDb for cards whose source supplied none
@@ -163,7 +168,9 @@ direct hand-off from a discovery card into torrent intake.
 - `RecommendationFeedServiceTests` — in-library marking and title precedence,
   watched and hidden exclusion, per-user isolation of both history and hides,
   filtering after fusion keeping the feed full, source preference including the
-  vanished-source fallback, and poster backfill only for surviving cards.
+  vanished-source fallback, poster backfill only for surviving cards, and
+  multi-copy titles — a play on any copy excluding the title, and a stable
+  representative for the link.
 - `e2e/recommendations.spec.ts` — the library/discovery split, the Both badge,
   the availability filter, hide-with-undo, the conditional source control, the
   self-explaining empty state, and the conditional home row.

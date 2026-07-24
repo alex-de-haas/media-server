@@ -88,6 +88,12 @@ public static class RecommendationEndpoints
                 return Results.Unauthorized();
             }
 
+            if (string.IsNullOrWhiteSpace(tmdbId))
+            {
+                // A blank id would otherwise look like a successful no-op and hide a caller's bug.
+                return Results.BadRequest(new { error = "A TMDb id is required." });
+            }
+
             // Idempotent: unhiding something that is not hidden is the state the caller wanted.
             await feed.UnhideAsync(user.Id, new RecommendationIdentity(kind, tmdbId.Trim()), cancellationToken);
             return Results.NoContent();

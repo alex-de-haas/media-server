@@ -20,8 +20,10 @@ export function RecommendationCard({
   onHide: (item: Recommendation) => void;
   onTrack: (item: Recommendation) => void;
 }) {
-  const href = item.inLibrary
-    ? `/${item.kind === "Series" ? "series" : "movies"}/${item.publicId ?? item.mediaItemId}`
+  // The media-item id, not the public id: the detail routes are declared `{id:guid}` and resolve by
+  // MediaItem.Id, so a public id — a deterministic hash — would not even match the route.
+  const href = item.inLibrary && item.mediaItemId
+    ? `/${item.kind === "Series" ? "series" : "movies"}/${item.mediaItemId}`
     : null;
   // Independent engines agreeing is the strongest signal the feed has, so it is worth saying out loud.
   const agreed = item.sources.length > 1;

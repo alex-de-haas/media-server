@@ -13,8 +13,7 @@ const feed = {
       year: 2010,
       posterUrl: null,
       inLibrary: true,
-      mediaItemId: "m1",
-      publicId: "m1",
+      mediaItemId: "b7f3c2d1-0000-4000-8000-000000000001",
       sources: ["library"],
     },
     {
@@ -25,7 +24,6 @@ const feed = {
       posterUrl: null,
       inLibrary: false,
       mediaItemId: null,
-      publicId: null,
       sources: ["library", "trakt"],
     },
   ],
@@ -103,4 +101,16 @@ test("the home row appears only when there is something to recommend", async ({ 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Recommended for you" })).toBeVisible();
   await expect(page.getByRole("link", { name: "See all" })).toBeVisible();
+});
+
+test("a held title links by media-item id, which is what the detail route resolves", async ({ page }) => {
+  // The detail routes are declared {id:guid} and look up MediaItem.Id; linking by public id — a
+  // deterministic hash — would not even match the route.
+  await setupApp(page, { recommendations: feed });
+  await page.goto("/recommendations");
+
+  await expect(page.getByRole("link").filter({ has: page.locator("img, span") }).first()).toHaveAttribute(
+    "href",
+    "/movies/b7f3c2d1-0000-4000-8000-000000000001",
+  );
 });

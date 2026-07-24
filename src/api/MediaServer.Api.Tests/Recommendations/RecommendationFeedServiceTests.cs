@@ -75,6 +75,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         var item = Assert.Single((await Build()).Items);
 
         Assert.True(item.InLibrary);
+        // The media-item id specifically: the detail routes are {id:guid} and resolve by it.
         Assert.Equal(movie.Id, item.MediaItemId);
         // The library's own title wins: that is the name shown everywhere else in the app.
         Assert.Equal("Local Title", item.Title);
@@ -113,6 +114,32 @@ public sealed class RecommendationFeedServiceTests : IDisposable
             new RecommendationIdentity(RecommendationKind.Series, "95396"), "Started", 2022, null, 0));
 
         Assert.Empty((await Build()).Items);
+    }
+
+    [Fact]
+    public async Task WatchingAnySecondCopyOfATitleStillExcludesIt()
+    {
+        // A 4K edition beside a regular one is one title to the viewer. Tracking only one copy would
+        // recommend something they finished last night on the other.
+        var regular = AddItem(MediaKind.Movie, "Dune", "438631");
+        var fourK = AddItem(MediaKind.Movie, "Dune 4K", "438631");
+        MarkPlayed(fourK.Id);
+        Provider("library", Candidate("438631", 0));
+
+        Assert.Empty((await Build()).Items);
+        Assert.NotEqual(regular.Id, fourK.Id);
+    }
+
+    [Fact]
+    public async Task AMultiCopyTitleLinksToAStableCopy()
+    {
+        // Adding a second edition must not change the link a user already follows.
+        var first = AddItem(MediaKind.Movie, "Dune", "438631");
+        _time.Advance(TimeSpan.FromDays(1));
+        AddItem(MediaKind.Movie, "Dune 4K", "438631");
+        Provider("library", Candidate("438631", 0));
+
+        Assert.Equal(first.Id, Assert.Single((await Build()).Items).MediaItemId);
     }
 
     [Fact]

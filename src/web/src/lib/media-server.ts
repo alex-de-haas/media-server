@@ -599,8 +599,8 @@ export interface Recommendation {
   posterUrl: string | null;
   /** Whether this instance holds it — the difference between "play" and "go find". */
   inLibrary: boolean;
+  /** The detail routes are `{id:guid}` and resolve by this — a public id would never match. */
   mediaItemId: string | null;
-  publicId: string | null;
   /** Providers that suggested it; more than one means independent engines agreed. */
   sources: string[];
 }
