@@ -10,6 +10,9 @@ change ships, bump the app version in the **same commit**:
 - **major** — reserved until the app declares a stable `1.0.0`; after that, breaking
   changes for the app's users.
 
+Documentation-only changes (`docs/`, `README.md`, `AGENTS.md`) are the exception —
+merge them without a version bump.
+
 Where the version lives:
 
 - `version` in `manifest.json` is the app's release version and the source of truth —
@@ -28,6 +31,13 @@ Each runtime app versions independently from Hosty Core/CLI and from the other a
   implement all phases on one branch and open a single PR. Individual phases rarely
   deliver complete functionality on their own, and under the versioning rules above
   each per-phase PR would pointlessly bump the version.
+
+## Documentation
+
+- Feature and planning docs under `docs/` carry a `Status:` / `Created:` / `Updated:`
+  header. When a feature finishes development, update its doc's `Status:` (and the
+  `Updated:` date) in the same PR that ships the work — a shipped feature must not
+  stay marked as planned or in progress.
 
 ## Unit Testing
 - Use `xUnit` for backend unit tests.
