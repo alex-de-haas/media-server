@@ -89,14 +89,15 @@ viewing-duration or streak analytics, and any heatmap.
       `latestWatchedAt`, series-poster episode rows, user scoping — with unit
       tests for the envelope, the caps, and the scoping.
 - [x] `(AppUserId, WatchedAt)` index migration.
-- [ ] Calendar shell split: shared month shell (navigation, grid frame,
+- [x] Calendar shell split: shared month shell (navigation, grid frame,
       overflow) with mode-specific content and toolbars — no conditional
       branching accumulation; URL state `?view=&month=` for both modes with
-      `Releases` as the default; release behavior pinned by existing e2e.
-- [ ] Watched desktop grid: lossless grouping helpers (movie `xN`,
+      `Releases` as the default; release behavior pinned by new e2e (the
+      calendar had none).
+- [x] Watched desktop grid: lossless grouping helpers (movie `xN`,
       series-per-day card), three-group cap, day-detail dialog with exact
       times, provenance labels, and time notches.
-- [ ] Watched toolbar: kind filters, filter-following `Undated N`, the
+- [x] Watched toolbar: kind filters, filter-following `Undated N`, the
       **Watched without a date** list, empty month state with
       `Jump to last watched month`.
 - [ ] Mobile agenda on the same grouping helpers.

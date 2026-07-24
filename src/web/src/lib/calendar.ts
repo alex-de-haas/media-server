@@ -7,6 +7,52 @@ import type { CalendarEvent, ReleaseType } from "@/lib/watchlist";
 /** Monday-first weekday header, matching the grid produced by {@link monthGridDays}. */
 export const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
+/** Which question the calendar is answering: what is coming, or what was watched. */
+export type CalendarMode = "releases" | "watched";
+
+/**
+ * Releases is the default so an existing `/calendar` link keeps its meaning. Anything unrecognized
+ * falls back rather than erroring — a hand-edited URL should show a calendar, not a crash.
+ */
+export function parseCalendarMode(value: string | null | undefined): CalendarMode {
+  return value === "watched" ? "watched" : "releases";
+}
+
+/** The month a `?month=yyyy-MM` param selects; an absent or malformed value means "this month". */
+export function parseMonthParam(value: string | null | undefined, today: Date = new Date()): Date {
+  const match = /^(\d{4})-(\d{2})$/.exec(value ?? "");
+  if (!match) {
+    return startOfMonth(today);
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) {
+    return startOfMonth(today);
+  }
+  return new Date(year, month - 1, 1);
+}
+
+/** The `?month=` wire format: "yyyy-MM" in local time. */
+export function toMonthParam(month: Date): string {
+  return format(month, "yyyy-MM");
+}
+
+/**
+ * A shareable calendar URL. Defaults are omitted so the common case stays `/calendar` — the state is
+ * explicit in the link when it differs, and never persisted behind the user's back.
+ */
+export function calendarHref(mode: CalendarMode, month: Date, today: Date = new Date()): string {
+  const params = new URLSearchParams();
+  if (mode !== "releases") {
+    params.set("view", mode);
+  }
+  if (toMonthParam(month) !== toMonthParam(today)) {
+    params.set("month", toMonthParam(month));
+  }
+  const query = params.toString();
+  return query ? `/calendar?${query}` : "/calendar";
+}
+
 /**
  * Every day cell of the month grid: full Monday-first weeks covering the given month, so the length is
  * always a multiple of 7 and the first/last cells may belong to the adjacent months.

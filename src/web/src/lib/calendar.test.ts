@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calendarHref,
   episodeCode,
   eventChipLabel,
   formatDateKey,
@@ -8,7 +9,10 @@ import {
   leadLabel,
   monthGridDays,
   monthGridRange,
+  parseCalendarMode,
+  parseMonthParam,
   toDateKey,
+  toMonthParam,
 } from "@/lib/calendar";
 import type { CalendarEvent } from "@/lib/watchlist";
 
@@ -89,5 +93,49 @@ describe("labels", () => {
     expect(episodeCode(null, 2)).toBeNull();
     expect(eventChipLabel({ type: "EpisodeAir", season: 4, episode: 2 })).toBe("S4E2");
     expect(eventChipLabel({ type: "Theatrical", season: null, episode: null })).toBe("Theatrical");
+  });
+});
+
+describe("calendar URL state", () => {
+  const today = new Date(2026, 6, 24);
+
+  it("defaults to the releases mode, so an existing /calendar link keeps its meaning", () => {
+    expect(parseCalendarMode(null)).toBe("releases");
+    expect(parseCalendarMode("releases")).toBe("releases");
+    expect(parseCalendarMode("watched")).toBe("watched");
+  });
+
+  it("falls back instead of erroring on an unrecognized mode", () => {
+    expect(parseCalendarMode("history")).toBe("releases");
+    expect(parseCalendarMode("")).toBe("releases");
+  });
+
+  it("reads a month param as a local month", () => {
+    const month = parseMonthParam("2026-03", today);
+    expect(month.getFullYear()).toBe(2026);
+    expect(month.getMonth()).toBe(2);
+    expect(month.getDate()).toBe(1);
+  });
+
+  it("falls back to the current month when the param is absent or malformed", () => {
+    for (const value of [null, undefined, "", "2026", "2026-13", "not-a-month"]) {
+      expect(toMonthParam(parseMonthParam(value, today))).toBe("2026-07");
+    }
+  });
+
+  it("round-trips a month through the wire format", () => {
+    expect(toMonthParam(parseMonthParam("2025-12", today))).toBe("2025-12");
+  });
+
+  it("omits defaults so the common case stays a bare /calendar", () => {
+    expect(calendarHref("releases", new Date(2026, 6, 1), today)).toBe("/calendar");
+  });
+
+  it("encodes only what differs from the default", () => {
+    expect(calendarHref("watched", new Date(2026, 6, 1), today)).toBe("/calendar?view=watched");
+    expect(calendarHref("releases", new Date(2026, 2, 1), today)).toBe("/calendar?month=2026-03");
+    expect(calendarHref("watched", new Date(2026, 2, 1), today)).toBe(
+      "/calendar?view=watched&month=2026-03",
+    );
   });
 });

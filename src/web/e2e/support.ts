@@ -40,6 +40,8 @@ export interface AppMock {
   vpn?: unknown;
   metadataSearch?: unknown[];
   remapTargetId?: string; // id returned by POST /library/{id}/remap
+  releaseCalendar?: unknown[]; // GET /watchlist/calendar
+  watchHistoryCalendar?: unknown; // GET /watch-history/calendar (an envelope, not a list)
 }
 
 export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
@@ -86,6 +88,14 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/vpn") return route.fulfill({ json: mock.vpn ?? null });
     if (path.endsWith("/played")) return route.fulfill({ json: userData({ played: method === "POST" }) });
     if (path.endsWith("/favorite")) return route.fulfill({ json: userData({ isFavorite: method === "POST" }) });
+
+    if (path === "/watchlist/calendar") return route.fulfill({ json: mock.releaseCalendar ?? [] });
+    // An envelope rather than a list, so it cannot fall through to the empty-array catch-all.
+    if (path === "/watch-history/calendar") {
+      return route.fulfill({
+        json: mock.watchHistoryCalendar ?? { events: [], undated: { movies: 0, episodes: 0 }, latestWatchedAt: null },
+      });
+    }
 
     if (path === "/metadata/search") return route.fulfill({ json: mock.metadataSearch ?? [] });
     if (/^\/ingest\/[^/]+\/search$/.test(path)) return route.fulfill({ json: mock.metadataSearch ?? [] });
