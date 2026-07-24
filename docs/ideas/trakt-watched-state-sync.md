@@ -210,7 +210,7 @@ storage semantics when the Infuse observation succeeds:
 ## Links
 
 - [Implementation planning](../planning/trakt-watched-state-sync.md)
-- [Watch-history calendar plan](../features/watch-history-calendar/plan.md)
+- [Watch-history calendar](../features/watch-history-calendar/feature.md)
 - [Jellyfin compatibility](../features/jellyfin-compatibility.md)
 - [Storage and data](../features/storage-and-data.md)
 - [Security](../features/security.md)
