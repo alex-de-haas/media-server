@@ -1,6 +1,6 @@
 # Watch-History Calendar
 
-Status: Idea
+Status: Draft
 Created: 2026-07-24
 Updated: 2026-07-24
 
@@ -83,6 +83,8 @@ Pros:
 - Preserves the existing navigation while keeping the two meanings separate.
 - Reuses proven calendar behavior without forcing both event types into one cell.
 - Provides stable deep links such as `/calendar?view=watched&month=2026-07`.
+  This is new work — the current page keeps its month in memory only — but the
+  release view gains the same shareable URLs from it.
 - Leaves room for a later explicit `Combined` mode if users actually need it.
 
 Cons:
@@ -129,9 +131,12 @@ Calendar    [ Releases | Watched ]       <   July 2026   >  Today
 ```
 
 - A movie row uses poster, title, and local completion time.
-- Episodes from the same series on the same calendar day collapse to one compact
-  grid row such as `Severance · 3 episodes`; this is presentation grouping, not
-  history deduplication.
+- Episodes from the same series on the same calendar day always collapse to
+  **one card carrying the series poster**, such as `Severance · 3 episodes`. A
+  binge day of 10+ episodes still occupies exactly one card — the day cell has
+  no room for more, and the series is the unit the user remembers. This is
+  presentation grouping, not history deduplication; every individual episode
+  and its exact time remains in the day detail.
 - Multiple plays of the same movie on one day show `x2`. Every timestamp remains
   available in the day detail.
 - At most three compact groups appear in a cell. `+N more` opens the complete day.
@@ -153,25 +158,26 @@ render an agenda grouped by date:
 
 ```text
 Wed, Jul 8                                      3 plays
-  [poster] Severance · S02E03                    19:42
-  [poster] Severance · S02E04                    20:37
-  [poster] Severance · S02E05                    21:31
+  [series poster] Severance · 3 episodes   19:42–21:31
 
 Fri, Jul 10                                     2 plays
   [poster] Arrival                                  x2
 ```
 
-The same API data and grouping helpers should drive the desktop grid and mobile
-agenda so their counts cannot diverge.
+The agenda uses the same series-per-day card as the grid — one row per series
+with the series poster and the first–last completion times; individual episodes
+expand in the day detail. The same API data and grouping helpers should drive
+the desktop grid and mobile agenda so their counts cannot diverge.
 
 ### Visual Direction
 
 Treat the view as a restrained **screening diary**, not a generic activity
 dashboard.
 
-- Palette: Paper `#FFFFFF`, Ink `#252525`, Soft Gray `#F5F5F5`, Border
-  `#E4E4E7`, and the existing Projector Gold approximately `#BF8532`; dark mode
-  continues to inherit the Hosty theme tokens.
+- Palette: the existing neutral tokens (`--background`, `--foreground`,
+  `--muted`, `--border`) plus `--brand` — the app's single non-neutral
+  "projector gold" hue, reserved here for the time notches. No new hex values:
+  the page must follow the oklch token system so both themes keep working.
 - Typography: Inter for controls and titles, Fraunces only when a media title is
   given room in the day detail, and Geist Mono for exact times and counts.
 - Signature element: each exact play in the day detail gets one small
@@ -203,7 +209,9 @@ Each response row needs:
 
 - history-entry ID and `watchedAt`;
 - media-item ID, kind, title, poster URL, and detail URL inputs;
-- series title/ID plus season and episode numbers for episodes;
+- series title/ID plus season and episode numbers for episodes — and for them
+  the poster input is the **series** poster: episodes rarely carry artwork of
+  their own, and the grouped card is series-level anyway;
 - origin, for optional provenance in the detailed view.
 
 The response should be an envelope containing `events`, `undatedCount`, and
@@ -247,10 +255,11 @@ endpoint and expose them in **Watched without a date** outside the grid.
 - **What qualifies for a dated event?** Current answer: only an entry with an
   exact `WatchedAt`. **Recommendation:** never place manual or legacy timeless
   marks on a guessed date.
-- **How should series episodes be grouped?** Current answer: by series and local
-  date in the compact grid, with individual episode rows and times in day detail.
-  **Recommendation:** do not infer binge sessions or collapse episode ranges from
-  temporal proximity.
+- **How should series episodes be grouped?** Decided: one card per series per
+  calendar day, carrying the series poster, in both the grid and the mobile
+  agenda; individual episode rows and times appear only in day detail.
+  **Recommendation:** group strictly by series and calendar day — do not infer
+  binge sessions or collapse episode ranges from temporal proximity.
 - **Should users edit or delete history from the calendar?** Current answer: this
   request is about display, and remote ownership rules make deletion non-trivial.
   **Recommendation:** make the first version read-only; treat history correction
