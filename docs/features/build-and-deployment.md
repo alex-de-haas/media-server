@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-24
 
 ## Description
 
@@ -47,7 +47,10 @@ hosty apps logs com.haas.media-server
   stream and the public `jellyfin` surface, with `ffprobe` available in the image.
   Downloading is delegated to the external `torrent-engine` app (a required cross-app
   dependency), so this image binds **no** raw torrent listener.
-- `web` image: Next.js production server (or static export if later converted).
+- `web` image: Next.js production server (or static export if later converted),
+  built on the `node:<major>-bookworm-slim` base. The Node major tracks the active
+  LTS line and matches `node-version` in `ci.yml`, so the image runs what CI builds
+  and tests against; both move together in one change.
 - `docker` is the default install profile; `dev` is used for local development.
   Catalog roots are bound through Hosty external host-path mounts (see
   [Storage and data](storage-and-data.md)). Image build/publish lands in M4 (see
