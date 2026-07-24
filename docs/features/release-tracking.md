@@ -415,7 +415,7 @@ builds on these entities without reshaping them:
 ## API
 
 Endpoints are shaped as discrete commands so the same operations can be exposed as
-MCP tools in M6 (see [root](root.md) roadmap):
+MCP tools in M6 (see [root](../root.md) roadmap):
 
 - `GET /api/watchlist` — the user's tracked titles with resolved dates and reminders.
 - `POST /api/watchlist` — add `{ providerRef, kind, monitorScope?, monitoredSeasons?, regionOverride? }`.
@@ -464,3 +464,7 @@ Backend tests use xUnit and Imposter (mock the TMDb client). Required coverage:
   owned/aired/missing-aired gap and its refresh when either side changes.
 - Watchlist and reminder API authorization scoping, and the reminder-creation
   resolved-state response.
+
+## Links
+
+- [Watch-history calendar idea](../ideas/watch-history-calendar.md)

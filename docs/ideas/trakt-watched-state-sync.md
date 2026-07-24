@@ -2,7 +2,7 @@
 
 Status: Promoted
 Created: 2026-07-21
-Updated: 2026-07-22
+Updated: 2026-07-24
 
 ## Motivation
 
@@ -210,6 +210,7 @@ storage semantics when the Infuse observation succeeds:
 ## Links
 
 - [Implementation planning](../planning/trakt-watched-state-sync.md)
+- [Watch-history calendar idea](watch-history-calendar.md)
 - [Jellyfin compatibility](../features/jellyfin-compatibility.md)
 - [Storage and data](../features/storage-and-data.md)
 - [Security](../features/security.md)

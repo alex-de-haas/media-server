@@ -1096,6 +1096,7 @@ Live Trakt verification uses a dedicated non-production application and account:
 ## Links
 
 - [Originating idea](../ideas/trakt-watched-state-sync.md)
+- [Watch-history calendar idea](../ideas/watch-history-calendar.md)
 - [Hosty platform request #15: Core-managed app secrets store](../features/hosty-platform-requests.md)
 - [docker-host idea: App Secrets Store](https://github.com/alex-de-haas/docker-host/blob/main/docs/ideas/app-secrets-store.md)
 - [Jellyfin compatibility](../features/jellyfin-compatibility.md)
