@@ -48,6 +48,28 @@ public sealed class TmdbRecommendationCacheEntry
     public DateTimeOffset FetchedAt { get; set; }
 }
 
+/// <summary>
+/// One title's poster path, cached.
+/// </summary>
+/// <remarks>
+/// Trakt returns no artwork, so a title only it suggested arrives posterless and would render as a
+/// grey box. Looking the poster up costs one TMDb call per title, which is worth caching hard: a
+/// poster path changes about as often as the film's title does.
+/// </remarks>
+public sealed class TmdbPosterCacheEntry
+{
+    public Guid Id { get; set; }
+
+    public RecommendationKind Kind { get; set; }
+
+    public required string TmdbId { get; set; }
+
+    /// <summary>The path TMDb reports, or null when it has no poster — a cached negative, not a miss.</summary>
+    public string? PosterPath { get; set; }
+
+    public DateTimeOffset FetchedAt { get; set; }
+}
+
 /// <summary>Per-user recommendation settings that must outlive a browser.</summary>
 /// <remarks>
 /// Server-side rather than browser storage so the choice follows the user between devices — the same

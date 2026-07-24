@@ -41,6 +41,7 @@ public sealed record RecommendationFeedDto(
 public sealed class RecommendationFeedService(
     MediaServerDbContext database,
     IRecommendationProviderRegistry registry,
+    ITmdbPosterLookup posters,
     ILogger<RecommendationFeedService> logger)
 {
     /// <summary>How many each provider is asked for before fusion. Bounded so one long tail cannot drown the other's head.</summary>
@@ -130,7 +131,39 @@ public sealed class RecommendationFeedService(
             }
         }
 
-        return items;
+        return await WithPostersAsync(items, cancellationToken);
+    }
+
+    /// <summary>
+    /// Fills artwork in for the cards that reached the feed without any — Trakt returns none, so a
+    /// title only it suggested would otherwise render as a grey box.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately after the limit is applied: this costs one TMDb request per uncached title, and
+    /// paying that for candidates nobody will see would be waste.
+    /// </remarks>
+    private async Task<List<RecommendationDto>> WithPostersAsync(
+        List<RecommendationDto> items, CancellationToken cancellationToken)
+    {
+        var missing = items
+            .Where(item => item.PosterUrl is null)
+            .Select(item => new RecommendationIdentity(
+                Enum.Parse<RecommendationKind>(item.Kind), item.TmdbId))
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return items;
+        }
+
+        var found = await posters.ForAsync(missing, cancellationToken);
+        return [.. items.Select(item => item.PosterUrl is not null
+            ? item
+            : found.TryGetValue(
+                new RecommendationIdentity(Enum.Parse<RecommendationKind>(item.Kind), item.TmdbId),
+                out var url)
+                ? item with { PosterUrl = url }
+                : item)];
     }
 
     private async Task<HashSet<RecommendationIdentity>> HiddenAsync(

@@ -1121,6 +1121,35 @@ namespace MediaServer.Api.Data.Migrations
                     b.ToTable("SourceFiles");
                 });
 
+            modelBuilder.Entity("MediaServer.Api.Data.TmdbPosterCacheEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FetchedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PosterPath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TmdbId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "TmdbId")
+                        .IsUnique();
+
+                    b.ToTable("TmdbPosterCache");
+                });
+
             modelBuilder.Entity("MediaServer.Api.Data.TmdbRecommendationCacheEntry", b =>
                 {
                     b.Property<Guid>("Id")

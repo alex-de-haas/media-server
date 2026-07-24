@@ -268,12 +268,67 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         Assert.Equal("1", Assert.Single((await Build()).Items).TmdbId);
     }
 
+    /// <summary>Answers from a fixed table; the real one costs a TMDb request per title.</summary>
+    private sealed class StubPosters : ITmdbPosterLookup
+    {
+        public Dictionary<RecommendationIdentity, string> Urls { get; } = [];
+
+        public List<RecommendationIdentity> Asked { get; } = [];
+
+        public Task<IReadOnlyDictionary<RecommendationIdentity, string>> ForAsync(
+            IReadOnlyCollection<RecommendationIdentity> identities, CancellationToken cancellationToken)
+        {
+            Asked.AddRange(identities);
+            return Task.FromResult<IReadOnlyDictionary<RecommendationIdentity, string>>(
+                identities.Where(Urls.ContainsKey).ToDictionary(identity => identity, identity => Urls[identity]));
+        }
+    }
+
+    private readonly StubPosters _posters = new();
+
     private RecommendationFeedService Service()
     {
         var registry = new RecommendationProviderRegistry(
             _providers, NullLogger<RecommendationProviderRegistry>.Instance);
         return new RecommendationFeedService(
-            _database, registry, NullLogger<RecommendationFeedService>.Instance);
+            _database, registry, _posters, NullLogger<RecommendationFeedService>.Instance);
+    }
+
+    [Fact]
+    public async Task ACandidateWithoutArtworkGetsItsPosterLookedUp()
+    {
+        // Trakt returns none, so without this every Trakt-only suggestion renders as a grey box.
+        Provider("trakt", Candidate("27205", 0));
+        _posters.Urls[new RecommendationIdentity(RecommendationKind.Movie, "27205")] = "https://img/p.jpg";
+
+        var item = Assert.Single((await Build()).Items);
+
+        Assert.Equal("https://img/p.jpg", item.PosterUrl);
+    }
+
+    [Fact]
+    public async Task PostersAreOnlyLookedUpForCardsThatSurvivedFiltering()
+    {
+        // Each lookup is a TMDb request; paying for candidates nobody will see would be waste.
+        var seen = AddItem(MediaKind.Movie, "Seen", "1");
+        MarkPlayed(seen.Id);
+        Provider("trakt", Candidate("1", 0), Candidate("2", 1));
+
+        await Build(limit: 1);
+
+        Assert.Equal("2", Assert.Single(_posters.Asked).TmdbId);
+    }
+
+    [Fact]
+    public async Task ACandidateThatAlreadyHasArtworkIsNotLookedUpAgain()
+    {
+        Provider("library", new RecommendationCandidate(
+            new RecommendationIdentity(RecommendationKind.Movie, "1"), "Has one", 2024, "https://img/have.jpg", 0));
+
+        var item = Assert.Single((await Build()).Items);
+
+        Assert.Equal("https://img/have.jpg", item.PosterUrl);
+        Assert.Empty(_posters.Asked);
     }
 
     private Task<RecommendationFeedDto> Build(RecommendationKind? kind = null, int limit = 20) =>

@@ -37,6 +37,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<ReminderDelivery> ReminderDeliveries => Set<ReminderDelivery>();
     public DbSet<RecommendationHide> RecommendationHides => Set<RecommendationHide>();
     public DbSet<TmdbRecommendationCacheEntry> TmdbRecommendationCache => Set<TmdbRecommendationCacheEntry>();
+    public DbSet<TmdbPosterCacheEntry> TmdbPosterCache => Set<TmdbPosterCacheEntry>();
     public DbSet<RecommendationPreference> RecommendationPreferences => Set<RecommendationPreference>();
 
     /// <summary>
@@ -535,6 +536,12 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         recommendationCache.HasIndex(entity => new { entity.Kind, entity.TmdbId }).IsUnique();
         recommendationCache.Property(entity => entity.Kind).HasConversion<int>();
         recommendationCache.Property(entity => entity.TmdbId).HasMaxLength(32);
+
+        var posterCache = modelBuilder.Entity<TmdbPosterCacheEntry>();
+        posterCache.HasKey(entity => entity.Id);
+        posterCache.HasIndex(entity => new { entity.Kind, entity.TmdbId }).IsUnique();
+        posterCache.Property(entity => entity.Kind).HasConversion<int>();
+        posterCache.Property(entity => entity.TmdbId).HasMaxLength(32);
 
         var recommendationPreference = modelBuilder.Entity<RecommendationPreference>();
         recommendationPreference.HasKey(entity => entity.Id);

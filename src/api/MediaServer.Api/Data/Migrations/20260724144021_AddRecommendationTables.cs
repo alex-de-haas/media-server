@@ -53,6 +53,21 @@ namespace MediaServer.Api.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "TmdbPosterCache",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
+                    Kind = table.Column<int>(type: "INTEGER", nullable: false),
+                    TmdbId = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
+                    PosterPath = table.Column<string>(type: "TEXT", nullable: true),
+                    FetchedAt = table.Column<string>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_TmdbPosterCache", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "TmdbRecommendationCache",
                 columns: table => new
                 {
@@ -80,6 +95,12 @@ namespace MediaServer.Api.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_TmdbPosterCache_Kind_TmdbId",
+                table: "TmdbPosterCache",
+                columns: new[] { "Kind", "TmdbId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_TmdbRecommendationCache_Kind_TmdbId",
                 table: "TmdbRecommendationCache",
                 columns: new[] { "Kind", "TmdbId" },
@@ -94,6 +115,9 @@ namespace MediaServer.Api.Data.Migrations
 
             migrationBuilder.DropTable(
                 name: "RecommendationPreferences");
+
+            migrationBuilder.DropTable(
+                name: "TmdbPosterCache");
 
             migrationBuilder.DropTable(
                 name: "TmdbRecommendationCache");
