@@ -126,5 +126,11 @@ Backend (xUnit, Imposter for provider mocks), in
 The legacy single-identity match paths (movie batch, series pack) keep their
 existing coverage in `IngestPipelineTests`.
 
+Web e2e (Playwright, `e2e/activity.spec.ts`): a franchise pack pre-groups by
+parsed title, a movie is picked per group, and Approve issues **one** match
+request whose groups each carry only their own file. A single-movie batch
+covers the same grouped shape with one group; the series pack covers the
+untouched single-identity flow.
+
 Parser and scoring coverage for the identification fixes lives with the metadata
 feature: [metadata](../metadata/feature.md).
