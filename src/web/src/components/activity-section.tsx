@@ -774,8 +774,17 @@ function displayPath(relativePath: string): string {
 // identified yet. Prefer the resolved media title, then an operator-pinned title (the correct name, even
 // before identify runs), then the backend's parsed title, and only fall back to the torrent/download name
 // when no files have been parsed yet (e.g. a magnet still fetching metadata).
+//
+// mediaTitle names one media item — the batch's primary — so a franchise pack resolving to several movies
+// would read as just the first of them. Count the distinct movies the batch actually mapped and say so.
+// Movies only: a season pack's many episodes still belong to the one series the title already names.
 function ingestTitle(item: IngestItem): string {
-  if (item.mediaTitle) return item.mediaTitle;
+  if (item.mediaTitle) {
+    const movieIds = new Set(
+      item.sourceFiles.filter((file) => file.assigned?.kind === "Movie" && file.mediaItemId).map((file) => file.mediaItemId!),
+    );
+    return movieIds.size > 1 ? `${item.mediaTitle} (+${movieIds.size - 1} more)` : item.mediaTitle;
+  }
   if (item.targetTitle) return item.targetTitle;
   const parsed = item.sourceFiles.find((file) => file.parsedTitle?.trim())?.parsedTitle?.trim();
   if (parsed) return parsed;

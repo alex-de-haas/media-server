@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Search, Target } from "lucide-react";
+import { Loader2, Search, Target, TriangleAlert } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type MetadataCandidate } from "@/lib/media-server";
 import { errorMessage } from "@/lib/ui";
@@ -97,6 +97,13 @@ export function IngestPinDialog({
   const heading = item.downloadName ?? item.sourceFiles[0]?.relativePath ?? "Untitled item";
   const pinnedId = item.targetProviderId;
 
+  // A movie pin applies to every video in the batch, so a franchise pack would import as one movie with
+  // N versions rather than N movies. Warn before that happens — the auto-identify path (or the review
+  // dialog's per-group matching) is what handles a multi-movie pack. Series packs are the normal case:
+  // the pin is the show and each file still resolves to its own episode.
+  const videoCount = item.sourceFiles.filter((file) => !file.isAudio).length;
+  const warnMultiVideo = !isEpisodic && videoCount > 1;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-xl">
@@ -113,6 +120,17 @@ export function IngestPinDialog({
               ? "Pick the series now and the download will be identified as it — episodes are matched by their file names."
               : "Pick the movie now and the download will be identified as it — no waiting to fix the name later."}
           </p>
+
+          {warnMultiVideo && (
+            <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-500">
+              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                This download has {videoCount} video files. Pinning one movie imports all of them as versions of
+                that movie. For a pack of different films, leave it unpinned — each file is identified on its own,
+                and Resolve match lets you set a movie per file.
+              </span>
+            </p>
+          )}
 
           <form
             className="flex flex-wrap items-end gap-2"

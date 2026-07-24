@@ -38,7 +38,7 @@ This replaces the earlier single movie/TV "library" model.
 - `defaultKeepSeeding` seeds new downloads in this catalog unless overridden at
   add time (see [Torrents and organizer](torrents-and-organizer.md)).
 - `metadataLanguage` optionally overrides the global default for this catalog
-  (e.g. Anime → `ja`/`en`), see [Metadata](metadata.md).
+  (e.g. Anime → `ja`/`en`), see [Metadata](metadata/feature.md).
 
 ## On-Disk Layout
 
@@ -147,7 +147,7 @@ operate over the catalog root (always excluding `.incoming/`):
   selected by catalog `type`: a Jellyfin-compatible naming engine for
   `movie`/`series`, and a dedicated anime parser (AnitomySharp) for `anime`,
   which understands absolute episode numbering and release-group tags. See
-  [Metadata](metadata.md).
+  [Metadata](metadata/feature.md).
 - Scanning is idempotent: re-scanning an unchanged catalog produces no duplicate
   items and preserves stable public IDs.
 

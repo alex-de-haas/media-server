@@ -124,8 +124,17 @@ public sealed class IngestService(
     public async Task<MatchOutcome> MatchAsync(Guid id, MatchRequest request, CancellationToken cancellationToken)
     {
         // The endpoint rejects an empty batch too; guarded here as well so an internal caller can't flip
-        // the item to Pending and re-drive it having matched nothing.
-        if (request.Files is not { Count: > 0 })
+        // the item to Pending and re-drive it having matched nothing. A file repeated across groups is
+        // equally rejected: two identities claiming one file has no honest resolution order.
+        var groups = request.ToGroups();
+        if (groups.Any(group => group.Files is not { Count: > 0 }))
+        {
+            return MatchOutcome.FileNotFound;
+        }
+
+        var fileRequests = groups.SelectMany(group => group.Files).ToList();
+        var requestedIds = fileRequests.Select(file => file.SourceFileId).Distinct().ToList();
+        if (requestedIds.Count != fileRequests.Count)
         {
             return MatchOutcome.FileNotFound;
         }
@@ -146,7 +155,6 @@ public sealed class IngestService(
         var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == item.CatalogId, cancellationToken)
             ?? throw new InvalidOperationException("Catalog not found for ingest item.");
 
-        var requestedIds = request.Files.Select(file => file.SourceFileId).Distinct().ToList();
         var sourceFiles = await database.SourceFiles
             .Where(file => file.IngestItemId == id && requestedIds.Contains(file.Id))
             .ToDictionaryAsync(file => file.Id, cancellationToken);
@@ -155,21 +163,33 @@ public sealed class IngestService(
             return MatchOutcome.FileNotFound;
         }
 
-        // One confirmed identity for the whole batch (a torrent never mixes titles): the series for
-        // episodes — each file keeping its own season/episode — or the movie every file is a version of.
-        var candidate = new MetadataCandidate(new ProviderRef(request.Provider, request.ProviderId), request.Title, request.Year, 1.0);
-        var movie = request.Kind == MediaKind.Episode ? null : await identifyService.ResolveMovieAsync(catalog, candidate, cancellationToken);
-
+        // One confirmed identity per group: the series for episodes — each file keeping its own
+        // season/episode — or the movie every file in the group is a version of. A franchise pack sends
+        // several movie groups and resolves in this one call. Movies resolve once per distinct identity:
+        // ResolveMovieAsync reads the store, which cannot see an unflushed sibling from a previous group.
+        var moviesByIdentity = new Dictionary<(string Provider, string ProviderId), MediaItem>();
         var now = DateTimeOffset.UtcNow;
-        foreach (var fileRequest in request.Files)
+        foreach (var group in groups)
         {
-            var mediaItem = movie ?? await identifyService.ResolveEpisodeAsync(catalog,
-                candidate, new ParsedName(MediaKind.Episode, request.Title, request.Year, fileRequest.Season, fileRequest.Episode, null), cancellationToken);
+            var candidate = new MetadataCandidate(new ProviderRef(group.Provider, group.ProviderId), group.Title, group.Year, 1.0);
+            MediaItem? movie = null;
+            if (group.Kind != MediaKind.Episode &&
+                !moviesByIdentity.TryGetValue((group.Provider, group.ProviderId), out movie))
+            {
+                movie = await identifyService.ResolveMovieAsync(catalog, candidate, cancellationToken);
+                moviesByIdentity[(group.Provider, group.ProviderId)] = movie;
+            }
 
-            var sourceFile = sourceFiles[fileRequest.SourceFileId];
-            sourceFile.MediaItemId = mediaItem.Id;
-            sourceFile.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
-            sourceFile.UpdatedAt = now;
+            foreach (var fileRequest in group.Files)
+            {
+                var mediaItem = movie ?? await identifyService.ResolveEpisodeAsync(catalog,
+                    candidate, new ParsedName(MediaKind.Episode, group.Title, group.Year, fileRequest.Season, fileRequest.Episode, null), cancellationToken);
+
+                var sourceFile = sourceFiles[fileRequest.SourceFileId];
+                sourceFile.MediaItemId = mediaItem.Id;
+                sourceFile.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
+                sourceFile.UpdatedAt = now;
+            }
         }
 
         item.Status = IngestStatus.Pending;

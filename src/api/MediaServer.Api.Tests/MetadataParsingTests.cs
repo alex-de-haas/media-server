@@ -53,6 +53,45 @@ public sealed class NameParserTests
         Assert.Equal(12, parsed.Episode);
     }
 
+    [Theory]
+    [InlineData("01. Назад в будущее 1985.mkv", "Назад в будущее", 1985)]
+    [InlineData("01.Назад в будущее.1985.mkv", "Назад в будущее", 1985)]
+    [InlineData("02 - Die Hard 2 1990.mkv", "Die Hard 2", 1990)]
+    [InlineData("2. Die Hard 2 (1990).mkv", "Die Hard 2", 1990)]
+    public void Strips_track_ordinal_prefix_from_movie_names(string name, string title, int year)
+    {
+        // Franchise packs number their films ("01. …") and the ordinal poisons the provider query.
+        var parsed = _parser.Parse(name, CatalogType.Movie);
+
+        Assert.Equal(title, parsed.Title);
+        Assert.Equal(year, parsed.Year);
+    }
+
+    [Theory]
+    [InlineData("8 Mile (2002).mkv", "8 Mile", 2002)]
+    [InlineData("1408.2007.1080p.mkv", "1408", 2007)]
+    [InlineData("24.2016.1080p.mkv", "24", 2016)]
+    public void Keeps_movie_titles_that_start_with_digits(string name, string title, int year)
+    {
+        // A bare number with no dot-space separator (or a dotted number without a leading zero) is a
+        // title, not a track ordinal.
+        var parsed = _parser.Parse(name, CatalogType.Movie);
+
+        Assert.Equal(title, parsed.Title);
+        Assert.Equal(year, parsed.Year);
+    }
+
+    [Fact]
+    public void Keeps_leading_numbers_in_series_names()
+    {
+        // In series catalogs a leading number is an episode ordinal, so movie-style ordinal stripping
+        // must not apply.
+        var parsed = _parser.Parse("01. The Show.mkv", CatalogType.Series);
+
+        Assert.Equal(MediaKind.Series, parsed.Kind);
+        Assert.Equal("01 The Show", parsed.Title);
+    }
+
     [Fact]
     public void Strips_custom_release_group_from_a_movie_title()
     {

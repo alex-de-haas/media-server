@@ -38,21 +38,32 @@ public static class IngestEndpoints
         // may be re-matched here while the item is still in review.
         group.MapPost("/{id:guid}/match", async (Guid id, MatchRequest request, IngestService service, CancellationToken cancellationToken) =>
         {
-            if (request.Files is not { Count: > 0 })
+            // The same rules apply to every identity group — the legacy single-identity shape validates
+            // as one group (see MatchRequest.ToGroups).
+            foreach (var matchGroup in request.ToGroups())
             {
-                return Results.BadRequest(new { error = "At least one source file is required to match." });
+                if (matchGroup.Files is not { Count: > 0 })
+                {
+                    return Results.BadRequest(new { error = "At least one source file is required in every match group." });
+                }
+
+                // A manual match resolves files to a movie or to episodes of a series — the other kinds are
+                // containers/extras and would silently be treated as a movie by the resolver.
+                if (matchGroup.Kind is not (MediaKind.Movie or MediaKind.Episode))
+                {
+                    return Results.BadRequest(new { error = "kind must be Movie or Episode." });
+                }
+
+                if (string.IsNullOrWhiteSpace(matchGroup.Provider) || string.IsNullOrWhiteSpace(matchGroup.ProviderId) || string.IsNullOrWhiteSpace(matchGroup.Title))
+                {
+                    return Results.BadRequest(new { error = "An identity (provider, id, title) is required to match." });
+                }
             }
 
-            // A manual match resolves files to a movie or to episodes of a series — the other kinds are
-            // containers/extras and would silently be treated as a movie by the resolver.
-            if (request.Kind is not (MediaKind.Movie or MediaKind.Episode))
+            var fileIds = request.ToGroups().SelectMany(matchGroup => matchGroup.Files).Select(file => file.SourceFileId).ToList();
+            if (fileIds.Distinct().Count() != fileIds.Count)
             {
-                return Results.BadRequest(new { error = "kind must be Movie or Episode." });
-            }
-
-            if (string.IsNullOrWhiteSpace(request.Provider) || string.IsNullOrWhiteSpace(request.ProviderId) || string.IsNullOrWhiteSpace(request.Title))
-            {
-                return Results.BadRequest(new { error = "An identity (provider, id, title) is required to match." });
+                return Results.BadRequest(new { error = "A source file may appear in only one match group." });
             }
 
             return await service.MatchAsync(id, request, cancellationToken) switch

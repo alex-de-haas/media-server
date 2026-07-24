@@ -27,7 +27,15 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
             ? type == "movie" ? $"&year={year}" : $"&first_air_date_year={year}"
             : string.Empty;
 
-        var path = $"search/{type}?query={Uri.EscapeDataString(query.Title)}{yearParam}";
+        // A query in a non-Latin script asks TMDb for the matching configured metadata language: the
+        // search itself matches translated titles regardless, but the response `title` comes back in the
+        // request language — and the local re-score below can only see the match when the candidate title
+        // is in the query's script (a RU query against "Back to the Future" scores zero title overlap).
+        var languageParam = SearchLanguageFor(query.Title) is { } language
+            ? $"&language={Uri.EscapeDataString(language)}"
+            : string.Empty;
+
+        var path = $"search/{type}?query={Uri.EscapeDataString(query.Title)}{yearParam}{languageParam}";
         var document = await GetAsync(path, cancellationToken);
         if (document is null || !document.RootElement.TryGetProperty("results", out var results))
         {
@@ -38,15 +46,21 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
         foreach (var result in results.EnumerateArray())
         {
             var id = GetString(result, "id");
-            var title = GetString(result, type == "movie" ? "title" : "name")
-                        ?? GetString(result, type == "movie" ? "original_title" : "original_name");
+            var originalTitle = GetString(result, type == "movie" ? "original_title" : "original_name");
+            var title = GetString(result, type == "movie" ? "title" : "name") ?? originalTitle;
             if (id is null || title is null)
             {
                 continue;
             }
 
             var candidateYear = ParseYear(GetString(result, type == "movie" ? "release_date" : "first_air_date"));
+            // Best of display vs original title: a film searched by its original-language name still
+            // scores when the display title is the English one (and vice versa).
             var score = TitleScoring.Score(query.Title, query.Year, title, candidateYear);
+            if (originalTitle is not null && originalTitle != title)
+            {
+                score = Math.Max(score, TitleScoring.Score(query.Title, query.Year, originalTitle, candidateYear));
+            }
             var posterPath = GetString(result, "poster_path");
             var posterUrl = string.IsNullOrEmpty(posterPath) ? null : PosterThumbBaseUrl + posterPath;
             candidates.Add(new MetadataCandidate(new ProviderRef(Key, id), title, candidateYear, score, posterUrl));
@@ -275,6 +289,48 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
 
     private Task<JsonDocument?> GetAsync(string pathWithQuery, CancellationToken cancellationToken) =>
         TmdbRequest.GetAsync(httpClientFactory, settings, logger, pathWithQuery, cancellationToken);
+
+    /// <summary>
+    /// Unicode ranges a metadata language's titles are written in, keyed by ISO 639-1 code. Latin-script
+    /// languages are absent on purpose: the language-less search already answers in (Latin) en-US, and
+    /// characters carry no signal that would pick, say, German over English.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, (char First, char Last)[]> ScriptRangesByLanguage =
+        new Dictionary<string, (char, char)[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ru"] = [('\u0400', '\u04FF')], // Cyrillic
+            ["uk"] = [('\u0400', '\u04FF')],
+            ["be"] = [('\u0400', '\u04FF')],
+            ["bg"] = [('\u0400', '\u04FF')],
+            ["sr"] = [('\u0400', '\u04FF')],
+            ["el"] = [('\u0370', '\u03FF')], // Greek
+            ["he"] = [('\u0590', '\u05FF')], // Hebrew
+            ["ar"] = [('\u0600', '\u06FF')], // Arabic
+            ["th"] = [('\u0E00', '\u0E7F')], // Thai
+            ["ja"] = [('\u3040', '\u30FF'), ('\u4E00', '\u9FFF')], // Hiragana/Katakana + CJK ideographs
+            ["zh"] = [('\u4E00', '\u9FFF')],
+            ["ko"] = [('\uAC00', '\uD7AF'), ('\u1100', '\u11FF')], // Hangul syllables + jamo
+        };
+
+    /// <summary>
+    /// The configured metadata language whose script the query title is (at least partly) written in, or
+    /// null for Latin/unknown scripts — the search then runs language-less as before. Any character of the
+    /// script counts: a mixed name ("Терминатор Terminator") still wants the localized response title, and
+    /// the original-title fallback in the scoring covers its Latin half.
+    /// </summary>
+    private string? SearchLanguageFor(string title)
+    {
+        foreach (var language in settings.SupportedLanguages)
+        {
+            if (ScriptRangesByLanguage.TryGetValue(language.Split('-')[0], out var ranges) &&
+                title.Any(character => ranges.Any(range => character >= range.First && character <= range.Last)))
+            {
+                return language;
+            }
+        }
+
+        return null;
+    }
 
     private static string TmdbType(MediaKind kind) => kind is MediaKind.Movie or MediaKind.Video ? "movie" : "tv";
 

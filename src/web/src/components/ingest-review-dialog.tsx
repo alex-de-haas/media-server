@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Check, Combine, FileAudio2, FileVideo2, Film, Loader2, Search } from "lucide-react";
 import { toast } from "@/lib/toast";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // What Apply should do with a file. Resolved files (already mapped or skipped) default to "keep" — shown
 // with their current mapping, untouched unless the operator explicitly re-decides them via Change.
@@ -26,13 +27,27 @@ type FileDecision = "keep" | "match" | "extra" | "skip";
 // episode/movie no video here targets — the mux stage drops such tracks ("orphan").
 type MergeState = "grouped" | "linked" | "orphan" | null;
 
-// The one identity the whole batch resolves against — a torrent never mixes titles, so the operator
-// confirms the series (or movie) once and only the per-file season/episode vary.
+// A confirmed provider identity. Series batches resolve against one of these for the whole batch (an
+// episodic torrent never mixes shows); movie batches carry one per group — a franchise pack maps each
+// file group to its own movie.
 interface SelectedIdentity {
   provider: string;
   providerId: string;
   title: string;
   year: number | null;
+}
+
+// A movie-catalog identity group: the files that resolve to one movie plus the group's own search state.
+// Groups are pre-seeded from parsed titles when the dialog opens; the operator can move files between
+// groups (or spin a file into a new one) before approving. Apply sends all groups in one match request.
+interface MovieGroup {
+  id: string;
+  fileIds: string[];
+  searchTitle: string;
+  searchYear: string;
+  selected: SelectedIdentity | null;
+  results: MetadataCandidate[] | null;
+  searching: boolean;
 }
 
 /**
@@ -70,6 +85,8 @@ export function IngestReviewDialog({
   const [searchTitle, setSearchTitle] = useState("");
   const [searchYear, setSearchYear] = useState("");
   const [selected, setSelected] = useState<SelectedIdentity | null>(null);
+  // Movie catalogs only; empty for series (which resolve against the single `selected` identity above).
+  const [movieGroups, setMovieGroups] = useState<MovieGroup[]>([]);
   // Per-file overrides of the default decision (pending files: match/extra/skip from the backend's
   // classification; resolved files: keep). Only explicit operator choices live here.
   const [decisions, setDecisions] = useState<Record<string, FileDecision>>({});
@@ -89,6 +106,83 @@ export function IngestReviewDialog({
     onSuccess: (results) => setSearchResults(results),
     onError: (error) => toast.error("Search failed", { description: errorMessage(error) }),
   });
+
+  const fileById = (fileId: string) => item.sourceFiles.find((file) => file.id === fileId);
+  const groupOfFile = (fileId: string) => movieGroups.find((group) => group.fileIds.includes(fileId));
+
+  // Per-group metadata search (movie catalogs). Plain promises rather than one useMutation: several
+  // groups search in parallel when the dialog opens, each spinner and result list its own.
+  const runGroupSearch = (groupId: string, title: string, year: number | null) => {
+    setMovieGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, searching: true } : group)));
+    mediaServer
+      .searchIngest(item.id, { title, year, kind: "Movie" })
+      .then((results) =>
+        setMovieGroups((prev) =>
+          prev.map((group) => (group.id === groupId ? { ...group, results, searching: false } : group)),
+        ),
+      )
+      .catch((error: unknown) => {
+        setMovieGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, searching: false } : group)));
+        toast.error("Search failed", { description: errorMessage(error) });
+      });
+  };
+
+  // A resolved movie file re-decided to "match" must land in a group: the one already pointing at its
+  // current identity when there is one, else a fresh group pre-selected to that identity.
+  const ensureInGroup = (file: IngestSourceFile) => {
+    if (isEpisodic) return;
+    setMovieGroups((prev) => {
+      if (prev.some((group) => group.fileIds.includes(file.id))) return prev;
+      const assigned = file.assigned;
+      const identity: SelectedIdentity | null =
+        assigned?.provider && assigned.providerId
+          ? { provider: assigned.provider, providerId: assigned.providerId, title: assigned.title, year: null }
+          : null;
+      const existing = identity ? prev.find((group) => group.selected && sameIdentity(group.selected, identity)) : undefined;
+      if (existing) {
+        return prev.map((group) => (group === existing ? { ...group, fileIds: [...group.fileIds, file.id] } : group));
+      }
+      return [
+        ...prev,
+        {
+          id: `g-${file.id}`,
+          fileIds: [file.id],
+          searchTitle: (file.parsedTitle ?? "").trim(),
+          searchYear: file.parsedYear != null ? String(file.parsedYear) : "",
+          selected: identity,
+          results: null,
+          searching: false,
+        },
+      ];
+    });
+  };
+
+  // Moves a file to another group ("new" spins it into a fresh group seeded from its parsed name).
+  // Emptied groups disappear.
+  const moveFileToGroup = (file: IngestSourceFile, targetGroupId: string) => {
+    setMovieGroups((prev) => {
+      const removed = prev.map((group) => ({ ...group, fileIds: group.fileIds.filter((id) => id !== file.id) }));
+      const next =
+        targetGroupId === "new"
+          ? [
+              ...removed,
+              {
+                id: `g-${file.id}-new`,
+                fileIds: [file.id],
+                searchTitle: (file.parsedTitle ?? "").trim(),
+                searchYear: file.parsedYear != null ? String(file.parsedYear) : "",
+                selected: null,
+                results: null,
+                searching: false,
+              },
+            ]
+          : removed.map((group) => (group.id === targetGroupId ? { ...group, fileIds: [...group.fileIds, file.id] } : group));
+      return next.filter((group) => group.fileIds.length > 0);
+    });
+    if (targetGroupId === "new" && (file.parsedTitle ?? "").trim()) {
+      runGroupSearch(`g-${file.id}-new`, (file.parsedTitle ?? "").trim(), file.parsedYear ?? null);
+    }
+  };
 
   const decisionFor = (file: IngestSourceFile): FileDecision => {
     const explicit = decisions[file.id];
@@ -118,19 +212,47 @@ export function IngestReviewDialog({
         (file) => decisionFor(file) === "skip" && file.assignmentStatus !== "Skipped",
       );
 
-      if (matchFiles.length > 0 || extraFiles.length > 0) {
-        if (!selected) throw new Error(isEpisodic ? "Pick a series above first." : "Pick a movie above first.");
+      if (!isEpisodic && matchFiles.length > 0) {
+        // Movie catalogs match per group — every group with match-decided files sends its own identity,
+        // all in one request so the pipeline re-drives once.
+        const activeGroups = movieGroups
+          .map((group) => ({
+            group,
+            files: group.fileIds
+              .map(fileById)
+              .filter((file): file is IngestSourceFile => file != null && decisionFor(file) === "match"),
+          }))
+          .filter((entry) => entry.files.length > 0);
+        if (activeGroups.some((entry) => !entry.group.selected)) {
+          throw new Error("Pick a movie for every group first.");
+        }
+        const grouped = new Set(activeGroups.flatMap((entry) => entry.files.map((file) => file.id)));
+        if (matchFiles.some((file) => !grouped.has(file.id))) {
+          throw new Error("Every file to match must belong to a group.");
+        }
+        await mediaServer.matchIngest(item.id, {
+          groups: activeGroups.map((entry) => ({
+            kind: "Movie" as const,
+            provider: entry.group.selected!.provider,
+            providerId: entry.group.selected!.providerId,
+            title: entry.group.selected!.title,
+            year: entry.group.selected!.year,
+            files: entry.files.map((file) => ({ sourceFileId: file.id, season: null, episode: null })),
+          })),
+        });
+      } else if (matchFiles.length > 0 || extraFiles.length > 0) {
+        if (!selected) throw new Error("Pick a series above first.");
         if (matchFiles.length > 0) {
           await mediaServer.matchIngest(item.id, {
-            kind: isEpisodic ? "Episode" : "Movie",
+            kind: "Episode",
             provider: selected.provider,
             providerId: selected.providerId,
             title: selected.title,
             year: selected.year,
             files: matchFiles.map((file) => ({
               sourceFileId: file.id,
-              season: isEpisodic ? numbersFor(file).season : null,
-              episode: isEpisodic ? numbersFor(file).episode : null,
+              season: numbersFor(file).season,
+              episode: numbersFor(file).episode,
             })),
           });
         }
@@ -213,9 +335,84 @@ export function IngestReviewDialog({
           : null),
     );
 
-    // No auto-identified candidates to show? Run the search up-front so variants appear without a click.
-    if (item.reviewCandidates.length === 0 && parsedTitle) {
-      searchMutate({ title: parsedTitle, year: parsedYear });
+    if (isEpisodic) {
+      // This effect is the dialog's sanctioned reset-on-open spot (all the seeding above works the same
+      // way); the grouped movie state resets with the rest.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMovieGroups([]);
+      // No auto-identified candidates to show? Run the search up-front so variants appear without a click.
+      if (item.reviewCandidates.length === 0 && parsedTitle) {
+        searchMutate({ title: parsedTitle, year: parsedYear });
+      }
+      return;
+    }
+
+    // Movie catalogs pre-group the pending files by parsed title+year — a franchise pack parses into
+    // distinct titles, one group per movie. Audio tracks join the video bucket whose title prefixes
+    // theirs ("Movie One Rus" → "Movie One"), the sole video bucket when there is only one, or their own
+    // bucket otherwise. A pinned identity means the operator already declared the batch one movie.
+    const videoBuckets = new Map<string, { title: string; year: number | null; fileIds: string[] }>();
+    const audioFiles: IngestSourceFile[] = [];
+    for (const file of pendingFiles) {
+      if (file.isAudio) {
+        audioFiles.push(file);
+        continue;
+      }
+      const title = (file.parsedTitle ?? "").trim();
+      const key = `${title.toLowerCase()}|${file.parsedYear ?? ""}`;
+      const bucket = videoBuckets.get(key);
+      if (bucket) bucket.fileIds.push(file.id);
+      else videoBuckets.set(key, { title, year: file.parsedYear ?? null, fileIds: [file.id] });
+    }
+    const buckets = [...videoBuckets.values()];
+    for (const audio of audioFiles) {
+      const parsed = (audio.parsedTitle ?? "").trim().toLowerCase();
+      const host =
+        buckets.length === 1
+          ? buckets[0]
+          : buckets.find((bucket) => bucket.title.length > 0 && parsed.startsWith(bucket.title.toLowerCase()));
+      if (host) host.fileIds.push(audio.id);
+      else buckets.push({ title: (audio.parsedTitle ?? "").trim(), year: audio.parsedYear ?? null, fileIds: [audio.id] });
+    }
+
+    const seededGroups: MovieGroup[] = pinnedIdentity
+      ? [
+          {
+            id: "pinned",
+            fileIds: pendingFiles.map((file) => file.id),
+            searchTitle: pinnedIdentity.title,
+            searchYear: pinnedIdentity.year != null ? String(pinnedIdentity.year) : "",
+            selected: pinnedIdentity,
+            results: null,
+            searching: false,
+          },
+        ]
+      : buckets.map((bucket) => ({
+          id: `g-${bucket.fileIds[0]}`,
+          fileIds: bucket.fileIds,
+          searchTitle: bucket.title,
+          searchYear: bucket.year != null ? String(bucket.year) : "",
+          // A single-bucket batch mirrors the old single-identity seeding; multi-bucket groups start
+          // unselected and fill from their own searches.
+          selected:
+            buckets.length === 1
+              ? (mappedIdentity ??
+                (confident && confident.score >= 0.95
+                  ? { provider: confident.reference.provider, providerId: confident.reference.id, title: confident.title, year: confident.year }
+                  : null))
+              : null,
+          results: null,
+          searching: false,
+        }));
+    setMovieGroups(seededGroups);
+
+    // Fetch candidates per group up-front so every group has options without a click. A lone group
+    // reuses the batch's auto-identified candidates when it has some.
+    for (const group of seededGroups) {
+      const hasBatchCandidates = seededGroups.length === 1 && item.reviewCandidates.length > 0;
+      if (!group.selected && !hasBatchCandidates && group.searchTitle) {
+        runGroupSearch(group.id, group.searchTitle, group.searchYear ? Number(group.searchYear) : null);
+      }
     }
     // Everything read here is derived from item each render; keying the effect on item.id (+ the catalog
     // kind via isEpisodic) keeps it to one run per open.
@@ -247,7 +444,18 @@ export function IngestReviewDialog({
     (file) => decisionFor(file) === "skip" && file.assignmentStatus !== "Skipped",
   ).length;
   const changeCount = matchCount + extraCount + skipCount;
-  const needsIdentity = (matchCount > 0 || extraCount > 0) && !selected;
+  // Blocked until every identity involved is picked: the batch identity for series, each group with
+  // match-decided files for movies.
+  const needsIdentity = isEpisodic
+    ? (matchCount > 0 || extraCount > 0) && !selected
+    : movieGroups.some(
+        (group) =>
+          !group.selected &&
+          group.fileIds.some((fileId) => {
+            const file = fileById(fileId);
+            return file != null && decisionFor(file) === "match";
+          }),
+      );
 
   const title = item.downloadName ?? fileNameOf(item.sourceFiles[0]?.relativePath) ?? "Untitled item";
 
@@ -262,8 +470,14 @@ export function IngestReviewDialog({
   const targetOf = (file: IngestSourceFile): { key: string; label: string } | null => {
     const decision = decisionFor(file);
     if (decision === "match") {
+      if (!isEpisodic) {
+        // Movie files key on their group's identity — files of one group pair together even before the
+        // movie is picked (they all receive the same one on Apply).
+        const group = groupOfFile(file.id);
+        const identity = group?.selected ? `${group.selected.provider}:${group.selected.providerId}` : `group:${group?.id ?? "none"}`;
+        return { key: `${identity}|Movie`, label: "Movie" };
+      }
       const identity = selected ? `${selected.provider}:${selected.providerId}` : "unselected";
-      if (!isEpisodic) return { key: `${identity}|Movie`, label: "Movie" };
       const numbers = numbersFor(file);
       const label = `S${String(numbers.season).padStart(2, "0")}E${String(numbers.episode).padStart(2, "0")}`;
       return { key: `${identity}|${label}`, label };
@@ -331,10 +545,51 @@ export function IngestReviewDialog({
       busy={busy}
       merge={merge}
       mergeIntoName={mergeIntoName}
-      onDecision={(decision) => setDecisions((prev) => ({ ...prev, [file.id]: decision }))}
+      groupPicker={groupPickerFor(file)}
+      onDecision={(decision) => {
+        // A movie file re-decided to "match" needs a group to resolve against (see ensureInGroup).
+        if (decision === "match") ensureInGroup(file);
+        setDecisions((prev) => ({ ...prev, [file.id]: decision }));
+      }}
       onNumbers={(patch) => setNumbers(file, patch)}
     />
   );
+
+  // The group mover for a pending movie file: hidden when there is nowhere to move (a lone single-file
+  // group). "New group" splits a file out of a shared group.
+  const groupPickerFor = (file: IngestSourceFile) => {
+    if (isEpisodic || isResolved(file)) return null;
+    const group = groupOfFile(file.id);
+    if (!group) return null;
+    const canSplit = group.fileIds.length > 1;
+    if (movieGroups.length === 1 && !canSplit) return null;
+    return (
+      <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
+        <span>Group</span>
+        <Select
+          value={group.id}
+          disabled={busy}
+          onValueChange={(value) => value != null && moveFileToGroup(file, value)}
+        >
+          <SelectTrigger size="sm" className="h-7 w-48 text-xs">
+            {/* Base UI's Value renders the raw value (the group id) without children — label it like the
+                dropdown items instead. */}
+            <SelectValue>
+              {group.selected?.title ?? (group.searchTitle || `Movie ${movieGroups.indexOf(group) + 1}`)}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {movieGroups.map((candidate, index) => (
+              <SelectItem key={candidate.id} value={candidate.id}>
+                {candidate.selected?.title ?? (candidate.searchTitle || `Movie ${index + 1}`)}
+              </SelectItem>
+            ))}
+            {canSplit && <SelectItem value="new">New group…</SelectItem>}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  };
 
   const renderFileRows = (files: IngestSourceFile[]) =>
     rowsOf(files).map((row) => {
@@ -375,77 +630,60 @@ export function IngestReviewDialog({
         {/* min-h-0 lets the file list flex-shrink inside the height-capped dialog, keeping the Apply
             footer pinned inside the card instead of overflowing past it. */}
         <div className="flex min-h-0 flex-col gap-3 text-sm">
-          {/* Pre-filled from the parsed name; edit + re-search when the auto-parse was wrong. */}
-          <form
-            className="flex flex-wrap items-end gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (searchTitle.trim()) search.mutate({ title: searchTitle.trim(), year: searchYear.trim() ? Number(searchYear) : null });
-            }}
-          >
-            <Field className="flex-1">
-              <FieldLabel htmlFor={titleId}>Corrected title</FieldLabel>
-              <Input
-                id={titleId}
-                value={searchTitle}
-                placeholder={isEpisodic ? "Series title" : "Movie title"}
-                onChange={(e) => setSearchTitle(e.target.value)}
-              />
-            </Field>
-            <Field className="w-20">
-              <FieldLabel htmlFor={yearId}>Year</FieldLabel>
-              <Input id={yearId} type="number" value={searchYear} onChange={(e) => setSearchYear(e.target.value)} />
-            </Field>
-            <Button type="submit" variant="secondary" size="sm" disabled={!searchTitle.trim() || search.isPending}>
-              <Search />
-              {search.isPending ? "Searching…" : "Search"}
-            </Button>
-          </form>
+          {/* Series: one identity for the whole batch (an episodic torrent never mixes shows), confirmed
+              once here instead of per file. Movie batches pick identities inside each group below. */}
+          {isEpisodic && (
+            <>
+              {/* Pre-filled from the parsed name; edit + re-search when the auto-parse was wrong. */}
+              <form
+                className="flex flex-wrap items-end gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (searchTitle.trim()) search.mutate({ title: searchTitle.trim(), year: searchYear.trim() ? Number(searchYear) : null });
+                }}
+              >
+                <Field className="flex-1">
+                  <FieldLabel htmlFor={titleId}>Corrected title</FieldLabel>
+                  <Input id={titleId} value={searchTitle} placeholder="Series title" onChange={(e) => setSearchTitle(e.target.value)} />
+                </Field>
+                <Field className="w-20">
+                  <FieldLabel htmlFor={yearId}>Year</FieldLabel>
+                  <Input id={yearId} type="number" value={searchYear} onChange={(e) => setSearchYear(e.target.value)} />
+                </Field>
+                <Button type="submit" variant="secondary" size="sm" disabled={!searchTitle.trim() || search.isPending}>
+                  <Search />
+                  {search.isPending ? "Searching…" : "Search"}
+                </Button>
+              </form>
 
-          {/* One identity for the whole batch — a torrent never mixes titles, so the series (or movie) is
-              confirmed once here instead of per file. */}
-          <div className="flex shrink-0 flex-col gap-1.5">
-            <span className="text-muted-foreground text-xs">
-              {isEpisodic
-                ? "Pick the series once — it applies to every file below."
-                : "Pick the movie once — it applies to every file below."}
-            </span>
-            <div className="flex max-h-52 flex-col gap-1.5 overflow-y-auto">
-              {identityOptions.length ? (
-                identityOptions.map((option) => {
-                  const active = selected != null && sameIdentity(selected, option.identity);
-                  return (
-                    <button
-                      key={`${option.identity.provider}:${option.identity.providerId}`}
-                      type="button"
-                      aria-pressed={active}
-                      disabled={busy}
-                      onClick={() => setSelected(option.identity)}
-                      className={`hover:bg-accent focus-visible:ring-ring flex items-center gap-2.5 rounded-md border px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-60 ${active ? "border-primary" : ""}`}
-                    >
-                      <CandidatePoster url={option.posterUrl} title={option.identity.title} />
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate font-medium">
-                          {option.identity.title}
-                          {option.identity.year ? ` (${option.identity.year})` : ""}
-                        </span>
-                        <span className="text-muted-foreground text-xs">{option.note}</span>
-                      </span>
-                      {active && <Check className="text-primary size-4 shrink-0" aria-hidden="true" />}
-                    </button>
-                  );
-                })
-              ) : (
-                <span className="text-muted-foreground text-xs">
-                  {search.isPending
-                    ? "Searching…"
-                    : searchResults
-                      ? "No matches for that title."
-                      : "No candidates returned — try a corrected title above."}
-                </span>
-              )}
-            </div>
-          </div>
+              <div className="flex shrink-0 flex-col gap-1.5">
+                <span className="text-muted-foreground text-xs">Pick the series once — it applies to every file below.</span>
+                <div className="flex max-h-52 flex-col gap-1.5 overflow-y-auto">
+                  {identityOptions.length ? (
+                    identityOptions.map((option) => (
+                      <IdentityOptionButton
+                        key={`${option.identity.provider}:${option.identity.providerId}`}
+                        identity={option.identity}
+                        posterUrl={option.posterUrl}
+                        note={option.note}
+                        active={selected != null && sameIdentity(selected, option.identity)}
+                        disabled={busy}
+                        onClick={() => setSelected(option.identity)}
+                      />
+                    ))
+                  ) : (
+                    <span className="text-muted-foreground text-xs">
+                      {search.isPending
+                        ? "Searching…"
+                        : searchResults
+                          ? "No matches for that title."
+                          : "No candidates returned — try a corrected title above."}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Per-file decisions. Extras that don't exist on the provider (creditless openings, menus, …)
               can't ever match — keep them as playable extras of the series, or skip them entirely. */}
@@ -453,7 +691,9 @@ export function IngestReviewDialog({
             <span>
               {isEpisodic
                 ? "Files without a match can be kept as extras of the series, or skipped (not imported)."
-                : "Files without a match can be skipped — skipped files aren’t imported."}
+                : movieGroups.length > 1
+                  ? "Files are grouped by movie — pick each group's movie, or move a file if the grouping is wrong. Skipped files aren’t imported."
+                  : "Files without a match can be skipped — skipped files aren’t imported."}
             </span>
             {pendingFiles.length > 1 && (
               <Button
@@ -477,7 +717,129 @@ export function IngestReviewDialog({
           {/* The flexing scroll region: it takes whatever height the capped dialog has left (min-h-0 up
               the tree makes that boundable) and scrolls its overflow, so the footer below never spills. */}
           <div className="-mr-2 flex min-h-20 flex-1 flex-col gap-2 overflow-y-auto pr-2">
-            {renderFileRows(pendingFiles)}
+            {isEpisodic
+              ? renderFileRows(pendingFiles)
+              : movieGroups.map((group, index) => {
+                  const files = group.fileIds
+                    .map(fileById)
+                    .filter((file): file is IngestSourceFile => file != null);
+                  if (files.length === 0) return null;
+                  // A lone group reuses the batch's auto-identified candidates; otherwise each group
+                  // shows its own search results.
+                  const groupCandidates = group.results ?? (movieGroups.length === 1 ? item.reviewCandidates : []);
+                  return (
+                    <div key={group.id} className="flex flex-col gap-2 rounded-lg border p-2">
+                      <div className="flex items-center gap-1.5 text-xs font-medium">
+                        <Film className="text-muted-foreground size-3.5 shrink-0" aria-hidden="true" />
+                        <span className="truncate">
+                          {group.selected
+                            ? `${group.selected.title}${group.selected.year ? ` (${group.selected.year})` : ""}`
+                            : movieGroups.length > 1
+                              ? `Movie ${index + 1} — pick below`
+                              : "Pick the movie below"}
+                        </span>
+                      </div>
+                      {renderFileRows(files)}
+
+                      {/* The group's own search + candidates: confirming an identity here only affects
+                          this group's files. */}
+                      <form
+                        className="flex flex-wrap items-end gap-2"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (group.searchTitle.trim()) {
+                            runGroupSearch(group.id, group.searchTitle.trim(), group.searchYear.trim() ? Number(group.searchYear) : null);
+                          }
+                        }}
+                      >
+                        <Field className="flex-1">
+                          <FieldLabel htmlFor={`${titleId}-${group.id}`}>Corrected title</FieldLabel>
+                          <Input
+                            id={`${titleId}-${group.id}`}
+                            value={group.searchTitle}
+                            placeholder="Movie title"
+                            onChange={(e) =>
+                              setMovieGroups((prev) =>
+                                prev.map((candidate) => (candidate.id === group.id ? { ...candidate, searchTitle: e.target.value } : candidate)),
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field className="w-20">
+                          <FieldLabel htmlFor={`${yearId}-${group.id}`}>Year</FieldLabel>
+                          <Input
+                            id={`${yearId}-${group.id}`}
+                            type="number"
+                            value={group.searchYear}
+                            onChange={(e) =>
+                              setMovieGroups((prev) =>
+                                prev.map((candidate) => (candidate.id === group.id ? { ...candidate, searchYear: e.target.value } : candidate)),
+                              )
+                            }
+                          />
+                        </Field>
+                        <Button type="submit" variant="secondary" size="sm" disabled={!group.searchTitle.trim() || group.searching}>
+                          <Search />
+                          {group.searching ? "Searching…" : "Search"}
+                        </Button>
+                      </form>
+                      <div className="flex max-h-40 flex-col gap-1.5 overflow-y-auto">
+                        {/* A picked identity that fell out of the candidate list (pinned, carried over
+                            from a prior search) stays visible as the active option. */}
+                        {group.selected != null &&
+                          !groupCandidates.some(
+                            (candidate) =>
+                              candidate.reference.provider === group.selected!.provider &&
+                              candidate.reference.id === group.selected!.providerId,
+                          ) && (
+                            <IdentityOptionButton
+                              identity={group.selected}
+                              posterUrl={null}
+                              note="Selected"
+                              active
+                              disabled={busy}
+                              onClick={() => {}}
+                            />
+                          )}
+                        {groupCandidates.length ? (
+                          groupCandidates.map((candidate) => {
+                            const identity: SelectedIdentity = {
+                              provider: candidate.reference.provider,
+                              providerId: candidate.reference.id,
+                              title: candidate.title,
+                              year: candidate.year,
+                            };
+                            return (
+                              <IdentityOptionButton
+                                key={`${identity.provider}:${identity.providerId}`}
+                                identity={identity}
+                                posterUrl={candidate.posterUrl}
+                                note={`${(candidate.score * 100).toFixed(0)}% match`}
+                                active={group.selected != null && sameIdentity(group.selected, identity)}
+                                disabled={busy}
+                                onClick={() =>
+                                  setMovieGroups((prev) =>
+                                    prev.map((candidateGroup) =>
+                                      candidateGroup.id === group.id ? { ...candidateGroup, selected: identity } : candidateGroup,
+                                    ),
+                                  )
+                                }
+                              />
+                            );
+                          })
+                        ) : (
+                          <span className="text-muted-foreground text-xs">
+                            {group.searching
+                              ? "Searching…"
+                              : group.results
+                                ? "No matches for that title."
+                                : "No candidates — try a corrected title above."}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
 
             {resolvedFiles.length > 0 && (
               <div className="text-muted-foreground mt-1 text-xs font-medium">
@@ -493,7 +855,9 @@ export function IngestReviewDialog({
               {needsIdentity
                 ? isEpisodic
                   ? "Pick a series above to apply."
-                  : "Pick a movie above to apply."
+                  : movieGroups.length > 1
+                    ? "Pick a movie for every group to apply."
+                    : "Pick a movie above to apply."
                 : changeCount === 0
                   ? "No pending changes."
                   : [
@@ -527,6 +891,7 @@ function FileRow({
   busy,
   merge,
   mergeIntoName,
+  groupPicker,
   onDecision,
   onNumbers,
 }: {
@@ -537,6 +902,7 @@ function FileRow({
   busy: boolean;
   merge: MergeState;
   mergeIntoName?: string;
+  groupPicker?: ReactNode;
   onDecision: (decision: FileDecision) => void;
   onNumbers: (patch: Partial<{ season: number; episode: number }>) => void;
 }) {
@@ -625,6 +991,9 @@ function FileRow({
         </span>
       )}
 
+      {/* The group this movie file resolves with; moving it re-targets which movie it becomes. */}
+      {decision === "match" && groupPicker}
+
       {/* Per-file season/episode, pre-filled from the current mapping or this file's parsed name. */}
       {decision === "match" && isEpisodic && (
         <div className="text-muted-foreground flex items-center gap-3">
@@ -681,6 +1050,44 @@ function DecisionButton({
 }
 
 const sameIdentity = (a: SelectedIdentity, b: SelectedIdentity) => a.provider === b.provider && a.providerId === b.providerId;
+
+// One selectable identity row (poster, title, provenance note) — used by the series-wide identity list
+// and by each movie group's candidate list.
+function IdentityOptionButton({
+  identity,
+  posterUrl,
+  note,
+  active,
+  disabled,
+  onClick,
+}: {
+  identity: SelectedIdentity;
+  posterUrl: string | null;
+  note: string;
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={`hover:bg-accent focus-visible:ring-ring flex items-center gap-2.5 rounded-md border px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-60 ${active ? "border-primary" : ""}`}
+    >
+      <CandidatePoster url={posterUrl} title={identity.title} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate font-medium">
+          {identity.title}
+          {identity.year ? ` (${identity.year})` : ""}
+        </span>
+        <span className="text-muted-foreground text-xs">{note}</span>
+      </span>
+      {active && <Check className="text-primary size-4 shrink-0" aria-hidden="true" />}
+    </button>
+  );
+}
 
 // The compact chip for a resolved file: where it currently points.
 function mappingLabel(file: IngestSourceFile): string {

@@ -84,7 +84,7 @@ and a later overview / curated order / "missing movies" extension only adds
 columns to the same table.
 
 This is consistent with the architecture, **not** an exception to it: the
-"derive from `Raw` at display time" rule in [metadata.md](metadata.md) governs
+"derive from `Raw` at display time" rule in [metadata.md](metadata/feature.md) governs
 *single-item display attributes* (overview, tagline, studios, keywords, trailer).
 *Cross-item structure* — a person appearing in many items, a franchise grouping
 many movies — cannot be expressed that way (each `Raw` is independent), so it is
