@@ -1118,13 +1118,17 @@ function MovieConversions({ itemId }: { itemId: string }) {
     return null;
   }
 
+  // A label over a stack of conversion cards, mirroring the Activity page's groups — each job already draws
+  // its own bordered card, so this block adds no box of its own.
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-dashed p-3">
+    <section className="flex flex-col gap-2">
       <p className="text-muted-foreground text-xs font-medium">Conversions</p>
-      {mine.map((job) => (
-        <TranscodeJobRow key={job.id} job={job} />
-      ))}
-    </div>
+      <div className="flex flex-col gap-3">
+        {mine.map((job) => (
+          <TranscodeJobRow key={job.id} job={job} />
+        ))}
+      </div>
+    </section>
   );
 }
 

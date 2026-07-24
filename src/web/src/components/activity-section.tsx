@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Clock, Loader2, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
@@ -22,9 +22,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ActivityCard, ActivityCardHeader, ActivityProgress, ActivityQueued, ActivityStats, IconAction } from "@/components/activity-card";
 import { EmptyState, ErrorState, Loading } from "@/components/states";
 import { IngestStepper, type StepActivity } from "@/components/ingest-stepper";
 import { IngestReviewDialog } from "@/components/ingest-review-dialog";
@@ -506,7 +506,7 @@ function IngestRow({
   const transferring = download !== undefined && !DOWNLOAD_DONE_STATES.includes(download.state);
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border p-3">
+    <ActivityCard>
       {category === "active" && (
         <IngestStepper
           stage={item.stage}
@@ -516,12 +516,11 @@ function IngestRow({
         />
       )}
 
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-1">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <p className="truncate font-medium" title={title}>
-              {title}
-            </p>
+      <ActivityCardHeader
+        title={title}
+        titleAttr={title}
+        markers={
+          <>
             {pinned && (
               <Tooltip>
                 <TooltipTrigger
@@ -555,9 +554,11 @@ function IngestRow({
                 <TooltipContent>{warning}</TooltipContent>
               </Tooltip>
             )}
-          </div>
-          {(meta || showFiles) && (
-            <p className="text-muted-foreground text-xs">
+          </>
+        }
+        meta={
+          (meta || showFiles) && (
+            <>
               {meta}
               {showFiles && (
                 <>
@@ -565,45 +566,46 @@ function IngestRow({
                   <FilesTooltip files={item.sourceFiles} />
                 </>
               )}
-            </p>
-          )}
-          {category === "active" && hint && <p className="text-muted-foreground text-xs">{hint}</p>}
-        </div>
-
-        {/* One icon row, right of the title: only the actions that apply to the item's current step/state. */}
-        <div className="flex shrink-0 items-center gap-1">
-          {/* No manual pause/resume while the VPN is down — the engine gates transfers and a resume can't
-              succeed under the killswitch. */}
-          {transferring && download && !vpnDown && (
-            transferPending ? (
-              <IconAction label={transferIntent === "pause" ? "Pausing…" : "Resuming…"} icon={<Pause />} pending onClick={() => {}} />
-            ) : isDownloadPaused(download) ? (
-              <IconAction label="Resume" icon={<Play />} onClick={togglePause} />
-            ) : (
-              <IconAction label="Pause" icon={<Pause />} onClick={togglePause} />
-            )
-          )}
-          {category === "seeding" && download && (
-            <IconAction label="Stop seeding" icon={<Square />} pending={stopSeeding.isPending} onClick={() => stopSeeding.mutate(download.id)} />
-          )}
-          {canPin && (
-            <IconAction
-              label={item.targetTitle ? (isEpisodic ? "Change series" : "Change title") : isEpisodic ? "Set series" : "Set title"}
-              icon={<Target />}
-              onClick={() => setPinOpen(true)}
-            />
-          )}
-          {item.status === "NeedsReview" && (
-            <IconAction label="Resolve match" icon={<SearchCheck />} onClick={() => setReviewOpen(true)} />
-          )}
-          {(item.status === "Failed" || (item.status === "NeedsReview" && role === "admin")) && (
-            <IconAction label="Retry" icon={<RotateCw />} pending={retry.isPending} onClick={() => retry.mutate()} />
-          )}
-          {role === "admin" && (
-            <IconAction label="Remove" icon={<Trash2 />} destructive pending={remove.isPending} onClick={() => setConfirmOpen(true)} />
-          )}
-        </div>
-      </div>
+            </>
+          )
+        }
+        note={category === "active" && hint ? hint : undefined}
+        /* One icon row, right of the title: only the actions that apply to the item's current step/state. */
+        actions={
+          <>
+            {/* No manual pause/resume while the VPN is down — the engine gates transfers and a resume can't
+                succeed under the killswitch. */}
+            {transferring && download && !vpnDown && (
+              transferPending ? (
+                <IconAction label={transferIntent === "pause" ? "Pausing…" : "Resuming…"} icon={<Pause />} pending onClick={() => {}} />
+              ) : isDownloadPaused(download) ? (
+                <IconAction label="Resume" icon={<Play />} onClick={togglePause} />
+              ) : (
+                <IconAction label="Pause" icon={<Pause />} onClick={togglePause} />
+              )
+            )}
+            {category === "seeding" && download && (
+              <IconAction label="Stop seeding" icon={<Square />} pending={stopSeeding.isPending} onClick={() => stopSeeding.mutate(download.id)} />
+            )}
+            {canPin && (
+              <IconAction
+                label={item.targetTitle ? (isEpisodic ? "Change series" : "Change title") : isEpisodic ? "Set series" : "Set title"}
+                icon={<Target />}
+                onClick={() => setPinOpen(true)}
+              />
+            )}
+            {item.status === "NeedsReview" && (
+              <IconAction label="Resolve match" icon={<SearchCheck />} onClick={() => setReviewOpen(true)} />
+            )}
+            {(item.status === "Failed" || (item.status === "NeedsReview" && role === "admin")) && (
+              <IconAction label="Retry" icon={<RotateCw />} pending={retry.isPending} onClick={() => retry.mutate()} />
+            )}
+            {role === "admin" && (
+              <IconAction label="Remove" icon={<Trash2 />} destructive pending={remove.isPending} onClick={() => setConfirmOpen(true)} />
+            )}
+          </>
+        }
+      />
 
       {category === "active" && transferring && download && <DownloadProgress download={download} vpnDown={vpnDown} />}
       {category === "seeding" && download && <SeedingStats download={download} />}
@@ -644,7 +646,7 @@ function IngestRow({
           setConfirmOpen(false);
         }}
       />
-    </div>
+    </ActivityCard>
   );
 }
 
@@ -667,29 +669,28 @@ function ActivityGroup({ icon: Icon, label, children }: { icon: LucideIcon; labe
 // download card. Labels can be absent for a move stranded by a restart; speed/ETA until the first tick.
 function MoveProgressRow({ move }: { move: LibraryMoveJob }) {
   return (
-    <div className="flex flex-col gap-2 rounded-md border p-3">
-      <p className="min-w-0 truncate font-medium">
-        Moving {move.title ? <span title={move.title}>“{move.title}”</span> : "item"}
-        {move.targetCatalogName && <span className="text-muted-foreground font-normal"> → {move.targetCatalogName}</span>}
-      </p>
-      {move.queued ? (
-        // Waiting behind the move that's copying now — no bar/stats yet, just say it's queued.
-        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          <Clock className="size-3.5 shrink-0" aria-hidden />
-          Queued
-        </span>
-      ) : (
-        <>
-          <Progress value={move.progress} />
+    <ActivityCard>
+      <ActivityCardHeader
+        title={
+          <>
+            Moving {move.title ? <span title={move.title}>“{move.title}”</span> : "item"}
+            {move.targetCatalogName && <span className="text-muted-foreground font-normal"> → {move.targetCatalogName}</span>}
+          </>
+        }
+        // Waiting behind the move that's copying now — the queued line replaces the bar and stats below.
+        note={move.queued ? <ActivityQueued /> : undefined}
+      />
+      {!move.queued && (
+        <ActivityProgress value={move.progress}>
           {/* Speed/ETA are each present only mid-copy — the 100% tick has a rate but no ETA — so gate them apart. */}
-          <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
+          <ActivityStats>
             <span>{move.progress}%</span>
             {move.bytesPerSecond != null && <span>{formatSpeed(move.bytesPerSecond)}</span>}
             {move.etaSeconds != null && <span>ETA {formatEta(move.etaSeconds)}</span>}
-          </div>
-        </>
+          </ActivityStats>
+        </ActivityProgress>
       )}
-    </div>
+    </ActivityCard>
   );
 }
 
@@ -706,9 +707,8 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
   const active = !vpnDown && !isDownloadPaused(download);
 
   return (
-    <div className="flex flex-col gap-2">
-      <Progress value={Math.min(percent, 100)} />
-      <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono">
+    <ActivityProgress value={percent}>
+      <ActivityStats>
         <span>{formatPercent(download.percentComplete)}</span>
         {vpnDown ? (
           // Transfer is gated by the killswitch — show why instead of a misleading 0 B/s.
@@ -723,9 +723,9 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
             <span>ETA {formatEta(eta)}</span>
           </>
         )}
-      </div>
+      </ActivityStats>
       {active && <PeerStats download={download} />}
-    </div>
+    </ActivityProgress>
   );
 }
 
@@ -745,21 +745,21 @@ function PeerStats({ download }: { download: Download }) {
   }
 
   return (
-    <div className="text-muted-foreground/80 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs">
+    <ActivityStats tone="muted">
       {parts.map((part, index) => (
         <span key={index}>{part}</span>
       ))}
-    </div>
+    </ActivityStats>
   );
 }
 
 function SeedingStats({ download }: { download: Download }) {
   return (
-    <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 font-mono">
+    <ActivityStats>
       <span>↑ {formatSpeed(download.uploadRateBytesPerSecond)}</span>
       <span>ratio {download.ratio?.toFixed(2) ?? "—"}</span>
       <span>{download.peers ?? 0} peers</span>
-    </div>
+    </ActivityStats>
   );
 }
 
@@ -816,45 +816,6 @@ function FilesTooltip({ files }: { files: IngestSourceFile[] }) {
           )}
         </ul>
       </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function IconAction({
-  label,
-  icon,
-  onClick,
-  disabled,
-  pending,
-  destructive,
-}: {
-  label: string;
-  icon: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  // Swaps the icon for a spinner and disables the button — feedback for commands that take a moment to
-  // land (and a guard against impatient double-clicks).
-  pending?: boolean;
-  destructive?: boolean;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={label}
-            aria-busy={pending}
-            onClick={onClick}
-            disabled={disabled || pending}
-            className={cn(destructive && "text-destructive hover:text-destructive hover:bg-destructive/10")}
-          >
-            {pending ? <Loader2 className="animate-spin" /> : icon}
-          </Button>
-        }
-      />
-      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }

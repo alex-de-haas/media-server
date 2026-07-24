@@ -5,9 +5,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Trash2, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
-import { formatBytes, formatEta, formatPercent } from "@/lib/format";
+import { formatBytes, formatEta, formatPercent, formatTimeAgo } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
-import { cn } from "@/lib/utils";
+import { ActivityCard, ActivityCardHeader, ActivityProgress, ActivityQueued, ActivityStats, IconAction } from "@/components/activity-card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MODES = [
@@ -361,7 +360,8 @@ function TrackList({
   );
 }
 
-/** One transcode job row: live progress while running, an outcome + dismiss once terminal. */
+/** One transcode job card: live progress while running, an outcome + dismiss once terminal. Built from the
+ * shared Activity card pieces so a conversion reads exactly like a download or a move. */
 export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
   const queryClient = useQueryClient();
   const active = isTranscodeActive(job);
@@ -378,37 +378,47 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
     onError: (error) => toast.error("Couldn’t dismiss", { description: errorMessage(error) }),
   });
 
+  const title = job.name ?? job.outputPath;
+  // The card's meta line, matching the "catalog · added 2m ago" line on an ingest card: what this run
+  // produces, and when it started.
+  const started = formatTimeAgo(job.createdAt);
+  const meta = [job.videoCodec === "copy" ? "Remux" : job.videoCodec.toUpperCase(), started && `started ${started}`]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate font-mono text-xs" title={job.name ?? job.outputPath}>
-          {job.name ?? job.outputPath}
-        </span>
-        {active ? (
-          <Button variant="ghost" size="icon-sm" aria-label="Cancel" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
-            <X />
-          </Button>
-        ) : (
-          <Button variant="ghost" size="icon-sm" aria-label="Dismiss" disabled={remove.isPending} onClick={() => remove.mutate()}>
-            <Trash2 />
-          </Button>
-        )}
-      </div>
-      {active && <Progress value={Math.min(job.percentComplete, 100)} />}
-      {/* Stats below the bar (percent · speed × · ETA), mirroring the move and download cards. */}
-      <div className={cn("flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums", job.state === "Failed" ? "text-destructive" : "text-muted-foreground")}>
-        {job.state === "Running" ? (
-          <>
+    <ActivityCard>
+      <ActivityCardHeader
+        title={title}
+        titleAttr={title}
+        meta={meta}
+        // Waiting for an encoder slot — the queued line replaces the bar and stats below, like a queued move.
+        note={job.state === "Queued" ? <ActivityQueued /> : undefined}
+        actions={
+          active ? (
+            <IconAction label="Cancel" icon={<X />} pending={cancel.isPending} onClick={() => cancel.mutate()} />
+          ) : (
+            <IconAction label="Dismiss" icon={<Trash2 />} destructive pending={remove.isPending} onClick={() => remove.mutate()} />
+          )
+        }
+      />
+      {/* Stats below the bar (percent · speed × · ETA), mirroring the move and download cards. A terminal job
+          keeps the stat line for its outcome, without a bar; a queued one says so in the header instead. */}
+      {job.state === "Running" ? (
+        <ActivityProgress value={job.percentComplete}>
+          <ActivityStats>
             <span>{formatPercent(job.percentComplete)}</span>
             {job.speed != null && <span>{job.speed.toFixed(1)}×</span>}
             {job.etaSeconds != null && <span>ETA {formatEta(job.etaSeconds)}</span>}
-          </>
-        ) : (
+          </ActivityStats>
+        </ActivityProgress>
+      ) : job.state === "Queued" ? null : (
+        <ActivityStats tone={job.state === "Failed" ? "destructive" : "default"}>
           <span>{stateLabel(job)}</span>
-        )}
-      </div>
+        </ActivityStats>
+      )}
       {job.state === "Failed" && job.error && <p className="text-destructive text-xs">{job.error}</p>}
-    </div>
+    </ActivityCard>
   );
 }
 
