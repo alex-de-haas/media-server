@@ -42,7 +42,12 @@ export function CalendarShell({
   const days = monthGridDays(month);
 
   return (
-    <section className="flex flex-col gap-4">
+    // The calendar breaks out of the shell's reading-width column: seven fixed columns turn width
+    // directly into legible cards, and at the shared 1024px each day is only ~139px — enough for
+    // "Futurama" but not for a long title. Centered on the viewport (the shell clips overflow-x for
+    // exactly this), capped so an ultrawide monitor does not stretch a month into a smear, and a
+    // no-op on phones where the cap is below the column width anyway.
+    <section className="relative left-1/2 flex w-[min(100vw-3rem,90rem)] -translate-x-1/2 flex-col gap-4">
       <header className="flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Calendar</h1>
         <ModeSwitch mode={mode} onChange={onModeChange} />

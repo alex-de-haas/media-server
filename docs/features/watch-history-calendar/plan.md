@@ -102,11 +102,13 @@ viewing-duration or streak analytics, and any heatmap.
       `Jump to last watched month`.
 - [x] Mobile agenda on the same grouping helpers.
 - [x] Visual pass: tokens only, Fraunces day-detail titles, reduced-motion
-      transition, dark mode and narrow-screen verified live against the dev
-      instance. **Hosty-iframe rendering is not verified** — the Shell asks for
-      a password, which the agent will not enter; the surface introduces no
-      iframe-sensitive behavior (no popups or new windows) and reuses the
-      existing app chrome, but someone signed into the Shell should confirm.
+      transition; dark mode, narrow screen, and Hosty-iframe rendering all
+      verified live (the iframe by the author, who is signed into the Shell).
+- [x] The calendar breaks out of the shell's 1024px reading column to
+      `min(100vw-3rem, 90rem)`: seven fixed columns turn width straight into
+      legible cards, taking a day cell from 139px to 176px. Its content column
+      is therefore wider than the nav's — accepted deliberately after the
+      trade-off was raised.
 - [ ] `feature.md` for this folder written from shipped reality; this plan
       deleted; index regenerated — in the completing PR.
 
