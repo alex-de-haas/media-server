@@ -1,8 +1,7 @@
 # Metadata
 
-Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-24
 
 ## Description
 
@@ -39,11 +38,30 @@ additional sources can be added without schema churn.
   persisted in the `AppSettings` row) are stripped from the name as whole words,
   case-insensitively — e.g. `LostFilm.TV`, `RARBG`. This keeps group/tag tokens out
   of the parsed title so a name like `Project.Hail.Mary.LostFilm.TV` matches cleanly.
+- **Movie names also lose a leading track ordinal** (`01. `, `02 - `): franchise
+  packs number their films, and the ordinal would otherwise poison the provider
+  query. The dot is what separates an ordinal from a title that merely starts with
+  digits, so the strip runs before dots are normalized to spaces — `8 Mile`,
+  `1408.2007.1080p` and `24.2016.1080p` keep their titles. Series and anime names
+  are left alone: there a leading number is an episode ordinal the parsers use.
+- **Non-Latin queries search in their own script.** When a parsed title is written
+  in the script of one of the configured `SUPPORTED_LANGUAGES` (Cyrillic, Greek,
+  Hebrew, Arabic, Thai, CJK, Hangul), the provider search rides with that language
+  so the returned titles come back in the query's script. Without it a Russian
+  query scores zero title overlap against TMDb's English titles and can never
+  reach the auto-match threshold. Each candidate is then scored on the **best of
+  its display and original titles**, which also covers the reverse case (a film
+  searched by its original-language name whose display title is English).
 - High-confidence matches auto-apply. Low-confidence matches route to the review
   queue, where the operator confirms a candidate (manual match override). The review
   dialog pre-fills the parsed title and each file's `SxxEyy`, and auto-searches on
   open so the operator usually just picks a candidate.
-- Each playable source file must ultimately map to a movie or an episode.
+- Each playable source file must ultimately map to a movie or an episode. A movie
+  batch may resolve to **several different movies** — see
+  [multi-movie-ingest](../multi-movie-ingest/feature.md).
+- A localized match names the created item in that language, so its canonical
+  library folder is localized too (`Назад в будущее (1985)/`). Library naming
+  follows the matched title; it is not translated back to a canonical language.
 - Match results are cached against the stable public item ID and the source-file
   assignment, so a later remap can rebuild clean paths and downstream metadata.
 
@@ -153,9 +171,12 @@ published library items, split into cast and crew (crew grouped by department).
 Backend tests should use xUnit and Imposter (mock the provider client). Required
 coverage:
 
-- Provider search and match scoring (auto-match vs review threshold).
+- Provider search and match scoring (auto-match vs review threshold), including
+  the non-Latin path: the search language is picked from the query's script, and
+  a candidate scores on the better of its display and original titles.
 - Torrent-name/file-list parsing for movie, single-episode, and season-pack
-  suggestions.
+  suggestions, plus movie-only ordinal-prefix stripping (and the digit-led titles
+  it must not touch).
 - Multi-language fetch and `provider + language` cache keying.
 - Catalog language override and fallback ordering.
 - Backfill on adding a language.

@@ -239,7 +239,7 @@ loads the UI inside the Shell; identity validates; `/health` green; CI passes.
 **Goal:** add a torrent + pick a catalog → fully published, playable item, no manual steps.
 Depends on M0. Specs: [automation-pipeline](automation-pipeline.md),
 [domain-model](domain-model.md), [torrents-and-organizer](torrents-and-organizer.md),
-[catalogs](catalogs.md), [metadata](metadata.md), [background-tasks](background-tasks.md).
+[catalogs](catalogs.md), [metadata](metadata/feature.md), [background-tasks](background-tasks.md).
 - Catalog model; read roots from `HOSTY_MOUNT_CATALOGROOTS`; validate each is a
   single filesystem (`st_dev`); `files/` + `library/` layout per root.
 - Torrent engine (MonoTorrent) hosted service: add magnet/`.torrent`, download

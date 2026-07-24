@@ -127,13 +127,36 @@ public sealed record IngestItemResponse(
 }
 
 /// <summary>
-/// Operator manual-match for source files of an item in review (resumes the pipeline). One provider
-/// identity — the series for episodes, the movie itself otherwise — applies to every file in
-/// <see cref="Files"/>; a batch never mixes titles, so the operator confirms the identity once and only
-/// the per-file season/episode vary. Files already auto-matched may be re-matched this way while the item
-/// is still in review (nothing has been organized yet).
+/// Operator manual-match for source files of an item in review (resumes the pipeline). The legacy shape
+/// carries one provider identity — the series for episodes, the movie itself otherwise — applied to every
+/// file in <see cref="Files"/>. A multi-movie batch (a franchise pack) instead sends <see cref="Groups"/>:
+/// one identity per group, all resolved in a single request/re-drive so partial matching never races the
+/// pipeline. When <see cref="Groups"/> is present the top-level identity fields are ignored. Files already
+/// auto-matched may be re-matched either way while the item is still in review (nothing has been
+/// organized yet).
 /// </summary>
 public sealed record MatchRequest(
+    MediaKind Kind,
+    string Provider,
+    string ProviderId,
+    string Title,
+    int? Year,
+    IReadOnlyList<MatchFileRequest> Files,
+    IReadOnlyList<MatchGroupRequest>? Groups = null)
+{
+    /// <summary>The request normalized to identity groups: <see cref="Groups"/> when provided, otherwise
+    /// the legacy single-identity fields as one group.</summary>
+    public IReadOnlyList<MatchGroupRequest> ToGroups() => Groups is { Count: > 0 }
+        ? Groups
+        : [new MatchGroupRequest(Kind, Provider, ProviderId, Title, Year, Files)];
+}
+
+/// <summary>
+/// One identity group of a <see cref="MatchRequest"/>: the provider identity (series for episodes, the
+/// movie otherwise) and the files it applies to. An audio file in a group merges into that group's
+/// movie/episode video at the mux stage, like any other match.
+/// </summary>
+public sealed record MatchGroupRequest(
     MediaKind Kind,
     string Provider,
     string ProviderId,

@@ -46,7 +46,7 @@ public sealed record PersonDetails(
 /// Search/match/fetch/images abstraction; TMDb is the first implementation. Identify uses
 /// <see cref="SearchAsync"/> + scoring; enrich uses <see cref="FetchAsync"/>/<see cref="GetImagesAsync"/>
 /// to populate <c>MetadataRecord</c>/<c>ImageAsset</c> keyed by provider+language. See
-/// <c>docs/features/metadata.md</c>.
+/// <c>docs/features/metadata/feature.md</c>.
 /// </summary>
 public interface IMetadataProvider
 {

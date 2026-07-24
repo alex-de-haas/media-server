@@ -108,7 +108,7 @@ public sealed class CatalogRefreshCoordinator(MediaServerDbContext database, Job
 /// Re-runs the idempotent enrich step for every identified item in a catalog to pull fresh provider
 /// metadata and images, reporting progress on the supplied <see cref="Job"/>. Each item is enriched in its
 /// own DI scope so the EF change tracker stays bounded across a large catalog, and items are paced so a
-/// refresh doesn't hammer the metadata provider. See <c>docs/features/metadata.md</c>.
+/// refresh doesn't hammer the metadata provider. See <c>docs/features/metadata/feature.md</c>.
 /// </summary>
 public sealed class CatalogMetadataRefreshService(
     MediaServerDbContext database,

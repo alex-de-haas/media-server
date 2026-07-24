@@ -15,7 +15,7 @@ public sealed class AppSettings
     /// <summary>
     /// Custom release-group / tag tokens stripped from a file name before identification (e.g.
     /// <c>LostFilm.TV</c>, <c>RARBG</c>). Matched case-insensitively as whole words after the name is
-    /// normalized. See <c>NameParser</c> and <c>docs/features/metadata.md</c>.
+    /// normalized. See <c>NameParser</c> and <c>docs/features/metadata/feature.md</c>.
     /// </summary>
     public List<string> CustomReleaseGroups { get; set; } = [];
 

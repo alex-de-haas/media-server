@@ -174,17 +174,23 @@ export interface IngestItem {
   updatedAt: string;
 }
 
-// One confirmed identity (the series for episodes, the movie itself otherwise) applied to every file in
-// the batch — only the per-file season/episode vary. Files already auto-matched may be re-matched this
-// way while the item is still in review.
-export interface MatchInput {
-  kind: "Movie" | "Series" | "Season" | "Episode" | "Video";
+// One confirmed identity (the series for episodes, the movie itself otherwise) and the files it applies
+// to — only the per-file season/episode vary within a group. Files already auto-matched may be re-matched
+// this way while the item is still in review.
+export interface MatchGroupInput {
+  kind: "Movie" | "Episode";
   provider: string;
   providerId: string;
   title: string;
   year?: number | null;
   files: { sourceFileId: string; season?: number | null; episode?: number | null }[];
 }
+
+// Either the legacy single-identity shape (one movie/series for the whole batch) or identity groups —
+// a franchise pack maps each file group to its own movie in one request, so the pipeline re-drives once.
+// The kind is narrowed to what the endpoint accepts: the other kinds are containers/extras the resolver
+// would silently treat as a movie, so it rejects them.
+export type MatchInput = MatchGroupInput | { groups: MatchGroupInput[] };
 
 export interface MetadataSearchInput {
   title: string;

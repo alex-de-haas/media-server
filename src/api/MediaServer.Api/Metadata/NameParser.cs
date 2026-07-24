@@ -11,7 +11,7 @@ public sealed record ParsedName(MediaKind Kind, string Title, int? Year, int? Se
 /// <summary>
 /// Parses a release/file name into title + year (movies) or title + season/episode (series/anime).
 /// The parser is selected by catalog type: a Jellyfin-style regex engine for movie/series, and
-/// AnitomySharp for anime absolute numbering. See <c>docs/features/metadata.md</c>.
+/// AnitomySharp for anime absolute numbering. See <c>docs/features/metadata/feature.md</c>.
 /// </summary>
 public interface INameParser
 {
@@ -29,13 +29,13 @@ public sealed partial class NameParser : INameParser
         // Strip configured release groups from the raw name first, so both the cleaned form (movie/series
         // regex) and the AnitomySharp input (anime) are free of them.
         var stripped = StripReleaseGroups(name, releaseGroups);
-        var cleaned = Clean(StripExtension(stripped));
+        var withoutExtension = StripExtension(stripped);
 
         return catalogType switch
         {
-            CatalogType.Anime => ParseAnime(stripped, cleaned),
-            CatalogType.Series => ParseSeries(cleaned),
-            _ => ParseMovie(cleaned),
+            CatalogType.Anime => ParseAnime(stripped, Clean(withoutExtension)),
+            CatalogType.Series => ParseSeries(Clean(withoutExtension)),
+            _ => ParseMovie(Clean(StripOrdinalPrefix(withoutExtension))),
         };
     }
 
@@ -139,6 +139,18 @@ public sealed partial class NameParser : INameParser
             : name;
     }
 
+    /// <summary>
+    /// Removes a leading track-style ordinal ("01. ", "2. ", "02 - ") from a movie file name — franchise
+    /// packs commonly number their films, and the ordinal poisons the provider query. Runs before
+    /// <see cref="Clean"/> because the dot is the signal that separates an ordinal from a title that
+    /// merely starts with digits ("1408.2007.1080p") — once dots become spaces the two are
+    /// indistinguishable. Movie-only: for series and anime a leading number is an episode ordinal the
+    /// parsers rely on. A bare number with no separator is never stripped ("8 Mile", "1917"), and only a
+    /// zero-led pair may omit the space after the dot ("01.Назад в будущее") — for a plain number the
+    /// space is required, so "24.2016.1080p" keeps its title.
+    /// </summary>
+    private static string StripOrdinalPrefix(string value) => OrdinalPrefixRegex().Replace(value, string.Empty);
+
     private static string Clean(string value) =>
         CollapseSpaces(value.Replace('.', ' ').Replace('_', ' ').Replace('+', ' ')).Trim();
 
@@ -163,6 +175,9 @@ public sealed partial class NameParser : INameParser
     private static string StripYear(string value) => TidyTitle(YearRegex().Replace(value, string.Empty));
 
     private static string CollapseSpaces(string value) => MultiSpaceRegex().Replace(value, " ");
+
+    [GeneratedRegex(@"^\s*(?:\d{1,2}\s*\.\s+|0\d\s*\.\s*|\d{1,2}\s*[-–—]\s+)")]
+    private static partial Regex OrdinalPrefixRegex();
 
     [GeneratedRegex(@"\b(19\d\d|20\d\d)\b")]
     private static partial Regex YearRegex();

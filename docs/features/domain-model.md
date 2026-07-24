@@ -196,7 +196,7 @@ refreshed on a staleness window keyed off `DetailsFetchedAt`.
 
 A `Person` is **shared** across every item it is credited on; per-item credit
 details live on the join, not here. Enrich upserts people by `(Provider,
-ProviderId)` and never duplicates a person per item. See [Metadata](metadata.md).
+ProviderId)` and never duplicates a person per item. See [Metadata](metadata/feature.md).
 
 **MediaItemPerson** — credit join linking a `Person` to a `MediaItem`
 
@@ -465,7 +465,7 @@ public record RemoteImage(ImageType Type, string? Language, string RemotePath, i
 
 Identify uses `SearchAsync` + scoring (auto-match vs review threshold); enrich uses
 `FetchAsync`/`GetImagesAsync` to populate `MetadataRecord` and `ImageAsset` keyed
-by `provider + language`. See [Metadata](metadata.md).
+by `provider + language`. See [Metadata](metadata/feature.md).
 
 ## Contract: IContentSource (future, M5)
 
