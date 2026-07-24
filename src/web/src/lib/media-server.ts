@@ -188,16 +188,9 @@ export interface MatchGroupInput {
 
 // Either the legacy single-identity shape (one movie/series for the whole batch) or identity groups —
 // a franchise pack maps each file group to its own movie in one request, so the pipeline re-drives once.
-export type MatchInput =
-  | {
-      kind: "Movie" | "Series" | "Season" | "Episode" | "Video";
-      provider: string;
-      providerId: string;
-      title: string;
-      year?: number | null;
-      files: { sourceFileId: string; season?: number | null; episode?: number | null }[];
-    }
-  | { groups: MatchGroupInput[] };
+// The kind is narrowed to what the endpoint accepts: the other kinds are containers/extras the resolver
+// would silently treat as a movie, so it rejects them.
+export type MatchInput = MatchGroupInput | { groups: MatchGroupInput[] };
 
 export interface MetadataSearchInput {
   title: string;

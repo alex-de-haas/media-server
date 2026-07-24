@@ -112,16 +112,29 @@ export function IngestReviewDialog({
 
   // Per-group metadata search (movie catalogs). Plain promises rather than one useMutation: several
   // groups search in parallel when the dialog opens, each spinner and result list its own.
+  //
+  // Each group's searches are serialized by a token, because two can be in flight for the same group:
+  // closing and re-opening the dialog re-seeds the group and fires a second auto-search while the first
+  // is still running. Without the token the slower (older) response lands last and replaces the newer
+  // candidates, offering movies that no longer belong to the group on screen. A response whose token is
+  // no longer the group's current one is dropped, spinner included.
+  const searchTokens = useRef<Record<string, number>>({});
   const runGroupSearch = (groupId: string, title: string, year: number | null) => {
+    const token = (searchTokens.current[groupId] ?? 0) + 1;
+    searchTokens.current[groupId] = token;
+    const isCurrent = () => searchTokens.current[groupId] === token;
+
     setMovieGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, searching: true } : group)));
     mediaServer
       .searchIngest(item.id, { title, year, kind: "Movie" })
-      .then((results) =>
+      .then((results) => {
+        if (!isCurrent()) return;
         setMovieGroups((prev) =>
           prev.map((group) => (group.id === groupId ? { ...group, results, searching: false } : group)),
-        ),
-      )
+        );
+      })
       .catch((error: unknown) => {
+        if (!isCurrent()) return;
         setMovieGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, searching: false } : group)));
         toast.error("Search failed", { description: errorMessage(error) });
       });
