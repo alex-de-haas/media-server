@@ -9,6 +9,7 @@ using HostySdk.App;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.Recommendations;
 using MediaServer.Api.WatchHistory;
 using MediaServer.Api.WatchHistory.Trakt;
 using MediaServer.Api.Jobs;
@@ -160,6 +161,11 @@ builder.Services.AddScoped<WatchHistoryDeliveryService>();
 builder.Services.AddScoped<WatchHistorySyncPreviewService>();
 builder.Services.AddScoped<WatchHistorySyncApplyService>();
 builder.Services.AddScoped<WatchHistoryCalendarService>();
+
+builder.Services.AddScoped<IRecommendationProviderRegistry, RecommendationProviderRegistry>();
+builder.Services.AddScoped<RecommendationSeedSelector>();
+builder.Services.AddScoped<ITmdbRecommendationSource, TmdbRecommendationSource>();
+builder.Services.AddScoped<IRecommendationProvider, LibraryRecommendationProvider>();
 builder.Services.AddHostedService<WatchHistoryDeliveryWorker>();
 // An abandoned device flow is never polled again, so nothing else would remove its row or its stored
 // device code.

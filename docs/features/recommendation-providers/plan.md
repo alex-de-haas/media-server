@@ -1,6 +1,6 @@
 # Recommendation Providers
 
-Status: Ready
+Status: In Progress
 Created: 2026-07-24
 Updated: 2026-07-25
 
@@ -104,11 +104,13 @@ New behavior; no recommendations surface exists today.
 
 ## Deliverables
 
-- [ ] `IRecommendationProvider` + registry + availability model, mirroring the
+- [x] `IRecommendationProvider` + registry + availability model, mirroring the
       watched-history provider pattern — with tests.
-- [ ] Built-in engine: seed selection (episodes→series, recency/favorite
+- [x] Built-in engine: seed selection (episodes→series, recency/favorite
       weighting), TMDb fan-out through the persistent per-title cache,
-      aggregation and ranking, watched/hidden/seed exclusions — with tests.
+      aggregation and ranking, seed exclusions — with tests. (Watched/hidden
+      filtering belongs to the feed service in phase 3, where the library is
+      known.)
 - [ ] Trakt provider over the existing connection: both feeds, TMDb-ID mapping,
       health-gated availability, silent degradation — with tests.
 - [ ] Rank fusion: bounded inputs, RRF, agreement boost, identity merge for a

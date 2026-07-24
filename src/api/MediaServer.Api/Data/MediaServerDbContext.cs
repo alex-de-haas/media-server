@@ -35,6 +35,9 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<WatchlistEntry> WatchlistEntries => Set<WatchlistEntry>();
     public DbSet<ReleaseReminder> ReleaseReminders => Set<ReleaseReminder>();
     public DbSet<ReminderDelivery> ReminderDeliveries => Set<ReminderDelivery>();
+    public DbSet<RecommendationHide> RecommendationHides => Set<RecommendationHide>();
+    public DbSet<TmdbRecommendationCacheEntry> TmdbRecommendationCache => Set<TmdbRecommendationCacheEntry>();
+    public DbSet<RecommendationPreference> RecommendationPreferences => Set<RecommendationPreference>();
 
     /// <summary>
     /// Registers <see cref="UtcDateTimeOffsetConverter"/> for every <see cref="DateTimeOffset"/> and
@@ -511,6 +514,35 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         session.HasOne<MediaItem>()
             .WithMany()
             .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var hides = modelBuilder.Entity<RecommendationHide>();
+        hides.HasKey(entity => entity.Id);
+        // One hide per user and title: hiding twice is the same intent, and a duplicate would make
+        // the un-hide ambiguous.
+        hides.HasIndex(entity => new { entity.AppUserId, entity.Kind, entity.TmdbId }).IsUnique();
+        hides.Property(entity => entity.Kind).HasConversion<int>();
+        hides.Property(entity => entity.TmdbId).HasMaxLength(32);
+        hides.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var recommendationCache = modelBuilder.Entity<TmdbRecommendationCacheEntry>();
+        recommendationCache.HasKey(entity => entity.Id);
+        // The engine looks a seed up by its coordinates; uniqueness keeps a refresh replacing the row
+        // rather than growing a pile of generations.
+        recommendationCache.HasIndex(entity => new { entity.Kind, entity.TmdbId }).IsUnique();
+        recommendationCache.Property(entity => entity.Kind).HasConversion<int>();
+        recommendationCache.Property(entity => entity.TmdbId).HasMaxLength(32);
+
+        var recommendationPreference = modelBuilder.Entity<RecommendationPreference>();
+        recommendationPreference.HasKey(entity => entity.Id);
+        recommendationPreference.HasIndex(entity => entity.AppUserId).IsUnique();
+        recommendationPreference.Property(entity => entity.Sources).HasMaxLength(256);
+        recommendationPreference.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
             .OnDelete(DeleteBehavior.Cascade);
 
         var history = modelBuilder.Entity<PlaybackHistoryEntry>();
