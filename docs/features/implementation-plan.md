@@ -339,7 +339,7 @@ step.
 **Goal:** turn the single-page functional dashboard into a navigable, themed,
 multi-page application with real browse/detail pages. Depends on M1–M3;
 independent of and parallelizable with M4. Specs:
-[frontend-application](frontend-application.md). Design decisions recorded
+[frontend-application](frontend-application/feature.md). Design decisions recorded
 2026-06-18.
 
 **Architecture principle (decided 2026-06-18):** the `web` UI consumes **only** the

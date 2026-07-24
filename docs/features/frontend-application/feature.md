@@ -1,6 +1,5 @@
 # Frontend Application
 
-Status: Implemented
 Created: 2026-06-15
 Updated: 2026-07-24
 
@@ -43,7 +42,14 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   delete.
 - **Activity** (`/activity`) — the live automation pipeline per ingest item,
   including the review queue for low-confidence matches, source-file assignments,
-  and manual match/remap override.
+  and manual match/remap override. The page shows three kinds of work — downloads
+  (with the pipeline stepper), cross-catalog moves, and conversions — grouped
+  under labelled headers and rendered as **one shared card**: a bordered shell
+  holding a title with inline markers, a muted meta line, a right-aligned row of
+  tooltip-labelled icon actions, and, below them, a progress bar with a
+  monospace tabular stat line (percent, rates, ETA). Work that is waiting shows a
+  queued line instead of a bar. The same card renders a conversion wherever it
+  appears, including the Conversions block on movie detail.
 - **Catalogs** (`/catalogs`, admin) — configured catalogs (with free space and
   offline state), scan and metadata-refresh triggers, a direct `Browse media`
   action, and catalog removal.
@@ -58,7 +64,7 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   stores an app-origin HttpOnly cookie when browser policy allows it, supports
   the standard Hosty Runtime App bearer-header fallback for embedded iframe
   sessions, and removes the code from the URL (see
-  [Hosty runtime app](hosty-runtime-app.md)).
+  [Hosty runtime app](../hosty-runtime-app.md)).
 - The BFF resolves the Hosty identity to an internal Media Server user. Hosty
   admins receive the `admin` role; assigned non-admin Hosty users receive the
   `user` role.
@@ -118,9 +124,12 @@ coverage:
 - Embedded routing and asset loading through the Hosty Shell iframe.
 - Catalog filter routing, applicable catalog types, offline labels, and
   preservation through detail navigation.
+- Activity card behavior per work type: the actions each state offers (their
+  accessible names), and that a queued item shows the queued line rather than a
+  progress bar.
 
 ## Links
 
-- [Catalog library browsing idea](../ideas/catalog-library-browsing.md)
-- [Watch-history calendar](watch-history-calendar/feature.md)
-- [Catalogs](catalogs.md)
+- [Catalog library browsing idea](../../ideas/catalog-library-browsing.md)
+- [Watch-history calendar](../watch-history-calendar/feature.md)
+- [Catalogs](../catalogs.md)

@@ -1103,7 +1103,7 @@ Live Trakt verification uses a dedicated non-production application and account:
 - [Storage and data](../features/storage-and-data.md)
 - [Security](../features/security.md)
 - [Background tasks and progress](../features/background-tasks.md)
-- [Frontend application](../features/frontend-application.md)
+- [Frontend application](../features/frontend-application/feature.md)
 - [Hosty runtime app](../features/hosty-runtime-app.md)
 - [Trakt create an app](https://docs.trakt.tv/docs/create-an-app)
 - [Trakt OAuth authentication](https://docs.trakt.tv/docs/authentication-oauth)

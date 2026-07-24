@@ -380,9 +380,11 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
 
   const title = job.name ?? job.outputPath;
   // The card's meta line, matching the "catalog · added 2m ago" line on an ingest card: what this run
-  // produces, and when it started.
-  const started = formatTimeAgo(job.createdAt);
-  const meta = [job.videoCodec === "copy" ? "Remux" : job.videoCodec.toUpperCase(), started && `started ${started}`]
+  // produces, and how long the job has existed. `createdAt` is when the job was queued, not when encoding
+  // began (a queued job hasn't started at all), so the line says "added" like the ingest card rather than
+  // claiming a start time the API doesn't report.
+  const age = formatTimeAgo(job.createdAt);
+  const meta = [job.videoCodec === "copy" ? "Remux" : job.videoCodec.toUpperCase(), age && `added ${age}`]
     .filter(Boolean)
     .join(" · ");
 
