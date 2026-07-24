@@ -14,7 +14,8 @@ public sealed class TraktWatchHistoryProvider(
     MediaServerDbContext database,
     TraktOAuthClient oauth,
     TraktAuthorizationService authorization,
-    ILogger<TraktWatchHistoryProvider> logger)
+    ILogger<TraktWatchHistoryProvider> logger,
+    TraktWorkIdResolver workIds)
     : IWatchHistoryProvider
 {
     /// <summary>Trakt caps a history page at 100; ask for that and follow the page count it reports.</summary>
@@ -182,11 +183,25 @@ public sealed class TraktWatchHistoryProvider(
         string accessToken, WatchHistoryIdentity sample, IReadOnlyList<WatchHistoryIdentity> wanted, CancellationToken cancellationToken)
     {
         var type = sample.Kind == WatchHistoryMediaKind.Movie ? "movies" : "shows";
-        var traktId = sample.TmdbId?.ToString(CultureInfo.InvariantCulture) ?? sample.ImdbId;
-        if (string.IsNullOrWhiteSpace(traktId))
+        // These paths take a Trakt id, slug, or IMDb id — a TMDb id yields 200 with an empty array,
+        // silently indistinguishable from "no history", which is what left every add unowned.
+        var resolved = await workIds.ResolveAsync(sample, accessToken, cancellationToken);
+        if (!resolved.Succeeded)
+        {
+            // A lookup that could not be made says nothing about this work. Reporting an empty history
+            // here would be authoritative and wrong — a delivery retry would re-post a play that
+            // already exists, and a sync would reconcile against a snapshot that never loaded.
+            return WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Failed(
+                resolved.Failure!.Value, resolved.Detail, resolved.RetryAfter);
+        }
+
+        // Trakt genuinely knows no such work: an empty history is the honest answer.
+        if (string.IsNullOrWhiteSpace(resolved.Value))
         {
             return WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Success([]);
         }
+
+        var traktId = resolved.Value;
 
         var plays = new List<WatchHistoryPlay>();
         var wantedEpisodes = wanted

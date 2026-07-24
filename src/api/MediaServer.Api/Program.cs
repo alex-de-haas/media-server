@@ -154,6 +154,8 @@ builder.Services.AddScoped<TraktOAuthClient>();
 builder.Services.AddScoped<TraktAuthorizationService>();
 builder.Services.AddScoped<IWatchHistoryProviderAuthorization>(provider =>
     provider.GetRequiredService<TraktAuthorizationService>());
+builder.Services.AddSingleton<TraktWorkIdCache>();
+builder.Services.AddScoped<TraktWorkIdResolver>();
 builder.Services.AddScoped<IWatchHistoryProvider, TraktWatchHistoryProvider>();
 builder.Services.AddScoped<WatchHistoryIdentityMapper>();
 builder.Services.AddScoped<WatchHistoryRecorder>();

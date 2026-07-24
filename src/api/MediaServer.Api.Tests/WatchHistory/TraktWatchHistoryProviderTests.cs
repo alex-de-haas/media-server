@@ -48,6 +48,9 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
 
         public List<(string Path, string? Body)> Requests { get; } = [];
 
+        /// <summary>Makes the next id-resolution call fail, for tests about that path.</summary>
+        public bool FailNextSearch { get; set; }
+
         public void Enqueue(HttpStatusCode status, object? body = null) => _responses.Enqueue((status, body));
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -55,6 +58,26 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
             Requests.Add((
                 request.RequestUri!.PathAndQuery,
                 request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken)));
+
+            // Resolving a TMDb id to a Trakt id precedes every per-work read; answering it here keeps
+            // each test expressing only the behaviour it is about.
+            if (request.RequestUri!.AbsolutePath.StartsWith("/search/tmdb/", StringComparison.Ordinal))
+            {
+                // A test that is about the lookup failing takes the queued response instead.
+                if (FailNextSearch)
+                {
+                    FailNextSearch = false;
+                    return new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                    {
+                        Content = new StringContent("", Encoding.UTF8, "application/json"),
+                    };
+                }
+
+                var type = request.RequestUri.Query.Contains("type=movie", StringComparison.Ordinal) ? "movie" : "show";
+                var payload = new StringContent(
+                    $$"""[ { "{{type}}": { "ids": { "trakt": 999 } } } ]""", Encoding.UTF8, "application/json");
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = payload };
+            }
 
             var (status, body) = _responses.Count > 0 ? _responses.Dequeue() : (HttpStatusCode.OK, (object?)Array.Empty<object>());
             var response = new HttpResponseMessage(status);
@@ -121,8 +144,23 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
         var oauth = new TraktOAuthClient(new StubFactory(_handler), settings, _time, NullLogger<TraktOAuthClient>.Instance);
         var authorization = new TraktAuthorizationService(
             _database, oauth, _credentials, settings, _time, NullLogger<TraktAuthorizationService>.Instance);
+        var workIds = new TraktWorkIdResolver(
+            oauth, new TraktWorkIdCache(), NullLogger<TraktWorkIdResolver>.Instance);
         return new TraktWatchHistoryProvider(
-            _database, oauth, authorization, NullLogger<TraktWatchHistoryProvider>.Instance);
+            _database, oauth, authorization, NullLogger<TraktWatchHistoryProvider>.Instance, workIds);
+    }
+
+    [Fact]
+    public async Task AFailedIdLookupIsReportedRatherThanReadAsAnEmptyHistory()
+    {
+        // The whole point of the id fix: an unaskable lookup must not become an authoritative "no
+        // history", or a delivery retry would re-post a play that already exists.
+        _handler.FailNextSearch = true;
+
+        var result = await Provider().GetHistoryAsync(_userId, [Movie()], CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(WatchHistoryFailure.RateLimited, result.Failure);
     }
 
     private static WatchHistoryIdentity Movie(int tmdb = 27205) =>
@@ -346,8 +384,10 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
         var result = await Provider().GetHistoryAsync(_userId, [Movie()], CancellationToken.None);
 
         Assert.Equal(101, result.Value!.Count);
-        Assert.Equal(2, _handler.Requests.Count);
-        Assert.Contains("page=2", _handler.Requests[1].Path);
+        // History pages specifically: the id-resolution call in front of them is not what this pins.
+        var pages = _handler.Requests.Where(request => request.Path.Contains("sync/history")).ToList();
+        Assert.Equal(2, pages.Count);
+        Assert.Contains("page=2", pages[1].Path);
     }
 
     [Fact]
