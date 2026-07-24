@@ -25,7 +25,7 @@ Two usable sources already exist behind credentials the instance holds today:
   gate). Trakt also supports hiding a recommendation
   (`DELETE /recommendations/{type}/{id}`).
 
-Both return TMDb ids, so results map onto the library through the existing
+Both return TMDb IDs, so results map onto the library through the existing
 identity machinery (`WatchHistoryIdentity`, `PublicIdFactory` precedence).
 
 ## Current Constraints
@@ -38,8 +38,9 @@ identity machinery (`WatchHistoryIdentity`, `PublicIdFactory` precedence).
   optional and per-user (`WatchHistoryConnections`). Free Trakt accounts allow one
   connected Community App, so a Trakt-only design would exclude users who keep
   their single slot for another app.
-- Trakt returns an ordered list without scores; TMDb returns paged results with
-  vote metadata per seed. Merging needs a rank-based rule, not raw score math.
+- Trakt returns an ordered list without scores; TMDb returns paged results whose
+  items carry vote metadata. The two scales are incommensurable, so merging needs
+  a rank-based rule, not raw score math.
 - The TMDb path fans out one request per seed title. TMDb rate limits are
   generous but not free; per-title recommendation lists change slowly.
 - Recommendations are per app user (per-user history, per-user Trakt connection),
@@ -127,7 +128,7 @@ Cons:
   concept. A local per-user hide list must apply to the merged feed; propagating
   a hide to Trakt (when the item came from Trakt) is optional polish and must
   never be required for the local hide to work.
-- **Identity gaps.** A recommended TMDb id that maps to several library items
+- **Identity gaps.** A recommended TMDb ID that maps to several library items
   (multi-catalog duplicates) or to none must degrade the same way the
   watched-history mapper does: deterministic, reported, never guessed.
 
@@ -164,7 +165,7 @@ the merged feed.
 ## Notes
 
 - Live probes on 2026-07-24: Trakt shows-recommendations returned a ranked
-  personalized list (tmdb ids present) on a free account; movies came back empty
+  personalized list (TMDb IDs present) on a free account; movies came back empty
   only because the account's post-wipe history held almost no movies. TMDb
   per-title recommendations returned plausible lists; `/similar` did not.
 - Trakt free-tier context: one Community App per free account, so the built-in
