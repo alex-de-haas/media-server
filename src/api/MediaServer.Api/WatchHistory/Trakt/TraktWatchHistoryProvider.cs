@@ -14,7 +14,8 @@ public sealed class TraktWatchHistoryProvider(
     MediaServerDbContext database,
     TraktOAuthClient oauth,
     TraktAuthorizationService authorization,
-    ILogger<TraktWatchHistoryProvider> logger)
+    ILogger<TraktWatchHistoryProvider> logger,
+    TraktWorkIdResolver workIds)
     : IWatchHistoryProvider
 {
     /// <summary>Trakt caps a history page at 100; ask for that and follow the page count it reports.</summary>
@@ -182,7 +183,9 @@ public sealed class TraktWatchHistoryProvider(
         string accessToken, WatchHistoryIdentity sample, IReadOnlyList<WatchHistoryIdentity> wanted, CancellationToken cancellationToken)
     {
         var type = sample.Kind == WatchHistoryMediaKind.Movie ? "movies" : "shows";
-        var traktId = sample.TmdbId?.ToString(CultureInfo.InvariantCulture) ?? sample.ImdbId;
+        // These paths take a Trakt id, slug, or IMDb id — a TMDb id yields 200 with an empty array,
+        // silently indistinguishable from "no history", which is what left every add unowned.
+        var traktId = await workIds.ResolveAsync(sample, accessToken, cancellationToken);
         if (string.IsNullOrWhiteSpace(traktId))
         {
             return WatchHistoryResult<IReadOnlyList<WatchHistoryPlay>>.Success([]);
