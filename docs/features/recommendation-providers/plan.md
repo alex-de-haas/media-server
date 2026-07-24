@@ -1,6 +1,6 @@
 # Recommendation Providers
 
-Status: Draft
+Status: Ready
 Created: 2026-07-24
 Updated: 2026-07-25
 
@@ -139,21 +139,13 @@ One branch, one PR.
 
 ## Open Questions
 
-Recommended answers baked into Target Behavior above; each needs sign-off in
-chat before this plan can go Ready:
-
-- **Surface**: home row + `/recommendations` page reached from it, no new
-  top-level tab. Confirm?
-- **Discovery handoff**: not-in-library cards go to the Track (watchlist) flow,
-  never directly to torrent intake — acquisition stays in Watchlist and
-  discovery. Confirm?
-- **Hide scope**: local-only in v1; no Trakt hide propagation. Confirm?
-- **Sources default**: all available sources by default, per-user server-side
-  override, control visible only with a Trakt connection. Confirm?
-- **Seed constants** (20 seeds, ~90-day half-life, ~50 per provider before
-  fusion, ~7-day TMDb cache TTL): treated as implementation-tunable defaults,
-  documented in `feature.md` when shipped, not re-approved individually.
-  Confirm?
+None. The five product decisions were confirmed in chat on 2026-07-25: home
+row plus `/recommendations` page with no new top-level tab; not-in-library
+cards hand off to the Track (watchlist) flow, never to torrent intake; hides
+are local-only in v1; all available sources by default with a per-user
+server-side override shown only alongside a Trakt connection; the seed
+constants are implementation-tunable defaults documented in `feature.md` when
+shipped.
 
 ## Verification
 
