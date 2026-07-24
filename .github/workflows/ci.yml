@@ -105,3 +105,17 @@ jobs:
 
       - name: Validate manifest structure and dev runtime commands
         run: bash scripts/validate-manifest.sh
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Check docs index and headers
+        run: node scripts/docs-index.mjs --check
