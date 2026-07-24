@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 # Build context: src/web (self-contained pnpm project for the `web` service).
+# Node major is kept on the active LTS line and in step with `node-version` in ci.yml,
+# so the image runs what CI actually builds and tests against.
 
-FROM node:22-bookworm-slim AS base
+FROM node:24-bookworm-slim AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 # Pin pnpm via corepack so installs match CI (no packageManager field in package.json).
@@ -22,7 +24,7 @@ COPY . .
 RUN pnpm build
 
 # ---- runner ----
-FROM node:22-bookworm-slim AS runner
+FROM node:24-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
