@@ -159,6 +159,7 @@ builder.Services.AddScoped<WatchHistoryRecorder>();
 builder.Services.AddScoped<WatchHistoryDeliveryService>();
 builder.Services.AddScoped<WatchHistorySyncPreviewService>();
 builder.Services.AddScoped<WatchHistorySyncApplyService>();
+builder.Services.AddScoped<WatchHistoryCalendarService>();
 builder.Services.AddHostedService<WatchHistoryDeliveryWorker>();
 // An abandoned device flow is never polled again, so nothing else would remove its row or its stored
 // device code.

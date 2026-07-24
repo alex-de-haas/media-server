@@ -517,6 +517,9 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         history.HasKey(entity => entity.Id);
         // The projection reads a user's plays for an item, newest first.
         history.HasIndex(entity => new { entity.AppUserId, entity.MediaItemId, entity.WatchedAt });
+        // The calendar scans one user's plays over a date range; the index above leads with the
+        // item, so it cannot serve that without a full scan.
+        history.HasIndex(entity => new { entity.AppUserId, entity.WatchedAt });
         // One session yields one play: this is what stops a rewind past the threshold recording a
         // second. Filtered, because every non-playback origin leaves the session id null and SQLite
         // would otherwise treat those nulls as distinct and let duplicates through unnoticed.
