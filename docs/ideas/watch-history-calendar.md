@@ -214,16 +214,20 @@ Each response row needs:
   their own, and the grouped card is series-level anyway;
 - origin, for optional provenance in the detailed view.
 
-The response should be an envelope containing `events`, `undatedCount`, and
-`latestWatchedAt`; the last value supports the honest empty-state shortcut without
-loading all history. The backend should cap the requested interval (for example,
+The response should be an envelope containing `events`, `undated` (a per-kind
+breakdown such as `{ "movies": 8, "episodes": 4 }` — a single total could not
+follow the Movies/Episodes filter, because the timeless rows it counts are
+absent from `events` and so cannot be re-filtered client-side), and
+`latestWatchedAt`; the last value supports the honest empty-state shortcut
+without loading all history. The backend should cap the requested interval (for example,
 62 days) and add an index on `(AppUserId, WatchedAt)`. The existing
 `(AppUserId, MediaItemId, WatchedAt)` index is optimized for one item's history,
 not a user's time-range scan.
 
 Timeless rows must not be assigned a fabricated date such as their creation or
-sync date. Return their count through the calendar response or a small companion
-endpoint and expose them in **Watched without a date** outside the grid.
+sync date. Return their per-kind counts through the calendar response and expose
+them in **Watched without a date** outside the grid; the `Undated N` toolbar
+entry shows the count matching the active kind filter.
 
 ## Risks
 
