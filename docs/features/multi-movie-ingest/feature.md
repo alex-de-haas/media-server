@@ -37,11 +37,13 @@ Two identification behaviors carry most of this path for non-English packs —
 ordinal-prefix stripping and script-matched provider search. They belong to the
 metadata feature and are documented there: [metadata](../metadata/feature.md).
 
-## Review: One Identity per Group
+## Matching: One Identity per Group
 
-When files can't be auto-matched the batch parks at `NeedsReview`, and the
-review dialog resolves it. For **movie catalogs** the dialog is organized around
-identity groups rather than one batch-wide identity:
+Per-group matching is reached two ways — after the batch parks at `NeedsReview`
+("Resolve match"), or **before the download finishes** ("Set titles", see
+[Operator Surfaces](#operator-surfaces)). Both open the same dialog and send the
+same request; only the copy differs. For **movie catalogs** it is organized
+around identity groups rather than one batch-wide identity:
 
 - Pending files are **pre-grouped by parsed title + year** — a franchise pack
   parses into distinct titles, so each movie starts as its own group. An
@@ -100,11 +102,36 @@ library remap.
 
 ## Operator Surfaces
 
-- **Pin dialog.** Pinning applies to every video in the batch, so a movie-catalog
-  item with more than one video file shows a warning: pinning one movie imports
-  all of them as versions of it, and a pack of different films should be left
-  unpinned (auto-identify, or per-group matching in review). Series batches don't
-  warn — pinning the show there is exactly right.
+- **One identity action.** "What is this?" is a single question, so an activity
+  row carries a **single** identity control (available until identify has run —
+  queued, downloading, or parked). Which surface it opens is decided for the
+  operator:
+
+  | Item | Action | Opens |
+  | --- | --- | --- |
+  | Parked at `NeedsReview` | "Resolve match" | matching dialog |
+  | Movie catalog, >1 video file | "Set titles" | matching dialog |
+  | Anything else | "Set title" / "Set series" | pin dialog |
+
+  A parked item shows only "Resolve match": matching is strictly richer than a
+  pin (per-file decisions, skip, extras), so a second control opening the same
+  dialog would be pure duplication. The pin survives because it answers what a
+  match cannot: it needs **no file list** (a magnet whose metadata hasn't
+  arrived yet), and for a series pack it is the better tool — the pin is the
+  show, and identify still derives each episode from its file name at match
+  time rather than freezing numbers up front.
+- **Pre-download matching.** A torrent's file list arrives with its metadata, so
+  the matching dialog works while the transfer is still running: the operator
+  sets a movie per file up front, identify finds every file already confirmed,
+  and the pack publishes without ever stopping at review. The backend needs no
+  special case — matching is accepted until the `identify` stage completes. A
+  partially pre-matched batch auto-identifies the rest as usual. Files matched
+  early create their `MediaItem`s immediately, but nothing is published until
+  the pipeline reaches Publish, so an abandoned download leaves only invisible
+  unpublished rows (no `PublicId`, no sources) that a later grab of the same
+  title reuses by identity.
+- **Two cuts of one film.** The same dialog covers it: put both files in one
+  group and they import as two versions of a single movie.
 - **Activity row.** A batch that mapped several distinct movies reads
   `Die Hard 2 (+1 more)` instead of naming only its primary item. Counted over
   movie assignments only, so a season pack still reads as its one series.
@@ -126,11 +153,23 @@ Backend (xUnit, Imposter for provider mocks), in
 The legacy single-identity match paths (movie batch, series pack) keep their
 existing coverage in `IngestPipelineTests`.
 
+Pre-download matching, in `IngestPreDownloadMatchTests`:
+
+- A grouped match issued while the download is still transferring confirms its
+  files, survives the download stage's deferrals, and publishes separate movies
+  on completion — with the provider never searched (identify skips confirmed
+  files, so a stubbed search that throws proves it).
+- A partially pre-matched pack auto-identifies only the files left unset.
+- Deleting a pre-matched download leaves no published leftovers: the early
+  `MediaItem`s stay unpublished (no `PublicId`) and no media sources exist.
+
 Web e2e (Playwright, `e2e/activity.spec.ts`): a franchise pack pre-groups by
 parsed title, a movie is picked per group, and Approve issues **one** match
 request whose groups each carry only their own file. A single-movie batch
 covers the same grouped shape with one group; the series pack covers the
-untouched single-identity flow.
+untouched single-identity flow. A still-downloading pack opens the same dialog
+from "Set titles" and sends the same grouped request, and a parked pack asserts
+the identity action never doubles up.
 
 Parser and scoring coverage for the identification fixes lives with the metadata
 feature: [metadata](../metadata/feature.md).
