@@ -1,6 +1,6 @@
 # Watch-History Calendar
 
-Status: Ready
+Status: In Progress
 Created: 2026-07-24
 Updated: 2026-07-24
 
@@ -85,10 +85,10 @@ viewing-duration or streak analytics, and any heatmap.
 
 ## Deliverables
 
-- [ ] Calendar read endpoint: bounded range, per-kind `undated`,
+- [x] Calendar read endpoint: bounded range, per-kind `undated`,
       `latestWatchedAt`, series-poster episode rows, user scoping — with unit
       tests for the envelope, the caps, and the scoping.
-- [ ] `(AppUserId, WatchedAt)` index migration.
+- [x] `(AppUserId, WatchedAt)` index migration.
 - [ ] Calendar shell split: shared month shell (navigation, grid frame,
       overflow) with mode-specific content and toolbars — no conditional
       branching accumulation; URL state `?view=&month=` for both modes with
