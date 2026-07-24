@@ -132,6 +132,9 @@ Forward-looking designs and epics, kept separate from the roadmap specs:
 - [Watched-history providers: Trakt](ideas/trakt-watched-state-sync.md) — a
   provider-neutral watched-history subsystem with Trakt as its first optional
   per-user provider.
+- [Recommendation providers](ideas/recommendation-providers.md) — a built-in
+  TMDb-plus-local-history engine for everyone, an optional Trakt provider for
+  connected users, and rank fusion that boosts titles both agree on.
 
 ## Planning
 
