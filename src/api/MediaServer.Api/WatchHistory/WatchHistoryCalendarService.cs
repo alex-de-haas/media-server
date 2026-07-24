@@ -25,6 +25,19 @@ public sealed record WatchHistoryCalendarEvent(
     int? EpisodeNumber,
     string Origin);
 
+/// <summary>One watched mark that carries no date — shown in a list, never on the grid.</summary>
+public sealed record WatchHistoryUndatedEntry(
+    Guid EntryId,
+    Guid MediaItemId,
+    string? PublicId,
+    string Kind,
+    string Title,
+    string? PosterUrl,
+    string? SeriesTitle,
+    int? SeasonNumber,
+    int? EpisodeNumber,
+    string Origin);
+
 /// <summary>How many watched marks carry no date, split by kind.</summary>
 /// <remarks>
 /// Per kind rather than one total: the Watched toolbar filters by Movies/Episodes, and these rows are
@@ -55,6 +68,39 @@ public sealed class WatchHistoryCalendarService(MediaServerDbContext database)
     /// leaves room for the adjacent-month cells while keeping the scan bounded.
     /// </summary>
     internal static readonly TimeSpan MaxRange = TimeSpan.FromDays(62);
+
+    /// <summary>
+    /// The user's undated marks, newest first. Bounded: this is a "what else have I watched" list,
+    /// not an archive browser.
+    /// </summary>
+    public async Task<IReadOnlyList<WatchHistoryUndatedEntry>> LoadUndatedAsync(
+        int appUserId, CancellationToken cancellationToken)
+    {
+        const int limit = 200;
+        var entries = await database.PlaybackHistoryEntries.AsNoTracking()
+            .Where(entry => entry.AppUserId == appUserId && entry.WatchedAt == null)
+            .OrderByDescending(entry => entry.CreatedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        if (entries.Count == 0)
+        {
+            return [];
+        }
+
+        var projected = await ProjectAsync(entries, cancellationToken);
+        return [.. projected.Select(entry => new WatchHistoryUndatedEntry(
+            entry.EntryId,
+            entry.MediaItemId,
+            entry.PublicId,
+            entry.Kind,
+            entry.Title,
+            entry.PosterUrl,
+            entry.SeriesTitle,
+            entry.SeasonNumber,
+            entry.EpisodeNumber,
+            entry.Origin))];
+    }
 
     public async Task<WatchHistoryCalendarResponse> LoadAsync(
         int appUserId, DateTimeOffset from, DateTimeOffset toExclusive, CancellationToken cancellationToken)
@@ -133,7 +179,8 @@ public sealed class WatchHistoryCalendarService(MediaServerDbContext database)
 
             events.Add(new WatchHistoryCalendarEvent(
                 entry.Id,
-                entry.WatchedAt!.Value,
+                // Undated rows reuse this projection for their list; the caller drops the instant.
+                entry.WatchedAt ?? default,
                 item.Id,
                 item.PublicId,
                 item.Kind.ToString(),

@@ -19,6 +19,7 @@ export function CalendarShell({
   onMonthChange,
   toolbar,
   renderDay,
+  agenda,
   children,
 }: {
   mode: CalendarMode;
@@ -29,6 +30,12 @@ export function CalendarShell({
   toolbar?: ReactNode;
   /** Renders one day cell's contents; the frame, date badge, and outside/today styling stay here. */
   renderDay: (day: Date) => ReactNode;
+  /**
+   * Narrow-screen replacement for the grid. Seven columns of chips are unreadable on a phone, so a
+   * mode that has an agenda shows it there instead. Swapped with CSS, not a viewport hook, so the
+   * server and client render the same markup.
+   */
+  agenda?: ReactNode;
   /** Rendered under the grid — dialogs, drawers, and any out-of-grid lists. */
   children?: ReactNode;
 }) {
@@ -66,7 +73,10 @@ export function CalendarShell({
         {toolbar}
       </header>
 
-      <div className="overflow-hidden rounded-lg border">
+      <div
+        data-testid="calendar-grid"
+        className={cn("overflow-hidden rounded-lg border", agenda && "hidden md:block")}
+      >
         <div className="grid grid-cols-7 border-b">
           {WEEKDAY_LABELS.map((label) => (
             <div key={label} className="text-muted-foreground px-2 py-1.5 text-center text-xs font-medium">
@@ -82,6 +92,12 @@ export function CalendarShell({
           ))}
         </div>
       </div>
+
+      {agenda && (
+        <div data-testid="calendar-agenda" className="md:hidden">
+          {agenda}
+        </div>
+      )}
 
       {children}
     </section>

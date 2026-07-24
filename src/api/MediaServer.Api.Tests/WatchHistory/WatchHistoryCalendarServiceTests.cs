@@ -212,6 +212,39 @@ public sealed class WatchHistoryCalendarServiceTests : IDisposable
         Assert.Equal("ProviderSync", entry.Origin);
     }
 
+    [Fact]
+    public async Task TheUndatedListNamesTheItemsRatherThanJustCountingThem()
+    {
+        // The toolbar shows a count, but the list has to answer "which ones?" — otherwise the user
+        // cannot tell what the number refers to.
+        var movie = AddMovie("Solaris");
+        var series = AddSeries("Andor");
+        var episode = AddEpisode(series, season: 1, number: 3, title: "Reckoning");
+        AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Legacy);
+
+        var entries = await Service().LoadUndatedAsync(_userId, CancellationToken.None);
+
+        Assert.Equal(2, entries.Count);
+        var movieEntry = Assert.Single(entries, entry => entry.Kind == "Movie");
+        Assert.Equal("Solaris", movieEntry.Title);
+        var episodeEntry = Assert.Single(entries, entry => entry.Kind == "Episode");
+        Assert.Equal("Reckoning", episodeEntry.Title);
+        Assert.Equal("Andor", episodeEntry.SeriesTitle);
+        Assert.Equal(1, episodeEntry.SeasonNumber);
+        Assert.Equal(3, episodeEntry.EpisodeNumber);
+    }
+
+    [Fact]
+    public async Task TheUndatedListExcludesDatedPlaysAndOtherUsers()
+    {
+        var movie = AddMovie("Solaris");
+        AddPlay(movie.Id, "2026-07-12T20:00:00Z");
+        AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual, appUserId: _otherUserId);
+
+        Assert.Empty(await Service().LoadUndatedAsync(_userId, CancellationToken.None));
+    }
+
     private WatchHistoryCalendarService Service() => new(_database);
 
     private Task<WatchHistoryCalendarResponse> LoadMonthAsync() => Service().LoadAsync(

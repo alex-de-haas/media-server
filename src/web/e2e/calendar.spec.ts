@@ -99,7 +99,7 @@ test("a watched deep link opens that view directly", async ({ page }) => {
   await page.goto("/calendar?view=watched&month=2026-07");
 
   await expect(page.getByRole("tab", { name: "watched" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByText("Severance")).toBeVisible();
+  await expect(page.getByTestId("calendar-grid").getByText("Severance")).toBeVisible();
 });
 
 test("a binge of one series is a single card that expands to every episode", async ({ page }) => {
@@ -107,9 +107,10 @@ test("a binge of one series is a single card that expands to every episode", asy
   await page.goto("/calendar?view=watched&month=2026-07");
 
   // Two episodes on one day render one card labelled by the series.
-  const card = page.getByRole("button", { name: /Severance/ });
+  const grid = page.getByTestId("calendar-grid");
+  const card = grid.getByRole("button", { name: /Severance/ });
   await expect(card).toHaveCount(1);
-  await expect(page.getByText("2 episodes")).toBeVisible();
+  await expect(grid.getByText("2 episodes")).toBeVisible();
 
   await card.click();
 
@@ -145,4 +146,19 @@ test("an empty month offers a jump to the last watched one", async ({ page }) =>
   // The jump is client-side, so this waits on hydration as well as navigation — under parallel
   // workers that can outlast the default expect timeout.
   await expect(page).toHaveURL(/month=2026-03/, { timeout: 15_000 });
+});
+
+test("a phone gets a date-grouped agenda instead of seven columns", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setupApp(page, { watchHistoryCalendar: watchedHistory });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  const agenda = page.getByTestId("calendar-agenda");
+  await expect(agenda).toBeVisible();
+  await expect(page.getByTestId("calendar-grid")).toBeHidden();
+
+  // The same series-per-day card as the grid, with the day's real play count beside the date.
+  await expect(agenda.getByText("2 episodes")).toBeVisible();
+  await expect(agenda.getByText("2 plays")).toBeVisible();
+  await expect(agenda.getByText("1 play")).toBeVisible();
 });

@@ -588,6 +588,20 @@ export interface WatchHistoryCalendarEvent {
   origin: "LocalPlayback" | "Manual" | "ProviderSync" | "Legacy";
 }
 
+/** A watched mark with no date: shown in a list, never placed on a guessed day. */
+export interface WatchHistoryUndatedEntry {
+  entryId: string;
+  mediaItemId: string;
+  publicId: string | null;
+  kind: "Movie" | "Episode";
+  title: string;
+  posterUrl: string | null;
+  seriesTitle: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  origin: "LocalPlayback" | "Manual" | "ProviderSync" | "Legacy";
+}
+
 export interface WatchHistoryCalendarResponse {
   events: WatchHistoryCalendarEvent[];
   /** Timeless marks get no date, so they are counted per kind instead of placed on the grid. */
@@ -830,6 +844,8 @@ export const mediaServer = {
     apiJson<WatchHistoryProvider[]>(`${BASE}/watch-history/providers`),
   // The range is the visible grid as UTC instants; the server returns raw plays and the browser
   // groups them by its own local days.
+  watchHistoryUndated: () =>
+    apiJson<WatchHistoryUndatedEntry[]>(`${BASE}/watch-history/calendar/undated`),
   watchHistoryCalendar: (from: string, toExclusive: string) =>
     apiJson<WatchHistoryCalendarResponse>(
       `${BASE}/watch-history/calendar?from=${encodeURIComponent(from)}&toExclusive=${encodeURIComponent(toExclusive)}`,

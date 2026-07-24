@@ -100,9 +100,13 @@ viewing-duration or streak analytics, and any heatmap.
 - [x] Watched toolbar: kind filters, filter-following `Undated N`, the
       **Watched without a date** list, empty month state with
       `Jump to last watched month`.
-- [ ] Mobile agenda on the same grouping helpers.
-- [ ] Visual pass: tokens only, Fraunces day-detail titles, reduced-motion
-      transition, dark-mode and Hosty-iframe verification.
+- [x] Mobile agenda on the same grouping helpers.
+- [x] Visual pass: tokens only, Fraunces day-detail titles, reduced-motion
+      transition, dark mode and narrow-screen verified live against the dev
+      instance. **Hosty-iframe rendering is not verified** — the Shell asks for
+      a password, which the agent will not enter; the surface introduces no
+      iframe-sensitive behavior (no popups or new windows) and reuses the
+      existing app chrome, but someone signed into the Shell should confirm.
 - [ ] `feature.md` for this folder written from shipped reality; this plan
       deleted; index regenerated — in the completing PR.
 
