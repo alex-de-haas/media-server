@@ -1,8 +1,8 @@
 # Release Tracking
 
-Status: Planned
+Status: Implemented
 Created: 2026-07-14
-Updated: 2026-07-14
+Updated: 2026-07-24
 
 > Near-term slice of the M5 [Watchlist and discovery](watchlist-and-discovery.md)
 > vision. This spec covers **only** tracking: a per-user calendar of movie/series
