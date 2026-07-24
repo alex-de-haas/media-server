@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-24
 
 ## Description
 
@@ -561,3 +561,7 @@ Backend tests use xUnit and Imposter. Required coverage:
 - `IMetadataProvider` multi-language fetch and candidate scoring (mock provider).
 - `ICatalogPathSandbox` containment and traversal/symlink rejection.
 - Credential lockout counters and token hashing.
+
+## Links
+
+- [Watch-history calendar idea](../ideas/watch-history-calendar.md)
