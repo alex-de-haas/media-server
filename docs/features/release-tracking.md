@@ -467,4 +467,4 @@ Backend tests use xUnit and Imposter (mock the TMDb client). Required coverage:
 
 ## Links
 
-- [Watch-history calendar idea](../ideas/watch-history-calendar.md)
+- [Watch-history calendar plan](watch-history-calendar/plan.md)
