@@ -491,7 +491,11 @@ function IngestRow({
   // instead of the single-movie pin (which would import every video as a version of one film). The same
   // dialog handles the "several cuts" case: put those files in one group. Series packs keep the pin — there
   // the show is the identity and each file still resolves to its own episode.
-  const canPreMatch = canPin && !isEpisodic && item.sourceFiles.filter((file) => !file.isAudio).length > 1;
+  // Keyed on the catalog being known to be a Movie one, not merely "not episodic": while the catalogs
+  // query is still loading `catalog` is undefined, and treating that as a movie would route a series pack
+  // to the per-movie dialog for the first render.
+  const canPreMatch =
+    canPin && catalog?.type === "Movie" && item.sourceFiles.filter((file) => !file.isAudio).length > 1;
 
   // One identity action, never two: "what is this?" is a single question, so the row offers a single
   // control and picks the surface that can answer it here.
