@@ -12,9 +12,9 @@ name: Dependabot auto-merge
 # parallel PRs are the norm and a squash rewrites merged history, leaving the other in-flight
 # branches unable to rebase cleanly onto main. Automation follows the same rule as a human.
 #
-# TWO REPOSITORY SETTINGS ARE REQUIRED for this to behave as intended:
-#   1. Settings > General > "Allow auto-merge", plus "Allow merge commits" for the strategy
-#      below -- without either, the merge step fails.
+# TWO REPOSITORY REQUIREMENTS MUST BE MET for this to behave as intended:
+#   1. Settings > General: both "Allow auto-merge" and "Allow merge commits" (the strategy
+#      used below) enabled -- without either toggle, the merge step fails.
 #   2. Branch protection on `main` with the CI jobs marked as required checks. Without
 #      required checks a PR is mergeable the moment it opens, and auto-merge merges it
 #      immediately -- the "on green CI" half of the contract silently disappears. The
