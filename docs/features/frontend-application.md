@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-07-12
+Updated: 2026-07-24
 
 ## Description
 
@@ -122,4 +122,5 @@ coverage:
 ## Links
 
 - [Catalog library browsing idea](../ideas/catalog-library-browsing.md)
+- [Watch-history calendar idea](../ideas/watch-history-calendar.md)
 - [Catalogs](catalogs.md)
