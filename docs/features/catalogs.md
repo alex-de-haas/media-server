@@ -177,4 +177,4 @@ Backend tests should use xUnit and Imposter. Required coverage:
 ## Links
 
 - [Catalog library browsing idea](../ideas/catalog-library-browsing.md)
-- [Frontend application](frontend-application.md)
+- [Frontend application](frontend-application/feature.md)

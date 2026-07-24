@@ -163,7 +163,7 @@ storage destination.
 - Implementation planning was completed on 2026-07-12 and removed under the
   planning completion rule.
 - [Catalogs feature](../features/catalogs.md)
-- [Frontend application](../features/frontend-application.md)
+- [Frontend application](../features/frontend-application/feature.md)
 
 ## Notes
 
