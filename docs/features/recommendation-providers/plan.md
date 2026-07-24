@@ -111,9 +111,9 @@ New behavior; no recommendations surface exists today.
       aggregation and ranking, seed exclusions — with tests. (Watched/hidden
       filtering belongs to the feed service in phase 3, where the library is
       known.)
-- [ ] Trakt provider over the existing connection: both feeds, TMDb-ID mapping,
+- [x] Trakt provider over the existing connection: both feeds, TMDb-ID mapping,
       health-gated availability, silent degradation — with tests.
-- [ ] Rank fusion: bounded inputs, RRF, agreement boost, identity merge for a
+- [x] Rank fusion: bounded inputs, RRF, agreement boost, identity merge for a
       single provider — with tests.
 - [ ] Feed and hide endpoints, hide persistence, per-user source preference —
       with tests.
