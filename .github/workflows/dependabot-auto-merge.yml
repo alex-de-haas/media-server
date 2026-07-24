@@ -8,8 +8,13 @@ name: Dependabot auto-merge
 # group (see .github/dependabot.yml). That group is restricted to minor/patch, so a future
 # 1.0 major falls outside it and still lands as a PR someone has to read.
 #
+# Merges with a merge commit, never a squash: AGENTS.md forbids squash-merging here because
+# parallel PRs are the norm and a squash rewrites merged history, leaving the other in-flight
+# branches unable to rebase cleanly onto main. Automation follows the same rule as a human.
+#
 # TWO REPOSITORY SETTINGS ARE REQUIRED for this to behave as intended:
-#   1. Settings > General > "Allow auto-merge" -- without it, the merge step fails.
+#   1. Settings > General > "Allow auto-merge", plus "Allow merge commits" for the strategy
+#      below -- without either, the merge step fails.
 #   2. Branch protection on `main` with the CI jobs marked as required checks. Without
 #      required checks a PR is mergeable the moment it opens, and auto-merge merges it
 #      immediately -- the "on green CI" half of the contract silently disappears. The
@@ -41,7 +46,7 @@ jobs:
 
       - name: Enable auto-merge
         if: steps.metadata.outputs.dependency-group == 'hosty-sdk'
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: gh pr merge --auto --merge "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
