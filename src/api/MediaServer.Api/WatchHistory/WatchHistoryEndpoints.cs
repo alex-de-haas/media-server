@@ -161,6 +161,51 @@ public static class WatchHistoryEndpoints
                 ToResponse(connection)));
         });
 
+        group.MapGet("/calendar", async (
+            DateTimeOffset from,
+            DateTimeOffset toExclusive,
+            ClaimsPrincipal principal,
+            WatchHistoryCalendarService calendar,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            if (toExclusive <= from)
+            {
+                return Results.BadRequest(new { error = "'toExclusive' must be after 'from'." });
+            }
+
+            // Bounded so one request cannot ask the database to scan a decade of history. The client
+            // asks for the visible grid, which never exceeds six weeks.
+            if (toExclusive - from > WatchHistoryCalendarService.MaxRange)
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"The requested range exceeds {WatchHistoryCalendarService.MaxRange.TotalDays:0} days.",
+                });
+            }
+
+            return Results.Ok(await calendar.LoadAsync(user.Id, from, toExclusive, cancellationToken));
+        });
+
+        group.MapGet("/calendar/undated", async (
+            MediaKind? kind,
+            ClaimsPrincipal principal,
+            WatchHistoryCalendarService calendar,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            return user is null
+                ? Results.Unauthorized()
+                : Results.Ok(await calendar.LoadUndatedAsync(user.Id, kind, cancellationToken));
+        });
+
         group.MapGet("/connections/{providerKey}", async (
             string providerKey,
             ClaimsPrincipal principal,

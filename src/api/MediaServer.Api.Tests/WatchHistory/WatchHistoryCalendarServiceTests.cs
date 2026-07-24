@@ -1,0 +1,404 @@
+using MediaServer.Api.Configuration;
+using MediaServer.Api.Data;
+using MediaServer.Api.Tests.Jellyfin;
+using MediaServer.Api.WatchHistory;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+
+namespace MediaServer.Api.Tests.WatchHistory;
+
+/// <summary>
+/// The calendar read: what it returns, what it refuses to invent, and whose history it will not show.
+/// </summary>
+public sealed class WatchHistoryCalendarServiceTests : IDisposable
+{
+    private readonly SqliteConnection _connection;
+    private readonly MediaServerDbContext _database;
+    private readonly TestTimeProvider _time = new(DateTimeOffset.Parse("2026-07-24T12:00:00Z"));
+    private readonly int _userId;
+    private readonly int _otherUserId;
+    private readonly Guid _catalogId = Guid.NewGuid();
+
+    public WatchHistoryCalendarServiceTests()
+    {
+        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection.Open();
+        _database = new MediaServerDbContext(
+            new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        _database.Database.Migrate();
+
+        var user = NewUser("host-1", "alex@example.com");
+        var other = NewUser("host-2", "sam@example.com");
+        _database.AppUsers.AddRange(user, other);
+        _database.SaveChanges();
+        _userId = user.Id;
+        _otherUserId = other.Id;
+
+        _database.Catalogs.Add(new Catalog
+        {
+            Id = _catalogId, Name = "Library", Type = CatalogType.Movie, Root = "/m",
+            CreatedAt = _time.GetUtcNow(), UpdatedAt = _time.GetUtcNow(),
+        });
+        _database.SaveChanges();
+    }
+
+    [Fact]
+    public async Task ItReturnsRawPlaysInTheRangeWithoutGroupingThem()
+    {
+        // Two plays of one movie on one day stay two rows: grouping is the browser's job, in its own
+        // time zone, and collapsing here would lose a real rewatch.
+        var movie = AddMovie("Arrival");
+        AddPlay(movie.Id, "2026-07-10T20:00:00Z");
+        AddPlay(movie.Id, "2026-07-10T22:30:00Z");
+
+        var result = await LoadMonthAsync();
+
+        Assert.Equal(2, result.Events.Count);
+        Assert.All(result.Events, entry => Assert.Equal("Arrival", entry.Title));
+        Assert.Equal(
+            [DateTimeOffset.Parse("2026-07-10T20:00:00Z"), DateTimeOffset.Parse("2026-07-10T22:30:00Z")],
+            result.Events.Select(entry => entry.WatchedAt));
+    }
+
+    [Fact]
+    public async Task AnEpisodeCarriesItsSeriesTitlePosterAndNumbering()
+    {
+        // The grid groups episodes at series level, so each row must be able to render the series card
+        // without a second lookup.
+        var series = AddSeries("Severance");
+        AddPoster(series.Id, "https://img/severance.jpg");
+        var episode = AddEpisode(series, season: 2, number: 3, title: "Who Is Alive?");
+        AddPlay(episode.Id, "2026-07-08T19:42:00Z");
+
+        var result = await LoadMonthAsync();
+
+        var entry = Assert.Single(result.Events);
+        Assert.Equal("Episode", entry.Kind);
+        Assert.Equal("Who Is Alive?", entry.Title);
+        Assert.Equal("Severance", entry.SeriesTitle);
+        Assert.Equal(series.Id, entry.SeriesId);
+        Assert.Equal("https://img/severance.jpg", entry.PosterUrl);
+        Assert.Equal(2, entry.SeasonNumber);
+        Assert.Equal(3, entry.EpisodeNumber);
+    }
+
+    [Fact]
+    public async Task AnEpisodePrefersCanonicalNumberingOverTheDisplayOne()
+    {
+        // A re-mapped release (anime absolute numbering) displays one way and is identified another;
+        // the calendar must name the episode the provider would recognize.
+        var series = AddSeries("Frieren");
+        var episode = AddEpisode(series, season: 1, number: 28, title: "Episode 28");
+        episode.IdentitySeasonNumber = 2;
+        episode.IdentityEpisodeNumber = 4;
+        _database.SaveChanges();
+        AddPlay(episode.Id, "2026-07-11T21:00:00Z");
+
+        var entry = Assert.Single((await LoadMonthAsync()).Events);
+
+        Assert.Equal(2, entry.SeasonNumber);
+        Assert.Equal(4, entry.EpisodeNumber);
+    }
+
+    [Fact]
+    public async Task PlaysOutsideTheRangeAreExcluded()
+    {
+        var movie = AddMovie("Dune");
+        AddPlay(movie.Id, "2026-06-30T23:00:00Z");
+        AddPlay(movie.Id, "2026-07-15T10:00:00Z");
+        AddPlay(movie.Id, "2026-08-01T00:00:00Z");
+
+        var result = await LoadMonthAsync();
+
+        var entry = Assert.Single(result.Events);
+        Assert.Equal(DateTimeOffset.Parse("2026-07-15T10:00:00Z"), entry.WatchedAt);
+    }
+
+    [Fact]
+    public async Task TheRangeEndIsExclusive()
+    {
+        // Adjacent month requests must not both claim a play on the boundary instant.
+        var movie = AddMovie("Tenet");
+        AddPlay(movie.Id, "2026-08-01T00:00:00Z");
+
+        var result = await Service().LoadAsync(
+            _userId,
+            DateTimeOffset.Parse("2026-07-01T00:00:00Z"),
+            DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+            CancellationToken.None);
+
+        Assert.Empty(result.Events);
+    }
+
+    [Fact]
+    public async Task UndatedMarksAreCountedByKindAndNeverPlacedOnTheGrid()
+    {
+        // A timeless mark says "watched", not "watched then" — it gets no date, and the toolbar filters
+        // by kind, so one total would not be answerable.
+        var movie = AddMovie("Solaris");
+        var series = AddSeries("Andor");
+        var episode = AddEpisode(series, season: 1, number: 1, title: "Kassa");
+        AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Legacy);
+        AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+
+        var result = await LoadMonthAsync();
+
+        Assert.Empty(result.Events);
+        Assert.Equal(1, result.Undated.Movies);
+        Assert.Equal(2, result.Undated.Episodes);
+    }
+
+    [Fact]
+    public async Task LatestWatchedAtLooksBeyondTheRequestedRange()
+    {
+        // This is what lets an empty month offer "jump to last watched month" without loading history.
+        var movie = AddMovie("Stalker");
+        AddPlay(movie.Id, "2026-03-02T18:00:00Z");
+
+        var result = await LoadMonthAsync();
+
+        Assert.Empty(result.Events);
+        Assert.Equal(DateTimeOffset.Parse("2026-03-02T18:00:00Z"), result.LatestWatchedAt);
+    }
+
+    [Fact]
+    public async Task WithNoHistoryAtAllTheResponseIsEmptyRatherThanNull()
+    {
+        var result = await LoadMonthAsync();
+
+        Assert.Empty(result.Events);
+        Assert.Equal(0, result.Undated.Movies);
+        Assert.Equal(0, result.Undated.Episodes);
+        Assert.Null(result.LatestWatchedAt);
+    }
+
+    [Fact]
+    public async Task AnotherUsersHistoryIsNeverReturned()
+    {
+        var movie = AddMovie("Solaris");
+        AddPlay(movie.Id, "2026-07-12T20:00:00Z", appUserId: _otherUserId);
+        AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual, appUserId: _otherUserId);
+
+        var result = await LoadMonthAsync();
+
+        Assert.Empty(result.Events);
+        Assert.Equal(0, result.Undated.Movies);
+        Assert.Null(result.LatestWatchedAt);
+    }
+
+    [Fact]
+    public async Task AMoviePlayCarriesItsOwnPosterAndNoSeriesFields()
+    {
+        var movie = AddMovie("Arrival");
+        AddPoster(movie.Id, "https://img/arrival.jpg");
+        AddPlay(movie.Id, "2026-07-10T20:00:00Z");
+
+        var entry = Assert.Single((await LoadMonthAsync()).Events);
+
+        Assert.Equal("Movie", entry.Kind);
+        Assert.Equal("https://img/arrival.jpg", entry.PosterUrl);
+        Assert.Null(entry.SeriesId);
+        Assert.Null(entry.SeriesTitle);
+    }
+
+    [Fact]
+    public async Task OriginTravelsWithEachPlayForProvenance()
+    {
+        var movie = AddMovie("Arrival");
+        AddPlay(movie.Id, "2026-07-10T20:00:00Z", origin: PlaybackHistoryOrigin.ProviderSync);
+
+        var entry = Assert.Single((await LoadMonthAsync()).Events);
+
+        Assert.Equal("ProviderSync", entry.Origin);
+    }
+
+    [Fact]
+    public async Task TheUndatedListNamesTheItemsRatherThanJustCountingThem()
+    {
+        // The toolbar shows a count, but the list has to answer "which ones?" — otherwise the user
+        // cannot tell what the number refers to.
+        var movie = AddMovie("Solaris");
+        var series = AddSeries("Andor");
+        var episode = AddEpisode(series, season: 1, number: 3, title: "Reckoning");
+        AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Legacy);
+
+        var page = await Service().LoadUndatedAsync(_userId, kind: null, CancellationToken.None);
+        var entries = page.Entries;
+
+        Assert.Equal(2, page.Total);
+        Assert.Equal(2, entries.Count);
+        var movieEntry = Assert.Single(entries, entry => entry.Kind == "Movie");
+        Assert.Equal("Solaris", movieEntry.Title);
+        var episodeEntry = Assert.Single(entries, entry => entry.Kind == "Episode");
+        Assert.Equal("Reckoning", episodeEntry.Title);
+        Assert.Equal("Andor", episodeEntry.SeriesTitle);
+        Assert.Equal(1, episodeEntry.SeasonNumber);
+        Assert.Equal(3, episodeEntry.EpisodeNumber);
+    }
+
+    [Fact]
+    public async Task TheUndatedListExcludesDatedPlaysAndOtherUsers()
+    {
+        var movie = AddMovie("Solaris");
+        AddPlay(movie.Id, "2026-07-12T20:00:00Z");
+        AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual, appUserId: _otherUserId);
+
+        Assert.Empty((await Service().LoadUndatedAsync(_userId, kind: null, CancellationToken.None)).Entries);
+    }
+
+    [Fact]
+    public async Task TheUndatedListNarrowsToOneKindServerSide()
+    {
+        // The toolbar's count is per kind, so the list has to be too — filtering a capped page in the
+        // browser would show a movie subset of the newest 200 rows and call it the movie total.
+        var movie = AddMovie("Solaris");
+        var series = AddSeries("Andor");
+        var episode = AddEpisode(series, season: 1, number: 1, title: "Kassa");
+        AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Legacy);
+
+        var movies = await Service().LoadUndatedAsync(_userId, MediaKind.Movie, CancellationToken.None);
+        var episodes = await Service().LoadUndatedAsync(_userId, MediaKind.Episode, CancellationToken.None);
+
+        Assert.Equal(1, movies.Total);
+        Assert.Equal("Solaris", Assert.Single(movies.Entries).Title);
+        Assert.Equal(2, episodes.Total);
+        Assert.All(episodes.Entries, entry => Assert.Equal("Episode", entry.Kind));
+    }
+
+    [Fact]
+    public async Task TheUndatedTotalCountsBeyondTheReturnedPage()
+    {
+        // Otherwise the dialog would silently show 200 of 250 and look complete.
+        var movie = AddMovie("Solaris");
+        for (var index = 0; index < WatchHistoryCalendarService.UndatedLimit + 5; index++)
+        {
+            AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        }
+
+        var page = await Service().LoadUndatedAsync(_userId, kind: null, CancellationToken.None);
+
+        Assert.Equal(WatchHistoryCalendarService.UndatedLimit, page.Entries.Count);
+        Assert.Equal(WatchHistoryCalendarService.UndatedLimit + 5, page.Total);
+    }
+
+    [Fact]
+    public async Task TitlesFollowTheConfiguredLanguageRatherThanRowOrder()
+    {
+        // An item can hold a record per language; picking whichever came back last would make the
+        // calendar disagree with the item's own page.
+        var movie = AddMovie("Solyaris");
+        _database.MetadataRecords.AddRange(
+            NewMetadata(movie.Id, "ru-RU", "Солярис"),
+            NewMetadata(movie.Id, "en-US", "Solaris"));
+        _database.SaveChanges();
+        AddPlay(movie.Id, "2026-07-10T20:00:00Z");
+
+        var english = Assert.Single((await LoadMonthAsync()).Events);
+        Assert.Equal("Solaris", english.Title);
+
+        var russian = new WatchHistoryCalendarService(
+            _database, new MediaServerSettings { SupportedLanguages = ["ru-RU", "en-US"] });
+        var localized = Assert.Single((await russian.LoadAsync(
+            _userId,
+            DateTimeOffset.Parse("2026-07-01T00:00:00Z"),
+            DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+            CancellationToken.None)).Events);
+        Assert.Equal("Солярис", localized.Title);
+    }
+
+    private MetadataRecord NewMetadata(Guid itemId, string language, string title) => new()
+    {
+        Id = Guid.NewGuid(), MediaItemId = itemId, Provider = "tmdb",
+        Language = language, Title = title,
+    };
+
+    private WatchHistoryCalendarService Service() =>
+        new(_database, new MediaServerSettings { SupportedLanguages = ["en-US"] });
+
+    private Task<WatchHistoryCalendarResponse> LoadMonthAsync() => Service().LoadAsync(
+        _userId,
+        DateTimeOffset.Parse("2026-07-01T00:00:00Z"),
+        DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+        CancellationToken.None);
+
+    private AppUser NewUser(string hostUserId, string email) => new()
+    {
+        HostUserId = hostUserId, Email = email, DisplayName = email, Role = AppUserRole.User,
+        CreatedAt = _time.GetUtcNow(), LastSeenAt = _time.GetUtcNow(),
+    };
+
+    private MediaItem AddMovie(string title)
+    {
+        var item = new MediaItem
+        {
+            Id = Guid.NewGuid(), CatalogId = _catalogId, Kind = MediaKind.Movie, Title = title,
+            AddedAt = _time.GetUtcNow(), UpdatedAt = _time.GetUtcNow(),
+        };
+        _database.MediaItems.Add(item);
+        _database.SaveChanges();
+        return item;
+    }
+
+    private MediaItem AddSeries(string title)
+    {
+        var item = new MediaItem
+        {
+            Id = Guid.NewGuid(), CatalogId = _catalogId, Kind = MediaKind.Series, Title = title,
+            AddedAt = _time.GetUtcNow(), UpdatedAt = _time.GetUtcNow(),
+        };
+        _database.MediaItems.Add(item);
+        _database.SaveChanges();
+        return item;
+    }
+
+    private MediaItem AddEpisode(MediaItem series, int season, int number, string title)
+    {
+        var item = new MediaItem
+        {
+            Id = Guid.NewGuid(), CatalogId = _catalogId, Kind = MediaKind.Episode, Title = title,
+            SeriesId = series.Id, ParentIndexNumber = season, IndexNumber = number,
+            AddedAt = _time.GetUtcNow(), UpdatedAt = _time.GetUtcNow(),
+        };
+        _database.MediaItems.Add(item);
+        _database.SaveChanges();
+        return item;
+    }
+
+    private void AddPoster(Guid itemId, string url)
+    {
+        _database.ImageAssets.Add(new ImageAsset
+        {
+            Id = Guid.NewGuid(), MediaItemId = itemId, ImageType = ImageType.Primary,
+            RemotePath = url, SortOrder = 0, Provider = "tmdb", Tag = "primary",
+        });
+        _database.SaveChanges();
+    }
+
+    private void AddPlay(
+        Guid itemId,
+        string? watchedAt = null,
+        PlaybackHistoryOrigin origin = PlaybackHistoryOrigin.LocalPlayback,
+        int? appUserId = null)
+    {
+        _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+        {
+            Id = Guid.NewGuid(),
+            AppUserId = appUserId ?? _userId,
+            MediaItemId = itemId,
+            CreatedAt = _time.GetUtcNow(),
+            WatchedAt = watchedAt is null ? null : DateTimeOffset.Parse(watchedAt),
+            Origin = origin,
+        });
+        _database.SaveChanges();
+    }
+
+    public void Dispose()
+    {
+        _database.Dispose();
+        _connection.Dispose();
+    }
+}

@@ -122,5 +122,5 @@ coverage:
 ## Links
 
 - [Catalog library browsing idea](../ideas/catalog-library-browsing.md)
-- [Watch-history calendar plan](watch-history-calendar/plan.md)
+- [Watch-history calendar](watch-history-calendar/feature.md)
 - [Catalogs](catalogs.md)

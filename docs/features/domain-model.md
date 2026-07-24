@@ -564,4 +564,4 @@ Backend tests use xUnit and Imposter. Required coverage:
 
 ## Links
 
-- [Watch-history calendar plan](watch-history-calendar/plan.md)
+- [Watch-history calendar](watch-history-calendar/feature.md)
