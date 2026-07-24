@@ -167,6 +167,7 @@ builder.Services.AddScoped<RecommendationSeedSelector>();
 builder.Services.AddScoped<ITmdbRecommendationSource, TmdbRecommendationSource>();
 builder.Services.AddScoped<IRecommendationProvider, LibraryRecommendationProvider>();
 builder.Services.AddScoped<IRecommendationProvider, MediaServer.Api.Recommendations.Trakt.TraktRecommendationProvider>();
+builder.Services.AddScoped<RecommendationFeedService>();
 builder.Services.AddHostedService<WatchHistoryDeliveryWorker>();
 // An abandoned device flow is never polled again, so nothing else would remove its row or its stored
 // device code.
@@ -408,6 +409,7 @@ app.MapWatchlistEndpoints();
 app.MapSettingsEndpoints();
 app.MapJellyfinCredentialEndpoints();
 app.MapWatchHistoryEndpoints();
+app.MapRecommendationEndpoints();
 app.MapRealtimeEndpoints();
 
 // Jellyfin-compatible surface served on the public `jellyfin` endpoint.

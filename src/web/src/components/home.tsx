@@ -7,6 +7,8 @@ import { mediaServer, type LibraryRailItem } from "@/lib/media-server";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
 import { Rail, RailItem } from "@/components/rail";
+import { RecommendationCard } from "@/components/recommendation-card";
+import { useRecommendationActions } from "@/components/recommendations-view";
 import { PosterCard, detailHref } from "@/components/poster-card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -27,6 +29,7 @@ export function Home() {
 
       {resume.data?.length ? <RailRow title="Continue watching" items={resume.data} /> : null}
       {nextUp.data?.length ? <RailRow title="Next up" items={nextUp.data} /> : null}
+      <RecommendedRow />
 
       {recent.isPending ? (
         <RailSkeleton title="Recently added" />
@@ -48,6 +51,40 @@ export function Home() {
         <p className="text-muted-foreground text-sm">Nothing published yet — add a torrent from the Downloads tab.</p>
       )}
     </div>
+  );
+}
+
+/**
+ * The recommendations rail. Rendered only when there is something to say — a user who has watched
+ * nothing yet should see the page they already know, not an empty promise.
+ */
+function RecommendedRow() {
+  const feed = useQuery({
+    queryKey: ["recommendations", "home"],
+    queryFn: () => mediaServer.recommendations({ limit: 12 }),
+  });
+  const { hide, track } = useRecommendationActions();
+
+  if (!feed.data?.items.length) {
+    return null;
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-lg font-semibold tracking-tight">Recommended for you</h2>
+        <Link href="/recommendations" className="text-muted-foreground hover:text-foreground text-sm">
+          See all
+        </Link>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-1">
+        {feed.data.items.map((item) => (
+          <div key={`${item.kind}:${item.tmdbId}`} className="w-28 shrink-0 sm:w-32">
+            <RecommendationCard item={item} onHide={hide} onTrack={track} />
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

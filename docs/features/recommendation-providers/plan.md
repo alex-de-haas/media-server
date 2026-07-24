@@ -115,11 +115,12 @@ New behavior; no recommendations surface exists today.
       health-gated availability, silent degradation — with tests.
 - [x] Rank fusion: bounded inputs, RRF, agreement boost, identity merge for a
       single provider — with tests.
-- [ ] Feed and hide endpoints, hide persistence, per-user source preference —
+- [x] Feed and hide endpoints, hide persistence, per-user source preference —
       with tests.
-- [ ] Web: home-page row + `/recommendations` page, library/not-in-library
+- [x] Web: home-page row + `/recommendations` page, library/not-in-library
       split, Track handoff for discoveries, hide with undo, source and kind
-      filters — unit tests for the pure logic, e2e for the surface.
+      filters — e2e for the surface. (No separate unit tests: the view holds no
+      pure logic worth extracting, unlike the calendar's grouping.)
 - [ ] Live verification against real TMDb and a connected Trakt account (both
       credentials exist on the dev instance).
 - [ ] `feature.md` written from shipped reality; this plan deleted; index

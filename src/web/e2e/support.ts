@@ -43,6 +43,7 @@ export interface AppMock {
   releaseCalendar?: unknown[]; // GET /watchlist/calendar
   watchHistoryCalendar?: unknown; // GET /watch-history/calendar (an envelope, not a list)
   watchHistoryUndated?: unknown; // GET /watch-history/calendar/undated ({ entries, total })
+  recommendations?: unknown; // GET /recommendations ({ items, sources, selectedSources })
 }
 
 export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
@@ -92,6 +93,15 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
 
     if (path === "/watchlist/calendar") return route.fulfill({ json: mock.releaseCalendar ?? [] });
     // An envelope rather than a list, so it cannot fall through to the empty-array catch-all.
+    if (path === "/recommendations") {
+      return route.fulfill({
+        json: mock.recommendations ?? { items: [], sources: [], selectedSources: [] },
+      });
+    }
+    if (path === "/recommendations/hide" || path === "/recommendations/sources") {
+      return route.fulfill({ status: 204, body: "" });
+    }
+
     if (path === "/watch-history/calendar/undated") {
       return route.fulfill({ json: mock.watchHistoryUndated ?? { entries: [], total: 0 } });
     }

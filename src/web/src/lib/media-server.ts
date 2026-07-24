@@ -588,6 +588,35 @@ export interface WatchHistoryCalendarEvent {
   origin: "LocalPlayback" | "Manual" | "ProviderSync" | "Legacy";
 }
 
+export type RecommendationKind = "Movie" | "Series";
+
+/** One card in the recommendations feed. */
+export interface Recommendation {
+  kind: RecommendationKind;
+  tmdbId: string;
+  title: string;
+  year: number | null;
+  posterUrl: string | null;
+  /** Whether this instance holds it — the difference between "play" and "go find". */
+  inLibrary: boolean;
+  mediaItemId: string | null;
+  publicId: string | null;
+  /** Providers that suggested it; more than one means independent engines agreed. */
+  sources: string[];
+}
+
+export interface RecommendationSource {
+  key: string;
+  displayName: string;
+}
+
+export interface RecommendationFeed {
+  items: Recommendation[];
+  /** Every source available to this user, selected or not — so the control can offer them back. */
+  sources: RecommendationSource[];
+  selectedSources: string[];
+}
+
 /** A watched mark with no date: shown in a list, never placed on a guessed day. */
 export interface WatchHistoryUndatedEntry {
   entryId: string;
@@ -846,6 +875,19 @@ export const mediaServer = {
   revokeJellyfinCredential: () => send(`/jellyfin/credential`, "DELETE"),
 
   // Watch-history providers. Every route acts on the caller; none takes an app-user id.
+  recommendations: (options?: { kind?: RecommendationKind; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (options?.kind) query.set("kind", options.kind);
+    if (options?.limit) query.set("limit", String(options.limit));
+    const suffix = query.toString();
+    return apiJson<RecommendationFeed>(`${BASE}/recommendations${suffix ? `?${suffix}` : ""}`);
+  },
+  hideRecommendation: (kind: RecommendationKind, tmdbId: string) =>
+    send(`/recommendations/hide`, "POST", { kind, tmdbId }),
+  unhideRecommendation: (kind: RecommendationKind, tmdbId: string) =>
+    send(`/recommendations/hide?kind=${kind}&tmdbId=${encodeURIComponent(tmdbId)}`, "DELETE"),
+  setRecommendationSources: (sources: string[] | null) =>
+    send(`/recommendations/sources`, "PUT", { sources }),
   listWatchHistoryProviders: () =>
     apiJson<WatchHistoryProvider[]>(`${BASE}/watch-history/providers`),
   // The range is the visible grid as UTC instants; the server returns raw plays and the browser
