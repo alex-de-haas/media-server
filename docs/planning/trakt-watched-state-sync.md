@@ -1,8 +1,9 @@
 # Watched-History Providers: Trakt
 
-Status: Draft
+Status: In progress — phases 1–4 shipped (PRs #91–#102); see
+[Implementation Phases](#implementation-phases) for what remains
 Created: 2026-07-21
-Updated: 2026-07-23
+Updated: 2026-07-24
 
 ## Goal
 
@@ -943,50 +944,60 @@ it cannot read a stale remote snapshot while older local events are pending.
 - [x] Resolve the observation-dependent open questions (session key, multi-episode
   identity); the two remaining questions are Trakt-side and belong to Phase 2.
 - [ ] Verify Trakt read-before/write/read-after ID resolution, eventual-consistency
-  retries, and owned-ID deletion with a test account. **This is the last Phase 0
-  item**, and it needs a Trakt application plus a test account, which do not exist
-  yet.
-- [ ] Receive explicit user approval and change status from `Draft` to `Ready`.
+  retries, and owned-ID deletion with a test account. Still open; it now belongs to
+  the live verification in Phase 5 rather than gating implementation.
+- [x] Receive explicit user approval — given by starting implementation; the
+  `Draft` → `Ready` gate below is superseded by the shipped phases.
 
 ### Phase 1: Provider Core, Configuration, and OAuth
 
-- [ ] Add provider contracts, registry, descriptors, and capabilities with Trakt
+Shipped in PRs #91–#94.
+
+- [x] Add provider contracts, registry, descriptors, and capabilities with Trakt
   as the only adapter.
-- [ ] Add Hosty settings, typed validation, admin guidance, and unavailable states.
-- [ ] Add connection, authorization, outbox, sync-run, and aggregate state-revision
+- [x] Add Hosty settings, typed validation, admin guidance, and unavailable states.
+- [x] Add connection, authorization, outbox, sync-run, and aggregate state-revision
   schema.
-- [ ] Add `PlaybackHistoryEntry`, the session-to-entry link,
+- [x] Add `PlaybackHistoryEntry`, the session-to-entry link,
   provider ownership/link state, aggregate projection, and legacy migration.
-- [ ] Integrate `HostySecretsClient` for credential storage and the
+- [x] Integrate `HostySecretsClient` for credential storage and the
   missing-secret reconnect path.
-- [ ] Implement typed Trakt HTTP/OAuth/profile/refresh/revoke operations.
-- [ ] Add current-user connection endpoints and tests.
+- [x] Implement typed Trakt HTTP/OAuth/profile/refresh/revoke operations.
+- [x] Add current-user connection endpoints and tests.
 
 ### Phase 2: Durable Outbound Watched Operations
 
-- [ ] Add mutation origin/state revision and atomic outbox recording to
+Shipped in PRs #95–#98.
+
+- [x] Add mutation origin/state revision and atomic outbox recording to
   `UserDataService`.
-- [ ] Extend the shipped session gate to record the created history entry, so a
+- [x] Extend the shipped session gate to record the created history entry, so a
   restart or repeated report reuses the completion decision.
-- [ ] Implement `EnsureTimelessWatched` and `RemoveOwnedTimelessEntries` with
+- [x] Implement `EnsureTimelessWatched` and `RemoveOwnedTimelessEntries` with
   read-before/write/read-after ID reconciliation.
-- [ ] Implement grouped history reads and batched/chunked bulk mutations.
-- [ ] Implement canonical movie/episode/bulk/multi-episode identity mapping.
-- [ ] Implement worker leases, pacing, refresh, retries, ambiguous-result checks,
+- [ ] Implement grouped history reads and batched/chunked bulk mutations. **Partial:**
+  the worker leases up to 20 outbox events per tick, but each event still resolves one
+  identity, so a season/series mark performs one read/mutation pair per episode.
+  `IWatchHistoryProvider.GetHistoryAsync` already takes an identity list, so grouping
+  is additive.
+- [x] Implement canonical movie/episode/bulk/multi-episode identity mapping.
+- [x] Implement worker leases, pacing, refresh, retries, ambiguous-result checks,
   issues, and cleanup.
-- [ ] Verify all existing playback behavior and new offline/restart behavior.
+- [x] Verify all existing playback behavior and new offline/restart behavior.
 
 ### Phase 3: Explicit Full-History Sync
 
-- [ ] Implement bounded scoped preview and pending-outbox prerequisite.
-- [ ] Fetch paginated full Trakt history for the selected scope.
-- [ ] Implement missing local exact/timeless additions and final history re-fetch.
-- [ ] Replace scoped local history, normalize unknown entries, and recompute
+Shipped in PRs #99–#100.
+
+- [x] Implement bounded scoped preview and pending-outbox prerequisite.
+- [x] Fetch paginated full Trakt history for the selected scope.
+- [x] Implement missing local exact/timeless additions and final history re-fetch.
+- [x] Replace scoped local history, normalize unknown entries, and recompute
   aggregates without modifying favorites or `LastPlayedDate`.
-- [ ] Apply only unchanged state revisions and implement missing/ambiguous,
+- [x] Apply only unchanged state revisions and implement missing/ambiguous,
   failed-export, concurrent-change, and partial-failure issues.
-- [ ] Preserve legacy `PlayCount` for unwatched rows with no local/Trakt history.
-- [ ] Test repeat sync, count collapse, resume preservation, large scopes, and
+- [x] Preserve legacy `PlayCount` for unwatched rows with no local/Trakt history.
+- [x] Test repeat sync, count collapse, resume preservation, large scopes, and
   multi-episode cases.
 
 ### Phase 4: Settings and Operations
@@ -1107,16 +1118,30 @@ Live Trakt verification uses a dedicated non-production application and account:
 
 ## Notes
 
-The Infuse observation is complete (2026-07-22) and its results are recorded
-above. Two things still gate `Ready`:
+The Infuse observation is complete (2026-07-22) and its results are recorded above.
+The `Draft` gate it fed into is spent: implementation ran through PRs #91–#102 and
+phases 1–4 are merged (provider core, schema, device-flow OAuth, connection
+endpoints, Trakt history operations, identity mapping, per-play history plus the
+outbox, the delivery worker, scoped sync preview and apply, and the Settings
+section).
 
-1. the Trakt owned-history-ID reconciliation test, which needs a Trakt application
-   and a dedicated test account that do not exist yet;
-2. explicit user approval of the resulting contract.
+What is still open, as of 2026-07-24:
 
-Implementation of the integration must not start while the plan is `Draft`. The
-playback-side work already merged (diagnostics 0.21.0–0.21.1, the play-count fix
-0.21.2) is deliberately outside that rule: it fixed current behavior and does not
+1. **Grouped season/series delivery** — one read/mutation pair per episode today
+   (Phase 2).
+2. **Directory reconciliation and telemetry** — `DirectoryReconcileService` still
+   revokes only the Jellyfin credential; an unassigned or removed user keeps their
+   `WatchHistoryConnection` row and its Core secret. Deliberately deferred in
+   Phase 4, but it is the one acceptance criterion with a data-hygiene consequence.
+3. **Live Trakt verification** — the read-before/write/read-after ID-resolution run,
+   the rate-limit/failure/reconnect paths, and the Hosty iframe device-flow check
+   against a dedicated test account (Phase 0's last item plus Phase 5).
+4. **Feature documentation** — no `docs/features/` document describes the shipped
+   watched-history subsystem yet, so this plan cannot be removed under the
+   completion rule.
+
+The playback-side work merged earlier (diagnostics 0.21.0–0.21.1, the play-count fix
+0.21.2) was outside the plan gate by design: it fixed current behavior and does not
 depend on Trakt.
 
 Trakt documentation was reviewed on 2026-07-21. External contracts and rate limits

@@ -496,7 +496,7 @@ workflow (push to main → `:latest`, tags → `:vX.Y.Z`). End-to-end install un
 `docker` profile via Core (mounts/ingress/torrent port) remains a manual on-device
 step.
 
-### M5a — Release tracking (planned)
+### M5a — Release tracking (implemented 2026-07-14, PR #56, v0.14.0)
 **Goal:** per-user release calendar + reminders per
 [release-tracking](release-tracking.md) — tracking only, **no acquisition** (no
 source search, no auto-grab, no `Intake` handoff). Depends on M4.

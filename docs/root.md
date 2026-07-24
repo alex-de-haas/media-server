@@ -138,21 +138,24 @@ Forward-looking designs and epics, kept separate from the roadmap specs:
 
 ## Planning
 
-Approved or draft work that remains to be implemented:
+Approved, draft, or partly shipped work that is not yet complete:
 
-- [Watched-history providers: Trakt](planning/trakt-watched-state-sync.md) — Draft
-  design for provider-neutral watched-history sync/outbox behavior, conditional
-  per-play history after Infuse validation, and the first Trakt adapter.
+- [Watched-history providers: Trakt](planning/trakt-watched-state-sync.md) — in
+  progress. Provider-neutral watched-history sync/outbox behavior, per-play history,
+  and the first Trakt adapter; phases 1–4 are merged, with grouped season delivery,
+  directory reconciliation/telemetry, live Trakt verification, and the feature
+  document still outstanding.
 
 ## Feature documentation
 
 The specifications below live in `docs/features/` and are the source of truth for
 the product's behavior. Most describe functionality already implemented through M4;
 see the [implementation plan](features/implementation-plan.md) for per-milestone
-status. The still-planned M5 work lands in two phases: [Release
-tracking](features/release-tracking.md) (near-term — a watchlist and release
-calendar over TMDb dates, no downloading) and [Watchlist and
-discovery](features/watchlist-and-discovery.md) (the acquisition layer on top).
+status. M5 lands in two phases: [Release
+tracking](features/release-tracking.md) (a watchlist and release calendar over
+TMDb dates, no downloading — implemented) and [Watchlist and
+discovery](features/watchlist-and-discovery.md) (the acquisition layer on top —
+still planned).
 
 - [Implementation plan](features/implementation-plan.md)
 - [Hosty runtime app](features/hosty-runtime-app.md)
@@ -200,10 +203,10 @@ relevant planning files until implementation is complete.
 - **M4 — Automation polish & Docker delivery.** ✅ Done. Reconciler, retries, review
   queue, manual match override, scheduled scans, metadata refresh, app-data backups,
   GHCR image publishing.
-- **M5 — Watchlist and discovery (future).** Lands in two phases: **release
-  tracking** (near-term — per-user watchlist and release calendar over TMDb dates,
-  with notifications, no downloading; see [Release
-  tracking](features/release-tracking.md)) then **acquisition** (custom
+- **M5 — Watchlist and discovery.** Lands in two phases: **release tracking**
+  ✅ Done — per-user watchlist and release calendar over TMDb dates, typed
+  release/air dates, reminders and notifications, no downloading (see [Release
+  tracking](features/release-tracking.md)) — then **acquisition** (future: custom
   content-source providers, release matching, auto-grab into the pipeline).
 - **M6 — MCP / AI (future).** Use cases exposed as MCP tools for an AI agent.
 
