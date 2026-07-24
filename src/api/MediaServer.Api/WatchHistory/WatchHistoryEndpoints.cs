@@ -194,6 +194,7 @@ public static class WatchHistoryEndpoints
         });
 
         group.MapGet("/calendar/undated", async (
+            MediaKind? kind,
             ClaimsPrincipal principal,
             WatchHistoryCalendarService calendar,
             MediaServerDbContext database,
@@ -202,7 +203,7 @@ public static class WatchHistoryEndpoints
             var user = await ResolveUserAsync(principal, database, cancellationToken);
             return user is null
                 ? Results.Unauthorized()
-                : Results.Ok(await calendar.LoadUndatedAsync(user.Id, cancellationToken));
+                : Results.Ok(await calendar.LoadUndatedAsync(user.Id, kind, cancellationToken));
         });
 
         group.MapGet("/connections/{providerKey}", async (

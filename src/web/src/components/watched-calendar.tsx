@@ -310,15 +310,16 @@ function UndatedDialog({
   filter: WatchedKindFilter;
   onClose: () => void;
 }) {
+  const kind = filter === "movies" ? "Movie" : filter === "episodes" ? "Episode" : undefined;
   const undated = useQuery({
-    queryKey: ["watch-history-undated"],
-    queryFn: () => mediaServer.watchHistoryUndated(),
+    queryKey: ["watch-history-undated", kind ?? "all"],
+    queryFn: () => mediaServer.watchHistoryUndated(kind),
     enabled: open,
   });
 
-  const entries = (undated.data ?? []).filter((entry) =>
-    filter === "all" ? true : filter === "movies" ? entry.kind === "Movie" : entry.kind === "Episode",
-  );
+  const entries = undated.data?.entries ?? [];
+  const total = undated.data?.total ?? 0;
+  const truncated = total > entries.length;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -332,6 +333,11 @@ function UndatedDialog({
         </DialogHeader>
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {undated.isPending && <Skeleton className="h-14 w-full" />}
+          {truncated && (
+            <p className="text-muted-foreground px-1.5 text-xs">
+              Showing the most recent {entries.length} of {total}.
+            </p>
+          )}
           {entries.map((entry) => (
             <div key={entry.entryId} className="flex items-center gap-3 rounded-md p-1.5">
               <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">

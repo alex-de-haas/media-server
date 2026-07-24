@@ -22,6 +22,10 @@ issues a query and neither accumulates branches inside the other.
 existing `/calendar` link keeps its meaning, and defaults are omitted from
 generated links — the common case stays a bare `/calendar`.
 
+Switching mode **pushes** — it is a destination worth coming back from — while
+paging months **replaces**, so stepping through a year does not bury the
+previous page under twelve history entries.
+
 The params are read in the **server component** and passed down as props.
 `useSearchParams` is deliberately not used: on this statically rendered route it
 yields nothing until hydration, and a click landing in that window navigated
@@ -91,7 +95,7 @@ a deliberate trade, not an oversight.
 
 ```http
 GET /api/watch-history/calendar?from=<utc-instant>&toExclusive=<utc-instant>
-GET /api/watch-history/calendar/undated
+GET /api/watch-history/calendar/undated?kind=Movie|Episode
 ```
 
 Both are authenticated and scoped to the caller; every query filters on the
@@ -105,14 +109,20 @@ a user's time-range scan.
 The response envelope carries `events` (raw, ungrouped plays), `undated`
 (`{ movies, episodes }`), and `latestWatchedAt`. Each event carries the
 history-entry id, `watchedAt`, media-item id, kind, title, poster URL, series id
-and title, season/episode numbers, and origin. For an episode the poster is the
-**series** poster, and the numbering is canonical (`Identity*`) with the display
+and title, season/episode numbers, and origin. Titles follow the instance's
+configured language with the same preference order the rest of the library uses,
+so a multi-language item cannot render differently here than on its own page.
+For an episode the poster is the **series** poster, and the numbering is canonical (`Identity*`) with the display
 numbering as fallback — a re-mapped release displays one way and is identified
 another.
 
-`/undated` returns the timeless marks themselves, newest first and bounded, so
-the list can name titles rather than only counting them. It is fetched when the
-dialog opens, not with the calendar.
+`/undated?kind=Movie|Episode` returns the timeless marks themselves, newest
+first, so the list can name titles rather than only counting them. The kind is
+applied server-side — filtering a capped page in the browser would show a subset
+of the newest rows and present it as that kind's total. The response is
+`{ entries, total }`: entries are capped at 200 and `total` is what lets the
+dialog say it is showing only the most recent ones. Fetched when the dialog
+opens, not with the calendar.
 
 ## Not included
 
@@ -122,8 +132,9 @@ activity heatmap.
 
 ## Testing Expectations
 
-- `WatchHistoryCalendarServiceTests` covers the read: raw ungrouped plays,
-  range filtering with an exclusive end, series title/poster/canonical numbering
+- `WatchHistoryCalendarServiceTests` covers the read: language-correct titles,
+  the undated page's kind narrowing and its total counting past the cap, raw
+  ungrouped plays, range filtering with an exclusive end, series title/poster/canonical numbering
   on episodes, per-kind undated counts, `latestWatchedAt` reaching beyond the
   requested range, the undated list naming its items, and — twice over — that
   another user's history is never returned.

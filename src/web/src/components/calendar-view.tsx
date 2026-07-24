@@ -7,7 +7,10 @@ import { WatchedCalendar } from "@/components/watched-calendar";
 
 /**
  * The /calendar page. Mode and month live in the URL rather than in component state, so a view is
- * shareable and the back button works; only the selected mode mounts, so the other never queries.
+ * shareable; only the selected mode mounts, so the other never queries.
+ *
+ * Switching mode pushes — it is a destination a user may want to come back from. Paging months
+ * replaces: stepping through a year should not bury the previous page under twelve history entries.
  *
  * The params arrive as props from the server component — not from `useSearchParams` — because that
  * hook returns nothing until hydration on a static route, and navigating during that window would
@@ -18,11 +21,10 @@ export function CalendarView({ view, month: monthParam }: { view: string | null;
   const mode = parseCalendarMode(view);
   const month = parseMonthParam(monthParam);
 
-  const navigate = (nextMode: CalendarMode, nextMonth: Date) =>
-    router.replace(calendarHref(nextMode, nextMonth), { scroll: false });
-
-  const onModeChange = (next: CalendarMode) => navigate(next, month);
-  const onMonthChange = (next: Date) => navigate(mode, next);
+  const onModeChange = (next: CalendarMode) =>
+    router.push(calendarHref(next, month), { scroll: false });
+  const onMonthChange = (next: Date) =>
+    router.replace(calendarHref(mode, next), { scroll: false });
 
   return mode === "watched" ? (
     <WatchedCalendar month={month} onModeChange={onModeChange} onMonthChange={onMonthChange} />

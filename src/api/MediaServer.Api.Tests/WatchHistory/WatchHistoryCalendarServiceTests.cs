@@ -1,3 +1,4 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Tests.Jellyfin;
 using MediaServer.Api.WatchHistory;
@@ -223,8 +224,10 @@ public sealed class WatchHistoryCalendarServiceTests : IDisposable
         AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
         AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Legacy);
 
-        var entries = await Service().LoadUndatedAsync(_userId, CancellationToken.None);
+        var page = await Service().LoadUndatedAsync(_userId, kind: null, CancellationToken.None);
+        var entries = page.Entries;
 
+        Assert.Equal(2, page.Total);
         Assert.Equal(2, entries.Count);
         var movieEntry = Assert.Single(entries, entry => entry.Kind == "Movie");
         Assert.Equal("Solaris", movieEntry.Title);
@@ -242,10 +245,79 @@ public sealed class WatchHistoryCalendarServiceTests : IDisposable
         AddPlay(movie.Id, "2026-07-12T20:00:00Z");
         AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual, appUserId: _otherUserId);
 
-        Assert.Empty(await Service().LoadUndatedAsync(_userId, CancellationToken.None));
+        Assert.Empty((await Service().LoadUndatedAsync(_userId, kind: null, CancellationToken.None)).Entries);
     }
 
-    private WatchHistoryCalendarService Service() => new(_database);
+    [Fact]
+    public async Task TheUndatedListNarrowsToOneKindServerSide()
+    {
+        // The toolbar's count is per kind, so the list has to be too — filtering a capped page in the
+        // browser would show a movie subset of the newest 200 rows and call it the movie total.
+        var movie = AddMovie("Solaris");
+        var series = AddSeries("Andor");
+        var episode = AddEpisode(series, season: 1, number: 1, title: "Kassa");
+        AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        AddPlay(episode.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Legacy);
+
+        var movies = await Service().LoadUndatedAsync(_userId, MediaKind.Movie, CancellationToken.None);
+        var episodes = await Service().LoadUndatedAsync(_userId, MediaKind.Episode, CancellationToken.None);
+
+        Assert.Equal(1, movies.Total);
+        Assert.Equal("Solaris", Assert.Single(movies.Entries).Title);
+        Assert.Equal(2, episodes.Total);
+        Assert.All(episodes.Entries, entry => Assert.Equal("Episode", entry.Kind));
+    }
+
+    [Fact]
+    public async Task TheUndatedTotalCountsBeyondTheReturnedPage()
+    {
+        // Otherwise the dialog would silently show 200 of 250 and look complete.
+        var movie = AddMovie("Solaris");
+        for (var index = 0; index < WatchHistoryCalendarService.UndatedLimit + 5; index++)
+        {
+            AddPlay(movie.Id, watchedAt: null, origin: PlaybackHistoryOrigin.Manual);
+        }
+
+        var page = await Service().LoadUndatedAsync(_userId, kind: null, CancellationToken.None);
+
+        Assert.Equal(WatchHistoryCalendarService.UndatedLimit, page.Entries.Count);
+        Assert.Equal(WatchHistoryCalendarService.UndatedLimit + 5, page.Total);
+    }
+
+    [Fact]
+    public async Task TitlesFollowTheConfiguredLanguageRatherThanRowOrder()
+    {
+        // An item can hold a record per language; picking whichever came back last would make the
+        // calendar disagree with the item's own page.
+        var movie = AddMovie("Solyaris");
+        _database.MetadataRecords.AddRange(
+            NewMetadata(movie.Id, "ru-RU", "Солярис"),
+            NewMetadata(movie.Id, "en-US", "Solaris"));
+        _database.SaveChanges();
+        AddPlay(movie.Id, "2026-07-10T20:00:00Z");
+
+        var english = Assert.Single((await LoadMonthAsync()).Events);
+        Assert.Equal("Solaris", english.Title);
+
+        var russian = new WatchHistoryCalendarService(
+            _database, new MediaServerSettings { SupportedLanguages = ["ru-RU", "en-US"] });
+        var localized = Assert.Single((await russian.LoadAsync(
+            _userId,
+            DateTimeOffset.Parse("2026-07-01T00:00:00Z"),
+            DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+            CancellationToken.None)).Events);
+        Assert.Equal("Солярис", localized.Title);
+    }
+
+    private MetadataRecord NewMetadata(Guid itemId, string language, string title) => new()
+    {
+        Id = Guid.NewGuid(), MediaItemId = itemId, Provider = "tmdb",
+        Language = language, Title = title,
+    };
+
+    private WatchHistoryCalendarService Service() =>
+        new(_database, new MediaServerSettings { SupportedLanguages = ["en-US"] });
 
     private Task<WatchHistoryCalendarResponse> LoadMonthAsync() => Service().LoadAsync(
         _userId,

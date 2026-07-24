@@ -602,6 +602,12 @@ export interface WatchHistoryUndatedEntry {
   origin: "LocalPlayback" | "Manual" | "ProviderSync" | "Legacy";
 }
 
+export interface WatchHistoryUndatedPage {
+  entries: WatchHistoryUndatedEntry[];
+  /** How many undated marks exist in the requested scope; `entries` is capped below this. */
+  total: number;
+}
+
 export interface WatchHistoryCalendarResponse {
   events: WatchHistoryCalendarEvent[];
   /** Timeless marks get no date, so they are counted per kind instead of placed on the grid. */
@@ -844,8 +850,12 @@ export const mediaServer = {
     apiJson<WatchHistoryProvider[]>(`${BASE}/watch-history/providers`),
   // The range is the visible grid as UTC instants; the server returns raw plays and the browser
   // groups them by its own local days.
-  watchHistoryUndated: () =>
-    apiJson<WatchHistoryUndatedEntry[]>(`${BASE}/watch-history/calendar/undated`),
+  // The kind is applied server-side so the list and the toolbar's count answer the same question,
+  // and `total` lets the dialog admit when it is showing only the most recent marks.
+  watchHistoryUndated: (kind?: "Movie" | "Episode") =>
+    apiJson<WatchHistoryUndatedPage>(
+      `${BASE}/watch-history/calendar/undated${kind ? `?kind=${kind}` : ""}`,
+    ),
   watchHistoryCalendar: (from: string, toExclusive: string) =>
     apiJson<WatchHistoryCalendarResponse>(
       `${BASE}/watch-history/calendar?from=${encodeURIComponent(from)}&toExclusive=${encodeURIComponent(toExclusive)}`,
