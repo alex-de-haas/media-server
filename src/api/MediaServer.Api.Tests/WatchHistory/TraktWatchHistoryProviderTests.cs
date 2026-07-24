@@ -48,6 +48,9 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
 
         public List<(string Path, string? Body)> Requests { get; } = [];
 
+        /// <summary>Makes the next id-resolution call fail, for tests about that path.</summary>
+        public bool FailNextSearch { get; set; }
+
         public void Enqueue(HttpStatusCode status, object? body = null) => _responses.Enqueue((status, body));
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -60,6 +63,16 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
             // each test expressing only the behaviour it is about.
             if (request.RequestUri!.AbsolutePath.StartsWith("/search/tmdb/", StringComparison.Ordinal))
             {
+                // A test that is about the lookup failing takes the queued response instead.
+                if (FailNextSearch)
+                {
+                    FailNextSearch = false;
+                    return new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                    {
+                        Content = new StringContent("", Encoding.UTF8, "application/json"),
+                    };
+                }
+
                 var type = request.RequestUri.Query.Contains("type=movie", StringComparison.Ordinal) ? "movie" : "show";
                 var payload = new StringContent(
                     $$"""[ { "{{type}}": { "ids": { "trakt": 999 } } } ]""", Encoding.UTF8, "application/json");
@@ -135,6 +148,19 @@ public sealed class TraktWatchHistoryProviderTests : IDisposable
             oauth, new TraktWorkIdCache(), NullLogger<TraktWorkIdResolver>.Instance);
         return new TraktWatchHistoryProvider(
             _database, oauth, authorization, NullLogger<TraktWatchHistoryProvider>.Instance, workIds);
+    }
+
+    [Fact]
+    public async Task AFailedIdLookupIsReportedRatherThanReadAsAnEmptyHistory()
+    {
+        // The whole point of the id fix: an unaskable lookup must not become an authoritative "no
+        // history", or a delivery retry would re-post a play that already exists.
+        _handler.FailNextSearch = true;
+
+        var result = await Provider().GetHistoryAsync(_userId, [Movie()], CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(WatchHistoryFailure.RateLimited, result.Failure);
     }
 
     private static WatchHistoryIdentity Movie(int tmdb = 27205) =>

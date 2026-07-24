@@ -41,40 +41,49 @@ public sealed class TraktWorkIdResolver(
 {
 
     /// <summary>
-    /// The path segment to address this work by, or null when Trakt cannot recognize it at all.
+    /// The path segment to address this work by.
     /// </summary>
-    public async Task<string?> ResolveAsync(
+    /// <returns>
+    /// A success carrying the id, a success carrying <c>null</c> when Trakt genuinely knows no such
+    /// work, or a failure when the lookup could not be made.
+    /// </returns>
+    /// <remarks>
+    /// The three outcomes have to stay distinguishable. Collapsing "I could not ask" into "there is
+    /// nothing" is precisely the mistake this class exists to undo: the caller would report an
+    /// authoritative empty history, and a delivery retry would re-post a play that already exists.
+    /// </remarks>
+    public async Task<WatchHistoryResult<string?>> ResolveAsync(
         WatchHistoryIdentity identity, string accessToken, CancellationToken cancellationToken)
     {
         // Trakt accepts an IMDb id on these paths, and it needs no lookup.
         if (!string.IsNullOrWhiteSpace(identity.ImdbId))
         {
-            return identity.ImdbId;
+            return WatchHistoryResult<string?>.Success(identity.ImdbId);
         }
 
         if (identity.TmdbId is not { } tmdbId)
         {
-            return null;
+            return WatchHistoryResult<string?>.Success(null);
         }
 
         if (cache.TryGet(identity.Kind, tmdbId, out var cached))
         {
-            return cached;
+            return WatchHistoryResult<string?>.Success(cached);
         }
 
-        var resolved = await SearchAsync(identity.Kind, tmdbId, accessToken, cancellationToken);
-        if (resolved.Failed)
+        var searched = await SearchAsync(identity.Kind, tmdbId, accessToken, cancellationToken);
+        if (!searched.Succeeded)
         {
-            // Do not cache an outage as "unknown work": that would blank this title for the process's
-            // lifetime. Returning null here only skips one read, which the caller retries.
-            return null;
+            // Not cached: an outage is not evidence about this work, and remembering it as "unknown"
+            // would blank the title for the process's lifetime.
+            return searched;
         }
 
-        cache.Set(identity.Kind, tmdbId, resolved.TraktId);
-        return resolved.TraktId;
+        cache.Set(identity.Kind, tmdbId, searched.Value);
+        return searched;
     }
 
-    private async Task<(bool Failed, string? TraktId)> SearchAsync(
+    private async Task<WatchHistoryResult<string?>> SearchAsync(
         WatchHistoryMediaKind kind, int tmdbId, string accessToken, CancellationToken cancellationToken)
     {
         // Episodes are addressed through their show, so the search type follows the same split the
@@ -85,14 +94,17 @@ public sealed class TraktWorkIdResolver(
         var response = await oauth.SendAsync(HttpMethod.Get, path, content: null, accessToken, cancellationToken);
         if (!response.Succeeded)
         {
+            // Rate limits and outages travel back with their kind intact, so the caller can retry
+            // rather than conclude anything about this work.
             logger.LogDebug("Trakt could not be searched for tmdb:{TmdbId}: {Detail}", tmdbId, response.Detail);
-            return (Failed: true, null);
+            return WatchHistoryResult<string?>.Failed(response.Failure!.Value, response.Detail, response.RetryAfter);
         }
 
         using var document = response.Value!;
         if (document.RootElement.ValueKind != JsonValueKind.Array)
         {
-            return (Failed: false, null);
+            return WatchHistoryResult<string?>.Failed(
+                WatchHistoryFailure.ContractViolation, "Trakt's search returned a body that is not a list.");
         }
 
         foreach (var element in document.RootElement.EnumerateArray())
@@ -105,12 +117,12 @@ public sealed class TraktWorkIdResolver(
 
             if (ids.TryGetProperty("trakt", out var trakt) && trakt.ValueKind == JsonValueKind.Number)
             {
-                return (Failed: false, trakt.GetInt64().ToString(CultureInfo.InvariantCulture));
+                return WatchHistoryResult<string?>.Success(trakt.GetInt64().ToString(CultureInfo.InvariantCulture));
             }
         }
 
         // Trakt answered and knows no such work. A real negative, worth remembering.
         logger.LogDebug("Trakt knows no {Type} for tmdb:{TmdbId}.", type, tmdbId);
-        return (Failed: false, null);
+        return WatchHistoryResult<string?>.Success(null);
     }
 }

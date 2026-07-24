@@ -51,7 +51,7 @@ public sealed class TraktWorkIdResolverTests : IDisposable
             "token",
             CancellationToken.None);
 
-        Assert.Equal("tt12042730", resolved);
+        Assert.Equal("tt12042730", resolved.Value);
         Assert.Empty(_handler.Requests);
     }
 
@@ -62,7 +62,7 @@ public sealed class TraktWorkIdResolverTests : IDisposable
 
         var resolved = await Resolver().ResolveAsync(Movie(687163), "token", CancellationToken.None);
 
-        Assert.Equal("531178", resolved);
+        Assert.Equal("531178", resolved.Value);
         Assert.Contains("search/tmdb/687163?type=movie", Assert.Single(_handler.Requests), StringComparison.Ordinal);
     }
 
@@ -80,7 +80,7 @@ public sealed class TraktWorkIdResolverTests : IDisposable
             "token",
             CancellationToken.None);
 
-        Assert.Equal("1425", resolved);
+        Assert.Equal("1425", resolved.Value);
         Assert.Contains("type=show", Assert.Single(_handler.Requests), StringComparison.Ordinal);
     }
 
@@ -104,9 +104,13 @@ public sealed class TraktWorkIdResolverTests : IDisposable
         _handler.Responses.Enqueue((HttpStatusCode.OK, "[]"));
         var resolver = Resolver();
 
-        Assert.Null(await resolver.ResolveAsync(Movie(1), "token", CancellationToken.None));
-        Assert.Null(await resolver.ResolveAsync(Movie(1), "token", CancellationToken.None));
+        // A success carrying null: Trakt answered, and it knows no such work.
+        var first = await resolver.ResolveAsync(Movie(1), "token", CancellationToken.None);
+        var second = await resolver.ResolveAsync(Movie(1), "token", CancellationToken.None);
 
+        Assert.True(first.Succeeded);
+        Assert.Null(first.Value);
+        Assert.True(second.Succeeded);
         // A real negative, so asking again is pointless.
         Assert.Single(_handler.Requests);
     }
@@ -119,8 +123,11 @@ public sealed class TraktWorkIdResolverTests : IDisposable
         _handler.Responses.Enqueue((HttpStatusCode.OK, """[ { "movie": { "ids": { "trakt": 531178 } } } ]"""));
         var resolver = Resolver();
 
-        Assert.Null(await resolver.ResolveAsync(Movie(687163), "token", CancellationToken.None));
-        Assert.Equal("531178", await resolver.ResolveAsync(Movie(687163), "token", CancellationToken.None));
+        var failed = await resolver.ResolveAsync(Movie(687163), "token", CancellationToken.None);
+        Assert.False(failed.Succeeded);
+
+        var retried = await resolver.ResolveAsync(Movie(687163), "token", CancellationToken.None);
+        Assert.Equal("531178", retried.Value);
     }
 
     [Fact]
@@ -129,8 +136,23 @@ public sealed class TraktWorkIdResolverTests : IDisposable
         var resolved = await Resolver().ResolveAsync(
             new WatchHistoryIdentity { Kind = WatchHistoryMediaKind.Movie }, "token", CancellationToken.None);
 
-        Assert.Null(resolved);
+        Assert.True(resolved.Succeeded);
+        Assert.Null(resolved.Value);
         Assert.Empty(_handler.Requests);
+    }
+
+    [Fact]
+    public async Task AFailedLookupIsAFailureNotAnEmptyAnswer()
+    {
+        // Collapsing "I could not ask" into "there is nothing" is the exact mistake this class exists
+        // to undo: the caller would report an authoritative empty history, and a delivery retry would
+        // re-post a play that already exists.
+        _handler.Responses.Enqueue((HttpStatusCode.TooManyRequests, ""));
+
+        var resolved = await Resolver().ResolveAsync(Movie(687163), "token", CancellationToken.None);
+
+        Assert.False(resolved.Succeeded);
+        Assert.Equal(WatchHistoryFailure.RateLimited, resolved.Failure);
     }
 
     private static WatchHistoryIdentity Movie(int tmdbId) =>
