@@ -79,6 +79,9 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   });
 
   return (
+    // The preview is a sibling of this dialog rather than a child of its root: nested inside, base-ui owns
+    // it as this dialog's popup and an outside click never dismisses it.
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-xl">
         <DialogHeader>
@@ -179,8 +182,9 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           )}
         </div>
       </DialogContent>
-
-      <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
     </Dialog>
+
+    <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
+    </>
   );
 }

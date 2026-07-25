@@ -24,6 +24,29 @@ const feed = {
 
 const preview = { "27205": aTitlePreview("27205", "Inception") };
 
+// The same title as the feed's discovery, already on the user's calendar.
+const aTrackedInception = {
+  id: "w1",
+  trackedTitleId: "t1",
+  kind: "Movie",
+  title: "Inception",
+  year: 2010,
+  posterUrl: null,
+  provider: "tmdb",
+  providerId: "27205",
+  productionStatus: null,
+  inLibrary: false,
+  libraryItemId: null,
+  monitorScope: null,
+  monitoredSeasons: [],
+  regionOverride: null,
+  note: null,
+  nextRelease: null,
+  hasDates: false,
+  libraryGap: null,
+  reminders: [],
+};
+
 test("a discovery poster opens the preview and it says what the title is", async ({ page }) => {
   await setupApp(page, { recommendations: feed, titlePreview: preview });
   await page.goto("/recommendations");
@@ -145,29 +168,7 @@ test("a search candidate can be checked before it is tracked", async ({ page }) 
 test("a tracked title opens its preview from the tracked drawer", async ({ page }) => {
   await setupApp(page, {
     titlePreview: preview,
-    watchlist: [
-      {
-        id: "w1",
-        trackedTitleId: "t1",
-        kind: "Movie",
-        title: "Inception",
-        year: 2010,
-        posterUrl: null,
-        provider: "tmdb",
-        providerId: "27205",
-        productionStatus: null,
-        inLibrary: false,
-        libraryItemId: null,
-        monitorScope: null,
-        monitoredSeasons: [],
-        regionOverride: null,
-        note: null,
-        nextRelease: null,
-        hasDates: false,
-        libraryGap: null,
-        reminders: [],
-      },
-    ],
+    watchlist: [aTrackedInception],
   });
   await page.goto("/calendar?month=2026-07");
 
@@ -175,4 +176,32 @@ test("a tracked title opens its preview from the tracked drawer", async ({ page 
   await page.getByRole("button", { name: /Inception/ }).click();
 
   await expect(page.getByRole("dialog").getByText("A thief who steals corporate secrets through dream-sharing technology.")).toBeVisible();
+});
+
+// A preview rendered inside the drawer's root belongs to the drawer as far as base-ui is concerned, and
+// nothing outside it can dismiss it — a dialog with no way out.
+test("the preview opened over the drawer can be closed every ordinary way", async ({ page }) => {
+  await setupApp(page, { titlePreview: preview, watchlist: [aTrackedInception] });
+  await page.goto("/calendar?month=2026-07");
+
+  const overview = page.getByText("A thief who steals corporate secrets through dream-sharing technology.");
+  // Reopening goes through the drawer each time, since opening the preview hands the screen over to it.
+  // Waiting for it to be open matters: Escape and outside clicks are routed by focus.
+  const openPreview = async () => {
+    await page.getByRole("button", { name: "Tracked titles" }).click();
+    await page.getByRole("button", { name: /Inception/ }).first().click();
+    await expect(overview).toBeVisible();
+  };
+
+  await openPreview();
+  await page.getByRole("button", { name: "Close" }).first().click();
+  await expect(overview).toBeHidden();
+
+  await openPreview();
+  await page.keyboard.press("Escape");
+  await expect(overview).toBeHidden();
+
+  await openPreview();
+  await page.mouse.click(40, 400); // anywhere outside it
+  await expect(overview).toBeHidden();
 });

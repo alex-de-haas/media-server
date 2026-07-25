@@ -45,13 +45,22 @@ A failed request shows the retry state without losing those known facts.
 | Surface | What opens it |
 | --- | --- |
 | Recommendations (`/recommendations` and the home row) | the poster of a **discovery**; a held title keeps its link to the detail page |
-| Tracked titles drawer | the poster/title area of a row (the bell, refresh and stop-tracking buttons keep their own hit areas) |
+| Tracked titles drawer | the poster/title area of a row, which closes the drawer (the bell, refresh and stop-tracking buttons keep their own hit areas) |
 | Release calendar, day dialog | the row body; the bell beside it still opens the reminder dialog |
 | "Add a title" search results | the result row; its `Track` button is unchanged |
 
-The preview opens over a `Dialog` (add a title), over a `Drawer` (tracked titles), and
-hosts the reminder dialog itself — nested overlays, which Base UI supports and the e2e
-suite exercises.
+Two rules keep it dismissable, both learned the hard way:
+
+- It is rendered as a **sibling** of the surface that opens it, never inside that
+  surface's root. Nested there, Base UI treats it as the parent overlay's own popup and
+  an outside click never reaches it.
+- **One modal overlay at a time.** The tracked drawer and the calendar's day dialog both
+  close as they hand off to the preview; two focus traps side by side send Escape to the
+  overlay underneath. The reminder dialog the preview hosts is the exception — it is a
+  genuine child of the preview, which Base UI coordinates.
+
+Its close button carries its own scrim, because a bare glyph disappears against a bright
+backdrop.
 
 ## API
 
@@ -120,5 +129,6 @@ with playback, versions, episodes and admin controls, and the preview never imit
 - `e2e/title-preview.spec.ts` — opening from a discovery poster and from the tracked
   drawer, the facts it states, tracking offered but never playback, dismissal closing
   the dialog, a held title linking to its page, the error state keeping the known
-  facts, the preview opening over the search dialog without replacing it, and a
-  tracked series not being mistaken for the movie sharing its TMDb id.
+  facts, the preview opening over the search dialog without replacing it, a tracked
+  series not being mistaken for the movie sharing its TMDb id, and the preview opened
+  over the drawer being dismissable by its close button, Escape and an outside click.
