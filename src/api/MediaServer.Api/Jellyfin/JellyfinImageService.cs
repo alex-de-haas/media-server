@@ -148,20 +148,30 @@ public sealed class JellyfinImageService(
     private static string CollectionCacheName(Guid collectionId, string slot, string tag) =>
         $"collection-{collectionId:N}-{slot}-{tag}";
 
-    /// <summary>Every cache file name <see cref="GetCollectionImageAsync"/> can currently write for a collection.</summary>
+    /// <summary>
+    /// Every cache file name <see cref="GetCollectionImageAsync"/> can currently write for a collection. This
+    /// mirrors that method's <c>BackdropUrl ?? PosterUrl</c> fallback exactly: naming a file it would not write
+    /// would pin a superseded binary as live and leak it forever.
+    /// </summary>
     public static IEnumerable<string> CollectionCacheNames(MovieCollection collection)
     {
+        var backdrop = JellyfinCollectionService.BackdropTag(collection);
+        if (backdrop is not null)
+        {
+            yield return CollectionCacheName(collection.Id, BackdropSlot, backdrop);
+        }
+
         if (JellyfinCollectionService.PrimaryTag(collection) is { } primary)
         {
             yield return CollectionCacheName(collection.Id, PrimarySlot, primary);
-            // A collection with no backdrop of its own serves the poster in the backdrop slot — under the
-            // poster's tag, so that request caches to its own file rather than reusing the primary one.
-            yield return CollectionCacheName(collection.Id, BackdropSlot, primary);
-        }
 
-        if (JellyfinCollectionService.BackdropTag(collection) is { } backdrop)
-        {
-            yield return CollectionCacheName(collection.Id, BackdropSlot, backdrop);
+            // Only a collection with no backdrop of its own falls back to serving the poster in the backdrop
+            // slot — under the poster's tag, so that request caches to its own file rather than reusing the
+            // primary one. Once the collection gains a real backdrop this name goes dead and is reclaimed.
+            if (backdrop is null)
+            {
+                yield return CollectionCacheName(collection.Id, BackdropSlot, primary);
+            }
         }
     }
 

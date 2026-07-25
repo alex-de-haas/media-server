@@ -103,7 +103,7 @@ public sealed class ImageCacheSweeperTests : IDisposable
         var paths = JellyfinImageService.CollectionCacheNames(collection)
             .Select(name => WriteCached(name + ".jpg", aged: true))
             .ToList();
-        Assert.Equal(3, paths.Count); // primary + backdrop-under-poster-tag + backdrop.
+        Assert.Equal(2, paths.Count); // Its own poster and backdrop; no poster-in-backdrop-slot fallback.
 
         _database.MovieCollections.Remove(collection);
         await _database.SaveChangesAsync();
@@ -111,7 +111,33 @@ public sealed class ImageCacheSweeperTests : IDisposable
         var report = await Sweeper().SweepAsync(CancellationToken.None);
 
         Assert.All(paths, path => Assert.False(File.Exists(path)));
-        Assert.Equal(3, report.FilesDeleted);
+        Assert.Equal(paths.Count, report.FilesDeleted);
+    }
+
+    [Fact]
+    public async Task Sweep_reclaims_the_backdrop_slot_poster_once_a_collection_gains_its_own_backdrop()
+    {
+        // While a collection has no backdrop, the backdrop slot serves the poster and caches under the poster's
+        // tag. Gaining a real backdrop makes that file dead — the live names must not keep naming it.
+        var collection = SeedCollection("https://images.test/poster.jpg", backdropUrl: null);
+        var before = JellyfinImageService.CollectionCacheNames(collection).ToHashSet();
+        Assert.Equal(2, before.Count);
+        foreach (var name in before)
+        {
+            WriteCached(name + ".jpg", aged: true);
+        }
+
+        collection.BackdropUrl = "https://images.test/backdrop.jpg";
+        await _database.SaveChangesAsync();
+
+        var report = await Sweeper().SweepAsync(CancellationToken.None);
+
+        // Exactly the name that stopped being reachable — the poster in the backdrop slot — is reclaimed.
+        var after = JellyfinImageService.CollectionCacheNames(collection).ToHashSet();
+        var dead = Assert.Single(before.Except(after));
+        Assert.False(File.Exists(Path.Combine(_images, dead + ".jpg")));
+        Assert.True(File.Exists(Path.Combine(_images, before.Intersect(after).Single() + ".jpg")));
+        Assert.Equal(1, report.FilesDeleted);
     }
 
     [Fact]
