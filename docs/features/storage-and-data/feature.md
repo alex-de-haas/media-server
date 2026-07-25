@@ -1,8 +1,7 @@
 # Storage and Data
 
-Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-25
 
 ## Description
 
@@ -64,7 +63,7 @@ SQLite is single-writer, so the app minimizes and serializes writes:
   probe, enrich, publish).
 - The orchestrator claims an ingest item with a lease (`LeaseOwner`/`LeaseUntil`)
   and uses an optimistic-concurrency token, so the reconciler and operator actions
-  never double-drive the same item (see [Domain model](domain-model.md)).
+  never double-drive the same item (see [Domain model](../domain-model.md)).
 - No write transaction is held open across I/O (ffprobe, provider HTTP): do the
   long operation first, then a short write.
 
@@ -73,11 +72,41 @@ SQLite is single-writer, so the app minimizes and serializes writes:
 Everything Hosty should back up lives under `HOSTY_APP_DATA_DIR`:
 
 - `media-server.db` (plus `-wal` / `-shm`).
-- Metadata image cache.
+- Metadata image cache (`images/`, see below).
 - Background job and pipeline state.
 
 (Torrent resume/fast-resume state is **not** here — it lives in the external
 `torrent-engine` app's own data directory and is backed up with that app.)
+
+### Image Cache
+
+Artwork is a provider URL until it is first requested; the Jellyfin image surface
+then downloads the binary and caches it under `images/`, keyed by what the file
+holds rather than by who points at it:
+
+- Item artwork is stored as `{tag}{extension}`, where the tag is the provider's
+  image hash. Two items sharing artwork therefore share one file.
+- Collection (BoxSet) artwork has no `ImageAsset` row, so its identity lives in
+  the file name: `collection-{collectionId}-{slot}-{tag}{extension}`. Swapping a
+  collection's poster changes the tag and lands the new art in a new file.
+
+Nothing erases these files at delete time. Every purge path (library item delete,
+catalog delete, remap, move-merge) drops `ImageAsset` rows with `ExecuteDelete`,
+and a shared tag means a file is dead only once the *last* referencing row is
+gone — a question about the whole table, not about the rows being deleted. A
+catalog purge additionally never materializes its item ids on purpose, so it has
+no tag list to erase from.
+
+Instead a scheduled sweep bounds the cache: every 12 hours (first pass 10 minutes
+after startup) it lists `images/`, rebuilds the set of live names from the
+distinct `ImageAsset.Tag` values plus the names each `MovieCollection` can
+currently produce, and deletes every file that matches none of them — including
+`.tmp` leftovers from failed writes. Files written within the last hour are
+skipped so a sweep never races an in-flight download. Because the sweep runs over
+the directory rather than off a delete, it also reclaims artwork that existing
+installs leaked before it existed. A cache miss is not an error state — the image
+surface refetches — so reclaiming late, or reclaiming a file that turns out to be
+live, costs at most one download.
 
 ### Backup Consistency
 
@@ -99,7 +128,8 @@ continuously backup-safe on its own:
 If Hosty later adds an app-facing pre-backup lifecycle hook, the app can use it to
 checkpoint on demand; until then the app cannot assume one exists.
 
-The image cache is regenerable; if backup size matters, it can be excluded from
+The image cache is regenerable and self-bounding (the sweep above keeps it to what
+the library still references); if backup size matters, it can be excluded from
 backup in a later refinement, but the default is to keep all app data in one
 backed-up directory.
 
@@ -110,10 +140,10 @@ operator owns that media and its own backups).
 
 - Each catalog root is a host directory on a single filesystem holding a transient
   `.incoming/` staging area plus the canonical published media at the root (see
-  [Catalogs](catalogs.md)).
+  [Catalogs](../catalogs.md)).
 - **v1 (`localCommand`):** roots are operator-configured host paths; the host
   process accesses them directly, with no volume mounts. Path access is sandboxed
-  to configured roots (see [File and directory management](file-directory-management.md)).
+  to configured roots (see [File and directory management](../file-directory-management.md)).
 - **Future (`docker`):** each catalog root becomes an external host-path bind
   mount once Hosty supports the required mount model. Removing the app must never
   delete external media.
@@ -139,6 +169,10 @@ Backend tests should use xUnit and Imposter. Required coverage:
 
 - EF Core mapping for relational entities and JSON columns.
 - App data paths resolved from `HOSTY_APP_DATA_DIR`.
+- The image cache sweep: an unreferenced file is reclaimed, a file whose tag is
+  still shared by another `ImageAsset` row is kept, live and superseded collection
+  artwork are told apart, stale `.tmp` leftovers are reclaimed, and recently
+  written files are left alone.
 - Migration apply on startup and correct migration history after a simulated
   restore; failure path refuses to start half-migrated.
 - Progress is not persisted; only state transitions are written and trigger

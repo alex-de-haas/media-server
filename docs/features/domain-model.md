@@ -24,7 +24,7 @@ Conventions:
   can be refreshed or re-linked.
 - Flexible/provider-shaped data is stored in **JSON columns** (SQLite JSON1 /
   EF Core JSON mapping), not in a document database (see
-  [Storage and data](storage-and-data.md)).
+  [Storage and data](storage-and-data/feature.md)).
 - Catalogs are operator-managed at runtime → a DB table. Secrets and global
   toggles come from Hosty app settings/env, not the DB.
 
@@ -237,7 +237,7 @@ and ETA are **not persisted**. The torrent engine reports them in memory and
 broadcasts them over the realtime stream; only state transitions are written to
 the database, and a transition (e.g. Completed) is what triggers downstream
 pipeline actions. See
-[Storage and data](storage-and-data.md) and [Background tasks](background-tasks.md).
+[Storage and data](storage-and-data/feature.md) and [Background tasks](background-tasks/feature.md).
 
 **SourceFile** (one playable file flowing through an ingest)
 

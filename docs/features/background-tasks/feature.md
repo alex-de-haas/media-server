@@ -1,8 +1,7 @@
 # Background Tasks and Progress
 
-Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-25
 
 ## Description
 
@@ -22,18 +21,21 @@ job state that survives restarts.
   library item deletion, and large-file streaming support work where progress is
   useful.
 - Reconciler runs that re-drive stuck pipeline items.
+- Scheduled housekeeping: library scans for missing files, and the artwork cache
+  sweep that reclaims orphaned image binaries (see
+  [Storage and data](../storage-and-data/feature.md)).
 
 ## Progress Model
 
 Each job has: job id, type, related entity (e.g. ingest item, torrent), status,
 progress 0–100, attempt count, and optional error. Pipeline stages (see
-[Automation pipeline](automation-pipeline.md)) emit jobs so the UI can show the
+[Automation pipeline](../automation-pipeline.md)) emit jobs so the UI can show the
 full flow per item, not just isolated tasks.
 
 Torrent download progress is a special case: it is **not persisted** to the
 database. The torrent engine reports it from memory and the hub broadcasts it;
 only torrent **state transitions** are written and trigger pipeline actions (see
-[Torrents and organizer](torrents-and-organizer.md)).
+[Torrents and organizer](../torrents-and-organizer.md)).
 
 ## SignalR Events
 
@@ -47,7 +49,7 @@ seeding state. Clients subscribe once and receive updates for all active work.
 
 Transport (WebSocket, SSE, long-polling fallback) must be validated through the
 Hosty Shell embed route, because behavior can depend on it (see
-[Hosty runtime app](hosty-runtime-app.md)).
+[Hosty runtime app](../hosty-runtime-app.md)).
 
 ## Observability
 
@@ -68,7 +70,7 @@ signals for operator-grade debugging and metrics:
 - **Export.** OTLP exporter with a configurable endpoint; in dev it can fall back
   to console. The collector is optional — the app must run without one.
 - **Redaction.** Tokens, PINs, and `api_key` query values never appear in spans,
-  logs, or metric attributes (see [Security](security.md)).
+  logs, or metric attributes (see [Security](../security.md)).
 
 ## Persistence and Recovery
 
@@ -77,7 +79,7 @@ reconciler resumes non-terminal items and re-drives stuck work with bounded
 retries and backoff. The reconciler claims each item with a lease
 (`LeaseOwner`/`LeaseUntil`) before driving it, so it never double-processes an
 item the orchestrator or an operator action is already handling (see
-[Domain model](domain-model.md)).
+[Domain model](../domain-model.md)).
 
 ## Testing Expectations
 
