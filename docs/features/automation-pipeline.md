@@ -89,7 +89,7 @@ the hand-off and the rest of the pipeline.
 - **Non-blocking.** A single item entering the review queue (ambiguous match)
   does not block other items in the pipeline.
 - **Observable.** Each stage emits background job events (see
-  [Background tasks](background-tasks.md)) consumed by the UI activity view.
+  [Background tasks](background-tasks/feature.md)) consumed by the UI activity view.
 - **Database is source of truth.** Publish writes items to the database; the
   reconcile scan only checks the catalog root against it, while the import scan
   ingests orphan files through the pipeline (see [Catalogs](catalogs.md)).

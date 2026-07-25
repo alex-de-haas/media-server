@@ -319,7 +319,7 @@ downstream pipeline stage transitions. The client subscribes once and receives
 updates for all active torrents and ingests. Live progress, speed, ratio, and ETA
 are streamed from the engine's in-memory state and are **not persisted**; only
 state transitions are written to the database (see
-[Storage and data](../storage-and-data.md)).
+[Storage and data](../storage-and-data/feature.md)).
 
 ## Testing Expectations
 

@@ -53,7 +53,7 @@ hosty apps logs com.haas.media-server
   and tests against; both move together in one change.
 - `docker` is the default install profile; `dev` is used for local development.
   Catalog roots are bound through Hosty external host-path mounts (see
-  [Storage and data](storage-and-data.md)). Image build/publish lands in M4 (see
+  [Storage and data](storage-and-data/feature.md)). Image build/publish lands in M4 (see
   [Implementation plan](implementation-plan.md)).
 
 ## GitHub Actions CI/CD

@@ -14,7 +14,7 @@ manual file manager.
 ## Sandbox
 
 All file access is sandboxed to configured catalog roots (see
-[Catalogs](../catalogs.md) and [Storage and data](../storage-and-data.md)).
+[Catalogs](../catalogs.md) and [Storage and data](../storage-and-data/feature.md)).
 
 - Resolve and normalize every path, then verify it is contained within a
   configured root before any operation.
@@ -80,6 +80,9 @@ With one tree, one file backs one item:
   history follows its media item by design.
 - **Remove one version** (`DELETE /api/library/sources/{id}`, admin): drops a single
   `MediaSource` of an item, used to retire the original after a verified transcode.
+- Every removal above drops the item's `ImageAsset` rows; the cached artwork binaries
+  they pointed at are reclaimed later by the image-cache sweep (see
+  [Storage and data](../storage-and-data/feature.md)), not inline.
 - Any of these is refused with **409** while the owning item (for a season or episode,
   its series) is being moved to another catalog.
 - **Remove download** (`DELETE /api/torrents/{id}`) only applies while a download

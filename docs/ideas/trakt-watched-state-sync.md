@@ -212,7 +212,7 @@ storage semantics when the Infuse observation succeeds:
 - [Implementation planning](../planning/trakt-watched-state-sync.md)
 - [Watch-history calendar](../features/watch-history-calendar/feature.md)
 - [Jellyfin compatibility](../features/jellyfin-compatibility.md)
-- [Storage and data](../features/storage-and-data.md)
+- [Storage and data](../features/storage-and-data/feature.md)
 - [Security](../features/security.md)
 - [Trakt create an app](https://docs.trakt.tv/docs/create-an-app)
 - [Trakt OAuth authentication](https://docs.trakt.tv/docs/authentication-oauth)
