@@ -308,7 +308,7 @@ Details:
 
 Both run as hosted services in the `CatalogHealthService` /
 `CatalogMetadataRefreshService` mold, reported over the realtime job feed (see
-[Background tasks](background-tasks.md)).
+[Background tasks](background-tasks/feature.md)).
 
 **Date-sync — `watchlist:refresh-dates`, every 24h, the only TMDb caller.**
 

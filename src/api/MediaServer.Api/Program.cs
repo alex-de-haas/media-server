@@ -272,6 +272,10 @@ builder.Services.AddScoped<JellyfinImageService>();
 builder.Services.AddScoped<JellyfinStreamResolver>();
 builder.Services.AddHttpClient(JellyfinImageService.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
 
+// Nothing erases a cached artwork binary when its item goes, so the cache is bounded by a scheduled sweep.
+builder.Services.AddScoped<ImageCacheSweeper>();
+builder.Services.AddHostedService<ImageCacheSweepWorker>();
+
 // Throttle PIN logins per source IP; the per-username dimension is handled by credential lockout.
 builder.Services.AddRateLimiter(options =>
 {

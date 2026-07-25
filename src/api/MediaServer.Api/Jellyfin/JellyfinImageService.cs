@@ -20,6 +20,12 @@ public sealed class JellyfinImageService(
 {
     public const string HttpClientName = "jellyfin-images";
 
+    /// <summary>The cache directory holding every artwork binary, item and collection alike.</summary>
+    public static string CacheDirectory(HostyOptions hosty) => Path.Combine(hosty.AppDataDir, "images");
+
+    private const string PrimarySlot = "primary";
+    private const string BackdropSlot = "backdrop";
+
     public async Task<ImagePayload?> GetImageAsync(
         string itemPublicId, ImageType type, string? tag, int index, CancellationToken cancellationToken)
     {
@@ -90,11 +96,9 @@ public sealed class JellyfinImageService(
             ?? JellyfinCollectionService.PrimaryTag(collection)
             ?? string.Empty;
 
-        var directory = Path.Combine(hosty.AppDataDir, "images");
-        var slot = type == ImageType.Backdrop ? "backdrop" : "primary";
-        // The tag is part of the filename so a swapped poster/backdrop (new url → new tag) lands in a new file
-        // and is refetched, instead of the stale cached bytes being served forever.
-        var path = Path.Combine(directory, $"collection-{collection.Id:N}-{slot}-{tag}{ExtensionFor(remote)}");
+        var directory = CacheDirectory(hosty);
+        var slot = type == ImageType.Backdrop ? BackdropSlot : PrimarySlot;
+        var path = Path.Combine(directory, CollectionCacheName(collection.Id, slot, tag) + ExtensionFor(remote));
         if (File.Exists(path))
         {
             return new ImagePayload(await File.ReadAllBytesAsync(path, cancellationToken), ContentTypeFor(path), tag);
@@ -134,6 +138,43 @@ public sealed class JellyfinImageService(
         return new ImagePayload(bytes, contentType, tag);
     }
 
+    /// <summary>
+    /// The cache file name (extension aside) of one collection artwork slot. A collection is not a media item,
+    /// so no <see cref="ImageAsset"/> row records what is on disk — the name carries it instead. The tag is part
+    /// of it so a swapped poster/backdrop (new url → new tag) lands in a new file and is refetched, instead of
+    /// the stale cached bytes being served forever; the superseded file is then reclaimed by
+    /// <see cref="ImageCacheSweeper"/>, which recomputes the live names with <see cref="CollectionCacheNames"/>.
+    /// </summary>
+    private static string CollectionCacheName(Guid collectionId, string slot, string tag) =>
+        $"collection-{collectionId:N}-{slot}-{tag}";
+
+    /// <summary>
+    /// Every cache file name <see cref="GetCollectionImageAsync"/> can currently write for a collection. This
+    /// mirrors that method's <c>BackdropUrl ?? PosterUrl</c> fallback exactly: naming a file it would not write
+    /// would pin a superseded binary as live and leak it forever.
+    /// </summary>
+    public static IEnumerable<string> CollectionCacheNames(MovieCollection collection)
+    {
+        var backdrop = JellyfinCollectionService.BackdropTag(collection);
+        if (backdrop is not null)
+        {
+            yield return CollectionCacheName(collection.Id, BackdropSlot, backdrop);
+        }
+
+        if (JellyfinCollectionService.PrimaryTag(collection) is { } primary)
+        {
+            yield return CollectionCacheName(collection.Id, PrimarySlot, primary);
+
+            // Only a collection with no backdrop of its own falls back to serving the poster in the backdrop
+            // slot — under the poster's tag, so that request caches to its own file rather than reusing the
+            // primary one. Once the collection gains a real backdrop this name goes dead and is reclaimed.
+            if (backdrop is null)
+            {
+                yield return CollectionCacheName(collection.Id, BackdropSlot, primary);
+            }
+        }
+    }
+
     private static string ExtensionFor(string url)
     {
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && Path.GetExtension(uri.AbsolutePath) is { Length: > 0 } extension)
@@ -158,7 +199,7 @@ public sealed class JellyfinImageService(
 
         try
         {
-            var directory = Path.Combine(hosty.AppDataDir, "images");
+            var directory = CacheDirectory(hosty);
             Directory.CreateDirectory(directory);
             var extension = ".jpg";
             if (Uri.TryCreate(asset.RemotePath, UriKind.Absolute, out var uri))

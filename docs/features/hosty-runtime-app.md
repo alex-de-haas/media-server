@@ -46,7 +46,7 @@ Two services with stable keys across runtime profiles:
   target** (`defaultRuntime: docker`). Unblocked now that Hosty Core provides the
   external host-path mount model for catalog roots (`externalMounts`, injected as
   `HOSTY_MOUNT_{KEY}`) and Cloudflare-tunnel ingress (see
-  [Storage and data](storage-and-data.md) and
+  [Storage and data](storage-and-data/feature.md) and
   [Implementation plan](implementation-plan.md)).
 
 Keep the same service keys, endpoint keys, setting keys, data semantics, and UI
@@ -225,9 +225,9 @@ port, dependency, and setting).
 - On schema upgrade, the app prefers to request an on-demand backup from Core
   before applying EF Core migrations; if Core does not expose an app-callable
   backup endpoint, the app applies migrations without a pre-migration backup (see
-  [Storage and data](storage-and-data.md)).
+  [Storage and data](storage-and-data/feature.md)).
 
-Details in [Storage and data](storage-and-data.md).
+Details in [Storage and data](storage-and-data/feature.md).
 
 ## Shell Embedding
 
