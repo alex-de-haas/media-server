@@ -25,7 +25,7 @@ import { RemapDialog } from "@/components/remap-dialog";
 import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { episodeLabel, formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
-import { errorMessage } from "@/lib/ui";
+import { errorMessage, formatCount, openExternal } from "@/lib/ui";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -656,20 +656,6 @@ function KeywordTags({ keywords }: { keywords: string[] }) {
 
 // Opens a trailer / IMDb page in a new tab, severing the opener for safety. The `noopener` window
 // feature already nulls `opener`, but not every browser honours it, so clear it explicitly too.
-function openExternal(url: string) {
-  const opened = window.open(url, "_blank", "noopener,noreferrer");
-  if (opened) {
-    opened.opener = null;
-  }
-}
-
-// Compact vote counts: 12345 → "12K". Pin the locale so SSR and the client format identically (avoids a
-// hydration mismatch); the UI is English-only.
-const countFormatter = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
-function formatCount(value: number) {
-  return countFormatter.format(value);
-}
-
 /**
  * Launches Infuse for the item via a TMDb library deep link (movies auto-play; series open to the show),
  * with a copy-link fallback for when the popup is blocked or Infuse isn't installed. Renders nothing when

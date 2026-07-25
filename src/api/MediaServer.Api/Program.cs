@@ -137,6 +137,8 @@ builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
+// Scoped: it reads the library and the payload cache through a DbContext.
+builder.Services.AddScoped<TitlePreviewService>();
 
 // Watched-history providers resolve by stable key, like the metadata providers above.
 // Scoped rather than singleton: the adapters it resolves hold a DbContext, and a singleton registry

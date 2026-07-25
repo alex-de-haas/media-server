@@ -38,6 +38,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<RecommendationHide> RecommendationHides => Set<RecommendationHide>();
     public DbSet<TmdbRecommendationCacheEntry> TmdbRecommendationCache => Set<TmdbRecommendationCacheEntry>();
     public DbSet<TmdbPosterCacheEntry> TmdbPosterCache => Set<TmdbPosterCacheEntry>();
+    public DbSet<TmdbTitleDetailCacheEntry> TmdbTitleDetailCache => Set<TmdbTitleDetailCacheEntry>();
     public DbSet<RecommendationPreference> RecommendationPreferences => Set<RecommendationPreference>();
 
     /// <summary>
@@ -542,6 +543,14 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         posterCache.HasIndex(entity => new { entity.Kind, entity.TmdbId }).IsUnique();
         posterCache.Property(entity => entity.Kind).HasConversion<int>();
         posterCache.Property(entity => entity.TmdbId).HasMaxLength(32);
+
+        var titleDetailCache = modelBuilder.Entity<TmdbTitleDetailCacheEntry>();
+        titleDetailCache.HasKey(entity => entity.Id);
+        // One row per title and language; a refresh replaces it rather than piling up generations.
+        titleDetailCache.HasIndex(entity => new { entity.Kind, entity.TmdbId, entity.Language }).IsUnique();
+        titleDetailCache.Property(entity => entity.Kind).HasConversion<int>();
+        titleDetailCache.Property(entity => entity.TmdbId).HasMaxLength(32);
+        titleDetailCache.Property(entity => entity.Language).HasMaxLength(16);
 
         var recommendationPreference = modelBuilder.Entity<RecommendationPreference>();
         recommendationPreference.HasKey(entity => entity.Id);

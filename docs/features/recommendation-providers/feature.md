@@ -133,10 +133,11 @@ to all available rather than silently emptying the feed.
   (`Everything | In library | Not in library`). The source control appears only
   once a second source exists; turning the last one off is treated as "all"
   rather than leaving an unexplained empty feed.
-- A held title links to its detail page. A discovery offers **Track**, handing
-  off to the existing watchlist flow — this page never pretends playback is
-  available for something the instance does not have, and acquisition stays in
-  [Watchlist and discovery](../watchlist-and-discovery.md).
+- A held title links to its detail page. A discovery's poster opens the
+  [title preview](../title-preview/feature.md), and the card offers **Track**,
+  handing off to the existing watchlist flow — this page never pretends playback
+  is available for something the instance does not have, and acquisition stays
+  in [Watchlist and discovery](../watchlist-and-discovery.md).
 - Hiding is one click, so undo is one click: the toast carries it.
 - A title both engines chose is badged **Both**.
 

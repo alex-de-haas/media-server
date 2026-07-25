@@ -384,6 +384,9 @@ The gap recomputes whenever the library or the schedule changes, so it never dri
 - **Tracked drawer** — a **name filter** on top, then poster rows of the user's
   tracked movies/series (kind, next date, in-library / owned-vs-aired hint, and a
   "no date yet" marker where applicable); add (TMDb search) and remove live here.
+  A row's poster/title area opens the
+  [title preview](title-preview/feature.md), as do the rows of the day dialog and
+  the "Add title" search results.
 - **Reminders drawer** — a name filter, then poster rows of the user's reminders
   (type, lead, time, and a state pill: scheduled / recurring / released / pending),
   each deletable. This is where **pending** reminders (type set, date unknown) live.

@@ -18,6 +18,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TitlePreviewDialog, type TitlePreviewTarget } from "@/components/title-preview-dialog";
 
 /**
  * "Add title" on the calendar: search TMDb for a movie or series — in the library or not — and put it on
@@ -34,6 +35,7 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [searchTitle, setSearchTitle] = useState("");
   const [searchYear, setSearchYear] = useState("");
   const [results, setResults] = useState<MetadataCandidate[] | null>(null);
+  const [preview, setPreview] = useState<TitlePreviewTarget | null>(null);
 
   // Reset transient state each time the dialog (re)opens so a prior search doesn't linger.
   const [wasOpen, setWasOpen] = useState(open);
@@ -138,16 +140,33 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   key={`${candidate.reference.provider}:${candidate.reference.id}`}
                   className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5"
                 >
-                  <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
-                    {candidate.posterUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={candidate.posterUrl} alt="" className="h-full w-full object-cover" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{candidate.title}</p>
-                    <p className="text-muted-foreground text-xs">{candidate.year ?? "Year unknown"}</p>
-                  </div>
+                  {/* A search result is often a guess — the row opens the preview so it can be checked
+                      before it lands on the calendar. */}
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
+                    onClick={() =>
+                      setPreview({
+                        provider: candidate.reference.provider,
+                        providerId: candidate.reference.id,
+                        kind,
+                        title: candidate.title,
+                        year: candidate.year,
+                        posterUrl: candidate.posterUrl,
+                      })
+                    }
+                  >
+                    <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
+                      {candidate.posterUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={candidate.posterUrl} alt="" className="h-full w-full object-cover" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{candidate.title}</p>
+                      <p className="text-muted-foreground text-xs">{candidate.year ?? "Year unknown"}</p>
+                    </div>
+                  </button>
                   <Button variant="outline" size="sm" disabled={track.isPending} onClick={() => track.mutate(candidate)}>
                     <CalendarPlus className="size-4" aria-hidden /> Track
                   </Button>
@@ -159,6 +178,8 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           )}
         </div>
       </DialogContent>
+
+      <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
     </Dialog>
   );
 }

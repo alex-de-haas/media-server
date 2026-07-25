@@ -386,6 +386,41 @@ export interface LibraryDetail {
   keywords: string[];
 }
 
+// What the preview dialog shows about a title the instance may not hold. Field names match `LibraryDetail`
+// wherever they overlap, so both render through the same formatting helpers. It carries nothing about
+// playback, versions or files: those exist only for a held title, and `inLibrary`/`mediaItemId` link to its
+// full detail page instead.
+export interface TitlePreview {
+  provider: string;
+  providerId: string;
+  kind: string;
+  title: string;
+  originalTitle: string | null;
+  year: number | null;
+  overview: string | null;
+  tagline: string | null;
+  genres: string[];
+  posterUrl: string | null;
+  backdropUrl: string | null;
+  officialRating: string | null;
+  communityRating: number | null;
+  voteCount: number | null;
+  runtimeTicks: number | null;
+  // Production status (Released, Ended, Returning Series, …).
+  status: string | null;
+  // Totals per the provider (series only); the instance may hold fewer, or none.
+  seasonCount: number | null;
+  episodeCount: number | null;
+  directors: string[];
+  creators: string[];
+  cast: CastMember[];
+  trailerUrl: string | null;
+  imdbId: string | null;
+  homepage: string | null;
+  inLibrary: boolean;
+  mediaItemId: string | null;
+}
+
 // A TV network/distributor surfaced on series detail.
 export interface Network {
   name: string;
@@ -863,6 +898,11 @@ export const mediaServer = {
   // Person page, keyed by the provider identity its cast members carry (CastMember.provider/providerId).
   getPerson: (provider: string, providerId: string) =>
     apiJson<Person>(`${BASE}/persons/${provider}/${providerId}`),
+
+  // Detail preview for one provider title — held or not. `kind` is required: TMDb's movie and tv id
+  // spaces overlap, so the server never guesses which one an id belongs to.
+  getTitlePreview: (provider: string, providerId: string, kind: "Movie" | "Series") =>
+    apiJson<TitlePreview>(`${BASE}/metadata/${provider}/${encodeURIComponent(providerId)}?kind=${kind}`),
 
   searchMetadata: (input: MetadataSearchInput) =>
     apiJson<MetadataCandidate[]>(`${BASE}/metadata/search`, {

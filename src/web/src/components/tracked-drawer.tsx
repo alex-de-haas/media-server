@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { QueryState } from "@/components/states";
+import { TitlePreviewDialog, type TitlePreviewTarget } from "@/components/title-preview-dialog";
 
 /**
  * The Tracked slide-over: every title on the user's calendar as a poster row — kind, next date (or a
@@ -35,6 +36,7 @@ export function TrackedDrawer({
   onRemind: (item: WatchlistItem) => void;
 }) {
   const [filter, setFilter] = useState("");
+  const [preview, setPreview] = useState<TitlePreviewTarget | null>(null);
   const queryClient = useQueryClient();
 
   const watchlist = useQuery({ queryKey: ["watchlist"], queryFn: watchlistApi.list, enabled: open });
@@ -96,6 +98,7 @@ export function TrackedDrawer({
                   <TrackedRow
                     key={item.id}
                     item={item}
+                    onOpen={() => setPreview(previewTargetOf(item))}
                     onRemind={() => onRemind(item)}
                     onRefresh={() => refresh.mutate(item)}
                     onRemove={() => remove.mutate(item)}
@@ -107,18 +110,34 @@ export function TrackedDrawer({
           </div>
         </div>
       </DrawerContent>
+
+      <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
     </Drawer>
   );
 }
 
+/** A tracked title already carries its provider identity, so the preview opens on what the row shows. */
+function previewTargetOf(item: WatchlistItem): TitlePreviewTarget {
+  return {
+    provider: item.provider,
+    providerId: item.providerId,
+    kind: item.kind,
+    title: item.title,
+    year: item.year,
+    posterUrl: item.posterUrl,
+  };
+}
+
 function TrackedRow({
   item,
+  onOpen,
   onRemind,
   onRefresh,
   onRemove,
   busy,
 }: {
   item: WatchlistItem;
+  onOpen: () => void;
   onRemind: () => void;
   onRefresh: () => void;
   onRemove: () => void;
@@ -131,6 +150,8 @@ function TrackedRow({
 
   return (
     <div className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5">
+      {/* Poster and title open the preview; the per-row actions to the right keep their own hit areas. */}
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
       <div className="bg-secondary h-16 w-11 shrink-0 overflow-hidden rounded">
         {item.posterUrl && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -157,6 +178,7 @@ function TrackedRow({
           <p className="text-brand truncate text-xs">Behind by {item.libraryGap.missingAired} aired</p>
         )}
       </div>
+      </button>
       <div className="flex shrink-0 items-center">
         <Button
           variant="ghost"

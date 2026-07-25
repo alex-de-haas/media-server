@@ -1,7 +1,7 @@
-using System.Text.Json;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Library;
@@ -274,7 +274,12 @@ public sealed class LibraryReadService(
         // Crew, networks, studios, trailer, keywords, … live in the cached TMDb payload (Raw); parse them
         // once here rather than persisting a column per field. Cast is the exception: it comes from the
         // normalized Person/MediaItemPerson join so each member carries a stable person id the UI can link to.
-        var rich = ParseRich(meta?.Raw, item.Kind);
+        var rich = TmdbPayload.Parse(meta?.Raw, item.Kind);
+        // Empty rather than absent for a movie, or for a series TMDb lists no network for; the UI hides the
+        // rail on null, so collapse it here rather than rendering an empty one.
+        var networks = rich.Networks.Count > 0
+            ? rich.Networks.Select(brand => new NetworkDto(brand.Name, brand.LogoUrl)).ToList()
+            : null;
         var cast = await LoadCastAsync(item.Id, cancellationToken);
 
         return new LibraryDetailDto(
@@ -306,7 +311,7 @@ public sealed class LibraryReadService(
             item.DefaultSourceId,
             mediaSources,
             seasons,
-            rich.Networks,
+            networks,
             rich.Status,
             rich.VoteCount,
             rich.SeasonCount,
@@ -318,7 +323,7 @@ public sealed class LibraryReadService(
             cast,
             rich.Directors,
             rich.Creators,
-            rich.Studios,
+            rich.Studios.Select(brand => new StudioDto(brand.Name, brand.LogoUrl)).ToList(),
             rich.Keywords);
     }
 
@@ -515,10 +520,6 @@ public sealed class LibraryReadService(
         images.Where(image => image.ImageType == type).OrderBy(image => image.SortOrder)
             .Select(image => image.RemotePath).FirstOrDefault();
 
-    // The TMDb image CDN base. Poster/backdrop/logo RemotePaths are already absolute (the provider
-    // prefixes them), but network logo_paths come straight from the cached JSON payload, so prefix here.
-    private const string TmdbImageBase = "https://image.tmdb.org/t/p/original";
-
     /// <summary>
     /// The best title logo: prefer the configured language, then English, then a language-neutral logo,
     /// then whatever is first. Logos are tagged with a 2-letter language (or null) by the provider.
@@ -546,96 +547,7 @@ public sealed class LibraryReadService(
             ?? logos.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First();
     }
 
-    /// <summary>
-    /// Rich detail fields derived from the cached TMDb payload (<c>MetadataRecord.Raw</c>). The provider
-    /// folds credits/external ids/videos/certification/keywords into that payload via append_to_response,
-    /// so everything here is parsed without an extra request or a dedicated column.
-    /// </summary>
-    private sealed record RichMetadata
-    {
-        public static readonly RichMetadata Empty = new();
-
-        public IReadOnlyList<NetworkDto>? Networks { get; init; }
-        public IReadOnlyList<StudioDto> Studios { get; init; } = [];
-        public IReadOnlyList<string> Directors { get; init; } = [];
-        public IReadOnlyList<string> Creators { get; init; } = [];
-        public IReadOnlyList<string> Keywords { get; init; } = [];
-        public string? Status { get; init; }
-        public int? VoteCount { get; init; }
-        public int? SeasonCount { get; init; }
-        public int? EpisodeCount { get; init; }
-        public string? CollectionName { get; init; }
-        public string? Homepage { get; init; }
-        public string? ImdbId { get; init; }
-        public string? TrailerUrl { get; init; }
-    }
-
     private const int MaxCast = 20;
-    private const int MaxKeywords = 16;
-
-    private static RichMetadata ParseRich(string? raw, MediaKind kind)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return RichMetadata.Empty;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(raw);
-            var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                return RichMetadata.Empty;
-            }
-
-            // Networks are a series concept; keep them null for movies so the UI hides the rail.
-            var networks = kind == MediaKind.Series
-                ? ParseBrands(root, "networks").Select(brand => new NetworkDto(brand.Name, brand.LogoUrl)).ToList()
-                : [];
-
-            return new RichMetadata
-            {
-                Networks = networks.Count > 0 ? networks : null,
-                Studios = ParseBrands(root, "production_companies").Select(brand => new StudioDto(brand.Name, brand.LogoUrl)).ToList(),
-                Directors = ParseCrewJob(root, "Director"),
-                Creators = ParseNames(root, "created_by"),
-                Keywords = ParseKeywords(root),
-                Status = EmptyToNull(JsonString(root, "status")),
-                VoteCount = JsonInt(root, "vote_count"),
-                SeasonCount = JsonInt(root, "number_of_seasons"),
-                EpisodeCount = JsonInt(root, "number_of_episodes"),
-                CollectionName = ParseCollectionName(root),
-                Homepage = EmptyToNull(JsonString(root, "homepage")),
-                ImdbId = ParseImdbId(root),
-                TrailerUrl = ParseTrailerUrl(root),
-            };
-        }
-        catch (JsonException)
-        {
-            return RichMetadata.Empty;
-        }
-    }
-
-    // A name + absolute logo url, shared by networks and production companies (identical TMDb shape).
-    private static IReadOnlyList<(string Name, string? LogoUrl)> ParseBrands(JsonElement root, string property)
-    {
-        if (!root.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
-        {
-            return [];
-        }
-
-        var brands = new List<(string, string?)>();
-        foreach (var element in array.EnumerateArray())
-        {
-            if (EmptyToNull(JsonString(element, "name")) is { } name)
-            {
-                brands.Add((name, ImageUrl(JsonString(element, "logo_path"))));
-            }
-        }
-
-        return brands;
-    }
 
     // The top-billed cast from the normalized Person/MediaItemPerson join (written at enrich time), ordered
     // by billing order. Each member carries its stable provider identity so the UI can link to the person
@@ -652,168 +564,7 @@ public sealed class LibraryReadService(
             .Take(MaxCast)
             .ToListAsync(cancellationToken);
 
-    private static IReadOnlyList<string> ParseCrewJob(JsonElement root, string job)
-    {
-        if (!TryGetArray(root, "credits", "crew", out var crew))
-        {
-            return [];
-        }
-
-        var names = new List<string>();
-        foreach (var member in crew.EnumerateArray())
-        {
-            if (JsonEquals(member, "job", job) &&
-                EmptyToNull(JsonString(member, "name")) is { } name && !names.Contains(name))
-            {
-                names.Add(name);
-            }
-        }
-
-        return names;
-    }
-
-    private static IReadOnlyList<string> ParseNames(JsonElement root, string property)
-    {
-        if (!root.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
-        {
-            return [];
-        }
-
-        var names = new List<string>();
-        foreach (var element in array.EnumerateArray())
-        {
-            if (EmptyToNull(JsonString(element, "name")) is { } name && !names.Contains(name))
-            {
-                names.Add(name);
-            }
-        }
-
-        return names;
-    }
-
-    // Keywords nest under keywords.keywords for movies and keywords.results for tv.
-    private static IReadOnlyList<string> ParseKeywords(JsonElement root)
-    {
-        if (!root.TryGetProperty("keywords", out var keywords) || keywords.ValueKind != JsonValueKind.Object)
-        {
-            return [];
-        }
-
-        JsonElement array;
-        if (keywords.TryGetProperty("keywords", out var movie) && movie.ValueKind == JsonValueKind.Array)
-        {
-            array = movie;
-        }
-        else if (keywords.TryGetProperty("results", out var series) && series.ValueKind == JsonValueKind.Array)
-        {
-            array = series;
-        }
-        else
-        {
-            return [];
-        }
-
-        var names = new List<string>();
-        foreach (var keyword in array.EnumerateArray())
-        {
-            if (EmptyToNull(JsonString(keyword, "name")) is { } name)
-            {
-                names.Add(name);
-            }
-
-            if (names.Count >= MaxKeywords)
-            {
-                break;
-            }
-        }
-
-        return names;
-    }
-
-    private static string? ParseCollectionName(JsonElement root) =>
-        root.TryGetProperty("belongs_to_collection", out var collection) && collection.ValueKind == JsonValueKind.Object
-            ? EmptyToNull(JsonString(collection, "name"))
-            : null;
-
-    private static string? ParseImdbId(JsonElement root)
-    {
-        if (root.TryGetProperty("external_ids", out var external) && external.ValueKind == JsonValueKind.Object &&
-            EmptyToNull(JsonString(external, "imdb_id")) is { } id)
-        {
-            return id;
-        }
-
-        // Movies also carry imdb_id at the top level.
-        return EmptyToNull(JsonString(root, "imdb_id"));
-    }
-
-    // The best YouTube trailer: an official trailer, then any trailer, then any YouTube clip.
-    private static string? ParseTrailerUrl(JsonElement root)
-    {
-        if (!TryGetArray(root, "videos", "results", out var results))
-        {
-            return null;
-        }
-
-        string? official = null;
-        string? trailer = null;
-        string? anyYoutube = null;
-        foreach (var video in results.EnumerateArray())
-        {
-            if (!JsonEquals(video, "site", "YouTube") || EmptyToNull(JsonString(video, "key")) is not { } key)
-            {
-                continue;
-            }
-
-            var url = "https://www.youtube.com/watch?v=" + key;
-            anyYoutube ??= url;
-            if (!JsonEquals(video, "type", "Trailer"))
-            {
-                continue;
-            }
-
-            trailer ??= url;
-            if (video.TryGetProperty("official", out var isOfficial) && isOfficial.ValueKind == JsonValueKind.True)
-            {
-                official ??= url;
-            }
-        }
-
-        return official ?? trailer ?? anyYoutube;
-    }
-
-    private static bool TryGetArray(JsonElement root, string objectProperty, string arrayProperty, out JsonElement array)
-    {
-        array = default;
-        if (root.TryGetProperty(objectProperty, out var container) && container.ValueKind == JsonValueKind.Object &&
-            container.TryGetProperty(arrayProperty, out var value) && value.ValueKind == JsonValueKind.Array)
-        {
-            array = value;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static string? JsonString(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
-
-    // Ordinal compare against a string-valued property, allocation-free (ValueEquals reads the UTF-8 bytes).
-    // The ValueKind guard keeps it from throwing on a non-string value, unlike a bare ValueEquals call.
-    private static bool JsonEquals(JsonElement element, string property, string value) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var prop) &&
-        prop.ValueKind == JsonValueKind.String && prop.ValueEquals(value);
-
-    private static int? JsonInt(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.TryGetInt32(out var number)
-            ? number
-            : null;
-
     private static string? EmptyToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
-
-    private static string? ImageUrl(string? path) => string.IsNullOrWhiteSpace(path) ? null : TmdbImageBase + path;
 
     private static MediaSourceDto MapSource(MediaSource source) => new(
         source.Id,

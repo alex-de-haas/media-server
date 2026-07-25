@@ -41,6 +41,8 @@ export interface AppMock {
   metadataSearch?: unknown[];
   remapTargetId?: string; // id returned by POST /library/{id}/remap
   releaseCalendar?: unknown[]; // GET /watchlist/calendar
+  watchlist?: unknown[]; // GET /watchlist
+  titlePreview?: Record<string, unknown>; // GET /metadata/{provider}/{id}, keyed by provider id
   watchHistoryCalendar?: unknown; // GET /watch-history/calendar (an envelope, not a list)
   watchHistoryUndated?: unknown; // GET /watch-history/calendar/undated ({ entries, total })
   recommendations?: unknown; // GET /recommendations ({ items, sources, selectedSources })
@@ -92,6 +94,12 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path.endsWith("/favorite")) return route.fulfill({ json: userData({ isFavorite: method === "POST" }) });
 
     if (path === "/watchlist/calendar") return route.fulfill({ json: mock.releaseCalendar ?? [] });
+    if (path === "/watchlist") {
+      // POST is a track; the dialogs only need it to succeed.
+      return method === "POST"
+        ? route.fulfill({ json: { ...(mock.watchlist?.[0] ?? {}), id: "w-new", title: "Tracked" } })
+        : route.fulfill({ json: mock.watchlist ?? [] });
+    }
     // An envelope rather than a list, so it cannot fall through to the empty-array catch-all.
     if (path === "/recommendations") {
       return route.fulfill({
@@ -112,6 +120,16 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     }
 
     if (path === "/metadata/search") return route.fulfill({ json: mock.metadataSearch ?? [] });
+
+    // The title preview: /metadata/{provider}/{id}. An id the mock does not know is a 404, as it is on
+    // the server — the dialog has to say so rather than hang.
+    const previewId = path.match(/^\/metadata\/[^/]+\/([^/]+)$/)?.[1];
+    if (previewId) {
+      const preview = mock.titlePreview?.[previewId];
+      return preview
+        ? route.fulfill({ json: preview })
+        : route.fulfill({ status: 404, json: { error: "not found" } });
+    }
     if (/^\/ingest\/[^/]+\/search$/.test(path)) return route.fulfill({ json: mock.metadataSearch ?? [] });
     if (/^\/ingest\/[^/]+\/match$/.test(path)) return route.fulfill({ json: null });
     if (/^\/library\/[^/]+\/remap$/.test(path)) return route.fulfill({ json: { id: mock.remapTargetId ?? "remapped" } });
@@ -207,6 +225,41 @@ export const movieDetail = (id: string, title: string, tmdbId: string | null = n
   creators: [],
   studios: [],
   keywords: [],
+});
+
+// What `GET /metadata/{provider}/{id}` answers for a title the instance does not hold.
+export const aTitlePreview = (
+  providerId: string,
+  title: string,
+  overrides: Record<string, unknown> = {},
+) => ({
+  provider: "tmdb",
+  providerId,
+  kind: "Movie",
+  title,
+  originalTitle: null,
+  year: 2010,
+  overview: "A thief who steals corporate secrets through dream-sharing technology.",
+  tagline: null,
+  genres: ["Science Fiction", "Action"],
+  posterUrl: null,
+  backdropUrl: null,
+  officialRating: "PG-13",
+  communityRating: 8.4,
+  voteCount: 34000,
+  runtimeTicks: 88_800_000_000,
+  status: "Released",
+  seasonCount: null,
+  episodeCount: null,
+  directors: ["Christopher Nolan"],
+  creators: [],
+  cast: [{ provider: "tmdb", providerId: "6193", name: "Leonardo DiCaprio", character: "Cobb", profileUrl: null }],
+  trailerUrl: null,
+  imdbId: null,
+  homepage: null,
+  inLibrary: false,
+  mediaItemId: null,
+  ...overrides,
 });
 
 export const seriesDetail = (id: string, title: string, tmdbId: string | null = null) => ({

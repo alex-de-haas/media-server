@@ -97,7 +97,9 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
                 continue;
             }
 
-            records.Add(MapDetails(reference, language, type, document.RootElement));
+            // The payload is projected by the shared reader, which the preview surface uses too — the
+            // localized facts about a title must not depend on who read the document.
+            records.Add(TmdbPayload.MapDetails(reference, language, kind, document.RootElement));
         }
 
         return records;
@@ -162,129 +164,6 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
             var language = image.TryGetProperty("iso_639_1", out var iso) && iso.ValueKind == JsonValueKind.String ? iso.GetString() : null;
             images.Add(new RemoteImage(type, language, ImageBaseUrl + filePath, sortOrder++));
         }
-    }
-
-    private ProviderMetadata MapDetails(ProviderRef reference, string language, string type, JsonElement root)
-    {
-        var genres = new List<string>();
-        if (root.TryGetProperty("genres", out var genreArray) && genreArray.ValueKind == JsonValueKind.Array)
-        {
-            genres.AddRange(genreArray.EnumerateArray().Select(genre => GetString(genre, "name")).OfType<string>());
-        }
-
-        long? runtimeTicks = type == "movie"
-            ? GetInt(root, "runtime") is { } minutes ? minutes * TimeSpan.TicksPerMinute : null
-            : FirstEpisodeRuntimeTicks(root);
-
-        return new ProviderMetadata(
-            reference,
-            language,
-            GetString(root, type == "movie" ? "title" : "name"),
-            GetString(root, type == "movie" ? "original_title" : "original_name"),
-            GetString(root, "original_language"),
-            EmptyToNull(GetString(root, "overview")),
-            EmptyToNull(GetString(root, "tagline")),
-            genres,
-            OfficialRating: ParseOfficialRating(root, type, PreferredRegion(language)),
-            CommunityRating: GetDouble(root, "vote_average"),
-            ReleaseDate: ParseDate(GetString(root, type == "movie" ? "release_date" : "first_air_date")),
-            RuntimeTicks: runtimeTicks,
-            Raw: root.GetRawText());
-    }
-
-    // The certification (PG-13, TV-MA, 16, …) for the operator's region. TMDb keys it by country, so
-    // prefer the region implied by the requested language, then fall back to US, then any available rating.
-    private static string? ParseOfficialRating(JsonElement root, string type, string region) => type == "movie"
-        ? PickByRegion(root, "release_dates", region, MovieCertification)
-        : PickByRegion(root, "content_ratings", region, entry => EmptyToNull(GetString(entry, "rating")));
-
-    private static string? MovieCertification(JsonElement entry)
-    {
-        if (!entry.TryGetProperty("release_dates", out var dates) || dates.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
-
-        foreach (var date in dates.EnumerateArray())
-        {
-            if (EmptyToNull(GetString(date, "certification")) is { } certification)
-            {
-                return certification;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? PickByRegion(JsonElement root, string property, string region, Func<JsonElement, string?> select)
-    {
-        if (!root.TryGetProperty(property, out var container) || container.ValueKind != JsonValueKind.Object ||
-            !container.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
-
-        string? fallbackUs = null;
-        string? fallbackAny = null;
-        foreach (var entry in results.EnumerateArray())
-        {
-            if (select(entry) is not { } value)
-            {
-                continue;
-            }
-
-            // ValueEquals compares the UTF-8 bytes directly (no string allocation per entry). TMDb
-            // returns iso_3166_1 as an upper-case alpha-2 code, and region is upper-cased to match.
-            if (entry.TryGetProperty("iso_3166_1", out var iso) && iso.ValueKind == JsonValueKind.String)
-            {
-                if (iso.ValueEquals(region))
-                {
-                    return value;
-                }
-
-                if (iso.ValueEquals("US"))
-                {
-                    fallbackUs ??= value;
-                }
-            }
-
-            fallbackAny ??= value;
-        }
-
-        return fallbackUs ?? fallbackAny;
-    }
-
-    // "ru-RU" → "RU"; "zh-Hans-CN" → "CN"; a tag with no region (bare "en") defaults to US, TMDb's most
-    // complete certification set. The region is the first 2-letter subtag after the language code, so a
-    // script subtag (4 letters) between them is skipped.
-    private static string PreferredRegion(string language)
-    {
-        var parts = language.Split('-');
-        for (var i = 1; i < parts.Length; i++)
-        {
-            if (parts[i].Length == 2)
-            {
-                return parts[i].ToUpperInvariant();
-            }
-        }
-
-        return "US";
-    }
-
-    private static long? FirstEpisodeRuntimeTicks(JsonElement root)
-    {
-        if (root.TryGetProperty("episode_run_time", out var array) && array.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var value in array.EnumerateArray())
-            {
-                if (value.TryGetInt32(out var minutes))
-                {
-                    return minutes * TimeSpan.TicksPerMinute;
-                }
-            }
-        }
-
-        return null;
     }
 
     private Task<JsonDocument?> GetAsync(string pathWithQuery, CancellationToken cancellationToken) =>
@@ -355,14 +234,4 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
             _ => null,
         };
     }
-
-    private static int? GetInt(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.TryGetInt32(out var number)
-            ? number
-            : null;
-
-    private static double? GetDouble(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.TryGetDouble(out var number)
-            ? number
-            : null;
 }

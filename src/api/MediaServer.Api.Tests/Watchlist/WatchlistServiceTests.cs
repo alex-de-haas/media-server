@@ -232,6 +232,26 @@ public sealed class WatchlistServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Calendar_events_carry_the_provider_identity_so_a_row_can_open_the_title_preview()
+    {
+        int userId;
+        using (var database = WatchlistTestData.NewContext(_connection))
+        {
+            var user = WatchlistTestData.SeedUser(database);
+            userId = user.Id;
+            var movie = WatchlistTestData.SeedTitle(database, MediaKind.Movie, "27205", "Inception");
+            WatchlistTestData.SeedEntry(database, user, movie);
+            WatchlistTestData.SeedRelease(database, movie, ReleaseType.Theatrical, Today.AddDays(2), region: "US");
+        }
+
+        var events = await ExecuteAsync(service => service.CalendarAsync(userId, Today, Today.AddDays(30), CancellationToken.None));
+
+        var single = Assert.Single(events);
+        Assert.Equal("tmdb", single.Provider);
+        Assert.Equal("27205", single.ProviderId);
+    }
+
+    [Fact]
     public async Task Calendar_shows_only_the_title_level_episodes_for_a_tracking_off_series()
     {
         int userId;

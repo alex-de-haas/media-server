@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Download, FolderTree, type LucideIcon } from "lucide-react";
@@ -8,7 +9,8 @@ import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
 import { Rail, RailItem } from "@/components/rail";
 import { RecommendationCard } from "@/components/recommendation-card";
-import { useRecommendationActions } from "@/components/recommendations-view";
+import { previewTarget, recommendationOf, useRecommendationActions } from "@/components/recommendations-view";
+import { TitlePreviewDialog, type TitlePreviewTarget } from "@/components/title-preview-dialog";
 import { PosterCard, detailHref } from "@/components/poster-card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -64,6 +66,7 @@ function RecommendedRow() {
     queryFn: () => mediaServer.recommendations({ limit: 12 }),
   });
   const { hide, track } = useRecommendationActions();
+  const [preview, setPreview] = useState<TitlePreviewTarget | null>(null);
 
   if (!feed.data?.items.length) {
     return null;
@@ -80,10 +83,21 @@ function RecommendedRow() {
       <div className="flex gap-3 overflow-x-auto pb-1">
         {feed.data.items.map((item) => (
           <div key={`${item.kind}:${item.tmdbId}`} className="w-28 shrink-0 sm:w-32">
-            <RecommendationCard item={item} onHide={hide} onTrack={track} />
+            <RecommendationCard
+              item={item}
+              onHide={hide}
+              onTrack={track}
+              onOpen={(opened) => setPreview(previewTarget(opened))}
+            />
           </div>
         ))}
       </div>
+
+      <TitlePreviewDialog
+        target={preview}
+        onOpenChange={(open) => !open && setPreview(null)}
+        onHide={(target) => hide(recommendationOf(target, feed.data?.items ?? []))}
+      />
     </section>
   );
 }

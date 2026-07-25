@@ -28,6 +28,7 @@ import { AddTitleDialog } from "@/components/add-title-dialog";
 import { ReminderDialog, type ReminderTarget } from "@/components/reminder-dialog";
 import { RemindersDrawer } from "@/components/reminders-drawer";
 import { TrackedDrawer } from "@/components/tracked-drawer";
+import { TitlePreviewDialog, type TitlePreviewTarget } from "@/components/title-preview-dialog";
 
 interface ReminderPrompt {
   target: ReminderTarget;
@@ -57,6 +58,7 @@ export function ReleasesCalendar({
   const [reminderPrompt, setReminderPrompt] = useState<ReminderPrompt | null>(null);
   const [reminderOpen, setReminderOpen] = useState(false);
   const [dayDetail, setDayDetail] = useState<string | null>(null);
+  const [preview, setPreview] = useState<TitlePreviewTarget | null>(null);
 
   const range = monthGridRange(month);
   const events = useQuery({
@@ -76,6 +78,17 @@ export function ReleasesCalendar({
       defaultType: event.type,
     });
     setReminderOpen(true);
+  };
+
+  const openPreviewFor = (event: CalendarEvent) => {
+    setDayDetail(null);
+    setPreview({
+      provider: event.provider,
+      providerId: event.providerId,
+      kind: event.kind,
+      title: event.title,
+      posterUrl: event.posterUrl,
+    });
   };
 
   const openReminderForItem = (item: WatchlistItem) => {
@@ -166,31 +179,43 @@ export function ReleasesCalendar({
           </DialogHeader>
           <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
             {detailEvents.map((event) => (
-              <button
-                key={event.releaseId}
-                type="button"
-                className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5 text-left"
-                onClick={() => openReminderFor(event)}
-              >
-                <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
-                  {event.posterUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={event.posterUrl} alt="" className="h-full w-full object-cover" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-1.5 truncate text-sm font-medium">
-                    <span className="truncate">{event.title}</span>
-                    {event.inLibrary && <Check className="text-brand size-3.5 shrink-0" aria-label="In library" />}
-                  </p>
-                  <p className="text-muted-foreground text-xs">{eventChipLabel(event)}</p>
-                </div>
-                {event.hasReminder && <Bell className="text-brand size-4 shrink-0" aria-label="Reminder set" />}
-              </button>
+              <div key={event.releaseId} className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5">
+                {/* The row body says what the title is; the bell keeps the reminder one click away. */}
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
+                  onClick={() => openPreviewFor(event)}
+                >
+                  <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
+                    {event.posterUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={event.posterUrl} alt="" className="h-full w-full object-cover" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+                      <span className="truncate">{event.title}</span>
+                      {event.inLibrary && <Check className="text-brand size-3.5 shrink-0" aria-label="In library" />}
+                    </p>
+                    <p className="text-muted-foreground text-xs">{eventChipLabel(event)}</p>
+                  </div>
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={event.hasReminder ? "Reminder set" : "Remind me"}
+                  className={event.hasReminder ? "text-brand" : undefined}
+                  onClick={() => openReminderFor(event)}
+                >
+                  <Bell />
+                </Button>
+              </div>
             ))}
           </div>
         </DialogContent>
       </Dialog>
+
+      <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
     </>
   );
 
