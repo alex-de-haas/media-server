@@ -32,8 +32,9 @@ Top to bottom:
   names are **not** links: `/people/{provider}-{id}` resolves against local `Person`
   rows, and a title nobody holds has none.
 - **Actions**: `Track / remind me` (the shared `TrackTitleControl`, which lights up
-  when the title is already on the calendar), `Trailer`, `IMDb`, and `Not interested`
-  on the recommendation surfaces. A held title leads with **Open in library**.
+  when the title is already on the calendar — matched on kind as well as provider id,
+  since the two id spaces overlap), `Trailer`, `IMDb`, and `Not interested` on the
+  recommendation surfaces. A held title leads with **Open in library**.
 
 The dialog opens on what the calling card already knows — poster, title, year — and
 fills in the rest when the request lands; only the parts that need it show skeletons.
@@ -119,4 +120,5 @@ with playback, versions, episodes and admin controls, and the preview never imit
 - `e2e/title-preview.spec.ts` — opening from a discovery poster and from the tracked
   drawer, the facts it states, tracking offered but never playback, dismissal closing
   the dialog, a held title linking to its page, the error state keeping the known
-  facts, and the preview opening over the search dialog without replacing it.
+  facts, the preview opening over the search dialog without replacing it, and a
+  tracked series not being mistaken for the movie sharing its TMDb id.

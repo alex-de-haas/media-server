@@ -88,6 +88,41 @@ test("a title the provider cannot answer for still shows what the card knew", as
   await expect(dialog.getByRole("button", { name: "Retry" })).toBeVisible();
 });
 
+test("a tracked series is not mistaken for the movie sharing its TMDb id", async ({ page }) => {
+  await setupApp(page, {
+    recommendations: feed, // the movie 27205
+    titlePreview: preview,
+    watchlist: [
+      {
+        id: "w1",
+        trackedTitleId: "t1",
+        kind: "Series", // same id, the other id space
+        title: "Something Else",
+        year: 2019,
+        posterUrl: null,
+        provider: "tmdb",
+        providerId: "27205",
+        productionStatus: null,
+        inLibrary: false,
+        libraryItemId: null,
+        monitorScope: null,
+        monitoredSeasons: [],
+        regionOverride: null,
+        note: null,
+        nextRelease: null,
+        hasDates: false,
+        libraryGap: null,
+        reminders: [],
+      },
+    ],
+  });
+  await page.goto("/recommendations");
+  await page.getByRole("button", { name: "Details for Inception" }).click();
+
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Track / remind me" })).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Tracked" })).toHaveCount(0);
+});
+
 test("a search candidate can be checked before it is tracked", async ({ page }) => {
   await setupApp(page, {
     titlePreview: preview,

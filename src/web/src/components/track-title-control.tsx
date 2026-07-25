@@ -29,9 +29,11 @@ export function TrackTitleControl({
   const [open, setOpen] = useState(false);
 
   const watchlist = useQuery({ queryKey: ["watchlist"], queryFn: watchlistApi.list });
+  // The kind is part of the identity: TMDb's movie and tv id spaces overlap, so matching on the id alone
+  // would show a tracked series as this movie's state — and hand its trackedTitleId to a movie reminder.
   const tracked = useMemo(
-    () => watchlist.data?.find((item) => item.provider === "tmdb" && item.providerId === tmdbId),
-    [watchlist.data, tmdbId],
+    () => watchlist.data?.find((item) => item.provider === "tmdb" && item.providerId === tmdbId && item.kind === kind),
+    [watchlist.data, tmdbId, kind],
   );
   const hasReminder = tracked?.reminders.some((reminder) => reminder.active) ?? false;
 
