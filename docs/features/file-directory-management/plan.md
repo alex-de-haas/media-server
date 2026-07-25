@@ -25,16 +25,27 @@ Written as a diff against [File and directory management](../file-directory-mana
   on disk for an import scan to re-adopt.
 - **New** `DELETE /api/library/seasons/{id}?deleteFiles={bool}` (admin) does the same for
   every episode of one season, the extras parented to that season, and the season row.
-- Both **prune emptied containers**: a season with no episodes left is removed, and a
-  series with nothing left under it (no seasons, episodes, or extras) is removed too —
-  the same cascade `RemapService.CleanupOrphanAsync` already applies after a remap. The
-  response reports what was pruned so the UI can navigate away once the series is gone.
+- Both **prune emptied containers**, counting *every* remaining child rather than only
+  episodes: a season is removed once nothing carries its `SeasonId` — a season-scoped
+  extra (`Kind.Video`, which `IdentifyService.ResolveExtraAsync` parents to the season
+  with both `ParentId` and `SeasonId`) keeps its season alive — and a series is removed
+  once nothing is left under it (no seasons, episodes, or series-level extras). This is
+  exactly what `RemapService.CleanupOrphanAsync` already counts after a remap, and the
+  `Restrict` self-FK makes it mandatory: pruning a season that still has an extra under
+  it would fail the delete outright. The response reports what was pruned so the UI can
+  navigate away once the series is gone.
 - Both are **refused with 409 while the owning series is moving** between catalogs, like
   every other library mutation.
 - A `SourceFile` that fed the episode is **detached, not deleted** (`MediaItemId → null`),
-  so the download's own data is untouched — mirroring the item-level delete. Watch
-  history survives by design (`PlaybackHistoryEntry`/`WatchHistoryOutboxEvent` carry no
-  FK to `MediaItem`).
+  so the download's own data is untouched — mirroring the item-level delete.
+- **Watch history follows the deleted episode**, as it already does for a deleted movie or
+  series: `PlaybackHistoryEntry.MediaItemId` is a required cascading FK
+  (`MediaServerDbContext.cs:590-594`, "a deleted item's plays cannot be projected or
+  exported", asserted by `WatchHistorySchemaTests.DeletingAnItemDropsItsHistory`), so the
+  episode's plays go with it. Queued exports are unaffected: `WatchHistoryOutboxEvent`
+  carries a `MediaItemId` column with no FK plus its own frozen `IdentitySnapshot`, and so
+  still describes the item as it was identified when the play happened. This work changes
+  neither behavior and adds no migration.
 - **Series detail → Episodes tab** gains, for admins: a delete action on each episode row
   and one on each season heading, each opening a confirm dialog with a "Delete files from
   disk" checkbox that defaults to off (mirroring `DeleteItemDialog`). When the last
@@ -80,10 +91,12 @@ Written as a diff against [File and directory management](../file-directory-mana
 - [ ] `media-detail.tsx`: episode-row and season-heading delete actions, the confirm
       dialog, the existing `invalidate()` key set, and navigate-away on a pruned series.
 - [ ] Backend tests: a new `LibraryDeleteServiceTests` (episode delete keeps siblings;
-      season delete takes its episodes and extras; emptied season and series pruned;
-      `deleteFiles` false/true; a movie or top-level series id rejected on the new routes;
-      `SourceFile` detached; `UserItemData` gone; watch-history rows survive) and endpoint
-      tests for the admin gate and the 409 move guard.
+      season delete takes its episodes and its season-scoped extras; emptied season and
+      series pruned; a leftover season-scoped extra keeps its season, and the delete still
+      succeeds; `deleteFiles` false/true; a movie or top-level series id rejected on the new
+      routes; `SourceFile` detached; `UserItemData` and the episode's `PlaybackHistoryEntry`
+      rows gone, its `WatchHistoryOutboxEvent` rows kept) and endpoint tests for the admin
+      gate and the 409 move guard.
 - [ ] Web tests for the admin gate on the new actions and the dialog's default-off checkbox.
 - [ ] Docs: `feature.md` Removal Semantics, endpoint list, and Testing Expectations; the
       series-detail bullet in `frontend-application/feature.md`; the duplicated Removal
