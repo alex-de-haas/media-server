@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { anEpisode, aMovie, aSeries, movieDetail, seriesDetail, setupApp } from "./support";
+import { anEpisode, aMovie, aSeason, aSeries, movieDetail, seriesDetail, setupApp } from "./support";
 
 test("opens a movie detail page and marks it watched", async ({ page }) => {
   await setupApp(page, {
@@ -214,6 +214,34 @@ test("admin deletes a whole season and leaves when the series is pruned", async 
 
   // The page it was called from no longer exists.
   await expect(page).toHaveURL(/\/series$/);
+});
+
+test("a season left with only extras still shows up and stays deletable", async ({ page }) => {
+  await setupApp(page, {
+    role: "admin",
+    library: [aSeries("s1", "Severance")],
+    detail: {
+      // Season 2's episodes are gone but it holds an extra, so the API keeps the season row. Without it in
+      // the listing there would be no way to remove that season from the UI at all.
+      s1: { ...seriesDetail("s1", "Severance", "95396"), seasons: [aSeason("season-1", 1, 1), aSeason("season-2", 2, 0)] },
+    },
+    episodes: { s1: [anEpisode("e1", 1, 1, "Good News About Hell")] },
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  await expect(page.getByRole("heading", { name: "Season 2" })).toBeVisible();
+  await expect(page.getByText("No episodes in this season.")).toBeVisible();
+
+  const deleted = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/proxy/api/library/seasons/season-2?deleteFiles=false") &&
+      request.method() === "DELETE",
+  );
+  await page.getByRole("button", { name: "Delete season 2" }).click();
+  await page.getByRole("button", { name: "Remove from library" }).click();
+  await deleted;
 });
 
 test("a non-admin gets no episode or season delete actions", async ({ page }) => {

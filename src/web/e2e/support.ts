@@ -282,6 +282,17 @@ export const seriesDetail = (id: string, title: string, tmdbId: string | null = 
   creators: [],
 });
 
+// One entry of a series detail's season rollup. `episodeCount` 0 is a real state: a season whose episodes
+// were all deleted but which still holds extras is deliberately kept by the API.
+export const aSeason = (id: string, seasonNumber: number, episodeCount: number) => ({
+  id,
+  publicId: id,
+  seasonNumber,
+  title: `Season ${seasonNumber}`,
+  episodeCount,
+  userData: null,
+});
+
 // `episodeNumberEnd` is set only for a file that holds a consecutive range (a "double episode").
 export const anEpisode = (
   id: string,

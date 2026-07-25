@@ -33,10 +33,13 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   tabs show Cast, Episodes grouped by season, and Tags; an episode whose file
   holds a consecutive range is labelled `S01E01-E02` (matching the on-disk name)
   so the season does not look like it skipped an episode — the title stays the
-  first episode's, as that is all the provider has. On the Episodes tab an admin can
-  also delete a single episode row or a whole season from its heading; both confirm
-  first, with a "Delete files from disk" checkbox that defaults to off, and both
-  return to the library grid when the delete leaves the series with nothing in it.
+  first episode's, as that is all the provider has. Seasons come from the detail's
+  season rollup, so a season the API kept after its last episode went — one holding
+  only extras — still gets a heading (reading "No episodes in this season") instead of
+  vanishing from the tab. On the Episodes tab an admin can also delete a single episode
+  row or a whole season from its heading; both confirm first, with a "Delete files from
+  disk" checkbox that defaults to off, and both return to the library grid when the
+  delete leaves the series with nothing in it.
   Detail admin controls support metadata refresh, remap where applicable, and
   deletion. **Playback is not in-browser** — Play deep-links to an Infuse/Jellyfin
   client.
@@ -133,8 +136,9 @@ coverage:
   accessible names), and that a queued item shows the queued line rather than a
   progress bar.
 - Episode and season deletion: the actions exist only for an admin, the request
-  carries `deleteFiles` only when the checkbox is ticked, and a delete that prunes
-  the series navigates back to the library grid.
+  carries `deleteFiles` only when the checkbox is ticked, a delete that prunes the
+  series navigates back to the library grid, and a season with no episodes left is
+  still listed and still deletable.
 
 ## Links
 

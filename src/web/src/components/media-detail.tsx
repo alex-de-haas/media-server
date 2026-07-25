@@ -16,6 +16,7 @@ import {
   type LibraryMoveJob,
   type MediaStream,
   type Network,
+  type SeasonSummary,
   type Studio,
   type TranscodeJob,
 } from "@/lib/media-server";
@@ -108,7 +109,11 @@ function DetailTabs({ item, backHref }: { item: LibraryDetail; backHref: string 
         <div className="flex flex-col gap-3">
           <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
           <MoveProgress itemId={item.id} />
-          {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} backHref={backHref} /> : <MediaInfo item={item} />}
+          {item.kind === "Series" ? (
+            <SeriesEpisodes seriesId={item.id} seasons={item.seasons} backHref={backHref} />
+          ) : (
+            <MediaInfo item={item} />
+          )}
         </div>
       </TabsContent>
       <TabsContent value="tags">
@@ -1194,44 +1199,91 @@ function DeleteVersionDialog({
   );
 }
 
-function SeriesEpisodes({ seriesId, backHref }: { seriesId: string; backHref: string }) {
+interface SeasonGroup {
+  key: string;
+  seasonId: string | null;
+  seasonNumber: number;
+  episodes: Episode[];
+}
+
+// Seasons come from the detail's rollup first, so a season whose episodes are all gone — one holding only
+// extras, which the backend deliberately keeps — still gets a heading and stays deletable. Episodes with no
+// matching season row (or when the rollup is empty) fall back to grouping by season number, so the listing
+// never depends on the rollup being there.
+function groupIntoSeasons(seasons: SeasonSummary[], episodes: Episode[]): SeasonGroup[] {
+  const groups = new Map<string, SeasonGroup>();
+  for (const season of seasons) {
+    groups.set(season.id, {
+      key: season.id,
+      seasonId: season.id,
+      seasonNumber: season.seasonNumber ?? 0,
+      episodes: [],
+    });
+  }
+
+  for (const episode of episodes) {
+    const known = episode.seasonId ? groups.get(episode.seasonId) : undefined;
+    if (known) {
+      known.episodes.push(episode);
+      continue;
+    }
+
+    const seasonNumber = episode.seasonNumber ?? 0;
+    const key = `number:${seasonNumber}`;
+    const group = groups.get(key) ?? { key, seasonId: episode.seasonId ?? null, seasonNumber, episodes: [] };
+    group.episodes.push(episode);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].sort((a, b) => a.seasonNumber - b.seasonNumber);
+}
+
+function SeriesEpisodes({
+  seriesId,
+  seasons,
+  backHref,
+}: {
+  seriesId: string;
+  seasons: SeasonSummary[] | null;
+  backHref: string;
+}) {
   const episodes = useQuery({ queryKey: ["episodes", seriesId], queryFn: () => mediaServer.listEpisodes(seriesId) });
 
   if (episodes.isPending) {
     return <p className="text-muted-foreground text-sm">Loading episodes…</p>;
   }
 
-  const all = episodes.data ?? [];
-  if (!all.length) {
+  const groups = groupIntoSeasons(seasons ?? [], episodes.data ?? []);
+  if (!groups.length) {
     return <EmptyDetailPanel>No episodes available.</EmptyDetailPanel>;
-  }
-
-  const seasons = new Map<number, Episode[]>();
-  for (const episode of all) {
-    const season = episode.seasonNumber ?? 0;
-    const list = seasons.get(season) ?? [];
-    list.push(episode);
-    seasons.set(season, list);
   }
 
   return (
     <section className="flex flex-col gap-4">
-      {[...seasons.entries()]
-        .sort((a, b) => a[0] - b[0])
-        .map(([season, eps]) => (
-          <div key={season} className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <h2 className="flex-1 text-lg font-semibold tracking-tight">Season {season}</h2>
-              <SeasonDeleteControl season={season} episodes={eps} seriesId={seriesId} backHref={backHref} />
-            </div>
-            <Separator />
+      {groups.map((group) => (
+        <div key={group.key} className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="flex-1 text-lg font-semibold tracking-tight">Season {group.seasonNumber}</h2>
+            <SeasonDeleteControl
+              season={group.seasonNumber}
+              seasonId={group.seasonId}
+              episodeCount={group.episodes.length}
+              seriesId={seriesId}
+              backHref={backHref}
+            />
+          </div>
+          <Separator />
+          {group.episodes.length ? (
             <ul className="flex flex-col divide-y rounded-md border">
-              {eps.map((episode) => (
+              {group.episodes.map((episode) => (
                 <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} backHref={backHref} />
               ))}
             </ul>
-          </div>
-        ))}
+          ) : (
+            <p className="text-muted-foreground text-sm">No episodes in this season.</p>
+          )}
+        </div>
+      ))}
     </section>
   );
 }
@@ -1265,20 +1317,21 @@ function useAfterChildDelete(seriesId: string, backHref: string) {
 
 function SeasonDeleteControl({
   season,
-  episodes,
+  seasonId,
+  episodeCount,
   seriesId,
   backHref,
 }: {
   season: number;
-  episodes: Episode[];
+  // The season row the delete targets — null for episodes published without one, which offer no season action.
+  seasonId: string | null;
+  episodeCount: number;
   seriesId: string;
   backHref: string;
 }) {
   const { role } = useSession();
   const [open, setOpen] = useState(false);
   const afterDelete = useAfterChildDelete(seriesId, backHref);
-  // The season row is what the delete targets; an episode published without one offers no season action.
-  const seasonId = episodes.find((episode) => episode.seasonId)?.seasonId ?? null;
 
   const remove = useMutation({
     mutationFn: (deleteFiles: boolean) => mediaServer.deleteSeason(seasonId!, deleteFiles),
@@ -1309,7 +1362,11 @@ function SeasonDeleteControl({
         onOpenChange={setOpen}
         heading="Delete season?"
         title={`Season ${season}`}
-        detail={`${formatCount(episodes.length)} ${episodes.length === 1 ? "episode" : "episodes"} will be removed from the library.`}
+        detail={
+          episodeCount
+            ? `${formatCount(episodeCount)} ${episodeCount === 1 ? "episode" : "episodes"} will be removed from the library.`
+            : "This season holds no episodes — only its extras, if any, will be removed."
+        }
         onConfirm={(deleteFiles) => remove.mutate(deleteFiles)}
       />
     </>
