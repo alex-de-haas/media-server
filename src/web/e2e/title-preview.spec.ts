@@ -158,11 +158,14 @@ test("a search candidate can be checked before it is tracked", async ({ page }) 
   await page.getByRole("button", { name: "Search" }).click();
   await page.getByRole("button", { name: /Inception/ }).click();
 
-  // The preview opens over the search dialog rather than replacing it: closing it returns to the results.
+  // The preview takes the screen from the search dialog — one modal at a time — and carries the Track
+  // action the results were for. Escape has to reach it, not an overlay left underneath.
   const previewDialog = page.getByRole("dialog").filter({ hasText: "A thief who steals corporate secrets" });
   await expect(previewDialog).toBeVisible();
-  await previewDialog.getByRole("button", { name: "Close" }).click();
-  await expect(page.getByRole("button", { name: "Track" })).toBeVisible();
+  await expect(previewDialog.getByRole("button", { name: "Track / remind me" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(previewDialog).toBeHidden();
 });
 
 test("a tracked title opens its preview from the tracked drawer", async ({ page }) => {
@@ -202,6 +205,9 @@ test("the preview opened over the drawer can be closed every ordinary way", asyn
   await expect(overview).toBeHidden();
 
   await openPreview();
-  await page.mouse.click(40, 400); // anywhere outside it
+  // Derived from the dialog's own box rather than a fixed point, so a change in its size or the viewport
+  // cannot quietly move the click inside it.
+  const box = await page.getByRole("dialog").boundingBox();
+  await page.mouse.click(Math.max(4, (box?.x ?? 100) / 2), Math.max(4, (box?.y ?? 100) / 2));
   await expect(overview).toBeHidden();
 });
