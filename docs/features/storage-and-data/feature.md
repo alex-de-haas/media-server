@@ -129,9 +129,8 @@ If Hosty later adds an app-facing pre-backup lifecycle hook, the app can use it 
 checkpoint on demand; until then the app cannot assume one exists.
 
 The image cache is regenerable and self-bounding (the sweep above keeps it to what
-the library still references); if backup size matters, it can be excluded from
-backup in a later refinement, but the default is to keep all app data in one
-backed-up directory.
+the library still references); if backup size matters it can be excluded from
+backup, but the default is to keep all app data in one backed-up directory.
 
 ## Catalog Roots
 
@@ -141,12 +140,18 @@ operator owns that media and its own backups).
 - Each catalog root is a host directory on a single filesystem holding a transient
   `.incoming/` staging area plus the canonical published media at the root (see
   [Catalogs](../catalogs.md)).
-- **v1 (`localCommand`):** roots are operator-configured host paths; the host
-  process accesses them directly, with no volume mounts. Path access is sandboxed
-  to configured roots (see [File and directory management](../file-directory-management.md)).
-- **Future (`docker`):** each catalog root becomes an external host-path bind
-  mount once Hosty supports the required mount model. Removing the app must never
-  delete external media.
+- Under **`dev`** (`localCommand`) roots are operator-configured host paths that
+  the host process reads directly, with no volume mounts.
+- Under **`docker`** (the default runtime) they are Hosty-managed external
+  host-path mounts, declared as `externalMounts.catalogRoots` in `manifest.json`
+  and injected as `HOSTY_MOUNT_CATALOGROOTS` (comma-separated `label=path`
+  entries). `MediaServerSettings` parses them and `CatalogService` rejects a
+  catalog root outside them (see
+  [Hosty runtime app](../hosty-runtime-app.md)).
+
+Either way path access is sandboxed to the configured roots (see
+[File and directory management](../file-directory-management.md)), and the media
+lives outside the app data directory, so removing the app never deletes it.
 
 ## Single-Filesystem Constraint
 
@@ -154,14 +159,6 @@ A completed file is **moved** (not hardlinked) from `.incoming/` into the
 canonical tree. Because both live under one `catalog.root` on one filesystem, the
 move is atomic and copies no bytes. This is why a single `catalog.root` (rather
 than two unrelated paths) is the configuration unit.
-
-## Open Questions
-
-- What Hosty mount/bind model should replace plain host paths for Docker
-  runtime?
-  Recommendation: keep v1 on `dev` / `localCommand` with explicit configured
-  host paths, then design Hosty-owned external catalog mounts separately before
-  enabling Docker as the default runtime.
 
 ## Testing Expectations
 
