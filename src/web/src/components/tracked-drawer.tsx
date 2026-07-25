@@ -72,6 +72,11 @@ export function TrackedDrawer({
   const matches = (item: WatchlistItem) => !query || item.title.toLowerCase().includes(query);
 
   return (
+    // The preview is a sibling of the drawer rather than a child of it, and opening it closes the drawer
+    // (see onOpen below): both are modal overlays that trap focus, and two traps fight — nested, an outside
+    // click never reached the preview; side by side, Escape went to the drawer underneath. The calendar's
+    // day dialog hands off to the preview the same way.
+    <>
     <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="right">
       <DrawerContent>
         <DrawerHeader>
@@ -98,7 +103,10 @@ export function TrackedDrawer({
                   <TrackedRow
                     key={item.id}
                     item={item}
-                    onOpen={() => setPreview(previewTargetOf(item))}
+                    onOpen={() => {
+                      onOpenChange(false);
+                      setPreview(previewTargetOf(item));
+                    }}
                     onRemind={() => onRemind(item)}
                     onRefresh={() => refresh.mutate(item)}
                     onRemove={() => remove.mutate(item)}
@@ -110,9 +118,10 @@ export function TrackedDrawer({
           </div>
         </div>
       </DrawerContent>
-
-      <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
     </Drawer>
+
+    <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
+    </>
   );
 }
 

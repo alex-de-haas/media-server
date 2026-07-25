@@ -79,6 +79,11 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   });
 
   return (
+    // The preview is a sibling of this dialog rather than a child of its root, and opening it closes this
+    // one (see the result row below): nested, base-ui owns it as this dialog's popup and an outside click
+    // never dismisses it; side by side, two focus traps send Escape to the overlay underneath. One modal at
+    // a time — and the preview carries its own Track action, which is what the results were for.
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-xl">
         <DialogHeader>
@@ -145,7 +150,8 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
-                    onClick={() =>
+                    onClick={() => {
+                      onOpenChange(false);
                       setPreview({
                         provider: candidate.reference.provider,
                         providerId: candidate.reference.id,
@@ -153,8 +159,8 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         title: candidate.title,
                         year: candidate.year,
                         posterUrl: candidate.posterUrl,
-                      })
-                    }
+                      });
+                    }}
                   >
                     {/* Spans, not divs/paragraphs: a button may only contain phrasing content. */}
                     <span className="bg-secondary block h-14 w-10 shrink-0 overflow-hidden rounded">
@@ -179,8 +185,9 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           )}
         </div>
       </DialogContent>
-
-      <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
     </Dialog>
+
+    <TitlePreviewDialog target={preview} onOpenChange={(open) => !open && setPreview(null)} />
+    </>
   );
 }

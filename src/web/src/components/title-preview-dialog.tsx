@@ -1,8 +1,9 @@
 "use client";
 
+import { useRef } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Clapperboard, ExternalLink, EyeOff, Library, Star, User } from "lucide-react";
+import { Clapperboard, ExternalLink, EyeOff, Library, Star, User, X } from "lucide-react";
 import { mediaServer, type CastMember, type TitlePreview } from "@/lib/media-server";
 import { formatRuntime } from "@/lib/format";
 import { formatCount, openExternal } from "@/lib/ui";
@@ -10,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -45,6 +47,8 @@ export function TitlePreviewDialog({
   // Only the recommendation surfaces can dismiss a title, so the action shows only when they pass this.
   onHide?: (target: TitlePreviewTarget) => void;
 }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+
   const preview = useQuery({
     queryKey: ["title-preview", target?.provider, target?.providerId, target?.kind],
     queryFn: () => mediaServer.getTitlePreview(target!.provider, target!.providerId, target!.kind),
@@ -61,7 +65,24 @@ export function TitlePreviewDialog({
 
   return (
     <Dialog open={target !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      {/* Focus has to land inside the preview: opened over the tracked drawer it is a sibling of that
+          drawer, whose own focus trap otherwise keeps the caret — and Escape would then close the drawer
+          underneath instead of the dialog on top. */}
+      <DialogContent
+        className="max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        showCloseButton={false}
+        initialFocus={closeRef}
+      >
+        {/* The shared close button is a bare glyph, which disappears against a bright backdrop; this one
+            carries its own scrim so it stays legible over any artwork. */}
+        <DialogClose
+          ref={closeRef}
+          aria-label="Close"
+          className="absolute top-3 right-3 z-10 rounded-full bg-black/40 p-1.5 text-white/90 transition-colors hover:bg-black/60 hover:text-white focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <X className="size-4" />
+        </DialogClose>
+
         {/* Banner and body scroll together, so the poster keeps its overlap however far the text runs. */}
         <div className="flex min-h-0 flex-col overflow-y-auto">
           <Banner backdropUrl={detail?.backdropUrl ?? null} />

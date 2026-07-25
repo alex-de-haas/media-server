@@ -24,6 +24,29 @@ const feed = {
 
 const preview = { "27205": aTitlePreview("27205", "Inception") };
 
+// The same title as the feed's discovery, already on the user's calendar.
+const aTrackedInception = {
+  id: "w1",
+  trackedTitleId: "t1",
+  kind: "Movie",
+  title: "Inception",
+  year: 2010,
+  posterUrl: null,
+  provider: "tmdb",
+  providerId: "27205",
+  productionStatus: null,
+  inLibrary: false,
+  libraryItemId: null,
+  monitorScope: null,
+  monitoredSeasons: [],
+  regionOverride: null,
+  note: null,
+  nextRelease: null,
+  hasDates: false,
+  libraryGap: null,
+  reminders: [],
+};
+
 test("a discovery poster opens the preview and it says what the title is", async ({ page }) => {
   await setupApp(page, { recommendations: feed, titlePreview: preview });
   await page.goto("/recommendations");
@@ -135,39 +158,20 @@ test("a search candidate can be checked before it is tracked", async ({ page }) 
   await page.getByRole("button", { name: "Search" }).click();
   await page.getByRole("button", { name: /Inception/ }).click();
 
-  // The preview opens over the search dialog rather than replacing it: closing it returns to the results.
+  // The preview takes the screen from the search dialog — one modal at a time — and carries the Track
+  // action the results were for. Escape has to reach it, not an overlay left underneath.
   const previewDialog = page.getByRole("dialog").filter({ hasText: "A thief who steals corporate secrets" });
   await expect(previewDialog).toBeVisible();
-  await previewDialog.getByRole("button", { name: "Close" }).click();
-  await expect(page.getByRole("button", { name: "Track" })).toBeVisible();
+  await expect(previewDialog.getByRole("button", { name: "Track / remind me" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(previewDialog).toBeHidden();
 });
 
 test("a tracked title opens its preview from the tracked drawer", async ({ page }) => {
   await setupApp(page, {
     titlePreview: preview,
-    watchlist: [
-      {
-        id: "w1",
-        trackedTitleId: "t1",
-        kind: "Movie",
-        title: "Inception",
-        year: 2010,
-        posterUrl: null,
-        provider: "tmdb",
-        providerId: "27205",
-        productionStatus: null,
-        inLibrary: false,
-        libraryItemId: null,
-        monitorScope: null,
-        monitoredSeasons: [],
-        regionOverride: null,
-        note: null,
-        nextRelease: null,
-        hasDates: false,
-        libraryGap: null,
-        reminders: [],
-      },
-    ],
+    watchlist: [aTrackedInception],
   });
   await page.goto("/calendar?month=2026-07");
 
@@ -175,4 +179,35 @@ test("a tracked title opens its preview from the tracked drawer", async ({ page 
   await page.getByRole("button", { name: /Inception/ }).click();
 
   await expect(page.getByRole("dialog").getByText("A thief who steals corporate secrets through dream-sharing technology.")).toBeVisible();
+});
+
+// A preview rendered inside the drawer's root belongs to the drawer as far as base-ui is concerned, and
+// nothing outside it can dismiss it — a dialog with no way out.
+test("the preview opened over the drawer can be closed every ordinary way", async ({ page }) => {
+  await setupApp(page, { titlePreview: preview, watchlist: [aTrackedInception] });
+  await page.goto("/calendar?month=2026-07");
+
+  const overview = page.getByText("A thief who steals corporate secrets through dream-sharing technology.");
+  // Reopening goes through the drawer each time, since opening the preview hands the screen over to it.
+  // Waiting for it to be open matters: Escape and outside clicks are routed by focus.
+  const openPreview = async () => {
+    await page.getByRole("button", { name: "Tracked titles" }).click();
+    await page.getByRole("button", { name: /Inception/ }).first().click();
+    await expect(overview).toBeVisible();
+  };
+
+  await openPreview();
+  await page.getByRole("button", { name: "Close" }).first().click();
+  await expect(overview).toBeHidden();
+
+  await openPreview();
+  await page.keyboard.press("Escape");
+  await expect(overview).toBeHidden();
+
+  await openPreview();
+  // Derived from the dialog's own box rather than a fixed point, so a change in its size or the viewport
+  // cannot quietly move the click inside it.
+  const box = await page.getByRole("dialog").boundingBox();
+  await page.mouse.click(Math.max(4, (box?.x ?? 100) / 2), Math.max(4, (box?.y ?? 100) / 2));
+  await expect(overview).toBeHidden();
 });
