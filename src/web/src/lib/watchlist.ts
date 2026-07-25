@@ -71,6 +71,9 @@ export interface CalendarEvent {
   kind: TrackedKind;
   title: string;
   posterUrl: string | null;
+  // The title's provider identity, so a calendar row can open the same preview a recommendation opens.
+  provider: string;
+  providerId: string;
   type: ReleaseType;
   date: string;
   previousDate: string | null;

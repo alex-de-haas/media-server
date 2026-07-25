@@ -8,17 +8,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 /**
- * One recommended title. A held title links to its detail page; a discovery opens the Track flow,
- * because this surface never pretends playback is available for something the instance lacks.
+ * One recommended title. A held title links to its detail page; a discovery opens the preview dialog,
+ * whose actions are Track and Not interested — this surface never pretends playback is available for
+ * something the instance lacks.
  */
 export function RecommendationCard({
   item,
   onHide,
   onTrack,
+  onOpen,
 }: {
   item: Recommendation;
   onHide: (item: Recommendation) => void;
   onTrack: (item: Recommendation) => void;
+  onOpen: (item: Recommendation) => void;
 }) {
   // The media-item id, not the public id: the detail routes are declared `{id:guid}` and resolve by
   // MediaItem.Id, so a public id — a deterministic hash — would not even match the route.
@@ -49,11 +52,23 @@ export function RecommendationCard({
   return (
     <div className="group/rec relative flex flex-col gap-1.5">
       {href ? (
-        <Link href={href} className="block">
+        // The poster is decorative (alt="") and the title lives below the card, so the link needs a label
+        // of its own — without one a screen reader announces an unnamed link.
+        <Link href={href} aria-label={`Open ${item.title}`} className="block">
           {poster}
         </Link>
       ) : (
-        poster
+        // A discovery has no page to link to, so the poster opens the preview instead of going nowhere.
+        // The label is an aria-label rather than visually-hidden text: the title already appears below the
+        // poster, and a second copy in the DOM would read as a duplicate.
+        <button
+          type="button"
+          aria-label={`Details for ${item.title}`}
+          className="block cursor-pointer text-left"
+          onClick={() => onOpen(item)}
+        >
+          {poster}
+        </button>
       )}
 
       <div className="flex flex-col gap-0.5">

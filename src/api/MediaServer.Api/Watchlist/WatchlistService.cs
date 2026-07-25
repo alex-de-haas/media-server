@@ -205,6 +205,8 @@ public sealed class WatchlistService(
                     title.Kind,
                     title.Title,
                     title.PosterUrl,
+                    title.IdentityProvider,
+                    title.IdentityProviderId,
                     release.Type,
                     release.Date,
                     release.PreviousDate,

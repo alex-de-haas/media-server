@@ -11,6 +11,8 @@ const aRelease = {
   kind: "Movie",
   title: "Dune: Part Three",
   posterUrl: null,
+  provider: "tmdb",
+  providerId: "693134",
   type: "Theatrical",
   date: "2026-07-15",
   previousDate: null,

@@ -62,6 +62,8 @@ describe("groupEventsByDay", () => {
     kind: "Movie",
     title,
     posterUrl: null,
+    provider: "tmdb",
+    providerId: "27205",
     type: "Digital",
     date,
     previousDate: null,

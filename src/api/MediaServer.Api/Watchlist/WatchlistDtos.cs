@@ -57,6 +57,10 @@ public sealed record CalendarEventDto(
     MediaKind Kind,
     string Title,
     string? PosterUrl,
+    // The title's canonical provider identity, so a calendar row can open the same detail preview a
+    // recommendation or a search result opens. The tracked-title id is local and means nothing to it.
+    string Provider,
+    string ProviderId,
     ReleaseType Type,
     DateOnly Date,
     DateOnly? PreviousDate,

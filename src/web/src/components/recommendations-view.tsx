@@ -10,6 +10,7 @@ import { watchlistApi } from "@/lib/watchlist";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/states";
 import { RecommendationCard } from "@/components/recommendation-card";
+import { TitlePreviewDialog, type TitlePreviewTarget } from "@/components/title-preview-dialog";
 
 type KindFilter = "all" | "Movie" | "Series";
 type LibraryFilter = "all" | "library" | "discover";
@@ -30,6 +31,7 @@ const PLACES: Array<{ value: LibraryFilter; label: string }> = [
 export function RecommendationsView() {
   const [kind, setKind] = useState<KindFilter>("all");
   const [place, setPlace] = useState<LibraryFilter>("all");
+  const [preview, setPreview] = useState<TitlePreviewTarget | null>(null);
 
   const feed = useQuery({
     queryKey: ["recommendations", kind],
@@ -75,11 +77,47 @@ export function RecommendationsView() {
               item={item}
               onHide={hide}
               onTrack={track}
+              onOpen={(opened) => setPreview(previewTarget(opened))}
             />
           ))}
         </Grid>
       )}
+
+      <TitlePreviewDialog
+        target={preview}
+        onOpenChange={(open) => !open && setPreview(null)}
+        onHide={(target) => hide(recommendationOf(target, items))}
+      />
     </section>
+  );
+}
+
+/** What the card already knows, so the dialog opens on real content rather than an empty frame. */
+export function previewTarget(item: Recommendation): TitlePreviewTarget {
+  return {
+    provider: "tmdb",
+    providerId: item.tmdbId,
+    kind: item.kind === "Series" ? "Series" : "Movie",
+    title: item.title,
+    year: item.year,
+    posterUrl: item.posterUrl,
+  };
+}
+
+// Hiding is keyed by identity, and the feed row is the only place a title's display fields live; fall
+// back to the target's own when the feed has moved on under the open dialog.
+export function recommendationOf(target: TitlePreviewTarget, items: Recommendation[]): Recommendation {
+  return (
+    items.find((item) => item.tmdbId === target.providerId && item.kind === target.kind) ?? {
+      kind: target.kind,
+      tmdbId: target.providerId,
+      title: target.title,
+      year: target.year ?? null,
+      posterUrl: target.posterUrl ?? null,
+      inLibrary: false,
+      mediaItemId: null,
+      sources: [],
+    }
   );
 }
 
