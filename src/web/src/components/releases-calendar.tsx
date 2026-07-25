@@ -186,19 +186,20 @@ export function ReleasesCalendar({
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
                   onClick={() => openPreviewFor(event)}
                 >
-                  <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
+                  {/* Spans, not divs/paragraphs: a button may only contain phrasing content. */}
+                  <span className="bg-secondary block h-14 w-10 shrink-0 overflow-hidden rounded">
                     {event.posterUrl && (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={event.posterUrl} alt="" className="h-full w-full object-cover" />
                     )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+                  </span>
+                  <span className="block min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                       <span className="truncate">{event.title}</span>
                       {event.inLibrary && <Check className="text-brand size-3.5 shrink-0" aria-label="In library" />}
-                    </p>
-                    <p className="text-muted-foreground text-xs">{eventChipLabel(event)}</p>
-                  </div>
+                    </span>
+                    <span className="text-muted-foreground block text-xs">{eventChipLabel(event)}</span>
+                  </span>
                 </button>
                 <Button
                   variant="ghost"

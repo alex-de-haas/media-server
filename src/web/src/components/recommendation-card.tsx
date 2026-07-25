@@ -52,7 +52,9 @@ export function RecommendationCard({
   return (
     <div className="group/rec relative flex flex-col gap-1.5">
       {href ? (
-        <Link href={href} className="block">
+        // The poster is decorative (alt="") and the title lives below the card, so the link needs a label
+        // of its own — without one a screen reader announces an unnamed link.
+        <Link href={href} aria-label={`Open ${item.title}`} className="block">
           {poster}
         </Link>
       ) : (

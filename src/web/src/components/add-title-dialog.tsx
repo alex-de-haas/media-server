@@ -156,16 +156,17 @@ export function AddTitleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       })
                     }
                   >
-                    <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
+                    {/* Spans, not divs/paragraphs: a button may only contain phrasing content. */}
+                    <span className="bg-secondary block h-14 w-10 shrink-0 overflow-hidden rounded">
                       {candidate.posterUrl && (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={candidate.posterUrl} alt="" className="h-full w-full object-cover" />
                       )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{candidate.title}</p>
-                      <p className="text-muted-foreground text-xs">{candidate.year ?? "Year unknown"}</p>
-                    </div>
+                    </span>
+                    <span className="block min-w-0 flex-1">
+                      <span className="block truncate font-medium">{candidate.title}</span>
+                      <span className="text-muted-foreground block text-xs">{candidate.year ?? "Year unknown"}</span>
+                    </span>
                   </button>
                   <Button variant="outline" size="sm" disabled={track.isPending} onClick={() => track.mutate(candidate)}>
                     <CalendarPlus className="size-4" aria-hidden /> Track
