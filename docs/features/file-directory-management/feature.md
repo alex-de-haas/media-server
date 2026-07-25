@@ -1,8 +1,7 @@
 # File and Directory Management
 
-Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-25
 
 ## Description
 
@@ -15,7 +14,7 @@ manual file manager.
 ## Sandbox
 
 All file access is sandboxed to configured catalog roots (see
-[Catalogs](catalogs.md) and [Storage and data](storage-and-data.md)).
+[Catalogs](../catalogs.md) and [Storage and data](../storage-and-data.md)).
 
 - Resolve and normalize every path, then verify it is contained within a
   configured root before any operation.
@@ -32,7 +31,8 @@ All file access is sandboxed to configured catalog roots (see
 - Move a published item's file(s) into **another catalog** (see Move Semantics).
 - Clear a download's `.incoming/` staging folder once its file moves out, or when
   the in-flight download is removed.
-- Delete a library item by removing its canonical file.
+- Delete a library item — a whole movie or series, one season, one episode, or a
+  single version — by removing its canonical file(s).
 - Import scan: enumerate the catalog root (excluding `.incoming/`) for orphan
   media files.
 - Stream large files without whole-file buffering.
@@ -52,6 +52,8 @@ Internal endpoints (under `/api`, behind Host identity):
 ```text
 GET    /api/files/resolve?catalogId={id}&path=...   # internal/debug only
 DELETE /api/library/{id}?deleteFiles={bool}         # removes the published item (and file if asked)
+DELETE /api/library/episodes/{id}?deleteFiles={bool} # removes one episode → { seasonRemoved, seriesRemoved }
+DELETE /api/library/seasons/{id}?deleteFiles={bool}  # removes one season  → { seasonRemoved, seriesRemoved }
 POST   /api/catalogs/{id}/scan                       # import scan of the catalog root
 POST   /api/library/{id}/move                        # move the item into another catalog → { jobId }
 ```
@@ -64,7 +66,22 @@ With one tree, one file backs one item:
 
 - **Remove from library** (`DELETE /api/library/{id}`): drops the DB rows;
   `deleteFiles=true` also deletes the canonical file, `deleteFiles=false` leaves it
-  on disk for a later import scan to re-adopt.
+  on disk for a later import scan to re-adopt. Accepts a published top-level movie or
+  series; a series takes its seasons, episodes, and extras with it.
+- **Remove one episode or one season** (`DELETE /api/library/episodes/{id}`,
+  `DELETE /api/library/seasons/{id}`, both admin): the same two modes, applied to part
+  of a series. A season takes its episodes and the extras parented to it. Both then
+  prune what they emptied — a season once nothing carries its `SeasonId` any more, then
+  the series once nothing is left under it at all. Emptiness counts every remaining
+  child, so a leftover season-scoped extra keeps its season (and pruning around it would
+  fail the `Restrict` self-FK on `ParentId`). The response reports
+  `{ seasonRemoved, seriesRemoved }` so a caller standing on the series page knows when
+  that page is gone. Deleting an item drops the plays recorded against it — playback
+  history follows its media item by design.
+- **Remove one version** (`DELETE /api/library/sources/{id}`, admin): drops a single
+  `MediaSource` of an item, used to retire the original after a verified transcode.
+- Any of these is refused with **409** while the owning item (for a season or episode,
+  its series) is being moved to another catalog.
 - **Remove download** (`DELETE /api/torrents/{id}`) only applies while a download
   exists (before the download→identify hand-off); it clears the `.incoming/` data
   and the in-flight ingest. After the hand-off there is no download — removal goes
@@ -103,5 +120,10 @@ Backend tests should use xUnit and Imposter. Required coverage:
   delete inside `.incoming/`).
 - Move behavior for organize and remap; staging cleanup on hand-off and download
   removal; canonical-file deletion on library item removal.
+- Episode and season removal: siblings and containers survive a single episode; a
+  season takes its episodes and season-scoped extras; emptied containers are pruned
+  while a leftover extra keeps its season; `deleteFiles` false leaves the file for a
+  rescan and true erases it; a movie, a top-level series, or an unpublished row is
+  refused; the source file is detached rather than deleted.
 - Import scan skips `.incoming/` and already-known files.
 - Large-file streaming stays inside catalog roots.

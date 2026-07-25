@@ -9,6 +9,7 @@ import { toast } from "@/lib/toast";
 import {
   mediaServer,
   type CastMember,
+  type ChildDeleteResult,
   type Episode,
   type LibraryDetail,
   type LibraryMediaSource,
@@ -82,12 +83,12 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
         <AdminControls id={item.id} title={item.title} kind={item.kind} catalogId={item.catalogId} backHref={backHref} />
       </div>
       <Hero item={item} />
-      <DetailTabs item={item} />
+      <DetailTabs item={item} backHref={backHref} />
     </div>
   );
 }
 
-function DetailTabs({ item }: { item: LibraryDetail }) {
+function DetailTabs({ item, backHref }: { item: LibraryDetail; backHref: string }) {
   const mediaLabel = item.kind === "Series" ? "Episodes" : "Media";
 
   return (
@@ -107,7 +108,7 @@ function DetailTabs({ item }: { item: LibraryDetail }) {
         <div className="flex flex-col gap-3">
           <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
           <MoveProgress itemId={item.id} />
-          {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} /> : <MediaInfo item={item} />}
+          {item.kind === "Series" ? <SeriesEpisodes seriesId={item.id} backHref={backHref} /> : <MediaInfo item={item} />}
         </div>
       </TabsContent>
       <TabsContent value="tags">
@@ -355,12 +356,17 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
 function DeleteItemDialog({
   open,
   onOpenChange,
+  heading = "Delete item?",
   title,
+  detail,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  heading?: string;
   title: string;
+  // Extra line under the description — what else goes with this delete (a season's episode count).
+  detail?: string;
   onConfirm: (deleteFiles: boolean) => void;
 }) {
   // Default to keeping files: deleting a published item shouldn't silently remove the media on disk.
@@ -378,9 +384,10 @@ function DeleteItemDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="sm:max-w-md">
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete item?</AlertDialogTitle>
+          <AlertDialogTitle>{heading}</AlertDialogTitle>
           <AlertDialogDescription>
             Remove <span className="text-foreground font-medium">{title}</span> from the library.
+            {detail && <span className="mt-1 block">{detail}</span>}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -1187,7 +1194,7 @@ function DeleteVersionDialog({
   );
 }
 
-function SeriesEpisodes({ seriesId }: { seriesId: string }) {
+function SeriesEpisodes({ seriesId, backHref }: { seriesId: string; backHref: string }) {
   const episodes = useQuery({ queryKey: ["episodes", seriesId], queryFn: () => mediaServer.listEpisodes(seriesId) });
 
   if (episodes.isPending) {
@@ -1213,11 +1220,14 @@ function SeriesEpisodes({ seriesId }: { seriesId: string }) {
         .sort((a, b) => a[0] - b[0])
         .map(([season, eps]) => (
           <div key={season} className="flex flex-col gap-2">
-            <h2 className="text-lg font-semibold tracking-tight">Season {season}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="flex-1 text-lg font-semibold tracking-tight">Season {season}</h2>
+              <SeasonDeleteControl season={season} episodes={eps} seriesId={seriesId} backHref={backHref} />
+            </div>
             <Separator />
             <ul className="flex flex-col divide-y rounded-md border">
               {eps.map((episode) => (
-                <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} />
+                <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} backHref={backHref} />
               ))}
             </ul>
           </div>
@@ -1226,20 +1236,96 @@ function SeriesEpisodes({ seriesId }: { seriesId: string }) {
   );
 }
 
-function EmptyDetailPanel({ children }: { children: string }) {
-  return <p className="text-muted-foreground py-6 text-sm">{children}</p>;
-}
-
-function EpisodeRow({ episode, seriesId }: { episode: Episode; seriesId: string }) {
-  const { role } = useSession();
+// Invalidates every view an episode or season delete can change. Shared so the row and the season heading
+// cannot drift apart.
+function useEpisodeInvalidation(seriesId: string) {
   const queryClient = useQueryClient();
-  const [remapOpen, setRemapOpen] = useState(false);
-
-  const invalidate = () => {
+  return () => {
     for (const key of [["episodes", seriesId], ["library-detail", seriesId], ["library"], ["nextup"], ["resume"], ["recent"]]) {
       queryClient.invalidateQueries({ queryKey: key });
     }
   };
+}
+
+// Deleting the last episode prunes its season, and a series left with nothing under it goes too — in which
+// case this page no longer exists and we head back to the library.
+function useAfterChildDelete(seriesId: string, backHref: string) {
+  const router = useRouter();
+  const invalidate = useEpisodeInvalidation(seriesId);
+  return (result: ChildDeleteResult, removed: string) => {
+    invalidate();
+    if (result.seriesRemoved) {
+      toast.success(`${removed} deleted — the series had nothing left and was removed too`);
+      router.push(backHref);
+      return;
+    }
+    toast.success(`${removed} deleted`);
+  };
+}
+
+function SeasonDeleteControl({
+  season,
+  episodes,
+  seriesId,
+  backHref,
+}: {
+  season: number;
+  episodes: Episode[];
+  seriesId: string;
+  backHref: string;
+}) {
+  const { role } = useSession();
+  const [open, setOpen] = useState(false);
+  const afterDelete = useAfterChildDelete(seriesId, backHref);
+  // The season row is what the delete targets; an episode published without one offers no season action.
+  const seasonId = episodes.find((episode) => episode.seasonId)?.seasonId ?? null;
+
+  const remove = useMutation({
+    mutationFn: (deleteFiles: boolean) => mediaServer.deleteSeason(seasonId!, deleteFiles),
+    onSuccess: (result) => {
+      setOpen(false);
+      afterDelete(result, `Season ${season}`);
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+
+  if (role !== "admin" || !seasonId) {
+    return null;
+  }
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Delete season ${season}`}
+        disabled={remove.isPending}
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 />
+      </Button>
+      <DeleteItemDialog
+        open={open}
+        onOpenChange={setOpen}
+        heading="Delete season?"
+        title={`Season ${season}`}
+        detail={`${formatCount(episodes.length)} ${episodes.length === 1 ? "episode" : "episodes"} will be removed from the library.`}
+        onConfirm={(deleteFiles) => remove.mutate(deleteFiles)}
+      />
+    </>
+  );
+}
+
+function EmptyDetailPanel({ children }: { children: string }) {
+  return <p className="text-muted-foreground py-6 text-sm">{children}</p>;
+}
+
+function EpisodeRow({ episode, seriesId, backHref }: { episode: Episode; seriesId: string; backHref: string }) {
+  const { role } = useSession();
+  const [remapOpen, setRemapOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const invalidate = useEpisodeInvalidation(seriesId);
+  const afterDelete = useAfterChildDelete(seriesId, backHref);
 
   const played = useMutation({
     mutationFn: (value: boolean) => mediaServer.setPlayed(episode.id, value),
@@ -1252,6 +1338,16 @@ function EpisodeRow({ episode, seriesId }: { episode: Episode; seriesId: string 
   // A double-episode file reads "S01E01-E02", so the season no longer looks like it skipped an episode.
   // The title stays the first episode's — TMDb has no combined title for the range and one is not invented.
   const label = episodeLabel(episode.seasonNumber, episode.episodeNumber, episode.episodeNumberEnd);
+
+  const remove = useMutation({
+    mutationFn: (deleteFiles: boolean) => mediaServer.deleteEpisode(episode.id, deleteFiles),
+    onSuccess: (result) => {
+      setDeleteOpen(false);
+      afterDelete(result, label);
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+
   const deepLink = infuseDeepLink(
     { kind: "episode", seriesTmdbId: episode.seriesTmdbId, season: episode.seasonNumber, episode: episode.episodeNumber },
     { play: true },
@@ -1290,6 +1386,26 @@ function EpisodeRow({ episode, seriesId }: { episode: Episode; seriesId: string 
         <Button variant="ghost" size="icon-sm" aria-label="Fix match" onClick={() => setRemapOpen(true)}>
           <Wand2 />
         </Button>
+      )}
+      {role === "admin" && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Delete ${label}`}
+          disabled={remove.isPending}
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 />
+        </Button>
+      )}
+      {role === "admin" && (
+        <DeleteItemDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          heading="Delete episode?"
+          title={`${label} · ${episode.title}`}
+          onConfirm={(deleteFiles) => remove.mutate(deleteFiles)}
+        />
       )}
       {role === "admin" && (
         <RemapDialog

@@ -113,7 +113,7 @@ operator owns that media and its own backups).
   [Catalogs](catalogs.md)).
 - **v1 (`localCommand`):** roots are operator-configured host paths; the host
   process accesses them directly, with no volume mounts. Path access is sandboxed
-  to configured roots (see [File and directory management](file-directory-management.md)).
+  to configured roots (see [File and directory management](file-directory-management/feature.md)).
 - **Future (`docker`):** each catalog root becomes an external host-path bind
   mount once Hosty supports the required mount model. Removing the app must never
   delete external media.

@@ -481,10 +481,20 @@ export interface Person {
   crew: PersonCrewGroup[];
 }
 
+// What an episode/season delete took beyond its target: a season emptied by the delete is pruned, and so is
+// a series left with nothing under it.
+export interface ChildDeleteResult {
+  seasonRemoved: boolean;
+  seriesRemoved: boolean;
+}
+
 export interface Episode {
   id: string;
   publicId: string | null;
   seriesTmdbId: string | null;
+  // The season item this episode belongs to — what a "delete this season" action targets. Null only for an
+  // episode published without a season row, which then simply offers no season-level action.
+  seasonId: string | null;
   seasonNumber: number | null;
   episodeNumber: number | null;
   // Last episode covered when this one file holds a consecutive range (a "double episode"): the item is
@@ -865,6 +875,12 @@ export const mediaServer = {
     apiJson<UserItemData>(`${BASE}/library/${id}/favorite`, { method: favorite ? "POST" : "DELETE" }),
   deleteLibraryItem: (id: string, deleteFiles: boolean) =>
     send(`/library/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
+  // Delete one episode, or a whole season, of a series (admin); deleteFiles also erases the files. The
+  // result says what the delete emptied and pruned — a removed series means the page is gone.
+  deleteEpisode: (id: string, deleteFiles: boolean) =>
+    apiJson<ChildDeleteResult>(`${BASE}/library/episodes/${id}?deleteFiles=${deleteFiles}`, { method: "DELETE" }),
+  deleteSeason: (id: string, deleteFiles: boolean) =>
+    apiJson<ChildDeleteResult>(`${BASE}/library/seasons/${id}?deleteFiles=${deleteFiles}`, { method: "DELETE" }),
   // Delete one media source / version (admin); deleteFile also erases the file (used for transcode "replace").
   deleteMediaSource: (sourceId: string, deleteFile: boolean) =>
     send(`/library/sources/${sourceId}?deleteFile=${deleteFile}`, "DELETE"),

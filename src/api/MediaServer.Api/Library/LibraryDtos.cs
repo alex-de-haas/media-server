@@ -142,6 +142,9 @@ public sealed record EpisodeDto(
     string? PublicId,
     // The owning series' TMDb id — an episode carries its series identity; used for the Infuse deep link.
     string? SeriesTmdbId,
+    // The season row this episode belongs to. The Episodes tab groups by SeasonNumber, so this is what
+    // gives a group an id to act on (deleting the whole season).
+    Guid? SeasonId,
     int? SeasonNumber,
     int? EpisodeNumber,
     // Last episode covered by this file when it holds a consecutive range (a "double episode"): the row is

@@ -34,6 +34,7 @@ export interface AppMock {
   nextup?: unknown[];
   detail?: Record<string, unknown>;
   episodes?: Record<string, unknown[]>;
+  childDelete?: { seasonRemoved: boolean; seriesRemoved: boolean }; // DELETE /library/{episodes,seasons}/{id}
   catalogs?: unknown[];
   downloads?: unknown[];
   ingest?: unknown[];
@@ -133,6 +134,13 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (/^\/ingest\/[^/]+\/search$/.test(path)) return route.fulfill({ json: mock.metadataSearch ?? [] });
     if (/^\/ingest\/[^/]+\/match$/.test(path)) return route.fulfill({ json: null });
     if (/^\/library\/[^/]+\/remap$/.test(path)) return route.fulfill({ json: { id: mock.remapTargetId ?? "remapped" } });
+
+    // Episode/season delete answers with what it pruned, so the UI knows when the series page is gone.
+    if (method === "DELETE" && /^\/library\/(episodes|seasons)\/[^/]+$/.test(path)) {
+      return route.fulfill({
+        json: mock.childDelete ?? { seasonRemoved: false, seriesRemoved: false },
+      });
+    }
 
     const detailId = path.match(/^\/library\/([^/]+)$/)?.[1];
     if (detailId && mock.detail?.[detailId]) return route.fulfill({ json: mock.detail[detailId] });
@@ -285,6 +293,7 @@ export const anEpisode = (
   id,
   publicId: id,
   seriesTmdbId: "123",
+  seasonId: `season-${seasonNumber}`,
   seasonNumber,
   episodeNumber,
   episodeNumberEnd,

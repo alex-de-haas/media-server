@@ -15,7 +15,7 @@ public sealed record LibraryImportReport(int FilesScanned, int Imported, int Ski
 /// then runs: identify → organize (rename into canonical form) → probe → enrich → publish. Files that
 /// already back a published <see cref="MediaSource"/>, or already have an in-flight ingest, are skipped
 /// (idempotent). The transient <c>.incoming/</c> staging area is never scanned.
-/// See <c>docs/features/torrents-and-organizer.md</c>.
+/// See <c>docs/features/torrents-and-organizer/feature.md</c>.
 /// </summary>
 public sealed class LibraryImportService(
     MediaServerDbContext database, IPipelineQueue queue, ILogger<LibraryImportService> logger)

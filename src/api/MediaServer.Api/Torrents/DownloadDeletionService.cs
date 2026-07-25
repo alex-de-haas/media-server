@@ -8,7 +8,7 @@ namespace MediaServer.Api.Torrents;
 /// hand-off. It stops and drops the torrent, deletes the staging data under <c>.incoming/</c>, and removes
 /// the download's in-flight ingest(s) and source files. A published item has no download (the hand-off
 /// dropped it), so its removal goes through the library, not here — there are no library files to
-/// reconcile. See <c>docs/features/torrents-and-organizer.md</c>.
+/// reconcile. See <c>docs/features/torrents-and-organizer/feature.md</c>.
 /// </summary>
 public sealed class DownloadDeletionService(
     MediaServerDbContext database,

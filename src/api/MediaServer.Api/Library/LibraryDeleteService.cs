@@ -4,10 +4,10 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.Library;
 
 /// <summary>
-/// Deletes a published top-level item (movie or series) from the library. Two modes mirror the
-/// downloads UX: a plain remove (DB rows only — the files stay and a rescan can re-publish them) and a
-/// remove that also deletes the hardlinked files under the catalog's <c>library/</c> subtree. It never
-/// touches <c>files/</c> (the seed copy) — downloads and the library are deleted independently.
+/// Deletes published library rows: a top-level movie or series, one season, one episode, or a single
+/// version of an item. Two modes mirror the downloads UX: a plain remove (DB rows only — the files stay
+/// and a rescan can re-publish them) and a remove that also deletes the canonical files from the catalog.
+/// It never touches a download's own staging data — downloads and the library are deleted independently.
 /// </summary>
 public sealed class LibraryDeleteService(
     MediaServerDbContext database,
@@ -33,30 +33,7 @@ public sealed class LibraryDeleteService(
 
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
-            // Detach source files from these items (keep the download's files; just unassign them).
-            await database.SourceFiles
-                .Where(file => file.MediaItemId != null && ids.Contains(file.MediaItemId.Value))
-                .ExecuteUpdateAsync(setters => setters.SetProperty(file => file.MediaItemId, (Guid?)null), cancellationToken);
-
-            // Dependents first (explicit, so we don't depend on DB cascade being enabled).
-            var sourceIds = await database.MediaSources
-                .Where(source => ids.Contains(source.MediaItemId))
-                .Select(source => source.Id)
-                .ToListAsync(cancellationToken);
-            await database.MediaStreams.Where(stream => sourceIds.Contains(stream.MediaSourceId)).ExecuteDeleteAsync(cancellationToken);
-            await database.MediaSources.Where(source => ids.Contains(source.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-            await database.MetadataRecords.Where(record => ids.Contains(record.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-            await database.ImageAssets.Where(image => ids.Contains(image.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-            await database.UserItemData.Where(data => ids.Contains(data.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-
-            // Items child→parent: the self-FK on ParentId is Restrict, so leaves first — episodes and
-            // extras (Videos parent to their series or season) — then seasons, then the root.
-            await database.MediaItems.Where(media => ids.Contains(media.Id) &&
-                (media.Kind == MediaKind.Episode || media.Kind == MediaKind.Video)).ExecuteDeleteAsync(cancellationToken);
-            await database.MediaItems.Where(media => ids.Contains(media.Id) && media.Kind == MediaKind.Season).ExecuteDeleteAsync(cancellationToken);
-            await database.MediaItems.Where(media => ids.Contains(media.Id) &&
-                (media.Kind == MediaKind.Series || media.Kind == MediaKind.Movie)).ExecuteDeleteAsync(cancellationToken);
-
+            await PurgeItemsAsync(ids, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
 
@@ -66,6 +43,85 @@ public sealed class LibraryDeleteService(
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Deletes one published episode from its series, with the same two modes as the item-level delete.
+    /// Emptied containers are pruned — see <see cref="DeleteWithinSeriesAsync"/>. Returns null when no
+    /// such episode exists.
+    /// </summary>
+    public Task<ChildDeleteResult?> DeleteEpisodeAsync(Guid id, bool deleteFiles, CancellationToken cancellationToken) =>
+        DeleteWithinSeriesAsync(id, MediaKind.Episode, deleteFiles, cancellationToken);
+
+    /// <summary>
+    /// Deletes one published season — its episodes, the extras parented to it, and the season row itself.
+    /// Returns null when no such season exists.
+    /// </summary>
+    public Task<ChildDeleteResult?> DeleteSeasonAsync(Guid id, bool deleteFiles, CancellationToken cancellationToken) =>
+        DeleteWithinSeriesAsync(id, MediaKind.Season, deleteFiles, cancellationToken);
+
+    /// <summary>
+    /// Deletes a published episode or season and then prunes whatever it emptied: the owning season once
+    /// nothing carries its <see cref="MediaItem.SeasonId"/> any more, then the series once nothing is left
+    /// under it. Emptiness counts *every* remaining child, not just episodes — a season-scoped extra keeps
+    /// its season alive, and pruning around it would fail the <c>Restrict</c> self-FK on
+    /// <see cref="MediaItem.ParentId"/>. This mirrors the cascade <c>RemapService.CleanupOrphanAsync</c>
+    /// applies after a remap.
+    /// </summary>
+    private async Task<ChildDeleteResult?> DeleteWithinSeriesAsync(
+        Guid id, MediaKind kind, bool deleteFiles, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.PublicId != null &&
+                candidate.Kind == kind && candidate.SeriesId != null, cancellationToken);
+        if (item is null)
+        {
+            return null;
+        }
+
+        // A season takes its own children with it (episodes and season-scoped extras alike).
+        var ids = kind == MediaKind.Season
+            ? await database.MediaItems.AsNoTracking()
+                .Where(candidate => candidate.Id == item.Id || candidate.SeasonId == item.Id ||
+                    candidate.ParentId == item.Id)
+                .Select(candidate => candidate.Id)
+                .Distinct()
+                .ToListAsync(cancellationToken)
+            : [item.Id];
+
+        var files = deleteFiles ? await GatherLibraryFilesAsync(ids, cancellationToken) : [];
+
+        var seasonRemoved = kind == MediaKind.Season;
+        var seriesRemoved = false;
+
+        await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
+        {
+            await PurgeItemsAsync(ids, cancellationToken);
+
+            if (kind == MediaKind.Episode && item.SeasonId is { } seasonId &&
+                !await database.MediaItems.AnyAsync(candidate => candidate.SeasonId == seasonId, cancellationToken))
+            {
+                await PurgeItemsAsync([seasonId], cancellationToken);
+                seasonRemoved = true;
+            }
+
+            var seriesId = item.SeriesId!.Value;
+            if (!await database.MediaItems.AnyAsync(candidate => candidate.Id != seriesId &&
+                (candidate.SeriesId == seriesId || candidate.ParentId == seriesId), cancellationToken))
+            {
+                await PurgeItemsAsync([seriesId], cancellationToken);
+                seriesRemoved = true;
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        foreach (var (catalog, relativePath) in files)
+        {
+            fileEraser.Erase(catalog, relativePath);
+        }
+
+        return new ChildDeleteResult(seasonRemoved, seriesRemoved);
     }
 
     /// <summary>
@@ -116,6 +172,40 @@ public sealed class LibraryDeleteService(
         return true;
     }
 
+    /// <summary>
+    /// Deletes the given items and every dependent row, inside the caller's transaction. Ids are removed
+    /// child→parent because the self-FK on <see cref="MediaItem.ParentId"/> is <c>Restrict</c>, so a set
+    /// spanning generations still deletes cleanly. Rows that only ever cascade — playback sessions and
+    /// history, transcode jobs — are left to the DB.
+    /// </summary>
+    private async Task PurgeItemsAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken)
+    {
+        // Detach source files from these items (keep the download's files; just unassign them).
+        await database.SourceFiles
+            .Where(file => file.MediaItemId != null && ids.Contains(file.MediaItemId.Value))
+            .ExecuteUpdateAsync(setters => setters.SetProperty(file => file.MediaItemId, (Guid?)null), cancellationToken);
+
+        // Dependents first (explicit, so we don't depend on DB cascade being enabled).
+        var sourceIds = await database.MediaSources
+            .Where(source => ids.Contains(source.MediaItemId))
+            .Select(source => source.Id)
+            .ToListAsync(cancellationToken);
+        await database.MediaStreams.Where(stream => sourceIds.Contains(stream.MediaSourceId)).ExecuteDeleteAsync(cancellationToken);
+        await database.MediaSources.Where(source => ids.Contains(source.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+        await database.MetadataRecords.Where(record => ids.Contains(record.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+        await database.ImageAssets.Where(image => ids.Contains(image.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+        await database.MediaItemPersons.Where(credit => ids.Contains(credit.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+        await database.UserItemData.Where(data => ids.Contains(data.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+
+        // Items child→parent: leaves first — episodes and extras (Videos parent to their series or
+        // season) — then seasons, then the root.
+        await database.MediaItems.Where(media => ids.Contains(media.Id) &&
+            (media.Kind == MediaKind.Episode || media.Kind == MediaKind.Video)).ExecuteDeleteAsync(cancellationToken);
+        await database.MediaItems.Where(media => ids.Contains(media.Id) && media.Kind == MediaKind.Season).ExecuteDeleteAsync(cancellationToken);
+        await database.MediaItems.Where(media => ids.Contains(media.Id) &&
+            (media.Kind == MediaKind.Series || media.Kind == MediaKind.Movie)).ExecuteDeleteAsync(cancellationToken);
+    }
+
     private async Task<List<Guid>> CollectItemIdsAsync(MediaItem item, CancellationToken cancellationToken)
     {
         if (item.Kind != MediaKind.Series)
@@ -155,3 +245,9 @@ public sealed class LibraryDeleteService(
             .ToList();
     }
 }
+
+/// <summary>
+/// What an episode/season delete took beyond its target. <c>SeriesRemoved</c> tells the UI the
+/// series page it was called from is gone and it should navigate back to the library.
+/// </summary>
+public sealed record ChildDeleteResult(bool SeasonRemoved, bool SeriesRemoved);

@@ -12,7 +12,7 @@ Updated: 2026-07-14
 > per-catalog import **Scan**. Milestone narrative below that still mentions
 > `files/`/`library/` hardlinks or seed-copy teardown predates this change and is
 > kept as a historical record; the current model is in
-> [Torrents and organizer](torrents-and-organizer.md).
+> [Torrents and organizer](torrents-and-organizer/feature.md).
 >
 > **Torrent-engine extraction (2026-06-24).** The in-process **MonoTorrent** engine
 > was removed from `api` and extracted into a standalone, VPN-isolated
@@ -27,7 +27,7 @@ Updated: 2026-07-14
 > that describes an **in-process** engine, the raw torrent port / `HOSTY_PORT_TORRENT`,
 > or those two settings (including the §4 manifest, the M1 narrative, and §7/§8)
 > predates this change and is kept as a historical record. Current model:
-> [Torrents and organizer](torrents-and-organizer.md) and
+> [Torrents and organizer](torrents-and-organizer/feature.md) and
 > [Torrent engine app](../ideas/torrent-engine-app.md).
 
 ## Purpose
@@ -238,7 +238,7 @@ loads the UI inside the Shell; identity validates; `/health` green; CI passes.
 ### M1 — Ingest happy path (primary use case)
 **Goal:** add a torrent + pick a catalog → fully published, playable item, no manual steps.
 Depends on M0. Specs: [automation-pipeline](automation-pipeline.md),
-[domain-model](domain-model.md), [torrents-and-organizer](torrents-and-organizer.md),
+[domain-model](domain-model.md), [torrents-and-organizer](torrents-and-organizer/feature.md),
 [catalogs](catalogs.md), [metadata](metadata/feature.md), [background-tasks](background-tasks.md).
 - Catalog model; read roots from `HOSTY_MOUNT_CATALOGROOTS`; validate each is a
   single filesystem (`st_dev`); `files/` + `library/` layout per root.

@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-07-24
+Updated: 2026-07-25
 
 ## Description
 
@@ -33,9 +33,13 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   tabs show Cast, Episodes grouped by season, and Tags; an episode whose file
   holds a consecutive range is labelled `S01E01-E02` (matching the on-disk name)
   so the season does not look like it skipped an episode — the title stays the
-  first episode's, as that is all the provider has. Detail admin controls
-  support metadata refresh, remap where applicable, and deletion. **Playback is
-  not in-browser** — Play deep-links to an Infuse/Jellyfin client.
+  first episode's, as that is all the provider has. On the Episodes tab an admin can
+  also delete a single episode row or a whole season from its heading; both confirm
+  first, with a "Delete files from disk" checkbox that defaults to off, and both
+  return to the library grid when the delete leaves the series with nothing in it.
+  Detail admin controls support metadata refresh, remap where applicable, and
+  deletion. **Playback is not in-browser** — Play deep-links to an Infuse/Jellyfin
+  client.
 - **Downloads** (`/downloads`) — torrent list with live progress, ratio, and
   seeding status; add (with catalog + `keepSeeding`, showing each catalog's free
   space and refusing oversized `.torrent` downloads), pause, resume, stop seeding,
@@ -108,8 +112,9 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
 
 The UI does not expose a general file manager in v1. It exposes media-oriented
 actions: add torrent, confirm/remap source files, stop seeding, remove downloads,
-and delete library items. The UI is English-only in v1; localization is deferred
-until Hosty provides app-level language support.
+and delete library items — a whole movie or series, one season, or one episode. The UI
+is English-only in v1; localization is deferred until Hosty provides app-level language
+support.
 
 ## Testing Expectations
 
@@ -127,6 +132,9 @@ coverage:
 - Activity card behavior per work type: the actions each state offers (their
   accessible names), and that a queued item shows the queued line rather than a
   progress bar.
+- Episode and season deletion: the actions exist only for an admin, the request
+  carries `deleteFiles` only when the checkbox is ticked, and a delete that prunes
+  the series navigates back to the library grid.
 
 ## Links
 

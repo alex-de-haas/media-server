@@ -69,7 +69,7 @@ declared in the manifest's `dependencies`, discovered via the injected
 by `RemoteTorrentEngine`. All peer connectivity, the raw listen port, and port
 mapping live in that app. When the dependency is unconfigured, a
 `DisabledTorrentEngine` keeps the rest of the app working (see
-[Torrents and organizer](torrents-and-organizer.md) and
+[Torrents and organizer](torrents-and-organizer/feature.md) and
 [Torrent engine app](../ideas/torrent-engine-app.md)).
 
 ## Runtime Environment

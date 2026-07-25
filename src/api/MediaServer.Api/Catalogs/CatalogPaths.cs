@@ -8,7 +8,7 @@ namespace MediaServer.Api.Catalogs;
 /// the catalog root. There is no separate <c>library/</c> subtree and no hardlinking — a completed file
 /// is <b>moved</b> from <c>.incoming/</c> into its canonical place. Everything outside <c>.incoming/</c>
 /// is the durable library and the only subtree the read/scan/Jellyfin surfaces expose.
-/// See <c>docs/features/torrents-and-organizer.md</c>.
+/// See <c>docs/features/torrents-and-organizer/feature.md</c>.
 /// </summary>
 public sealed record CatalogPaths(string Root, string IncomingDir)
 {

@@ -156,6 +156,82 @@ test("labels a double-episode file with the range it covers", async ({ page }) =
   await expect(page.getByText("S01E03")).toBeVisible();
 });
 
+test("admin deletes one episode, keeping the files unless asked", async ({ page }) => {
+  await setupApp(page, {
+    role: "admin",
+    library: [aSeries("s1", "Severance")],
+    detail: { s1: seriesDetail("s1", "Severance", "95396") },
+    episodes: { s1: [anEpisode("e1", 1, 1, "Good News About Hell"), anEpisode("e2", 1, 2, "Half Loop")] },
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  // Keeping the files is the default: a delete must not silently remove media from disk.
+  const kept = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/proxy/api/library/episodes/e1?deleteFiles=false") && request.method() === "DELETE",
+  );
+  await page.getByRole("button", { name: "Delete S01E01" }).click();
+  await expect(page.getByRole("heading", { name: "Delete episode?" })).toBeVisible();
+  await page.getByRole("button", { name: "Remove from library" }).click();
+  await kept;
+  await expect(page).toHaveURL(/\/series\/s1$/);
+
+  // Ticking the box is what escalates to erasing the file.
+  const erased = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/proxy/api/library/episodes/e2?deleteFiles=true") && request.method() === "DELETE",
+  );
+  await page.getByRole("button", { name: "Delete S01E02" }).click();
+  await page.getByRole("checkbox", { name: /Delete files from disk/ }).click();
+  await page.getByRole("button", { name: "Delete + remove files" }).click();
+  await erased;
+});
+
+test("admin deletes a whole season and leaves when the series is pruned", async ({ page }) => {
+  await setupApp(page, {
+    role: "admin",
+    library: [aSeries("s1", "Severance")],
+    detail: { s1: seriesDetail("s1", "Severance", "95396") },
+    episodes: { s1: [anEpisode("e1", 1, 1, "Good News About Hell")] },
+    // Its only season goes, so nothing is left under the series and the server prunes it too.
+    childDelete: { seasonRemoved: true, seriesRemoved: true },
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  const deleted = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/proxy/api/library/seasons/season-1?deleteFiles=false") &&
+      request.method() === "DELETE",
+  );
+  await page.getByRole("button", { name: "Delete season 1" }).click();
+  await expect(page.getByText("1 episode will be removed from the library.")).toBeVisible();
+  await page.getByRole("button", { name: "Remove from library" }).click();
+  await deleted;
+
+  // The page it was called from no longer exists.
+  await expect(page).toHaveURL(/\/series$/);
+});
+
+test("a non-admin gets no episode or season delete actions", async ({ page }) => {
+  await setupApp(page, {
+    role: "user",
+    library: [aSeries("s1", "Severance")],
+    detail: { s1: seriesDetail("s1", "Severance", "95396") },
+    episodes: { s1: [anEpisode("e1", 1, 1, "Good News About Hell")] },
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  await expect(page.getByText(/S01E01/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete S01E01" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Delete season 1" })).toHaveCount(0);
+});
+
 test("admin fixes a misidentified movie and lands on the corrected item", async ({ page }) => {
   await setupApp(page, {
     role: "admin",

@@ -10,7 +10,7 @@ public sealed record OrganizedFile(Guid SourceFileId, Guid MediaItemId, string L
 /// staging area, or wherever a scanned file already sits — into the catalog's canonical layout at the
 /// catalog root, renaming per the confirmed metadata. A move within one filesystem is atomic and
 /// zero-copy; there are no hardlinks. Emptied <c>.incoming/</c> staging folders are removed.
-/// See <c>docs/features/torrents-and-organizer.md</c>.
+/// See <c>docs/features/torrents-and-organizer/feature.md</c>.
 /// </summary>
 public interface IOrganizer
 {

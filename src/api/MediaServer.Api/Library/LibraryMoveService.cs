@@ -28,7 +28,7 @@ namespace MediaServer.Api.Library;
 /// </list>
 /// A move within one volume is an atomic rename; across volumes it copies then deletes the source (with a
 /// free-space pre-check), reporting progress on its <see cref="Job"/>. See
-/// <c>docs/features/file-directory-management.md</c>.
+/// <c>docs/features/file-directory-management/feature.md</c>.
 /// </summary>
 public sealed class LibraryMoveService(
     MediaServerDbContext database,
