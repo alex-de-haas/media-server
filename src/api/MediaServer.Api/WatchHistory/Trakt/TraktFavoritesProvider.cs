@@ -43,6 +43,10 @@ public sealed class TraktFavoritesProvider(
         }
 
         var favorites = new List<ProviderFavorite>();
+        // Counted separately from the list: an entry Trakt holds but this app cannot match (no TMDb or
+        // IMDb id) still occupies a slot, so folding it out of the count would under-report how full the
+        // list is and weaken the cap warning.
+        var held = 0;
         foreach (var (type, kind) in new[] { ("movies", FavoriteWorkKind.Movie), ("shows", FavoriteWorkKind.Series) })
         {
             for (var page = 1; page <= MaxPages; page++)
@@ -61,7 +65,8 @@ public sealed class TraktFavoritesProvider(
                         WatchHistoryFailure.ContractViolation, $"Trakt returned a non-list favorites body for {type}.");
                 }
 
-                var before = favorites.Count;
+                var returned = document.RootElement.GetArrayLength();
+                held += returned;
                 foreach (var element in document.RootElement.EnumerateArray())
                 {
                     if (ReadFavorite(element, kind) is { } favorite)
@@ -70,9 +75,10 @@ public sealed class TraktFavoritesProvider(
                     }
                 }
 
-                // Short page (or none at all) means the list is exhausted; Trakt's paging headers are not
-                // needed for a list this small and capped.
-                if (favorites.Count - before < PageSize)
+                // Page fullness is decided by what Trakt returned, not by what survived matching: one
+                // skipped entry on a full page would otherwise look like the end of the list and hide
+                // every page after it.
+                if (returned < PageSize)
                 {
                     break;
                 }
@@ -80,7 +86,7 @@ public sealed class TraktFavoritesProvider(
         }
 
         return WatchHistoryResult<FavoritesSnapshot>.Success(
-            new FavoritesSnapshot(favorites, favorites.Count, FavoritesCapacity));
+            new FavoritesSnapshot(favorites, held, FavoritesCapacity));
     }
 
     public Task<WatchHistoryResult<FavoritesWriteResult>> AddFavoritesAsync(
@@ -139,8 +145,10 @@ public sealed class TraktFavoritesProvider(
             logger.LogInformation("Trakt did not recognise {Count} of {Total} favorited works.", notFound, wanted.Count);
         }
 
+        // The cap travels with every write, not only with a full read: Settings needs both halves of
+        // "97/100", and a user who never runs an explicit sync would otherwise see neither.
         return WatchHistoryResult<FavoritesWriteResult>.Success(
-            new FavoritesWriteResult(applied, unchanged, notFound, RemoteCountOf(root)));
+            new FavoritesWriteResult(applied, unchanged, notFound, RemoteCountOf(root), FavoritesCapacity));
     }
 
     /// <summary>

@@ -53,22 +53,25 @@ public sealed class FavoritesSyncService(
     ILogger<FavoritesSyncService> logger)
 {
     public async Task<WatchHistoryResult<FavoritesSyncPlan>> PreviewAsync(
-        int appUserId, CancellationToken cancellationToken) =>
-        await ReconcileAsync(appUserId, apply: false, cancellationToken);
+        int appUserId, string providerKey, CancellationToken cancellationToken) =>
+        await ReconcileAsync(appUserId, providerKey, apply: false, cancellationToken);
 
     public async Task<WatchHistoryResult<FavoritesSyncPlan>> ApplyAsync(
-        int appUserId, CancellationToken cancellationToken) =>
-        await ReconcileAsync(appUserId, apply: true, cancellationToken);
+        int appUserId, string providerKey, CancellationToken cancellationToken) =>
+        await ReconcileAsync(appUserId, providerKey, apply: true, cancellationToken);
 
     private async Task<WatchHistoryResult<FavoritesSyncPlan>> ReconcileAsync(
-        int appUserId, bool apply, CancellationToken cancellationToken)
+        int appUserId, string providerKey, bool apply, CancellationToken cancellationToken)
     {
+        // Keyed by the provider the route named, not merely by the user: the schema allows one
+        // connection per provider, so picking "the user's connection" would reconcile one provider's
+        // favorites against another's account the day a second provider exists.
         var connection = await database.WatchHistoryConnections
-            .FirstOrDefaultAsync(link => link.AppUserId == appUserId, cancellationToken);
+            .FirstOrDefaultAsync(link => link.AppUserId == appUserId && link.ProviderKey == providerKey, cancellationToken);
         if (connection is null)
         {
             return WatchHistoryResult<FavoritesSyncPlan>.Failed(
-                WatchHistoryFailure.AuthenticationRequired, "No provider is connected.");
+                WatchHistoryFailure.AuthenticationRequired, $"'{providerKey}' is not connected.");
         }
 
         var provider = registry.FindFavorites(connection.ProviderKey);

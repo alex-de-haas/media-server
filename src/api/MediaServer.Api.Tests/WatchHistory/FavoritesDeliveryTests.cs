@@ -45,6 +45,9 @@ public sealed class FavoritesDeliveryTests : IDisposable
         Assert.Equal(WatchHistoryOutboxStatus.Completed, queued.Status);
         var connection = await verify.WatchHistoryConnections.SingleAsync();
         Assert.Equal(42, connection.FavoritesRemoteCount);
+        // The cap rides along with every write: Settings shows the counter only when it has both, so a
+        // user who never runs an explicit sync would otherwise see neither half.
+        Assert.Equal(100, connection.FavoritesCapacity);
     }
 
     [Fact]
@@ -190,6 +193,6 @@ public sealed class FavoritesDeliveryTests : IDisposable
             Task.FromResult(Failure is { } failure
                 ? WatchHistoryResult<FavoritesWriteResult>.Failed(failure, "stub failure")
                 : WatchHistoryResult<FavoritesWriteResult>.Success(
-                    new FavoritesWriteResult(identities.Count - NotFound, 0, NotFound, RemoteCountAfterWrite)));
+                    new FavoritesWriteResult(identities.Count - NotFound, 0, NotFound, RemoteCountAfterWrite, 100)));
     }
 }

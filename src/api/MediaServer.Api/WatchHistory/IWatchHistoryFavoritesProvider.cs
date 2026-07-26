@@ -34,7 +34,7 @@ public sealed record FavoritesSnapshot(IReadOnlyList<ProviderFavorite> Favorites
 /// could not identify are counted separately: they are the caller's business to surface, not a reason
 /// to fail a batch that otherwise landed.
 /// </summary>
-public sealed record FavoritesWriteResult(int Applied, int Unchanged, int NotFound, int? RemoteCount);
+public sealed record FavoritesWriteResult(int Applied, int Unchanged, int NotFound, int? RemoteCount, int? Capacity = null);
 
 /// <summary>
 /// A provider that also carries favorites. Optional on purpose: an adapter that only knows plays stays

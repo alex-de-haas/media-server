@@ -37,7 +37,7 @@ public sealed class FavoritesSyncTests : IDisposable
     {
         await FavoriteAsync(_movieId);
 
-        var plan = await Service().PreviewAsync(_userId, CancellationToken.None);
+        var plan = await Service().PreviewAsync(_userId, "trakt", CancellationToken.None);
 
         Assert.True(plan.Succeeded);
         var entry = Assert.Single(plan.Value!.Entries);
@@ -53,7 +53,7 @@ public sealed class FavoritesSyncTests : IDisposable
     {
         await FavoriteAsync(_movieId);
 
-        Assert.True((await Service().ApplyAsync(_userId, CancellationToken.None)).Succeeded);
+        Assert.True((await Service().ApplyAsync(_userId, "trakt", CancellationToken.None)).Succeeded);
 
         await using var verify = _db.Create();
         var queued = Assert.Single(await verify.WatchHistoryOutboxEvents.ToListAsync());
@@ -68,7 +68,7 @@ public sealed class FavoritesSyncTests : IDisposable
     {
         _provider.Favorites.Add(new ProviderFavorite(new FavoriteIdentity(FavoriteWorkKind.Movie, 27205, null), _time.GetUtcNow()));
 
-        var plan = await Service().ApplyAsync(_userId, CancellationToken.None);
+        var plan = await Service().ApplyAsync(_userId, "trakt", CancellationToken.None);
 
         Assert.True(plan.Succeeded);
         Assert.Equal(FavoriteSyncAction.AddLocally, Assert.Single(plan.Value!.Entries).Action);
@@ -84,7 +84,7 @@ public sealed class FavoritesSyncTests : IDisposable
         await FavoriteAsync(_movieId);
         await SeedStateAsync(remotePresent: true, localFavorite: true);
 
-        var plan = await Service().ApplyAsync(_userId, CancellationToken.None);
+        var plan = await Service().ApplyAsync(_userId, "trakt", CancellationToken.None);
 
         Assert.Equal(FavoriteSyncAction.RemoveLocally, Assert.Single(plan.Value!.Entries).Action);
         await using var verify = _db.Create();
@@ -99,7 +99,7 @@ public sealed class FavoritesSyncTests : IDisposable
         _provider.Favorites.Add(new ProviderFavorite(new FavoriteIdentity(FavoriteWorkKind.Movie, 27205, null), _time.GetUtcNow()));
         await SeedStateAsync(remotePresent: true, localFavorite: true);
 
-        var plan = await Service().ApplyAsync(_userId, CancellationToken.None);
+        var plan = await Service().ApplyAsync(_userId, "trakt", CancellationToken.None);
 
         Assert.Equal(FavoriteSyncAction.RemoveRemotely, Assert.Single(plan.Value!.Entries).Action);
         await using var verify = _db.Create();
@@ -113,7 +113,7 @@ public sealed class FavoritesSyncTests : IDisposable
         // Deleted but remembered: the ghost keeps the favorite, and a re-download brings it back visible.
         _provider.Favorites.Add(new ProviderFavorite(new FavoriteIdentity(FavoriteWorkKind.Movie, 99999, null), _time.GetUtcNow()));
 
-        var plan = await Service().ApplyAsync(_userId, CancellationToken.None);
+        var plan = await Service().ApplyAsync(_userId, "trakt", CancellationToken.None);
 
         Assert.Equal(FavoriteSyncAction.AddLocally, Assert.Single(plan.Value!.Entries).Action);
         await using var verify = _db.Create();
@@ -125,7 +125,7 @@ public sealed class FavoritesSyncTests : IDisposable
     {
         _provider.Favorites.Add(new ProviderFavorite(new FavoriteIdentity(FavoriteWorkKind.Movie, 12345, null), _time.GetUtcNow()));
 
-        var plan = await Service().PreviewAsync(_userId, CancellationToken.None);
+        var plan = await Service().PreviewAsync(_userId, "trakt", CancellationToken.None);
 
         var entry = Assert.Single(plan.Value!.Entries);
         Assert.Equal(FavoriteSyncAction.SkippedNotInLibrary, entry.Action);
@@ -139,9 +139,9 @@ public sealed class FavoritesSyncTests : IDisposable
         // already landed, the next comparison would read the unchanged provider as a fresh remote
         // removal — and offer to clear the favorite the user just set.
         await FavoriteAsync(_movieId);
-        Assert.True((await Service().ApplyAsync(_userId, CancellationToken.None)).Succeeded);
+        Assert.True((await Service().ApplyAsync(_userId, "trakt", CancellationToken.None)).Succeeded);
 
-        var again = await Service().PreviewAsync(_userId, CancellationToken.None);
+        var again = await Service().PreviewAsync(_userId, "trakt", CancellationToken.None);
 
         Assert.Equal(FavoriteSyncAction.AddRemotely, Assert.Single(again.Value!.Entries).Action);
         await using var verify = _db.Create();
@@ -153,7 +153,7 @@ public sealed class FavoritesSyncTests : IDisposable
     {
         _provider.RemoteCount = 97;
 
-        var plan = await Service().PreviewAsync(_userId, CancellationToken.None);
+        var plan = await Service().PreviewAsync(_userId, "trakt", CancellationToken.None);
 
         Assert.Equal(97, plan.Value!.RemoteCount);
         Assert.Equal(100, plan.Value!.Capacity);

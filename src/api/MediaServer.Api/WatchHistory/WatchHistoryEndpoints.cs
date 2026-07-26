@@ -305,7 +305,7 @@ public static class WatchHistoryEndpoints
                 return context.Problem;
             }
 
-            var result = await favorites.PreviewAsync(context.User!.Id, cancellationToken);
+            var result = await favorites.PreviewAsync(context.User!.Id, context.ProviderKey!, cancellationToken);
             return result.Succeeded ? Results.Ok(result.Value!) : ToProblem(result.Failure!.Value, result.Detail);
         });
 
@@ -323,7 +323,7 @@ public static class WatchHistoryEndpoints
                 return context.Problem;
             }
 
-            var result = await favorites.ApplyAsync(context.User!.Id, cancellationToken);
+            var result = await favorites.ApplyAsync(context.User!.Id, context.ProviderKey!, cancellationToken);
             return result.Succeeded ? Results.Ok(result.Value!) : ToProblem(result.Failure!.Value, result.Detail);
         });
 

@@ -171,7 +171,7 @@ public sealed class WatchHistoryDeliveryService(
             return (result.Failure, result.Detail, result.RetryAfter);
         }
 
-        await RecordFavoritesCountAsync(connection.Id, result.Value!.RemoteCount, cancellationToken);
+        await RecordFavoritesCountAsync(connection.Id, result.Value!.RemoteCount, result.Value!.Capacity, cancellationToken);
 
         // A work the provider cannot identify is not a delivery failure to retry — it is a fact about
         // the work. Report it so Settings can show which favorite never made it across.
@@ -183,8 +183,13 @@ public sealed class WatchHistoryDeliveryService(
         return (null, null, null);
     }
 
-    /// <summary>Stores how full the provider's favorites list is, so Settings can warn before a write fails.</summary>
-    private async Task RecordFavoritesCountAsync(Guid connectionId, int? remoteCount, CancellationToken cancellationToken)
+    /// <summary>
+    /// Stores how full the provider's favorites list is, so Settings can warn before a write fails.
+    /// The cap is written alongside it: the UI shows the counter only when it has both halves, so
+    /// recording one without the other would leave it invisible until an explicit sync ran.
+    /// </summary>
+    private async Task RecordFavoritesCountAsync(
+        Guid connectionId, int? remoteCount, int? capacity, CancellationToken cancellationToken)
     {
         if (remoteCount is not { } count)
         {
@@ -193,7 +198,10 @@ public sealed class WatchHistoryDeliveryService(
 
         await database.WatchHistoryConnections
             .Where(connection => connection.Id == connectionId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(connection => connection.FavoritesRemoteCount, count), cancellationToken);
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(connection => connection.FavoritesRemoteCount, count)
+                // Keep whatever cap is already known when this write did not report one.
+                .SetProperty(connection => connection.FavoritesCapacity, connection => capacity ?? connection.FavoritesCapacity), cancellationToken);
     }
 
     private async Task<(WatchHistoryFailure?, string?, TimeSpan?)> AddExactAsync(
