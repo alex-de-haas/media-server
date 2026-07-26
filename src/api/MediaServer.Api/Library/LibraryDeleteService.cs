@@ -240,8 +240,8 @@ public sealed class LibraryDeleteService(
             .ToDictionaryAsync(catalog => catalog.Id, cancellationToken);
 
         return sources
-            .Where(source => catalogs.ContainsKey(source.CatalogId))
-            .Select(source => (catalogs[source.CatalogId], source.Path))
+            .Where(source => source.CatalogId is { } catalogId && catalogs.ContainsKey(catalogId))
+            .Select(source => (catalogs[source.CatalogId!.Value], source.Path))
             .ToList();
     }
 }

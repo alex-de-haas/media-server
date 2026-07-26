@@ -632,7 +632,8 @@ public sealed class JellyfinLibraryService(
 
         return item.Kind switch
         {
-            MediaKind.Movie or MediaKind.Series => new ItemParents(ParentId: JellyfinIds.Catalog(item.CatalogId)),
+            // Jellyfin serves published items only, and a published item always has a catalog.
+            MediaKind.Movie or MediaKind.Series => new ItemParents(ParentId: JellyfinIds.Catalog(item.CatalogId!.Value)),
             MediaKind.Season => new ItemParents(
                 ParentId: Lookup(item.SeriesId ?? item.ParentId)?.PublicId,
                 SeriesId: Lookup(item.SeriesId)?.PublicId,
@@ -651,7 +652,7 @@ public sealed class JellyfinLibraryService(
                 SeriesName: Lookup(item.SeriesId)?.Title,
                 SeasonId: Lookup(item.SeasonId)?.PublicId,
                 SeasonName: Lookup(item.SeasonId)?.Title),
-            _ => new ItemParents(ParentId: JellyfinIds.Catalog(item.CatalogId)),
+            _ => new ItemParents(ParentId: JellyfinIds.Catalog(item.CatalogId!.Value)),
         };
     }
 

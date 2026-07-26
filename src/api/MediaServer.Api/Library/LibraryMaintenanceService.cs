@@ -152,7 +152,7 @@ public sealed class LibraryMaintenanceService(
 
         foreach (var source in sources)
         {
-            if (source.MediaItem is null || !catalogsById.TryGetValue(source.MediaItem.CatalogId, out var catalog))
+            if (source.MediaItem?.CatalogId is not { } sourceCatalogId || !catalogsById.TryGetValue(sourceCatalogId, out var catalog))
             {
                 continue;
             }

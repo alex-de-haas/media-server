@@ -60,13 +60,13 @@ public sealed class JellyfinCatalogArtwork(MediaServerDbContext database)
         // the SQL trivially translatable (no GroupBy/First-per-group) while staying a single query.
         var candidates = await database.ImageAssets.AsNoTracking()
             .Where(image => image.ImageType == ImageType.Backdrop
-                && catalogIds.Contains(image.MediaItem!.CatalogId)
+                && image.MediaItem!.CatalogId != null && catalogIds.Contains(image.MediaItem!.CatalogId.Value)
                 && image.MediaItem.PublicId != null
                 && image.MediaItem.ParentId == null
                 && (image.MediaItem.Kind == MediaKind.Movie || image.MediaItem.Kind == MediaKind.Series))
             .Select(image => new
             {
-                image.MediaItem!.CatalogId,
+                CatalogId = image.MediaItem!.CatalogId!.Value,
                 image.MediaItem.AddedAt,
                 image.SortOrder,
                 image.Tag,

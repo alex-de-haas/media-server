@@ -152,7 +152,7 @@ public sealed class LibraryReadService(
             return new LibraryItemDto(
                 item.Id,
                 item.PublicId,
-                item.CatalogId,
+                item.CatalogId!.Value,
                 item.Kind.ToString(),
                 TitleFor(meta, item.Title),
                 item.Year ?? meta?.ReleaseDate?.Year,
@@ -286,7 +286,7 @@ public sealed class LibraryReadService(
             item.Id,
             item.PublicId,
             TmdbId(item),
-            item.CatalogId,
+            item.CatalogId!.Value,
             catalogName,
             catalogRoot,
             item.Kind.ToString(),

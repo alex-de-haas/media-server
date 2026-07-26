@@ -21,15 +21,17 @@ public static class PublicIdFactory
     {
         var provider = item.IdentityProvider ?? "local";
         var providerId = item.IdentityProviderId ?? item.Id.ToString("N");
+        var catalogId = item.CatalogId
+            ?? throw new InvalidOperationException($"Cannot mint a public id for catalog-less item {item.Id} — a tombstone must be re-homed to a catalog before publishing.");
 
         return item.Kind switch
         {
-            MediaKind.Movie or MediaKind.Video => ForMovie(item.CatalogId, provider, providerId),
-            MediaKind.Series => ForSeries(item.CatalogId, provider, providerId),
-            MediaKind.Season => ForSeason(item.CatalogId, provider, providerId, item.IdentitySeasonNumber ?? item.IndexNumber ?? 1),
-            MediaKind.Episode => ForEpisode(item.CatalogId, provider, providerId,
+            MediaKind.Movie or MediaKind.Video => ForMovie(catalogId, provider, providerId),
+            MediaKind.Series => ForSeries(catalogId, provider, providerId),
+            MediaKind.Season => ForSeason(catalogId, provider, providerId, item.IdentitySeasonNumber ?? item.IndexNumber ?? 1),
+            MediaKind.Episode => ForEpisode(catalogId, provider, providerId,
                 item.IdentitySeasonNumber ?? item.ParentIndexNumber ?? 1, item.IdentityEpisodeNumber ?? item.IndexNumber ?? 0),
-            _ => ForMovie(item.CatalogId, provider, providerId),
+            _ => ForMovie(catalogId, provider, providerId),
         };
     }
 

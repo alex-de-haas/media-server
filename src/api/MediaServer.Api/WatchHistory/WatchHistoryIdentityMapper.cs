@@ -199,7 +199,7 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
             .Where(entry => entry.Kind == MediaKind.Movie && entry.Id != item.Id);
         if (catalogScope is { Count: > 0 })
         {
-            candidates = candidates.Where(entry => catalogScope.Contains(entry.CatalogId));
+            candidates = candidates.Where(entry => entry.CatalogId != null && catalogScope.Contains(entry.CatalogId.Value));
         }
 
         // The canonical identity is indexed by (CatalogId, IdentityProvider, IdentityProviderId), so
