@@ -49,11 +49,15 @@ public sealed record WatchHistorySyncEntry(
 
 /// <summary>The read-only comparison the user approves before anything is written.</summary>
 /// <remarks>
+/// The counts describe the items either side has watched, not the size of the scanned scope: an
+/// item nobody has watched appears in no classification at all.
+/// <para>
 /// There is deliberately no "remote items not in this library" count. Reporting one needs an
 /// account-wide history read, and <see cref="IWatchHistoryProvider.GetHistoryAsync"/> answers only
 /// for the identities it is given — which here come from local items, so such a count could only
 /// ever be zero. Publishing a field that is structurally always zero is worse than not having it;
 /// the plan records the capability this would need.
+/// </para>
 /// </remarks>
 public sealed record WatchHistorySyncPreview(
     Guid RunId,
@@ -172,7 +176,13 @@ public sealed class WatchHistorySyncPreviewService(
                 ? WatchHistorySyncClassification.AmbiguousLocalIdentity
                 : Classify(row, localPlays, remotePlays);
 
-            entries.Add(new WatchHistorySyncEntry(item.Id, item.Title, classification, localPlays, remotePlays));
+            if (classification is null)
+            {
+                // Nobody has watched it on either side, so it is not part of the comparison at all.
+                continue;
+            }
+
+            entries.Add(new WatchHistorySyncEntry(item.Id, item.Title, classification.Value, localPlays, remotePlays));
         }
 
         var outbound = await database.WatchHistoryOutboxEvents.AsNoTracking()
@@ -225,7 +235,16 @@ public sealed class WatchHistorySyncPreviewService(
     private static bool IsIssue(WatchHistorySyncEntry entry) =>
         entry.Classification is not WatchHistorySyncClassification.InSync;
 
-    private static WatchHistorySyncClassification Classify(UserItemData? row, int localPlays, int remotePlays)
+    /// <summary>
+    /// How one item compares, or <c>null</c> when neither side has ever watched it.
+    /// </summary>
+    /// <remarks>
+    /// An untouched item is not "in sync" — it is outside the comparison. Counting it as
+    /// <see cref="WatchHistorySyncClassification.InSync"/> made that line report the size of the
+    /// scanned library under a label the user reads as "watched on both sides", which in a library
+    /// of mostly unwatched episodes is off by an order of magnitude.
+    /// </remarks>
+    private static WatchHistorySyncClassification? Classify(UserItemData? row, int localPlays, int remotePlays)
     {
         if (row is { Played: false, PlayCount: > 0 })
         {
@@ -240,7 +259,7 @@ public sealed class WatchHistorySyncPreviewService(
             (true, true) => WatchHistorySyncClassification.InSync,
             (true, false) => WatchHistorySyncClassification.LocalOnly,
             (false, true) => WatchHistorySyncClassification.RemoteOnly,
-            _ => WatchHistorySyncClassification.InSync,
+            _ => null,
         };
     }
 
