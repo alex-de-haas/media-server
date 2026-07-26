@@ -145,6 +145,20 @@ public static class IngestEndpoints
         group.MapDelete("/{id:guid}/pin", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
             await service.UnpinAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound());
 
+        // Re-home an ingest parked over a cross-catalog identity conflict into the catalog that already
+        // holds the title. The destination is the conflict identify recorded — the operator confirms, it
+        // is never supplied by the client.
+        group.MapPost("/{id:guid}/retarget", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
+            await service.RetargetAsync(id, cancellationToken) switch
+            {
+                RetargetOutcome.NotFound => Results.NotFound(),
+                RetargetOutcome.NoConflict => Results.Conflict(new { error = "This item is not parked over a catalog conflict." }),
+                RetargetOutcome.AlreadyOrganized => Results.Conflict(new { error = "This item has already been identified — move it from its library page instead." }),
+                RetargetOutcome.NotStaged => Results.Conflict(new { error = "This item's files are not in staging, so they cannot be re-homed. Move the existing title into this catalog instead." }),
+                RetargetOutcome.CrossVolume => Results.Conflict(new { error = "The catalogs are on different volumes. Move the existing title into this catalog instead." }),
+                _ => Results.Accepted(),
+            });
+
         // Operator safety valve: remove a single pipeline tracking row (e.g. an orphaned/stuck entry).
         // Admin-only and destructive-by-intent, though it only deletes the ingest row itself.
         group.MapDelete("/{id:guid}", async (Guid id, IngestService service, CancellationToken cancellationToken) =>

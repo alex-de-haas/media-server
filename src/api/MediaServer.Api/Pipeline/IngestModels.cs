@@ -67,6 +67,9 @@ public sealed record IngestItemResponse(
     IReadOnlyList<string> StagesCompleted,
     string? LastError,
     DateTimeOffset? NextAttemptAt,
+    // Set only while the item is parked over a cross-catalog identity conflict: the catalog that already
+    // holds the title, and the destination the Retarget action re-homes this ingest to.
+    Guid? ConflictCatalogId,
     IReadOnlyList<MetadataCandidate> ReviewCandidates,
     IReadOnlyList<IngestSourceFileResponse> SourceFiles,
     DateTimeOffset CreatedAt,
@@ -99,6 +102,7 @@ public sealed record IngestItemResponse(
             item.StagesCompleted,
             item.LastError,
             item.NextAttemptAt,
+            item.ConflictCatalogId,
             candidates,
             sourceFiles.Select(file =>
             {
@@ -237,6 +241,21 @@ public sealed record MetadataSearchRequest(string Title, int? Year, MediaKind? K
 public sealed record PinIdentityRequest(string Provider, string ProviderId, MediaKind Kind, string Title, int? Year);
 
 /// <summary>Result of a <c>PinAsync</c> request, mapped to a status code by the endpoint.</summary>
+/// <summary>
+/// Result of re-homing an ingest parked over a cross-catalog identity conflict into the catalog that
+/// already holds the title. <c>CrossVolume</c> and <c>NotStaged</c> are the two honest refusals: the
+/// first needs a copy that belongs in a background job, the second has no staging directory to move.
+/// </summary>
+public enum RetargetOutcome
+{
+    NotFound,
+    NoConflict,
+    AlreadyOrganized,
+    NotStaged,
+    CrossVolume,
+    Retargeted,
+}
+
 public enum PinOutcome
 {
     NotFound,

@@ -132,7 +132,8 @@ public sealed class IdentifyStage(IdentifyService identifyService) : IPipelineSt
 
         return outcome.AllResolved
             ? StageResult.Done
-            : new StageResult.NeedsReview(outcome.ReviewReason ?? "Manual match required.", outcome.Candidates);
+            : new StageResult.NeedsReview(
+                outcome.ReviewReason ?? "Manual match required.", outcome.Candidates, outcome.ConflictCatalogId);
     }
 
     // The operator- or acquisition-pinned identity, or null when nothing is pinned (the default auto-identify

@@ -63,6 +63,13 @@ public sealed class IngestItem
     /// <summary>Provider candidates (JSON) when <see cref="Status"/> is NeedsReview.</summary>
     public string? ReviewCandidates { get; set; }
 
+    /// <summary>
+    /// The catalog that already holds this ingest's identity, when identification parked it because a
+    /// work may live in only one catalog. It is what the review's <b>Retarget</b> action re-homes the
+    /// ingest to; cleared on every re-drive (retry, pin, match, skip, retarget).
+    /// </summary>
+    public Guid? ConflictCatalogId { get; set; }
+
     public string? LastError { get; set; }
 
     /// <summary>OpenTelemetry trace id for linking a UI activity row to its trace.</summary>

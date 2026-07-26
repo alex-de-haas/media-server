@@ -6,7 +6,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Pipeline;
 
-public sealed record IdentifyOutcome(bool AllResolved, string? ReviewReason, IReadOnlyList<MetadataCandidate> Candidates);
+/// <summary>
+/// What one identify pass concluded. <paramref name="ConflictCatalogId"/> is set only when a file was
+/// parked because its identity already lives in another catalog — it names the Retarget destination.
+/// </summary>
+public sealed record IdentifyOutcome(
+    bool AllResolved,
+    string? ReviewReason,
+    IReadOnlyList<MetadataCandidate> Candidates,
+    Guid? ConflictCatalogId = null);
 
 /// <summary>
 /// A pinned identity for an ingest item: resolve its files against this provider reference directly, skipping
@@ -31,6 +39,7 @@ public sealed class IdentifyService(
     {
         var unresolved = new List<MetadataCandidate>();
         var reviewReasons = new List<string>();
+        Guid? conflictCatalogId = null;
         var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
 
         // Videos resolve first; external audio tracks then match against the videos' items (they carry no
@@ -70,29 +79,25 @@ public sealed class IdentifyService(
             var name = DeriveName(sourceFile.RelativePath, fallbackName);
             var parsed = parser.Parse(name, catalog.Type, releaseGroups);
 
-            MediaItem mediaItem;
+            // The identity this file resolves to, and whether it lands as an episode of a series or as a
+            // movie — both paths converge here so the cross-catalog gate below sees every resolution.
+            MetadataCandidate identity;
+            bool asEpisode;
             if (target is not null)
             {
                 // Pinned identity: resolve straight to the target, no provider search (and thus no scoring).
-                var pinned = new MetadataCandidate(new ProviderRef(target.Provider, target.ProviderId), target.Title, target.Year, 1.0);
-                if (target.Kind == MediaKind.Series)
-                {
-                    // The show is pinned, but each file still needs its own episode number from the name. A file
-                    // with no SxxEyy (parses to a series-level title) can't be placed under a specific episode,
-                    // so route just that file to review rather than silently inventing S01E00.
-                    if (parsed.Episode is null)
-                    {
-                        sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
-                        sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
-                        reviewReasons.Add($"Pinned to '{target.Title}', but no episode number was found in '{parsed.Title}'.");
-                        continue;
-                    }
+                identity = new MetadataCandidate(new ProviderRef(target.Provider, target.ProviderId), target.Title, target.Year, 1.0);
+                asEpisode = target.Kind == MediaKind.Series;
 
-                    mediaItem = await ResolveEpisodeAsync(catalog, pinned, parsed, cancellationToken);
-                }
-                else
+                // The show is pinned, but each file still needs its own episode number from the name. A file
+                // with no SxxEyy (parses to a series-level title) can't be placed under a specific episode,
+                // so route just that file to review rather than silently inventing S01E00.
+                if (asEpisode && parsed.Episode is null)
                 {
-                    mediaItem = await ResolveMovieAsync(catalog, pinned, cancellationToken);
+                    sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                    sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+                    reviewReasons.Add($"Pinned to '{target.Title}', but no episode number was found in '{parsed.Title}'.");
+                    continue;
                 }
             }
             else
@@ -111,10 +116,28 @@ public sealed class IdentifyService(
                     continue;
                 }
 
-                mediaItem = parsed.Kind == MediaKind.Episode
-                    ? await ResolveEpisodeAsync(catalog, best, parsed, cancellationToken)
-                    : await ResolveMovieAsync(catalog, best, cancellationToken);
+                identity = best;
+                asEpisode = parsed.Kind == MediaKind.Episode;
             }
+
+            // A work lives in exactly one catalog: publishing this identity here while another catalog
+            // already holds it would split watched state and favorites across two rows. Park instead —
+            // the review offers Retarget (re-home the ingest to that catalog, where it merges as another
+            // version) or Skip.
+            if (await FindCrossCatalogConflictAsync(catalog, asEpisode, identity.Reference, cancellationToken) is { } conflict)
+            {
+                sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+                conflictCatalogId = conflict.CatalogId;
+                reviewReasons.Add(
+                    $"{Describe(identity)} is already in catalog '{conflict.CatalogName}' — a title lives in one " +
+                    "catalog only. Retarget this download to that catalog, or skip it.");
+                continue;
+            }
+
+            var mediaItem = asEpisode
+                ? await ResolveEpisodeAsync(catalog, identity, parsed, cancellationToken)
+                : await ResolveMovieAsync(catalog, identity, cancellationToken);
 
             sourceFile.MediaItemId = mediaItem.Id;
             sourceFile.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
@@ -147,8 +170,47 @@ public sealed class IdentifyService(
         var allResolved = sourceFiles.All(file =>
             (file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && file.MediaItemId is not null) ||
             file.AssignmentStatus is SourceFileAssignmentStatus.Skipped or SourceFileAssignmentStatus.Merged);
-        return new IdentifyOutcome(allResolved, allResolved ? null : string.Join(" ", reviewReasons.Distinct()), unresolved);
+        return new IdentifyOutcome(
+            allResolved,
+            allResolved ? null : string.Join(" ", reviewReasons.Distinct()),
+            unresolved,
+            allResolved ? null : conflictCatalogId);
     }
+
+    /// <summary>
+    /// The published item holding this identity in a <b>different</b> catalog, if any. Nothing is
+    /// reported when this catalog already has the identity: adding another version beside it is the
+    /// ordinary path, and a pre-existing duplicate pair is the audit's business, not the gate's.
+    /// Tombstones are ignored on both sides — a ghost carries no files to conflict with and is adopted.
+    /// </summary>
+    private async Task<(Guid CatalogId, string CatalogName)?> FindCrossCatalogConflictAsync(
+        Catalog catalog, bool asEpisode, ProviderRef reference, CancellationToken cancellationToken)
+    {
+        var kind = asEpisode ? MediaKind.Series : MediaKind.Movie;
+
+        var here = await database.MediaItems.AsNoTracking().AnyAsync(item =>
+            item.CatalogId == catalog.Id && item.Kind == kind &&
+            item.IdentityProvider == reference.Provider && item.IdentityProviderId == reference.Id,
+            cancellationToken);
+        if (here)
+        {
+            return null;
+        }
+
+        return await database.MediaItems.AsNoTracking()
+            .Where(item => item.CatalogId != null && item.CatalogId != catalog.Id && item.PublicId != null &&
+                item.Kind == kind &&
+                item.IdentityProvider == reference.Provider && item.IdentityProviderId == reference.Id)
+            .Join(database.Catalogs.AsNoTracking(), item => item.CatalogId, other => (Guid?)other.Id,
+                (_, other) => new { other.Id, other.Name })
+            .Select(row => new ValueTuple<Guid, string>(row.Id, row.Name))
+            .Cast<(Guid CatalogId, string CatalogName)?>()
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>"Dune (2021)" — the operator-facing name of an identity in a review reason.</summary>
+    private static string Describe(MetadataCandidate identity) =>
+        identity.Year is { } year ? $"'{identity.Title}' ({year})" : $"'{identity.Title}'";
 
     /// <summary>
     /// Matches external audio tracks to this batch's resolved videos: the single movie for a movie batch,

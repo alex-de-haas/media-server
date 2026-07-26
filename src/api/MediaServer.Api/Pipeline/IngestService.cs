@@ -1,8 +1,11 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.IO;
+using MediaServer.Api.Library;
 using MediaServer.Api.Media;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.Organizer;
 using MediaServer.Api.Torrents;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,6 +25,7 @@ public sealed class IngestService(
     IPipelineQueue queue,
     DownloadDeletionService downloadDeletion,
     ICatalogPathSandbox sandbox,
+    IFilesystemInspector filesystem,
     ILogger<IngestService> logger)
 {
     public async Task<IReadOnlyList<IngestItemResponse>> ListAsync(CancellationToken cancellationToken)
@@ -416,6 +420,127 @@ public sealed class IngestService(
         }
 
         return PinOutcome.Pinned;
+    }
+
+    /// <summary>
+    /// Re-homes an ingest parked over a cross-catalog identity conflict into the catalog that already
+    /// holds the title, where publish merges it as another version. The destination is the conflict the
+    /// gate recorded — never a client-supplied catalog — so the operator only confirms a decision the
+    /// server already made.
+    ///
+    /// The ingest's staged files keep their catalog-relative paths (<c>.incoming/&lt;downloadId&gt;/…</c>,
+    /// unique per download), so re-homing is one directory move and no row rewrite. Both catalogs must
+    /// sit on the same volume: <see cref="OrganizerService"/> hardlinks staging into the library with a
+    /// plain move, and a cross-volume copy belongs in a progress-reporting background job, not here —
+    /// see <see cref="LibraryMoveService"/> for that path. Scan-imported ingests have no staging to
+    /// move and are refused.
+    /// </summary>
+    public async Task<RetargetOutcome> RetargetAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+        if (item is null)
+        {
+            return RetargetOutcome.NotFound;
+        }
+
+        if (item.ConflictCatalogId is not { } targetCatalogId)
+        {
+            return RetargetOutcome.NoConflict;
+        }
+
+        // Same boundary as a match: past identify, Organize may already have moved files into the library.
+        if (item.StagesCompleted.Contains("identify"))
+        {
+            return RetargetOutcome.AlreadyOrganized;
+        }
+
+        var source = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == item.CatalogId, cancellationToken);
+        var target = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == targetCatalogId, cancellationToken);
+        if (source is null || target is null)
+        {
+            return RetargetOutcome.NotFound;
+        }
+
+        if (!LibraryMoveService.SameVolume(filesystem, source.Root, target.Root))
+        {
+            return RetargetOutcome.CrossVolume;
+        }
+
+        // Every staged file of this ingest sits under one .incoming/<downloadId>/ root; a scan-imported
+        // ingest has none, and moving its library-area files is a library move, not a retarget.
+        var relativePaths = await database.SourceFiles
+            .Where(file => file.IngestItemId == id)
+            .Select(file => file.RelativePath)
+            .ToListAsync(cancellationToken);
+        if (relativePaths.Count == 0 || relativePaths.Any(path => !CatalogPaths.IsIncoming(path)))
+        {
+            return RetargetOutcome.NotStaged;
+        }
+
+        var stagingRoots = relativePaths
+            .Select(path => string.Join('/', path.Split('/').Take(2)))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        // Resolve everything before moving anything: a half-moved batch would leave the ingest pointing
+        // at files split across two catalog roots.
+        var moves = new List<(string From, string To)>();
+        foreach (var stagingRoot in stagingRoots)
+        {
+            if (!sandbox.TryResolve(source, stagingRoot, out var from) ||
+                !sandbox.TryResolve(target, stagingRoot, out var to) ||
+                !Directory.Exists(from) ||
+                Directory.Exists(to)) // A leftover at the destination: never merge blindly into it.
+            {
+                return RetargetOutcome.NotStaged;
+            }
+
+            moves.Add((from, to));
+        }
+
+        CatalogPaths.For(target).EnsureCreated();
+        foreach (var (from, to) in moves)
+        {
+            Directory.Move(from, to);
+        }
+
+        // The download row is usually gone by now (the download→identify hand-off drops it), but keep any
+        // survivor's save path honest.
+        var downloadId = item.DownloadId;
+        if (downloadId is { } downloadRowId)
+        {
+            var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == downloadRowId, cancellationToken);
+            if (download is not null && sandbox.TryResolve(target, CatalogPaths.IncomingRelative(downloadRowId), out var savePath))
+            {
+                download.SavePath = savePath;
+                download.CatalogId = target.Id;
+            }
+        }
+
+        item.CatalogId = target.Id;
+        item.ConflictCatalogId = null;
+        item.ReviewCandidates = null;
+        item.Status = IngestStatus.Pending;
+        item.NextAttemptAt = null;
+        item.LastError = null;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // Identification runs again from scratch in the new catalog: the parked files were never mapped,
+        // and a stale NeedsReview mark would keep the batch from resolving.
+        var parked = await database.SourceFiles
+            .Where(file => file.IngestItemId == id && file.AssignmentStatus == SourceFileAssignmentStatus.NeedsReview)
+            .ToListAsync(cancellationToken);
+        foreach (var file in parked)
+        {
+            file.AssignmentStatus = SourceFileAssignmentStatus.Unassigned;
+            file.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
+        queue.Enqueue(item.Id);
+
+        logger.LogInformation("Retargeted ingest {Ingest} from catalog {Source} to {Target}.", item.Id, source.Name, target.Name);
+        return RetargetOutcome.Retargeted;
     }
 
     /// <summary>Clears a pinned identity, restoring the default parse-and-search identify path. No re-drive —
