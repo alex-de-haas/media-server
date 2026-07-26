@@ -105,6 +105,10 @@ describe("connectionBadge", () => {
         lastDeliveryAt: null,
         lastSyncAt: null,
         lastError: null,
+        supportsFavorites: false,
+        favoritesCount: null,
+        favoritesCapacity: null,
+        favoriteSyncFailures: [],
       }),
     ).toBe("connected");
     expect(
@@ -116,6 +120,10 @@ describe("connectionBadge", () => {
         lastDeliveryAt: null,
         lastSyncAt: null,
         lastError: "Trakt rejected the stored refresh token.",
+        supportsFavorites: false,
+        favoritesCount: null,
+        favoritesCapacity: null,
+        favoriteSyncFailures: [],
       }),
     ).toBe("reconnect");
   });
