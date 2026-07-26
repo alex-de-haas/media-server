@@ -29,8 +29,20 @@ parked as `NeedsReview` and no item is created. The reason names the catalog:
 
 Two cases deliberately pass the gate: an identity already present **in this
 catalog** (adding another version is the ordinary path, and a pre-existing
-pair is the audit's business), and a **tombstone** anywhere (a ghost carries
-no files to conflict with and is adopted instead).
+pair is the audit's business), and a **tombstone elsewhere** (a ghost carries
+no files to conflict with and is adopted instead). A tombstone *here* does not
+wave a title through: reviving it while another catalog publishes the same
+identity would mint the very pair the gate exists to prevent.
+
+The operator's own actions run the same check. `MatchAsync` and
+`AssignExtrasAsync` create library items exactly as identification does, so
+picking an identity another catalog owns is refused with a `409` naming the
+two ways forward — a work lives in one catalog whether a machine or a person
+chose the identity.
+
+When one batch collides with **several** catalogs (a franchise pack whose
+films live apart), every reason is reported but no retarget destination is
+recorded: moving the ingest to one of them would leave the others conflicting.
 
 `IngestItem.ConflictCatalogId` records the catalog that owns the title. The
 orchestrator writes it when parking and clears it on every claim, so it always
@@ -46,9 +58,12 @@ making one.
 
 Staged files keep their catalog-relative paths
 (`.incoming/<downloadId>/…`, unique per download), so re-homing is one
-directory move with no row rewrite: the source files, the ingest, and any
+directory move with no path rewrite: the source files, the ingest, and any
 surviving download row simply point at the new catalog, and identification
-re-runs from scratch there.
+re-runs from scratch there. Every non-terminal mapping is dropped first —
+a mixed batch (one film auto-matched, another conflicting) would otherwise
+keep a confirmed file pointing at an item in the catalog it just left, while
+the organizer files it under the new root.
 
 Two refusals are honest rather than incidental:
 
@@ -98,10 +113,12 @@ survive, and tolerated by everything that already handles them.
 ## Testing Expectations
 
 - `CrossCatalogGateTests` — the gate parks movies and series instead of
-  duplicating; same-catalog version merges are unaffected; the full retarget
-  cycle re-homes staging and publishes as a second version; scan-imported
-  conflicts park, create no item, and report `CanRetarget = false`; refusals
-  for unconflicted and unknown items.
+  duplicating; same-catalog version merges are unaffected; an operator match
+  cannot pick an identity another catalog owns; a local tombstone does not
+  wave through a title published elsewhere; the full retarget cycle re-homes
+  staging (clearing mappings the batch already made) and publishes as a
+  second version; scan-imported conflicts park, create no item, and report
+  `CanRetarget = false`; refusals for unconflicted and unknown items.
 - `LibraryMaintenanceServiceTests` — duplicate detection across catalogs, and
   that tombstones and unpublished rows are not counted as copies.
 - Web e2e (`activity.spec.ts`) — the conflict banner renders the server's

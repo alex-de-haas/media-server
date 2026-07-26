@@ -39,7 +39,9 @@ public sealed class IdentifyService(
     {
         var unresolved = new List<MetadataCandidate>();
         var reviewReasons = new List<string>();
-        Guid? conflictCatalogId = null;
+        // Distinct because one batch can collide with two different catalogs (a franchise pack whose
+        // films live apart); a single retarget destination is only honest when there is exactly one.
+        var conflictCatalogIds = new HashSet<Guid>();
         var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
 
         // Videos resolve first; external audio tracks then match against the videos' items (they carry no
@@ -128,7 +130,7 @@ public sealed class IdentifyService(
             {
                 sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
                 sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
-                conflictCatalogId = conflict.CatalogId;
+                conflictCatalogIds.Add(conflict.CatalogId);
                 reviewReasons.Add(
                     $"{Describe(identity)} is already in catalog '{conflict.CatalogName}' — a title lives in one " +
                     "catalog only. Retarget this download to that catalog, or skip it.");
@@ -174,22 +176,28 @@ public sealed class IdentifyService(
             allResolved,
             allResolved ? null : string.Join(" ", reviewReasons.Distinct()),
             unresolved,
-            allResolved ? null : conflictCatalogId);
+            // No destination when the batch collides with several catalogs: moving it to one of them
+            // would leave the others conflicting, so those reasons stand on their own and the review
+            // offers no retarget.
+            allResolved || conflictCatalogIds.Count != 1 ? null : conflictCatalogIds.Single());
     }
 
     /// <summary>
-    /// The published item holding this identity in a <b>different</b> catalog, if any. Nothing is
-    /// reported when this catalog already has the identity: adding another version beside it is the
-    /// ordinary path, and a pre-existing duplicate pair is the audit's business, not the gate's.
-    /// Tombstones are ignored on both sides — a ghost carries no files to conflict with and is adopted.
+    /// The published item holding this identity in a <b>different</b> catalog, if any — the check every
+    /// path that creates library items runs before it does so (identification, and the operator's own
+    /// match/extras actions in <see cref="IngestService"/>). Nothing is reported when this catalog
+    /// already publishes the identity: adding another version beside it is the ordinary path, and a
+    /// pre-existing duplicate pair is the audit's business, not the gate's. Tombstones count on neither
+    /// side: a ghost here would otherwise be revived into a second published copy, and a ghost elsewhere
+    /// carries no files to conflict with.
     /// </summary>
-    private async Task<(Guid CatalogId, string CatalogName)?> FindCrossCatalogConflictAsync(
+    internal async Task<(Guid CatalogId, string CatalogName)?> FindCrossCatalogConflictAsync(
         Catalog catalog, bool asEpisode, ProviderRef reference, CancellationToken cancellationToken)
     {
         var kind = asEpisode ? MediaKind.Series : MediaKind.Movie;
 
         var here = await database.MediaItems.AsNoTracking().AnyAsync(item =>
-            item.CatalogId == catalog.Id && item.Kind == kind &&
+            item.CatalogId == catalog.Id && item.Kind == kind && item.RemovedAt == null &&
             item.IdentityProvider == reference.Provider && item.IdentityProviderId == reference.Id,
             cancellationToken);
         if (here)

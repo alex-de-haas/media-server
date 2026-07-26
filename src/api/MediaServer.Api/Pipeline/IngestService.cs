@@ -171,6 +171,18 @@ public sealed class IngestService(
         // season/episode — or the movie every file in the group is a version of. A franchise pack sends
         // several movie groups and resolves in this one call. Movies resolve once per distinct identity:
         // ResolveMovieAsync reads the store, which cannot see an unflushed sibling from a previous group.
+        // An operator pick creates library items just like identification does, so it passes the same
+        // gate: a work lives in one catalog, whether a machine or a person chose the identity.
+        foreach (var group in groups)
+        {
+            var reference = new ProviderRef(group.Provider, group.ProviderId);
+            if (await identifyService.FindCrossCatalogConflictAsync(
+                    catalog, group.Kind == MediaKind.Episode, reference, cancellationToken) is not null)
+            {
+                return MatchOutcome.CatalogConflict;
+            }
+        }
+
         var moviesByIdentity = new Dictionary<(string Provider, string ProviderId), MediaItem>();
         var now = DateTimeOffset.UtcNow;
         foreach (var group in groups)
@@ -313,7 +325,15 @@ public sealed class IngestService(
             return AssignExtrasOutcome.AudioFile;
         }
 
-        var seriesCandidate = new MetadataCandidate(new ProviderRef(request.Provider, request.ProviderId), request.Title, request.Year, 1.0);
+        // Attaching extras creates (or adopts) the series itself, so it passes the same one-catalog gate
+        // as an ordinary match.
+        var reference = new ProviderRef(request.Provider, request.ProviderId);
+        if (await identifyService.FindCrossCatalogConflictAsync(catalog, asEpisode: true, reference, cancellationToken) is not null)
+        {
+            return AssignExtrasOutcome.CatalogConflict;
+        }
+
+        var seriesCandidate = new MetadataCandidate(reference, request.Title, request.Year, 1.0);
         var series = await identifyService.ResolveSeriesAsync(catalog, seriesCandidate, cancellationToken);
 
         // One Video item per file. Titles come from the extras classification (cleaned file name as
@@ -525,13 +545,20 @@ public sealed class IngestService(
         item.LastError = null;
         item.UpdatedAt = DateTimeOffset.UtcNow;
 
-        // Identification runs again from scratch in the new catalog: the parked files were never mapped,
-        // and a stale NeedsReview mark would keep the batch from resolving.
-        var parked = await database.SourceFiles
-            .Where(file => file.IngestItemId == id && file.AssignmentStatus == SourceFileAssignmentStatus.NeedsReview)
+        // Identification runs again from scratch in the new catalog. Every non-terminal mapping is
+        // dropped, not just the parked ones: a mixed batch (one film auto-matched, another conflicting)
+        // would otherwise keep its confirmed file pointing at an item in the *old* catalog while the
+        // organizer files it under the new root — a source whose path resolves through the wrong
+        // catalog, i.e. missing media. Skipped and Merged stay terminal; the items the old catalog may
+        // be left holding are unpublished and sourceless, so they surface nowhere.
+        var mapped = await database.SourceFiles
+            .Where(file => file.IngestItemId == id &&
+                file.AssignmentStatus != SourceFileAssignmentStatus.Skipped &&
+                file.AssignmentStatus != SourceFileAssignmentStatus.Merged)
             .ToListAsync(cancellationToken);
-        foreach (var file in parked)
+        foreach (var file in mapped)
         {
+            file.MediaItemId = null;
             file.AssignmentStatus = SourceFileAssignmentStatus.Unassigned;
             file.UpdatedAt = DateTimeOffset.UtcNow;
         }

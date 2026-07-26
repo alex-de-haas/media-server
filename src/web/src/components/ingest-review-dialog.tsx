@@ -684,10 +684,11 @@ export function IngestReviewDialog({
               <p className="text-xs">{item.lastError}</p>
               {item.canRetarget ? (
                 <div>
+                  {/* Disabled while *any* action runs: Approve and this both re-drive the same ingest. */}
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={retarget.isPending}
+                    disabled={busy}
                     onClick={() => retarget.mutate()}
                   >
                     {retarget.isPending ? <Loader2 className="animate-spin" /> : <FolderInput />}

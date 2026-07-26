@@ -195,6 +195,135 @@ public sealed class CrossCatalogGateTests
     }
 
     [Fact]
+    public async Task An_operator_match_cannot_pick_an_identity_owned_by_another_catalog()
+    {
+        using var harness = new PipelineTestHarness();
+        StrongMatch(harness);
+
+        var owning = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Inception.2010.1080p", "Inception.2010.1080p/movie.mkv");
+        await harness.Orchestrator.DriveAsync(owning.IngestId, CancellationToken.None);
+
+        // A different film arrives elsewhere and lands in review; the operator then picks the *owned*
+        // identity by hand — the gate must hold for a person's choice exactly as for the machine's.
+        harness.MetadataProvider.OnSearch = _ => [new MetadataCandidate(new ProviderRef("tmdb", "1"), "Unknown", 1999, 0.1)];
+        var other = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Ambiguous.2021", "Ambiguous.2021/movie.mkv");
+        await harness.Orchestrator.DriveAsync(other.IngestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+        var sourceFileId = await database.SourceFiles.Where(file => file.IngestItemId == other.IngestId)
+            .Select(file => file.Id).SingleAsync();
+
+        var outcome = await service.MatchAsync(other.IngestId,
+            new MatchRequest(MediaKind.Movie, "tmdb", "27205", "Inception", 2010, [new MatchFileRequest(sourceFileId, null, null)]),
+            CancellationToken.None);
+
+        Assert.Equal(MatchOutcome.CatalogConflict, outcome);
+        Assert.Equal(1, await database.MediaItems.CountAsync(item => item.Kind == MediaKind.Movie));
+    }
+
+    [Fact]
+    public async Task A_local_tombstone_does_not_wave_through_a_title_owned_elsewhere()
+    {
+        using var harness = new PipelineTestHarness();
+        StrongMatch(harness);
+
+        // The film was here once (deleted, history kept) and is now published in another catalog. Reviving
+        // the local ghost would republish it — producing exactly the cross-catalog pair the gate forbids.
+        var here = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Inception.2010.1080p", "Inception.2010.1080p/movie.mkv");
+        await harness.Orchestrator.DriveAsync(here.IngestId, CancellationToken.None);
+
+        Guid ghostId;
+        using (var scope = harness.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            var movie = await database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Movie);
+            ghostId = movie.Id;
+            movie.PublicId = null;
+            movie.RemovedAt = DateTimeOffset.UtcNow;
+            // A second catalog publishes the same identity while the local copy is a ghost.
+            var elsewhere = new Catalog
+            {
+                Id = Guid.NewGuid(), Name = "Movies 4K", Type = CatalogType.Movie,
+                Root = Path.Combine(harness.Root, "elsewhere"), CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            database.Catalogs.Add(elsewhere);
+            database.MediaItems.Add(new MediaItem
+            {
+                Id = Guid.NewGuid(), PublicId = "pub-elsewhere", CatalogId = elsewhere.Id, Kind = MediaKind.Movie,
+                Title = "Inception", Year = 2010, IdentityProvider = "tmdb", IdentityProviderId = "27205",
+                AddedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            });
+            await database.SaveChangesAsync();
+        }
+
+        var again = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Inception.2010.720p", "Inception.2010.720p/movie.mkv", here.CatalogId);
+        await harness.Orchestrator.DriveAsync(again.IngestId, CancellationToken.None);
+
+        using var verify = harness.CreateScope();
+        var verifyDb = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var parked = await verifyDb.IngestItems.SingleAsync(item => item.Id == again.IngestId);
+        Assert.Equal(IngestStatus.NeedsReview, parked.Status);
+        // The ghost stayed a ghost instead of being revived into a second published copy.
+        var ghost = await verifyDb.MediaItems.SingleAsync(item => item.Id == ghostId);
+        Assert.Null(ghost.PublicId);
+        Assert.NotNull(ghost.RemovedAt);
+        Assert.Equal(1, await verifyDb.MediaItems.CountAsync(item => item.Kind == MediaKind.Movie && item.PublicId != null));
+    }
+
+    [Fact]
+    public async Task Retarget_clears_mappings_the_batch_already_made_in_the_old_catalog()
+    {
+        using var harness = new PipelineTestHarness();
+
+        // A pack of two films: one is owned by another catalog, the other is new here — so the batch
+        // parks with one file already confirmed against an item in *this* catalog.
+        var owning = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Inception.2010.1080p", "Inception.2010.1080p/movie.mkv");
+        harness.MetadataProvider.OnSearch = query =>
+            [new MetadataCandidate(new ProviderRef("tmdb", query.Title.Contains("Inception") ? "27205" : "155"), query.Title, query.Year, 1.0)];
+        await harness.Orchestrator.DriveAsync(owning.IngestId, CancellationToken.None);
+
+        var pack = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Nolan.Pack", "Nolan.Pack/The.Dark.Knight.2008.mkv",
+            additionalSourceRelativePaths: ["Nolan.Pack/Inception.2010.mkv"]);
+        await harness.Orchestrator.DriveAsync(pack.IngestId, CancellationToken.None);
+
+        using (var scope = harness.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            var parked = await database.IngestItems.SingleAsync(item => item.Id == pack.IngestId);
+            Assert.Equal(IngestStatus.NeedsReview, parked.Status);
+            Assert.Equal(owning.CatalogId, parked.ConflictCatalogId);
+            // Precondition for the bug this guards: one file of the batch is already mapped.
+            Assert.True(await database.SourceFiles.AnyAsync(file =>
+                file.IngestItemId == pack.IngestId && file.MediaItemId != null));
+
+            var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+            Assert.Equal(RetargetOutcome.Retargeted, await service.RetargetAsync(pack.IngestId, CancellationToken.None));
+
+            // Nothing may still point at an item in the catalog the batch just left.
+            Assert.False(await database.SourceFiles.AnyAsync(file =>
+                file.IngestItemId == pack.IngestId && file.MediaItemId != null));
+        }
+
+        await harness.Orchestrator.DriveAsync(pack.IngestId, CancellationToken.None);
+
+        using var verify = harness.CreateScope();
+        var verifyDb = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var done = await verifyDb.IngestItems.SingleAsync(item => item.Id == pack.IngestId);
+        Assert.Equal(IngestStatus.Done, done.Status);
+        // Every file of the re-homed pack resolved inside the destination catalog, files included.
+        var catalog = await verifyDb.Catalogs.SingleAsync(item => item.Id == owning.CatalogId);
+        var sources = await verifyDb.MediaSources.Include(source => source.MediaItem).ToListAsync();
+        Assert.All(sources, source =>
+        {
+            Assert.Equal(owning.CatalogId, source.MediaItem!.CatalogId);
+            Assert.True(File.Exists(Path.Combine(catalog.Root, source.Path.Replace('/', Path.DirectorySeparatorChar))));
+        });
+    }
+
+    [Fact]
     public async Task Retarget_refuses_an_item_that_is_not_parked_over_a_conflict()
     {
         using var harness = new PipelineTestHarness();

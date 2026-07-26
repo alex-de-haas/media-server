@@ -77,7 +77,8 @@ export function LibraryHealthSection() {
         )}
 
         {report?.crossCatalogDuplicates.map((duplicate) => (
-          <div key={`${duplicate.kind}-${duplicate.title}-${duplicate.year}`} className="flex flex-col gap-1 rounded-md border p-3">
+          // Keyed on the copies themselves: two different films can share a title and year.
+          <div key={duplicate.copies.map((copy) => copy.mediaItemId).join("-")} className="flex flex-col gap-1 rounded-md border p-3">
             <p className="font-medium">
               {duplicate.title}
               {duplicate.year != null && <span className="text-muted-foreground font-normal"> ({duplicate.year})</span>}

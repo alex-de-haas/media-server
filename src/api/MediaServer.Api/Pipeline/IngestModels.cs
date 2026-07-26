@@ -184,6 +184,8 @@ public enum MatchOutcome
     NotFound,
     FileNotFound,
     AlreadyOrganized,
+    /// <summary>The chosen identity is already published in another catalog — a work lives in one catalog.</summary>
+    CatalogConflict,
     Matched,
 }
 
@@ -229,6 +231,8 @@ public enum AssignExtrasOutcome
     /// video payloads, so the item would publish with no source. Match it to its episode instead.</summary>
     AudioFile,
     AlreadyOrganized,
+    /// <summary>The chosen series is already published in another catalog — a work lives in one catalog.</summary>
+    CatalogConflict,
     Assigned,
 }
 
@@ -247,7 +251,6 @@ public sealed record MetadataSearchRequest(string Title, int? Year, MediaKind? K
 /// </summary>
 public sealed record PinIdentityRequest(string Provider, string ProviderId, MediaKind Kind, string Title, int? Year);
 
-/// <summary>Result of a <c>PinAsync</c> request, mapped to a status code by the endpoint.</summary>
 /// <summary>
 /// Result of re-homing an ingest parked over a cross-catalog identity conflict into the catalog that
 /// already holds the title. <c>CrossVolume</c> and <c>NotStaged</c> are the two honest refusals: the
@@ -263,6 +266,7 @@ public enum RetargetOutcome
     Retargeted,
 }
 
+/// <summary>Result of a <c>PinAsync</c> request, mapped to a status code by the endpoint.</summary>
 public enum PinOutcome
 {
     NotFound,
