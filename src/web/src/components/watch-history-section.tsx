@@ -186,6 +186,7 @@ function ProviderRow({ provider }: { provider: WatchHistoryProvider }) {
       <WatchHistorySyncDialog
         providerKey={provider.key}
         providerName={provider.displayName}
+        supportsFavorites={connection?.supportsFavorites ?? false}
         open={syncOpen}
         onOpenChange={setSyncOpen}
         onApplied={refresh}

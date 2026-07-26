@@ -97,11 +97,5 @@ the latter.
   favorites landing on a tombstone, remote favorites absent from the library
   reported as skipped, and the cap reported in the plan.
 
-## Outstanding
-
-Live contract verification against a real Trakt account has **not** been run:
-every Trakt call here is exercised against a stub, so the payload shapes
-(`/sync/favorites` request bodies, `favorited_at`, `list.item_count`) are
-implemented from the documented contract rather than an observed response.
-The 420 path in particular has only been simulated. Run an explicit favorites
-sync against the dedicated test account before trusting it in anger.
+Live contract verification against a real Trakt account has not been run yet;
+it is tracked as the one open deliverable in [plan.md](plan.md).

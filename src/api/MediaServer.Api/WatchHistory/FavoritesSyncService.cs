@@ -147,7 +147,8 @@ public sealed class FavoritesSyncService(
                     // Both sides agree. Remember it only while there is something to remember: a work
                     // favorited nowhere needs no memory, and writing one per library title would store a
                     // row for every film the user never marked.
-                    UpsertState(connection.Id, local.Identity, remote, local.IsFavorite, now, previous, keep: local.IsFavorite);
+                    UpsertState(connection.Id, local.Identity, remote, local.IsFavorite,
+                        remotePresent: remote is not null, now, previous, keep: local.IsFavorite);
                 }
 
                 continue;
@@ -164,15 +165,19 @@ public sealed class FavoritesSyncService(
                 case FavoriteSyncAction.AddRemotely:
                 case FavoriteSyncAction.RemoveRemotely:
                     // Outbound work goes through the outbox like every other provider write, so a
-                    // failure retries (or turns terminal) with the rest of it.
+                    // failure retries (or turns terminal) with the rest of it. The remembered remote
+                    // side stays what the snapshot actually showed — claiming the write already landed
+                    // would make the next reconciliation read the unchanged provider as a fresh remote
+                    // edit and propose undoing the user's own favorite.
                     await QueueAsync(connection, appUserId, local, action.Value == FavoriteSyncAction.AddRemotely, now, cancellationToken);
-                    UpsertState(connection.Id, local.Identity, remote, local.IsFavorite, now, previous);
+                    UpsertState(connection.Id, local.Identity, remote, local.IsFavorite, remotePresent: remote is not null, now, previous);
                     break;
 
                 case FavoriteSyncAction.AddLocally:
                 case FavoriteSyncAction.RemoveLocally:
-                    await SetLocalAsync(appUserId, local.ItemIds, action.Value == FavoriteSyncAction.AddLocally, cancellationToken);
-                    UpsertState(connection.Id, local.Identity, remote, action.Value == FavoriteSyncAction.AddLocally, now, previous);
+                    var nowFavorite = action.Value == FavoriteSyncAction.AddLocally;
+                    await SetLocalAsync(appUserId, local.ItemIds, nowFavorite, cancellationToken);
+                    UpsertState(connection.Id, local.Identity, remote, nowFavorite, remotePresent: remote is not null, now, previous);
                     break;
             }
         }
@@ -288,7 +293,7 @@ public sealed class FavoritesSyncService(
 
     private void UpsertState(
         Guid connectionId, FavoriteIdentity identity, ProviderFavorite? remote, bool local,
-        DateTimeOffset now, WatchHistoryFavoriteState? existing, bool keep = true)
+        bool remotePresent, DateTimeOffset now, WatchHistoryFavoriteState? existing, bool keep = true)
     {
         if (!keep)
         {
@@ -316,9 +321,9 @@ public sealed class FavoritesSyncService(
             database.WatchHistoryFavoriteStates.Add(existing);
         }
 
-        // The state records the world *after* this reconciliation, which is what the next one compares
-        // against: an outbound push is expected to land, and a local write already has.
-        existing.RemotePresent = local;
+        // The local side records what this reconciliation just made true; the remote side records only
+        // what the provider actually showed. Queued work is not yet a fact about the provider.
+        existing.RemotePresent = remotePresent;
         existing.RemoteFavoritedAt = remote?.FavoritedAt ?? existing.RemoteFavoritedAt;
         existing.LocalFavorite = local;
         existing.ReconciledAt = now;

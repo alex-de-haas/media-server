@@ -133,6 +133,22 @@ public sealed class FavoritesSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task A_second_preview_before_delivery_does_not_propose_undoing_the_favorite()
+    {
+        // Apply only *queues* the outbound add. If the remembered remote state claimed the write had
+        // already landed, the next comparison would read the unchanged provider as a fresh remote
+        // removal — and offer to clear the favorite the user just set.
+        await FavoriteAsync(_movieId);
+        Assert.True((await Service().ApplyAsync(_userId, CancellationToken.None)).Succeeded);
+
+        var again = await Service().PreviewAsync(_userId, CancellationToken.None);
+
+        Assert.Equal(FavoriteSyncAction.AddRemotely, Assert.Single(again.Value!.Entries).Action);
+        await using var verify = _db.Create();
+        Assert.True(await verify.UserItemData.AnyAsync(data => data.MediaItemId == _movieId && data.IsFavorite));
+    }
+
+    [Fact]
     public async Task The_plan_reports_how_full_the_remote_list_is()
     {
         _provider.RemoteCount = 97;
