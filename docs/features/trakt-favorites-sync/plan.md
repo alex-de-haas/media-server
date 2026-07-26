@@ -51,11 +51,12 @@ sync preview when such favorites exist — not with per-item badges.
 
 ### Duplicates during the transition
 
-Until [single catalog per title](../single-catalog-per-title/plan.md) ships
-and its audit clears pre-existing pairs, one work can still be several
-library items. For sync purposes a work is favorited when **any** of its
-items is, and an unfavorite pushes a removal only when no item for that
-identity remains favorited.
+[Single catalog per title](../single-catalog-per-title/feature.md) stops new
+duplicates at import, but pairs that pre-date it survive until its audit
+sends the operator to repair them, and nothing in the database forbids the
+state. For sync purposes, then, a work is favorited when **any** of its items
+is, and an unfavorite pushes a removal only when no item for that identity
+remains favorited.
 
 ### Outbound (push)
 
