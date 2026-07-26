@@ -169,8 +169,11 @@ export interface IngestItem {
   lastError: string | null;
   nextAttemptAt: string | null;
   // Set while the item is parked because its title already lives in another catalog: that catalog, and
-  // the destination retargetIngest re-homes this download to.
+  // the destination retargetIngest re-homes this download to. canRetarget is false when the files were
+  // picked up by a catalog scan rather than staged by a download — those cannot be re-homed, and the
+  // repair is to move the existing title into this catalog instead.
   conflictCatalogId: string | null;
+  canRetarget: boolean;
   reviewCandidates: MetadataCandidate[];
   sourceFiles: IngestSourceFile[];
   createdAt: string;

@@ -682,17 +682,26 @@ export function IngestReviewDialog({
           {item.conflictCatalogId && (
             <div className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3">
               <p className="text-xs">{item.lastError}</p>
-              <div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={retarget.isPending}
-                  onClick={() => retarget.mutate()}
-                >
-                  {retarget.isPending ? <Loader2 className="animate-spin" /> : <FolderInput />}
-                  {conflictCatalogName ? `Move download to ${conflictCatalogName}` : "Move download to that catalog"}
-                </Button>
-              </div>
+              {item.canRetarget ? (
+                <div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={retarget.isPending}
+                    onClick={() => retarget.mutate()}
+                  >
+                    {retarget.isPending ? <Loader2 className="animate-spin" /> : <FolderInput />}
+                    {conflictCatalogName ? `Move download to ${conflictCatalogName}` : "Move download to that catalog"}
+                  </Button>
+                </div>
+              ) : (
+                // Scan-imported files live in this catalog's library area, not in staging, so there is no
+                // download to send anywhere — the repair runs the other way.
+                <p className="text-muted-foreground text-xs">
+                  These files were found by a catalog scan, so they can’t be moved from here. Move the existing
+                  title into this catalog from its library page instead, then retry.
+                </p>
+              )}
             </div>
           )}
           {isPreMatch && (

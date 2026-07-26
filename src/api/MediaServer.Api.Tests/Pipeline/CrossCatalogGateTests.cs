@@ -129,6 +129,72 @@ public sealed class CrossCatalogGateTests
     }
 
     [Fact]
+    public async Task A_scan_imported_conflict_parks_without_offering_a_retarget()
+    {
+        using var harness = new PipelineTestHarness();
+        StrongMatch(harness);
+
+        var owning = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Inception.2010.1080p", "Inception.2010.1080p/movie.mkv");
+        await harness.Orchestrator.DriveAsync(owning.IngestId, CancellationToken.None);
+
+        // A second catalog whose root already holds a copy of the same film — found by a scan, not staged.
+        Guid scanCatalogId;
+        Guid scanIngestId;
+        using (var scope = harness.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var catalog = new Catalog
+            {
+                Id = Guid.NewGuid(), Name = "Movies 4K", Type = CatalogType.Movie,
+                Root = Path.Combine(harness.Root, "scan-" + Guid.NewGuid().ToString("N")),
+                CreatedAt = now, UpdatedAt = now,
+            };
+            CatalogPaths.For(catalog.Root).EnsureCreated();
+            var relative = "Inception (2010)/Inception.mkv";
+            var absolute = Path.Combine(catalog.Root, relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+            await File.WriteAllBytesAsync(absolute, new byte[1024]);
+
+            scanCatalogId = catalog.Id;
+            scanIngestId = Guid.NewGuid();
+            database.Catalogs.Add(catalog);
+            database.IngestItems.Add(new IngestItem
+            {
+                Id = scanIngestId, CatalogId = catalog.Id, Stage = IngestStage.Identify,
+                Status = IngestStatus.Pending, StagesCompleted = ["intake", "download"],
+                CreatedAt = now, UpdatedAt = now,
+            });
+            database.SourceFiles.Add(new SourceFile
+            {
+                Id = Guid.NewGuid(), IngestItemId = scanIngestId, RelativePath = relative, SizeBytes = 1024,
+                AssignmentStatus = SourceFileAssignmentStatus.Unassigned, CreatedAt = now, UpdatedAt = now,
+            });
+            await database.SaveChangesAsync();
+        }
+
+        await harness.Orchestrator.DriveAsync(scanIngestId, CancellationToken.None);
+
+        using var verify = harness.CreateScope();
+        var verifyDb = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var parked = await verifyDb.IngestItems.SingleAsync(item => item.Id == scanIngestId);
+        Assert.Equal(IngestStatus.NeedsReview, parked.Status);
+        Assert.Equal(owning.CatalogId, parked.ConflictCatalogId);
+        // No second item was created in the scanning catalog…
+        Assert.Equal(1, await verifyDb.MediaItems.CountAsync(item => item.Kind == MediaKind.Movie));
+        Assert.False(await verifyDb.MediaItems.AnyAsync(item => item.CatalogId == scanCatalogId));
+
+        // …and retarget is refused: the files are in the catalog's library area, not staging, so the
+        // repair runs the other way (move the existing title here).
+        var service = verify.ServiceProvider.GetRequiredService<IngestService>();
+        Assert.Equal(RetargetOutcome.NotStaged, await service.RetargetAsync(scanIngestId, CancellationToken.None));
+
+        var response = await service.GetAsync(scanIngestId, CancellationToken.None);
+        Assert.NotNull(response);
+        Assert.False(response.CanRetarget); // the UI shows the manual repair instead of a doomed button
+    }
+
+    [Fact]
     public async Task Retarget_refuses_an_item_that_is_not_parked_over_a_conflict()
     {
         using var harness = new PipelineTestHarness();

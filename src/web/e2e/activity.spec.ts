@@ -100,6 +100,7 @@ test("a catalog conflict offers moving the download to the catalog that owns the
           "'Inception' (2010) is already in catalog 'Movies' — a title lives in one catalog only. Retarget this download to that catalog, or skip it.",
         nextAttemptAt: null,
         conflictCatalogId: "c2",
+        canRetarget: true,
         reviewCandidates: [],
         sourceFiles: [
           {

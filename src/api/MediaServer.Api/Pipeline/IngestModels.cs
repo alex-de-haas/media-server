@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
 using MediaServer.Api.Metadata;
@@ -68,8 +69,12 @@ public sealed record IngestItemResponse(
     string? LastError,
     DateTimeOffset? NextAttemptAt,
     // Set only while the item is parked over a cross-catalog identity conflict: the catalog that already
-    // holds the title, and the destination the Retarget action re-homes this ingest to.
+    // holds the title, and the destination the Retarget action re-homes this ingest to. CanRetarget is
+    // false for a scan-imported ingest, whose files sit in the catalog's library area rather than in
+    // staging and so cannot be re-homed by a directory move — there the repair is to move the existing
+    // title into this catalog instead.
     Guid? ConflictCatalogId,
+    bool CanRetarget,
     IReadOnlyList<MetadataCandidate> ReviewCandidates,
     IReadOnlyList<IngestSourceFileResponse> SourceFiles,
     DateTimeOffset CreatedAt,
@@ -103,6 +108,8 @@ public sealed record IngestItemResponse(
             item.LastError,
             item.NextAttemptAt,
             item.ConflictCatalogId,
+            item.ConflictCatalogId is not null && sourceFiles.Count > 0 &&
+                sourceFiles.All(file => CatalogPaths.IsIncoming(file.RelativePath)),
             candidates,
             sourceFiles.Select(file =>
             {
