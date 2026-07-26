@@ -36,7 +36,7 @@ This replaces the earlier single movie/TV "library" model.
   ordering (aired vs absolute), not in Jellyfin collection type.
 - `root` is a single host directory on one filesystem (see Layout below).
 - `defaultKeepSeeding` seeds new downloads in this catalog unless overridden at
-  add time (see [Torrents and organizer](torrents-and-organizer.md)).
+  add time (see [Torrents and organizer](torrents-and-organizer/feature.md)).
 - `metadataLanguage` optionally overrides the global default for this catalog
   (e.g. Anime → `ja`/`en`), see [Metadata](metadata/feature.md).
 
@@ -77,7 +77,7 @@ canonical tree is atomic and copies no bytes.
 Each catalog reports the free space on its `root` volume. The UI shows this when
 the operator picks a destination catalog for a download, and the engine uses it
 for the pre-download space check (see
-[Torrents and organizer](torrents-and-organizer.md)).
+[Torrents and organizer](torrents-and-organizer/feature.md)).
 
 ## Jellyfin Mapping
 
@@ -138,7 +138,7 @@ operate over the catalog root (always excluding `.incoming/`):
 - an **import** scan (the per-catalog *Scan* action) that ingests media files
   with no `MediaSource` row through the pipeline from the identify stage, for
   onboarding a hand-copied collection (see
-  [Torrents and organizer](torrents-and-organizer.md)).
+  [Torrents and organizer](torrents-and-organizer/feature.md)).
 
 - Manual and scheduled scans, constrained to catalog roots.
 - Detect supported formats: `.mp4`, `.m4v`, `.mov`, `.mkv`, `.webm`, `.avi`,
@@ -160,7 +160,7 @@ operate over the catalog root (always excluding `.incoming/`):
   **Missing/Unavailable** (soft), not deleted, so `UserData`/watched state
   survives a temporary mount glitch or a rename.
 - Hard deletion of an item happens only by explicit operator action (see
-  [File and directory management](file-directory-management.md)).
+  [File and directory management](file-directory-management/feature.md)).
 
 ## Testing Expectations
 

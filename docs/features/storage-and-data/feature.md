@@ -150,7 +150,7 @@ operator owns that media and its own backups).
   [Hosty runtime app](../hosty-runtime-app.md)).
 
 Either way path access is sandboxed to the configured roots (see
-[File and directory management](../file-directory-management.md)), and the media
+[File and directory management](../file-directory-management/feature.md)), and the media
 lives outside the app data directory, so removing the app never deletes it.
 
 ## Single-Filesystem Constraint

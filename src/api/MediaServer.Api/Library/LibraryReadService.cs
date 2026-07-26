@@ -409,6 +409,7 @@ public sealed class LibraryReadService(
                 episode.Id,
                 episode.PublicId,
                 TmdbId(episode),
+                episode.SeasonId,
                 episode.ParentIndexNumber,
                 episode.IndexNumber,
                 episode.IndexNumberEnd,

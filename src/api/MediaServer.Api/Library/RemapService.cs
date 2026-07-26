@@ -12,7 +12,7 @@ namespace MediaServer.Api.Library;
 /// metadata identity; we reassign the item's <see cref="MediaSource"/>(s) to the resolved target item and
 /// <b>move</b> the canonical file to match the target's naming — then prune the now-orphaned old item
 /// (and any emptied season/series). A move within the catalog root is atomic and zero-copy; there are no
-/// hardlinks. See <c>docs/features/torrents-and-organizer.md</c>.
+/// hardlinks. See <c>docs/features/torrents-and-organizer/feature.md</c>.
 /// </summary>
 public sealed class RemapService(
     MediaServerDbContext database,

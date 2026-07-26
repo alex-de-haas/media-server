@@ -35,7 +35,7 @@ full flow per item, not just isolated tasks.
 Torrent download progress is a special case: it is **not persisted** to the
 database. The torrent engine reports it from memory and the hub broadcasts it;
 only torrent **state transitions** are written and trigger pipeline actions (see
-[Torrents and organizer](../torrents-and-organizer.md)).
+[Torrents and organizer](../torrents-and-organizer/feature.md)).
 
 ## SignalR Events
 

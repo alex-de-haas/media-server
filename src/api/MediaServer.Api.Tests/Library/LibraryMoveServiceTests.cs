@@ -346,6 +346,7 @@ public sealed class LibraryMoveServiceTests : IDisposable
         var source = await AddCatalogAsync(_sourceRoot, CatalogType.Series, "Shows");
         var series = await AddSeriesAsync(source, "Severance", "tmdb", "95396", [(1, 1)]);
         var episode = await _database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Episode && item.SeriesId == series.Id);
+        var season = await _database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Season && item.SeriesId == series.Id);
         var mediaSource = await _database.MediaSources.SingleAsync(candidate => candidate.MediaItemId == episode.Id);
         var guard = new LibraryMoveGuard(_database, _queue);
 
@@ -353,13 +354,16 @@ public sealed class LibraryMoveServiceTests : IDisposable
 
         _queue.TryReserve(series.Id); // What RequestAsync does when it admits the move.
 
-        // The reservation is keyed on the series; operations on the episode or its source resolve up to it.
+        // The reservation is keyed on the series; operations on the episode, the season, or the source
+        // resolve up to it — this is what makes the episode/season delete endpoints answer 409 mid-move.
         Assert.True(await guard.IsItemMovingAsync(series.Id, CancellationToken.None));
         Assert.True(await guard.IsItemMovingAsync(episode.Id, CancellationToken.None));
+        Assert.True(await guard.IsItemMovingAsync(season.Id, CancellationToken.None));
         Assert.True(await guard.IsSourceMovingAsync(mediaSource.Id, CancellationToken.None));
 
         _queue.Release(series.Id);
         Assert.False(await guard.IsItemMovingAsync(episode.Id, CancellationToken.None));
+        Assert.False(await guard.IsItemMovingAsync(season.Id, CancellationToken.None));
         Assert.False(await guard.IsSourceMovingAsync(mediaSource.Id, CancellationToken.None));
     }
 

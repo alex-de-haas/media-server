@@ -72,7 +72,7 @@ mandatory:
 ## File Safety
 
 - All file access is sandboxed to configured catalog roots; traversal and symlink
-  escapes are rejected (see [File and directory management](file-directory-management.md)).
+  escapes are rejected (see [File and directory management](file-directory-management/feature.md)).
 - Jellyfin clients address media by item id, never by path, so stream URLs cannot
   bypass catalog authorization.
 

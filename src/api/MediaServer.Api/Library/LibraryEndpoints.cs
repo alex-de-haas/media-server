@@ -104,6 +104,31 @@ public static class LibraryEndpoints
             return deleted ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Delete one episode, or a whole season, of a published series (admin only). `deleteFiles=true` also
+        // erases the files from disk. The response reports what the delete emptied and pruned, so the caller
+        // knows when the series page it came from no longer exists.
+        group.MapDelete("/episodes/{id:guid}", async (Guid id, bool? deleteFiles, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
+        {
+            if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
+            {
+                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+            }
+
+            var result = await deleteService.DeleteEpisodeAsync(id, deleteFiles ?? false, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        group.MapDelete("/seasons/{id:guid}", async (Guid id, bool? deleteFiles, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
+        {
+            if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
+            {
+                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+            }
+
+            var result = await deleteService.DeleteSeasonAsync(id, deleteFiles ?? false, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         // Delete a single media source / version (admin only). `deleteFile=true` also erases the file from
         // disk — used to drop the original after a verified transcode "replace".
         group.MapDelete("/sources/{sourceId:guid}", async (Guid sourceId, bool? deleteFile, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>

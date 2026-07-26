@@ -1,8 +1,7 @@
 # Torrents and Organizer
 
-Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-24
+Updated: 2026-07-25
 
 ## Description
 
@@ -53,7 +52,7 @@ cross-app dependency that runs the BitTorrent client (MonoTorrent) VPN-isolated 
 its own container. Media Server drives it over the app's HTTP control API + SSE
 stream through `RemoteTorrentEngine` (the `ITorrentEngine` abstraction), discovered
 via the injected `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`. See
-[Torrent engine app](../ideas/torrent-engine-app.md).
+[Torrent engine app](../../ideas/torrent-engine-app.md).
 
 Engine capabilities (driven through `ITorrentEngine`):
 
@@ -91,7 +90,7 @@ control API. All peer connectivity (the fixed TCP/UDP listen port, DHT/PEX/LSD, 
 encryption, port mapping) and the VPN tunnel + killswitch live in the `torrent-engine`
 app and are configured there. This also sidesteps the docker bridge-NAT throughput
 collapse that plagued the old in-process engine, by tunnelling all peer connections
-through a single VPN flow. See [Torrent engine app](../ideas/torrent-engine-app.md).
+through a single VPN flow. See [Torrent engine app](../../ideas/torrent-engine-app.md).
 
 ## Pipeline
 
@@ -245,6 +244,10 @@ have more than one file when it carries alternate versions):
   removes the DB rows. With `deleteFiles = true` it also deletes the canonical
   file(s) from disk (freeing space). With `deleteFiles = false` the file stays on disk
   (orphaned) and a later **scan** can re-import it.
+- **Remove part of a series** (`DELETE /api/library/episodes/{id}`,
+  `DELETE /api/library/seasons/{id}`, same `deleteFiles` option): the same removal for
+  one episode or one whole season, pruning the containers it empties. See
+  [File and directory management](../file-directory-management/feature.md#removal-semantics).
 - **Remove download** (`DELETE /api/torrents/{id}`) only applies while a download
   exists (download/seeding stage). It stops the torrent and clears its
   `.incoming/` data and in-flight ingest. After the download→identify hand-off
@@ -272,7 +275,7 @@ survive); when it already holds the identity the sources merge onto the existing
 item as extra versions and the source rows are pruned. A same-volume move is an
 atomic rename; a cross-volume move runs as a background job that copies then deletes
 the source, with a free-space pre-check. See
-[File and directory management](file-directory-management.md#move-semantics).
+[File and directory management](../file-directory-management/feature.md#move-semantics).
 
 ## Library Scan (import)
 
@@ -316,7 +319,7 @@ downstream pipeline stage transitions. The client subscribes once and receives
 updates for all active torrents and ingests. Live progress, speed, ratio, and ETA
 are streamed from the engine's in-memory state and are **not persisted**; only
 state transitions are written to the database (see
-[Storage and data](storage-and-data/feature.md)).
+[Storage and data](../storage-and-data/feature.md)).
 
 ## Testing Expectations
 
@@ -336,7 +339,9 @@ Backend tests should use xUnit. Required coverage:
   files.
 - Catalog scan imports orphan root files (confident → published, low-confidence →
   review, already-published → skipped) and never touches `.incoming/`.
-- Library removal with/without `deleteFiles` (file deleted vs left for re-scan).
+- Library removal with/without `deleteFiles` (file deleted vs left for re-scan),
+  including single-episode and whole-season removal and the container pruning that
+  follows.
 - Free-space pre-check refuses oversized `.torrent` downloads and notifies for
   magnets.
 - Progress/speed/ratio are not persisted; only state transitions are written.

@@ -13,7 +13,7 @@ Updated: 2026-06-24
 > via `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`, with a `DisabledTorrentEngine` fallback
 > when the dependency is absent. Phases 2–4 below are complete; only phase 5
 > (multiple consumers) remains future. See
-> [Torrents and organizer](../features/torrents-and-organizer.md).
+> [Torrents and organizer](../features/torrents-and-organizer/feature.md).
 
 ## Motivation
 
@@ -90,7 +90,7 @@ than netns-sharing.
 
 ### 2. File hand-off — keep the zero-copy move
 
-`torrents-and-organizer.md` is built on an **atomic, same-filesystem move** from
+`torrents-and-organizer/feature.md` is built on an **atomic, same-filesystem move** from
 `.incoming/<downloadId>/` into the catalog. If the engine is a different container,
 downloaded files must land on a filesystem `media-server` can move from in place.
 
