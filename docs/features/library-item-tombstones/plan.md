@@ -133,7 +133,7 @@ keep the target's values when both exist.
       season/episode deletes; `deleteUserData` on the three endpoints.
 - [x] `CatalogService.DeleteAsync`: items with user signal become catalog-less
       tombstones instead of being purged with the catalog.
-- [ ] Revival: identify/publish adoption of tombstones clears `RemovedAt`;
+- [x] Revival: identify/publish adoption of tombstones clears `RemovedAt`;
       covered for ingest re-download and rescan re-publish; cross-catalog
       adoption re-homes the ghost (same-catalog match preferred).
 - [ ] Remap signal migration replacing the orphan-cleanup data loss.

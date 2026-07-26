@@ -302,6 +302,9 @@ public sealed class PublishStage(MediaServerDbContext database, WatchlistLibrary
         foreach (var item in graph.All)
         {
             item.PublicId ??= PublicIdFactory.ForItem(item);
+            // Adoption normally clears this at identify; publishing is what makes it definitive — a
+            // published item is not removed, whatever path it took here.
+            item.RemovedAt = null;
             item.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
