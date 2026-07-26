@@ -22,6 +22,12 @@ public interface IWatchHistoryProviderRegistry
 
     /// <summary>The authorization collaborator for <paramref name="providerKey"/>, or null when it has none.</summary>
     IWatchHistoryProviderAuthorization? FindAuthorization(string providerKey);
+
+    /// <summary>
+    /// The favorites adapter for <paramref name="providerKey"/>, or null when that provider carries no
+    /// favorites. Callers ask for it rather than downcasting, so "supports favorites" has one answer.
+    /// </summary>
+    IWatchHistoryFavoritesProvider? FindFavorites(string providerKey);
 }
 
 /// <summary>
@@ -33,15 +39,19 @@ public sealed class WatchHistoryProviderRegistry : IWatchHistoryProviderRegistry
 {
     private readonly IReadOnlyDictionary<string, IWatchHistoryProvider> providers;
     private readonly IReadOnlyDictionary<string, IWatchHistoryProviderAuthorization> authorizations;
+    private readonly IReadOnlyDictionary<string, IWatchHistoryFavoritesProvider> favorites;
 
     public WatchHistoryProviderRegistry(
         IEnumerable<IWatchHistoryProvider> providers,
-        IEnumerable<IWatchHistoryProviderAuthorization> authorizations)
+        IEnumerable<IWatchHistoryProviderAuthorization> authorizations,
+        IEnumerable<IWatchHistoryFavoritesProvider> favorites)
     {
         // A duplicate key would make resolution depend on registration order — a bug that would only
         // show up as one provider mysteriously shadowing another, so fail at startup instead.
         this.providers = ToLookup(providers, provider => provider.Key, nameof(IWatchHistoryProvider));
         this.authorizations = ToLookup(authorizations, authorization => authorization.ProviderKey, nameof(IWatchHistoryProviderAuthorization));
+        // Favorites adapters are keyed by the provider they extend, so one connection covers both.
+        this.favorites = ToLookup(favorites, favorite => favorite.ProviderKey, nameof(IWatchHistoryFavoritesProvider));
     }
 
     public IReadOnlyList<WatchHistoryProviderDescriptor> Describe() =>
@@ -58,6 +68,9 @@ public sealed class WatchHistoryProviderRegistry : IWatchHistoryProviderRegistry
 
     public IWatchHistoryProviderAuthorization? FindAuthorization(string providerKey) =>
         string.IsNullOrWhiteSpace(providerKey) ? null : authorizations.GetValueOrDefault(providerKey.Trim());
+
+    public IWatchHistoryFavoritesProvider? FindFavorites(string providerKey) =>
+        string.IsNullOrWhiteSpace(providerKey) ? null : favorites.GetValueOrDefault(providerKey.Trim());
 
     private static IReadOnlyDictionary<string, T> ToLookup<T>(IEnumerable<T> items, Func<T, string> key, string what)
     {

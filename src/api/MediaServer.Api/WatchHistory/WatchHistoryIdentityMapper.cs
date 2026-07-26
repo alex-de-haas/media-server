@@ -235,6 +235,29 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
         return false;
     }
 
+    /// <summary>
+    /// The work-level identity a favorites provider speaks: the movie itself, or the series. Null for
+    /// anything else — seasons and episodes carry no favorite of their own, and a work with no external
+    /// id cannot be named to a provider.
+    /// </summary>
+    public static FavoriteIdentity? FavoriteIdentityOf(MediaItem item)
+    {
+        var kind = item.Kind switch
+        {
+            MediaKind.Movie => FavoriteWorkKind.Movie,
+            MediaKind.Series => FavoriteWorkKind.Series,
+            _ => (FavoriteWorkKind?)null,
+        };
+        if (kind is not { } workKind)
+        {
+            return null;
+        }
+
+        var (tmdb, imdb) = ExternalIds(item);
+        var identity = new FavoriteIdentity(workKind, tmdb, imdb);
+        return identity.IsResolvable ? identity : null;
+    }
+
     private static (int? Tmdb, string? Imdb) ExternalIds(MediaItem item)
     {
         int? tmdb = null;

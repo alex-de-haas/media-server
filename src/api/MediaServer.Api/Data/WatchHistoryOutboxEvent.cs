@@ -87,6 +87,19 @@ public enum WatchHistoryOutboxOperation
 
     /// <summary>Record a play at a proven exact time.</summary>
     AddExactWatch,
+
+    /// <summary>
+    /// Add the work to the provider's favorites. Only ever queued by an explicit favorite action:
+    /// absence of a local row is never read as an intent (see <see cref="RemoveFavorite"/>).
+    /// </summary>
+    AddFavorite,
+
+    /// <summary>
+    /// Remove the work from the provider's favorites — queued only by an explicit unfavorite. A row
+    /// that merely disappeared (a tombstone purge, a bulk cleanup) queues nothing: deleting local data
+    /// is hygiene, not a statement about the work.
+    /// </summary>
+    RemoveFavorite,
 }
 
 /// <summary>Delivery state of one outbox event.</summary>

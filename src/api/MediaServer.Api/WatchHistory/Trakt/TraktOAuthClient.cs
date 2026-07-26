@@ -302,6 +302,15 @@ public sealed class TraktOAuthClient(
                     WatchHistoryFailure.RateLimited, "Trakt rate limit reached.", RetryAfterOf(response));
             }
 
+            // 420 is Trakt's "account limit exceeded" — the favorites list (100 items, every account) or
+            // a list count. Unlike 429 it is not a pacing problem: nothing changes until the user frees
+            // space, so it must not be retried and must not be lumped in with contract violations.
+            if ((int)response.StatusCode == 420)
+            {
+                return WatchHistoryResult<JsonDocument>.Failed(
+                    WatchHistoryFailure.AccountLimitReached, "The Trakt account limit is full (HTTP 420).");
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 var failure = (int)response.StatusCode >= 500 ? WatchHistoryFailure.Transient : WatchHistoryFailure.ContractViolation;

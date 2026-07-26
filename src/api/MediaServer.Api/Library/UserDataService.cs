@@ -16,7 +16,8 @@ public sealed class UserDataService(
     MediaServerDbContext database,
     TimeProvider time,
     WatchHistoryRecorder? watchHistory = null,
-    ILogger<UserDataService>? logger = null)
+    ILogger<UserDataService>? logger = null,
+    FavoritesRecorder? favorites = null)
 {
     /// <summary>Crossing this fraction of the runtime marks the item watched and clears its resume point.</summary>
     internal const double WatchedThreshold = 0.90;
@@ -322,7 +323,17 @@ public sealed class UserDataService(
         }
 
         var row = await GetOrCreateRowAsync(appUserId, item.Id, cancellationToken);
+        var changed = row.IsFavorite != favorite;
         row.IsFavorite = favorite;
+
+        // Only a real transition travels to a connected provider, and only from this explicit action:
+        // re-clicking a favorite is not a new statement, and a row that merely vanishes is not one at
+        // all. Staged before the save so the flag and its outbound event commit together.
+        if (changed && favorites is not null)
+        {
+            await favorites.StageAsync(appUserId, item, favorite, cancellationToken);
+        }
+
         await database.SaveChangesAsync(cancellationToken);
         return await LoadOneAsync(appUserId, item, cancellationToken);
     }

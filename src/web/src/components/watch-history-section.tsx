@@ -104,6 +104,42 @@ function ProviderRow({ provider }: { provider: WatchHistoryProvider }) {
           {needsReconnect && connection.lastError && (
             <span className="text-destructive">{connection.lastError}</span>
           )}
+
+          {connection.supportsFavorites && (
+            <>
+              <span className="pt-1">
+                Favorites
+                {connection.favoritesCount != null && connection.favoritesCapacity != null && (
+                  <span
+                    className={
+                      // The cap is the provider's, not ours, and it is not raised by paying: warn while
+                      // there is still room to act rather than only when a write finally fails.
+                      connection.favoritesCount >= connection.favoritesCapacity
+                        ? " text-destructive"
+                        : connection.favoritesCount >= connection.favoritesCapacity * 0.9
+                          ? " text-foreground"
+                          : ""
+                    }
+                  >
+                    {" "}
+                    {connection.favoritesCount}/{connection.favoritesCapacity}
+                    {connection.favoritesCount >= connection.favoritesCapacity
+                      ? " — full, new favorites can’t be added there"
+                      : ""}
+                  </span>
+                )}
+              </span>
+              <span className="text-xs">
+                Only movies and series sync to {provider.displayName}; season and episode favorites stay
+                here.
+              </span>
+              {connection.favoriteSyncFailures.length > 0 && (
+                <span className="text-destructive text-xs">
+                  Not synced: {connection.favoriteSyncFailures.join(", ")}
+                </span>
+              )}
+            </>
+          )}
         </div>
       ) : (
         <p className="text-muted-foreground">
@@ -150,6 +186,7 @@ function ProviderRow({ provider }: { provider: WatchHistoryProvider }) {
       <WatchHistorySyncDialog
         providerKey={provider.key}
         providerName={provider.displayName}
+        supportsFavorites={connection?.supportsFavorites ?? false}
         open={syncOpen}
         onOpenChange={setSyncOpen}
         onApplied={refresh}

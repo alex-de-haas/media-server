@@ -57,6 +57,15 @@ public sealed class WatchHistoryProviderConnection
     /// <summary>Sanitized, bounded reason for the current status. Never contains credentials.</summary>
     public string? LastError { get; set; }
 
+    /// <summary>
+    /// How many favorites the provider said it held after the last favorites call, and the cap it
+    /// reported (Trakt: 100 for every account). Stored so Settings can warn as the list fills instead
+    /// of only reporting the write that finally failed. Null until a favorites call has run.
+    /// </summary>
+    public int? FavoritesRemoteCount { get; set; }
+
+    public int? FavoritesCapacity { get; set; }
+
     public AppUser? AppUser { get; set; }
 }
 

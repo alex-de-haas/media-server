@@ -9,6 +9,8 @@ import {
   type WatchHistorySyncPreview,
   type WatchHistorySyncResult,
   type WatchHistorySyncSkip,
+  type FavoritesSyncPlan,
+  type FavoriteSyncAction,
 } from "@/lib/media-server";
 import { buildScopeRequest, canApply, canPreview, changeCount, hasBlockingWork } from "@/lib/watch-history";
 import { errorMessage } from "@/lib/ui";
@@ -69,7 +71,9 @@ const SKIP_LABELS: Record<WatchHistorySyncSkip, string> = {
 type Phase =
   | { kind: "scope" }
   | { kind: "previewing" }
-  | { kind: "preview"; preview: WatchHistorySyncPreview }
+  // Favorites ride along with the history preview; null when the provider carries none (or the
+  // favorites read failed, which must not sink the history comparison the user asked for).
+  | { kind: "preview"; preview: WatchHistorySyncPreview; favorites: FavoritesSyncPlan | null }
   | { kind: "applying" }
   | { kind: "result"; result: WatchHistorySyncResult }
   | { kind: "error"; message: string };
@@ -82,12 +86,15 @@ type Phase =
 export function WatchHistorySyncDialog({
   providerKey,
   providerName,
+  supportsFavorites = false,
   open,
   onOpenChange,
   onApplied,
 }: {
   providerKey: string;
   providerName: string;
+  /** Whether this provider carries favorites; false hides the favorites half entirely. */
+  supportsFavorites?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onApplied: () => void;
@@ -95,6 +102,7 @@ export function WatchHistorySyncDialog({
   const [phase, setPhase] = useState<Phase>({ kind: "scope" });
   const [includeMovies, setIncludeMovies] = useState(true);
   const [includeEpisodes, setIncludeEpisodes] = useState(true);
+  const [includeFavorites, setIncludeFavorites] = useState(true);
   const [catalogIds, setCatalogIds] = useState<string[]>([]);
 
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs, enabled: open });
@@ -107,6 +115,7 @@ export function WatchHistorySyncDialog({
       setPhase({ kind: "scope" });
       setIncludeMovies(true);
       setIncludeEpisodes(true);
+      setIncludeFavorites(true);
       setCatalogIds([]);
     }
   }
@@ -118,16 +127,28 @@ export function WatchHistorySyncDialog({
         providerKey,
         buildScopeRequest(includeMovies, includeEpisodes, catalogIds),
       );
-      setPhase({ kind: "preview", preview });
+      // Favorites are their own comparison — works, not plays — but they belong to the same explicit
+      // sync the user just asked for, so they are previewed alongside rather than behind a second
+      // button. A provider that carries no favorites simply contributes nothing here.
+      const favorites = includeFavorites && supportsFavorites
+        ? await mediaServer.previewFavoritesSync(providerKey).catch(() => null)
+        : null;
+      setPhase({ kind: "preview", preview, favorites });
     } catch (error) {
       setPhase({ kind: "error", message: errorMessage(error) });
     }
   };
 
-  const runApply = async (runId: string) => {
+  const runApply = async (runId: string, applyFavorites: boolean) => {
     setPhase({ kind: "applying" });
     try {
       const result = await mediaServer.applyWatchHistorySync(providerKey, runId);
+      if (applyFavorites) {
+        // Applied after the history run so a favorites failure cannot roll back plays that already
+        // landed; its own errors surface through the connection's favorites state.
+        await mediaServer.applyFavoritesSync(providerKey).catch(() => null);
+      }
+
       setPhase({ kind: "result", result });
       onApplied();
     } catch (error) {
@@ -159,6 +180,12 @@ export function WatchHistorySyncDialog({
                   <Checkbox checked={includeEpisodes} onCheckedChange={(v) => setIncludeEpisodes(v === true)} />
                   Episodes
                 </label>
+                {supportsFavorites && (
+                  <label className="flex items-center gap-2">
+                    <Checkbox checked={includeFavorites} onCheckedChange={(v) => setIncludeFavorites(v === true)} />
+                    Favorites
+                  </label>
+                )}
               </div>
             </div>
             {(catalogs.data?.length ?? 0) > 0 && (
@@ -191,7 +218,7 @@ export function WatchHistorySyncDialog({
         )}
 
         {phase.kind === "preview" && (
-          <PreviewBody preview={phase.preview} providerName={providerName} />
+          <PreviewBody preview={phase.preview} favorites={phase.favorites} providerName={providerName} />
         )}
 
         {phase.kind === "applying" && (
@@ -222,9 +249,11 @@ export function WatchHistorySyncDialog({
 
 function PreviewBody({
   preview,
+  favorites,
   providerName,
 }: {
   preview: WatchHistorySyncPreview;
+  favorites: FavoritesSyncPlan | null;
   providerName: string;
 }) {
   const rows = CLASSIFICATIONS.map((entry) => ({ ...entry, count: preview.counts[entry.key] ?? 0 })).filter(
@@ -249,6 +278,8 @@ function PreviewBody({
           ))}
         </ul>
       )}
+
+      {favorites && <FavoritesSummary plan={favorites} providerName={providerName} />}
 
       {hasBlockingWork(preview) && (
         <Warning>
@@ -330,7 +361,7 @@ function SyncFooter({
   providerName: string;
   canPreview: boolean;
   onPreview: () => void;
-  onApply: (runId: string) => void;
+  onApply: (runId: string, applyFavorites: boolean) => void;
   onClose: () => void;
   onBack: () => void;
 }) {
@@ -362,7 +393,7 @@ function SyncFooter({
           <Button
             size="sm"
             disabled={!canApply(phase.preview)}
-            onClick={() => onApply(phase.preview.runId)}
+            onClick={() => onApply(phase.preview.runId, phase.favorites !== null)}
           >
             {`Apply to ${providerName}`}
           </Button>
@@ -386,4 +417,59 @@ function SyncFooter({
         </>
       );
   }
+}
+
+// The favorites half of the comparison: works, not plays. Only the actions with something to do are
+// listed; "not in your library" is called out separately because nothing will happen to those.
+const FAVORITE_ACTIONS: Array<{ key: FavoriteSyncAction; label: (provider: string) => string }> = [
+  { key: "AddLocally", label: (p) => `Favorite here (from ${p})` },
+  { key: "AddRemotely", label: (p) => `Favorite on ${p}` },
+  { key: "RemoveLocally", label: (p) => `Unfavorite here (removed on ${p})` },
+  { key: "RemoveRemotely", label: (p) => `Unfavorite on ${p}` },
+];
+
+function FavoritesSummary({ plan, providerName }: { plan: FavoritesSyncPlan; providerName: string }) {
+  const rows = FAVORITE_ACTIONS.map((entry) => ({ ...entry, count: plan.counts[entry.key] ?? 0 })).filter(
+    (entry) => entry.count > 0,
+  );
+  const skipped = plan.counts.SkippedNotInLibrary ?? 0;
+  const full = plan.remoteCount != null && plan.capacity != null && plan.remoteCount >= plan.capacity;
+
+  return (
+    <div className="flex flex-col gap-1.5 border-t pt-3">
+      <span className="text-muted-foreground text-xs">
+        Favorites
+        {plan.remoteCount != null && plan.capacity != null && (
+          <span className={full ? "text-destructive" : ""}>
+            {" "}
+            · {plan.remoteCount}/{plan.capacity} on {providerName}
+          </span>
+        )}
+      </span>
+      {rows.length === 0 && skipped === 0 ? (
+        <p className="text-muted-foreground">Favorites are already in sync.</p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {rows.map((entry) => (
+            <li key={entry.key} className="flex items-baseline justify-between gap-3">
+              <span>{entry.label(providerName)}</span>
+              <span className="tabular-nums font-medium">{entry.count}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {skipped > 0 && (
+        <span className="text-muted-foreground text-xs">
+          {skipped} favorite{skipped === 1 ? "" : "s"} on {providerName} match nothing in this library and
+          will be left alone.
+        </span>
+      )}
+      {full && (
+        <Warning>
+          Your {providerName} favorites are full ({plan.capacity}), so new ones can’t be added there until
+          you remove some.
+        </Warning>
+      )}
+    </div>
+  );
 }

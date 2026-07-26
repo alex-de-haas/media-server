@@ -64,6 +64,12 @@ public enum WatchHistoryFailure
     /// <summary>The identity was rejected or is unknown to the provider — retrying will not help.</summary>
     IdentityRejected,
 
+    /// <summary>
+    /// An account-level cap is full (Trakt allows 100 favorites, for every account). Terminal, not
+    /// retryable: only the user can free space, so retrying burns rate limit and hides the real reason.
+    /// </summary>
+    AccountLimitReached,
+
     /// <summary>The provider answered, but not in a way we can use. Terminal until someone looks.</summary>
     ContractViolation,
 }

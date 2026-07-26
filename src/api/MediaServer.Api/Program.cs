@@ -159,11 +159,16 @@ builder.Services.AddScoped<IWatchHistoryProviderAuthorization>(provider =>
 builder.Services.AddSingleton<TraktWorkIdCache>();
 builder.Services.AddScoped<TraktWorkIdResolver>();
 builder.Services.AddScoped<IWatchHistoryProvider, TraktWatchHistoryProvider>();
+// Favorites are a separate, optional capability: an adapter that only knows plays stays a complete
+// IWatchHistoryProvider, and the core resolves this interface by provider key when it needs one.
+builder.Services.AddScoped<IWatchHistoryFavoritesProvider, TraktFavoritesProvider>();
 builder.Services.AddScoped<WatchHistoryIdentityMapper>();
 builder.Services.AddScoped<WatchHistoryRecorder>();
 builder.Services.AddScoped<WatchHistoryDeliveryService>();
 builder.Services.AddScoped<WatchHistorySyncPreviewService>();
 builder.Services.AddScoped<WatchHistorySyncApplyService>();
+builder.Services.AddScoped<FavoritesRecorder>();
+builder.Services.AddScoped<FavoritesSyncService>();
 builder.Services.AddScoped<WatchHistoryCalendarService>();
 
 builder.Services.AddScoped<IRecommendationProviderRegistry, RecommendationProviderRegistry>();

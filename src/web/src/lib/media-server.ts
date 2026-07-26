@@ -555,6 +555,28 @@ export interface WatchHistoryConnection {
   lastDeliveryAt: string | null;
   lastSyncAt: string | null;
   lastError: string | null;
+  // Favorites, when the provider carries them. favoritesCount/Capacity describe how full its list is
+  // (Trakt caps every account at 100); favoriteSyncFailures names titles whose push ended terminally —
+  // a full list is the usual reason.
+  supportsFavorites: boolean;
+  favoritesCount: number | null;
+  favoritesCapacity: number | null;
+  favoriteSyncFailures: string[];
+}
+
+// What reconciling favorites would do (or did) to one work.
+export type FavoriteSyncAction =
+  | "AddRemotely"
+  | "AddLocally"
+  | "RemoveRemotely"
+  | "RemoveLocally"
+  | "SkippedNotInLibrary";
+
+export interface FavoritesSyncPlan {
+  entries: { title: string; action: FavoriteSyncAction }[];
+  counts: Partial<Record<FavoriteSyncAction, number>>;
+  remoteCount: number | null;
+  capacity: number | null;
 }
 
 export interface WatchHistoryProvider {
@@ -1014,6 +1036,11 @@ export const mediaServer = {
       `${BASE}/watch-history/connections/${providerKey}/authorization/poll`,
       { method: "POST" },
     ),
+  // Favorites reconcile on their own preview/apply pair: they compare works, not plays.
+  previewFavoritesSync: (providerKey: string) =>
+    apiJson<FavoritesSyncPlan>(`${BASE}/watch-history/connections/${providerKey}/favorites/preview`, { method: "POST" }),
+  applyFavoritesSync: (providerKey: string) =>
+    apiJson<FavoritesSyncPlan>(`${BASE}/watch-history/connections/${providerKey}/favorites/apply`, { method: "POST" }),
   previewWatchHistorySync: (providerKey: string, scope?: WatchHistorySyncScope) =>
     apiJson<WatchHistorySyncPreview>(
       `${BASE}/watch-history/connections/${providerKey}/sync/preview`,

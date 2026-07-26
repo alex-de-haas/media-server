@@ -20,7 +20,14 @@ public sealed record WatchHistoryConnectionResponse(
     DateTimeOffset ConnectedAt,
     DateTimeOffset? LastDeliveryAt,
     DateTimeOffset? LastSyncAt,
-    string? LastError);
+    string? LastError,
+    // Favorites, when this provider carries them: how full its list is and the cap it enforces (Trakt
+    // allows 100 for every account), plus the works whose favorite could not be delivered — a full list
+    // among them. Null counts mean no favorites call has run yet.
+    bool SupportsFavorites,
+    int? FavoritesCount,
+    int? FavoritesCapacity,
+    IReadOnlyList<string> FavoriteSyncFailures);
 
 /// <summary>What to show the user so they can approve the connection on the provider's site.</summary>
 public sealed record WatchHistoryAuthorizationResponse(
@@ -85,14 +92,22 @@ public static class WatchHistoryEndpoints
                 .Where(entry => entry.AppUserId == user.Id)
                 .ToListAsync(cancellationToken);
 
+            // This is the route Settings actually loads, so the favorites fields have to be filled in
+            // here — not only on the single-connection route — or the whole favorites UI stays hidden.
+            var failuresByConnection = await FavoriteFailuresAsync(
+                database, connections.Select(entry => entry.Id).ToList(), cancellationToken);
+
             var providers = registry.Describe()
                 .Select(descriptor => new WatchHistoryProviderResponse(
                     descriptor.Key,
                     descriptor.DisplayName,
                     descriptor.IsConfigured,
                     descriptor.Capabilities.ExactTimestampWrites,
-                    ToResponse(connections.FirstOrDefault(entry =>
-                        string.Equals(entry.ProviderKey, descriptor.Key, StringComparison.OrdinalIgnoreCase)))))
+                    ToResponse(
+                        connections.FirstOrDefault(entry =>
+                            string.Equals(entry.ProviderKey, descriptor.Key, StringComparison.OrdinalIgnoreCase)),
+                        registry.FindFavorites(descriptor.Key) is not null,
+                        failuresByConnection)))
                 .ToList();
 
             return Results.Ok(providers);
@@ -222,7 +237,13 @@ public static class WatchHistoryEndpoints
             var connection = await database.WatchHistoryConnections.AsNoTracking().FirstOrDefaultAsync(
                 entry => entry.AppUserId == context.User!.Id && entry.ProviderKey == context.ProviderKey, cancellationToken);
 
-            return connection is null ? Results.NotFound() : Results.Ok(ToResponse(connection));
+            if (connection is null)
+            {
+                return Results.NotFound();
+            }
+
+            var failures = await FavoriteFailuresAsync(database, [connection.Id], cancellationToken);
+            return Results.Ok(ToResponse(connection, registry.FindFavorites(context.ProviderKey!) is not null, failures));
         });
 
         group.MapPost("/connections/{providerKey}/sync/preview", async (
@@ -266,6 +287,44 @@ public static class WatchHistoryEndpoints
             return result.Succeeded
                 ? Results.Ok(result.Value!)
                 : ToProblem(result.Failure!.Value, result.Detail);
+        });
+
+        // Favorites reconcile alongside the watched history but stand on their own: they compare works,
+        // not plays, so they are their own preview and apply rather than a section of the history run.
+        group.MapPost("/connections/{providerKey}/favorites/preview", async (
+            string providerKey,
+            ClaimsPrincipal principal,
+            IWatchHistoryProviderRegistry registry,
+            FavoritesSyncService favorites,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var context = await ResolveAsync(principal, providerKey, registry, database, cancellationToken);
+            if (context.Problem is not null)
+            {
+                return context.Problem;
+            }
+
+            var result = await favorites.PreviewAsync(context.User!.Id, context.ProviderKey!, cancellationToken);
+            return result.Succeeded ? Results.Ok(result.Value!) : ToProblem(result.Failure!.Value, result.Detail);
+        });
+
+        group.MapPost("/connections/{providerKey}/favorites/apply", async (
+            string providerKey,
+            ClaimsPrincipal principal,
+            IWatchHistoryProviderRegistry registry,
+            FavoritesSyncService favorites,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var context = await ResolveAsync(principal, providerKey, registry, database, cancellationToken);
+            if (context.Problem is not null)
+            {
+                return context.Problem;
+            }
+
+            var result = await favorites.ApplyAsync(context.User!.Id, context.ProviderKey!, cancellationToken);
+            return result.Succeeded ? Results.Ok(result.Value!) : ToProblem(result.Failure!.Value, result.Detail);
         });
 
         group.MapDelete("/connections/{providerKey}", async (
@@ -354,7 +413,41 @@ public static class WatchHistoryEndpoints
             title: "Provider unavailable", detail: detail, statusCode: StatusCodes.Status502BadGateway),
     };
 
-    internal static WatchHistoryConnectionResponse? ToResponse(WatchHistoryProviderConnection? connection) =>
+    /// <summary>
+    /// Titles whose favorite push ended terminally — a full Trakt list is the common one — keyed by
+    /// connection. Surfaced with the connection so Settings can name what never made it across, instead
+    /// of leaving the failure buried in the outbox.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<string>>> FavoriteFailuresAsync(
+        MediaServerDbContext database, IReadOnlyList<Guid> connectionIds, CancellationToken cancellationToken)
+    {
+        if (connectionIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<string>>();
+        }
+
+        var rows = await database.WatchHistoryOutboxEvents.AsNoTracking()
+            .Where(item => connectionIds.Contains(item.ConnectionId) &&
+                item.Status == WatchHistoryOutboxStatus.Terminal &&
+                (item.Operation == WatchHistoryOutboxOperation.AddFavorite ||
+                 item.Operation == WatchHistoryOutboxOperation.RemoveFavorite))
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(50)
+            .Join(database.MediaItems.AsNoTracking(), item => item.MediaItemId, media => media.Id,
+                (item, media) => new { item.ConnectionId, media.Title })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(row => row.ConnectionId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<string>)group.Select(row => row.Title).Distinct().ToList());
+    }
+
+    internal static WatchHistoryConnectionResponse? ToResponse(
+        WatchHistoryProviderConnection? connection,
+        bool supportsFavorites = false,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>>? favoriteFailures = null) =>
         connection is null
             ? null
             : new WatchHistoryConnectionResponse(
@@ -364,7 +457,11 @@ public static class WatchHistoryEndpoints
                 connection.ConnectedAt,
                 connection.LastDeliveryAt,
                 connection.LastSyncAt,
-                connection.LastError);
+                connection.LastError,
+                supportsFavorites,
+                connection.FavoritesRemoteCount,
+                connection.FavoritesCapacity,
+                favoriteFailures?.GetValueOrDefault(connection.Id) ?? []);
 
     private static async Task<AppUser?> ResolveUserAsync(
         ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
