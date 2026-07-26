@@ -107,17 +107,18 @@ public sealed class WatchHistoryDeliveryService(
             return (WatchHistoryFailure.ContractViolation, "The connection this work belonged to is gone.", null);
         }
 
+        // Favorites travel over the same outbox but speak in works, not plays: their snapshot is a
+        // FavoriteIdentity and their adapter is the optional favorites one. Resolved before the history
+        // adapter, which such an event never needs — a provider could carry favorites and no history.
+        if (item.Operation is WatchHistoryOutboxOperation.AddFavorite or WatchHistoryOutboxOperation.RemoveFavorite)
+        {
+            return await DeliverFavoriteAsync(connection, item, cancellationToken);
+        }
+
         var provider = registry.Find(connection.ProviderKey);
         if (provider is null)
         {
             return (WatchHistoryFailure.Unsupported, $"No adapter is registered for '{connection.ProviderKey}'.", null);
-        }
-
-        // Favorites travel over the same outbox but speak in works, not plays: their snapshot is a
-        // FavoriteIdentity and their adapter is the optional favorites one.
-        if (item.Operation is WatchHistoryOutboxOperation.AddFavorite or WatchHistoryOutboxOperation.RemoveFavorite)
-        {
-            return await DeliverFavoriteAsync(connection, item, cancellationToken);
         }
 
         var identity = Deserialize(item.IdentitySnapshot);

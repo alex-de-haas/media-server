@@ -167,6 +167,8 @@ builder.Services.AddScoped<WatchHistoryRecorder>();
 builder.Services.AddScoped<WatchHistoryDeliveryService>();
 builder.Services.AddScoped<WatchHistorySyncPreviewService>();
 builder.Services.AddScoped<WatchHistorySyncApplyService>();
+builder.Services.AddScoped<FavoritesRecorder>();
+builder.Services.AddScoped<FavoritesSyncService>();
 builder.Services.AddScoped<WatchHistoryCalendarService>();
 
 builder.Services.AddScoped<IRecommendationProviderRegistry, RecommendationProviderRegistry>();

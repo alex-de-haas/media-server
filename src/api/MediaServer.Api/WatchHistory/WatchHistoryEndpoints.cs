@@ -268,6 +268,44 @@ public static class WatchHistoryEndpoints
                 : ToProblem(result.Failure!.Value, result.Detail);
         });
 
+        // Favorites reconcile alongside the watched history but stand on their own: they compare works,
+        // not plays, so they are their own preview and apply rather than a section of the history run.
+        group.MapPost("/connections/{providerKey}/favorites/preview", async (
+            string providerKey,
+            ClaimsPrincipal principal,
+            IWatchHistoryProviderRegistry registry,
+            FavoritesSyncService favorites,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var context = await ResolveAsync(principal, providerKey, registry, database, cancellationToken);
+            if (context.Problem is not null)
+            {
+                return context.Problem;
+            }
+
+            var result = await favorites.PreviewAsync(context.User!.Id, cancellationToken);
+            return result.Succeeded ? Results.Ok(result.Value!) : ToProblem(result.Failure!.Value, result.Detail);
+        });
+
+        group.MapPost("/connections/{providerKey}/favorites/apply", async (
+            string providerKey,
+            ClaimsPrincipal principal,
+            IWatchHistoryProviderRegistry registry,
+            FavoritesSyncService favorites,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var context = await ResolveAsync(principal, providerKey, registry, database, cancellationToken);
+            if (context.Problem is not null)
+            {
+                return context.Problem;
+            }
+
+            var result = await favorites.ApplyAsync(context.User!.Id, cancellationToken);
+            return result.Succeeded ? Results.Ok(result.Value!) : ToProblem(result.Failure!.Value, result.Detail);
+        });
+
         group.MapDelete("/connections/{providerKey}", async (
             string providerKey,
             ClaimsPrincipal principal,
