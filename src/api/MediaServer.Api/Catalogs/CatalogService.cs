@@ -265,6 +265,13 @@ public sealed class CatalogService(
                     (item.Kind == MediaKind.Episode || item.Kind == MediaKind.Video) &&
                     signalIds.Contains(item.Id)));
 
+            // A purge unlinks tracked titles through the FK's SetNull; tombstones keep their rows, so the
+            // wishlist would keep reading "in library" — unlink every ghost by hand.
+            await database.TrackedTitles
+                .Where(title => title.MediaItemId != null &&
+                    database.MediaItems.Any(item => item.Id == title.MediaItemId && item.RemovedAt != null))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(title => title.MediaItemId, (Guid?)null), cancellationToken);
+
             // From here on, `CatalogId == id` names only the untouched items — purge them as before.
             // itemIds re-evaluates against the narrowed set wherever it is used.
             await database.MetadataRecords.Where(record => itemIds.Contains(record.MediaItemId)).ExecuteDeleteAsync(cancellationToken);

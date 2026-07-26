@@ -141,8 +141,9 @@ keep the target's values when both exist.
       deliberately serves tombstones (calendar); regression tests that a
       tombstone leaks into neither browse, Jellyfin, collections, people,
       search, nor title preview.
-- [ ] Frontend: second checkbox in `DeleteItemDialog`; calendar cards and day
-      detail stop linking when `PublicId` is null.
+- [x] Frontend: second checkbox in `DeleteItemDialog`; calendar cards and day
+      detail verified not to link to item pages at all (no guard needed —
+      nothing links).
 - [ ] Removed-titles surface: API listing tombstones with signal summary,
       unfavorite and permanent-purge actions, web page beside the library
       maintenance surface.

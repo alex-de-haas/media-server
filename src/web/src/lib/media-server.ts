@@ -873,14 +873,16 @@ export const mediaServer = {
     apiJson<UserItemData>(`${BASE}/library/${id}/played`, { method: played ? "POST" : "DELETE" }),
   setFavorite: (id: string, favorite: boolean) =>
     apiJson<UserItemData>(`${BASE}/library/${id}/favorite`, { method: favorite ? "POST" : "DELETE" }),
-  deleteLibraryItem: (id: string, deleteFiles: boolean) =>
-    send(`/library/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
+  // Without deleteUserData, an item someone favorited or watched survives as a hidden tombstone and a
+  // re-download restores it with its history; deleteUserData forces the full purge.
+  deleteLibraryItem: (id: string, deleteFiles: boolean, deleteUserData: boolean) =>
+    send(`/library/${id}?deleteFiles=${deleteFiles}&deleteUserData=${deleteUserData}`, "DELETE"),
   // Delete one episode, or a whole season, of a series (admin); deleteFiles also erases the files. The
   // result says what the delete emptied and pruned — a removed series means the page is gone.
-  deleteEpisode: (id: string, deleteFiles: boolean) =>
-    apiJson<ChildDeleteResult>(`${BASE}/library/episodes/${id}?deleteFiles=${deleteFiles}`, { method: "DELETE" }),
-  deleteSeason: (id: string, deleteFiles: boolean) =>
-    apiJson<ChildDeleteResult>(`${BASE}/library/seasons/${id}?deleteFiles=${deleteFiles}`, { method: "DELETE" }),
+  deleteEpisode: (id: string, deleteFiles: boolean, deleteUserData: boolean) =>
+    apiJson<ChildDeleteResult>(`${BASE}/library/episodes/${id}?deleteFiles=${deleteFiles}&deleteUserData=${deleteUserData}`, { method: "DELETE" }),
+  deleteSeason: (id: string, deleteFiles: boolean, deleteUserData: boolean) =>
+    apiJson<ChildDeleteResult>(`${BASE}/library/seasons/${id}?deleteFiles=${deleteFiles}&deleteUserData=${deleteUserData}`, { method: "DELETE" }),
   // Delete one media source / version (admin); deleteFile also erases the file (used for transcode "replace").
   deleteMediaSource: (sourceId: string, deleteFile: boolean) =>
     send(`/library/sources/${sourceId}?deleteFile=${deleteFile}`, "DELETE"),

@@ -277,6 +277,12 @@ public sealed class LibraryDeleteService(
             await database.PlaybackSessions.Where(session => tombstoneList.Contains(session.MediaItemId))
                 .ExecuteDeleteAsync(cancellationToken);
 
+            // A purge unlinks tracked titles through the FK's SetNull; a tombstone keeps the row, so the
+            // wishlist would keep reading "in library" — unlink by hand, mirroring what the FK would do.
+            await database.TrackedTitles
+                .Where(title => title.MediaItemId != null && tombstoneList.Contains(title.MediaItemId.Value))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(title => title.MediaItemId, (Guid?)null), cancellationToken);
+
             var now = DateTimeOffset.UtcNow;
             await database.MediaItems.Where(media => tombstoneList.Contains(media.Id))
                 .ExecuteUpdateAsync(setters => setters

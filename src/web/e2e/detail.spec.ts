@@ -167,10 +167,12 @@ test("admin deletes one episode, keeping the files unless asked", async ({ page 
   await page.goto("/series/s1");
   await page.getByRole("tab", { name: "Episodes" }).click();
 
-  // Keeping the files is the default: a delete must not silently remove media from disk.
+  // Keeping the files — and the watch history — is the default: a delete must not silently remove
+  // media from disk, and watched state survives as a tombstone unless explicitly purged.
   const kept = page.waitForRequest(
     (request) =>
-      request.url().includes("/api/proxy/api/library/episodes/e1?deleteFiles=false") && request.method() === "DELETE",
+      request.url().includes("/api/proxy/api/library/episodes/e1?deleteFiles=false&deleteUserData=false") &&
+      request.method() === "DELETE",
   );
   await page.getByRole("button", { name: "Delete S01E01" }).click();
   await expect(page.getByRole("heading", { name: "Delete episode?" })).toBeVisible();
@@ -178,13 +180,15 @@ test("admin deletes one episode, keeping the files unless asked", async ({ page 
   await kept;
   await expect(page).toHaveURL(/\/series\/s1$/);
 
-  // Ticking the box is what escalates to erasing the file.
+  // Ticking the boxes is what escalates to erasing the file and purging the history.
   const erased = page.waitForRequest(
     (request) =>
-      request.url().includes("/api/proxy/api/library/episodes/e2?deleteFiles=true") && request.method() === "DELETE",
+      request.url().includes("/api/proxy/api/library/episodes/e2?deleteFiles=true&deleteUserData=true") &&
+      request.method() === "DELETE",
   );
   await page.getByRole("button", { name: "Delete S01E02" }).click();
   await page.getByRole("checkbox", { name: /Delete files from disk/ }).click();
+  await page.getByRole("checkbox", { name: /Also delete watch history and favorites/ }).click();
   await page.getByRole("button", { name: "Delete + remove files" }).click();
   await erased;
 });
@@ -204,7 +208,7 @@ test("admin deletes a whole season and leaves when the series is pruned", async 
 
   const deleted = page.waitForRequest(
     (request) =>
-      request.url().includes("/api/proxy/api/library/seasons/season-1?deleteFiles=false") &&
+      request.url().includes("/api/proxy/api/library/seasons/season-1?deleteFiles=false&deleteUserData=false") &&
       request.method() === "DELETE",
   );
   await page.getByRole("button", { name: "Delete season 1" }).click();
