@@ -207,6 +207,32 @@ public sealed class LibraryMoveServiceTests : IDisposable
             item.SeriesId == sourceSeries.Id && item.Kind == MediaKind.Episode && item.RemovedAt == null));
     }
 
+    [Fact]
+    public async Task Move_series_merge_never_targets_a_ghost_episode()
+    {
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Series, "Series");
+        var target = await AddCatalogAsync(_targetRoot, CatalogType.Series, "Series 4K");
+        var targetSeries = await AddSeriesAsync(target, "The Show", "tmdb", "500", [(1, 1), (1, 2)]);
+        // The target's E01 was individually deleted and lives on as a tombstone under the published series.
+        var ghostId = await TombstoneEpisodeAsync(targetSeries.Id, episodeNumber: 1);
+        var sourceSeries = await AddSeriesAsync(source, "The Show", "tmdb", "500", [(1, 1)]);
+
+        var result = await MoveAsync(sourceSeries.Id, target.Id);
+
+        Assert.Equal(MoveResult.Kind.Ok, result.Status);
+        _database.ChangeTracker.Clear();
+        // The incoming E01 must not merge its sources onto the tombstone (they would be stranded behind
+        // a null PublicId) — it re-points as a published placement, and the ghost stays untouched.
+        var ghost = await _database.MediaItems.AsNoTracking().SingleAsync(item => item.Id == ghostId);
+        Assert.Null(ghost.PublicId);
+        Assert.NotNull(ghost.RemovedAt);
+        Assert.False(await _database.MediaSources.AsNoTracking().AnyAsync(s => s.MediaItemId == ghostId));
+        var published = await _database.MediaItems.AsNoTracking().SingleAsync(item =>
+            item.Kind == MediaKind.Episode && item.SeriesId == targetSeries.Id && item.PublicId != null &&
+            (item.IdentityEpisodeNumber ?? item.IndexNumber) == 1);
+        Assert.True(await _database.MediaSources.AsNoTracking().AnyAsync(s => s.MediaItemId == published.Id));
+    }
+
     /// <summary>Favorites and then deletes one episode through the real delete flow, yielding a tombstone.</summary>
     private async Task<Guid> TombstoneEpisodeAsync(Guid seriesId, int episodeNumber)
     {

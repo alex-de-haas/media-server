@@ -61,13 +61,15 @@ public sealed class RemovedTitlesService(MediaServerDbContext database)
             .GroupBy(entry => rootByItem[entry.MediaItemId])
             .ToDictionary(group => group.Key, group => (Count: group.Count(), Last: group.Max(entry => entry.WatchedAt)));
 
+        // Favorites aggregate over the same subtree as plays: a favorited episode kept its series
+        // alive as a tombstone, so the series entry must show (and be able to clear) that favorite.
         var favorites = appUserId is { } favoriteUserId
             ? await database.UserItemData.AsNoTracking()
-                .Where(data => data.AppUserId == favoriteUserId && data.IsFavorite && rootIds.Contains(data.MediaItemId))
+                .Where(data => data.AppUserId == favoriteUserId && data.IsFavorite && subtreeIds.Contains(data.MediaItemId))
                 .Select(data => data.MediaItemId)
                 .ToListAsync(cancellationToken)
             : [];
-        var favoriteSet = favorites.ToHashSet();
+        var favoriteSet = favorites.Select(id => rootByItem[id]).ToHashSet();
 
         var posters = new Dictionary<Guid, string>();
         var posterRows = await database.ImageAssets.AsNoTracking()
@@ -96,19 +98,38 @@ public sealed class RemovedTitlesService(MediaServerDbContext database)
             playsByRoot.TryGetValue(root.Id, out var last) ? last.Last : null)).ToList();
     }
 
-    /// <summary>Clears the user's favorite on a tombstoned title. False when there was nothing to clear.</summary>
+    /// <summary>
+    /// Clears the user's favorites across a tombstoned title's whole ghost subtree — the flag may sit
+    /// on the root or on any episode/season that kept the chain alive. False when there was nothing
+    /// to clear.
+    /// </summary>
     public async Task<bool> ClearFavoriteAsync(int appUserId, Guid mediaItemId, CancellationToken cancellationToken)
     {
-        var row = await database.UserItemData.FirstOrDefaultAsync(data =>
-            data.AppUserId == appUserId && data.MediaItemId == mediaItemId && data.IsFavorite &&
-            database.MediaItems.Any(item => item.Id == mediaItemId && item.RemovedAt != null), cancellationToken);
-        if (row is null)
+        var isTombstone = await database.MediaItems.AsNoTracking()
+            .AnyAsync(item => item.Id == mediaItemId && item.RemovedAt != null, cancellationToken);
+        if (!isTombstone)
+        {
+            return false;
+        }
+
+        var subtreeIds = await database.MediaItems.AsNoTracking()
+            .Where(item => item.Id == mediaItemId || item.SeriesId == mediaItemId || item.ParentId == mediaItemId)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var rows = await database.UserItemData
+            .Where(data => data.AppUserId == appUserId && data.IsFavorite && subtreeIds.Contains(data.MediaItemId))
+            .ToListAsync(cancellationToken);
+        if (rows.Count == 0)
         {
             return false;
         }
 
         // Tracked update on purpose: SaveChanges bumps StateRevision for the Jellyfin delta sync.
-        row.IsFavorite = false;
+        foreach (var row in rows)
+        {
+            row.IsFavorite = false;
+        }
+
         await database.SaveChangesAsync(cancellationToken);
         return true;
     }

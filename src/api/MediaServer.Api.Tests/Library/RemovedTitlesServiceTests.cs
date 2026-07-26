@@ -41,9 +41,10 @@ public sealed class RemovedTitlesServiceTests : IDisposable
         Assert.Equal(0, movie.PlayCount);
         Assert.Equal("https://cdn/phantom.jpg", movie.PosterUrl);
 
-        // The series aggregates its ghost episode's plays up to the title.
+        // The series aggregates its ghost episode's plays — and its favorite — up to the title: the
+        // episode favorite is what kept this chain alive, so the entry must show it.
         var series = Assert.Single(titles, title => title.Id == _ghostSeriesId);
-        Assert.False(series.IsFavorite);
+        Assert.True(series.IsFavorite);
         Assert.Equal(2, series.PlayCount);
         Assert.NotNull(series.LastWatchedAt);
     }
@@ -60,6 +61,21 @@ public sealed class RemovedTitlesServiceTests : IDisposable
 
         await using var verify = _db.Create();
         Assert.False(await verify.UserItemData.AnyAsync(data => data.MediaItemId == _ghostMovieId && data.IsFavorite));
+    }
+
+    [Fact]
+    public async Task Clear_favorite_on_a_series_clears_descendant_favorites_too()
+    {
+        // The favorite sits on the ghost episode, not the series row — clearing at the title level
+        // must reach it, or the flag would be permanently stuck (the ordinary endpoint refuses ghosts).
+        var service = new RemovedTitlesService(_context);
+
+        Assert.True(await service.ClearFavoriteAsync(_userId, _ghostSeriesId, CancellationToken.None));
+
+        await using var verify = _db.Create();
+        Assert.False(await verify.UserItemData.AnyAsync(data => data.MediaItemId == _ghostEpisodeId && data.IsFavorite));
+        Assert.False((await new RemovedTitlesService(verify).ListAsync(_userId, CancellationToken.None))
+            .Single(title => title.Id == _ghostSeriesId).IsFavorite);
     }
 
     [Fact]
@@ -153,6 +169,11 @@ public sealed class RemovedTitlesServiceTests : IDisposable
         context.UserItemData.Add(new UserItemData
         {
             Id = Guid.NewGuid(), AppUserId = user.Id, MediaItemId = published.Id, IsFavorite = true,
+        });
+        // The series' favorite sits on its ghost episode — the case a root-only lookup would miss.
+        context.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = user.Id, MediaItemId = ghostEpisode.Id, IsFavorite = true,
         });
         context.PlaybackHistoryEntries.AddRange(
             new PlaybackHistoryEntry

@@ -243,9 +243,12 @@ public sealed class LibraryMoveService(
             };
         }
 
-        // Merge into the existing target series, per episode.
+        // Merge into the existing target series, per episode. Published targets only: reassigning
+        // sources onto a tombstoned episode would strand the moved files behind a null PublicId — an
+        // incoming episode whose only counterpart is a ghost is re-pointed as a placement instead.
         var targetEpisodes = await database.MediaItems
-            .Where(candidate => candidate.CatalogId == target.Id && candidate.Kind == MediaKind.Episode && candidate.SeriesId == targetSeries.Id)
+            .Where(candidate => candidate.CatalogId == target.Id && candidate.Kind == MediaKind.Episode &&
+                candidate.SeriesId == targetSeries.Id && candidate.PublicId != null)
             .ToListAsync(cancellationToken);
 
         var placements = new List<EpisodePlacement>();
