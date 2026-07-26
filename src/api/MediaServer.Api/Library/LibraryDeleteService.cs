@@ -396,7 +396,9 @@ public sealed class LibraryDeleteService(
 }
 
 /// <summary>
-/// What an episode/season delete took beyond its target. <c>SeasonRemoved</c> tells the UI the
-/// season page it was called from is gone and it should navigate back to the library.
+/// What an episode/season delete took beyond its target (removed = left the library, whether purged
+/// or tombstoned). <c>SeriesRemoved</c> tells the UI the series page it was called from is gone and
+/// it should navigate back to the library; <c>SeasonRemoved</c> only reports that the owning season
+/// was pruned along the way.
 /// </summary>
 public sealed record ChildDeleteResult(bool SeasonRemoved, bool SeriesRemoved);

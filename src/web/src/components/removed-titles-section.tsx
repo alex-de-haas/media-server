@@ -54,6 +54,20 @@ export function RemovedTitlesSection() {
     onError: (error) => toast.error("Couldn’t delete removed title", { description: errorMessage(error) }),
   });
 
+  // A failed load must not silently drop the section — surface it like the other settings sections.
+  if (titles.isError) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Removed titles</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm">
+          <p className="text-destructive">Couldn’t load removed titles: {errorMessage(titles.error)}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   // The section only appears when there is something to manage — an empty ghost list is noise.
   if (!titles.data?.length) {
     return null;
