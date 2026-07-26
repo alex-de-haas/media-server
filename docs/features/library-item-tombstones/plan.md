@@ -136,7 +136,7 @@ keep the target's values when both exist.
 - [x] Revival: identify/publish adoption of tombstones clears `RemovedAt`;
       covered for ingest re-download and rescan re-publish; cross-catalog
       adoption re-homes the ghost (same-catalog match preferred).
-- [ ] Remap signal migration replacing the orphan-cleanup data loss.
+- [x] Remap signal migration replacing the orphan-cleanup data loss.
 - [ ] Query audit: every `MediaItems` read either filters published or
       deliberately serves tombstones (calendar); regression tests that a
       tombstone leaks into neither browse, Jellyfin, collections, people,
