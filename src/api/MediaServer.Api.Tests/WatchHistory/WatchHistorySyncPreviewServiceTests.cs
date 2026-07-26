@@ -152,6 +152,22 @@ public sealed class WatchHistorySyncPreviewServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AnItemNeitherSideHasWatchedIsNotCountedAtAll()
+    {
+        // It is not "in sync" — it is outside the comparison. Counting it there would make that line
+        // report the size of the scanned library under a label that reads "watched on both sides".
+        var watched = AddMovie("27205");
+        MarkWatchedLocally(watched.Id);
+        _provider.History.Add(new WatchHistoryPlay(Movie(27205), _time.GetUtcNow().AddDays(-1), "1"));
+        AddMovie("1375666", title: "Never watched");
+
+        var preview = await PreviewAsync();
+
+        Assert.Equal(1, preview.Counts[WatchHistorySyncClassification.InSync]);
+        Assert.Single(preview.Counts);
+    }
+
+    [Fact]
     public async Task HistoryOnlyTheProviderHasIsReportedAsRemoteOnly()
     {
         var movie = AddMovie("27205");

@@ -3,7 +3,7 @@
 Status: In progress — phases 1–4 shipped (PRs #91–#102); see
 [Implementation Phases](#implementation-phases) for what remains
 Created: 2026-07-21
-Updated: 2026-07-24
+Updated: 2026-07-26
 
 ## Goal
 
@@ -339,7 +339,14 @@ The Trakt Settings card exposes **Sync with Trakt**. It opens a popup where the
 user selects one or more accessible catalogs and optionally movies or series. The
 action is explicit; no schedule or background inbound poll invokes it.
 
-The popup first creates a read-only preview. It reports:
+The popup first creates a read-only preview. It reports the items **either side
+has watched**, never the size of the scanned scope — a title nobody has watched
+appears in no classification at all, and Apply skips it for the same reason
+rather than writing a state row for it. Counting untouched items as "watched on
+both sides" made that line read as the library's size (283 against a Trakt
+account holding under 100 entries), which is what it reported until 0.41.1.
+
+It reports:
 
 - selected catalogs/media kinds;
 - watched on both sides;
