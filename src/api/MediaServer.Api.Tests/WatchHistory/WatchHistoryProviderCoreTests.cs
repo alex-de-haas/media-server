@@ -179,8 +179,9 @@ public sealed class WatchHistoryProviderRegistryTests
 
     private static WatchHistoryProviderRegistry Registry(
         IEnumerable<IWatchHistoryProvider>? providers = null,
-        IEnumerable<IWatchHistoryProviderAuthorization>? authorizations = null) =>
-        new(providers ?? [new StubProvider("trakt")], authorizations ?? [new StubAuthorization("trakt")]);
+        IEnumerable<IWatchHistoryProviderAuthorization>? authorizations = null,
+        IEnumerable<IWatchHistoryFavoritesProvider>? favorites = null) =>
+        new(providers ?? [new StubProvider("trakt")], authorizations ?? [new StubAuthorization("trakt")], favorites ?? []);
 
     [Fact]
     public void ResolvesByKeyRegardlessOfCasing()

@@ -97,7 +97,7 @@ public sealed class WatchHistorySyncApplyServiceTests : IDisposable
             throw new NotSupportedException("Apply must never remove remote history.");
     }
 
-    private sealed class StubRegistry(IWatchHistoryProvider provider) : IWatchHistoryProviderRegistry
+    private sealed class StubRegistry(IWatchHistoryProvider provider, IWatchHistoryFavoritesProvider? favorites = null) : IWatchHistoryProviderRegistry
     {
         public IReadOnlyList<WatchHistoryProviderDescriptor> Describe() => [];
 
@@ -105,6 +105,8 @@ public sealed class WatchHistorySyncApplyServiceTests : IDisposable
             string.Equals(providerKey, provider.Key, StringComparison.OrdinalIgnoreCase) ? provider : null;
 
         public IWatchHistoryProviderAuthorization? FindAuthorization(string providerKey) => null;
+
+        public IWatchHistoryFavoritesProvider? FindFavorites(string providerKey) => favorites;
     }
 
     private WatchHistorySyncApplyService Apply() => new(

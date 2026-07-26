@@ -81,7 +81,7 @@ public sealed class WatchHistorySyncPreviewServiceTests : IDisposable
             throw new NotSupportedException("The preview must not write.");
     }
 
-    private sealed class StubRegistry(IWatchHistoryProvider provider) : IWatchHistoryProviderRegistry
+    private sealed class StubRegistry(IWatchHistoryProvider provider, IWatchHistoryFavoritesProvider? favorites = null) : IWatchHistoryProviderRegistry
     {
         public IReadOnlyList<WatchHistoryProviderDescriptor> Describe() => [];
 
@@ -89,6 +89,8 @@ public sealed class WatchHistorySyncPreviewServiceTests : IDisposable
             string.Equals(providerKey, provider.Key, StringComparison.OrdinalIgnoreCase) ? provider : null;
 
         public IWatchHistoryProviderAuthorization? FindAuthorization(string providerKey) => null;
+
+        public IWatchHistoryFavoritesProvider? FindFavorites(string providerKey) => favorites;
     }
 
     private WatchHistorySyncPreviewService Service() => new(

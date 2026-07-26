@@ -113,6 +113,13 @@ public sealed class WatchHistoryDeliveryService(
             return (WatchHistoryFailure.Unsupported, $"No adapter is registered for '{connection.ProviderKey}'.", null);
         }
 
+        // Favorites travel over the same outbox but speak in works, not plays: their snapshot is a
+        // FavoriteIdentity and their adapter is the optional favorites one.
+        if (item.Operation is WatchHistoryOutboxOperation.AddFavorite or WatchHistoryOutboxOperation.RemoveFavorite)
+        {
+            return await DeliverFavoriteAsync(connection, item, cancellationToken);
+        }
+
         var identity = Deserialize(item.IdentitySnapshot);
         if (identity is null)
         {
@@ -131,6 +138,61 @@ public sealed class WatchHistoryDeliveryService(
                 await RemoveOwnedAsync(provider, item, cancellationToken),
             _ => (WatchHistoryFailure.Unsupported, $"Unknown operation {item.Operation}.", null),
         };
+    }
+
+    /// <summary>
+    /// Sends one favorite or unfavorite. A full remote list answers
+    /// <see cref="WatchHistoryFailure.AccountLimitReached"/>, which is terminal by the same rule as a
+    /// rejected identity: only the user can free space, so retrying would burn rate limit and bury the
+    /// reason. Whatever the provider says about how full it now is, is recorded on the connection.
+    /// </summary>
+    private async Task<(WatchHistoryFailure?, string?, TimeSpan?)> DeliverFavoriteAsync(
+        WatchHistoryProviderConnection connection, WatchHistoryOutboxEvent item, CancellationToken cancellationToken)
+    {
+        var provider = registry.FindFavorites(connection.ProviderKey);
+        if (provider is null)
+        {
+            return (WatchHistoryFailure.Unsupported, $"'{connection.ProviderKey}' does not carry favorites.", null);
+        }
+
+        var identity = FavoritesRecorder.Deserialize(item.IdentitySnapshot);
+        if (identity is null || !identity.IsResolvable)
+        {
+            return (WatchHistoryFailure.ContractViolation, "The queued favorite identity could not be read.", null);
+        }
+
+        var result = item.Operation == WatchHistoryOutboxOperation.AddFavorite
+            ? await provider.AddFavoritesAsync(item.AppUserId, [identity], cancellationToken)
+            : await provider.RemoveFavoritesAsync(item.AppUserId, [identity], cancellationToken);
+
+        if (!result.Succeeded)
+        {
+            return (result.Failure, result.Detail, result.RetryAfter);
+        }
+
+        await RecordFavoritesCountAsync(connection.Id, result.Value!.RemoteCount, cancellationToken);
+
+        // A work the provider cannot identify is not a delivery failure to retry — it is a fact about
+        // the work. Report it so Settings can show which favorite never made it across.
+        if (result.Value!.NotFound > 0)
+        {
+            return (WatchHistoryFailure.IdentityRejected, "The provider does not recognise this title.", null);
+        }
+
+        return (null, null, null);
+    }
+
+    /// <summary>Stores how full the provider's favorites list is, so Settings can warn before a write fails.</summary>
+    private async Task RecordFavoritesCountAsync(Guid connectionId, int? remoteCount, CancellationToken cancellationToken)
+    {
+        if (remoteCount is not { } count)
+        {
+            return;
+        }
+
+        await database.WatchHistoryConnections
+            .Where(connection => connection.Id == connectionId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(connection => connection.FavoritesRemoteCount, count), cancellationToken);
     }
 
     private async Task<(WatchHistoryFailure?, string?, TimeSpan?)> AddExactAsync(

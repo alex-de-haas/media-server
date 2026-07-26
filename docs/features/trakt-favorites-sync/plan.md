@@ -1,6 +1,6 @@
 # Trakt Favorites Sync
 
-Status: Draft
+Status: In Progress
 Created: 2026-07-26
 Updated: 2026-07-26
 

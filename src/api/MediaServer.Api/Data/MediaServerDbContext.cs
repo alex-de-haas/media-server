@@ -28,6 +28,8 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<WatchHistoryProviderConnection> WatchHistoryConnections => Set<WatchHistoryProviderConnection>();
     public DbSet<WatchHistoryProviderAuthorization> WatchHistoryAuthorizations => Set<WatchHistoryProviderAuthorization>();
     public DbSet<WatchHistoryOutboxEvent> WatchHistoryOutboxEvents => Set<WatchHistoryOutboxEvent>();
+
+    public DbSet<WatchHistoryFavoriteState> WatchHistoryFavoriteStates => Set<WatchHistoryFavoriteState>();
     public DbSet<WatchHistorySyncRun> WatchHistorySyncRuns => Set<WatchHistorySyncRun>();
     public DbSet<AppSettings> AppSettings => Set<AppSettings>();
     public DbSet<TrackedTitle> TrackedTitles => Set<TrackedTitle>();
@@ -648,6 +650,21 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
 
         // Deleting a connection drops its undelivered work: there is no longer an account to send it to.
         outbox.HasOne(entity => entity.Connection)
+            .WithMany()
+            .HasForeignKey(entity => entity.ConnectionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var favoriteState = modelBuilder.Entity<WatchHistoryFavoriteState>();
+        favoriteState.HasKey(entity => entity.Id);
+        // One row per connection and canonical identity: reconciliation looks the work up by exactly this.
+        favoriteState.HasIndex(entity => new { entity.ConnectionId, entity.Kind, entity.IdentityProvider, entity.IdentityProviderId })
+            .IsUnique();
+        favoriteState.Property(entity => entity.Kind).HasConversion<int>();
+        favoriteState.Property(entity => entity.IdentityProvider).HasMaxLength(64);
+        favoriteState.Property(entity => entity.IdentityProviderId).HasMaxLength(128);
+
+        // Deleting a connection drops what it remembered about a provider it no longer speaks to.
+        favoriteState.HasOne(entity => entity.Connection)
             .WithMany()
             .HasForeignKey(entity => entity.ConnectionId)
             .OnDelete(DeleteBehavior.Cascade);
