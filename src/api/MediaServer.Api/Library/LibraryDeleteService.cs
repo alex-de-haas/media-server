@@ -55,6 +55,27 @@ public sealed class LibraryDeleteService(
     }
 
     /// <summary>
+    /// Permanently purges a tombstoned top-level title and its ghost subtree — the retroactive full
+    /// purge offered by the removed-titles surface. Returns false when no such tombstone exists.
+    /// </summary>
+    public async Task<bool> PurgeRemovedAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.RemovedAt != null &&
+                (candidate.Kind == MediaKind.Movie || candidate.Kind == MediaKind.Series), cancellationToken);
+        if (item is null)
+        {
+            return false;
+        }
+
+        var ids = await CollectItemIdsAsync(item, cancellationToken);
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        await RemoveItemsAsync(ids, deleteUserData: true, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
     /// Deletes one published episode from its series, with the same modes as the item-level delete.
     /// Emptied containers are pruned — see <see cref="DeleteWithinSeriesAsync"/>. Returns null when no
     /// such episode exists.

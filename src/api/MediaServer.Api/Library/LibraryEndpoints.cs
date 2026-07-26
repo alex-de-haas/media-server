@@ -91,6 +91,34 @@ public static class LibraryEndpoints
         group.MapDelete("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
             SetFavoriteAsync(id, favorite: false, principal, userData, database, cancellationToken));
 
+        // The removed-titles surface: tombstoned movies/series with the signed-in user's signal summary,
+        // clearing one's own favorite on a ghost, and the retroactive full purge (admin).
+        group.MapGet("/removed", async (
+            ClaimsPrincipal principal, RemovedTitlesService removed, MediaServerDbContext database, CancellationToken cancellationToken) =>
+        {
+            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            return Results.Ok(await removed.ListAsync(appUserId, cancellationToken));
+        });
+
+        group.MapDelete("/removed/{id:guid}/favorite", async (
+            Guid id, ClaimsPrincipal principal, RemovedTitlesService removed, MediaServerDbContext database, CancellationToken cancellationToken) =>
+        {
+            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            if (appUserId is not { } userId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return await removed.ClearFavoriteAsync(userId, id, cancellationToken) ? Results.NoContent() : Results.NotFound();
+        });
+
+        group.MapDelete("/removed/{id:guid}", async (
+            Guid id, LibraryDeleteService deleteService, CancellationToken cancellationToken) =>
+        {
+            var purged = await deleteService.PurgeRemovedAsync(id, cancellationToken);
+            return purged ? Results.NoContent() : Results.NotFound();
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         // Delete a published item (admin only). `deleteFiles=true` also removes the library/ hardlinks.
         // `deleteUserData=true` forces a full purge; without it, an item with user signal (favorite,
         // watched state, history) survives as a tombstone. Refused while the item is moving between

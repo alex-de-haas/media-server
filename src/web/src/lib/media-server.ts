@@ -703,6 +703,20 @@ export interface LibraryScanReport {
   missingPaths: string[];
 }
 
+// A tombstoned movie/series: deleted from the library but kept because watch history or favorites
+// still reference it. The signal summary is the signed-in user's.
+export interface RemovedTitle {
+  id: string;
+  kind: "Movie" | "Series";
+  title: string;
+  year: number | null;
+  posterUrl: string | null;
+  removedAt: string;
+  isFavorite: boolean;
+  playCount: number;
+  lastWatchedAt: string | null;
+}
+
 // Result of a per-catalog import scan: orphan media files under the root are ingested from identify.
 export interface LibraryImportReport {
   filesScanned: number;
@@ -883,6 +897,11 @@ export const mediaServer = {
     apiJson<ChildDeleteResult>(`${BASE}/library/episodes/${id}?deleteFiles=${deleteFiles}&deleteUserData=${deleteUserData}`, { method: "DELETE" }),
   deleteSeason: (id: string, deleteFiles: boolean, deleteUserData: boolean) =>
     apiJson<ChildDeleteResult>(`${BASE}/library/seasons/${id}?deleteFiles=${deleteFiles}&deleteUserData=${deleteUserData}`, { method: "DELETE" }),
+  // Removed titles: tombstoned movies/series that keep watch history and favorites after deletion.
+  listRemovedTitles: () => apiJson<RemovedTitle[]>(`${BASE}/library/removed`),
+  clearRemovedFavorite: (id: string) => send(`/library/removed/${id}/favorite`, "DELETE"),
+  // Permanently purges the tombstone and every trace of its history (admin).
+  purgeRemovedTitle: (id: string) => send(`/library/removed/${id}`, "DELETE"),
   // Delete one media source / version (admin); deleteFile also erases the file (used for transcode "replace").
   deleteMediaSource: (sourceId: string, deleteFile: boolean) =>
     send(`/library/sources/${sourceId}?deleteFile=${deleteFile}`, "DELETE"),

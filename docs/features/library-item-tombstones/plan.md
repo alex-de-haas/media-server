@@ -144,9 +144,9 @@ keep the target's values when both exist.
 - [x] Frontend: second checkbox in `DeleteItemDialog`; calendar cards and day
       detail verified not to link to item pages at all (no guard needed —
       nothing links).
-- [ ] Removed-titles surface: API listing tombstones with signal summary,
-      unfavorite and permanent-purge actions, web page beside the library
-      maintenance surface.
+- [x] Removed-titles surface: API listing tombstones with signal summary,
+      unfavorite and permanent-purge actions, web section on the Settings
+      page.
 - [ ] Backend xUnit tests (tombstone vs purge decision, container rules,
       revival, remap merge) and frontend tests for the dialog and calendar.
 - [ ] `feature.md`, `plan.md` deleted, index regenerated.
