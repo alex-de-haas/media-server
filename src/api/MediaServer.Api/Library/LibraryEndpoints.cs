@@ -92,40 +92,42 @@ public static class LibraryEndpoints
             SetFavoriteAsync(id, favorite: false, principal, userData, database, cancellationToken));
 
         // Delete a published item (admin only). `deleteFiles=true` also removes the library/ hardlinks.
-        // Refused while the item is moving between catalogs — the move is relocating the very files/rows.
-        group.MapDelete("/{id:guid}", async (Guid id, bool? deleteFiles, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
+        // `deleteUserData=true` forces a full purge; without it, an item with user signal (favorite,
+        // watched state, history) survives as a tombstone. Refused while the item is moving between
+        // catalogs — the move is relocating the very files/rows.
+        group.MapDelete("/{id:guid}", async (Guid id, bool? deleteFiles, bool? deleteUserData, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
             if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
             {
                 return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
             }
 
-            var deleted = await deleteService.DeleteAsync(id, deleteFiles ?? false, cancellationToken);
+            var deleted = await deleteService.DeleteAsync(id, deleteFiles ?? false, deleteUserData ?? false, cancellationToken);
             return deleted ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
         // Delete one episode, or a whole season, of a published series (admin only). `deleteFiles=true` also
-        // erases the files from disk. The response reports what the delete emptied and pruned, so the caller
-        // knows when the series page it came from no longer exists.
-        group.MapDelete("/episodes/{id:guid}", async (Guid id, bool? deleteFiles, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
+        // erases the files from disk; `deleteUserData=true` as above. The response reports what the delete
+        // emptied and pruned, so the caller knows when the series page it came from no longer exists.
+        group.MapDelete("/episodes/{id:guid}", async (Guid id, bool? deleteFiles, bool? deleteUserData, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
             if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
             {
                 return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
             }
 
-            var result = await deleteService.DeleteEpisodeAsync(id, deleteFiles ?? false, cancellationToken);
+            var result = await deleteService.DeleteEpisodeAsync(id, deleteFiles ?? false, deleteUserData ?? false, cancellationToken);
             return result is null ? Results.NotFound() : Results.Ok(result);
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
-        group.MapDelete("/seasons/{id:guid}", async (Guid id, bool? deleteFiles, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
+        group.MapDelete("/seasons/{id:guid}", async (Guid id, bool? deleteFiles, bool? deleteUserData, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
             if (await moveGuard.IsItemMovingAsync(id, cancellationToken))
             {
                 return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
             }
 
-            var result = await deleteService.DeleteSeasonAsync(id, deleteFiles ?? false, cancellationToken);
+            var result = await deleteService.DeleteSeasonAsync(id, deleteFiles ?? false, deleteUserData ?? false, cancellationToken);
             return result is null ? Results.NotFound() : Results.Ok(result);
         }).RequireAuthorization(AppRoles.AdminPolicy);
 

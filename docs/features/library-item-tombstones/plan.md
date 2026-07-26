@@ -126,9 +126,9 @@ keep the target's values when both exist.
 
 ## Deliverables
 
-- [ ] Migration: `RemovedAt` on `MediaItem`; `CatalogId` nullable (null only
+- [x] Migration: `RemovedAt` on `MediaItem`; `CatalogId` nullable (null only
       for tombstones — a published item always has a catalog).
-- [ ] `LibraryDeleteService`: tombstone path (default with user signal), full
+- [x] `LibraryDeleteService`: tombstone path (default with user signal), full
       purge path (`deleteUserData` or no signal), container tombstoning for
       season/episode deletes; `deleteUserData` on the three endpoints.
 - [ ] `CatalogService.DeleteAsync`: items with user signal become catalog-less
