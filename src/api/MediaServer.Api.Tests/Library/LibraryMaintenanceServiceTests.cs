@@ -106,6 +106,71 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Scan_audits_titles_published_in_more_than_one_catalog()
+    {
+        // New imports of an identity held elsewhere are refused (IdentifyService's gate), so a pair like
+        // this pre-dates the rule — the audit is how the operator finds and repairs it.
+        var movies = SeedCatalog();
+        var movies4K = SeedCatalog(Path.Combine(_root, "4k"));
+        Directory.CreateDirectory(movies4K.Root);
+        SeedPublishedMovie(movies, "tmdb", "27205", "Inception", 2010);
+        SeedPublishedMovie(movies4K, "tmdb", "27205", "Inception", 2010);
+        // A title held once is not a duplicate, and neither is the same id under a different kind.
+        SeedPublishedMovie(movies, "tmdb", "155", "The Dark Knight", 2008);
+
+        var report = await Service().ScanAsync(CancellationToken.None);
+
+        var duplicate = Assert.Single(report.CrossCatalogDuplicates);
+        Assert.Equal("Inception", duplicate.Title);
+        Assert.Equal(2010, duplicate.Year);
+        Assert.Equal("Movie", duplicate.Kind);
+        Assert.Equal(
+            new[] { movies.Id, movies4K.Id }.OrderBy(id => id),
+            duplicate.Copies.Select(copy => copy.CatalogId).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task The_duplicate_audit_ignores_tombstones_and_unpublished_rows()
+    {
+        var movies = SeedCatalog();
+        var movies4K = SeedCatalog(Path.Combine(_root, "4k-ghosts"));
+        Directory.CreateDirectory(movies4K.Root);
+        SeedPublishedMovie(movies, "tmdb", "27205", "Inception", 2010);
+        // A ghost (deleted, history kept) and an in-flight row are not second copies: the first is
+        // adopted back if the title returns, the second has not been published yet.
+        var ghost = SeedPublishedMovie(movies4K, "tmdb", "27205", "Inception", 2010);
+        ghost.PublicId = null;
+        ghost.RemovedAt = DateTimeOffset.UtcNow;
+        var pending = SeedPublishedMovie(movies4K, "tmdb", "27205", "Inception", 2010);
+        pending.PublicId = null;
+        _database.SaveChanges();
+
+        var report = await Service().ScanAsync(CancellationToken.None);
+
+        Assert.Empty(report.CrossCatalogDuplicates);
+    }
+
+    private MediaItem SeedPublishedMovie(Catalog catalog, string provider, string providerId, string title, int year)
+    {
+        var item = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            PublicId = Guid.NewGuid().ToString("N"),
+            CatalogId = catalog.Id,
+            Kind = MediaKind.Movie,
+            Title = title,
+            Year = year,
+            IdentityProvider = provider,
+            IdentityProviderId = providerId,
+            AddedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        _database.MediaItems.Add(item);
+        _database.SaveChanges();
+        return item;
+    }
+
+    [Fact]
     public async Task Scan_skips_offline_catalogs()
     {
         var offlineRoot = Path.Combine(Path.GetTempPath(), "ms-offline-" + Guid.NewGuid().ToString("N")); // never created

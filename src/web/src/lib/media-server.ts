@@ -707,6 +707,16 @@ export interface LibraryScanReport {
   sourcesChecked: number;
   missingFiles: number;
   missingPaths: string[];
+  crossCatalogDuplicates: CrossCatalogDuplicate[];
+}
+
+// A title published in two catalogs at once — the shape new imports are refused, so anything here
+// pre-dates that rule. Its copies keep separate watched state and favorites until they are merged.
+export interface CrossCatalogDuplicate {
+  kind: "Movie" | "Series";
+  title: string;
+  year: number | null;
+  copies: { mediaItemId: string; catalogId: string; catalogName: string }[];
 }
 
 // A tombstoned movie/series: deleted from the library but kept because watch history or favorites

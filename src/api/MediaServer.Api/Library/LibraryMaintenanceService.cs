@@ -8,8 +8,26 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Library;
 
-/// <summary>Result of a library scan pass: how much was checked and which library files are missing on disk.</summary>
-public sealed record LibraryScanReport(int CatalogsScanned, int SourcesChecked, int MissingFiles, IReadOnlyList<string> MissingPaths);
+/// <summary>One published copy of a title, as reported by the cross-catalog duplicate audit.</summary>
+public sealed record DuplicateCopy(Guid MediaItemId, Guid CatalogId, string CatalogName);
+
+/// <summary>
+/// A work published in more than one catalog — the shape the single-catalog rule forbids going forward,
+/// and which only pre-dates the gate. Its copies keep separate watched state and favorites, so the
+/// repair is to move one onto the other (which merges them into versions of a single item).
+/// </summary>
+public sealed record CrossCatalogDuplicate(string Kind, string Title, int? Year, IReadOnlyList<DuplicateCopy> Copies);
+
+/// <summary>
+/// Result of a library scan pass: how much was checked, which library files are missing on disk, and any
+/// title published in two catalogs at once.
+/// </summary>
+public sealed record LibraryScanReport(
+    int CatalogsScanned,
+    int SourcesChecked,
+    int MissingFiles,
+    IReadOnlyList<string> MissingPaths,
+    IReadOnlyList<CrossCatalogDuplicate> CrossCatalogDuplicates);
 
 /// <summary>
 /// M4 automation polish: on-demand and scheduled library maintenance. The scan verifies every published
@@ -185,7 +203,56 @@ public sealed class LibraryMaintenanceService(
                 cancellationToken: cancellationToken);
         }
 
-        return new LibraryScanReport(scannedCatalogs.Count, checkedCount, missing.Count, missing.Take(MaxMissingReported).ToList());
+        var duplicates = await FindCrossCatalogDuplicatesAsync(cancellationToken);
+        if (duplicates.Count > 0)
+        {
+            logger.LogWarning("Library scan found {Count} title(s) published in more than one catalog.", duplicates.Count);
+        }
+
+        return new LibraryScanReport(
+            scannedCatalogs.Count, checkedCount, missing.Count, missing.Take(MaxMissingReported).ToList(), duplicates);
+    }
+
+    /// <summary>
+    /// Titles published in more than one catalog. Identification now refuses to create these (see
+    /// <c>IdentifyService</c>), so anything reported here pre-dates the gate and is repaired by moving one
+    /// copy onto the other. Published rows only — a tombstone beside a live copy is the adoption path, not
+    /// a duplicate.
+    /// </summary>
+    public async Task<IReadOnlyList<CrossCatalogDuplicate>> FindCrossCatalogDuplicatesAsync(CancellationToken cancellationToken)
+    {
+        var copies = await database.MediaItems.AsNoTracking()
+            .Where(item => item.PublicId != null && item.CatalogId != null &&
+                (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series) &&
+                item.IdentityProvider != null && item.IdentityProviderId != null)
+            .Join(database.Catalogs.AsNoTracking(), item => item.CatalogId, catalog => (Guid?)catalog.Id,
+                (item, catalog) => new
+                {
+                    item.Id,
+                    item.Kind,
+                    item.Title,
+                    item.Year,
+                    item.IdentityProvider,
+                    item.IdentityProviderId,
+                    CatalogId = catalog.Id,
+                    CatalogName = catalog.Name,
+                })
+            .ToListAsync(cancellationToken);
+
+        return copies
+            .GroupBy(copy => (copy.Kind, copy.IdentityProvider, copy.IdentityProviderId))
+            .Where(group => group.Select(copy => copy.CatalogId).Distinct().Count() > 1)
+            .Select(group =>
+            {
+                var first = group.First();
+                return new CrossCatalogDuplicate(
+                    first.Kind.ToString(),
+                    first.Title,
+                    first.Year,
+                    group.Select(copy => new DuplicateCopy(copy.Id, copy.CatalogId, copy.CatalogName)).ToList());
+            })
+            .OrderBy(duplicate => duplicate.Title)
+            .ToList();
     }
 }
 
