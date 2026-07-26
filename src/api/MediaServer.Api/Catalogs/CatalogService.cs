@@ -50,10 +50,13 @@ public sealed class CatalogService(
             .OrderBy(catalog => catalog.Name)
             .ToListAsync(cancellationToken);
 
+        // Tombstones own no sources, so the null-catalog group can only ever be empty — filter it out
+        // rather than key the dictionary on a nullable id.
         var usedByCatalog = await (
                 from source in database.MediaSources.AsNoTracking()
                 join item in database.MediaItems.AsNoTracking() on source.MediaItemId equals item.Id
-                group source.SizeBytes by item.CatalogId into grouped
+                where item.CatalogId != null
+                group source.SizeBytes by item.CatalogId!.Value into grouped
                 select new { CatalogId = grouped.Key, Used = grouped.Sum() })
             .ToDictionaryAsync(entry => entry.CatalogId, entry => entry.Used, cancellationToken);
 

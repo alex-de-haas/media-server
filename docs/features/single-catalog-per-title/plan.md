@@ -9,7 +9,7 @@ Updated: 2026-07-26
 One movie or series exists in at most one catalog. This is a deliberate,
 temporary constraint: true multi-catalog membership (one record belonging to
 several catalogs) is a deep change deferred by
-[library item tombstones](../library-item-tombstones/plan.md) (see its Out of
+[library item tombstones](../library-item-tombstones/feature.md) (see its Out of
 Scope), but the *divergence* it causes is a real problem today — favoriting
 the 4K copy of a movie does nothing for the same movie in another catalog,
 watched state splits the same way. While the constraint holds, a work has
@@ -57,7 +57,7 @@ then merges there.
 The gate concerns **published** items only. A same-identity tombstone in
 another catalog never routes to review: ingest adopts it silently and re-homes
 it to the catalog the user chose (see
-[library item tombstones](../library-item-tombstones/plan.md)). There is no
+[library item tombstones](../library-item-tombstones/feature.md)). There is no
 real decision to ask for — the target catalog was named explicitly, and a
 ghost carries no files to conflict with.
 

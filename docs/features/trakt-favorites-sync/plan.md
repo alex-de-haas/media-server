@@ -89,7 +89,7 @@ how watched-history stores resolved remote ids.
 
 An inbound favorite naming a title the library lacks first tries to match a
 **tombstone** by identity
-([library item tombstones](../library-item-tombstones/plan.md)) — a
+([library item tombstones](../library-item-tombstones/feature.md)) — a
 deleted-but-loved title lands back on its ghost. What matches nothing is
 skipped, and the preview says so with a visible count rather than silently.
 
