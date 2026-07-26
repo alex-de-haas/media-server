@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
 using MediaServer.Api.Metadata;
@@ -67,6 +68,13 @@ public sealed record IngestItemResponse(
     IReadOnlyList<string> StagesCompleted,
     string? LastError,
     DateTimeOffset? NextAttemptAt,
+    // Set only while the item is parked over a cross-catalog identity conflict: the catalog that already
+    // holds the title, and the destination the Retarget action re-homes this ingest to. CanRetarget is
+    // false for a scan-imported ingest, whose files sit in the catalog's library area rather than in
+    // staging and so cannot be re-homed by a directory move — there the repair is to move the existing
+    // title into this catalog instead.
+    Guid? ConflictCatalogId,
+    bool CanRetarget,
     IReadOnlyList<MetadataCandidate> ReviewCandidates,
     IReadOnlyList<IngestSourceFileResponse> SourceFiles,
     DateTimeOffset CreatedAt,
@@ -99,6 +107,9 @@ public sealed record IngestItemResponse(
             item.StagesCompleted,
             item.LastError,
             item.NextAttemptAt,
+            item.ConflictCatalogId,
+            item.ConflictCatalogId is not null && sourceFiles.Count > 0 &&
+                sourceFiles.All(file => CatalogPaths.IsIncoming(file.RelativePath)),
             candidates,
             sourceFiles.Select(file =>
             {
@@ -173,6 +184,8 @@ public enum MatchOutcome
     NotFound,
     FileNotFound,
     AlreadyOrganized,
+    /// <summary>The chosen identity is already published in another catalog — a work lives in one catalog.</summary>
+    CatalogConflict,
     Matched,
 }
 
@@ -218,6 +231,8 @@ public enum AssignExtrasOutcome
     /// video payloads, so the item would publish with no source. Match it to its episode instead.</summary>
     AudioFile,
     AlreadyOrganized,
+    /// <summary>The chosen series is already published in another catalog — a work lives in one catalog.</summary>
+    CatalogConflict,
     Assigned,
 }
 
@@ -235,6 +250,21 @@ public sealed record MetadataSearchRequest(string Title, int? Year, MediaKind? K
 /// the file name). Rejected once the item has already been identified — correct a published item via library remap.
 /// </summary>
 public sealed record PinIdentityRequest(string Provider, string ProviderId, MediaKind Kind, string Title, int? Year);
+
+/// <summary>
+/// Result of re-homing an ingest parked over a cross-catalog identity conflict into the catalog that
+/// already holds the title. <c>CrossVolume</c> and <c>NotStaged</c> are the two honest refusals: the
+/// first needs a copy that belongs in a background job, the second has no staging directory to move.
+/// </summary>
+public enum RetargetOutcome
+{
+    NotFound,
+    NoConflict,
+    AlreadyOrganized,
+    NotStaged,
+    CrossVolume,
+    Retargeted,
+}
 
 /// <summary>Result of a <c>PinAsync</c> request, mapped to a status code by the endpoint.</summary>
 public enum PinOutcome

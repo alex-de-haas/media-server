@@ -71,6 +71,7 @@ public static class IngestEndpoints
                 MatchOutcome.NotFound => Results.NotFound(),
                 MatchOutcome.FileNotFound => Results.NotFound(new { error = "One or more source files were not found on this ingest." }),
                 MatchOutcome.AlreadyOrganized => Results.Conflict(new { error = "This item has already been identified — remap it from its library page instead." }),
+                MatchOutcome.CatalogConflict => Results.Conflict(new { error = "That title is already in another catalog — a title lives in one catalog only. Move this download to that catalog, or move the existing title here first." }),
                 _ => Results.Accepted(),
             };
         });
@@ -114,6 +115,7 @@ public static class IngestEndpoints
                 AssignExtrasOutcome.MovieCatalog => Results.BadRequest(new { error = "Extras attach to a series; this is a movie catalog." }),
                 AssignExtrasOutcome.AudioFile => Results.BadRequest(new { error = "An audio track can't be kept as an extra — match it to its episode (it will be merged into that video), or skip it." }),
                 AssignExtrasOutcome.AlreadyOrganized => Results.Conflict(new { error = "This item has already been identified — remap it from its library page instead." }),
+                AssignExtrasOutcome.CatalogConflict => Results.Conflict(new { error = "That series is already in another catalog — a title lives in one catalog only. Move this download to that catalog, or move the existing series here first." }),
                 _ => Results.Accepted(),
             };
         });
@@ -144,6 +146,20 @@ public static class IngestEndpoints
 
         group.MapDelete("/{id:guid}/pin", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
             await service.UnpinAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound());
+
+        // Re-home an ingest parked over a cross-catalog identity conflict into the catalog that already
+        // holds the title. The destination is the conflict identify recorded — the operator confirms, it
+        // is never supplied by the client.
+        group.MapPost("/{id:guid}/retarget", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
+            await service.RetargetAsync(id, cancellationToken) switch
+            {
+                RetargetOutcome.NotFound => Results.NotFound(),
+                RetargetOutcome.NoConflict => Results.Conflict(new { error = "This item is not parked over a catalog conflict." }),
+                RetargetOutcome.AlreadyOrganized => Results.Conflict(new { error = "This item has already been identified — move it from its library page instead." }),
+                RetargetOutcome.NotStaged => Results.Conflict(new { error = "This item's files are not in staging, so they cannot be re-homed. Move the existing title into this catalog instead." }),
+                RetargetOutcome.CrossVolume => Results.Conflict(new { error = "The catalogs are on different volumes. Move the existing title into this catalog instead." }),
+                _ => Results.Accepted(),
+            });
 
         // Operator safety valve: remove a single pipeline tracking row (e.g. an orphaned/stuck entry).
         // Admin-only and destructive-by-intent, though it only deletes the ingest row itself.

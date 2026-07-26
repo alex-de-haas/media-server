@@ -134,6 +134,15 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         item.HasIndex(entity => entity.PublicId).IsUnique();
         item.HasIndex(entity => new { entity.CatalogId, entity.IdentityProvider, entity.IdentityProviderId });
 
+        // No unique index enforces "one catalog per work" at the database level, deliberately. A partial
+        // unique index over published movie/series identity was built and rejected on evidence: creating
+        // it fails outright (SQLite error 19) on any existing database that already holds a duplicate
+        // pair, so upgrading such a server would leave the app unable to start — and the pair can only
+        // be repaired *while both rows exist*, by moving one onto the other. The rule is enforced where
+        // duplicates are born instead (IdentifyService's cross-catalog gate), audited by the library
+        // scan, and tolerated everywhere that already copes with two copies (watch-history's ambiguous
+        // identity, recommendations' multi-copy handling).
+
         // SetNull (not Cascade): CatalogService.DeleteAsync decides explicitly what a catalog delete
         // takes with it — tombstones with user data survive catalog-less. The FK is only a safety net,
         // and a safety net must never be the thing that erases a user's history.

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { Check, Combine, FileAudio2, FileVideo2, Film, Loader2, Search } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Check, Combine, FileAudio2, FileVideo2, Film, FolderInput, Loader2, Search } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type IngestSourceFile, type MetadataCandidate } from "@/lib/media-server";
 import { errorMessage } from "@/lib/ui";
@@ -309,7 +309,29 @@ export function IngestReviewDialog({
     onError: (error) => toast.error("Couldn’t apply changes", { description: errorMessage(error) }),
   });
 
-  const busy = apply.isPending;
+  // Re-homes the whole download into the catalog that already holds this title (the server decided which
+  // one when it parked the item; the operator only confirms). The catalogs list is just for the label —
+  // the reason text below already names the catalog in prose.
+  const catalogs = useQuery({
+    queryKey: ["catalogs"],
+    queryFn: mediaServer.listCatalogs,
+    enabled: open && item.conflictCatalogId != null,
+  });
+  const conflictCatalogName = catalogs.data?.find((entry) => entry.id === item.conflictCatalogId)?.name ?? null;
+
+  const retarget = useMutation({
+    mutationFn: () => mediaServer.retargetIngest(item.id),
+    onSuccess: () => {
+      toast.success(conflictCatalogName ? `Moved to ${conflictCatalogName}` : "Moved to the other catalog", {
+        description: "It will import as another version of the existing title.",
+      });
+      onMatched();
+      onOpenChange(false);
+    },
+    onError: (error) => toast.error("Couldn’t move the download", { description: errorMessage(error) }),
+  });
+
+  const busy = apply.isPending || retarget.isPending;
 
   // The identity the pipeline already resolved (some of) the batch against — an episode's provider
   // reference is its series — so re-opening a half-matched pack pre-selects the same series.
@@ -655,6 +677,34 @@ export function IngestReviewDialog({
         {/* min-h-0 lets the file list flex-shrink inside the height-capped dialog, keeping the Apply
             footer pinned inside the card instead of overflowing past it. */}
         <div className="flex min-h-0 flex-col gap-3 text-sm">
+          {/* Parked because the title already lives elsewhere: a work belongs to one catalog, so the way
+              forward is to send this download there (where it becomes another version) — or skip it below. */}
+          {item.conflictCatalogId && (
+            <div className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3">
+              <p className="text-xs">{item.lastError}</p>
+              {item.canRetarget ? (
+                <div>
+                  {/* Disabled while *any* action runs: Approve and this both re-drive the same ingest. */}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => retarget.mutate()}
+                  >
+                    {retarget.isPending ? <Loader2 className="animate-spin" /> : <FolderInput />}
+                    {conflictCatalogName ? `Move download to ${conflictCatalogName}` : "Move download to that catalog"}
+                  </Button>
+                </div>
+              ) : (
+                // Scan-imported files live in this catalog's library area, not in staging, so there is no
+                // download to send anywhere — the repair runs the other way.
+                <p className="text-muted-foreground text-xs">
+                  These files were found by a catalog scan, so they can’t be moved from here. Move the existing
+                  title into this catalog from its library page instead, then retry.
+                </p>
+              )}
+            </div>
+          )}
           {isPreMatch && (
             <p className="text-muted-foreground shrink-0 text-xs">
               Set a movie per file now — the pack imports as those movies when the download finishes. Files left

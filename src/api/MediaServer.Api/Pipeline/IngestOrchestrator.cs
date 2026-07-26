@@ -116,6 +116,7 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
 
                 case StageResult.NeedsReview review:
                     item.ReviewCandidates = JsonSerializer.Serialize(review.Candidates);
+                    item.ConflictCatalogId = review.ConflictCatalogId;
                     await jobService.CompleteAsync(job, cancellationToken);
                     await ParkAsync(database, notifier, item, IngestStatus.NeedsReview, review.Reason, null, cancellationToken);
                     return;
@@ -157,6 +158,9 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
 
         item.LeaseOwner = _instanceId;
         item.LeaseUntil = now + LeaseDuration;
+        // A recorded catalog conflict is what the last identify pass concluded; this drive recomputes it.
+        // Clearing here covers every way an item re-drives (retry, pin, match, skip, extras, retarget).
+        item.ConflictCatalogId = null;
         try
         {
             await database.SaveChangesAsync(cancellationToken);

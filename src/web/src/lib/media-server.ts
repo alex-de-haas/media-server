@@ -168,6 +168,12 @@ export interface IngestItem {
   stagesCompleted: string[];
   lastError: string | null;
   nextAttemptAt: string | null;
+  // Set while the item is parked because its title already lives in another catalog: that catalog, and
+  // the destination retargetIngest re-homes this download to. canRetarget is false when the files were
+  // picked up by a catalog scan rather than staged by a download — those cannot be re-homed, and the
+  // repair is to move the existing title into this catalog instead.
+  conflictCatalogId: string | null;
+  canRetarget: boolean;
   reviewCandidates: MetadataCandidate[];
   sourceFiles: IngestSourceFile[];
   createdAt: string;
@@ -701,6 +707,16 @@ export interface LibraryScanReport {
   sourcesChecked: number;
   missingFiles: number;
   missingPaths: string[];
+  crossCatalogDuplicates: CrossCatalogDuplicate[];
+}
+
+// A title published in two catalogs at once — the shape new imports are refused, so anything here
+// pre-dates that rule. Its copies keep separate watched state and favorites until they are merged.
+export interface CrossCatalogDuplicate {
+  kind: "Movie" | "Series";
+  title: string;
+  year: number | null;
+  copies: { mediaItemId: string; catalogId: string; catalogName: string }[];
 }
 
 // A tombstoned movie/series: deleted from the library but kept because watch history or favorites
@@ -849,6 +865,9 @@ export const mediaServer = {
   // Pin (or re-pin) the target identity; clear it back to the auto-identify path with unpinIngest.
   pinIngest: (id: string, input: PinInput) => send(`/ingest/${id}/pin`, "POST", input),
   unpinIngest: (id: string) => send(`/ingest/${id}/pin`, "DELETE"),
+  // Re-home an ingest parked because its title already lives in another catalog. The destination is the
+  // conflict the server recorded (conflictCatalogId) — the operator only confirms it.
+  retargetIngest: (id: string) => send(`/ingest/${id}/retarget`, "POST"),
   searchIngest: (id: string, input: MetadataSearchInput) =>
     apiJson<MetadataCandidate[]>(`${BASE}/ingest/${id}/search`, {
       method: "POST",

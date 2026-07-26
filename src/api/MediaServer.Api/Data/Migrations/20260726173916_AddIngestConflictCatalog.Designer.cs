@@ -3,6 +3,7 @@ using System;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    partial class MediaServerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260726173916_AddIngestConflictCatalog")]
+    partial class AddIngestConflictCatalog
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -32,7 +35,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("AppSettings", (string)null);
+                    b.ToTable("AppSettings");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.AppUser", b =>
@@ -69,7 +72,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("HostUserId")
                         .IsUnique();
 
-                    b.ToTable("AppUsers", (string)null);
+                    b.ToTable("AppUsers");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.Catalog", b =>
@@ -118,7 +121,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("Root")
                         .IsUnique();
 
-                    b.ToTable("Catalogs", (string)null);
+                    b.ToTable("Catalogs");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.Download", b =>
@@ -167,7 +170,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("InfoHash")
                         .IsUnique();
 
-                    b.ToTable("Downloads", (string)null);
+                    b.ToTable("Downloads");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.ImageAsset", b =>
@@ -207,7 +210,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("MediaItemId");
 
-                    b.ToTable("ImageAssets", (string)null);
+                    b.ToTable("ImageAssets");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.IngestItem", b =>
@@ -295,7 +298,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("IngestItems", (string)null);
+                    b.ToTable("IngestItems");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.JellyfinAccessToken", b =>
@@ -346,7 +349,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("TokenHash")
                         .IsUnique();
 
-                    b.ToTable("JellyfinAccessTokens", (string)null);
+                    b.ToTable("JellyfinAccessTokens");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.JellyfinCredential", b =>
@@ -397,7 +400,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("Username")
                         .IsUnique();
 
-                    b.ToTable("JellyfinCredentials", (string)null);
+                    b.ToTable("JellyfinCredentials");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.Job", b =>
@@ -445,7 +448,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("RelatedType", "RelatedId");
 
-                    b.ToTable("Jobs", (string)null);
+                    b.ToTable("Jobs");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.MediaItem", b =>
@@ -541,7 +544,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("CatalogId", "IdentityProvider", "IdentityProviderId");
 
-                    b.ToTable("MediaItems", (string)null);
+                    b.ToTable("MediaItems");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.MediaItemPerson", b =>
@@ -577,7 +580,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("PersonId");
 
-                    b.ToTable("MediaItemPersons", (string)null);
+                    b.ToTable("MediaItemPersons");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.MediaSource", b =>
@@ -620,7 +623,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("MediaItemId");
 
-                    b.ToTable("MediaSources", (string)null);
+                    b.ToTable("MediaSources");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.MediaStream", b =>
@@ -687,7 +690,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("MediaSourceId");
 
-                    b.ToTable("MediaStreams", (string)null);
+                    b.ToTable("MediaStreams");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.MetadataRecord", b =>
@@ -750,7 +753,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("MediaItemId", "Provider", "Language")
                         .IsUnique();
 
-                    b.ToTable("MetadataRecords", (string)null);
+                    b.ToTable("MetadataRecords");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.MovieCollection", b =>
@@ -792,7 +795,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("Provider", "ProviderId")
                         .IsUnique();
 
-                    b.ToTable("MovieCollections", (string)null);
+                    b.ToTable("MovieCollections");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.Person", b =>
@@ -846,7 +849,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("Provider", "ProviderId")
                         .IsUnique();
 
-                    b.ToTable("Persons", (string)null);
+                    b.ToTable("Persons");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.PlaybackHistoryEntry", b =>
@@ -906,7 +909,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("AppUserId", "MediaItemId", "WatchedAt");
 
-                    b.ToTable("PlaybackHistoryEntries", (string)null);
+                    b.ToTable("PlaybackHistoryEntries");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.PlaybackSession", b =>
@@ -952,7 +955,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("AppUserId", "MediaItemId", "SessionKey")
                         .IsUnique();
 
-                    b.ToTable("PlaybackSessions", (string)null);
+                    b.ToTable("PlaybackSessions");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.RecommendationHide", b =>
@@ -981,7 +984,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("AppUserId", "Kind", "TmdbId")
                         .IsUnique();
 
-                    b.ToTable("RecommendationHides", (string)null);
+                    b.ToTable("RecommendationHides");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.RecommendationPreference", b =>
@@ -1006,7 +1009,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("AppUserId")
                         .IsUnique();
 
-                    b.ToTable("RecommendationPreferences", (string)null);
+                    b.ToTable("RecommendationPreferences");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.ReleaseReminder", b =>
@@ -1044,7 +1047,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("AppUserId", "TrackedTitleId", "ReleaseType")
                         .IsUnique();
 
-                    b.ToTable("ReleaseReminders", (string)null);
+                    b.ToTable("ReleaseReminders");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.ReminderDelivery", b =>
@@ -1070,7 +1073,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("ReminderId", "TrackedReleaseId")
                         .IsUnique();
 
-                    b.ToTable("ReminderDeliveries", (string)null);
+                    b.ToTable("ReminderDeliveries");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.SourceFile", b =>
@@ -1124,7 +1127,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("IngestItemId", "RelativePath")
                         .IsUnique();
 
-                    b.ToTable("SourceFiles", (string)null);
+                    b.ToTable("SourceFiles");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.TmdbPosterCacheEntry", b =>
@@ -1153,7 +1156,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("Kind", "TmdbId")
                         .IsUnique();
 
-                    b.ToTable("TmdbPosterCache", (string)null);
+                    b.ToTable("TmdbPosterCache");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.TmdbRecommendationCacheEntry", b =>
@@ -1183,7 +1186,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("Kind", "TmdbId")
                         .IsUnique();
 
-                    b.ToTable("TmdbRecommendationCache", (string)null);
+                    b.ToTable("TmdbRecommendationCache");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.TmdbTitleDetailCacheEntry", b =>
@@ -1218,7 +1221,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("Kind", "TmdbId", "Language")
                         .IsUnique();
 
-                    b.ToTable("TmdbTitleDetailCache", (string)null);
+                    b.ToTable("TmdbTitleDetailCache");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.TrackedRelease", b =>
@@ -1276,7 +1279,7 @@ namespace MediaServer.Api.Data.Migrations
                         .HasDatabaseName("IX_TrackedReleases_EpisodeIdentity")
                         .HasFilter("\"Region\" IS NULL");
 
-                    b.ToTable("TrackedReleases", (string)null);
+                    b.ToTable("TrackedReleases");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.TrackedTitle", b =>
@@ -1352,7 +1355,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("IdentityProvider", "IdentityProviderId")
                         .IsUnique();
 
-                    b.ToTable("TrackedTitles", (string)null);
+                    b.ToTable("TrackedTitles");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.TranscodeJob", b =>
@@ -1425,7 +1428,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("State");
 
-                    b.ToTable("TranscodeJobs", (string)null);
+                    b.ToTable("TranscodeJobs");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.UserItemData", b =>
@@ -1471,7 +1474,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("AppUserId", "MediaItemId")
                         .IsUnique();
 
-                    b.ToTable("UserItemData", (string)null);
+                    b.ToTable("UserItemData");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.WatchHistoryOutboxEvent", b =>
@@ -1541,7 +1544,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("Status", "NextAttemptAt");
 
-                    b.ToTable("WatchHistoryOutboxEvents", (string)null);
+                    b.ToTable("WatchHistoryOutboxEvents");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.WatchHistoryProviderAuthorization", b =>
@@ -1591,7 +1594,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("AppUserId", "ProviderKey")
                         .IsUnique();
 
-                    b.ToTable("WatchHistoryAuthorizations", (string)null);
+                    b.ToTable("WatchHistoryAuthorizations");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.WatchHistoryProviderConnection", b =>
@@ -1646,7 +1649,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("AppUserId", "ProviderKey")
                         .IsUnique();
 
-                    b.ToTable("WatchHistoryConnections", (string)null);
+                    b.ToTable("WatchHistoryConnections");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.WatchHistorySyncRun", b =>
@@ -1703,7 +1706,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("AppUserId", "CreatedAt");
 
-                    b.ToTable("WatchHistorySyncRuns", (string)null);
+                    b.ToTable("WatchHistorySyncRuns");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.WatchlistEntry", b =>
@@ -1741,7 +1744,7 @@ namespace MediaServer.Api.Data.Migrations
                     b.HasIndex("AppUserId", "TrackedTitleId")
                         .IsUnique();
 
-                    b.ToTable("WatchlistEntries", (string)null);
+                    b.ToTable("WatchlistEntries");
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.Download", b =>
