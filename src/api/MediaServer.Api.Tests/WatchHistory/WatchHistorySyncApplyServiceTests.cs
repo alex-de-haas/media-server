@@ -512,6 +512,26 @@ public sealed class WatchHistorySyncApplyServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AnItemNeitherSideHasWatchedIsNeverTouched()
+    {
+        // The preview leaves it out of the comparison, so apply must not write a state row for it or
+        // count it as an import: a library of mostly unwatched titles would otherwise report
+        // thousands of imports the user never approved.
+        var watched = AddMovie("27205");
+        _provider.History.Add(new WatchHistoryPlay(Movie(27205), _time.GetUtcNow().AddDays(-2), "1"));
+        var untouched = AddMovie("1375666", catalogId: _otherCatalogId);
+
+        var result = await ApplyAsync(await PreviewRunAsync());
+
+        Assert.Equal(1, result.Imported);
+        Assert.Equal(0, result.Unchanged);
+        var row = Assert.Single(await _database.UserItemData.AsNoTracking().ToListAsync());
+        Assert.Equal(watched.Id, row.MediaItemId);
+        Assert.Empty(await _database.UserItemData.AsNoTracking()
+            .Where(entry => entry.MediaItemId == untouched.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task ACatalogScopeLimitsWhatIsTouched()
     {
         var inScope = AddMovie("27205");

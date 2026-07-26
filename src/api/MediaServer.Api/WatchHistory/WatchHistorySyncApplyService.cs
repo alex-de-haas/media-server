@@ -196,6 +196,17 @@ public sealed class WatchHistorySyncApplyService(
             }
 
             var row = rows.GetValueOrDefault(item.Id);
+            var local = localHistory.GetValueOrDefault(item.Id) ?? [];
+            var remote = remoteByKey.GetValueOrDefault(key) ?? [];
+
+            // Nothing on either side. The preview leaves these out of the comparison entirely
+            // (WatchHistorySyncPreviewService.Classify answers null), so projecting one here would
+            // write an empty UserItemData row the user never approved and report it as an import —
+            // in a library of mostly unwatched episodes, thousands of them.
+            if (remote.Count == 0 && local.Count == 0 && row is null or { Played: false, PlayCount: 0 })
+            {
+                continue;
+            }
 
             // The row may have moved since the preview — a play recorded while this job was running.
             // Its own outbound work will carry it; overwriting it here would lose a real viewing.
@@ -213,8 +224,7 @@ public sealed class WatchHistorySyncApplyService(
                 }
             }
 
-            if (Project(appUserId, item, identity, row, localHistory.GetValueOrDefault(item.Id) ?? [],
-                    remoteByKey.GetValueOrDefault(key) ?? []))
+            if (Project(appUserId, item, identity, row, local, remote))
             {
                 imported++;
             }
