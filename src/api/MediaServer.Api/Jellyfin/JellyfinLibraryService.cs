@@ -574,7 +574,9 @@ public sealed class JellyfinLibraryService(
         }
 
         var parents = await database.MediaItems.AsNoTracking()
-            .Where(item => parentIds.Contains(item.Id))
+            // Published only (defensive): a tombstoned container must not leak its name into a child's
+            // SeriesName/SeasonName — an absent parent renders as none at all.
+            .Where(item => parentIds.Contains(item.Id) && item.PublicId != null)
             .Select(item => new { item.Id, item.PublicId, item.Title })
             .ToListAsync(cancellationToken);
         return parents.ToDictionary(parent => parent.Id, parent => (parent.PublicId, parent.Title));

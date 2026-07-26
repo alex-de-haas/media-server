@@ -250,7 +250,9 @@ public sealed class WatchHistorySyncPreviewService(
             ? new[] { MediaKind.Movie, MediaKind.Episode }
             : [.. scope.Kinds.Select(kind => kind == WatchHistoryMediaKind.Movie ? MediaKind.Movie : MediaKind.Episode)];
 
-        var query = database.MediaItems.AsNoTracking().Where(item => kinds.Contains(item.Kind));
+        // Published only: sync reconciles the library the user can see. A tombstone's plays stay
+        // wherever they are; revival brings the item back into the next sync's scope.
+        var query = database.MediaItems.AsNoTracking().Where(item => item.PublicId != null && kinds.Contains(item.Kind));
         if (scope.CatalogIds.Count > 0)
         {
             query = query.Where(item => item.CatalogId != null && scope.CatalogIds.Contains(item.CatalogId.Value));

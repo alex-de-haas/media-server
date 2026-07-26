@@ -137,6 +137,8 @@ public sealed class CatalogMetadataRefreshServiceTests : IDisposable
             database.MediaItems.Add(new MediaItem
             {
                 Id = Guid.NewGuid(),
+                // Published: the refresh deliberately skips tombstones, so the seed must not look like one.
+                PublicId = $"pub-{index}",
                 CatalogId = catalog.Id,
                 Kind = MediaKind.Movie,
                 Title = $"Movie {index}",

@@ -135,7 +135,10 @@ public sealed class CatalogMetadataRefreshService(
         // Only identified items are refreshable (same gate as the per-item refresh); unidentified leaves
         // and container rows without an identity (e.g. seasons) have nothing authoritative to refresh from.
         var itemIds = await database.MediaItems.AsNoTracking()
-            .Where(item => item.CatalogId == catalogId && item.IdentityProvider != null && item.IdentityProviderId != null)
+            // Published only: refreshing a tombstone would spend provider calls on a deleted title
+            // and inflate the operator-facing counts.
+            .Where(item => item.CatalogId == catalogId && item.PublicId != null &&
+                item.IdentityProvider != null && item.IdentityProviderId != null)
             .Select(item => item.Id)
             .ToListAsync(cancellationToken);
 

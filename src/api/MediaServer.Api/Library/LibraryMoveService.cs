@@ -35,6 +35,7 @@ public sealed class LibraryMoveService(
     ICatalogPathSandbox sandbox,
     IFilesystemInspector filesystem,
     JobService jobs,
+    LibraryDeleteService deleteService,
     ILogger<LibraryMoveService> logger)
 {
     public const string JobType = "library:move";
@@ -151,8 +152,12 @@ public sealed class LibraryMoveService(
 
     private async Task<MovePlan?> BuildMoviePlanAsync(MediaItem movie, Catalog source, Catalog target, CancellationToken cancellationToken)
     {
+        // Published merge targets only: attaching sources to a tombstone would leave a playable item
+        // hidden behind a null PublicId. A ghost with this identity in the target catalog comes back
+        // through ingest adoption, not through a move.
         var mergeTarget = await database.MediaItems.FirstOrDefaultAsync(candidate =>
             candidate.CatalogId == target.Id && candidate.Kind == MediaKind.Movie && candidate.Id != movie.Id &&
+            candidate.PublicId != null &&
             candidate.IdentityProvider == movie.IdentityProvider && candidate.IdentityProviderId == movie.IdentityProviderId,
             cancellationToken);
 
@@ -174,21 +179,42 @@ public sealed class LibraryMoveService(
             Moves = moves,
             Movie = movie,
             MovieMergeTarget = mergeTarget,
+            // Ghost extras of a re-pointed movie follow their parent's catalog; on a merge the source
+            // movie is removed under the shared delete rules and keeps them as its tombstones.
+            GhostFollowerIds = mergeTarget is null ? await GhostChildIdsAsync(movie.Id, cancellationToken) : [],
         };
     }
 
+    /// <summary>
+    /// Tombstoned descendants of a top-level item: ghost episodes, seasons, and extras. On a re-point
+    /// move they follow the subtree into the target catalog — unpublished, unchanged otherwise — so
+    /// the per-catalog identity lookups keep finding them beside their hierarchy.
+    /// </summary>
+    private async Task<List<Guid>> GhostChildIdsAsync(Guid topId, CancellationToken cancellationToken) =>
+        await database.MediaItems
+            .Where(item => item.RemovedAt != null && (item.SeriesId == topId || item.ParentId == topId))
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+
     private async Task<MovePlan?> BuildSeriesPlanAsync(MediaItem series, Catalog source, Catalog target, CancellationToken cancellationToken)
     {
+        // Published merge targets only — see the movie plan; ghosts revive through adoption, not moves.
         var targetSeries = await database.MediaItems.FirstOrDefaultAsync(candidate =>
             candidate.CatalogId == target.Id && candidate.Kind == MediaKind.Series && candidate.Id != series.Id &&
+            candidate.PublicId != null &&
             candidate.IdentityProvider == series.IdentityProvider && candidate.IdentityProviderId == series.IdentityProviderId,
             cancellationToken);
 
+        // The plan handles published children; ghost children (tombstoned episodes/seasons/extras) carry
+        // no files and must never be republished by a move — they follow along on a re-point, and stay
+        // behind as tombstones on a merge (the shared delete rules keep their ancestor chain alive).
         var episodes = await database.MediaItems
-            .Where(candidate => candidate.Kind == MediaKind.Episode && candidate.SeriesId == series.Id)
+            .Where(candidate => candidate.Kind == MediaKind.Episode && candidate.SeriesId == series.Id &&
+                candidate.PublicId != null)
             .ToListAsync(cancellationToken);
         var seasons = await database.MediaItems
-            .Where(candidate => candidate.Kind == MediaKind.Season && candidate.SeriesId == series.Id)
+            .Where(candidate => candidate.Kind == MediaKind.Season && candidate.SeriesId == series.Id &&
+                candidate.PublicId != null)
             .ToListAsync(cancellationToken);
 
         var moves = new List<SourceMove>();
@@ -213,6 +239,7 @@ public sealed class LibraryMoveService(
                 Moves = moves,
                 SourceSeries = series,
                 RepointContainers = new List<MediaItem>(seasons) { series }.Concat(episodes).ToList(),
+                GhostFollowerIds = await GhostChildIdsAsync(series.Id, cancellationToken),
             };
         }
 
@@ -674,6 +701,16 @@ public sealed class LibraryMoveService(
         {
             await ApplySeriesAsync(plan, source, target, now, cancellationToken);
         }
+
+        // Ghost followers re-home without being republished: same rows, new catalog, still tombstones.
+        if (plan.GhostFollowerIds.Count > 0)
+        {
+            await database.MediaItems
+                .Where(item => plan.GhostFollowerIds.Contains(item.Id))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.CatalogId, target.Id)
+                    .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+        }
     }
 
     private static void ApplyMovie(MovePlan plan, Catalog target, DateTimeOffset now)
@@ -746,7 +783,7 @@ public sealed class LibraryMoveService(
         }
 
         var existing = await database.MediaItems.FirstOrDefaultAsync(candidate =>
-            candidate.CatalogId == target.Id && candidate.Kind == MediaKind.Season &&
+            candidate.CatalogId == target.Id && candidate.Kind == MediaKind.Season && candidate.PublicId != null &&
             candidate.SeriesId == targetSeries.Id && candidate.IdentitySeasonNumber == seasonNumber, cancellationToken);
         if (existing is not null)
         {
@@ -781,9 +818,12 @@ public sealed class LibraryMoveService(
 
     private async Task PrunePlanAsync(MovePlan plan, CancellationToken cancellationToken)
     {
+        // The shared delete rules decide tombstone vs purge: a merged row whose user data still matters
+        // survives as a ghost under its (equally ghosted) source hierarchy, an untouched one is purged.
+        // Nothing a move leaves behind is ever republished, and no user data dies with a merge.
         if (plan.MovieMergeTarget is not null)
         {
-            await PurgeItemsAsync([plan.Movie!.Id], cancellationToken);
+            await deleteService.RemoveItemsAsync([plan.Movie!.Id], deleteUserData: false, cancellationToken);
             return;
         }
 
@@ -795,31 +835,18 @@ public sealed class LibraryMoveService(
         // Merge: episodes whose sources were reassigned, then the now-empty source seasons, then the series.
         if (plan.MergedEpisodeIds.Count > 0)
         {
-            await PurgeItemsAsync(plan.MergedEpisodeIds, cancellationToken);
+            await deleteService.RemoveItemsAsync(plan.MergedEpisodeIds, deleteUserData: false, cancellationToken);
         }
 
         if (plan.SourceSeasonIds.Count > 0)
         {
-            await PurgeItemsAsync(plan.SourceSeasonIds, cancellationToken);
+            await deleteService.RemoveItemsAsync(plan.SourceSeasonIds, deleteUserData: false, cancellationToken);
         }
 
         if (plan.SourceSeriesId is { } seriesId)
         {
-            await PurgeItemsAsync([seriesId], cancellationToken);
+            await deleteService.RemoveItemsAsync([seriesId], deleteUserData: false, cancellationToken);
         }
-    }
-
-    /// <summary>Deletes the given items and their dependents. Caller passes a single-generation id set.</summary>
-    private async Task PurgeItemsAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken)
-    {
-        var sourceIds = await database.MediaSources.Where(source => ids.Contains(source.MediaItemId)).Select(source => source.Id).ToListAsync(cancellationToken);
-        await database.MediaStreams.Where(stream => sourceIds.Contains(stream.MediaSourceId)).ExecuteDeleteAsync(cancellationToken);
-        await database.MediaSources.Where(source => ids.Contains(source.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.MetadataRecords.Where(record => ids.Contains(record.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.ImageAssets.Where(image => ids.Contains(image.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.MediaItemPersons.Where(credit => ids.Contains(credit.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.UserItemData.Where(data => ids.Contains(data.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.MediaItems.Where(item => ids.Contains(item.Id)).ExecuteDeleteAsync(cancellationToken);
     }
 
     // ---- Helpers ---------------------------------------------------------------------------------------
@@ -916,6 +943,9 @@ public sealed class LibraryMoveService(
         public IReadOnlyList<Guid> MergedEpisodeIds { get; init; } = [];
         public IReadOnlyList<Guid> SourceSeasonIds { get; init; } = [];
         public Guid? SourceSeriesId { get; init; }
+
+        /// <summary>Tombstoned descendants that follow a re-point into the target catalog, unpublished.</summary>
+        public IReadOnlyList<Guid> GhostFollowerIds { get; init; } = [];
     }
 }
 

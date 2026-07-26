@@ -231,11 +231,16 @@ public sealed class IdentifyService(
 
     public async Task<MediaItem> ResolveMovieAsync(Catalog catalog, MetadataCandidate candidate, CancellationToken cancellationToken)
     {
-        var existing = await database.MediaItems.FirstOrDefaultAsync(item =>
-            item.CatalogId == catalog.Id &&
-            item.Kind == MediaKind.Movie &&
-            item.IdentityProvider == candidate.Reference.Provider &&
-            item.IdentityProviderId == candidate.Reference.Id, cancellationToken)
+        // Published first: if a live row and a ghost share the identity in this catalog (a move can
+        // leave that shape behind), new sources belong on the live one.
+        var existing = await database.MediaItems
+            .Where(item =>
+                item.CatalogId == catalog.Id &&
+                item.Kind == MediaKind.Movie &&
+                item.IdentityProvider == candidate.Reference.Provider &&
+                item.IdentityProviderId == candidate.Reference.Id)
+            .OrderBy(item => item.PublicId == null ? 1 : 0)
+            .FirstOrDefaultAsync(cancellationToken)
             // No live or ghost row in this catalog — a tombstone elsewhere (or catalog-less after its
             // catalog was deleted) is adopted instead, so a re-downloaded title finds its history.
             ?? await FindTombstoneAsync(MediaKind.Movie, candidate.Reference.Provider, candidate.Reference.Id,
@@ -404,16 +409,20 @@ public sealed class IdentifyService(
         Catalog catalog, MediaKind kind, string provider, string seriesProviderId,
         Func<MediaItem> factory, int? seasonNumber, int? episodeNumber, CancellationToken cancellationToken)
     {
+        // Published first (a move can leave a live row and a ghost sharing an identity in one catalog).
         // Foreign tombstones are only searched for the series itself: a season or episode ghost carries
         // parent links into its original hierarchy, so it may only come back through its series' adoption
         // (which re-homes the whole ghost subtree, making the same-catalog lookup above find it).
-        var existing = await database.MediaItems.FirstOrDefaultAsync(item =>
-            item.CatalogId == catalog.Id &&
-            item.Kind == kind &&
-            item.IdentityProvider == provider &&
-            item.IdentityProviderId == seriesProviderId &&
-            item.IdentitySeasonNumber == seasonNumber &&
-            item.IdentityEpisodeNumber == episodeNumber, cancellationToken)
+        var existing = await database.MediaItems
+            .Where(item =>
+                item.CatalogId == catalog.Id &&
+                item.Kind == kind &&
+                item.IdentityProvider == provider &&
+                item.IdentityProviderId == seriesProviderId &&
+                item.IdentitySeasonNumber == seasonNumber &&
+                item.IdentityEpisodeNumber == episodeNumber)
+            .OrderBy(item => item.PublicId == null ? 1 : 0)
+            .FirstOrDefaultAsync(cancellationToken)
             ?? (kind == MediaKind.Series
                 ? await FindTombstoneAsync(kind, provider, seriesProviderId, seasonNumber, episodeNumber, cancellationToken)
                 : null);

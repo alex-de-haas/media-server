@@ -191,8 +191,10 @@ public sealed class RecommendationFeedService(
     private async Task<Dictionary<RecommendationIdentity, LibraryTitle>> LibraryByTmdbIdAsync(
         CancellationToken cancellationToken)
     {
+        // Published only: a tombstone is a deleted title, and "you already have this" must not be
+        // claimed for something the user removed (nor may its ghost id become a dead detail link).
         var items = await database.MediaItems.AsNoTracking()
-            .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series)
+            .Where(item => item.PublicId != null && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series))
             .ToListAsync(cancellationToken);
 
         var copies = new Dictionary<RecommendationIdentity, List<MediaItem>>();

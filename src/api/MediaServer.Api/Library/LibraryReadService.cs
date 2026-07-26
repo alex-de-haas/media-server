@@ -180,7 +180,9 @@ public sealed class LibraryReadService(
         var seriesById = seriesIds.Count == 0
             ? new Dictionary<Guid, MediaItem>()
             : await database.MediaItems.AsNoTracking()
-                .Where(series => seriesIds.Contains(series.Id))
+                // Published only (defensive): a rail card must never take its title, poster, or nav
+                // target from a tombstoned series.
+                .Where(series => seriesIds.Contains(series.Id) && series.PublicId != null)
                 .ToDictionaryAsync(series => series.Id, cancellationToken);
         var seriesMeta = await MetadataByItemAsync(seriesIds, cancellationToken);
         var seriesPosters = await PostersAsync(seriesIds, cancellationToken);

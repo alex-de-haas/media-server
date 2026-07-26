@@ -137,7 +137,7 @@ keep the target's values when both exist.
       covered for ingest re-download and rescan re-publish; cross-catalog
       adoption re-homes the ghost (same-catalog match preferred).
 - [x] Remap signal migration replacing the orphan-cleanup data loss.
-- [ ] Query audit: every `MediaItems` read either filters published or
+- [x] Query audit: every `MediaItems` read either filters published or
       deliberately serves tombstones (calendar); regression tests that a
       tombstone leaks into neither browse, Jellyfin, collections, people,
       search, nor title preview.

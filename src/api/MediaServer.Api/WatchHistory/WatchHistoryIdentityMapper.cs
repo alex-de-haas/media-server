@@ -195,8 +195,10 @@ public sealed class WatchHistoryIdentityMapper(MediaServerDbContext database)
             return false;
         }
 
+        // Published only: a tombstone sharing the identity (deleted here, still held elsewhere) must
+        // not make the live item read as ambiguous and block its inbound state.
         var candidates = database.MediaItems.AsNoTracking()
-            .Where(entry => entry.Kind == MediaKind.Movie && entry.Id != item.Id);
+            .Where(entry => entry.Kind == MediaKind.Movie && entry.PublicId != null && entry.Id != item.Id);
         if (catalogScope is { Count: > 0 })
         {
             candidates = candidates.Where(entry => entry.CatalogId != null && catalogScope.Contains(entry.CatalogId.Value));

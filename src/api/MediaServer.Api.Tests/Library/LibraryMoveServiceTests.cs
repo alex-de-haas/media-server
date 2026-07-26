@@ -42,7 +42,9 @@ public sealed class LibraryMoveServiceTests : IDisposable
 
         _jobs = new JobService(_database, _notifier);
         _filesystem = new FakeFilesystem(_targetRoot);
-        _service = new LibraryMoveService(_database, new CatalogPathSandbox(), _filesystem, _jobs, NullLogger<LibraryMoveService>.Instance);
+        _service = new LibraryMoveService(_database, new CatalogPathSandbox(), _filesystem, _jobs,
+            new LibraryDeleteService(_database, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance)),
+            NullLogger<LibraryMoveService>.Instance);
         _coordinator = new LibraryMoveCoordinator(_database, _filesystem, _jobs, _queue);
     }
 
@@ -155,6 +157,87 @@ public sealed class LibraryMoveServiceTests : IDisposable
         var e01 = targetEpisodes.Single(e => (e.IdentityEpisodeNumber ?? e.IndexNumber) == 1);
         Assert.Equal(2, await _database.MediaSources.AsNoTracking().CountAsync(s => s.MediaItemId == e01.Id));
         Assert.True(File.Exists(Path.Combine(_targetRoot, "The Show (2020)", "Season 01", "The Show S01E02.mkv")));
+    }
+
+    [Fact]
+    public async Task Move_series_repoint_carries_ghost_children_without_republishing()
+    {
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Series, "Series");
+        var target = await AddCatalogAsync(_targetRoot, CatalogType.Series, "Series 4K");
+        var series = await AddSeriesAsync(source, "The Show", "tmdb", "500", [(1, 1), (1, 2)]);
+        var ghostId = await TombstoneEpisodeAsync(series.Id, episodeNumber: 2);
+
+        var result = await MoveAsync(series.Id, target.Id);
+
+        Assert.Equal(MoveResult.Kind.Ok, result.Status);
+        _database.ChangeTracker.Clear();
+        // The ghost followed the subtree into the target catalog but was not republished: a move must
+        // never turn a tombstone into a visible, unplayable item.
+        var ghost = await _database.MediaItems.AsNoTracking().SingleAsync(item => item.Id == ghostId);
+        Assert.Equal(target.Id, ghost.CatalogId);
+        Assert.Null(ghost.PublicId);
+        Assert.NotNull(ghost.RemovedAt);
+        Assert.True(await _database.UserItemData.AsNoTracking().AnyAsync(data => data.MediaItemId == ghostId && data.IsFavorite));
+    }
+
+    [Fact]
+    public async Task Move_series_merge_leaves_ghosts_behind_as_tombstones_not_purges()
+    {
+        var source = await AddCatalogAsync(_sourceRoot, CatalogType.Series, "Series");
+        var target = await AddCatalogAsync(_targetRoot, CatalogType.Series, "Series 4K");
+        var targetSeries = await AddSeriesAsync(target, "The Show", "tmdb", "500", [(1, 1)]);
+        var sourceSeries = await AddSeriesAsync(source, "The Show", "tmdb", "500", [(1, 1), (1, 2)]);
+        var ghostId = await TombstoneEpisodeAsync(sourceSeries.Id, episodeNumber: 2);
+
+        var result = await MoveAsync(sourceSeries.Id, target.Id);
+
+        Assert.Equal(MoveResult.Kind.Ok, result.Status);
+        Assert.Equal(targetSeries.Id, result.ResultId);
+        _database.ChangeTracker.Clear();
+        // The merge used to hard-delete the emptied source hierarchy; with a ghost under it, the source
+        // series and season now stay behind as tombstones and the ghost keeps its user data.
+        var ghost = await _database.MediaItems.AsNoTracking().SingleAsync(item => item.Id == ghostId);
+        Assert.NotNull(ghost.RemovedAt);
+        Assert.True(await _database.UserItemData.AsNoTracking().AnyAsync(data => data.MediaItemId == ghostId && data.IsFavorite));
+        var sourceSeriesRow = await _database.MediaItems.AsNoTracking().SingleAsync(item => item.Id == sourceSeries.Id);
+        Assert.Null(sourceSeriesRow.PublicId);
+        Assert.NotNull(sourceSeriesRow.RemovedAt);
+        // The merged episode had no signal of its own and was purged as before.
+        Assert.False(await _database.MediaItems.AsNoTracking().AnyAsync(item =>
+            item.SeriesId == sourceSeries.Id && item.Kind == MediaKind.Episode && item.RemovedAt == null));
+    }
+
+    /// <summary>Favorites and then deletes one episode through the real delete flow, yielding a tombstone.</summary>
+    private async Task<Guid> TombstoneEpisodeAsync(Guid seriesId, int episodeNumber)
+    {
+        var episode = await _database.MediaItems.SingleAsync(item =>
+            item.Kind == MediaKind.Episode && item.SeriesId == seriesId &&
+            (item.IdentityEpisodeNumber ?? item.IndexNumber) == episodeNumber);
+
+        var now = DateTimeOffset.UtcNow;
+        var user = await _database.AppUsers.FirstOrDefaultAsync();
+        if (user is null)
+        {
+            user = new AppUser
+            {
+                HostUserId = "host-1", Email = "user@example.com", Role = AppUserRole.User,
+                CreatedAt = now, LastSeenAt = now,
+            };
+            _database.AppUsers.Add(user);
+            await _database.SaveChangesAsync();
+        }
+
+        _database.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = user.Id, MediaItemId = episode.Id, IsFavorite = true,
+        });
+        await _database.SaveChangesAsync();
+
+        var deleter = new LibraryDeleteService(_database, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
+        var deleted = await deleter.DeleteEpisodeAsync(episode.Id, deleteFiles: true, deleteUserData: false, CancellationToken.None);
+        Assert.NotNull(deleted);
+        _database.ChangeTracker.Clear();
+        return episode.Id;
     }
 
     [Fact]
