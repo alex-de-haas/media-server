@@ -175,6 +175,83 @@ public sealed class CatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_tombstones_a_favorited_movie_catalog_less()
+    {
+        var service = CreateService();
+        var catalog = await service.CreateAsync(Request(_tempRoot), CancellationToken.None);
+
+        var now = DateTimeOffset.UtcNow;
+        var user = new AppUser { HostUserId = "host-1", Email = "user@example.com", Role = AppUserRole.User, CreatedAt = now, LastSeenAt = now };
+        _database.AppUsers.Add(user);
+        var loved = new MediaItem { Id = Guid.NewGuid(), PublicId = "pub-loved", CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Inception", Year = 2010, AddedAt = now, UpdatedAt = now };
+        var untouched = new MediaItem { Id = Guid.NewGuid(), PublicId = "pub-other", CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Tenet", Year = 2020, AddedAt = now, UpdatedAt = now };
+        _database.AddRange(loved, untouched);
+        _database.MediaSources.Add(new MediaSource { Id = Guid.NewGuid(), MediaItemId = loved.Id, Container = "mkv", Path = "Inception (2010)/Inception.mkv", SizeBytes = 5, DurationTicks = 0, CreatedAt = now });
+        _database.MetadataRecords.Add(new MetadataRecord { Id = Guid.NewGuid(), MediaItemId = loved.Id, Provider = "tmdb", Language = "en", Title = "Inception", FetchedAt = now });
+        await _database.SaveChangesAsync();
+        _database.UserItemData.Add(new UserItemData { Id = Guid.NewGuid(), AppUserId = user.Id, MediaItemId = loved.Id, IsFavorite = true });
+        await _database.SaveChangesAsync();
+        _database.ChangeTracker.Clear();
+
+        var deleted = await service.DeleteAsync(catalog.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        Assert.Empty(await _database.Catalogs.ToListAsync());
+        // The favorited movie survives its catalog: unpublished, catalog-less, sourceless — but with
+        // its favorite and metadata intact. The untouched one is purged with the catalog as before.
+        var ghost = await _database.MediaItems.SingleAsync();
+        Assert.Equal(loved.Id, ghost.Id);
+        Assert.Null(ghost.CatalogId);
+        Assert.Null(ghost.PublicId);
+        Assert.NotNull(ghost.RemovedAt);
+        Assert.Empty(await _database.MediaSources.ToListAsync());
+        Assert.True(await _database.UserItemData.AnyAsync(data => data.MediaItemId == loved.Id && data.IsFavorite));
+        Assert.True(await _database.MetadataRecords.AnyAsync(record => record.MediaItemId == loved.Id));
+    }
+
+    [Fact]
+    public async Task Delete_tombstones_the_ancestor_chain_of_a_watched_episode()
+    {
+        var service = CreateService();
+        var catalog = await service.CreateAsync(Request(_tempRoot), CancellationToken.None);
+
+        var now = DateTimeOffset.UtcNow;
+        var user = new AppUser { HostUserId = "host-1", Email = "user@example.com", Role = AppUserRole.User, CreatedAt = now, LastSeenAt = now };
+        _database.AppUsers.Add(user);
+        var series = new MediaItem { Id = Guid.NewGuid(), PublicId = "pub-series", CatalogId = catalog.Id, Kind = MediaKind.Series, Title = "Breaking Bad", AddedAt = now, UpdatedAt = now };
+        var season = new MediaItem { Id = Guid.NewGuid(), PublicId = "pub-season", CatalogId = catalog.Id, Kind = MediaKind.Season, Title = "Season 1", ParentId = series.Id, SeriesId = series.Id, IndexNumber = 1, AddedAt = now, UpdatedAt = now };
+        var watched = new MediaItem { Id = Guid.NewGuid(), PublicId = "pub-e1", CatalogId = catalog.Id, Kind = MediaKind.Episode, Title = "Pilot", ParentId = season.Id, SeriesId = series.Id, SeasonId = season.Id, ParentIndexNumber = 1, IndexNumber = 1, AddedAt = now, UpdatedAt = now };
+        var unwatched = new MediaItem { Id = Guid.NewGuid(), PublicId = "pub-e2", CatalogId = catalog.Id, Kind = MediaKind.Episode, Title = "Cat's in the Bag…", ParentId = season.Id, SeriesId = series.Id, SeasonId = season.Id, ParentIndexNumber = 1, IndexNumber = 2, AddedAt = now, UpdatedAt = now };
+        _database.AddRange(series, season, watched, unwatched);
+        await _database.SaveChangesAsync();
+        _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+        {
+            Id = Guid.NewGuid(), AppUserId = user.Id, MediaItemId = watched.Id, CreatedAt = now,
+            WatchedAt = now, Origin = PlaybackHistoryOrigin.LocalPlayback,
+        });
+        await _database.SaveChangesAsync();
+        _database.ChangeTracker.Clear();
+
+        var deleted = await service.DeleteAsync(catalog.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        // The play on episode 1 keeps its whole ancestor chain as catalog-less tombstones; the
+        // unwatched sibling goes with the catalog.
+        var remaining = await _database.MediaItems.ToListAsync();
+        Assert.Equal(3, remaining.Count);
+        Assert.Contains(remaining, item => item.Id == series.Id);
+        Assert.Contains(remaining, item => item.Id == season.Id);
+        Assert.Contains(remaining, item => item.Id == watched.Id);
+        Assert.All(remaining, item =>
+        {
+            Assert.Null(item.CatalogId);
+            Assert.Null(item.PublicId);
+            Assert.NotNull(item.RemovedAt);
+        });
+        Assert.True(await _database.PlaybackHistoryEntries.AnyAsync(entry => entry.MediaItemId == watched.Id));
+    }
+
+    [Fact]
     public async Task Delete_is_blocked_while_a_download_references_the_catalog()
     {
         var service = CreateService();

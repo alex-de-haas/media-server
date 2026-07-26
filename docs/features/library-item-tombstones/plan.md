@@ -131,7 +131,7 @@ keep the target's values when both exist.
 - [x] `LibraryDeleteService`: tombstone path (default with user signal), full
       purge path (`deleteUserData` or no signal), container tombstoning for
       season/episode deletes; `deleteUserData` on the three endpoints.
-- [ ] `CatalogService.DeleteAsync`: items with user signal become catalog-less
+- [x] `CatalogService.DeleteAsync`: items with user signal become catalog-less
       tombstones instead of being purged with the catalog.
 - [ ] Revival: identify/publish adoption of tombstones clears `RemovedAt`;
       covered for ingest re-download and rescan re-publish; cross-catalog
