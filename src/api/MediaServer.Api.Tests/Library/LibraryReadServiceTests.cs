@@ -497,7 +497,8 @@ public sealed class LibraryReadServiceTests : IDisposable
         SeedUserData(_movieId, played: true);
         var service = new LibraryDeleteService(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
-        var deleted = await service.DeleteAsync(_movieId, deleteFiles: false, CancellationToken.None);
+        // The movie is watched, so only the explicit purge removes the rows — the default would tombstone.
+        var deleted = await service.DeleteAsync(_movieId, deleteFiles: false, deleteUserData: true, CancellationToken.None);
 
         Assert.True(deleted);
         await using var verify = _db.Create();
@@ -529,7 +530,7 @@ public sealed class LibraryReadServiceTests : IDisposable
 
         var service = new LibraryDeleteService(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
-        var deleted = await service.DeleteAsync(_seriesId, deleteFiles: false, CancellationToken.None);
+        var deleted = await service.DeleteAsync(_seriesId, deleteFiles: false, deleteUserData: false, CancellationToken.None);
 
         Assert.True(deleted);
         await using var verify = _db.Create();
@@ -577,7 +578,7 @@ public sealed class LibraryReadServiceTests : IDisposable
         {
             var service = new LibraryDeleteService(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
-            var deleted = await service.DeleteAsync(movieId, deleteFiles: true, CancellationToken.None);
+            var deleted = await service.DeleteAsync(movieId, deleteFiles: true, deleteUserData: false, CancellationToken.None);
 
             Assert.True(deleted);
             Assert.False(File.Exists(absolutePath));

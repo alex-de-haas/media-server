@@ -231,14 +231,24 @@ public sealed class IdentifyService(
 
     public async Task<MediaItem> ResolveMovieAsync(Catalog catalog, MetadataCandidate candidate, CancellationToken cancellationToken)
     {
-        var existing = await database.MediaItems.FirstOrDefaultAsync(item =>
-            item.CatalogId == catalog.Id &&
-            item.Kind == MediaKind.Movie &&
-            item.IdentityProvider == candidate.Reference.Provider &&
-            item.IdentityProviderId == candidate.Reference.Id, cancellationToken);
+        // Published first: if a live row and a ghost share the identity in this catalog (a move can
+        // leave that shape behind), new sources belong on the live one.
+        var existing = await database.MediaItems
+            .Where(item =>
+                item.CatalogId == catalog.Id &&
+                item.Kind == MediaKind.Movie &&
+                item.IdentityProvider == candidate.Reference.Provider &&
+                item.IdentityProviderId == candidate.Reference.Id)
+            .OrderBy(item => item.PublicId == null ? 1 : 0)
+            .FirstOrDefaultAsync(cancellationToken)
+            // No live or ghost row in this catalog — a tombstone elsewhere (or catalog-less after its
+            // catalog was deleted) is adopted instead, so a re-downloaded title finds its history.
+            ?? await FindTombstoneAsync(MediaKind.Movie, candidate.Reference.Provider, candidate.Reference.Id,
+                seasonNumber: null, episodeNumber: null, cancellationToken);
 
         if (existing is not null)
         {
+            await AdoptIfTombstoneAsync(existing, catalog, cancellationToken);
             return existing;
         }
 
@@ -399,16 +409,27 @@ public sealed class IdentifyService(
         Catalog catalog, MediaKind kind, string provider, string seriesProviderId,
         Func<MediaItem> factory, int? seasonNumber, int? episodeNumber, CancellationToken cancellationToken)
     {
-        var existing = await database.MediaItems.FirstOrDefaultAsync(item =>
-            item.CatalogId == catalog.Id &&
-            item.Kind == kind &&
-            item.IdentityProvider == provider &&
-            item.IdentityProviderId == seriesProviderId &&
-            item.IdentitySeasonNumber == seasonNumber &&
-            item.IdentityEpisodeNumber == episodeNumber, cancellationToken);
+        // Published first (a move can leave a live row and a ghost sharing an identity in one catalog).
+        // Foreign tombstones are only searched for the series itself: a season or episode ghost carries
+        // parent links into its original hierarchy, so it may only come back through its series' adoption
+        // (which re-homes the whole ghost subtree, making the same-catalog lookup above find it).
+        var existing = await database.MediaItems
+            .Where(item =>
+                item.CatalogId == catalog.Id &&
+                item.Kind == kind &&
+                item.IdentityProvider == provider &&
+                item.IdentityProviderId == seriesProviderId &&
+                item.IdentitySeasonNumber == seasonNumber &&
+                item.IdentityEpisodeNumber == episodeNumber)
+            .OrderBy(item => item.PublicId == null ? 1 : 0)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? (kind == MediaKind.Series
+                ? await FindTombstoneAsync(kind, provider, seriesProviderId, seasonNumber, episodeNumber, cancellationToken)
+                : null);
 
         if (existing is not null)
         {
+            await AdoptIfTombstoneAsync(existing, catalog, cancellationToken);
             return existing;
         }
 
@@ -421,6 +442,57 @@ public sealed class IdentifyService(
         // Flush so subsequent container lookups in the same drive see this row.
         await database.SaveChangesAsync(cancellationToken);
         return created;
+    }
+
+    /// <summary>
+    /// The tombstone for an identity, wherever it lies: in another catalog, or catalog-less after its
+    /// catalog was deleted. Published rows in other catalogs are deliberately not matched — only a
+    /// ghost may cross a catalog boundary. The same-catalog lookup runs first at every call site, so a
+    /// local match (live or ghost) always wins over a foreign tombstone.
+    /// </summary>
+    private Task<MediaItem?> FindTombstoneAsync(
+        MediaKind kind, string provider, string providerId, int? seasonNumber, int? episodeNumber,
+        CancellationToken cancellationToken) =>
+        database.MediaItems.FirstOrDefaultAsync(item =>
+            item.RemovedAt != null &&
+            item.Kind == kind &&
+            item.IdentityProvider == provider &&
+            item.IdentityProviderId == providerId &&
+            item.IdentitySeasonNumber == seasonNumber &&
+            item.IdentityEpisodeNumber == episodeNumber, cancellationToken);
+
+    /// <summary>
+    /// Brings a tombstone back to life in <paramref name="catalog"/>: clears <see cref="MediaItem.RemovedAt"/>,
+    /// re-homes the row when it came from another (or a deleted) catalog, and drags a series' or movie's
+    /// ghost children along — they stay tombstones until their own files arrive, but they must live in the
+    /// adopting catalog or the per-catalog lookups above would mint duplicates beside them. Flushed
+    /// immediately: later lookups in the same identify run query the database, not the change tracker.
+    /// The publish stage then mints the public id as for any unpublished row. No-op for a live item.
+    /// </summary>
+    private async Task AdoptIfTombstoneAsync(MediaItem item, Catalog catalog, CancellationToken cancellationToken)
+    {
+        if (item.RemovedAt is null)
+        {
+            return;
+        }
+
+        item.RemovedAt = null;
+        item.CatalogId = catalog.Id;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+
+        if (item.Kind is MediaKind.Series or MediaKind.Movie)
+        {
+            var children = await database.MediaItems
+                .Where(child => child.RemovedAt != null &&
+                    (child.SeriesId == item.Id || child.ParentId == item.Id))
+                .ToListAsync(cancellationToken);
+            foreach (var child in children)
+            {
+                child.CatalogId = catalog.Id;
+            }
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
     }
 
     private static string DeriveName(string relativePath, string? fallbackName)

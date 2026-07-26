@@ -218,6 +218,7 @@ builder.Services.AddScoped<PersonReadService>();
 builder.Services.AddScoped<CollectionReadService>();
 builder.Services.AddSingleton<LibraryFileEraser>();
 builder.Services.AddScoped<LibraryDeleteService>();
+builder.Services.AddScoped<RemovedTitlesService>();
 builder.Services.AddScoped<LibrarySourceService>();
 builder.Services.AddScoped<RemapService>();
 

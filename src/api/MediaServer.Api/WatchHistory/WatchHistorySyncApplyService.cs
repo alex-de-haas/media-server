@@ -426,10 +426,11 @@ public sealed class WatchHistorySyncApplyService(
 
         // Read-only here: apply never modifies a MediaItem, and a whole-library scope would otherwise
         // load every row into the change tracker.
-        var query = database.MediaItems.AsNoTracking().Where(item => kinds.Contains(item.Kind));
+        // Published only — mirrors the preview's candidate set; see WatchHistorySyncPreviewService.
+        var query = database.MediaItems.AsNoTracking().Where(item => item.PublicId != null && kinds.Contains(item.Kind));
         if (scope.CatalogIds.Count > 0)
         {
-            query = query.Where(item => scope.CatalogIds.Contains(item.CatalogId));
+            query = query.Where(item => item.CatalogId != null && scope.CatalogIds.Contains(item.CatalogId.Value));
         }
 
         return await query.ToListAsync(cancellationToken);

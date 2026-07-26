@@ -41,6 +41,7 @@ public sealed class RemapServiceTests : IDisposable
             new IdentifyService(_database, new NameParser(), provider, new AppSettingsService(_database), NullLogger<IdentifyService>.Instance),
             new EnrichService(_database, provider, settings, new PersonSyncService(_database), new CollectionSyncService(_database)),
             sandbox,
+            new LibraryDeleteService(_database, new LibraryFileEraser(sandbox, NullLogger<LibraryFileEraser>.Instance)),
             NullLogger<RemapService>.Instance);
     }
 
@@ -118,6 +119,87 @@ public sealed class RemapServiceTests : IDisposable
         Assert.True(File.Exists(newAbsolute));
         Assert.Equal("ep", await File.ReadAllTextAsync(newAbsolute));
         Assert.False(File.Exists(Path.Combine(_root, oldRelative.Replace('/', Path.DirectorySeparatorChar))));
+    }
+
+    [Fact]
+    public async Task Remap_migrates_history_and_user_state_to_the_corrected_identity()
+    {
+        var catalog = await SeedCatalogAsync(CatalogType.Movie);
+        var (movie, _) = await SeedPublishedMovieAsync(catalog, "Wrong Title", 2000, "tmdb", "111", "payload");
+        var userId = await SeedUserAsync();
+        var entryId = Guid.NewGuid();
+        _database.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = userId, MediaItemId = movie.Id,
+            IsFavorite = true, Played = true, PlayCount = 2,
+        });
+        _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+        {
+            Id = entryId, AppUserId = userId, MediaItemId = movie.Id, CreatedAt = DateTimeOffset.UtcNow,
+            WatchedAt = DateTimeOffset.UtcNow, Origin = PlaybackHistoryOrigin.LocalPlayback, PlaySessionId = "session-1",
+        });
+        await _database.SaveChangesAsync();
+
+        var result = await _remap.RemapAsync(movie.Id,
+            new RemapRequest(MediaKind.Movie, "tmdb", "222", "Correct Movie", 2021, null, null), CancellationToken.None);
+
+        Assert.Equal(RemapResult.Kind.Ok, result.Status);
+        _database.ChangeTracker.Clear();
+        // The plays and flags describe the file the user watched — they follow it to the corrected
+        // identity instead of dying with the misidentified husk.
+        var entry = await _database.PlaybackHistoryEntries.SingleAsync(candidate => candidate.Id == entryId);
+        Assert.Equal(result.TargetId, entry.MediaItemId);
+        var data = await _database.UserItemData.SingleAsync(candidate => candidate.AppUserId == userId);
+        Assert.Equal(result.TargetId, data.MediaItemId);
+        Assert.True(data.IsFavorite);
+        Assert.True(data.Played);
+        Assert.False(await _database.MediaItems.AnyAsync(item => item.Id == movie.Id));
+    }
+
+    [Fact]
+    public async Task Remap_onto_an_existing_item_merges_user_state_with_or()
+    {
+        var catalog = await SeedCatalogAsync(CatalogType.Movie);
+        var (wrong, _) = await SeedPublishedMovieAsync(catalog, "Wrong Title", 2000, "tmdb", "111", "payload");
+        var (existing, _) = await SeedPublishedMovieAsync(catalog, "Correct Movie", 2021, "tmdb", "222", "other");
+        var userId = await SeedUserAsync();
+        _database.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = userId, MediaItemId = wrong.Id, IsFavorite = true,
+        });
+        _database.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = userId, MediaItemId = existing.Id, Played = true, PlayCount = 1,
+        });
+        await _database.SaveChangesAsync();
+
+        var result = await _remap.RemapAsync(wrong.Id,
+            new RemapRequest(MediaKind.Movie, "tmdb", "222", "Correct Movie", 2021, null, null), CancellationToken.None);
+
+        Assert.Equal(RemapResult.Kind.Ok, result.Status);
+        Assert.Equal(existing.Id, result.TargetId);
+        _database.ChangeTracker.Clear();
+        // The target already knew this user: the rows merge field-wise instead of duplicating —
+        // favorite arrives from the wrong-identity row, watched and counts stay the target's own.
+        var data = await _database.UserItemData.SingleAsync(candidate => candidate.AppUserId == userId);
+        Assert.Equal(existing.Id, data.MediaItemId);
+        Assert.True(data.IsFavorite);
+        Assert.True(data.Played);
+        Assert.Equal(1, data.PlayCount);
+        Assert.False(await _database.MediaItems.AnyAsync(item => item.Id == wrong.Id));
+    }
+
+    private async Task<int> SeedUserAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var user = new AppUser
+        {
+            HostUserId = "host-1", Email = "user@example.com", Role = AppUserRole.User,
+            CreatedAt = now, LastSeenAt = now,
+        };
+        _database.AppUsers.Add(user);
+        await _database.SaveChangesAsync();
+        return user.Id;
     }
 
     [Fact]

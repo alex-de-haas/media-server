@@ -233,7 +233,7 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
   const moving = useActiveMove(id) !== undefined;
 
   const remove = useMutation({
-    mutationFn: (deleteFiles: boolean) => mediaServer.deleteLibraryItem(id, deleteFiles),
+    mutationFn: (options: DeleteItemOptions) => mediaServer.deleteLibraryItem(id, options.deleteFiles, options.deleteUserData),
     onSuccess: () => {
       for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
         queryClient.invalidateQueries({ queryKey: key });
@@ -312,8 +312,8 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title={title}
-        onConfirm={(deleteFiles) => {
-          remove.mutate(deleteFiles);
+        onConfirm={(options) => {
+          remove.mutate(options);
           setConfirmOpen(false);
         }}
       />
@@ -358,6 +358,8 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
   );
 }
 
+export type DeleteItemOptions = { deleteFiles: boolean; deleteUserData: boolean };
+
 function DeleteItemDialog({
   open,
   onOpenChange,
@@ -372,17 +374,24 @@ function DeleteItemDialog({
   title: string;
   // Extra line under the description — what else goes with this delete (a season's episode count).
   detail?: string;
-  onConfirm: (deleteFiles: boolean) => void;
+  onConfirm: (options: DeleteItemOptions) => void;
 }) {
   // Default to keeping files: deleting a published item shouldn't silently remove the media on disk.
+  // History is likewise kept by default — watched state and favorites survive as a hidden tombstone
+  // and come back if the title is ever re-added.
   const [deleteFiles, setDeleteFiles] = useState(false);
+  const [deleteUserData, setDeleteUserData] = useState(false);
   const deleteFilesId = useId();
+  const deleteUserDataId = useId();
 
-  // Re-apply the default every time the dialog (re)opens so a prior toggle (then cancel) doesn't carry over.
+  // Re-apply the defaults every time the dialog (re)opens so a prior toggle (then cancel) doesn't carry over.
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setDeleteFiles(false);
+    if (open) {
+      setDeleteFiles(false);
+      setDeleteUserData(false);
+    }
   }
 
   return (
@@ -411,9 +420,28 @@ function DeleteItemDialog({
           </label>
         </div>
 
+        <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
+          <Checkbox
+            id={deleteUserDataId}
+            className="mt-0.5"
+            checked={deleteUserData}
+            onCheckedChange={(checked) => setDeleteUserData(checked === true)}
+          />
+          <label htmlFor={deleteUserDataId} className="cursor-pointer">
+            Also delete watch history and favorites
+            <span className="text-muted-foreground block text-xs">
+              Otherwise they are kept and restored if the title is ever added back.
+            </span>
+          </label>
+        </div>
+
         <AlertDialogFooter>
           <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" size="sm" onClick={() => onConfirm(deleteFiles)}>
+          <AlertDialogAction
+            variant="destructive"
+            size="sm"
+            onClick={() => onConfirm({ deleteFiles, deleteUserData })}
+          >
             {deleteFiles ? "Delete + remove files" : "Remove from library"}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -1334,7 +1362,7 @@ function SeasonDeleteControl({
   const afterDelete = useAfterChildDelete(seriesId, backHref);
 
   const remove = useMutation({
-    mutationFn: (deleteFiles: boolean) => mediaServer.deleteSeason(seasonId!, deleteFiles),
+    mutationFn: (options: DeleteItemOptions) => mediaServer.deleteSeason(seasonId!, options.deleteFiles, options.deleteUserData),
     onSuccess: (result) => {
       setOpen(false);
       afterDelete(result, `Season ${season}`);
@@ -1367,7 +1395,7 @@ function SeasonDeleteControl({
             ? `${formatCount(episodeCount)} ${episodeCount === 1 ? "episode" : "episodes"} will be removed from the library.`
             : "This season holds no episodes — only its extras, if any, will be removed."
         }
-        onConfirm={(deleteFiles) => remove.mutate(deleteFiles)}
+        onConfirm={(options) => remove.mutate(options)}
       />
     </>
   );
@@ -1397,7 +1425,7 @@ function EpisodeRow({ episode, seriesId, backHref }: { episode: Episode; seriesI
   const label = episodeLabel(episode.seasonNumber, episode.episodeNumber, episode.episodeNumberEnd);
 
   const remove = useMutation({
-    mutationFn: (deleteFiles: boolean) => mediaServer.deleteEpisode(episode.id, deleteFiles),
+    mutationFn: (options: DeleteItemOptions) => mediaServer.deleteEpisode(episode.id, options.deleteFiles, options.deleteUserData),
     onSuccess: (result) => {
       setDeleteOpen(false);
       afterDelete(result, label);
@@ -1461,7 +1489,7 @@ function EpisodeRow({ episode, seriesId, backHref }: { episode: Episode; seriesI
           onOpenChange={setDeleteOpen}
           heading="Delete episode?"
           title={`${label} · ${episode.title}`}
-          onConfirm={(deleteFiles) => remove.mutate(deleteFiles)}
+          onConfirm={(options) => remove.mutate(options)}
         />
       )}
       {role === "admin" && (

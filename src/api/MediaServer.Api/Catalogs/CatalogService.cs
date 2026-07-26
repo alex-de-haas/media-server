@@ -50,10 +50,13 @@ public sealed class CatalogService(
             .OrderBy(catalog => catalog.Name)
             .ToListAsync(cancellationToken);
 
+        // Tombstones own no sources, so the null-catalog group can only ever be empty — filter it out
+        // rather than key the dictionary on a nullable id.
         var usedByCatalog = await (
                 from source in database.MediaSources.AsNoTracking()
                 join item in database.MediaItems.AsNoTracking() on source.MediaItemId equals item.Id
-                group source.SizeBytes by item.CatalogId into grouped
+                where item.CatalogId != null
+                group source.SizeBytes by item.CatalogId!.Value into grouped
                 select new { CatalogId = grouped.Key, Used = grouped.Sum() })
             .ToDictionaryAsync(entry => entry.CatalogId, entry => entry.Used, cancellationToken);
 
@@ -192,9 +195,11 @@ public sealed class CatalogService(
         }
 
         // Removing a catalog drops its DB rows only; on-disk media in the root is never deleted here.
-        // MediaItem→Catalog is Cascade, but we cannot lean on it: the DB would delete the catalog's items
-        // in arbitrary order and the self-FK on MediaItem.ParentId is Restrict, so a series deleted ahead
-        // of its seasons trips "FOREIGN KEY constraint failed". Clear the items explicitly, child→parent.
+        // MediaItem→Catalog is SetNull, but we cannot lean on it: user signal is bound to the work, not
+        // the shelf it stood on, so items someone favorited, watched, or played become catalog-less
+        // tombstones (see LibraryDeleteService) while untouched items are purged explicitly,
+        // child→parent — the self-FK on MediaItem.ParentId is Restrict, so a series deleted ahead of
+        // its seasons trips "FOREIGN KEY constraint failed".
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
             // Composable subqueries, never materialized id lists: a catalog is unbounded, and EF expands an
@@ -217,8 +222,61 @@ public sealed class CatalogService(
             // hold a Restrict FK straight to the catalog, so they have to go regardless of their media link.
             await database.TranscodeJobs.Where(job => job.CatalogId == id).ExecuteDeleteAsync(cancellationToken);
             // Streams before sources: sourceIds reads MediaSources, so it must run while those rows still exist.
+            // Tombstones lose their sources like everything else — a ghost has no playable substance.
             await database.MediaStreams.Where(stream => sourceIds.Contains(stream.MediaSourceId)).ExecuteDeleteAsync(cancellationToken);
             await database.MediaSources.Where(source => itemIds.Contains(source.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
+
+            // Transient sessions go for every item: purged rows would cascade them anyway, and a ghost
+            // cannot be played.
+            await database.PlaybackSessions
+                .Where(session => database.MediaItems.Any(item => item.Id == session.MediaItemId && item.CatalogId == id))
+                .ExecuteDeleteAsync(cancellationToken);
+
+            // Tombstone the survivors before anything else touches MediaItems: one update per hierarchy
+            // level, top-down, so each statement's descendant subqueries only read rows a later statement
+            // will update. Setting CatalogId to null here is what excludes ghosts from every
+            // `CatalogId == id` delete below — no Except needed anywhere. Signal stays a composed
+            // subquery (UNION of user-data flags and history) for the same no-materialization reason.
+            var signalIds = database.UserItemData
+                .Where(data => data.IsFavorite || data.Played || data.PlaybackPositionTicks > 0 || data.PlayCount > 0)
+                .Select(data => data.MediaItemId)
+                .Concat(database.PlaybackHistoryEntries.Select(entry => entry.MediaItemId));
+            var now = DateTimeOffset.UtcNow;
+
+            Task TombstoneAsync(IQueryable<MediaItem> items) => items.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.CatalogId, (Guid?)null)
+                .SetProperty(item => item.PublicId, (string?)null)
+                .SetProperty(item => item.RemovedAt, now)
+                .SetProperty(item => item.LibraryPath, (string?)null)
+                .SetProperty(item => item.DefaultSourceId, (Guid?)null)
+                .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+
+            await TombstoneAsync(database.MediaItems
+                .Where(item => item.CatalogId == id &&
+                    (item.Kind == MediaKind.Series || item.Kind == MediaKind.Movie) &&
+                    (signalIds.Contains(item.Id) ||
+                     database.MediaItems.Any(child => child.CatalogId == id && child.SeriesId == item.Id &&
+                        signalIds.Contains(child.Id)))));
+            await TombstoneAsync(database.MediaItems
+                .Where(item => item.CatalogId == id && item.Kind == MediaKind.Season &&
+                    (signalIds.Contains(item.Id) ||
+                     database.MediaItems.Any(child => child.CatalogId == id &&
+                        (child.SeasonId == item.Id || child.ParentId == item.Id) &&
+                        signalIds.Contains(child.Id)))));
+            await TombstoneAsync(database.MediaItems
+                .Where(item => item.CatalogId == id &&
+                    (item.Kind == MediaKind.Episode || item.Kind == MediaKind.Video) &&
+                    signalIds.Contains(item.Id)));
+
+            // A purge unlinks tracked titles through the FK's SetNull; tombstones keep their rows, so the
+            // wishlist would keep reading "in library" — unlink every ghost by hand.
+            await database.TrackedTitles
+                .Where(title => title.MediaItemId != null &&
+                    database.MediaItems.Any(item => item.Id == title.MediaItemId && item.RemovedAt != null))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(title => title.MediaItemId, (Guid?)null), cancellationToken);
+
+            // From here on, `CatalogId == id` names only the untouched items — purge them as before.
+            // itemIds re-evaluates against the narrowed set wherever it is used.
             await database.MetadataRecords.Where(record => itemIds.Contains(record.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
             await database.ImageAssets.Where(image => itemIds.Contains(image.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
             await database.MediaItemPersons.Where(credit => itemIds.Contains(credit.MediaItemId)).ExecuteDeleteAsync(cancellationToken);

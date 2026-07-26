@@ -134,10 +134,13 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         item.HasIndex(entity => entity.PublicId).IsUnique();
         item.HasIndex(entity => new { entity.CatalogId, entity.IdentityProvider, entity.IdentityProviderId });
 
+        // SetNull (not Cascade): CatalogService.DeleteAsync decides explicitly what a catalog delete
+        // takes with it — tombstones with user data survive catalog-less. The FK is only a safety net,
+        // and a safety net must never be the thing that erases a user's history.
         item.HasOne(entity => entity.Catalog)
             .WithMany()
             .HasForeignKey(entity => entity.CatalogId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.SetNull);
 
         // Self-hierarchy: Season → Series, Episode → Season.
         item.HasOne<MediaItem>()

@@ -12,7 +12,16 @@ public sealed class MediaItem
     /// <summary>Unique, stable across rescans, exposed to Jellyfin. Null until published.</summary>
     public string? PublicId { get; set; }
 
-    public Guid CatalogId { get; set; }
+    /// <summary>Null only on a tombstone whose catalog was deleted — a published item always has one.</summary>
+    public Guid? CatalogId { get; set; }
+
+    /// <summary>
+    /// Set when the item was deleted from the library but kept as a tombstone because user data —
+    /// favorites, watched state, playback history — still references it. A tombstone is unpublished
+    /// (<see cref="PublicId"/> is null), owns no sources, and is invisible to every library surface
+    /// except the watched calendar and the removed-titles list. Ingest adopts it back by identity.
+    /// </summary>
+    public DateTimeOffset? RemovedAt { get; set; }
 
     public MediaKind Kind { get; set; }
 

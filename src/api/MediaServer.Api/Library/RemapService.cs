@@ -19,6 +19,7 @@ public sealed class RemapService(
     IdentifyService identifyService,
     EnrichService enrichService,
     ICatalogPathSandbox sandbox,
+    LibraryDeleteService deleteService,
     ILogger<RemapService> logger)
 {
     // Path equality follows the filesystem: case-insensitive on Windows and default macOS, ordinal elsewhere.
@@ -163,9 +164,10 @@ public sealed class RemapService(
 
         await database.SaveChangesAsync(cancellationToken);
 
-        // 3. Prune the orphaned old item (and any season/series it emptied). Runs after the reassignment
-        //    is persisted so the set-based deletes don't catch the moved sources.
-        await CleanupOrphanAsync(current, cancellationToken);
+        // 3. Migrate the user's relationship with the file to its corrected identity, then prune the
+        //    orphaned old item (and any season/series it emptied). Runs after the reassignment is
+        //    persisted so the set-based deletes don't catch the moved sources.
+        await CleanupOrphanAsync(current, target, cancellationToken);
 
         if (transaction is not null)
         {
@@ -221,8 +223,13 @@ public sealed class RemapService(
 
     private static void AssignPublicId(MediaItem item) => item.PublicId ??= PublicIdFactory.ForItem(item);
 
-    /// <summary>Removes the old leaf if it has no sources left, then cascades to an emptied season/series.</summary>
-    private async Task CleanupOrphanAsync(MediaItem old, CancellationToken cancellationToken)
+    /// <summary>
+    /// Migrates user signal from the misidentified leaf to its corrected identity, then removes the old
+    /// leaf and whatever season/series it emptied. The plays and flags describe the <b>file</b> the user
+    /// watched — the file now lives under <paramref name="target"/>, so the signal follows it instead of
+    /// dying with the wrong-identity husk (which is why the husk is purged, never tombstoned).
+    /// </summary>
+    private async Task CleanupOrphanAsync(MediaItem old, MediaItem target, CancellationToken cancellationToken)
     {
         var remaining = await database.MediaSources.CountAsync(source => source.MediaItemId == old.Id, cancellationToken);
         if (remaining > 0)
@@ -230,38 +237,67 @@ public sealed class RemapService(
             return; // Defensive: another source still backs it (e.g. a multi-file item only partly moved).
         }
 
+        await MigrateUserSignalAsync(old.Id, target.Id, cancellationToken);
+
         var seasonId = old.SeasonId;
         var seriesId = old.SeriesId;
 
-        await PurgeItemsAsync([old.Id], cancellationToken);
+        // The husk carries nothing of the user's any more — force the purge.
+        await deleteService.RemoveItemsAsync([old.Id], deleteUserData: true, cancellationToken);
 
+        // Emptied containers follow the shared delete rules: gone from the library either way, kept as
+        // tombstones when ghost children or their own user signal still need them, purged otherwise.
         if (seasonId is { } season &&
-            await database.MediaItems.CountAsync(item => item.SeasonId == season, cancellationToken) == 0)
+            await database.MediaItems.CountAsync(item => item.SeasonId == season && item.PublicId != null, cancellationToken) == 0)
         {
-            await PurgeItemsAsync([season], cancellationToken);
+            await deleteService.RemoveItemsAsync([season], deleteUserData: false, cancellationToken);
         }
 
         if (seriesId is { } series &&
-            await database.MediaItems.CountAsync(item => item.Id != series && (item.SeriesId == series || item.ParentId == series), cancellationToken) == 0)
+            await database.MediaItems.CountAsync(item => item.Id != series && (item.SeriesId == series || item.ParentId == series) &&
+                item.PublicId != null, cancellationToken) == 0)
         {
-            await PurgeItemsAsync([series], cancellationToken);
+            await deleteService.RemoveItemsAsync([series], deleteUserData: false, cancellationToken);
         }
     }
 
-    /// <summary>Deletes the given items and their dependents. Caller passes a single-generation id set.</summary>
-    private async Task PurgeItemsAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken)
+    /// <summary>
+    /// Repoints playback history and merges per-user state from <paramref name="oldId"/> onto
+    /// <paramref name="targetId"/>. History rows repoint wholesale (a colliding play — same user and
+    /// session already on the target — is the same viewing recorded twice, so the duplicate dies).
+    /// User state repoints where the target has no row for the user, and merges where it does:
+    /// favorite and watched combine with OR, the target keeps its own position and counts. Everything
+    /// left on the old item afterwards is duplicate residue for the purge that follows.
+    /// </summary>
+    private async Task MigrateUserSignalAsync(Guid oldId, Guid targetId, CancellationToken cancellationToken)
     {
-        var sourceIds = await database.MediaSources
-            .Where(source => ids.Contains(source.MediaItemId))
-            .Select(source => source.Id)
-            .ToListAsync(cancellationToken);
+        await database.PlaybackHistoryEntries
+            .Where(entry => entry.MediaItemId == oldId && entry.PlaySessionId != null &&
+                database.PlaybackHistoryEntries.Any(existing => existing.MediaItemId == targetId &&
+                    existing.AppUserId == entry.AppUserId && existing.PlaySessionId == entry.PlaySessionId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await database.PlaybackHistoryEntries
+            .Where(entry => entry.MediaItemId == oldId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(entry => entry.MediaItemId, targetId), cancellationToken);
 
-        await database.MediaStreams.Where(stream => sourceIds.Contains(stream.MediaSourceId)).ExecuteDeleteAsync(cancellationToken);
-        await database.MediaSources.Where(source => ids.Contains(source.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.MetadataRecords.Where(record => ids.Contains(record.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.ImageAssets.Where(image => ids.Contains(image.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.UserItemData.Where(data => ids.Contains(data.MediaItemId)).ExecuteDeleteAsync(cancellationToken);
-        await database.MediaItems.Where(item => ids.Contains(item.Id)).ExecuteDeleteAsync(cancellationToken);
+        // Bulk updates bypass SaveChanges, so the StateRevision bump the Jellyfin delta sync relies on
+        // is applied by hand in both statements.
+        await database.UserItemData
+            .Where(data => data.MediaItemId == oldId &&
+                !database.UserItemData.Any(existing => existing.MediaItemId == targetId && existing.AppUserId == data.AppUserId))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(data => data.MediaItemId, targetId)
+                .SetProperty(data => data.StateRevision, data => data.StateRevision + 1), cancellationToken);
+        await database.UserItemData
+            .Where(data => data.MediaItemId == targetId &&
+                database.UserItemData.Any(other => other.MediaItemId == oldId && other.AppUserId == data.AppUserId &&
+                    (other.IsFavorite || other.Played)))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(data => data.IsFavorite, data => data.IsFavorite ||
+                    database.UserItemData.Any(other => other.MediaItemId == oldId && other.AppUserId == data.AppUserId && other.IsFavorite))
+                .SetProperty(data => data.Played, data => data.Played ||
+                    database.UserItemData.Any(other => other.MediaItemId == oldId && other.AppUserId == data.AppUserId && other.Played))
+                .SetProperty(data => data.StateRevision, data => data.StateRevision + 1), cancellationToken);
     }
 }
 
