@@ -76,6 +76,65 @@ test("resolve match dialog shows the movie filename and metadata candidates", as
   expect(body.groups[0].files.map((file) => file.sourceFileId)).toEqual(["source-1"]);
 });
 
+// A title lives in exactly one catalog: an import whose identity is already published elsewhere is parked,
+// and the way forward is to send the whole download to that catalog (where it becomes another version).
+test("a catalog conflict offers moving the download to the catalog that owns the title", async ({ page }) => {
+  await setupApp(page, {
+    catalogs: [
+      { id: "c1", name: "Movies 4K", type: "Movie" },
+      { id: "c2", name: "Movies", type: "Movie" },
+    ],
+    ingest: [
+      {
+        id: "ingest-1",
+        catalogId: "c1",
+        downloadId: null,
+        downloadName: "Inception.2010.2160p.mkv",
+        mediaTitle: null,
+        mediaItemId: null,
+        stage: "Identify",
+        status: "NeedsReview",
+        attemptCount: 0,
+        stagesCompleted: ["intake", "download"],
+        lastError:
+          "'Inception' (2010) is already in catalog 'Movies' — a title lives in one catalog only. Retarget this download to that catalog, or skip it.",
+        nextAttemptAt: null,
+        conflictCatalogId: "c2",
+        reviewCandidates: [],
+        sourceFiles: [
+          {
+            id: "source-1",
+            relativePath: ".incoming/abc/Inception.2010.2160p.mkv",
+            sizeBytes: 1024,
+            assignmentStatus: "NeedsReview",
+            mediaItemId: null,
+            parsedTitle: "Inception",
+            parsedYear: 2010,
+            parsedSeason: null,
+            parsedEpisode: null,
+          },
+        ],
+        createdAt: "2026-07-26T10:00:00Z",
+        updatedAt: "2026-07-26T10:00:00Z",
+      },
+    ],
+  });
+
+  await page.goto("/activity");
+  await page.getByRole("button", { name: "Resolve match" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Resolve match" });
+  await expect(dialog).toBeVisible();
+  // The server's reason is shown verbatim — it names the catalog that owns the title.
+  await expect(dialog.getByText(/already in catalog 'Movies'/)).toBeVisible();
+
+  const retarget = page.waitForRequest(
+    (request) => request.url().includes("/ingest/ingest-1/retarget") && request.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "Move download to Movies" }).click();
+  await retarget;
+});
+
 // A franchise pack holds several movies, so the movie-catalog dialog groups the files by parsed title and
 // confirms one identity per group — the whole batch resolving in a single grouped match request.
 test("resolve match dialog maps a franchise pack to one movie per group", async ({ page }) => {

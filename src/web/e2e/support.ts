@@ -133,6 +133,7 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     }
     if (/^\/ingest\/[^/]+\/search$/.test(path)) return route.fulfill({ json: mock.metadataSearch ?? [] });
     if (/^\/ingest\/[^/]+\/match$/.test(path)) return route.fulfill({ json: null });
+    if (/^\/ingest\/[^/]+\/retarget$/.test(path)) return route.fulfill({ status: 202, json: null });
     if (/^\/library\/[^/]+\/remap$/.test(path)) return route.fulfill({ json: { id: mock.remapTargetId ?? "remapped" } });
 
     // Episode/season delete answers with what it pruned, so the UI knows when the series page is gone.
