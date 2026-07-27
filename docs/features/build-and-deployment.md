@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-07-24
+Updated: 2026-07-27
 
 ## Description
 
@@ -55,6 +55,35 @@ hosty apps logs com.haas.media-server
   Catalog roots are bound through Hosty external host-path mounts (see
   [Storage and data](storage-and-data/feature.md)). Image build/publish lands in M4 (see
   [Implementation plan](implementation-plan.md)).
+
+### Base images
+
+Both images pin their base by digest, the same discipline `publish.yml` applies to
+GitHub Actions: an unpinned tag lets two builds of one commit ship different
+userland. The re-pin command is recorded in each Dockerfile.
+
+### Container users
+
+The two services differ, and the difference is a property of what they touch:
+
+- **`web` runs unprivileged** as the base image's `node` user. It serves the Next
+  standalone bundle and mounts nothing — `catalogRoots` is declared on `api`, and
+  the app data target for `web` exists only in the `dev` runtime.
+- **`api` runs as root.** It is not merely a reader of `catalogRoots`: the
+  organizer creates canonical directories, ingest recursively deletes
+  `.incoming/<downloadId>`, and the mux and Jellyfin image services move and
+  delete files in place. Those roots are operator-owned host paths — any number of
+  them, each with its own owner, and on an existing installation created
+  root-owned by this image. The container cannot take ownership of them (they are
+  the user's media library, not app state), and there is no single uid to adopt
+  when several roots disagree.
+
+Dropping privileges in `api` therefore needs a uid/gid or supplementary-group
+contract from Hosty Core, which does not exist today — Core sets no `--user` and
+injects no uid. Recorded as a platform request (see
+[Hosty platform requests](hosty-platform-requests.md), item 16). Until it lands, a
+non-root `api` would fail to organize, ingest or mux on any catalog root it does
+not happen to own.
 
 ## GitHub Actions CI/CD
 
