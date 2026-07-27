@@ -15,9 +15,23 @@ export function joinRoot(base: string, relative: string) {
   return `${baseWithSeparator}${cleaned}`;
 }
 
-// Mirrors CatalogRootResolver.Normalize on the API side: forward slashes, no leading/trailing separator.
+// Mirrors CatalogRootResolver.Normalize on the API side: forward slashes, no leading/trailing separator,
+// "." and ".." resolved away. A path that climbs out of the mount reduces to "" here and is rejected by
+// the API, so the preview never shows a location the server would refuse to store.
 export function normalizeRelativePath(relative: string) {
-  return relative.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const segments: string[] = [];
+  for (const segment of relative.trim().split(/[\\/]+/)) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") segments.pop();
+    else segments.push(segment);
+  }
+  return segments.join("/");
+}
+
+// The label to actually submit: the picker falls back to the first configured mount for display, so an
+// unavailable stored label (its mount was removed or renamed) must not be what gets sent.
+export function effectiveMountLabel(mounts: CatalogMount[], label: string) {
+  return mounts.find((mount) => mount.label === label)?.label ?? mounts[0]?.label ?? "";
 }
 
 /**
@@ -40,7 +54,7 @@ export function MountPathPicker({
 }) {
   const mountId = useId();
   const relativePathId = useId();
-  const selected = mounts.find((mount) => mount.label === mountLabel) ?? mounts[0];
+  const selected = mounts.find((mount) => mount.label === effectiveMountLabel(mounts, mountLabel));
 
   return (
     <>

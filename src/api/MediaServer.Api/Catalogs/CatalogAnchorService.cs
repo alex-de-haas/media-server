@@ -143,22 +143,25 @@ public sealed class CatalogAnchorService(
             throw new CatalogValidationException("A mount is required.");
         }
 
-        var relative = CatalogRootResolver.Normalize(relativePath);
-        var resolved = CatalogRootResolver.Resolve(settings.CatalogMountRoots, label.Trim(), relative)
+        var relative = CatalogRootResolver.Normalize(relativePath)
+            ?? throw new CatalogValidationException("The path within the mount must stay inside it.");
+        // The mount's own label is what gets stored, not the caller's casing of it — see ResolveAnchor.
+        var (canonicalLabel, resolved) = CatalogRootResolver.ResolveAnchor(settings.CatalogMountRoots, label.Trim(), relative)
             ?? throw new CatalogValidationException(
                 $"No catalog-root mount named \"{label.Trim()}\" is configured for this runtime.");
 
         var taken = await database.Catalogs.AnyAsync(
-            candidate => candidate.Id != id && candidate.MountLabel == label.Trim() && candidate.MountRelativePath == relative,
+            candidate => candidate.Id != id && candidate.MountLabel == canonicalLabel && candidate.MountRelativePath == relative,
             cancellationToken);
         if (taken)
         {
             throw new CatalogValidationException($"Another catalog already uses that location: {resolved}");
         }
 
+        await EnsureNoDownloadIsWritingAsync(catalog, resolved, cancellationToken);
         EnsureRootUsable(resolved);
 
-        catalog.MountLabel = label.Trim();
+        catalog.MountLabel = canonicalLabel;
         catalog.MountRelativePath = relative;
         catalog.Root = resolved;
         catalog.UpdatedAt = DateTimeOffset.UtcNow;
@@ -172,6 +175,40 @@ public sealed class CatalogAnchorService(
         logger.LogInformation(
             "Catalog {Catalog} re-anchored by operator to mount {Label} at {Root}.", catalog.Name, catalog.MountLabel, resolved);
         return catalog;
+    }
+
+    /// <summary>
+    /// Refuses to move a catalog out from under a download the torrent engine is actively writing.
+    /// Rewriting <see cref="Download.SavePath"/> alone would not move the existing <c>.incoming/</c> data
+    /// or retarget the running engine: it would keep writing to the old directory while completion and
+    /// deletion looked at the new one, stranding the files. The startup pass has no such problem — the
+    /// engine is re-added from the (already rewritten) save paths after it runs.
+    ///
+    /// Only the states the engine actually resumes count (<see cref="DownloadState.Queued"/>,
+    /// <see cref="DownloadState.Downloading"/>, <see cref="DownloadState.Seeding"/>; see
+    /// <see cref="MediaServer.Api.Torrents.TorrentCoordinator"/>), and only while the catalog is where it
+    /// says it is: for an unanchored catalog the root is unreachable, nothing can be writing there, and
+    /// re-anchoring is precisely the repair — blocking it over a stale row would be a trap.
+    /// </summary>
+    private async Task EnsureNoDownloadIsWritingAsync(Catalog catalog, string resolved, CancellationToken cancellationToken)
+    {
+        if (string.Equals(catalog.Root, resolved, StringComparison.Ordinal) || !filesystem.DirectoryExists(catalog.Root))
+        {
+            return;
+        }
+
+        var active = await database.Downloads.CountAsync(
+            download => download.CatalogId == catalog.Id &&
+                (download.State == DownloadState.Queued ||
+                 download.State == DownloadState.Downloading ||
+                 download.State == DownloadState.Seeding),
+            cancellationToken);
+
+        if (active > 0)
+        {
+            throw new CatalogInUseException(
+                $"This catalog has {active} active download(s) writing to {catalog.Root}. Let them finish (or remove them) before moving the catalog.");
+        }
     }
 
     /// <summary>

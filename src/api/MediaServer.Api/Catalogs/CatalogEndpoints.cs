@@ -63,6 +63,10 @@ public static class CatalogEndpoints
             {
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status400BadRequest);
             }
+            catch (CatalogInUseException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status409Conflict);
+            }
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
         group.MapPatch("/{id:guid}", async (Guid id, UpdateCatalogRequest request, CatalogService service, CancellationToken cancellationToken) =>

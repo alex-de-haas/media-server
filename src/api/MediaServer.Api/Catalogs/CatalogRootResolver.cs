@@ -24,7 +24,17 @@ public static class CatalogRootResolver
     /// when the runtime injects no mount with that label (the mount was removed or renamed — the catalog
     /// is *unanchored*, and no path is guessed for it), or when the relative path would escape the mount.
     /// </summary>
-    public static string? Resolve(IReadOnlyList<CatalogMount> mounts, string? label, string? relativePath)
+    public static string? Resolve(IReadOnlyList<CatalogMount> mounts, string? label, string? relativePath) =>
+        ResolveAnchor(mounts, label, relativePath)?.Root;
+
+    /// <summary>
+    /// As <see cref="Resolve"/>, but also returns the mount's <b>own</b> label rather than the caller's
+    /// spelling of it. Labels are matched case-insensitively, so storing the caller's casing would let
+    /// <c>media</c> and <c>MEDIA</c> — one and the same mount — be recorded as two different anchors and
+    /// slip past the uniqueness check. Everything that persists an anchor stores this canonical label.
+    /// </summary>
+    public static (string Label, string Root)? ResolveAnchor(
+        IReadOnlyList<CatalogMount> mounts, string? label, string? relativePath)
     {
         if (string.IsNullOrEmpty(label))
         {
@@ -41,14 +51,18 @@ public static class CatalogRootResolver
         }
 
         var root = Path.GetFullPath(mount.Path);
-        var relative = Normalize(relativePath);
+        if (Normalize(relativePath) is not { } relative)
+        {
+            return null;
+        }
+
         if (relative.Length == 0)
         {
-            return root;
+            return (mount.Label, root);
         }
 
         var combined = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
-        return IsContained(combined, root) ? combined : null;
+        return IsContained(combined, root) ? (mount.Label, combined) : null;
     }
 
     /// <summary>
@@ -77,9 +91,11 @@ public static class CatalogRootResolver
                 continue;
             }
 
+            // Both sides are already canonical absolute paths and containment is established, so the
+            // relative path cannot climb out and Normalize cannot fail here.
             var relative = string.Equals(full, root, PathComparison)
                 ? string.Empty
-                : Normalize(Path.GetRelativePath(root, full));
+                : Normalize(Path.GetRelativePath(root, full)) ?? string.Empty;
             return (mount.Label, relative);
         }
 
@@ -88,18 +104,38 @@ public static class CatalogRootResolver
 
     /// <summary>
     /// Normalizes an operator-supplied or stored mount-relative path to the canonical posix-style form:
-    /// forward slashes, no leading/trailing separator, and <c>.</c> (what
-    /// <see cref="Path.GetRelativePath"/> returns for the root itself) flattened to empty.
+    /// forward slashes, no leading/trailing separator, and <c>.</c>/<c>..</c> segments resolved away.
+    /// Canonical matters beyond tidiness — this string *is* the catalog's stored location, so
+    /// <c>films</c> and <c>movies/../films</c> have to reduce to one value or two catalogs could claim
+    /// the same directory through the uniqueness check. Returns null when the path climbs out of the
+    /// mount, which the caller reports rather than silently clamping.
     /// </summary>
-    public static string Normalize(string? relativePath)
+    public static string? Normalize(string? relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
         {
             return string.Empty;
         }
 
-        var trimmed = relativePath.Trim().Replace('\\', '/').Trim('/');
-        return trimmed is "." ? string.Empty : trimmed;
+        var segments = new List<string>();
+        foreach (var segment in relativePath.Trim().Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (segment)
+            {
+                case ".":
+                    continue;
+                case ".." when segments.Count == 0:
+                    return null; // Climbs above the mount root.
+                case "..":
+                    segments.RemoveAt(segments.Count - 1);
+                    continue;
+                default:
+                    segments.Add(segment);
+                    continue;
+            }
+        }
+
+        return string.Join('/', segments);
     }
 
     /// <summary>True when <paramref name="path"/> is <paramref name="root"/> or sits underneath it.</summary>

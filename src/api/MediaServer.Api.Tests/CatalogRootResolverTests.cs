@@ -91,6 +91,31 @@ public sealed class CatalogRootResolverTests
     public void Refuses_a_relative_path_that_escapes_its_mount()
     {
         Assert.Null(CatalogRootResolver.Resolve(DockerMounts, "dev_media_1", "../../etc"));
+        Assert.Null(CatalogRootResolver.Normalize("../etc"));
+        Assert.Null(CatalogRootResolver.Normalize("movies/../../etc"));
+    }
+
+    [Fact]
+    public void Reduces_dot_segments_so_one_directory_has_one_stored_identity()
+    {
+        // The relative path is the durable identity: if "films" and "movies/../films" were stored as two
+        // different strings, the uniqueness check would let two catalogs own the same directory.
+        Assert.Equal("films", CatalogRootResolver.Normalize("movies/../films"));
+        Assert.Equal("films", CatalogRootResolver.Normalize("./films/."));
+        Assert.Equal(
+            CatalogRootResolver.Resolve(DockerMounts, "dev_media_1", "films"),
+            CatalogRootResolver.Resolve(DockerMounts, "dev_media_1", "movies/../films"));
+    }
+
+    [Fact]
+    public void Anchoring_reports_the_mounts_own_label_not_the_callers_casing()
+    {
+        // Storing the caller's spelling would let "dev_media_1" and "DEV_MEDIA_1" — the same mount — be
+        // recorded as two anchors, which the composite unique index compares case-sensitively.
+        var anchor = CatalogRootResolver.ResolveAnchor(DockerMounts, "DEV_MEDIA_1", "movies");
+
+        Assert.Equal("dev_media_1", anchor!.Value.Label);
+        Assert.Equal("/mnt/catalogRoots/dev_media_1/movies", anchor.Value.Root);
     }
 
     [Theory]
@@ -100,6 +125,7 @@ public sealed class CatalogRootResolverTests
     [InlineData("/movies/", "movies")]
     [InlineData("  movies  ", "movies")]
     [InlineData("tv\\anime", "tv/anime")]
+    [InlineData("tv//anime/", "tv/anime")]
     public void Normalizes_relative_paths(string? input, string expected) =>
         Assert.Equal(expected, CatalogRootResolver.Normalize(input));
 }

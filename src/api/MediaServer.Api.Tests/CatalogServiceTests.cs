@@ -155,6 +155,62 @@ public sealed class CatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Rejects_a_second_catalog_that_reaches_the_same_directory_by_another_spelling()
+    {
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] };
+        var service = CreateService(settings);
+        await service.CreateAsync(MountRequest("media", "movies"), CancellationToken.None);
+
+        // Same directory, written differently — the stored location has to reduce to one value, or both
+        // catalogs would scan and organize the same files.
+        await Assert.ThrowsAsync<CatalogValidationException>(
+            () => service.CreateAsync(MountRequest("media", "series/../movies"), CancellationToken.None));
+        // Same mount, different casing of its label.
+        await Assert.ThrowsAsync<CatalogValidationException>(
+            () => service.CreateAsync(MountRequest("MEDIA", "movies"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Rejects_a_path_that_climbs_out_of_its_mount()
+    {
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] };
+        var service = CreateService(settings);
+
+        await Assert.ThrowsAsync<CatalogValidationException>(
+            () => service.CreateAsync(MountRequest("media", "../elsewhere"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Stores_the_mounts_own_label_regardless_of_the_requested_casing()
+    {
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] };
+        var service = CreateService(settings);
+
+        var catalog = await service.CreateAsync(MountRequest("MEDIA", "movies"), CancellationToken.None);
+
+        Assert.Equal("media", catalog.MountLabel);
+    }
+
+    [Fact]
+    public async Task Reports_a_stale_label_as_unanchored_even_when_the_root_still_sits_inside_a_mount()
+    {
+        var created = await CreateService(new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] })
+            .CreateAsync(MountRequest("media", "movies"), CancellationToken.None);
+
+        // The mount was renamed but kept its path. The root still looks at home, yet the stored label is
+        // dead — it would resolve to nothing on the next runtime, so the operator has to be told now.
+        var renamed = CreateService(new MediaServerSettings
+        {
+            CatalogMountRoots = [new CatalogMount("media-renamed", _tempRoot)],
+        });
+
+        var catalog = await renamed.GetAsync(created.Id, CancellationToken.None);
+
+        Assert.NotNull(catalog);
+        Assert.True(catalog.Unanchored);
+    }
+
+    [Fact]
     public async Task Reports_a_catalog_outside_every_mount_of_this_runtime_as_unanchored()
     {
         // Created under one runtime's paths…

@@ -105,11 +105,13 @@ public sealed class CatalogService(
 
         if (!string.IsNullOrWhiteSpace(request.MountLabel))
         {
-            mountLabel = request.MountLabel.Trim();
-            mountRelative = CatalogRootResolver.Normalize(request.RelativePath);
-            root = CatalogRootResolver.Resolve(settings.CatalogMountRoots, mountLabel, mountRelative)
+            mountRelative = CatalogRootResolver.Normalize(request.RelativePath)
+                ?? throw new CatalogValidationException("The path within the mount must stay inside it.");
+            // Store the mount's own label, not the caller's casing of it — see ResolveAnchor.
+            var anchor = CatalogRootResolver.ResolveAnchor(settings.CatalogMountRoots, request.MountLabel.Trim(), mountRelative)
                 ?? throw new CatalogValidationException(
-                    $"No catalog-root mount named \"{mountLabel}\" is configured for this runtime.");
+                    $"No catalog-root mount named \"{request.MountLabel.Trim()}\" is configured for this runtime.");
+            (mountLabel, root) = anchor;
         }
         else
         {
@@ -386,13 +388,22 @@ public sealed class CatalogService(
     }
 
     /// <summary>
-    /// A catalog is unanchored when mounts are injected but none of them holds its root. Startup rewrites
-    /// the root of every catalog whose label this runtime provides (see <see cref="CatalogAnchorService"/>),
-    /// so a root still outside every mount here means the label is unknown to this runtime — or was never
-    /// recorded, for a root created under the other runtime profile. Standalone runs (no mounts) never
-    /// report it: there is nothing to be anchored to.
+    /// A catalog is unanchored when mounts are injected but this runtime cannot place it. For an anchored
+    /// catalog that is decided by its stored label alone: a mount renamed while keeping its path would
+    /// otherwise leave the root looking at home inside the renamed mount, hiding the re-anchor prompt for
+    /// a label that is in fact dead — and would fail on the next runtime. A catalog with no label (a
+    /// legacy row, or one created under the other runtime profile) has only its root to go on. Standalone
+    /// runs (no mounts injected) never report it: there is nothing to be anchored to.
     /// </summary>
-    private bool IsUnanchored(Catalog catalog) =>
-        settings.CatalogMountRoots.Count > 0 &&
-        CatalogRootResolver.ToMountRelative(settings.CatalogMountRoots, catalog.Root) is null;
+    private bool IsUnanchored(Catalog catalog)
+    {
+        if (settings.CatalogMountRoots.Count == 0)
+        {
+            return false;
+        }
+
+        return string.IsNullOrEmpty(catalog.MountLabel)
+            ? CatalogRootResolver.ToMountRelative(settings.CatalogMountRoots, catalog.Root) is null
+            : CatalogRootResolver.Resolve(settings.CatalogMountRoots, catalog.MountLabel, catalog.MountRelativePath) is null;
+    }
 }

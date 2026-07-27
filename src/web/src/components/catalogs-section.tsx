@@ -25,7 +25,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { QueryState } from "@/components/states";
 import { AddCatalogDialog } from "@/components/add-catalog-dialog";
-import { MountPathPicker, normalizeRelativePath } from "@/components/mount-path-picker";
+import { effectiveMountLabel, MountPathPicker, normalizeRelativePath } from "@/components/mount-path-picker";
 
 // A vivid, distinguishable palette (reads on both light and dark). Each catalog gets a stable color,
 // shared between its bar segment and the dot next to its name; cycles if there are more catalogs.
@@ -338,7 +338,9 @@ function AnchorCatalogDialog({
   const [mountLabel, setMountLabel] = useState(catalog.mountLabel ?? "");
   const [relativePath, setRelativePath] = useState(catalog.mountRelativePath ?? "");
 
-  const selectedLabel = mountLabel || mounts.data?.[0]?.label || "";
+  // Not `mountLabel || first`: an unanchored catalog carries a label this runtime no longer provides, and
+  // sending that back would just earn a "no mount named …" error while the picker showed the fallback.
+  const selectedLabel = effectiveMountLabel(mounts.data ?? [], mountLabel);
 
   const anchor = useMutation({
     mutationFn: () =>

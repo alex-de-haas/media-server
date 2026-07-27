@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { MountPathPicker, normalizeRelativePath } from "@/components/mount-path-picker";
+import { effectiveMountLabel, MountPathPicker, normalizeRelativePath } from "@/components/mount-path-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const CATALOG_TYPES: CatalogType[] = ["Movie", "Series", "Anime"];
@@ -42,7 +42,7 @@ export function AddCatalogDialog() {
   const [freeRoot, setFreeRoot] = useState("");
 
   const hasMounts = (mounts.data?.length ?? 0) > 0;
-  const selectedLabel = mountLabel || mounts.data?.[0]?.label || "";
+  const selectedLabel = effectiveMountLabel(mounts.data ?? [], mountLabel);
 
   const create = useMutation({
     mutationFn: () =>

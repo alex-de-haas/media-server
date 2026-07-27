@@ -72,7 +72,21 @@ media        /srv/media                /mnt/catalogRoots/media
   as stored (no path is guessed at), file-backed actions are unavailable as when
   offline, and the operator re-anchors it onto a configured mount from the
   Catalogs page (`POST /api/catalogs/{id}/anchor`). Media files are never moved
-  by anchoring; only the record of where the catalog lives changes.
+  by anchoring; only the record of where the catalog lives changes. For a
+  catalog that has a label, this is decided by whether that label resolves, not
+  by where its root happens to sit: a mount renamed while keeping its path
+  leaves the stored label dead, and it has to be reported now rather than on the
+  next runtime switch.
+- Re-anchoring a catalog to a **different** directory is refused while it has a
+  download the torrent engine is working on (queued, downloading, or seeding):
+  the engine holds the old staging path and would keep writing there. This never
+  blocks repairing an unanchored catalog, whose root is unreachable anyway.
+- `mountLabel` is stored as the mount's own label and `mountRelativePath` in
+  canonical form (`.`/`..` resolved away, forward slashes, no leading or
+  trailing separator). Both are the catalog's identity, so one directory has to
+  reduce to exactly one stored value — otherwise `films` and `movies/../films`,
+  or `media` and `MEDIA`, would slip past the uniqueness check as two catalogs
+  owning the same media. A path that climbs out of its mount is rejected.
 - A download's staging directory (`<root>/.incoming/<downloadId>`) is derived
   from the root, so it follows the catalog whenever the root is rewritten.
 - Standalone runs where Hosty injects no mounts keep free-text absolute roots
@@ -212,9 +226,12 @@ Backend tests should use xUnit and Imposter. Required coverage:
 - Catalog configuration validation.
 - Mount anchoring: label↔path translation in both directions (including the
   mount root itself, a sibling directory sharing a path prefix, an unknown
-  label, and a relative path that would escape its mount); the startup pass over
-  each case (re-anchor, backfill, unanchored, standalone) including the staging
-  directories of in-flight downloads; the operator re-anchor action.
+  label, dot-segment reduction, label casing, and a relative path that would
+  escape its mount); the startup pass over each case (re-anchor, backfill,
+  unanchored, standalone) including the staging directories of in-flight
+  downloads; the operator re-anchor action, including its refusal to move a
+  catalog with an active download and to accept a location another catalog
+  already owns by a different spelling.
 - Free space and offline reporting, including that an unanchored catalog is
   reported as such rather than as an unreachable volume.
 - Parser/provider selection by catalog type (movie / series / anime).

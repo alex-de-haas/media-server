@@ -28,6 +28,35 @@ test("an unanchored catalog is labelled for re-anchoring, not as an offline volu
   await expect(page.getByText("offline")).toHaveCount(0);
 });
 
+test("re-anchoring a catalog whose mount is gone submits the mount it actually shows", async ({ page }) => {
+  await setupApp(page, {
+    catalogs: [
+      aCatalog(MOVIES, "Movies", "Movie", false, {
+        root: "/Users/haas/dev-media/movies",
+        mountLabel: "retired_mount", // No longer configured — this is why the catalog is unanchored.
+        mountRelativePath: "movies",
+        unanchored: true,
+      }),
+    ],
+    catalogMounts: MOUNTS,
+  });
+
+  await page.goto("/catalogs");
+  await page.getByRole("button", { name: "Catalog actions" }).click();
+  await page.getByRole("menuitem", { name: "Re-anchor" }).click();
+
+  // The picker falls back to the first configured mount; submitting the dead label would just 400.
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("combobox", { name: "Mount" })).toContainText("dev_media_1");
+
+  const request = page.waitForRequest((candidate) =>
+    candidate.url().endsWith(`/api/proxy/api/catalogs/${MOVIES}/anchor`) && candidate.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "Re-anchor" }).click();
+
+  expect((await request).postDataJSON()).toEqual({ mountLabel: "dev_media_1", relativePath: "movies" });
+});
+
 test("re-anchoring sends the mount label and a normalized path within it", async ({ page }) => {
   await setupApp(page, {
     catalogs: [

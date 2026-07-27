@@ -173,6 +173,58 @@ public sealed class CatalogAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Operator_re_anchor_refuses_to_move_a_catalog_with_an_active_download()
+    {
+        var catalog = SeedCatalog($"{DevRoot}/movies", "dev_media_1", "movies");
+        _database.Downloads.Add(new Download
+        {
+            Id = Guid.NewGuid(),
+            InfoHash = "hash-1",
+            CatalogId = catalog.Id,
+            State = DownloadState.Downloading,
+            SavePath = $"{DevRoot}/movies/.incoming/x",
+            AddedAt = DateTimeOffset.UtcNow,
+        });
+        await _database.SaveChangesAsync();
+        var service = CreateService(
+        [
+            new CatalogMount("dev_media_1", DevRoot),
+            new CatalogMount("archive", "/Volumes/archive"),
+        ]);
+
+        // The engine is writing at the old location and would not be retargeted by a path rewrite.
+        await Assert.ThrowsAsync<CatalogInUseException>(
+            () => service.AnchorAsync(catalog.Id, "archive", "films", CancellationToken.None));
+        Assert.Equal($"{DevRoot}/movies", (await Reload(catalog.Id)).Root);
+    }
+
+    [Fact]
+    public async Task Operator_re_anchor_of_an_unreachable_catalog_is_not_blocked_by_its_downloads()
+    {
+        var catalog = SeedCatalog($"{DevRoot}/movies", "dev_media_1", "movies");
+        _database.Downloads.Add(new Download
+        {
+            Id = Guid.NewGuid(),
+            InfoHash = "hash-1",
+            CatalogId = catalog.Id,
+            State = DownloadState.Seeding,
+            SavePath = $"{DevRoot}/movies/.incoming/x",
+            AddedAt = DateTimeOffset.UtcNow,
+        });
+        await _database.SaveChangesAsync();
+
+        // The current root is gone (this is the unanchored case), so nothing can be writing there and
+        // blocking the repair over a stale download row would trap the operator.
+        var filesystem = new FakeFilesystem();
+        filesystem.Missing.Add($"{DevRoot}/movies");
+        var service = CreateService([new CatalogMount("archive", "/Volumes/archive")], filesystem);
+
+        var updated = await service.AnchorAsync(catalog.Id, "archive", "films", CancellationToken.None);
+
+        Assert.Equal("/Volumes/archive/films", updated!.Root);
+    }
+
+    [Fact]
     public async Task Operator_re_anchor_refuses_a_target_whose_parent_is_unreachable()
     {
         var catalog = SeedCatalog($"{DevRoot}/movies", "dev_media_1", "movies");
