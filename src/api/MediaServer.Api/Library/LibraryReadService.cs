@@ -581,7 +581,7 @@ public sealed class LibraryReadService(
 
     // Older rows stored ffprobe's demuxer format list (e.g. "matroska,webm") as the container; show the real
     // container from the file extension instead, falling back to the first listed format. New rows are already
-    // clean (see FfprobeMediaProbe.NormalizeContainer).
+    // clean: every provider now reports the extension as the container.
     private static string DisplayContainer(MediaSource source)
     {
         var extension = Path.GetExtension(source.Path).TrimStart('.').ToLowerInvariant();
@@ -595,6 +595,7 @@ public sealed class LibraryReadService(
     }
 
     private static MediaStreamDto MapStream(MediaStream stream) => new(
+        stream.Id,
         stream.StreamType.ToString(),
         stream.Index,
         stream.Codec,

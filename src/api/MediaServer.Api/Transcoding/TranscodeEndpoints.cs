@@ -11,6 +11,13 @@ public static class TranscodeEndpoints
         // input/output paths), so the whole surface is admin-only — matching the UI gating.
         var group = routes.MapGroup("/api/transcode").RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Whether the engine dependency is attached at all. The Media tab itself stays available without it
+        // — it lists a title's versions and picks which one plays, neither of which needs an engine — but
+        // the conversion controls have nothing to talk to, so the UI hides them rather than offering an
+        // action that can only fail.
+        group.MapGet("/availability", (ITranscodeEngine engine) =>
+            Results.Ok(new { available = engine is not DisabledTranscodeEngine }));
+
         group.MapGet("/", async (TranscodeService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListAsync(cancellationToken)));
 

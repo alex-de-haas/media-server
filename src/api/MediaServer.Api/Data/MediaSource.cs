@@ -1,3 +1,5 @@
+using MediaServer.Api.Probe;
+
 namespace MediaServer.Api.Data;
 
 /// <summary>A playable source for a <see cref="MediaItem"/>, populated from probe.</summary>
@@ -23,6 +25,14 @@ public sealed class MediaSource
     public int? Bitrate { get; set; }
 
     public long DurationTicks { get; set; }
+
+    /// <summary>
+    /// Which provider produced this row's media data. The two do not know the same things, so a null field
+    /// means different things depending on it: from the container-header reader it may simply be beyond a
+    /// header's reach, while from the engine it is an answer. It is also how rows read by the weaker
+    /// provider are found again when the engine is attached and the library is refreshed.
+    /// </summary>
+    public ProbeSource ProbeSource { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

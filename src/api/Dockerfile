@@ -20,19 +20,18 @@ RUN dotnet publish MediaServer.Api/MediaServer.Api.csproj -c Release -o /app/pub
 FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7 AS runtime
 WORKDIR /app
 
-# ffprobe (from ffmpeg) for media probing — v1 does no transcoding, so the full encoder is not needed,
-# but ffmpeg is the canonical ffprobe distribution. FfprobePath defaults to a PATH lookup of "ffprobe".
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
+# No ffmpeg. This image used to install the whole package for one binary — ffprobe — which dragged in the
+# Mesa/LLVM software-GL stack and every encoder as hard dependencies: 418 MB of a 747 MB image, of which the
+# two binaries actually used were half a megabyte. Probing now reads container headers in managed code and
+# defers to the transcode-engine for what a header cannot state, and merging external audio tracks is a job
+# submitted to that same engine, so neither binary is needed here any more.
 COPY --from=build /app/publish ./
 
 # This service deliberately still runs as root, unlike `web` (which declares USER node).
 #
 # `catalogRoots` is a required, multiple, rw `host-path` external mount, and the API does not merely
 # read it: OrganizerService creates canonical directories, IngestService recursively deletes
-# `.incoming/<downloadId>`, AudioMuxService and JellyfinImageService move and delete files in place.
+# `.incoming/<downloadId>`, SidecarPlacementService and JellyfinImageService move and delete files in place.
 # Those directories belong to the operator — arbitrary host paths, any number of them, each with its
 # own owner, and on an existing installation created root-owned by this very image. The container
 # cannot take ownership of them (they are the user's media library, not app state) and there is no

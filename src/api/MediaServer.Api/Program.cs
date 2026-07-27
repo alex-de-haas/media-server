@@ -14,7 +14,7 @@ using MediaServer.Api.WatchHistory;
 using MediaServer.Api.WatchHistory.Trakt;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Library;
-using MediaServer.Api.Mux;
+using MediaServer.Api.Sidecars;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.People;
 using MediaServer.Api.Pipeline;
@@ -49,7 +49,7 @@ builder.AddHostyTelemetry();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-// Manifest settings (TMDb key, languages, ffprobe, torrent tunables) + catalog-root mounts.
+// Manifest settings (TMDb key, languages, torrent tunables) + catalog-root mounts.
 var settings = MediaServerSettings.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(settings);
 
@@ -129,9 +129,23 @@ builder.Services.AddScoped<TranscodeOutputImporter>();
 
 // Identify / probe / enrich building blocks.
 builder.Services.AddSingleton<INameParser, NameParser>();
-builder.Services.AddSingleton<IMediaProbe, FfprobeMediaProbe>();
-builder.Services.AddSingleton<IAudioMuxer, FfmpegAudioMuxer>();
-builder.Services.AddScoped<AudioMuxService>();
+// Probing runs through the transcode engine when it is attached and falls back to reading the file's own
+// container header otherwise, so an ingest never depends on the dependency being up. See
+// docs/features/media-probe-providers/feature.md.
+builder.Services.AddSingleton<HeaderMediaProbe>();
+if (settings.TranscodeEngineUrl is { Length: > 0 } probeEngineUrl)
+{
+    builder.Services.AddSingleton(serviceProvider => new RemoteMediaProbe(
+        new HttpClient { BaseAddress = new Uri(probeEngineUrl) },
+        settings,
+        serviceProvider.GetRequiredService<ILogger<RemoteMediaProbe>>()));
+}
+
+builder.Services.AddSingleton<IMediaProbe>(serviceProvider => new CompositeMediaProbe(
+    serviceProvider.GetService<RemoteMediaProbe>(),
+    serviceProvider.GetRequiredService<HeaderMediaProbe>(),
+    serviceProvider.GetRequiredService<ILogger<CompositeMediaProbe>>()));
+builder.Services.AddScoped<SidecarPlacementService>();
 builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
 {
     client.BaseAddress = new Uri("https://api.themoviedb.org/");
@@ -195,7 +209,7 @@ builder.Services.AddScoped<JobService>();
 builder.Services.AddScoped<IPipelineStage, IntakeStage>();
 builder.Services.AddScoped<IPipelineStage, DownloadStage>();
 builder.Services.AddScoped<IPipelineStage, IdentifyStage>();
-builder.Services.AddScoped<IPipelineStage, MuxStage>();
+builder.Services.AddScoped<IPipelineStage, SidecarStage>();
 builder.Services.AddScoped<IPipelineStage, OrganizeStage>();
 builder.Services.AddScoped<IPipelineStage, ProbeStage>();
 builder.Services.AddScoped<IPipelineStage, EnrichStage>();

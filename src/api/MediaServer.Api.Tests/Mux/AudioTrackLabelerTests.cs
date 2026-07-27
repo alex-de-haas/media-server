@@ -42,4 +42,68 @@ public sealed class AudioTrackLabelerTests
             ".incoming/x/Movie/Movie.rus.ac3",
             ".incoming/x/Movie/Movie.mkv"));
     }
+
+    // Layout 1: per-group folders, every companion reusing the video's exact file name. Taken from
+    // "Fullmetal Alchemist Brotherhood [BDRip] [1080p]", whose three dub groups differ only by folder.
+    [Theory]
+    [InlineData("RUS Sound/[AniDUB]", "[AniDUB]")]
+    [InlineData("RUS Sound/[Get Smart]", "[Get Smart]")]
+    [InlineData("RUS Sound/[MCA]", "[MCA]")]
+    public void The_dub_group_folder_titles_a_track_that_reuses_the_videos_name(string folder, string expected)
+    {
+        const string Name = "[Yousei-raws] Fullmetal Alchemist Brotherhood 01 [BDrip 1920x1080 x264 FLAC]";
+        Assert.Equal(expected, AudioTrackLabeler.InferTitle($".incoming/x/{folder}/{Name}.mka", $".incoming/x/{Name}.mkv"));
+    }
+
+    [Theory]
+    // A folder that only classifies what is inside it names a bucket, not a track.
+    [InlineData("RUS Subs")]
+    [InlineData("Sound")]
+    [InlineData("Russian")]
+    [InlineData("Rus Sound")]
+    public void A_folder_of_only_language_and_category_words_yields_no_title(string folder)
+    {
+        const string Name = "[Yousei-raws] Fullmetal Alchemist Brotherhood 01 [BDrip 1920x1080 x264 FLAC]";
+        Assert.Null(AudioTrackLabeler.InferTitle($".incoming/x/{folder}/{Name}.ass", $".incoming/x/{Name}.mkv"));
+    }
+
+    // Layout 2: everything flat, the label carried as a suffix on the file name.
+    [Theory]
+    [InlineData("The Rock (1996).rus.AniDUB.mka", "AniDUB")]
+    [InlineData("The Rock (1996).rus.Get Smart.mka", "Get Smart")]
+    [InlineData("The Rock (1996).Гаврилов.mka", "Гаврилов")]
+    [InlineData("The Rock (1996).rus.MVO Дубляжная.mka", "MVO Дубляжная")]
+    public void The_name_suffix_titles_a_track_in_a_flat_layout(string companion, string expected) =>
+        Assert.Equal(expected, AudioTrackLabeler.InferTitle(
+            $".incoming/x/{companion}", ".incoming/x/The Rock (1996).mkv"));
+
+    [Theory]
+    // Nothing but a language, or a language and a subtitle flag, is not a title.
+    [InlineData("The Rock (1996).rus.srt")]
+    [InlineData("The Rock (1996).rus.forced.srt")]
+    [InlineData("The Rock (1996).eng.sdh.ass")]
+    [InlineData("The Rock (1996).mka")]
+    public void A_suffix_of_only_language_and_flags_yields_no_title(string companion) =>
+        Assert.Null(AudioTrackLabeler.InferTitle(
+            $".incoming/x/{companion}", ".incoming/x/The Rock (1996).mkv"));
+
+    [Fact]
+    public void The_name_wins_over_the_folder()
+    {
+        // A grouped release whose files also carry a suffix: the more specific label is in the name.
+        Assert.Equal("Gavrilov", AudioTrackLabeler.InferTitle(
+            ".incoming/x/RUS Sound/Movie.rus.Gavrilov.mka", ".incoming/x/Movie.mkv"));
+    }
+
+    [Theory]
+    // The names this feature writes must read back on a later catalog scan, without the database.
+    [InlineData("Fullmetal Alchemist Brotherhood S01E01.rus.AniDUB.mka", "rus", "AniDUB")]
+    [InlineData("Fullmetal Alchemist Brotherhood S01E01.rus.Get Smart.mka", "rus", "Get Smart")]
+    [InlineData("Fullmetal Alchemist Brotherhood S01E01.rus.ass", "rus", null)]
+    public void Its_own_output_reads_back(string companion, string language, string? title)
+    {
+        const string Video = "Fullmetal Alchemist Brotherhood S01E01.mkv";
+        Assert.Equal(language, AudioTrackLabeler.InferLanguage($"Show/Season 01/{companion}"));
+        Assert.Equal(title, AudioTrackLabeler.InferTitle($"Show/Season 01/{companion}", $"Show/Season 01/{Video}"));
+    }
 }

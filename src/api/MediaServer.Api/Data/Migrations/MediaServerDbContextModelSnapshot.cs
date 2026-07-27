@@ -617,6 +617,9 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("ProbeSource")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("SizeBytes")
                         .HasColumnType("INTEGER");
 

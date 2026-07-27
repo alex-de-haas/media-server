@@ -37,6 +37,15 @@ public sealed class OrganizerService(
             }
         }
 
+        // Companion audio tracks and subtitles are not organized here: their names derive from the video's
+        // canonical one, so they are placed afterwards (see SidecarPlacementService). Their staging root
+        // must survive this sweep — recursive deletion would take the only copy of a dub with it.
+        foreach (var companion in sourceFiles.Where(file =>
+            file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && MediaFormats.IsCompanion(file.RelativePath)))
+        {
+            KeepStaging(companion);
+        }
+
         // Group by assigned media item so that when several files map to one movie/episode (e.g. a
         // black-and-white and a regular cut of the same episode) each gets a distinct canonical path —
         // alternate versions of one item — instead of colliding on the (item, path) unique index.

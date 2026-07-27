@@ -508,7 +508,7 @@ export function IngestReviewDialog({
 
   // The mux pairing target a file's current decision points it at, or null when the decision doesn't land
   // it on a media item. `key` mirrors the MediaItemId the file resolves to after Apply — provider identity
-  // plus episode/movie — which is exactly what the mux stage groups by (AudioMuxService merges confirmed
+  // plus episode/movie — which is exactly what the sidecar stage groups by (SidecarPlacementService places confirmed
   // staged files sharing a MediaItemId); `label` is the episode part shown in a group header. Match files
   // key on the batch's selected identity — grouping them together is correct even while it's unpicked
   // (they all receive the same one on Apply) — while keep files key on their existing mapping's identity,

@@ -50,19 +50,6 @@ public sealed class FakeMediaProbe : IMediaProbe
         Task.FromResult(OnProbe(absolutePath));
 }
 
-/// <summary>Records each mux plan and writes a stub output file, so the service's finalize (move/rename,
-/// row updates) runs for real without invoking ffmpeg.</summary>
-public sealed class FakeAudioMuxer : IAudioMuxer
-{
-    public List<AudioMuxPlan> Plans { get; } = [];
-
-    public async Task MuxAsync(AudioMuxPlan plan, CancellationToken cancellationToken)
-    {
-        Plans.Add(plan);
-        await File.WriteAllBytesAsync(plan.OutputAbsolutePath, new byte[2048], cancellationToken);
-    }
-}
-
 /// <summary>No-op torrent engine: the pipeline reads <see cref="Download.State"/>, not the engine.</summary>
 public sealed class FakeTorrentEngine : ITorrentEngine
 {

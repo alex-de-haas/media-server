@@ -17,7 +17,27 @@ public sealed record TranscodeJobRequest(
     IReadOnlyList<int>? AudioStreamIndexes = null,
     IReadOnlyList<int>? SubtitleStreamIndexes = null,
     int? DefaultAudioStreamIndex = null,
-    int? DefaultSubtitleStreamIndex = null);
+    int? DefaultSubtitleStreamIndex = null,
+    IReadOnlyList<EngineAdditionalInput>? AdditionalInputs = null,
+    IReadOnlyList<EngineMetadataOverride>? MetadataOverrides = null);
+
+/// <summary>
+/// Rewrites one output stream's language and/or title. <see cref="Input"/> is the ordinal of the file the
+/// stream comes from — 0 is the primary input, 1 the first additional input — and <see cref="StreamIndex"/>
+/// its absolute index in that file. A null field leaves the source stream's own value alone.
+/// </summary>
+public sealed record EngineMetadataOverride(int Input, int StreamIndex, string? Language, string? Title);
+
+/// <summary>
+/// A sidecar file whose streams join the output — how a merge is expressed. Naming any makes the job a
+/// stream copy on the engine's side, so the encode-only options must be left alone. Selections are absolute
+/// stream indexes within that file.
+/// </summary>
+public sealed record EngineAdditionalInput(
+    string? MountLabel,
+    string RelativePath,
+    IReadOnlyList<int>? AudioStreamIndexes = null,
+    IReadOnlyList<int>? SubtitleStreamIndexes = null);
 
 /// <summary>What is known about a job right after it is created.</summary>
 public sealed record JobDescriptor(

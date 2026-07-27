@@ -30,6 +30,15 @@ public sealed record LibraryScanReport(
     IReadOnlyList<CrossCatalogDuplicate> CrossCatalogDuplicates);
 
 /// <summary>
+/// The outcome of filling in media data that was read without the engine. <paramref name="Remaining"/>
+/// counts the sources still on header-read data afterwards — files the engine could not answer for either,
+/// typically because their catalog root is not bound into it.
+/// </summary>
+/// <param name="ItemsRefreshed">How many media items were re-probed.</param>
+/// <param name="Remaining">Sources still carrying header-read data.</param>
+public sealed record MediaBackfillReport(int ItemsRefreshed, int Remaining);
+
+/// <summary>
 /// M4 automation polish: on-demand and scheduled library maintenance. The scan verifies every published
 /// <see cref="MediaSource"/> still resolves to a file on disk (drift from out-of-band deletes), skipping
 /// offline catalogs so an unmounted volume isn't reported as missing media. Metadata refresh re-runs the
@@ -117,6 +126,7 @@ public sealed class LibraryMaintenanceService(
             source.SizeBytes = result.SizeBytes;
             source.Bitrate = result.Bitrate;
             source.DurationTicks = result.DurationTicks;
+            source.ProbeSource = result.Source;
 
             // Swap the whole stream set: deleting the old rows (distinct ids) and inserting the freshly probed
             // ones is simpler and safer than diffing by index, and the cascade keeps no orphans. The new rows
@@ -155,6 +165,50 @@ public sealed class LibraryMaintenanceService(
             "Refreshed media data for item {MediaItem}: re-probed {Count} of {Total} source(s).",
             mediaItemId, reprobed, sources.Count);
         return true;
+    }
+
+    /// <summary>
+    /// Re-probes every source whose media data came from the container-header reader rather than the engine,
+    /// so a library built while the transcode engine was detached can be filled in once it is back. Returns
+    /// how many items were touched and how many sources were re-probed.
+    /// <para>
+    /// Deliberately an explicit action rather than something that fires when the dependency reconnects: a
+    /// probe is fast, so a whole-library pass is a foreground operation an operator can simply run, and
+    /// rewriting stored data on its own the moment a dependency reappears would be a surprise.
+    /// </para>
+    /// </summary>
+    public async Task<MediaBackfillReport> BackfillHeaderProbedAsync(CancellationToken cancellationToken)
+    {
+        var itemIds = await database.MediaSources.AsNoTracking()
+            .Where(source => source.ProbeSource == ProbeSource.Header)
+            .Select(source => source.MediaItemId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (itemIds.Count == 0)
+        {
+            return new MediaBackfillReport(0, 0);
+        }
+
+        logger.LogInformation("Backfilling media data for {Count} item(s) probed without the engine.", itemIds.Count);
+
+        var refreshed = 0;
+        foreach (var itemId in itemIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await RefreshMediaAsync(itemId, cancellationToken))
+            {
+                refreshed++;
+            }
+        }
+
+        var remaining = await database.MediaSources.AsNoTracking()
+            .CountAsync(source => source.ProbeSource == ProbeSource.Header, cancellationToken);
+
+        logger.LogInformation(
+            "Media backfill finished: {Refreshed} item(s) refreshed, {Remaining} source(s) still without engine data.",
+            refreshed, remaining);
+        return new MediaBackfillReport(refreshed, remaining);
     }
 
     public async Task<LibraryScanReport> ScanAsync(CancellationToken cancellationToken)

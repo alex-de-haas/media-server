@@ -58,6 +58,7 @@ public sealed class TranscodeOutputImporter(
             SizeBytes = result.SizeBytes,
             Bitrate = result.Bitrate,
             DurationTicks = result.DurationTicks,
+            ProbeSource = result.Source,
             CreatedAt = DateTimeOffset.UtcNow,
         };
         database.MediaSources.Add(source);

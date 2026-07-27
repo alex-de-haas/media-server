@@ -782,7 +782,9 @@ type StreamGroup = { type: string; label: string; streams: MediaStream[]; defaul
 // first track when none is flagged; subtitles stay off unless flagged. Matches the Convert dialog.
 function groupStreams(streams: MediaStream[]): StreamGroup[] {
   const byType = new Map<string, MediaStream[]>();
-  for (const stream of streams) {
+  // External tracks are sidecar files beside the video, not tracks inside it. They are listed separately,
+  // with their own actions, so this grouping covers only what the container itself carries.
+  for (const stream of streams.filter((stream) => !stream.isExternal)) {
     const list = byType.get(stream.type) ?? [];
     list.push(stream);
     byType.set(stream.type, list);
@@ -902,6 +904,14 @@ function SourceCard({
   hasMultiple: boolean;
 }) {
   const queryClient = useQueryClient();
+  // The engine is an optional dependency. Everything else on this tab — the version list, renaming, the
+  // default-version pick — is database-side and works without it, so only the convert control keys off this.
+  const { data: transcode } = useQuery({
+    queryKey: ["transcode-availability"],
+    queryFn: () => mediaServer.transcodeAvailability(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const canConvert = transcode?.available ?? false;
   const [convertOpen, setConvertOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -964,9 +974,11 @@ function SourceCard({
             <Button variant="ghost" size="icon-sm" aria-label="Rename version" onClick={() => setEditOpen(true)}>
               <Pencil />
             </Button>
-            <Button variant="ghost" size="icon-sm" aria-label="Convert to a smaller version" onClick={() => setConvertOpen(true)}>
-              <Shrink />
-            </Button>
+            {canConvert && (
+              <Button variant="ghost" size="icon-sm" aria-label="Convert to a smaller version" onClick={() => setConvertOpen(true)}>
+                <Shrink />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -985,6 +997,14 @@ function SourceCard({
         ))}
       </dl>
 
+      <SidecarSection
+        sidecars={source.streams.filter((stream) => stream.isExternal)}
+        sourceId={source.id}
+        itemId={itemId}
+        canManage={canManage}
+        canMerge={canConvert}
+      />
+
       {canManage && (
         <EditVersionDialog
           source={source}
@@ -995,7 +1015,7 @@ function SourceCard({
           onOpenChange={setEditOpen}
         />
       )}
-      {canManage && <TranscodeDialog source={source} open={convertOpen} onOpenChange={setConvertOpen} />}
+      {canManage && canConvert && <TranscodeDialog source={source} open={convertOpen} onOpenChange={setConvertOpen} />}
       {canManage && <DeleteVersionDialog source={source} itemId={itemId} open={deleteOpen} onOpenChange={setDeleteOpen} />}
     </div>
   );
@@ -1113,6 +1133,109 @@ function EditVersionDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Sidecar tracks: dub and subtitle files sitting beside the video rather than inside it. They are listed
+// apart from the container's own tracks because they behave differently — each is a file that can be
+// removed on its own, and a player will not use an external *audio* track at all until it is merged in.
+function SidecarSection({
+  sidecars,
+  sourceId,
+  itemId,
+  canManage,
+  canMerge,
+}: {
+  sidecars: MediaStream[];
+  sourceId: string;
+  itemId: string;
+  canManage: boolean;
+  canMerge: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const merge = useMutation({
+    mutationFn: () => mediaServer.createTranscodeJob({ sourceId, mergeStreamIds: selected }),
+    onSuccess: () => {
+      setSelected([]);
+      queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
+      toast.success("Merging tracks into a new version");
+    },
+    onError: (error) => toast.error("Couldn’t start the merge", { description: errorMessage(error) }),
+  });
+
+  const remove = useMutation({
+    mutationFn: ({ id, deleteFile }: { id: string; deleteFile: boolean }) =>
+      mediaServer.deleteExternalStream(id, deleteFile),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
+      toast.success("Track removed");
+    },
+    onError: (error) => toast.error("Couldn’t remove the track", { description: errorMessage(error) }),
+  });
+
+  if (sidecars.length === 0) {
+    return null;
+  }
+
+  const audioCount = sidecars.filter((stream) => stream.type === "Audio").length;
+
+  return (
+    <div className="mt-2 border-t pt-2">
+      <p className="text-muted-foreground text-xs">
+        {sidecars.length} separate {sidecars.length === 1 ? "file" : "files"} beside this version
+      </p>
+      {audioCount > 0 && (
+        // Worth stating plainly: keeping a dub as a file preserves it, but no player will use it there.
+        <p className="text-muted-foreground mt-0.5 text-xs">
+          External audio only plays once merged into the video.
+        </p>
+      )}
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {sidecars.map((stream) => (
+          <li key={stream.id} className="flex items-center gap-2 text-sm leading-6">
+            {canManage && canMerge && (
+              <Checkbox
+                checked={selected.includes(stream.id)}
+                onCheckedChange={(checked) =>
+                  setSelected((current) =>
+                    checked ? [...current, stream.id] : current.filter((id) => id !== stream.id),
+                  )
+                }
+                aria-label={`Merge ${stream.displayTitle ?? stream.type} into a new version`}
+              />
+            )}
+            <span className="min-w-0 flex-1 truncate">
+              <TrackText stream={stream} />
+            </span>
+            {canManage && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Remove this track"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                disabled={remove.isPending}
+                onClick={() => remove.mutate({ id: stream.id, deleteFile: true })}
+              >
+                <Trash2 />
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {canManage && canMerge && selected.length > 0 && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-2"
+          disabled={merge.isPending}
+          onClick={() => merge.mutate()}
+        >
+          Merge {selected.length} into a new version
+        </Button>
+      )}
+    </div>
   );
 }
 

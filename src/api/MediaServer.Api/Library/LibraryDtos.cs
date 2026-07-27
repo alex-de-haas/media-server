@@ -108,6 +108,9 @@ public sealed record MediaSourceDto(
     IReadOnlyList<MediaStreamDto> Streams);
 
 public sealed record MediaStreamDto(
+    // A sidecar is a file of its own and can be merged in or removed on its own, so it has to be
+    // addressable; an embedded track carries the same id harmlessly.
+    Guid Id,
     string Type,
     int Index,
     string? Codec,
