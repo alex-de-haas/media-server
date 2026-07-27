@@ -177,22 +177,35 @@ public sealed class LibraryDeleteService(
             return false;
         }
 
-        var catalog = await database.MediaSources.AsNoTracking()
+        var owner = await database.MediaSources.AsNoTracking()
             .Where(source => source.Id == stream.MediaSourceId)
-            .Join(database.MediaItems.AsNoTracking(), source => source.MediaItemId, item => item.Id, (_, item) => item)
-            .Join(database.Catalogs.AsNoTracking(), item => item.CatalogId, candidate => (Guid?)candidate.Id, (_, candidate) => candidate)
+            .Join(database.MediaItems.AsNoTracking(), source => source.MediaItemId, item => item.Id, (source, item) => new
+            {
+                source.MediaItemId,
+                item.CatalogId,
+            })
             .FirstOrDefaultAsync(cancellationToken);
+
+        var catalog = owner?.CatalogId is { } catalogId
+            ? await database.Catalogs.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == catalogId, cancellationToken)
+            : null;
 
         await database.MediaStreams.Where(candidate => candidate.Id == streamId).ExecuteDeleteAsync(cancellationToken);
 
         // The staged file row, if the ingest that placed it is still around, goes back to being unassigned
-        // rather than pointing at something that is no longer part of the library.
+        // rather than pointing at something that is no longer part of the library. Scoped to the media item
+        // this sidecar belonged to: a relative path is only unique within its catalog, so matching on the
+        // path alone would detach an identically-placed sidecar of another catalog whose file is still there.
         if (stream.ExternalPath is { Length: > 0 } path)
         {
-            await database.SourceFiles.Where(file => file.RelativePath == path)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(file => file.MediaItemId, (Guid?)null)
-                    .SetProperty(file => file.AssignmentStatus, SourceFileAssignmentStatus.Unassigned), cancellationToken);
+            if (owner is not null)
+            {
+                await database.SourceFiles
+                    .Where(file => file.RelativePath == path && file.MediaItemId == owner.MediaItemId)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(file => file.MediaItemId, (Guid?)null)
+                        .SetProperty(file => file.AssignmentStatus, SourceFileAssignmentStatus.Unassigned), cancellationToken);
+            }
 
             if (deleteFile && catalog is not null)
             {

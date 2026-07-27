@@ -95,6 +95,49 @@ public sealed class SidecarDeletionTests : IDisposable
     }
 
     [Fact]
+    public async Task An_identically_placed_sidecar_of_another_item_is_left_alone()
+    {
+        // A relative path is only unique within its catalog, so matching on the path alone would detach a
+        // sidecar of a different library whose file is still there. Another catalog means another ingest,
+        // which is also what the (IngestItemId, RelativePath) uniqueness allows.
+        var now = DateTimeOffset.UtcNow;
+        var otherCatalog = new Catalog
+        {
+            Id = Guid.NewGuid(), Name = "Other movies", Type = CatalogType.Movie,
+            Root = Path.Combine(Path.GetTempPath(), "ms-other-" + Guid.NewGuid().ToString("N")),
+            CreatedAt = now, UpdatedAt = now,
+        };
+        var otherMovie = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = otherCatalog.Id,
+            Kind = MediaKind.Movie, Title = "The Rock", Year = 1996, AddedAt = now, UpdatedAt = now,
+        };
+        var otherIngest = new IngestItem
+        {
+            Id = Guid.NewGuid(), CatalogId = otherCatalog.Id, Stage = IngestStage.Publish,
+            Status = IngestStatus.Done, CreatedAt = now, UpdatedAt = now,
+        };
+        var other = otherMovie.Id;
+        _context.Catalogs.Add(otherCatalog);
+        _context.MediaItems.Add(otherMovie);
+        _context.IngestItems.Add(otherIngest);
+        await _context.SaveChangesAsync();
+
+        _context.SourceFiles.Add(new SourceFile
+        {
+            Id = Guid.NewGuid(), IngestItemId = otherIngest.Id, MediaItemId = other,
+            RelativePath = _sidecarRelative, SizeBytes = 512,
+            AssignmentStatus = SourceFileAssignmentStatus.Sidecar, CreatedAt = now, UpdatedAt = now,
+        });
+        await _context.SaveChangesAsync();
+
+        await Service().DeleteExternalStreamAsync(_streamId, deleteFile: false, CancellationToken.None);
+
+        var untouched = await _context.SourceFiles.SingleAsync(file => file.MediaItemId == other);
+        Assert.Equal(SourceFileAssignmentStatus.Sidecar, untouched.AssignmentStatus);
+    }
+
+    [Fact]
     public async Task An_unknown_stream_is_reported_rather_than_silently_ignored() =>
         Assert.False(await Service().DeleteExternalStreamAsync(Guid.NewGuid(), deleteFile: false, CancellationToken.None));
 

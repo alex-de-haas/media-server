@@ -139,6 +139,37 @@ public sealed class SidecarNamingTests
         Assert.Equal(["The Rock (1996).rus.srt"], Names((".incoming/x/subs.SRT", "rus", null)));
     }
 
+    [Theory]
+    // Path.GetInvalidFileNameChars() answers for the runtime, and on Linux — which the container is — that
+    // is only "/" and NUL. The library it writes into may be exFAT or SMB, or be opened from Windows, so
+    // these have to go regardless of where the process happens to run.
+    [InlineData("Vol: 2")]
+    [InlineData("What? Really")]
+    [InlineData("Star*Dub")]
+    [InlineData("The \"Best\" Cut")]
+    [InlineData("A<B>C")]
+    [InlineData("Back\\Slash")]
+    public void Characters_windows_and_exfat_refuse_are_removed_even_on_linux(string title)
+    {
+        var names = Names(
+            (".incoming/x/a.mka", "rus", title),
+            (".incoming/x/b.mka", "rus", "Other"));
+
+        var name = names[0];
+        Assert.DoesNotContain(name, character => ":*?\"<>\\/".Contains(character));
+        Assert.False(name.EndsWith(". mka", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_title_that_sanitizes_to_nothing_falls_back_to_the_position()
+    {
+        var names = Names(
+            (".incoming/x/a.mka", "rus", "???"),
+            (".incoming/x/b.mka", "rus", "Real"));
+
+        Assert.Equal("The Rock (1996).rus.1.mka", names[0]);
+    }
+
     [Fact]
     public void A_sidecar_never_takes_the_videos_own_name()
     {

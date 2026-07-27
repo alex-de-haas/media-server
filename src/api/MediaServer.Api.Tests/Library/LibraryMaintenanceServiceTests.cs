@@ -273,4 +273,35 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         public Task<IReadOnlyList<CoreDirectoryUser>?> ListDirectoryUsersAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<CoreDirectoryUser>?>([]);
         public int CountFor(string dedupeKey) => Notifications.Count(n => n == dedupeKey);
     }
+
+    [Fact]
+    public async Task RefreshMedia_spares_sidecar_streams()
+    {
+        // Probing the video says nothing about files sitting beside it. Sweeping external rows here would
+        // delete entries whose files are still on disk, making the tracks vanish with no way to merge or
+        // remove them — and the backfill runs on exactly the items most likely to have them.
+        var catalog = SeedCatalog();
+        var relative = Path.Combine("library", "A", "a.mkv");
+        var absolute = Path.Combine(_root, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        await File.WriteAllBytesAsync(absolute, new byte[16]);
+        var itemId = SeedItemWithSource(catalog, relative);
+
+        var sourceId = (await _database.MediaSources.SingleAsync(source => source.MediaItemId == itemId)).Id;
+        _database.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = sourceId, StreamType = StreamType.Audio,
+            Index = 1000, Language = "rus", IsExternal = true, ExternalPath = "library/A/a.rus.mka",
+        });
+        await _database.SaveChangesAsync();
+
+        Assert.True(await Service().RefreshMediaAsync(itemId, CancellationToken.None));
+
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        var streams = await fresh.MediaStreams.Where(stream => stream.MediaSourceId == sourceId).ToListAsync();
+        var external = Assert.Single(streams.Where(stream => stream.IsExternal));
+        Assert.Equal("rus", external.Language);
+        // The embedded set was still replaced by the fresh probe.
+        Assert.Equal(2, streams.Count(stream => !stream.IsExternal));
+    }
 }

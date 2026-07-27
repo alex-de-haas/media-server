@@ -163,6 +163,32 @@ public sealed class IngestSidecarTests
     }
 
     [Fact]
+    public async Task The_emptied_staging_folder_is_cleared_once_the_tracks_are_out()
+    {
+        // Organize spares a staging root that still holds a companion — its recursive sweep would take the
+        // only copy of a dub with it — so clearing what is now empty falls to the sidecar stage.
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [SomeMovie];
+        ProbeCompanionsAs(harness, _ => UntaggedAudioProbe());
+
+        var (ingestId, catalogId, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Some Movie 2020",
+            "Some.Movie.2020/Some.Movie.2020.mkv",
+            additionalSourceRelativePaths: ["Some.Movie.2020/RUS Sound/Some.Movie.2020.mka"]);
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var catalog = await database.Catalogs.SingleAsync(item => item.Id == catalogId);
+        var incoming = Path.Combine(catalog.Root, ".incoming");
+
+        Assert.False(
+            Directory.Exists(incoming) && Directory.EnumerateFileSystemEntries(incoming).Any(),
+            "the staging folder must not be left behind once its files are placed");
+    }
+
+    [Fact]
     public async Task A_dub_only_batch_keeps_its_tracks_instead_of_discarding_them()
     {
         // The case that motivated the whole feature: tracks whose videos are not in this batch used to be

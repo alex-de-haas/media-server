@@ -1,3 +1,4 @@
+using System.Buffers;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
 
@@ -74,10 +75,20 @@ public static class SidecarNaming
         MediaFormats.IsCompanionAudio(relativePath) ? "audio" : "subtitle";
 
     /// <summary>
-    /// A file-name-safe label. Real titles carry characters no filesystem accepts — one release in the
-    /// development library labels a track <c>DUB | DD5.1 @ 640 kbps</c>, and <c>|</c> is invalid on
-    /// Windows, exFAT and SMB. Dots go too, since they separate the name's own parts.
+    /// Characters a name must not contain, whatever this process happens to be running on.
+    /// <c>Path.GetInvalidFileNameChars()</c> answers for the <b>runtime</b>, and on Linux — which is what
+    /// the container is — that is only <c>/</c> and NUL. But the catalog root is the operator's media
+    /// library: it may be exFAT or SMB, and it may be opened from Windows later. A name this app writes has
+    /// to survive all of those, so the forbidden set is fixed here rather than inherited from the host.
+    /// <para>
+    /// The dot is included because it separates the name's own parts, and the whole reason this exists is
+    /// real titles: one release in the development library labels a track <c>DUB | DD5.1 @ 640 kbps</c>.
+    /// </para>
     /// </summary>
+    private static readonly SearchValues<char> ForbiddenInNames =
+        SearchValues.Create("/\\:*?\"<>|.\0\r\n\t");
+
+    /// <summary>A file-name-safe label, or null when nothing usable is left of the title.</summary>
     internal static string? Slug(string? title)
     {
         if (string.IsNullOrWhiteSpace(title))
@@ -85,10 +96,16 @@ public static class SidecarNaming
             return null;
         }
 
-        var invalid = Path.GetInvalidFileNameChars();
+        var runtimeInvalid = Path.GetInvalidFileNameChars();
         var cleaned = new string([.. title.Trim().Trim('[', ']', '(', ')')
-            .Where(character => !invalid.Contains(character) && character != '.' && character != '|')]);
+            .Where(character =>
+                !ForbiddenInNames.Contains(character) &&
+                !runtimeInvalid.Contains(character) &&
+                !char.IsControl(character))]);
         cleaned = string.Join(' ', cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        // Windows also refuses a name ending in a dot or a space, and the trailing-dot case can arrive here
+        // from a title like "Vol. 2.".
+        cleaned = cleaned.TrimEnd('.', ' ');
         return cleaned.Length == 0 ? null : cleaned;
     }
 

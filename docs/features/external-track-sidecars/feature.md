@@ -22,6 +22,10 @@ canonical name is known, and its `MediaSource` exists for the rows to attach to.
 Every mapped companion is moved next to it under a canonical name and recorded as
 an external `MediaStream`.
 
+Both audio and subtitle companions are admitted from a torrent's file list in the
+first place: one that never became a `SourceFile` could not reach this stage, and
+would be swept as an untracked staging leftover.
+
 Companions are never organized by `OrganizerService` — their names derive from the
 video's — so its recursive staging sweep deliberately spares any root still
 holding one. Without that, the sweep would take the only copy of a dub with it.
@@ -53,7 +57,10 @@ keep the plain form.
 
 Slugs are sanitized, because real titles are not file names — one release in the
 development library labels a track `DUB | DD5.1 @ 640 kbps`, and `|` is invalid on
-Windows, exFAT and SMB. Names are capped at 255 **bytes** (Cyrillic costs two per
+Windows, exFAT and SMB. The forbidden set is fixed rather than taken from
+`Path.GetInvalidFileNameChars()`: that answers for the *runtime*, and on the Linux
+container that is only `/` and NUL — while the library it writes into may be exFAT
+or SMB, or be opened from Windows later. Names are capped at 255 **bytes** (Cyrillic costs two per
 character), collisions that survive sanitizing take a numeric suffix, and a
 crowded track with no title at all falls back to its position.
 
@@ -74,6 +81,12 @@ and rejected: after a merge the sidecar is an archive, its metadata already live
 in the database and in its name, and rewriting every one of them would be a full
 extra pass over gigabytes to produce a third copy of data that is not lost — and
 would turn the exact bytes the release shipped into a derivative.
+
+Re-probing a video spares them for the same reason: probing says nothing about
+files sitting beside it, so `RefreshMediaAsync` replaces only the embedded streams
+and leaves external rows alone. Without that, refreshing — or the media backfill,
+which runs on exactly the items most likely to have sidecars — would delete entries
+whose files are still on disk.
 
 Removing one is therefore a deliberate act: its own operation, presented in the
 Media tab the way deleting an unwanted version is, with the same explicit choice
@@ -107,17 +120,24 @@ has nothing to talk to without it.
 
 - `SidecarNamingTests` — the naming rule: a lone track keeping the plain form even
   when it has a title, several in one language told apart by theirs, audio and
-  subtitles not crowding each other, a title no filesystem accepts made safe,
+  subtitles not crowding each other, a title no filesystem accepts made safe —
+  including characters a Linux runtime would have let through,
   titles that sanitize to the same thing still made distinct, a crowded untitled
   track falling back to its position, the byte cap with Cyrillic, and a sidecar
   never taking the video's own name.
 - `IngestSidecarTests` — through the real pipeline: tracks matching their episodes
   and landing beside them under the plain form, three dubs of one movie told apart
   by their group folders, a tagged container naming its own track (including one
-  whose title cannot be a file name), and a dub-only batch keeping its tracks
-  instead of discarding them.
+  whose title cannot be a file name), the emptied staging folder being cleared once
+  the files are out, and a dub-only batch keeping its tracks instead of discarding
+  them.
 - `SidecarDeletionTests` — dropping the entry leaving the file, erasing taking it,
   the video and its own streams untouched, the staged row going back to unassigned,
-  an embedded stream not being deletable this way, and an unknown id reported.
+  an identically-placed sidecar of another catalog left alone, an embedded stream
+  not being deletable this way, and an unknown id reported.
+- `LibraryMaintenanceServiceTests` — re-probing a video replacing its embedded
+  streams while sparing the sidecar rows beside it.
+- `DownloadFileServiceTests` — a torrent's dubs *and* subtitles admitted as source
+  files, junk still refused.
 - `AudioTrackLabelerTests` — the language and title inference both layouts rely on,
   including reading this feature's own output back on a later scan.

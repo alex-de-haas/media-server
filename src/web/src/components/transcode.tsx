@@ -63,8 +63,10 @@ export function TranscodeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const audioStreams = source.streams.filter((stream) => stream.type === "Audio");
-  const subtitleStreams = source.streams.filter((stream) => stream.type === "Subtitle");
+  // Only the container's own tracks. A sidecar is a separate file: it has no index inside this video to
+  // copy or address, and folding one in is the merge action on the Media tab, not a conversion option.
+  const audioStreams = source.streams.filter((stream) => stream.type === "Audio" && !stream.isExternal);
+  const subtitleStreams = source.streams.filter((stream) => stream.type === "Subtitle" && !stream.isExternal);
   const sourceDefaultAudio = audioStreams.find((stream) => stream.isDefault)?.index ?? audioStreams[0]?.index ?? null;
   const sourceDefaultSubtitle = subtitleStreams.find((stream) => stream.isDefault)?.index ?? null;
   const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat ?? null;

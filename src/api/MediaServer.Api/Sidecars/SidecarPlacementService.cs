@@ -93,6 +93,15 @@ public sealed class SidecarPlacementService(
             .Where(stream => stream.MediaSourceId == source.Id && stream.IsExternal)
             .ToListAsync(cancellationToken);
 
+        // Captured before the moves, because placing a companion overwrites its RelativePath with the
+        // canonical one — reading the staging roots afterwards would find none and leave every emptied
+        // .incoming/<downloadId> folder behind.
+        var stagingRoots = companions
+            .Select(companion => StagingRootOf(companion.RelativePath))
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
         var placed = 0;
         foreach (var named in SidecarNaming.For(Path.GetFileName(video.RelativePath), labelled))
         {
@@ -132,7 +141,7 @@ public sealed class SidecarPlacementService(
         {
             await database.SaveChangesAsync(cancellationToken);
             logger.LogInformation("Placed {Count} companion file(s) beside {Video}.", placed, video.RelativePath);
-            SweepEmptiedStaging(catalog, companions);
+            SweepEmptiedStaging(catalog, stagingRoots);
         }
     }
 
@@ -141,13 +150,8 @@ public sealed class SidecarPlacementService(
     /// still holds a companion — its recursive sweep would otherwise take the only copy of a dub with it —
     /// so clearing what is now empty falls here.
     /// </summary>
-    private void SweepEmptiedStaging(Catalog catalog, IReadOnlyList<SourceFile> companions)
+    private void SweepEmptiedStaging(Catalog catalog, IReadOnlyList<string> roots)
     {
-        var roots = companions
-            .Select(companion => StagingRootOf(companion.RelativePath))
-            .OfType<string>()
-            .Distinct(StringComparer.Ordinal);
-
         foreach (var root in roots)
         {
             if (!sandbox.TryResolve(catalog, root, out var absolute) || !Directory.Exists(absolute))
