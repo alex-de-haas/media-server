@@ -5,7 +5,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.IO;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Metadata;
-using MediaServer.Api.Mux;
+using MediaServer.Api.Sidecars;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.People;
 using MediaServer.Api.Pipeline;
@@ -39,7 +39,6 @@ public sealed class PipelineTestHarness : IDisposable
 
         MetadataProvider = new FakeMetadataProvider();
         MediaProbe = new FakeMediaProbe();
-        AudioMuxer = new FakeAudioMuxer();
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -51,14 +50,13 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddSingleton<INameParser, NameParser>();
         services.AddSingleton<IMetadataProvider>(MetadataProvider);
         services.AddSingleton<IMediaProbe>(MediaProbe);
-        services.AddSingleton<IAudioMuxer>(AudioMuxer);
         services.AddSingleton<ITorrentEngine, FakeTorrentEngine>();
         services.AddSingleton<IRealtimeNotifier, NullRealtimeNotifier>();
         services.AddSingleton<IPipelineQueue, PipelineQueue>();
 
         services.AddScoped<AppSettingsService>();
         services.AddScoped<IOrganizer, OrganizerService>();
-        services.AddScoped<AudioMuxService>();
+        services.AddScoped<SidecarPlacementService>();
         services.AddScoped<IdentifyService>();
         services.AddScoped<PersonSyncService>();
         services.AddScoped<CollectionSyncService>();
@@ -69,9 +67,9 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddScoped<IPipelineStage, IntakeStage>();
         services.AddScoped<IPipelineStage, DownloadStage>();
         services.AddScoped<IPipelineStage, IdentifyStage>();
-        services.AddScoped<IPipelineStage, MuxStage>();
         services.AddScoped<IPipelineStage, OrganizeStage>();
         services.AddScoped<IPipelineStage, ProbeStage>();
+        services.AddScoped<IPipelineStage, SidecarStage>();
         services.AddScoped<IPipelineStage, EnrichStage>();
         services.AddScoped<IPipelineStage, PublishStage>();
         services.AddSingleton(TimeProvider.System);
@@ -89,8 +87,6 @@ public sealed class PipelineTestHarness : IDisposable
     public FakeMetadataProvider MetadataProvider { get; }
 
     public FakeMediaProbe MediaProbe { get; }
-
-    public FakeAudioMuxer AudioMuxer { get; }
 
     public IngestOrchestrator Orchestrator => _provider.GetRequiredService<IngestOrchestrator>();
 

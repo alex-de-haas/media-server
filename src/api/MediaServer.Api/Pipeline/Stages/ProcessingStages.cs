@@ -2,7 +2,7 @@ using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Watchlist;
 using MediaServer.Api.Media;
-using MediaServer.Api.Mux;
+using MediaServer.Api.Sidecars;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Torrents;
@@ -146,22 +146,27 @@ public sealed class IdentifyStage(IdentifyService identifyService) : IPipelineSt
 }
 
 /// <summary>
-/// Merges matched external audio tracks (a torrent's separate <c>.mka</c>/<c>.ac3</c> dubs) into their
-/// video files while everything still sits in staging — a stream-copy remux, no re-encode (see
-/// <see cref="AudioMuxService"/>). Runs before Organize so the canonical library file lands complete.
+/// Places a release's external audio tracks and subtitles beside the library file they belong to, and
+/// records them as external streams (see <see cref="SidecarPlacementService"/>). Runs after Probe because
+/// the rows attach to the video's media source, and after Organize because a sidecar's name is derived
+/// from the video's canonical one.
+/// <para>
+/// This is where ingest used to mux those tracks in. It no longer does: a track arrives as a file and stays
+/// one, whether or not the transcode engine is attached, and merging is a separate operation.
+/// </para>
 /// </summary>
-public sealed class MuxStage(AudioMuxService muxService) : IPipelineStage
+public sealed class SidecarStage(SidecarPlacementService placement) : IPipelineStage
 {
-    public string Key => "mux";
+    public string Key => "sidecars";
     public PipelinePhase Phase => PipelinePhase.Processing;
-    public int Order => 350;
-    public IngestStage Stage => IngestStage.Organize;
+    public int Order => 550;
+    public IngestStage Stage => IngestStage.Probe;
 
     public bool ShouldRun(IngestContext context) => !context.Item.StagesCompleted.Contains(Key);
 
     public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        await muxService.MuxAsync(context.SourceFiles, context.Catalog, cancellationToken);
+        await placement.PlaceAsync(context.SourceFiles, context.Catalog, cancellationToken);
         return StageResult.Done;
     }
 }
@@ -229,6 +234,7 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
                 SizeBytes = result.SizeBytes,
                 Bitrate = result.Bitrate,
                 DurationTicks = result.DurationTicks,
+                ProbeSource = result.Source,
                 CreatedAt = DateTimeOffset.UtcNow,
             };
             database.MediaSources.Add(source);

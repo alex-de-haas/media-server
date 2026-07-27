@@ -29,11 +29,12 @@ public sealed class DownloadFileService(MediaServerDbContext database)
         var incomingPrefix = CatalogPaths.IncomingRelative(downloadId);
 
         // De-duplicate the incoming list by relative path defensively (an engine file list shouldn't
-        // repeat a path, but the upsert must never create two rows for one file). External audio tracks
-        // ride along with the videos: Identify matches them to their episode and the mux stage merges
-        // them into the video file before Organize.
+        // repeat a path, but the upsert must never create two rows for one file). Companion tracks ride
+        // along with the videos — external audio and subtitles alike: Identify matches them to their
+        // episode and the sidecar stage places them beside it. A companion that never became a SourceFile
+        // could not reach that stage and would be swept as an untracked staging leftover.
         var playable = files
-            .Where(file => MediaFormats.IsPlayableMedia(file.RelativePath, file.Length) || MediaFormats.IsCompanionAudio(file.RelativePath))
+            .Where(file => MediaFormats.IsPlayableMedia(file.RelativePath, file.Length) || MediaFormats.IsCompanion(file.RelativePath))
             .GroupBy(file => file.RelativePath, StringComparer.Ordinal)
             .Select(group => group.First())
             .ToList();

@@ -309,6 +309,8 @@ export interface CollectionDetail {
 }
 
 export interface MediaStream {
+  /** Addressable because a sidecar is a file of its own — it can be merged in or removed independently. */
+  id: string;
   type: string;
   index: number;
   codec: string | null;
@@ -851,6 +853,18 @@ export interface CreateTranscodeInput {
   /** Mark one copied track as the container default. */
   defaultAudioStreamIndex?: number | null;
   defaultSubtitleStreamIndex?: number | null;
+  /**
+   * External stream ids of this source — sidecar dubs and subtitles beside the file — whose tracks join the
+   * output. Naming any makes the job a merge: the video is copied untouched, so `maxHeight` and `crf` must
+   * be left unset. The sidecars are not consumed; the merge writes a new version alongside them.
+   */
+  mergeStreamIds?: string[];
+  /**
+   * Corrections to a track's name written into the output. Only what actually changed is sent — an
+   * untouched field keeps whatever the source stream carries. There is no standalone rename: changing
+   * metadata alone still rewrites the file, so editing rides along with a job.
+   */
+  metadataEdits?: { streamId: string; language?: string; title?: string }[];
 }
 
 export const mediaServer = {
@@ -892,6 +906,9 @@ export const mediaServer = {
   removeDownload: (id: string, deleteFiles: boolean) =>
     send(`/torrents/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
 
+  // Whether the transcode-engine dependency is attached. The Media tab works without it — versions and the
+  // default-version pick are database-side — so only the conversion controls key off this.
+  transcodeAvailability: () => apiJson<{ available: boolean }>(`${BASE}/transcode/availability`),
   listTranscodeJobs: () => apiJson<TranscodeJob[]>(`${BASE}/transcode`),
   createTranscodeJob: (input: CreateTranscodeInput) =>
     apiJson<TranscodeJob>(`${BASE}/transcode`, {
@@ -970,6 +987,12 @@ export const mediaServer = {
   clearRemovedFavorite: (id: string) => send(`/library/removed/${id}/favorite`, "DELETE"),
   // Permanently purges the tombstone and every trace of its history (admin).
   purgeRemovedTitle: (id: string) => send(`/library/removed/${id}`, "DELETE"),
+  // Delete one sidecar — an external track file beside a library file (admin). Without deleteFile only the
+  // entry goes and the file stays; merging a track into a video never removes its sidecar, so this is the
+  // deliberate act that does.
+  deleteExternalStream: (streamId: string, deleteFile: boolean) =>
+    send(`/library/streams/${streamId}?deleteFile=${deleteFile}`, "DELETE"),
+
   // Delete one media source / version (admin); deleteFile also erases the file (used for transcode "replace").
   deleteMediaSource: (sourceId: string, deleteFile: boolean) =>
     send(`/library/sources/${sourceId}?deleteFile=${deleteFile}`, "DELETE"),

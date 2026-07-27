@@ -102,10 +102,17 @@ public enum SourceFileAssignmentStatus
     /// provider identity). Counts as resolved so the rest of the batch can proceed; the file is never
     /// organized or probed and is cleaned up with the staging leftovers.</summary>
     Skipped = 4,
-    /// <summary>An external audio track whose streams were muxed into its video file (see
-    /// <c>MediaServer.Api.Mux.AudioMuxService</c>). Terminal like <see cref="Skipped"/>: the standalone
-    /// audio file is never organized or probed and is cleaned up with the staging leftovers.</summary>
+    /// <summary>An external audio track whose streams were muxed into its video file. No longer produced:
+    /// ingest places companion files beside their video instead of consuming them (see
+    /// <see cref="Sidecar"/>). Kept so rows written before that change still read.</summary>
     Merged = 5,
+    /// <summary>
+    /// A companion audio track or subtitle placed beside its library file, and recorded as an external
+    /// stream of its media source (see <c>MediaServer.Api.Sidecars.SidecarPlacementService</c>). Unlike
+    /// <see cref="Skipped"/> and <see cref="Merged"/> this is not a discard: the file is part of the
+    /// library and is swept by nothing.
+    /// </summary>
+    Sidecar = 6,
 }
 
 /// <summary>Status of an observable background <see cref="Job"/>.</summary>

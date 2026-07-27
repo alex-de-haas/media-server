@@ -93,7 +93,14 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
             request.AudioStreamIndexes,
             request.SubtitleStreamIndexes,
             request.DefaultAudioStreamIndex,
-            request.DefaultSubtitleStreamIndex);
+            request.DefaultSubtitleStreamIndex,
+            request.AdditionalInputs?
+                .Select(input => new WireAdditionalInput(
+                    input.MountLabel, input.RelativePath, input.AudioStreamIndexes, input.SubtitleStreamIndexes))
+                .ToList(),
+            request.MetadataOverrides?
+                .Select(entry => new WireMetadataOverride(entry.Input, entry.StreamIndex, entry.Language, entry.Title))
+                .ToList());
 
         using var cts = ControlCts(cancellationToken);
         using var response = await _http.PostAsJsonAsync("/jobs", wire, Json, cts.Token);
@@ -281,7 +288,14 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
     private sealed record WireCreateJobRequest(
         string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, int? Crf,
         int? MaxHeight = null, IReadOnlyList<int>? AudioStreamIndexes = null, IReadOnlyList<int>? SubtitleStreamIndexes = null,
-        int? DefaultAudioStreamIndex = null, int? DefaultSubtitleStreamIndex = null);
+        int? DefaultAudioStreamIndex = null, int? DefaultSubtitleStreamIndex = null,
+        IReadOnlyList<WireAdditionalInput>? AdditionalInputs = null,
+        IReadOnlyList<WireMetadataOverride>? MetadataOverrides = null);
+
+    private sealed record WireMetadataOverride(int Input, int StreamIndex, string? Language, string? Title);
+
+    private sealed record WireAdditionalInput(
+        string? MountLabel, string Path, IReadOnlyList<int>? AudioStreamIndexes, IReadOnlyList<int>? SubtitleStreamIndexes);
 
     private sealed record EngineError(string? Error);
 

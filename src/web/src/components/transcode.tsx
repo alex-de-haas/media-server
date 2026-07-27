@@ -63,8 +63,10 @@ export function TranscodeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const audioStreams = source.streams.filter((stream) => stream.type === "Audio");
-  const subtitleStreams = source.streams.filter((stream) => stream.type === "Subtitle");
+  // Only the container's own tracks. A sidecar is a separate file: it has no index inside this video to
+  // copy or address, and folding one in is the merge action on the Media tab, not a conversion option.
+  const audioStreams = source.streams.filter((stream) => stream.type === "Audio" && !stream.isExternal);
+  const subtitleStreams = source.streams.filter((stream) => stream.type === "Subtitle" && !stream.isExternal);
   const sourceDefaultAudio = audioStreams.find((stream) => stream.isDefault)?.index ?? audioStreams[0]?.index ?? null;
   const sourceDefaultSubtitle = subtitleStreams.find((stream) => stream.isDefault)?.index ?? null;
   const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat ?? null;
@@ -84,6 +86,9 @@ export function TranscodeDialog({
   const [hardware, setHardware] = useState("auto");
   const [resolution, setResolution] = useState("source");
   const [crf, setCrf] = useState("");
+  // Titles the operator corrected, keyed by stream id. Only what actually changed is sent: an untouched
+  // field keeps whatever the source stream carries, so relabelling one track never freezes the others.
+  const [titles, setTitles] = useState<Record<string, string>>({});
   const [audioKept, setAudioKept] = useState<Set<number>>(() => new Set(audioStreams.map((stream) => stream.index)));
   const [subtitleKept, setSubtitleKept] = useState<Set<number>>(() => new Set(subtitleStreams.map((stream) => stream.index)));
   const [defaultAudio, setDefaultAudio] = useState<number | null>(sourceDefaultAudio);
@@ -99,6 +104,7 @@ export function TranscodeDialog({
       setHardware("auto");
       setResolution("source");
       setCrf("");
+      setTitles({});
       setAudioKept(new Set(audioStreams.map((stream) => stream.index)));
       setSubtitleKept(new Set(subtitleStreams.map((stream) => stream.index)));
       setDefaultAudio(sourceDefaultAudio);
@@ -160,6 +166,9 @@ export function TranscodeDialog({
         subtitleStreamIndexes: subtitlesChanged ? keptSubtitles : undefined,
         defaultAudioStreamIndex: audioDefaultChanged ? defaultAudio : undefined,
         defaultSubtitleStreamIndex: subtitleDefaultChanged ? defaultSubtitle : undefined,
+        metadataEdits: Object.entries(titles)
+          .filter(([id, title]) => title.trim() !== (source.streams.find((s) => s.id === id)?.title ?? ""))
+          .map(([streamId, title]) => ({ streamId, title: title.trim() })),
       };
       return mediaServer.createTranscodeJob(input);
     },
@@ -283,7 +292,7 @@ export function TranscodeDialog({
             </>
           )}
 
-          <TrackList title="Audio" streams={audioStreams} kept={audioKept} onToggle={toggleAudio} defaultIndex={defaultAudio} onDefault={setDefaultAudio} />
+          <TrackList title="Audio" streams={audioStreams} kept={audioKept} onToggle={toggleAudio} defaultIndex={defaultAudio} onDefault={setDefaultAudio} titles={titles} onTitle={setTitles} />
           <TrackList
             title="Subtitles"
             streams={subtitleStreams}
@@ -291,7 +300,9 @@ export function TranscodeDialog({
             onToggle={toggleSubtitle}
             defaultIndex={defaultSubtitle}
             onDefault={setDefaultSubtitle}
-          />
+          titles={titles}
+            onTitle={setTitles}
+            />
 
           <DialogFooter className="mt-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
@@ -315,6 +326,8 @@ function TrackList({
   onToggle,
   defaultIndex,
   onDefault,
+  titles,
+  onTitle,
 }: {
   title: string;
   streams: MediaStream[];
@@ -322,6 +335,8 @@ function TrackList({
   onToggle: (index: number, checked: boolean) => void;
   defaultIndex: number | null;
   onDefault: (index: number) => void;
+  titles: Record<string, string>;
+  onTitle: (update: (current: Record<string, string>) => Record<string, string>) => void;
 }) {
   if (!streams.length) {
     return null;
@@ -335,23 +350,34 @@ function TrackList({
           const checked = kept.has(stream.index);
           const label = stream.displayTitle ?? stream.codec ?? "—";
           return (
-            <li key={stream.index} className="flex items-center gap-2">
-              <Checkbox checked={checked} onCheckedChange={(value) => onToggle(stream.index, value === true)} aria-label={`Copy ${label}`} />
-              <span className="min-w-0 flex-1 truncate leading-6">
-                {label}
-                {stream.title ? <span className="text-muted-foreground"> “{stream.title}”</span> : null}
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant={defaultIndex === stream.index ? "secondary" : "ghost"}
-                className="h-6 shrink-0 px-2 text-xs"
+            <li key={stream.index} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Checkbox checked={checked} onCheckedChange={(value) => onToggle(stream.index, value === true)} aria-label={`Copy ${label}`} />
+                <span className="min-w-0 flex-1 truncate leading-6">{label}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={defaultIndex === stream.index ? "secondary" : "ghost"}
+                  className="h-6 shrink-0 px-2 text-xs"
+                  disabled={!checked}
+                  aria-pressed={defaultIndex === stream.index}
+                  onClick={() => onDefault(stream.index)}
+                >
+                  Default
+                </Button>
+              </div>
+              {/* The name written into the output. Editing is offered here because a job is being submitted
+                  anyway — changing metadata alone would still rewrite the whole file. */}
+              <Input
+                value={titles[stream.id] ?? stream.title ?? ""}
+                onChange={(event) =>
+                  onTitle((current) => ({ ...current, [stream.id]: event.target.value }))
+                }
                 disabled={!checked}
-                aria-pressed={defaultIndex === stream.index}
-                onClick={() => onDefault(stream.index)}
-              >
-                Default
-              </Button>
+                placeholder="Track name"
+                aria-label={`Name for ${label}`}
+                className="ml-6 h-7 text-xs"
+              />
             </li>
           );
         })}

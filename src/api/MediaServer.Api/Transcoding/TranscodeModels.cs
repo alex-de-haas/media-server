@@ -2,7 +2,14 @@ using MediaServer.Api.Data;
 
 namespace MediaServer.Api.Transcoding;
 
-/// <summary>Request to transcode a movie source into a new sibling version. <see cref="VideoCodec"/>
+/// <summary>Request to transcode a movie source into a new sibling version, or to merge its sidecars in.
+/// <para>
+/// <see cref="MergeStreamIds"/> names external streams of this source — sidecar dubs and subtitles sitting
+/// beside the file — whose tracks join the output. Naming any makes the job a merge: the video is copied
+/// untouched, so the encode-only options must be left unset. The sidecar files themselves are not consumed;
+/// the merge produces a new version alongside them.
+/// </para>
+/// <see cref="VideoCodec"/>
 /// (<c>h264</c>/<c>hevc</c>, default <c>hevc</c>, or <c>copy</c> to remux the video untouched — lossless and
 /// HDR-safe), <see cref="HardwareAcceleration"/> (<c>auto</c>/<c>vaapi</c>/<c>none</c>, default <c>auto</c>)
 /// and <see cref="Crf"/> (software only) fall back to defaults when omitted. <see cref="MaxHeight"/>
@@ -19,7 +26,21 @@ public sealed record CreateTranscodeRequest(
     IReadOnlyList<int>? AudioStreamIndexes = null,
     IReadOnlyList<int>? SubtitleStreamIndexes = null,
     int? DefaultAudioStreamIndex = null,
-    int? DefaultSubtitleStreamIndex = null);
+    int? DefaultSubtitleStreamIndex = null,
+    IReadOnlyList<Guid>? MergeStreamIds = null,
+    IReadOnlyList<StreamMetadataEdit>? MetadataEdits = null);
+
+/// <summary>
+/// Corrects one output stream's language or title while it is written. <see cref="StreamId"/> names a
+/// stream of the source — embedded or sidecar — and a field left null keeps whatever the source stream
+/// already carries, so relabelling one track never freezes the others' metadata.
+/// <para>
+/// There is no standalone rename: changing metadata alone still rewrites the file, so editing is offered
+/// only where a job is being submitted anyway. The values are applied by the engine and come back from the
+/// re-probed output; nothing edits the stored rows directly.
+/// </para>
+/// </summary>
+public sealed record StreamMetadataEdit(Guid StreamId, string? Language = null, string? Title = null);
 
 /// <summary>A transcode job with its persisted facts plus the live engine snapshot (when running).</summary>
 public sealed record TranscodeJobResponse(

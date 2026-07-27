@@ -158,6 +158,65 @@ public sealed class LibraryDeleteService(
     }
 
     /// <summary>
+    /// Deletes one external stream — a sidecar dub or subtitle sitting beside a library file. Its own
+    /// operation rather than a call into <see cref="DeleteSourceAsync"/>: a sidecar is a
+    /// <see cref="MediaStream"/> on a source, not a source of its own, so there is no version to drop. The
+    /// affordance is presented like deleting an unwanted version, and it makes the same explicit choice —
+    /// with <paramref name="deleteFile"/> the file is erased through the same eraser, without it only the
+    /// entry goes and the file stays on disk. A merge never calls this: folding a track into a video leaves
+    /// its sidecar alone, and removing one is always deliberate.
+    /// </summary>
+    public async Task<bool> DeleteExternalStreamAsync(Guid streamId, bool deleteFile, CancellationToken cancellationToken)
+    {
+        var stream = await database.MediaStreams.AsNoTracking()
+            .Where(candidate => candidate.Id == streamId && candidate.IsExternal)
+            .Select(candidate => new { candidate.Id, candidate.ExternalPath, candidate.MediaSourceId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (stream is null)
+        {
+            return false;
+        }
+
+        var owner = await database.MediaSources.AsNoTracking()
+            .Where(source => source.Id == stream.MediaSourceId)
+            .Join(database.MediaItems.AsNoTracking(), source => source.MediaItemId, item => item.Id, (source, item) => new
+            {
+                source.MediaItemId,
+                item.CatalogId,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var catalog = owner?.CatalogId is { } catalogId
+            ? await database.Catalogs.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == catalogId, cancellationToken)
+            : null;
+
+        await database.MediaStreams.Where(candidate => candidate.Id == streamId).ExecuteDeleteAsync(cancellationToken);
+
+        // The staged file row, if the ingest that placed it is still around, goes back to being unassigned
+        // rather than pointing at something that is no longer part of the library. Scoped to the media item
+        // this sidecar belonged to: a relative path is only unique within its catalog, so matching on the
+        // path alone would detach an identically-placed sidecar of another catalog whose file is still there.
+        if (stream.ExternalPath is { Length: > 0 } path)
+        {
+            if (owner is not null)
+            {
+                await database.SourceFiles
+                    .Where(file => file.RelativePath == path && file.MediaItemId == owner.MediaItemId)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(file => file.MediaItemId, (Guid?)null)
+                        .SetProperty(file => file.AssignmentStatus, SourceFileAssignmentStatus.Unassigned), cancellationToken);
+            }
+
+            if (deleteFile && catalog is not null)
+            {
+                fileEraser.Erase(catalog, path);
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Deletes a single <see cref="MediaSource"/> (one version of a movie) — used to drop the original after
     /// a verified transcode "replace". Removes the source + its streams (and cascades any transcode-job
     /// history that fed off it); with <paramref name="deleteFile"/> it also erases the file from disk and

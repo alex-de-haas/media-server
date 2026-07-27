@@ -167,33 +167,32 @@ When a file enters identify (post-download, or via scan):
   batch — in review the operator matches it to its episode (Extra is rejected for
   audio: it would publish an item with no playable source) or skips it.
 
-## External audio tracks (mux)
+## External audio tracks and subtitles (sidecars)
 
-Releases often ship dubs as separate per-episode audio files (a "Rus Sound"
-folder of `.mka`s next to the episodes). Playback clients that direct-play one
-container (Infuse plays `MediaSources[0]` as a single file) would never see them,
-so before Organize the `Mux` stage merges each matched track into its video:
+Releases often ship dubs and subtitles as separate per-episode files (a "Rus
+Sound" folder of `.mka`s and a "RUS Subs" folder next to the episodes). Ingest
+**keeps them as files**: after Probe, the `Sidecars` stage moves each matched
+companion next to its library file under a canonical name and records it as an
+external `MediaStream`. See
+[external-track-sidecars](../external-track-sidecars/feature.md).
 
-- A **stream-copy ffmpeg remux** (`-map 0 -map i:a -c copy`) into Matroska — no
-  re-encode, I/O bound, run in-process (not on the transcode-engine). `-map 0`
-  keeps everything the video already has (subtitles, chapters, attached fonts);
-  only audio streams are taken from the track files (never an mp3's cover art).
-  The staged video's extension becomes `.mkv`; Probe later sees all tracks in the
-  one file, so nothing downstream changes.
-- Appended streams keep their own language/title tags when present; untagged
-  streams get a language inferred from unambiguous path tokens ("Rus Sound",
-  `…rus.mka` → `rus`) and the dub folder's name as the track title
-  (`AudioTrackLabeler`).
-- Consumed audio rows flip to `Merged` (terminal, like `Skipped`) — persisted per
-  item, so a re-driven stage never appends the same tracks twice. The freed audio
-  files are swept with the `.incoming/` staging leftovers.
-- Only staged (torrent) files are muxed — a scan-imported file is the operator's
-  own library file and is never rewritten. A dub-only batch (tracks matched to
-  episodes with no video in the ingest) logs a warning and discards the tracks:
-  merging into already-published library files is a separate feature.
-- The ffmpeg binary comes from `FFMPEG_PATH`, falling back to a PATH lookup (the
-  Docker image installs the full ffmpeg package for ffprobe already). A mux
-  failure parks the item as a retryable failure with the ffmpeg error.
+Ingest used to merge them into the video here instead. That was lossy — a failed
+mux, an absent transcode engine, or a batch whose videos were not present
+destroyed the track — so merging is now a separate operation, run later and only
+when asked, and it produces a new version rather than rewriting the original.
+
+- Companions are **not organized** by the organizer: their names derive from the
+  video's canonical one, so they are placed afterwards. The organizer's recursive
+  staging sweep therefore spares any root still holding one — without that it
+  would take the only copy of a dub with it.
+- A track's language and title come from its own container when it has tags (a
+  `.mka` carries both), and from its path otherwise (`AudioTrackLabeler`: "Rus
+  Sound", `…rus.mka` → `rus`; a per-group folder such as `[AniDUB]` becomes the
+  title).
+- Placed rows become `Sidecar` — part of the library, swept by nothing. The old
+  `Merged` status is no longer produced.
+- A dub-only batch (tracks matched to items with no video in the ingest) **keeps**
+  its tracks where they are, rather than discarding them as it used to.
 
 ## Organize (move/rename)
 
@@ -204,8 +203,7 @@ hardlink:
 2. For each assigned playable file, build the canonical catalog-root-relative path
    from the confirmed metadata (movie template, or `Show/Season NN/Show SxxEyy`),
    preserving the file's extension (organize never changes the container — playback
-   is Direct Play/Stream only; a video that had external audio muxed in arrives
-   here already as `.mkv`).
+   is Direct Play/Stream only).
 3. **Move** the file there. For torrent items the source is `.incoming/...`; for
    scanned items the source is wherever it currently sits in the root. The
    `SourceFile` path and the `MediaItem.LibraryPath` are updated to the canonical

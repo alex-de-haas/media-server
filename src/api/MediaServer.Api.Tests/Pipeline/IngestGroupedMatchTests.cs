@@ -96,10 +96,11 @@ public sealed class IngestGroupedMatchTests
         var database2 = verifyScope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
         Assert.Equal(IngestStatus.Done, (await database2.IngestItems.SingleAsync(item => item.Id == ingestId)).Status);
 
-        // Exactly one mux ran — into movie one's video, not movie two's.
-        var plan = Assert.Single(harness.AudioMuxer.Plans);
-        Assert.Contains("Movie.One", plan.VideoAbsolutePath);
-        Assert.Equal(SourceFileAssignmentStatus.Merged, (await database2.SourceFiles.SingleAsync(file => file.Id == files[2].Id)).AssignmentStatus);
+        // The track landed beside movie one's video, not movie two's, and is part of the library rather
+        // than a consumed leftover.
+        var track = await database2.SourceFiles.SingleAsync(file => file.Id == files[2].Id);
+        Assert.Equal(SourceFileAssignmentStatus.Sidecar, track.AssignmentStatus);
+        Assert.Contains("Movie One", track.RelativePath, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

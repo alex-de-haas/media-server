@@ -43,7 +43,15 @@ public sealed class TranscodeService(
 
         var catalog = item.Catalog ?? throw new TranscodeRequestException("Source's catalog is unavailable.");
 
-        var codec = NormalizeCodec(request.VideoCodec);
+        // Merging is a stream copy by definition: the video is untouched and only tracks are added, so the
+        // caller does not have to also say "copy" and the encode-only options are contradictory.
+        var isMerge = request.MergeStreamIds is { Count: > 0 };
+        if (isMerge && (request.MaxHeight is not null || request.Crf is not null))
+        {
+            throw new TranscodeRequestException("maxHeight and crf cannot be set when merging tracks.");
+        }
+
+        var codec = isMerge ? "copy" : NormalizeCodec(request.VideoCodec);
         var hardware = NormalizeHardware(request.HardwareAcceleration);
         if (request.Crf is < 0 or > 51)
         {
@@ -86,7 +94,7 @@ public sealed class TranscodeService(
             throw new TranscodeRequestException("Source file not found on disk.");
         }
 
-        var outputRelative = BuildOutputRelative(source.Path, VersionLabel(codec, targetHeight));
+        var outputRelative = BuildOutputRelative(source.Path, isMerge ? "Merged" : VersionLabel(codec, targetHeight));
         if (!sandbox.TryResolve(catalog, outputRelative, out var outputAbsolute))
         {
             throw new TranscodeRequestException("Could not place the output inside the catalog.");
@@ -114,13 +122,18 @@ public sealed class TranscodeService(
         var output = ToMount(outputAbsolute)
             ?? throw new TranscodeRequestException("The output path is not under a configured media mount.");
 
+        var mergeStreams = await ResolveMergeStreamsAsync(request, source, cancellationToken);
+        var additionalInputs = ResolveMergeInputs(mergeStreams, catalog);
+        var metadataOverrides = ResolveMetadataOverrides(request, source, mergeStreams);
+
         JobDescriptor descriptor;
         try
         {
             descriptor = await engine.CreateAsync(
                 new TranscodeJobRequest(
                     input.Label, input.Relative, output.Label, output.Relative, codec, hardware, request.Crf,
-                    targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle),
+                    targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
+                    additionalInputs, metadataOverrides),
                 cancellationToken);
         }
         catch (InvalidOperationException exception)
@@ -228,8 +241,9 @@ public sealed class TranscodeService(
         return directory.Length > 0 ? $"{directory}/{name}" : name;
     }
 
-    /// <summary>The version label used for the output filename: "Remux" for a video copy, otherwise the codec
-    /// plus the target height when downscaling (e.g. "HEVC 1080p") or just the codec at full resolution.</summary>
+    /// <summary>The version label used for the output filename: "Merged" when sidecar tracks are folded in,
+    /// "Remux" for a plain video copy, otherwise the codec plus the target height when downscaling (e.g.
+    /// "HEVC 1080p") or just the codec at full resolution.</summary>
     internal static string VersionLabel(string codec, int? targetHeight) =>
         codec == "copy"
             ? "Remux"
@@ -287,26 +301,109 @@ public sealed class TranscodeService(
     /// path relative to the mount root, so the engine resolves it against its own media root with the same
     /// label (the same host path). Returns null when no mount contains the path. Mirrors the same mapping
     /// the torrent client does for save directories.</summary>
-    private (string? Label, string Relative)? ToMount(string absolutePath)
+    /// <summary>The sidecar streams this job merges in, in a stable order — their position here is the
+    /// engine input ordinal each becomes.</summary>
+    private async Task<IReadOnlyList<MediaStream>> ResolveMergeStreamsAsync(
+        CreateTranscodeRequest request, MediaSource source, CancellationToken cancellationToken)
     {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var full = Path.GetFullPath(absolutePath);
-        foreach (var mount in settings.CatalogMountRoots)
+        if (request.MergeStreamIds is not { Count: > 0 } ids)
         {
-            var rootFull = Path.GetFullPath(mount.Path);
-            // Don't double-append a separator when the mount root already ends with one (e.g. a filesystem
-            // root like "/"), which would break the descendant check.
-            var rootPrefix = rootFull.EndsWith(Path.DirectorySeparatorChar) ? rootFull : rootFull + Path.DirectorySeparatorChar;
-            if (string.Equals(full, rootFull, comparison) ||
-                full.StartsWith(rootPrefix, comparison))
-            {
-                var label = string.IsNullOrEmpty(mount.Label) ? null : mount.Label;
-                return (label, Path.GetRelativePath(rootFull, full).Replace('\\', '/'));
-            }
+            return [];
         }
 
-        return null;
+        var streams = await database.MediaStreams
+            .Where(stream => stream.MediaSourceId == source.Id && stream.IsExternal && ids.Contains(stream.Id))
+            .OrderBy(stream => stream.Index)
+            .ToListAsync(cancellationToken);
+
+        if (streams.Count != ids.Distinct().Count())
+        {
+            throw new TranscodeRequestException("One or more of the selected tracks is not a sidecar of this version.");
+        }
+
+        return streams;
     }
+
+    /// <summary>
+    /// Turns the sidecar streams into engine inputs. The engine appends each file's tracks to the output;
+    /// the sidecars themselves are not consumed, because the merge writes a new version alongside them and
+    /// removing one stays a separate, deliberate act.
+    /// </summary>
+    private IReadOnlyList<EngineAdditionalInput>? ResolveMergeInputs(IReadOnlyList<MediaStream> streams, Catalog catalog)
+    {
+        if (streams.Count == 0)
+        {
+            return null;
+        }
+
+        var inputs = new List<EngineAdditionalInput>(streams.Count);
+        foreach (var stream in streams)
+        {
+            if (stream.ExternalPath is not { Length: > 0 } relative)
+            {
+                throw new TranscodeRequestException("A selected track has no file to merge from.");
+            }
+
+            if (!sandbox.TryResolve(catalog, relative, out var absolute) || !File.Exists(absolute))
+            {
+                throw new TranscodeRequestException($"The file for '{Path.GetFileName(relative)}' is missing on disk.");
+            }
+
+            var mount = ToMount(absolute)
+                ?? throw new TranscodeRequestException("A selected track is not under a configured media mount.");
+
+            // The sidecar holds one track of its own kind, so index 0 is it.
+            inputs.Add(stream.StreamType == StreamType.Subtitle
+                ? new EngineAdditionalInput(mount.Label, mount.Relative, null, [0])
+                : new EngineAdditionalInput(mount.Label, mount.Relative, [0], null));
+        }
+
+        return inputs;
+    }
+
+    /// <summary>
+    /// Maps each requested edit onto the stream it names. An embedded stream is addressed within the primary
+    /// input by its own index; a sidecar being merged becomes its own input, where it is the only track and
+    /// therefore index 0. An edit naming a sidecar that is not part of this merge has no output stream to
+    /// write to and is refused rather than silently dropped.
+    /// </summary>
+    internal static IReadOnlyList<EngineMetadataOverride>? ResolveMetadataOverrides(
+        CreateTranscodeRequest request, MediaSource source, IReadOnlyList<MediaStream> mergeStreams)
+    {
+        if (request.MetadataEdits is not { Count: > 0 } edits)
+        {
+            return null;
+        }
+
+        var overrides = new List<EngineMetadataOverride>(edits.Count);
+        foreach (var edit in edits)
+        {
+            if (edit.Language is null && edit.Title is null)
+            {
+                throw new TranscodeRequestException("A track edit must set a language or a title.");
+            }
+
+            var mergeOrdinal = mergeStreams.ToList().FindIndex(stream => stream.Id == edit.StreamId);
+            if (mergeOrdinal >= 0)
+            {
+                overrides.Add(new EngineMetadataOverride(mergeOrdinal + 1, 0, edit.Language, edit.Title));
+                continue;
+            }
+
+            var embedded = source.Streams.FirstOrDefault(stream => stream.Id == edit.StreamId && !stream.IsExternal)
+                ?? throw new TranscodeRequestException(
+                    "A track edit names a track that is neither in this version nor among the tracks being merged.");
+
+            overrides.Add(new EngineMetadataOverride(0, embedded.Index, edit.Language, edit.Title));
+        }
+
+        return overrides;
+    }
+
+    private (string? Label, string Relative)? ToMount(string absolutePath) =>
+        CatalogMounts.TryResolve(settings, absolutePath, out var label, out var relative)
+            ? (label, relative)
+            : null;
 
     private static string NormalizeCodec(string? raw) => raw?.Trim().ToLowerInvariant() switch
     {

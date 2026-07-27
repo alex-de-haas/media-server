@@ -46,21 +46,25 @@ public sealed class DownloadFileServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Upsert_admits_external_audio_tracks_but_not_junk()
+    public async Task Upsert_admits_companion_tracks_but_not_junk()
     {
-        // External dubs ride along with the video for identify + mux; .nfo/.srt and the like never do.
+        // Dubs and subtitles both ride along with the video: Identify matches them to their episode and the
+        // sidecar stage places them beside it. A companion that never became a SourceFile could not reach
+        // that stage and would be swept as an untracked staging leftover. Real junk (.nfo) still never is.
         var files = new[]
         {
             new TorrentFileInfo(0, "Show/Show S01E01.mkv", 2_000_000_000),
             new TorrentFileInfo(1, "Show/Rus Sound/Show S01E01.mka", 100_000_000),
-            new TorrentFileInfo(2, "Show/Show S01E01.srt", 50_000),
+            new TorrentFileInfo(2, "Show/RUS Subs/Show S01E01.srt", 50_000),
             new TorrentFileInfo(3, "Show/info.nfo", 1_000),
         };
 
         var result = await Service().UpsertSourceFilesAsync(_downloadId, files, CancellationToken.None);
 
-        Assert.Equal(2, result.Count);
+        Assert.Equal(3, result.Count);
         Assert.Contains(result, file => file.RelativePath.EndsWith("Show S01E01.mka", StringComparison.Ordinal));
+        Assert.Contains(result, file => file.RelativePath.EndsWith("Show S01E01.srt", StringComparison.Ordinal));
+        Assert.DoesNotContain(result, file => file.RelativePath.EndsWith(".nfo", StringComparison.Ordinal));
     }
 
     [Fact]

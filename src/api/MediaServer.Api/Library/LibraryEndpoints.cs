@@ -172,6 +172,15 @@ public static class LibraryEndpoints
             return deleted ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Delete one sidecar — an external audio track or subtitle sitting beside a library file (admin
+        // only). `deleteFile=true` also erases it from disk; without it only the entry goes. Merging a track
+        // into a video never removes its sidecar, so this is the deliberate act that does.
+        group.MapDelete("/streams/{streamId:guid}", async (Guid streamId, bool? deleteFile, LibraryDeleteService deleteService, CancellationToken cancellationToken) =>
+        {
+            var deleted = await deleteService.DeleteExternalStreamAsync(streamId, deleteFile ?? false, cancellationToken);
+            return deleted ? Results.NoContent() : Results.NotFound();
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         // Pin (or clear, with sourceId=null) the version that plays by default — clients honor the first
         // MediaSource, so this reorders the sources (admin only).
         group.MapPut("/{id:guid}/default-source", async (Guid id, SetDefaultSourceRequest request, LibrarySourceService sources, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
@@ -225,6 +234,13 @@ public static class LibraryEndpoints
             var refreshed = await maintenance.RefreshMediaAsync(id, cancellationToken);
             return refreshed ? Results.Accepted() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Re-probe everything that was read without the transcode engine, now that it is attached (admin
+        // only). Explicit rather than automatic on reconnection: rewriting stored media data on its own the
+        // moment a dependency reappears would be a surprise, and a probe is fast enough to just run.
+        group.MapPost("/backfill-media", async (LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
+            Results.Ok(await maintenance.BackfillHeaderProbedAsync(cancellationToken)))
+            .RequireAuthorization(AppRoles.AdminPolicy);
 
         // Reassign a misidentified leaf (movie/episode) to a corrected identity and rebuild its hardlink (admin only).
         group.MapPost("/{id:guid}/remap", async (Guid id, RemapRequest request, RemapService remap, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
