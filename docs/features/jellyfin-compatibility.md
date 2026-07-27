@@ -10,7 +10,7 @@ Media Server exposes a Jellyfin-compatible HTTP API subset so clients such as
 Infuse can browse catalogs, fetch metadata and artwork, Direct Play media, and
 synchronize playback progress. This is a compatibility layer, not a full Jellyfin
 server. It is served on the public `jellyfin` endpoint of the `api` service (see
-[Hosty runtime app](hosty-runtime-app.md)).
+[Hosty runtime app](hosty-runtime-app/feature.md)).
 
 Protocol references:
 

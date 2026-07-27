@@ -49,7 +49,7 @@ seeding state. Clients subscribe once and receive updates for all active work.
 
 Transport (WebSocket, SSE, long-polling fallback) must be validated through the
 Hosty Shell embed route, because behavior can depend on it (see
-[Hosty runtime app](../hosty-runtime-app.md)).
+[Hosty runtime app](../hosty-runtime-app/feature.md)).
 
 ## Observability
 

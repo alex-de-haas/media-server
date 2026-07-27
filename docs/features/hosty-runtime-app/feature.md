@@ -1,6 +1,5 @@
 # Hosty Runtime App
 
-Status: Implemented
 Created: 2026-06-15
 Updated: 2026-07-27
 
@@ -46,8 +45,8 @@ Two services with stable keys across runtime profiles:
   target** (`defaultRuntime: docker`). Unblocked now that Hosty Core provides the
   external host-path mount model for catalog roots (`externalMounts`, injected as
   `HOSTY_MOUNT_{KEY}`) and Cloudflare-tunnel ingress (see
-  [Storage and data](storage-and-data/feature.md) and
-  [Implementation plan](implementation-plan.md)).
+  [Storage and data](../storage-and-data/feature.md) and
+  [Implementation plan](../implementation-plan.md)).
 
 Keep the same service keys, endpoint keys, setting keys, data semantics, and UI
 navigation across profiles so switching runtime is reviewable and reversible.
@@ -57,7 +56,7 @@ navigation across profiles so switching runtime is reviewable and reversible.
 - `ui` → `web:http`, `public: true`. The Shell UI entrypoint.
 - `jellyfin` → `api:jellyfin`, `public: true`. Reachable by native Jellyfin
   clients with Media Server-owned tokens (see
-  [Jellyfin compatibility](jellyfin-compatibility.md)).
+  [Jellyfin compatibility](../jellyfin-compatibility.md)).
 
 The internal `api` port is not exposed as a public endpoint; only `web` reaches
 it, through the injected dependency URL.
@@ -69,8 +68,8 @@ declared in the manifest's `dependencies`, discovered via the injected
 by `RemoteTorrentEngine`. All peer connectivity, the raw listen port, and port
 mapping live in that app. When the dependency is unconfigured, a
 `DisabledTorrentEngine` keeps the rest of the app working (see
-[Torrents and organizer](torrents-and-organizer/feature.md) and
-[Torrent engine app](../ideas/torrent-engine-app.md)).
+[Torrents and organizer](../torrents-and-organizer/feature.md) and
+[Torrent engine app](../../ideas/torrent-engine-app.md)).
 
 ## Runtime Environment
 
@@ -122,7 +121,7 @@ row so it can re-link by unique email if Hosty user ids change.
 
 **Jellyfin clients (app-owned).** Infuse cannot perform the app-code flow, so the
 `jellyfin` endpoint uses Media Server-owned credentials and opaque access tokens.
-See [Jellyfin compatibility](jellyfin-compatibility.md) and [Security](security.md).
+See [Jellyfin compatibility](../jellyfin-compatibility.md) and [Security](../security.md).
 
 ## Scoped User Directory
 
@@ -157,7 +156,7 @@ Public endpoint origins are configured after install through Core-managed
 ## Sample Manifest
 
 The authoritative manifest is `manifest.json` at the repo root.
-[Implementation plan §4](implementation-plan.md) keeps the original planning copy,
+[Implementation plan §4](../implementation-plan.md) keeps the original planning copy,
 now historical — it predates the torrent-engine extraction and still shows the
 removed raw `torrent` port and the `TORRENT_ENABLE_PORT_MAPPING` /
 `TORRENT_BIND_ADDRESS` settings. The real `app.0.1` schema uses **arrays** (not
@@ -223,9 +222,9 @@ port, dependency, and setting).
 - On schema upgrade, the app prefers to request an on-demand backup from Core
   before applying EF Core migrations; if Core does not expose an app-callable
   backup endpoint, the app applies migrations without a pre-migration backup (see
-  [Storage and data](storage-and-data/feature.md)).
+  [Storage and data](../storage-and-data/feature.md)).
 
-Details in [Storage and data](storage-and-data/feature.md).
+Details in [Storage and data](../storage-and-data/feature.md).
 
 ## Shell Embedding
 
@@ -256,3 +255,15 @@ hosty apps open com.haas.media-server --user user@hosty.local --mode shell
 Identity, Shell embedding, assignments, scoped directory, redirects, WebSockets,
 and SSE must be checked through this Core-managed lifecycle. Standalone dev
 servers can validate UI and business logic only.
+
+## Testing Expectations
+
+- Unit coverage for `MediaServerSettings.FromConfiguration`: every declared
+  manifest setting is read from its documented environment key, and each one
+  falls back to the manifest default when the variable is absent or unparsable.
+- Unit coverage for the injected-environment readers (`HostyOptions`, the
+  `HOSTY_MOUNT_CATALOGROOTS` parser, `HOSTY_DEPENDENCY_*` discovery): a missing
+  dependency URL degrades the feature instead of failing startup.
+- The manifest itself is validated against the Core contract through the local
+  lifecycle above (`hosty apps install . --runtime dev`); no automated test
+  substitutes for it.

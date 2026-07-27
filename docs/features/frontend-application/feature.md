@@ -71,7 +71,7 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   stores an app-origin HttpOnly cookie when browser policy allows it, supports
   the standard Hosty Runtime App bearer-header fallback for embedded iframe
   sessions, and removes the code from the URL (see
-  [Hosty runtime app](../hosty-runtime-app.md)).
+  [Hosty runtime app](../hosty-runtime-app/feature.md)).
 - The BFF resolves the Hosty identity to an internal Media Server user. Hosty
   admins receive the `admin` role; assigned non-admin Hosty users receive the
   `user` role.
