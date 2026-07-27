@@ -129,8 +129,9 @@ has nothing to talk to without it.
   and landing beside them under the plain form, three dubs of one movie told apart
   by their group folders, a tagged container naming its own track (including one
   whose title cannot be a file name), the emptied staging folder being cleared once
-  the files are out, and a dub-only batch keeping its tracks instead of discarding
-  them.
+  the files are out, sidecar indexes staying unique across drives and past the
+  container's own numbering, and a dub-only batch keeping its tracks instead of
+  discarding them.
 - `SidecarDeletionTests` — dropping the entry leaving the file, erasing taking it,
   the video and its own streams untouched, the staged row going back to unassigned,
   an identically-placed sidecar of another catalog left alone, an embedded stream

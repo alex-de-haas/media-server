@@ -189,6 +189,40 @@ public sealed class IngestSidecarTests
     }
 
     [Fact]
+    public async Task Sidecar_indexes_are_unique_within_a_source()
+    {
+        // Clients pick a stream by index, so two sidecars of one version must never share one — including
+        // across drives, where a naive counter restarting at its base would collide with what is already
+        // stored.
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [SomeMovie];
+        ProbeCompanionsAs(harness, _ => UntaggedAudioProbe());
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Some Movie 2020",
+            "Some.Movie.2020/Some.Movie.2020.mkv",
+            additionalSourceRelativePaths:
+            [
+                "Some.Movie.2020/RUS Sound/[AniDUB]/Some.Movie.2020.mka",
+                "Some.Movie.2020/RUS Sound/[MCA]/Some.Movie.2020.mka",
+            ]);
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+        // A second drive is a no-op for already-placed files, but it must not renumber or duplicate either.
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var externals = await database.MediaStreams.Where(stream => stream.IsExternal).ToListAsync();
+
+        Assert.Equal(2, externals.Count);
+        var indexes = externals.Select(stream => stream.Index).ToList();
+        Assert.Equal(indexes.Count, indexes.Distinct().Count());
+        // And they sit past the container's own numbering, so they cannot collide with an embedded track.
+        Assert.All(indexes, index => Assert.True(index >= 1000));
+    }
+
+    [Fact]
     public async Task A_dub_only_batch_keeps_its_tracks_instead_of_discarding_them()
     {
         // The case that motivated the whole feature: tracks whose videos are not in this batch used to be

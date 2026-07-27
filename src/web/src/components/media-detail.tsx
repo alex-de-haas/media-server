@@ -910,8 +910,11 @@ function SourceCard({
     queryKey: ["transcode-availability"],
     queryFn: () => mediaServer.transcodeAvailability(),
     staleTime: 5 * 60 * 1000,
+    // The endpoint is admin-only, and only an admin sees the controls it gates — asking as a plain viewer
+    // would just be a 401 on every version card.
+    enabled: canManage,
   });
-  const canConvert = transcode?.available ?? false;
+  const canConvert = canManage && (transcode?.available ?? false);
   const [convertOpen, setConvertOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);

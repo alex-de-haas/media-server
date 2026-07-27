@@ -102,6 +102,14 @@ public sealed class SidecarPlacementService(
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
+        // External indexes start past the container's own numbering and continue past whatever this source
+        // already carries: a re-drive, or a later release adding more tracks, must not reuse an index that
+        // a client already uses to pick a stream.
+        const int FirstExternalIndex = 1000;
+        var nextExternalIndex = existing.Count == 0
+            ? FirstExternalIndex
+            : Math.Max(FirstExternalIndex, existing.Max(stream => stream.Index) + 1);
+
         var placed = 0;
         foreach (var named in SidecarNaming.For(Path.GetFileName(video.RelativePath), labelled))
         {
@@ -123,8 +131,9 @@ public sealed class SidecarPlacementService(
                 MediaSourceId = source.Id,
                 StreamType = MediaFormats.IsCompanionAudio(target) ? StreamType.Audio : StreamType.Subtitle,
                 // External streams are not part of the container's own numbering, so they continue past it
-                // rather than colliding with an embedded track's index.
-                Index = 1000 + placed,
+                // rather than colliding with an embedded track's index — and past whatever this source
+                // already has, so a later drive adding more sidecars does not reuse an index.
+                Index = nextExternalIndex++,
                 Language = language,
                 Title = title,
                 IsExternal = true,
