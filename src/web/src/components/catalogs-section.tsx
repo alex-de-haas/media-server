@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clapperboard, FolderSearch, MoreVertical, RotateCw, Trash2 } from "lucide-react";
+import { Anchor, Clapperboard, FolderSearch, MoreVertical, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type CatalogRefreshJob, type CatalogVolumeUsage } from "@/lib/media-server";
 import { catalogBrowseHref } from "@/lib/catalog-navigation";
@@ -25,6 +25,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { QueryState } from "@/components/states";
 import { AddCatalogDialog } from "@/components/add-catalog-dialog";
+import { MountPathPicker, normalizeRelativePath } from "@/components/mount-path-picker";
 
 // A vivid, distinguishable palette (reads on both light and dark). Each catalog gets a stable color,
 // shared between its bar segment and the dot next to its name; cycles if there are more catalogs.
@@ -177,6 +178,7 @@ function CatalogRow({
 }) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [anchorOpen, setAnchorOpen] = useState(false);
   const refreshing = refresh !== undefined;
 
   const remove = useMutation({
@@ -232,7 +234,18 @@ function CatalogRow({
             />
             <span className="font-medium">{catalog.name}</span>
             <Badge variant="secondary">{catalog.type}</Badge>
-            {!catalog.online && <Badge variant="destructive">offline</Badge>}
+            {/* Unanchored subsumes offline: the root is unreachable *because* no mount of this runtime
+                holds it, and pointing at a volume to reconnect would send the operator the wrong way. */}
+            {catalog.unanchored ? (
+              <Tooltip>
+                <TooltipTrigger render={<Badge variant="destructive" tabIndex={0}>unanchored</Badge>} />
+                <TooltipContent>
+                  No catalog-root mount of this runtime holds {catalog.root}. Re-anchor it to a configured mount.
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              !catalog.online && <Badge variant="destructive">offline</Badge>
+            )}
           </div>
           <p className="text-muted-foreground truncate font-mono text-xs" title={catalog.root}>
             {catalog.root}
@@ -268,6 +281,10 @@ function CatalogRow({
                 <RotateCw />
                 {refreshing ? "Refreshing…" : "Refresh metadata"}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAnchorOpen(true)}>
+                <Anchor />
+                Re-anchor
+              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
                 <Trash2 />
                 Remove
@@ -286,6 +303,8 @@ function CatalogRow({
         </div>
       )}
 
+      <AnchorCatalogDialog catalog={catalog} open={anchorOpen} onOpenChange={setAnchorOpen} />
+
       <RemoveCatalogDialog
         open={confirmOpen}
         onOpenChange={(next) => {
@@ -297,6 +316,86 @@ function CatalogRow({
         onConfirm={() => remove.mutate()}
       />
     </li>
+  );
+}
+
+/**
+ * Re-points a catalog at a catalog-root mount. Needed when a mount was renamed or its volume moved, and
+ * for a catalog whose stored location the current runtime cannot see — the media on disk is untouched,
+ * only where the app looks for it changes.
+ */
+function AnchorCatalogDialog({
+  catalog,
+  open,
+  onOpenChange,
+}: {
+  catalog: Catalog;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const mounts = useQuery({ queryKey: ["catalog-mounts"], queryFn: mediaServer.listCatalogMounts, enabled: open });
+  const [mountLabel, setMountLabel] = useState(catalog.mountLabel ?? "");
+  const [relativePath, setRelativePath] = useState(catalog.mountRelativePath ?? "");
+
+  const selectedLabel = mountLabel || mounts.data?.[0]?.label || "";
+
+  const anchor = useMutation({
+    mutationFn: () =>
+      mediaServer.anchorCatalog(catalog.id, {
+        mountLabel: selectedLabel,
+        relativePath: normalizeRelativePath(relativePath),
+      }),
+    onSuccess: () => {
+      onOpenChange(false);
+      queryClient.invalidateQueries({ queryKey: ["catalogs"] });
+      queryClient.invalidateQueries({ queryKey: ["catalog-usage"] });
+      toast.success("Catalog re-anchored");
+    },
+    onError: (error) => toast.error("Couldn’t re-anchor catalog", { description: errorMessage(error) }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            anchor.mutate();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Re-anchor catalog</DialogTitle>
+            <DialogDescription>
+              Point <span className="text-foreground font-medium">{catalog.name}</span> at a configured mount. Media files
+              are not moved — this only records where the catalog lives.
+            </DialogDescription>
+          </DialogHeader>
+          {mounts.data?.length ? (
+            <MountPathPicker
+              mounts={mounts.data}
+              mountLabel={selectedLabel}
+              onMountLabelChange={setMountLabel}
+              relativePath={relativePath}
+              onRelativePathChange={setRelativePath}
+            />
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              No catalog-root mounts are configured for this app. Add one in Hosty first.
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={!selectedLabel || anchor.isPending}>
+              {anchor.isPending ? "Re-anchoring…" : "Re-anchor"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

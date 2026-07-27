@@ -66,7 +66,7 @@ episode.
 **catalog scan** is a second entry point: it creates an ingest **at `Identify`**
 for each media file already present in the catalog root with no published source,
 then runs the same identify → organize → probe → enrich → publish tail — for
-onboarding a hand-copied collection (see [Catalogs](catalogs.md)).
+onboarding a hand-copied collection (see [Catalogs](catalogs/feature.md)).
 
 **Seeding** lives only on the `Download` stage and is mutually exclusive with
 being in the library: with `keepSeeding` the ingest parks at `Download` (the file
@@ -92,7 +92,7 @@ the hand-off and the rest of the pipeline.
   [Background tasks](background-tasks/feature.md)) consumed by the UI activity view.
 - **Database is source of truth.** Publish writes items to the database; the
   reconcile scan only checks the catalog root against it, while the import scan
-  ingests orphan files through the pipeline (see [Catalogs](catalogs.md)).
+  ingests orphan files through the pipeline (see [Catalogs](catalogs/feature.md)).
 
 ## Ingest Item State
 

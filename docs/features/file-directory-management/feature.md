@@ -14,7 +14,7 @@ manual file manager.
 ## Sandbox
 
 All file access is sandboxed to configured catalog roots (see
-[Catalogs](../catalogs.md) and [Storage and data](../storage-and-data/feature.md)).
+[Catalogs](../catalogs/feature.md) and [Storage and data](../storage-and-data/feature.md)).
 
 - Resolve and normalize every path, then verify it is contained within a
   configured root before any operation.

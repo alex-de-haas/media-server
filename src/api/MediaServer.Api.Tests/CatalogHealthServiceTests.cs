@@ -1,4 +1,5 @@
 using MediaServer.Api.Catalogs;
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
@@ -20,6 +21,10 @@ public sealed class CatalogHealthServiceTests : IDisposable
         _database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
         _database.Database.Migrate();
     }
+
+    private CatalogHealthService CreateService(
+        IFilesystemInspector filesystem, IHostyCoreClient core, MediaServerSettings? settings = null) =>
+        new(_database, filesystem, settings ?? new MediaServerSettings(), core, NullLogger<CatalogHealthService>.Instance);
 
     private Guid SeedCatalog(string root = "/mnt/movies")
     {
@@ -43,7 +48,7 @@ public sealed class CatalogHealthServiceTests : IDisposable
         var id = SeedCatalog();
         var filesystem = new FakeFilesystem { Reachable = false };
         var core = new RecordingCoreClient();
-        var service = new CatalogHealthService(_database, filesystem, core, NullLogger<CatalogHealthService>.Instance);
+        var service = CreateService(filesystem, core);
 
         // First check: offline → marked + notified.
         Assert.Equal(1, await service.CheckAsync(CancellationToken.None));
@@ -67,7 +72,7 @@ public sealed class CatalogHealthServiceTests : IDisposable
         var id = SeedCatalog();
         var filesystem = new FakeFilesystem { Reachable = true, FreeBytes = 1L * 1024 * 1024 * 1024 }; // 1 GiB < 5 GiB threshold.
         var core = new RecordingCoreClient();
-        var service = new CatalogHealthService(_database, filesystem, core, NullLogger<CatalogHealthService>.Instance);
+        var service = CreateService(filesystem, core);
 
         Assert.Equal(1, await service.CheckAsync(CancellationToken.None));
         Assert.NotNull((await Reload(id)).LowDiskSince);
@@ -81,12 +86,35 @@ public sealed class CatalogHealthServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Unanchored_catalog_is_marked_offline_without_the_volume_notification()
+    {
+        // The catalog sits outside every mount this runtime injects — unreachable because the app is
+        // running under the other runtime profile, not because a volume went away.
+        var id = SeedCatalog("/Users/someone/media/movies");
+        var settings = new MediaServerSettings
+        {
+            CatalogMountRoots = [new CatalogMount("media", "/mnt/catalogRoots/media")],
+        };
+        var filesystem = new FakeFilesystem { Reachable = false };
+        var core = new RecordingCoreClient();
+        var service = CreateService(filesystem, core, settings);
+
+        Assert.Equal(1, await service.CheckAsync(CancellationToken.None));
+
+        // Still marked offline, so file-backed actions stay blocked…
+        Assert.NotNull((await Reload(id)).OfflineSince);
+        // …but "the volume is unreachable, it'll come back" would point the operator the wrong way.
+        Assert.Equal(0, core.CountFor($"media-server:catalog-offline:{id}"));
+        Assert.Empty(core.Notifications);
+    }
+
+    [Fact]
     public async Task Healthy_catalog_makes_no_changes()
     {
         SeedCatalog();
         var filesystem = new FakeFilesystem { Reachable = true, FreeBytes = 500L * 1024 * 1024 * 1024 };
         var core = new RecordingCoreClient();
-        var service = new CatalogHealthService(_database, filesystem, core, NullLogger<CatalogHealthService>.Instance);
+        var service = CreateService(filesystem, core);
 
         Assert.Equal(0, await service.CheckAsync(CancellationToken.None));
         Assert.Empty(core.Notifications);

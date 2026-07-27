@@ -34,7 +34,10 @@ public sealed class CatalogServiceTests : IDisposable
     }
 
     private CreateCatalogRequest Request(string root) =>
-        new("Movies", CatalogType.Movie, root, null, false, null);
+        new("Movies", CatalogType.Movie, root, null, null, null, false, null);
+
+    private static CreateCatalogRequest MountRequest(string label, string? relativePath) =>
+        new("Movies", CatalogType.Movie, null, label, relativePath, null, false, null);
 
     [Fact]
     public async Task Creates_catalog_with_incoming_staging_dir()
@@ -87,6 +90,101 @@ public sealed class CatalogServiceTests : IDisposable
         var service = CreateService(settings);
 
         await Assert.ThrowsAsync<CatalogValidationException>(() => service.CreateAsync(Request(_tempRoot), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Creates_catalog_anchored_to_a_mount_label()
+    {
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] };
+        var service = CreateService(settings);
+
+        var catalog = await service.CreateAsync(MountRequest("media", "movies"), CancellationToken.None);
+
+        // The label + relative path are the durable identity; the root is where that mount is right now.
+        Assert.Equal("media", catalog.MountLabel);
+        Assert.Equal("movies", catalog.MountRelativePath);
+        Assert.Equal(Path.Combine(_tempRoot, "movies"), catalog.Root);
+        Assert.False(catalog.Unanchored);
+        Assert.True(Directory.Exists(Path.Combine(_tempRoot, "movies", ".incoming")));
+    }
+
+    [Fact]
+    public async Task Anchors_a_free_text_root_that_lands_inside_a_mount()
+    {
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] };
+        var service = CreateService(settings);
+
+        var catalog = await service.CreateAsync(Request(Path.Combine(_tempRoot, "movies")), CancellationToken.None);
+
+        Assert.Equal("media", catalog.MountLabel);
+        Assert.Equal("movies", catalog.MountRelativePath);
+    }
+
+    [Fact]
+    public async Task Creating_at_the_mount_root_records_an_empty_relative_path()
+    {
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] };
+        var service = CreateService(settings);
+
+        var catalog = await service.CreateAsync(MountRequest("media", null), CancellationToken.None);
+
+        Assert.Equal("media", catalog.MountLabel);
+        Assert.Equal(string.Empty, catalog.MountRelativePath);
+        Assert.Equal(_tempRoot, catalog.Root);
+    }
+
+    [Fact]
+    public async Task Rejects_a_mount_label_this_runtime_does_not_provide()
+    {
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] };
+        var service = CreateService(settings);
+
+        await Assert.ThrowsAsync<CatalogValidationException>(
+            () => service.CreateAsync(MountRequest("elsewhere", "movies"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Rejects_a_second_catalog_at_the_same_place_within_a_mount()
+    {
+        var settings = new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] };
+        var service = CreateService(settings);
+        await service.CreateAsync(MountRequest("media", "movies"), CancellationToken.None);
+
+        await Assert.ThrowsAsync<CatalogValidationException>(
+            () => service.CreateAsync(MountRequest("media", "movies"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Reports_a_catalog_outside_every_mount_of_this_runtime_as_unanchored()
+    {
+        // Created under one runtime's paths…
+        var created = await CreateService(new MediaServerSettings { CatalogMountRoots = [new CatalogMount("media", _tempRoot)] })
+            .CreateAsync(MountRequest("media", "movies"), CancellationToken.None);
+
+        // …then read back under a runtime whose "media" mount is somewhere else entirely.
+        var elsewhere = CreateService(new MediaServerSettings
+        {
+            CatalogMountRoots = [new CatalogMount("other", Path.Combine(_tempRoot, "other-runtime"))],
+        });
+
+        var catalog = await elsewhere.GetAsync(created.Id, CancellationToken.None);
+
+        // Unanchored is about the mount table, not the disk: reported even here, where the stored path
+        // happens to still exist (in the real docker/dev switch it does not).
+        Assert.NotNull(catalog);
+        Assert.True(catalog.Unanchored);
+    }
+
+    [Fact]
+    public async Task Does_not_report_unanchored_on_a_standalone_run()
+    {
+        var service = CreateService();
+
+        var catalog = await service.CreateAsync(Request(_tempRoot), CancellationToken.None);
+
+        // No mounts injected: a free-text root is the whole story, so there is nothing to be anchored to.
+        Assert.Null(catalog.MountLabel);
+        Assert.False(catalog.Unanchored);
     }
 
     [Fact]

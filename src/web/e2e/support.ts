@@ -36,6 +36,7 @@ export interface AppMock {
   episodes?: Record<string, unknown[]>;
   childDelete?: { seasonRemoved: boolean; seriesRemoved: boolean }; // DELETE /library/{episodes,seasons}/{id}
   catalogs?: unknown[];
+  catalogMounts?: unknown[]; // GET /catalogs/mounts — the mount picker in the add/re-anchor dialogs
   downloads?: unknown[];
   ingest?: unknown[];
   vpn?: unknown;
@@ -88,6 +89,12 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/library/resume") return route.fulfill({ json: mock.resume ?? [] });
     if (path === "/library/nextup") return route.fulfill({ json: mock.nextup ?? [] });
     if (path === "/catalogs") return route.fulfill({ json: mock.catalogs ?? [] });
+    if (path === "/catalogs/mounts") return route.fulfill({ json: mock.catalogMounts ?? [] });
+    // Re-anchor answers with the catalog it rewrote; the UI only refetches, so echoing the first is enough.
+    const anchoredId = path.match(/^\/catalogs\/([^/]+)\/anchor$/)?.[1];
+    if (anchoredId && method === "POST") {
+      return route.fulfill({ json: (mock.catalogs ?? [])[0] ?? {} });
+    }
     if (path === "/torrents") return route.fulfill({ json: mock.downloads ?? [] });
     if (path === "/ingest") return route.fulfill({ json: mock.ingest ?? [] });
     if (path === "/vpn") return route.fulfill({ json: mock.vpn ?? null });
@@ -181,18 +188,23 @@ export const aCatalog = (
   name: string,
   type: "Movie" | "Series" | "Anime",
   online = true,
+  overrides: Record<string, unknown> = {},
 ) => ({
   id,
   name,
   type,
   root: `/media/${id}`,
+  mountLabel: "media",
+  mountRelativePath: id,
   namingTemplate: "{Title} ({Year})",
   defaultKeepSeeding: false,
   metadataLanguage: null,
   freeBytes: 1_000_000,
   online,
+  unanchored: false,
   createdAt: "2026-07-12T00:00:00Z",
   updatedAt: "2026-07-12T00:00:00Z",
+  ...overrides,
 });
 
 export const movieDetail = (id: string, title: string, tmdbId: string | null = null) => ({

@@ -72,6 +72,7 @@ builder.Services.AddScoped<PlaybackDiagnostics>(serviceProvider =>
 builder.Services.AddSingleton<IFilesystemInspector, FilesystemInspector>();
 builder.Services.AddSingleton<ICatalogPathSandbox, CatalogPathSandbox>();
 builder.Services.AddScoped<CatalogService>();
+builder.Services.AddScoped<CatalogAnchorService>();
 builder.Services.AddScoped<CatalogHealthService>();
 builder.Services.AddHostedService<CatalogHealthWorker>();
 builder.Services.AddScoped<IOrganizer, OrganizerService>();
@@ -384,6 +385,28 @@ using (var scope = app.Services.CreateScope())
                 cancellationToken: CancellationToken.None);
             throw;
         }
+    }
+
+    // Catalog roots are absolute paths, and Hosty hands the same mount a different absolute path per
+    // runtime profile (host paths under dev, container paths under docker). Re-resolve every root from its
+    // mount label now — after the schema is current, and before any hosted service reads a catalog.
+    try
+    {
+        var anchors = services.GetRequiredService<CatalogAnchorService>();
+        var summary = await anchors.ReanchorAllAsync(CancellationToken.None);
+        if (summary.Changed || summary.Unanchored > 0)
+        {
+            services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup.Catalogs").LogInformation(
+                "Catalog roots resolved for this runtime: {Reanchored} re-anchored, {BackFilled} newly anchored, {Unanchored} unanchored.",
+                summary.Reanchored, summary.BackFilled, summary.Unanchored);
+        }
+    }
+    catch (Exception exception)
+    {
+        // A failure here leaves catalogs pointing at the previous runtime's paths — they report offline and
+        // the operator can re-anchor them by hand, which is a far better outcome than refusing to start.
+        services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup.Catalogs")
+            .LogError(exception, "Resolving catalog roots for this runtime failed; catalog roots are left as stored.");
     }
 }
 

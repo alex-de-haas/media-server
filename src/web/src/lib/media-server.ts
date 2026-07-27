@@ -11,12 +11,22 @@ export interface Catalog {
   id: string;
   name: string;
   type: CatalogType;
+  // Absolute path in the runtime the API is currently running under, resolved from the mount label —
+  // it differs between the dev and docker runtimes for one and the same catalog.
   root: string;
+  // The catalog's durable location: the Hosty mount label plus the path within it ("" = the mount root).
+  // Null on standalone runs, where the operator gave a free-text absolute root.
+  mountLabel: string | null;
+  mountRelativePath: string | null;
   namingTemplate: string;
   defaultKeepSeeding: boolean;
   metadataLanguage: string | null;
   freeBytes: number;
   online: boolean;
+  // No mount of this runtime holds the catalog (its mount was removed or renamed, or the catalog was
+  // created under the other runtime profile). File-backed actions are unavailable as when offline, but
+  // the fix is to re-anchor it onto a mount rather than to reconnect a volume.
+  unanchored: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,13 +54,22 @@ export interface CatalogVolumeUsage {
   catalogs: CatalogUsageEntry[];
 }
 
+// Location is given either as a mount (`mountLabel` + `relativePath`, the normal case) or as a
+// free-text absolute `root` for standalone runs where no mounts are injected.
 export interface CreateCatalogInput {
   name: string;
   type: CatalogType;
-  root: string;
+  root?: string;
+  mountLabel?: string;
+  relativePath?: string;
   namingTemplate?: string;
   defaultKeepSeeding: boolean;
   metadataLanguage?: string | null;
+}
+
+export interface AnchorCatalogInput {
+  mountLabel: string;
+  relativePath: string;
 }
 
 export interface Download {
@@ -840,6 +859,14 @@ export const mediaServer = {
   listCatalogUsage: () => apiJson<CatalogVolumeUsage[]>(`${BASE}/catalogs/usage`),
   createCatalog: (input: CreateCatalogInput) =>
     apiJson<Catalog>(`${BASE}/catalogs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  // Re-points a catalog at a mount — for a renamed mount, a moved volume, or a catalog whose stored
+  // location the current runtime cannot see (`unanchored`).
+  anchorCatalog: (id: string, input: AnchorCatalogInput) =>
+    apiJson<Catalog>(`${BASE}/catalogs/${id}/anchor`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),

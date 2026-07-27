@@ -8,7 +8,7 @@ namespace MediaServer.Api.Organizer;
 /// Builds clean catalog-root-relative paths from confirmed identity, preserving the original extension
 /// (the container is never changed — playback is Direct Play/Stream only). Movies use the catalog naming
 /// template; series/anime use the Jellyfin <c>Show/Season NN/Show SxxEyy</c> layout. Published media
-/// lives directly at the catalog root (no <c>library/</c> subtree). See <c>docs/features/catalogs.md</c>.
+/// lives directly at the catalog root (no <c>library/</c> subtree). See <c>docs/features/catalogs/feature.md</c>.
 /// </summary>
 public static class LibraryNaming
 {
