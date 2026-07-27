@@ -2,7 +2,7 @@
 
 Status: Active (partially implemented — see per-item status)
 Created: 2026-06-15
-Updated: 2026-07-22
+Updated: 2026-07-27
 
 ## Description
 
@@ -530,3 +530,45 @@ tokens anyway, and every future OAuth integration would repeat the crypto.
   listing returns names only.
 - Bounded value size and per-app key count; documented removal semantics on app
   remove.
+
+## 16. Container uid/gid contract for writable external mounts — Medium
+
+**Problem.** The `api` image runs its process as root, and cannot stop doing so.
+Core sets no `--user` and injects no uid, so an image that drops privileges picks
+its uid blind. That is fine for the app data directory — Core owns it, and an
+entrypoint can read its owner and adopt it — but not for `catalogRoots`, which is
+a required, `multiple`, `rw` external host-path mount that the API genuinely
+writes to: the organizer creates canonical directories, ingest recursively deletes
+`.incoming/<downloadId>`, and the mux and Jellyfin image services move and delete
+files in place.
+
+Those roots belong to the operator. There may be several, each with its own owner,
+and on an existing installation they were created root-owned by this very image.
+The container must not take ownership of them — they are the user's media library,
+not app state — and with several roots there is no single uid to adopt. So the
+image stays root while every other first-party Hosty app image has moved to an
+unprivileged user.
+
+**Proposed contract.** Core tells the container which identity to run as, or grants
+it access to the mounts' identities. Either shape works:
+
+- Core injects `HOSTY_APP_UID` / `HOSTY_APP_GID` (and optionally passes `--user`),
+  chosen so it can still manage the app data tree itself; or
+- the manifest declares supplementary groups per external-mount slot, and Core
+  passes `--group-add` for the gids owning those paths.
+
+**How Media Server uses it.** The `api` entrypoint drops to the provided
+uid/gid — or the image declares `USER` directly when Core passes `--user` — and the
+existing catalog write paths keep working against operator-owned roots.
+
+**Workaround.** None that is safe. `api` runs as root; `web`, which mounts nothing,
+already runs as `node`. Chowning catalog roots from inside the container was
+considered and rejected: it would rewrite ownership of the operator's media library.
+
+**Acceptance criteria.**
+- An app can learn, or be started with, a uid/gid that can write its declared `rw`
+  external mounts.
+- Core retains the access it needs to its own app data tree (backup, restore, and
+  remove-with-data must keep working).
+- Existing installations with root-owned catalog roots have a documented migration
+  or remain functional.
