@@ -18,18 +18,10 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { effectiveMountLabel, MountPathPicker, normalizeRelativePath } from "@/components/mount-path-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const CATALOG_TYPES: CatalogType[] = ["Movie", "Series", "Anime"];
-
-// Joins a mount base with the operator-typed sub-path into the absolute root the backend validates.
-// Preserves the base (incl. a root like "/") when no sub-path is given, rather than trimming it away.
-function joinRoot(base: string, relative: string) {
-  const cleaned = relative.trim().replace(/^[\\/]+|[\\/]+$/g, "");
-  if (!cleaned) return base;
-  const baseWithSeparator = base.endsWith("/") || base.endsWith("\\") ? base : `${base}/`;
-  return `${baseWithSeparator}${cleaned}`;
-}
 
 export function AddCatalogDialog() {
   const queryClient = useQueryClient();
@@ -37,25 +29,28 @@ export function AddCatalogDialog() {
   const mounts = useQuery({ queryKey: ["catalog-mounts"], queryFn: mediaServer.listCatalogMounts });
   const nameId = useId();
   const typeId = useId();
-  const mountId = useId();
-  const relativePathId = useId();
   const freeRootId = useId();
 
   const [name, setName] = useState("");
   const [type, setType] = useState<CatalogType>("Movie");
   const [defaultKeepSeeding, setDefaultKeepSeeding] = useState(false);
-  // Mount-relative entry (used when Hosty injects catalog-root mounts)…
-  const [mountPath, setMountPath] = useState("");
+  // Mount-anchored entry (used when Hosty injects catalog-root mounts). The label is what gets stored:
+  // it is the same under every runtime, while the mount's absolute path is not.
+  const [mountLabel, setMountLabel] = useState("");
   const [relativePath, setRelativePath] = useState("");
   // …or a free-text absolute root when no mounts are injected (standalone local runs).
   const [freeRoot, setFreeRoot] = useState("");
 
   const hasMounts = (mounts.data?.length ?? 0) > 0;
-  const selectedMount = mountPath || mounts.data?.[0]?.path || "";
-  const root = hasMounts ? joinRoot(selectedMount, relativePath) : freeRoot.trim();
+  const selectedLabel = effectiveMountLabel(mounts.data ?? [], mountLabel);
 
   const create = useMutation({
-    mutationFn: () => mediaServer.createCatalog({ name: name.trim(), type, root, defaultKeepSeeding }),
+    mutationFn: () =>
+      mediaServer.createCatalog(
+        hasMounts
+          ? { name: name.trim(), type, mountLabel: selectedLabel, relativePath: normalizeRelativePath(relativePath), defaultKeepSeeding }
+          : { name: name.trim(), type, root: freeRoot.trim(), defaultKeepSeeding },
+      ),
     onSuccess: () => {
       setName("");
       setRelativePath("");
@@ -68,7 +63,8 @@ export function AddCatalogDialog() {
     onError: (error) => toast.error("Couldn’t add catalog", { description: errorMessage(error) }),
   });
 
-  const canSubmit = name.trim().length > 0 && root.length > 0 && !create.isPending;
+  const canSubmit =
+    name.trim().length > 0 && (hasMounts ? selectedLabel.length > 0 : freeRoot.trim().length > 0) && !create.isPending;
 
   return (
     <>
@@ -117,41 +113,13 @@ export function AddCatalogDialog() {
             </div>
 
             {hasMounts ? (
-              <>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor={mountId}>Mount</FieldLabel>
-                    <Select
-                      value={selectedMount}
-                      onValueChange={(value) => setMountPath((value as string | null) ?? "")}
-                      items={(mounts.data ?? []).map((mount) => ({ value: mount.path, label: mount.label }))}
-                    >
-                      <SelectTrigger id={mountId} className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {mounts.data?.map((mount) => (
-                          <SelectItem key={mount.path} value={mount.path}>
-                            {mount.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor={relativePathId}>Path within mount</FieldLabel>
-                    <Input
-                      id={relativePathId}
-                      placeholder="movies"
-                      value={relativePath}
-                      onChange={(e) => setRelativePath(e.target.value)}
-                    />
-                  </Field>
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  Catalog root: <span className="text-foreground font-mono break-all">{root}</span>
-                </p>
-              </>
+              <MountPathPicker
+                mounts={mounts.data ?? []}
+                mountLabel={selectedLabel}
+                onMountLabelChange={setMountLabel}
+                relativePath={relativePath}
+                onRelativePathChange={setRelativePath}
+              />
             ) : (
               <Field>
                 <FieldLabel htmlFor={freeRootId}>Catalog root (absolute path)</FieldLabel>

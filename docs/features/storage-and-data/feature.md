@@ -139,7 +139,7 @@ operator owns that media and its own backups).
 
 - Each catalog root is a host directory on a single filesystem holding a transient
   `.incoming/` staging area plus the canonical published media at the root (see
-  [Catalogs](../catalogs.md)).
+  [Catalogs](../catalogs/feature.md)).
 - Under **`dev`** (`localCommand`) roots are operator-configured host paths that
   the host process reads directly, with no volume mounts.
 - Under **`docker`** (the default runtime) they are Hosty-managed external

@@ -322,7 +322,7 @@ paths before the app starts, then injects the corrected binds.
 **How Media Server uses it.** Starts with corrected roots; no offline storm.
 
 **Workaround.** App marks unreachable roots Offline; operator re-points paths and
-rescans (see [Catalogs](catalogs.md)).
+rescans (see [Catalogs](catalogs/feature.md)).
 
 **Acceptance criteria.**
 - Restore flow surfaces declared external mounts for remapping.

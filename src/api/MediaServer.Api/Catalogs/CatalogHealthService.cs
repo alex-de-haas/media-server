@@ -1,3 +1,4 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
@@ -15,6 +16,7 @@ namespace MediaServer.Api.Catalogs;
 public sealed class CatalogHealthService(
     MediaServerDbContext database,
     IFilesystemInspector filesystem,
+    MediaServerSettings settings,
     IHostyCoreClient core,
     ILogger<CatalogHealthService> logger)
 {
@@ -37,14 +39,31 @@ public sealed class CatalogHealthService(
                 {
                     catalog.OfflineSince = now;
                     changed++;
-                    logger.LogWarning("Catalog {Catalog} ({Root}) is offline.", catalog.Name, catalog.Root);
-                    await core.PublishNotificationAsync(
-                        CoreNotificationLevel.Warning,
-                        $"Catalog \"{catalog.Name}\" is offline",
-                        $"The catalog root {catalog.Root} is unreachable. Downloads and streaming for this catalog are paused until it returns.",
-                        link: null,
-                        dedupeKey: $"media-server:catalog-offline:{catalog.Id}",
-                        cancellationToken: cancellationToken);
+
+                    // An unanchored catalog is unreachable for a different reason — this runtime provides
+                    // no mount holding it — and the operator's fix is to re-anchor it, not to reconnect a
+                    // volume. The offline marker is still stamped, so file-backed actions stay blocked,
+                    // but the "plug the volume back in" notification would be misleading; those catalogs
+                    // are announced once by CatalogAnchorService at startup instead.
+                    var unanchored = settings.CatalogMountRoots.Count > 0 &&
+                        CatalogRootResolver.ToMountRelative(settings.CatalogMountRoots, catalog.Root) is null;
+
+                    logger.LogWarning(
+                        unanchored
+                            ? "Catalog {Catalog} ({Root}) is offline: no catalog-root mount of this runtime holds it."
+                            : "Catalog {Catalog} ({Root}) is offline.",
+                        catalog.Name, catalog.Root);
+
+                    if (!unanchored)
+                    {
+                        await core.PublishNotificationAsync(
+                            CoreNotificationLevel.Warning,
+                            $"Catalog \"{catalog.Name}\" is offline",
+                            $"The catalog root {catalog.Root} is unreachable. Downloads and streaming for this catalog are paused until it returns.",
+                            link: null,
+                            dedupeKey: $"media-server:catalog-offline:{catalog.Id}",
+                            cancellationToken: cancellationToken);
+                    }
                 }
 
                 continue; // Can't inspect free space on an unreachable volume.

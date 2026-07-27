@@ -42,6 +42,33 @@ public static class CatalogEndpoints
             }
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // Re-points a catalog at a catalog-root mount. Needed when a mount is renamed or its volume moves,
+        // and for any catalog created before roots were anchored to mount labels whose stored path this
+        // runtime cannot see (see CatalogAnchorService).
+        group.MapPost("/{id:guid}/anchor", async (
+            Guid id,
+            AnchorCatalogRequest request,
+            CatalogAnchorService anchors,
+            CatalogService service,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var catalog = await anchors.AnchorAsync(id, request.MountLabel, request.RelativePath, cancellationToken);
+                return catalog is null
+                    ? Results.NotFound()
+                    : Results.Ok(await service.GetAsync(id, cancellationToken));
+            }
+            catch (CatalogValidationException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status400BadRequest);
+            }
+            catch (CatalogInUseException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status409Conflict);
+            }
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         group.MapPatch("/{id:guid}", async (Guid id, UpdateCatalogRequest request, CatalogService service, CancellationToken cancellationToken) =>
         {
             try

@@ -96,16 +96,45 @@ public sealed class CatalogService(
             throw new CatalogValidationException("Name is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Root))
+        // The mount label is the catalog's durable identity; the absolute root is only where that mount
+        // happens to be in this runtime. A request may name the mount directly (the UI's picker) or give a
+        // free-text absolute root (standalone runs) — which is still anchored when it lands inside a mount.
+        string root;
+        string? mountLabel;
+        string? mountRelative;
+
+        if (!string.IsNullOrWhiteSpace(request.MountLabel))
         {
-            throw new CatalogValidationException("Root is required.");
+            mountRelative = CatalogRootResolver.Normalize(request.RelativePath)
+                ?? throw new CatalogValidationException("The path within the mount must stay inside it.");
+            // Store the mount's own label, not the caller's casing of it — see ResolveAnchor.
+            var anchor = CatalogRootResolver.ResolveAnchor(settings.CatalogMountRoots, request.MountLabel.Trim(), mountRelative)
+                ?? throw new CatalogValidationException(
+                    $"No catalog-root mount named \"{request.MountLabel.Trim()}\" is configured for this runtime.");
+            (mountLabel, root) = anchor;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(request.Root))
+            {
+                throw new CatalogValidationException("Root is required.");
+            }
+
+            root = Path.GetFullPath(request.Root);
+            ValidateWithinMountRoots(root);
+            (mountLabel, mountRelative) = CatalogRootResolver.ToMountRelative(settings.CatalogMountRoots, root) is { } anchor
+                ? (anchor.Label, anchor.Relative)
+                : (null, null);
         }
 
-        var root = Path.GetFullPath(request.Root);
-        ValidateWithinMountRoots(root);
         EnsureRootReachable(root);
 
-        if (await database.Catalogs.AnyAsync(candidate => candidate.Root == root, cancellationToken))
+        var duplicate = mountLabel is null
+            ? await database.Catalogs.AnyAsync(candidate => candidate.Root == root, cancellationToken)
+            : await database.Catalogs.AnyAsync(
+                candidate => candidate.MountLabel == mountLabel && candidate.MountRelativePath == mountRelative,
+                cancellationToken);
+        if (duplicate)
         {
             throw new CatalogValidationException($"A catalog already exists for root: {root}");
         }
@@ -120,6 +149,8 @@ public sealed class CatalogService(
             Name = request.Name.Trim(),
             Type = request.Type,
             Root = root,
+            MountLabel = mountLabel,
+            MountRelativePath = mountRelative,
             NamingTemplate = string.IsNullOrWhiteSpace(request.NamingTemplate)
                 ? "{Title} ({Year})"
                 : request.NamingTemplate.Trim(),
@@ -353,6 +384,26 @@ public sealed class CatalogService(
     {
         var online = filesystem.DirectoryExists(catalog.Root);
         var freeBytes = online ? filesystem.GetAvailableFreeBytes(catalog.Root) : 0;
-        return CatalogResponse.From(catalog, freeBytes, online);
+        return CatalogResponse.From(catalog, freeBytes, online, IsUnanchored(catalog));
+    }
+
+    /// <summary>
+    /// A catalog is unanchored when mounts are injected but this runtime cannot place it. For an anchored
+    /// catalog that is decided by its stored label alone: a mount renamed while keeping its path would
+    /// otherwise leave the root looking at home inside the renamed mount, hiding the re-anchor prompt for
+    /// a label that is in fact dead — and would fail on the next runtime. A catalog with no label (a
+    /// legacy row, or one created under the other runtime profile) has only its root to go on. Standalone
+    /// runs (no mounts injected) never report it: there is nothing to be anchored to.
+    /// </summary>
+    private bool IsUnanchored(Catalog catalog)
+    {
+        if (settings.CatalogMountRoots.Count == 0)
+        {
+            return false;
+        }
+
+        return string.IsNullOrEmpty(catalog.MountLabel)
+            ? CatalogRootResolver.ToMountRelative(settings.CatalogMountRoots, catalog.Root) is null
+            : CatalogRootResolver.Resolve(settings.CatalogMountRoots, catalog.MountLabel, catalog.MountRelativePath) is null;
     }
 }

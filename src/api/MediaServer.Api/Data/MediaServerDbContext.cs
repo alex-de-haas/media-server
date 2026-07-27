@@ -123,7 +123,15 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         catalog.Property(entity => entity.Name).IsRequired();
         catalog.Property(entity => entity.Root).IsRequired();
         catalog.Property(entity => entity.Type).HasConversion<int>();
-        catalog.HasIndex(entity => entity.Root).IsUnique();
+
+        // Identity is the mount label + the path within it, so two catalogs can't claim one directory even
+        // though the absolute Root they resolve to differs per runtime. SQLite treats NULLs as distinct in
+        // a unique index, so standalone rows (no label) never collide here...
+        catalog.HasIndex(entity => new { entity.MountLabel, entity.MountRelativePath }).IsUnique();
+        // ...and are instead kept unique on their free-text absolute Root. Filtered to those rows only:
+        // an anchored Root is rewritten on every start, and a swapped pair of mount labels would trip an
+        // unfiltered unique index mid-rewrite.
+        catalog.HasIndex(entity => entity.Root).IsUnique().HasFilter("\"MountLabel\" IS NULL");
     }
 
     private static void ConfigureMediaItem(ModelBuilder modelBuilder)

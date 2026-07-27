@@ -14,7 +14,28 @@ public sealed class Catalog
 
     public CatalogType Type { get; set; }
 
-    /// <summary>Host path; contains <c>files/</c> + <c>library/</c> on one filesystem.</summary>
+    /// <summary>
+    /// The Hosty catalog-root mount this catalog lives under (<c>HOSTY_MOUNT_CATALOGROOTS</c>). Together
+    /// with <see cref="MountRelativePath"/> it is the catalog's durable identity: the label is the same
+    /// under every runtime profile, while the absolute path Hosty injects for it is not (host paths under
+    /// <c>dev</c>, container paths under <c>docker</c>). Null only for standalone runs where no mounts are
+    /// injected and the operator gave a free-text absolute root.
+    /// </summary>
+    public string? MountLabel { get; set; }
+
+    /// <summary>
+    /// Path of the catalog relative to its mount root, posix-style; empty when the catalog *is* the mount
+    /// root. Non-null exactly when <see cref="MountLabel"/> is.
+    /// </summary>
+    public string? MountRelativePath { get; set; }
+
+    /// <summary>
+    /// The absolute path of the catalog root <b>in the current runtime</b>: contains <c>.incoming/</c> plus
+    /// the published tree, on one filesystem. Derived from <see cref="MountLabel"/> +
+    /// <see cref="MountRelativePath"/> and re-resolved at every startup (see
+    /// <see cref="MediaServer.Api.Catalogs.CatalogAnchorService"/>) — it is a cache of "where is this
+    /// catalog right now", never the identity. Stored so the whole app can keep reading one absolute path.
+    /// </summary>
     public required string Root { get; set; }
 
     /// <summary>e.g. <c>{Title} ({Year})</c>.</summary>

@@ -2,13 +2,25 @@ using MediaServer.Api.Data;
 
 namespace MediaServer.Api.Catalogs;
 
+/// <summary>
+/// Where the catalog lives is given one of two ways: <see cref="MountLabel"/> + <see cref="RelativePath"/>
+/// (the normal case — the label is stable across runtime profiles), or a free-text absolute
+/// <see cref="Root"/> for standalone runs where Hosty injects no mounts. When both are supplied the mount
+/// wins; a <see cref="Root"/> that happens to sit inside a mount is anchored to it automatically.
+/// </summary>
 public sealed record CreateCatalogRequest(
     string Name,
     CatalogType Type,
-    string Root,
+    string? Root,
+    string? MountLabel,
+    string? RelativePath,
     string? NamingTemplate,
     bool DefaultKeepSeeding,
     string? MetadataLanguage);
+
+/// <summary>Re-points an existing catalog at a (possibly different) mount — see
+/// <see cref="CatalogAnchorService.AnchorAsync"/>.</summary>
+public sealed record AnchorCatalogRequest(string MountLabel, string? RelativePath);
 
 public sealed record UpdateCatalogRequest(
     string? Name,
@@ -16,29 +28,42 @@ public sealed record UpdateCatalogRequest(
     bool? DefaultKeepSeeding,
     string? MetadataLanguage);
 
+/// <summary>
+/// <see cref="Root"/> is the catalog's absolute path <b>in the current runtime</b>, resolved from
+/// <see cref="MountLabel"/> + <see cref="MountRelativePath"/>. <see cref="Unanchored"/> means this runtime
+/// provides no mount that holds the catalog (its mount was removed, renamed, or belongs to the other
+/// runtime profile): file-backed actions are unavailable exactly as when <see cref="Online"/> is false,
+/// but the fix is to re-anchor it rather than to reconnect a volume.
+/// </summary>
 public sealed record CatalogResponse(
     Guid Id,
     string Name,
     CatalogType Type,
     string Root,
+    string? MountLabel,
+    string? MountRelativePath,
     string NamingTemplate,
     bool DefaultKeepSeeding,
     string? MetadataLanguage,
     long FreeBytes,
     bool Online,
+    bool Unanchored,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt)
 {
-    public static CatalogResponse From(Catalog catalog, long freeBytes, bool online) => new(
+    public static CatalogResponse From(Catalog catalog, long freeBytes, bool online, bool unanchored) => new(
         catalog.Id,
         catalog.Name,
         catalog.Type,
         catalog.Root,
+        catalog.MountLabel,
+        catalog.MountRelativePath,
         catalog.NamingTemplate,
         catalog.DefaultKeepSeeding,
         catalog.MetadataLanguage,
         freeBytes,
         online,
+        unanchored,
         catalog.CreatedAt,
         catalog.UpdatedAt);
 }

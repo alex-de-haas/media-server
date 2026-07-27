@@ -144,4 +144,4 @@ coverage:
 
 - [Catalog library browsing idea](../../ideas/catalog-library-browsing.md)
 - [Watch-history calendar](../watch-history-calendar/feature.md)
-- [Catalogs](../catalogs.md)
+- [Catalogs](../catalogs/feature.md)
