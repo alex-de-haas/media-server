@@ -131,7 +131,7 @@ public sealed class DownloadDeletionServiceTests : IDisposable
         }
 
         public TorrentDescriptor Inspect(TorrentSource source) => new("hash", null, 0, false, []);
-        public Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken) => Task.FromResult(new TorrentDescriptor("hash", null, 0, false, []));
+        public Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, bool autoStart, CancellationToken cancellationToken) => Task.FromResult(new TorrentDescriptor("hash", null, 0, false, []));
         public Task PauseAsync(string infoHash, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task ResumeAsync(string infoHash, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task StopAsync(string infoHash, CancellationToken cancellationToken) => Task.CompletedTask;

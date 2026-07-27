@@ -26,7 +26,7 @@ public sealed class DisabledTorrentEngine : ITorrentEngine
     // Pure, offline parse — yields the info hash/size without needing the engine.
     public TorrentDescriptor Inspect(TorrentSource source) => LocalTorrentInspector.Inspect(source);
 
-    public Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken) =>
+    public Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, bool autoStart, CancellationToken cancellationToken) =>
         Task.FromException<TorrentDescriptor>(new InvalidOperationException(Unavailable));
 
     // Commands against a torrent the engine never knew about are no-ops, so stale download rows can still

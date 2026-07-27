@@ -42,9 +42,6 @@ public sealed record TorrentSnapshot(
     int? CompletePieces = null,
     long? EtaSeconds = null);
 
-/// <summary>Per-torrent rate limits (bytes/sec; 0 = unlimited).</summary>
-public sealed record TorrentLimits(int MaxDownloadRate, int MaxUploadRate);
-
 /// <summary>Status of the VPN tunnel the engine runs behind (engine-wide, not per-torrent).
 /// <see cref="Connected"/> is the primary signal; <see cref="ExitIp"/>/<see cref="ExitCountry"/> are a
 /// best-effort proof of egress and may be <c>null</c>.</summary>
@@ -69,7 +66,7 @@ public interface ITorrentEngine
     /// it to the engine — used for the pre-download free-space check.</summary>
     TorrentDescriptor Inspect(TorrentSource source);
 
-    Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken);
+    Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, bool autoStart, CancellationToken cancellationToken);
 
     Task PauseAsync(string infoHash, CancellationToken cancellationToken);
 

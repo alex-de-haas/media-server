@@ -2,7 +2,7 @@
 
 Status: Active
 Created: 2026-06-17
-Updated: 2026-07-14
+Updated: 2026-07-27
 
 > **Storage-model change (2026-06-21).** The catalog storage model was reworked
 > from two hardlinked subtrees (`files/` + `library/`) to a **single tree**: a
@@ -22,8 +22,9 @@ Updated: 2026-07-14
 > `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`); when the dependency URL is absent a
 > `DisabledTorrentEngine` keeps the rest of the app working. The manifest no longer
 > declares a raw `torrent` port, so `HOSTY_PORT_TORRENT` and the
-> `TORRENT_ENABLE_PORT_MAPPING` / `TORRENT_BIND_ADDRESS` settings are gone (only
-> `TORRENT_MAX_DOWNLOAD_SPEED` / `TORRENT_MAX_UPLOAD_SPEED` remain). Everything below
+> `TORRENT_ENABLE_PORT_MAPPING` / `TORRENT_BIND_ADDRESS` settings are gone; the last two,
+> `TORRENT_MAX_DOWNLOAD_SPEED` / `TORRENT_MAX_UPLOAD_SPEED`, were dropped on 2026-07-27 —
+> rate limiting now lives only in `torrent-engine`. Everything below
 > that describes an **in-process** engine, the raw torrent port / `HOSTY_PORT_TORRENT`,
 > or those two settings (including the §4 manifest, the M1 narrative, and §7/§8)
 > predates this change and is kept as a historical record. Current model:

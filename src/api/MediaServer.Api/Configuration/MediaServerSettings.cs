@@ -49,11 +49,6 @@ public sealed class MediaServerSettings
     /// </summary>
     public bool PlaybackDiagnosticsEnabled { get; init; }
 
-    /// <summary>Per-download rate limits forwarded to the torrent-engine; bytes/sec, 0 means unlimited.</summary>
-    public int TorrentMaxDownloadSpeed { get; init; }
-
-    public int TorrentMaxUploadSpeed { get; init; }
-
     /// <summary>
     /// Base URL of the external <c>torrent-engine</c> app, injected as the cross-app dependency
     /// <c>HOSTY_DEPENDENCY_TORRENT_ENGINE_URL</c>. When set, downloading is delegated to that app over
@@ -86,8 +81,6 @@ public sealed class MediaServerSettings
         string? Read(string key) => configuration[key] is { Length: > 0 } value ? value.Trim() : null;
         bool ReadBool(string key, bool fallback) =>
             bool.TryParse(Read(key), out var parsed) ? parsed : fallback;
-        int ReadInt(string key, int fallback) =>
-            int.TryParse(Read(key), out var parsed) ? parsed : fallback;
 
         var languages = (Read("SUPPORTED_LANGUAGES") ?? "en-US")
             .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -112,8 +105,6 @@ public sealed class MediaServerSettings
             JellyfinServerName = Read("JELLYFIN_SERVER_NAME") ?? "Media Server",
             JellyfinDiscoveryEnabled = ReadBool("JELLYFIN_DISCOVERY_ENABLED", false),
             PlaybackDiagnosticsEnabled = ReadBool("PLAYBACK_DIAGNOSTICS", false),
-            TorrentMaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),
-            TorrentMaxUploadSpeed = ReadInt("TORRENT_MAX_UPLOAD_SPEED", 0),
             TorrentEngineUrl = Read("HOSTY_DEPENDENCY_TORRENT_ENGINE_URL"),
             TranscodeEngineUrl = Read("HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL"),
             CatalogMountRoots = ParseMountRoots(Read("HOSTY_MOUNT_CATALOGROOTS")),

@@ -17,7 +17,6 @@ public sealed class TorrentService(
     MediaServerDbContext database,
     ITorrentEngine engine,
     IFilesystemInspector filesystem,
-    MediaServerSettings settings,
     HostyOptions hosty,
     IPipelineQueue pipelineQueue,
     DownloadDeletionService downloadDeletion,
@@ -68,7 +67,6 @@ public sealed class TorrentService(
         }
 
         var keepSeeding = request.KeepSeeding ?? catalog.DefaultKeepSeeding;
-        var limits = new TorrentLimits(settings.TorrentMaxDownloadSpeed, settings.TorrentMaxUploadSpeed);
 
         // Persist enough to re-add the torrent after a restart: the magnet URI, or the stored .torrent path.
         var sourceUri = PersistSource(source, descriptor.InfoHash);
@@ -113,7 +111,7 @@ public sealed class TorrentService(
 
         try
         {
-            await engine.AddAsync(source, savePath, limits, autoStart: true, cancellationToken);
+            await engine.AddAsync(source, savePath, autoStart: true, cancellationToken);
         }
         catch (Exception exception) when (exception is not TorrentRequestException)
         {

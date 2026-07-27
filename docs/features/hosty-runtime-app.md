@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-27
 
 ## Description
 
@@ -148,8 +148,6 @@ App-owned configuration declared in the manifest (`key`, `type`, `default`,
 | `SUPPORTED_LANGUAGES` | string | Ordered list, e.g. `ru-RU,en-US,ja`; first is fallback. |
 | `JELLYFIN_SERVER_NAME` | string | Shown in Infuse. |
 | `JELLYFIN_DISCOVERY_ENABLED` | boolean | Optional UDP discovery (default off). |
-| `TORRENT_MAX_DOWNLOAD_SPEED` | number | 0 = unlimited. |
-| `TORRENT_MAX_UPLOAD_SPEED` | number | 0 = unlimited. |
 | `FFPROBE_PATH` | string | Path to the `ffprobe` binary on the host (dev profile). |
 
 Public endpoint origins are configured after install through Core-managed
@@ -205,7 +203,7 @@ per-service `runtimes` keyed by profile key:
   "externalMounts": {
     "catalogRoots": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "api", "required": true }
   },
-  "settings": [ /* TMDB_API_KEY (secret, required), SUPPORTED_LANGUAGES, JELLYFIN_*, FFPROBE_PATH, TORRENT_MAX_DOWNLOAD_SPEED, TORRENT_MAX_UPLOAD_SPEED */ ],
+  "settings": [ /* TMDB_API_KEY (secret, required), SUPPORTED_LANGUAGES, JELLYFIN_*, FFPROBE_PATH */ ],
   "capabilities": ["backup", "logs"]
 }
 ```
