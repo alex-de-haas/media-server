@@ -15,7 +15,7 @@ Media Server-owned credentials for Jellyfin clients.
 
 - The UI uses the Hosty app-code flow and an app-origin session; the app never
   sees Host passwords or Host session cookies (see
-  [Hosty runtime app](hosty-runtime-app.md)).
+  [Hosty runtime app](hosty-runtime-app/feature.md)).
 - `api` trusts a forwarded Host identity only after validating it against Core
   (`/api/auth/apps/revalidate`).
 - Never trust client-supplied forwarding or proxy headers (for example

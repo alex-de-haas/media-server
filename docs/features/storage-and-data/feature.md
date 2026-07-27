@@ -147,7 +147,7 @@ operator owns that media and its own backups).
   and injected as `HOSTY_MOUNT_CATALOGROOTS` (comma-separated `label=path`
   entries). `MediaServerSettings` parses them and `CatalogService` rejects a
   catalog root outside them (see
-  [Hosty runtime app](../hosty-runtime-app.md)).
+  [Hosty runtime app](../hosty-runtime-app/feature.md)).
 
 Either way path access is sandboxed to the configured roots (see
 [File and directory management](../file-directory-management/feature.md)), and the media

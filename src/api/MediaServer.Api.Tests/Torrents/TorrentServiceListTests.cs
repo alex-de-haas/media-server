@@ -35,7 +35,6 @@ public sealed class TorrentServiceListTests : IDisposable
         _database,
         new FakeTorrentEngine(),
         new FilesystemInspector(),
-        new MediaServerSettings(),
         new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _tempRoot },
         new PipelineQueue(),
         new DownloadDeletionService(_database, new FakeTorrentEngine(), NullLogger<DownloadDeletionService>.Instance),

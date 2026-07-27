@@ -44,7 +44,7 @@ public sealed class TorrentAddOrderingTests : IDisposable
             return probe.Downloads.Any(download => download.InfoHash == "feedface");
         });
         var service = new TorrentService(
-            _database, engine, new FilesystemInspector(), new MediaServerSettings(),
+            _database, engine, new FilesystemInspector(),
             new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root },
             new PipelineQueue(),
             new DownloadDeletionService(_database, engine, NullLogger<DownloadDeletionService>.Instance),
@@ -85,7 +85,7 @@ public sealed class TorrentAddOrderingTests : IDisposable
         public TorrentDescriptor Inspect(TorrentSource source) =>
             new("feedface", "The Movie", 100, true, [new TorrentFileInfo(0, "The Movie/The Movie.mkv", 100)]);
 
-        public Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken)
+        public Task<TorrentDescriptor> AddAsync(TorrentSource source, string saveDirectory, bool autoStart, CancellationToken cancellationToken)
         {
             RowExistedWhenStarted = downloadExists();
             return Task.FromResult(Inspect(source));

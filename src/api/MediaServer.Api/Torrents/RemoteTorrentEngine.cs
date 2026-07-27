@@ -90,16 +90,16 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     public TorrentDescriptor Inspect(TorrentSource source) => LocalTorrentInspector.Inspect(source);
 
     public async Task<TorrentDescriptor> AddAsync(
-        TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken)
+        TorrentSource source, string saveDirectory, bool autoStart, CancellationToken cancellationToken)
     {
         var (mountLabel, savePath) = ToMountRelative(saveDirectory, _settings.CatalogMountRoots);
+        // No per-download rate limits: the engine owns throttling and applies its own global
+        // TORRENT_MAX_DOWNLOAD_SPEED / TORRENT_MAX_UPLOAD_SPEED when the request omits them.
         var request = new AddDownloadRequest(
             (source as TorrentSource.Magnet)?.Uri,
             source is TorrentSource.File file ? Convert.ToBase64String(file.Content) : null,
             mountLabel,
             savePath,
-            limits.MaxDownloadRate,
-            limits.MaxUploadRate,
             autoStart);
 
         using var cts = ControlCts(cancellationToken);
@@ -406,7 +406,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     }
 
     private sealed record AddDownloadRequest(
-        string? Magnet, string? TorrentBase64, string? MountLabel, string? SavePath, int MaxDownloadRate, int MaxUploadRate, bool AutoStart);
+        string? Magnet, string? TorrentBase64, string? MountLabel, string? SavePath, bool AutoStart);
 
     private sealed record EngineError(string? Error);
 

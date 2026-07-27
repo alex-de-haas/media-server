@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-07-25
+Updated: 2026-07-27
 
 ## Description
 
@@ -61,8 +61,9 @@ Engine capabilities (driven through `ITorrentEngine`):
 - Per-download directory under the catalog's `.incoming/<downloadId>/`, handed to
   the engine as a `mountLabel` + relative path against its matching downloads mount
   (so the post-download move stays on one filesystem — see the multi-mount note below).
-- Per-download speed limits forwarded from `TORRENT_MAX_DOWNLOAD_SPEED` /
-  `TORRENT_MAX_UPLOAD_SPEED`.
+- Rate limiting is the engine's own concern: Media Server sends no per-download
+  limits, so `torrent-engine` applies its global `TORRENT_MAX_DOWNLOAD_SPEED` /
+  `TORRENT_MAX_UPLOAD_SPEED` settings.
 
 `.torrent` parsing (info hash, size, file list) runs **locally** in Media Server
 (`LocalTorrentInspector`) before a download row is created — it needs no network.

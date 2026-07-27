@@ -58,7 +58,6 @@ public sealed class TorrentCoordinator(
         {
             using var scope = scopeFactory.CreateScope();
             var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
-            var settings = scope.ServiceProvider.GetRequiredService<MediaServerSettings>();
 
             var active = await database.Downloads
                 .Where(download => download.State == DownloadState.Downloading
@@ -77,8 +76,7 @@ public sealed class TorrentCoordinator(
                         continue;
                     }
 
-                    var limits = new TorrentLimits(settings.TorrentMaxDownloadSpeed, settings.TorrentMaxUploadSpeed);
-                    await engine.AddAsync(source, download.SavePath, limits, autoStart: true, cancellationToken);
+                    await engine.AddAsync(source, download.SavePath, autoStart: true, cancellationToken);
                 }
                 catch (Exception exception)
                 {

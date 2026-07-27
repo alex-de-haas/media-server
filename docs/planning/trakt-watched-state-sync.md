@@ -1111,7 +1111,7 @@ Live Trakt verification uses a dedicated non-production application and account:
 - [Security](../features/security.md)
 - [Background tasks and progress](../features/background-tasks/feature.md)
 - [Frontend application](../features/frontend-application/feature.md)
-- [Hosty runtime app](../features/hosty-runtime-app.md)
+- [Hosty runtime app](../features/hosty-runtime-app/feature.md)
 - [Trakt create an app](https://docs.trakt.tv/docs/create-an-app)
 - [Trakt OAuth authentication](https://docs.trakt.tv/docs/authentication-oauth)
 - [Trakt Device Code creation](https://docs.trakt.tv/reference/postoauthdevicecode)
