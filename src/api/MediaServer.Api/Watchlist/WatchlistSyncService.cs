@@ -140,6 +140,7 @@ public sealed class WatchlistSyncService(
         var title = await database.TrackedTitles
             .Include(candidate => candidate.Releases)
             .Include(candidate => candidate.Entries)
+            .AsSplitQuery() // Releases × entries would otherwise come back as a cross product.
             .FirstOrDefaultAsync(candidate => candidate.Id == trackedTitleId, cancellationToken);
         if (title is null)
         {

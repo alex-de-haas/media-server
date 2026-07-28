@@ -32,11 +32,15 @@ public sealed class ReminderDispatchService(
         var timeZone = timeProvider.LocalTimeZone;
         var today = WatchlistScope.LocalDay(now, timeZone);
 
+        // Two collections hang off each reminder (the title's releases, the reminder's own deliveries), so a
+        // single query would return their cross product per row — a series title's episode releases times
+        // every notification ever sent. Split queries keep each collection on its own round trip.
         var reminders = await database.ReleaseReminders
             .Include(reminder => reminder.AppUser)
             .Include(reminder => reminder.TrackedTitle).ThenInclude(title => title!.Releases)
             .Include(reminder => reminder.Deliveries)
             .Where(reminder => reminder.Active)
+            .AsSplitQuery()
             .ToListAsync(cancellationToken);
         if (reminders.Count == 0)
         {
