@@ -304,6 +304,7 @@ internal static class ContainerHeader
         var transfer = 0;
         var dolbyVision = false;
         var position = from;
+        Span<byte> colour = stackalloc byte[10];
         while (position + 8 <= to)
         {
             if (ReadBoxHeader(stream, position, to) is not { } box)
@@ -313,7 +314,6 @@ internal static class ContainerHeader
 
             if (box.Type == "colr" && box.Start + 10 <= box.End)
             {
-                Span<byte> colour = stackalloc byte[10];
                 stream.Position = box.Start;
                 stream.ReadExactly(colour);
                 // "nclx"/"nclc": primaries(2) transfer(2) matrix(2) follow the type.
