@@ -182,6 +182,7 @@ public sealed class ReminderService(
         var reminder = await database.ReleaseReminders
             .Include(candidate => candidate.TrackedTitle).ThenInclude(title => title!.Releases)
             .Include(candidate => candidate.Deliveries)
+            .AsSplitQuery() // Releases × deliveries would otherwise come back as a cross product.
             .FirstOrDefaultAsync(candidate => candidate.Id == reminderId && candidate.AppUserId == userId, cancellationToken);
         if (reminder is null)
         {

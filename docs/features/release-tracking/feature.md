@@ -1,15 +1,14 @@
 # Release Tracking
 
-Status: Implemented
 Created: 2026-07-14
-Updated: 2026-07-24
+Updated: 2026-07-28
 
-> Near-term slice of the M5 [Watchlist and discovery](watchlist-and-discovery.md)
+> Near-term slice of the M5 [Watchlist and discovery](../watchlist-and-discovery.md)
 > vision. This spec covers **only** tracking: a per-user calendar of movie/series
 > release dates sourced from TMDb, plus reminders on the releases a user cares
 > about. It deliberately excludes acquisition — no content-source search, no
 > release matching/scoring, no auto-grab, no handoff to `Intake`. Those stay in
-> [Watchlist and discovery](watchlist-and-discovery.md) and build on top of the
+> [Watchlist and discovery](../watchlist-and-discovery.md) and build on top of the
 > entities defined here.
 
 ## Description
@@ -68,7 +67,7 @@ In scope:
   a per-reminder lead time and notify time, delivered as a per-user notification.
 - An **Upcoming/Calendar** surface plus "add to calendar" from detail pages.
 
-Out of scope (owned by [Watchlist and discovery](watchlist-and-discovery.md)):
+Out of scope (owned by [Watchlist and discovery](../watchlist-and-discovery.md)):
 
 - `IContentSource`, source/indexer search, release parsing and scoring.
 - Auto-grab / operator-approval of a release, and the handoff into the `Intake`
@@ -120,7 +119,7 @@ TMDb requests, and keeps the eventual acquisition action — inherently a
 shared-library operation — attachable at the global level later.
 
 This supersedes the single reserved `WatchlistItem` sketch in the
-[domain model](domain-model.md#entities--discovery-future-m5); its `CatalogId`
+[domain model](../domain-model.md#entities--discovery-future-m5); its `CatalogId`
 and `Quality` fields move to the deferred acquisition layer.
 
 ```mermaid
@@ -308,7 +307,7 @@ Details:
 
 Both run as hosted services in the `CatalogHealthService` /
 `CatalogMetadataRefreshService` mold, reported over the realtime job feed (see
-[Background tasks](background-tasks/feature.md)).
+[Background tasks](../background-tasks/feature.md)).
 
 **Date-sync — `watchlist:refresh-dates`, every 24h, the only TMDb caller.**
 
@@ -336,6 +335,12 @@ Both run as hosted services in the `CatalogHealthService` /
 Decoupling the loops means date freshness (bounded, rate-limited) and reminder
 timing (fast, local) never trade off against each other.
 
+Both loops — and the reminder-update endpoint — load a row together with **two**
+collections: a title's releases plus either its watchlist entries or the reminder's
+delivery ledger. Those reads are EF **split queries**. A single joined query returns
+the two collections' cross product, which for a series is every episode release
+times every delivery already recorded.
+
 ## Notifications
 
 Delivery uses `IHostyCoreClient.PublishNotificationAsync(level, title, body, link,
@@ -356,7 +361,7 @@ no new persisted state.
 
 - **Series** — join the linked series' episode children (each `MediaItem` episode
   carries `IdentitySeasonNumber`/`IdentityEpisodeNumber`; see
-  [domain model](domain-model.md#entities--catalog--media)) to compute **Owned**,
+  [domain model](../domain-model.md#entities--catalog--media)) to compute **Owned**,
   **Aired** (air date `<= now`), and **Missing-aired** (`Aired − Owned`) — the "you
   have S1–S2, S3E1 aired but you don't have it" signal; the UI shows "behind by N".
 - **Movies** — a linked movie held only in poor quality can still be tracked for its
@@ -385,7 +390,7 @@ The gap recomputes whenever the library or the schedule changes, so it never dri
   tracked movies/series (kind, next date, in-library / owned-vs-aired hint, and a
   "no date yet" marker where applicable); add (TMDb search) and remove live here.
   A row's poster/title area opens the
-  [title preview](title-preview/feature.md), as do the rows of the day dialog and
+  [title preview](../title-preview/feature.md), as do the rows of the day dialog and
   the "Add title" search results.
 - **Reminders drawer** — a name filter, then poster rows of the user's reminders
   (type, lead, time, and a state pill: scheduled / recurring / released / pending),
@@ -404,7 +409,7 @@ The gap recomputes whenever the library or the schedule changes, so it never dri
 
 ## Reserved Seams for Acquisition
 
-The acquisition layer in [Watchlist and discovery](watchlist-and-discovery.md)
+The acquisition layer in [Watchlist and discovery](../watchlist-and-discovery.md)
 builds on these entities without reshaping them:
 
 - The `IPipelineStage` `Acquisition` phase and `IContentSource` contract are
@@ -418,7 +423,7 @@ builds on these entities without reshaping them:
 ## API
 
 Endpoints are shaped as discrete commands so the same operations can be exposed as
-MCP tools in M6 (see [root](../root.md) roadmap):
+MCP tools in M6 (see [root](../../root.md) roadmap):
 
 - `GET /api/watchlist` — the user's tracked titles with resolved dates and reminders.
 - `POST /api/watchlist` — add `{ providerRef, kind, monitorScope?, monitoredSeasons?, regionOverride? }`.
@@ -467,7 +472,10 @@ Backend tests use xUnit and Imposter (mock the TMDb client). Required coverage:
   owned/aired/missing-aired gap and its refresh when either side changes.
 - Watchlist and reminder API authorization scoping, and the reminder-creation
   resolved-state response.
+- No accidental cross-product read: the shared watchlist test context throws on EF's
+  `MultipleCollectionIncludeWarning`, so a load that pulls two collections fails the
+  suite until it opts into `AsSplitQuery()`.
 
 ## Links
 
-- [Watch-history calendar](watch-history-calendar/feature.md)
+- [Watch-history calendar](../watch-history-calendar/feature.md)
