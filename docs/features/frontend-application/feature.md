@@ -136,6 +136,9 @@ coverage:
 - Activity card behavior per work type: the actions each state offers (their
   accessible names), and that a queued item shows the queued line rather than a
   progress bar.
+- The download card's transferred/total readout: derivation from the bytes still
+  remaining, the downloaded-total and percentage fallbacks, clamping into the
+  torrent's size, and no readout while the size is unknown.
 - Episode and season deletion: the actions exist only for an admin, the request
   carries `deleteFiles` only when the checkbox is ticked, a delete that prunes the
   series navigates back to the library grid, and a season with no episodes left is

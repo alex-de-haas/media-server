@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, type LucideIcon, Pau
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatBytes, formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
+import { transferredBytes } from "@/lib/downloads";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
@@ -740,7 +741,9 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
       : null);
 
   const active = !vpnDown && !isDownloadPaused(download);
-  const transferred = downloadedBytes(download);
+  // Size readout stays outside the paused/VPN-down branch below: rates and ETA are meaningless once a
+  // transfer stops, but how much is already on disk still is.
+  const transferred = transferredBytes(download);
 
   return (
     <ActivityProgress value={percent}>
@@ -768,23 +771,6 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
       {active && <PeerStats download={download} />}
     </ActivityProgress>
   );
-}
-
-// Bytes of the torrent's content that are on disk, for the "1.2 GB / 7.5 GB" readout. Derived from what's
-// left rather than from `downloadedBytes`: the latter is everything the engine pulled off the wire, so
-// re-requested and hash-failed pieces make it drift past the torrent's size. Falls back to the reported
-// total, then to the percentage, for an engine build that doesn't send `remainingBytes`. Null while the
-// size is still unknown (a magnet that hasn't fetched its metadata yet), which hides the readout.
-function downloadedBytes(download: Download): number | null {
-  const size = download.sizeBytes;
-  if (size == null || size <= 0) {
-    return null;
-  }
-  const done =
-    download.remainingBytes != null
-      ? size - download.remainingBytes
-      : (download.downloadedBytes ?? (size * (download.percentComplete ?? 0)) / 100);
-  return Math.min(Math.max(done, 0), size);
 }
 
 // Peer/piece breakdown shown during an active download. Many `availablePeers` (known from
