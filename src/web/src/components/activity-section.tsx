@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
-import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
+import { formatBytes, formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
@@ -740,11 +740,17 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
       : null);
 
   const active = !vpnDown && !isDownloadPaused(download);
+  const transferred = downloadedBytes(download);
 
   return (
     <ActivityProgress value={percent}>
       <ActivityStats>
         <span>{formatPercent(download.percentComplete)}</span>
+        {transferred != null && (
+          <span>
+            {formatBytes(transferred)} / {formatBytes(download.sizeBytes)}
+          </span>
+        )}
         {vpnDown ? (
           // Transfer is gated by the killswitch — show why instead of a misleading 0 B/s.
           <span className="text-amber-500">Paused · VPN down</span>
@@ -762,6 +768,23 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
       {active && <PeerStats download={download} />}
     </ActivityProgress>
   );
+}
+
+// Bytes of the torrent's content that are on disk, for the "1.2 GB / 7.5 GB" readout. Derived from what's
+// left rather than from `downloadedBytes`: the latter is everything the engine pulled off the wire, so
+// re-requested and hash-failed pieces make it drift past the torrent's size. Falls back to the reported
+// total, then to the percentage, for an engine build that doesn't send `remainingBytes`. Null while the
+// size is still unknown (a magnet that hasn't fetched its metadata yet), which hides the readout.
+function downloadedBytes(download: Download): number | null {
+  const size = download.sizeBytes;
+  if (size == null || size <= 0) {
+    return null;
+  }
+  const done =
+    download.remainingBytes != null
+      ? size - download.remainingBytes
+      : (download.downloadedBytes ?? (size * (download.percentComplete ?? 0)) / 100);
+  return Math.min(Math.max(done, 0), size);
 }
 
 // Peer/piece breakdown shown during an active download. Many `availablePeers` (known from
