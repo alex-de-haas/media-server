@@ -10,7 +10,7 @@ Updated: 2026-06-21
 >
 > The tracking substrate this builds on — the per-user watchlist, the typed
 > release schedule, and the release calendar/notifications — is specified
-> separately and comes first in [Release tracking](release-tracking.md). This doc
+> separately and comes first in [Release tracking](release-tracking/feature.md). This doc
 > covers only what tracking does **not**: searching content sources, matching and
 > scoring releases, and grabbing the best one into `Intake`.
 

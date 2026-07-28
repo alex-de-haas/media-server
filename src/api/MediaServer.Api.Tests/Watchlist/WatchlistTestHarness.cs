@@ -2,6 +2,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace MediaServer.Api.Tests.Watchlist;
@@ -19,8 +20,27 @@ internal static class WatchlistTestData
         return connection;
     }
 
-    public static MediaServerDbContext NewContext(SqliteConnection connection) =>
-        new(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(connection).Options);
+    /// <summary>
+    /// The option shape every release-tracking test shares — used both for the contexts built here and for
+    /// the ones registered in a test's own container, so a service resolved from DI is held to it too.
+    /// </summary>
+    /// <remarks>
+    /// Every watchlist read that pulls two collections at once (a title's releases plus its entries, or a
+    /// reminder's deliveries) must ask for a split query — joined into one statement they come back as a
+    /// cross product. Throwing on the warning keeps that a failing test rather than a log line nobody reads
+    /// in production, since this is the code path where it actually bites.
+    /// </remarks>
+    public static void ConfigureDatabase(DbContextOptionsBuilder options, SqliteConnection connection) =>
+        options
+            .UseSqlite(connection)
+            .ConfigureWarnings(warnings => warnings.Throw(RelationalEventId.MultipleCollectionIncludeWarning));
+
+    public static MediaServerDbContext NewContext(SqliteConnection connection)
+    {
+        var options = new DbContextOptionsBuilder<MediaServerDbContext>();
+        ConfigureDatabase(options, connection);
+        return new MediaServerDbContext(options.Options);
+    }
 
     public static AppUser SeedUser(MediaServerDbContext database, string hostUserId = "host-1")
     {

@@ -29,7 +29,7 @@ public sealed class WatchlistSyncServiceTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<MediaServerDbContext>(options => options.UseSqlite(_connection));
+        services.AddDbContext<MediaServerDbContext>(options => WatchlistTestData.ConfigureDatabase(options, _connection));
         services.AddSingleton(new MediaServerSettings { WatchRegion = "US" });
         services.AddSingleton<IReleaseScheduleProvider>(_schedule);
         services.AddSingleton<IRealtimeNotifier, NullNotifier>();

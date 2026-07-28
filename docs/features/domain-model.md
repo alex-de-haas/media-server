@@ -359,7 +359,7 @@ sketch into a global title/schedule part (`TrackedTitle`, `TrackedRelease`) and 
 per-user subscription part (`WatchlistEntry`, `ReleaseReminder`,
 `ReminderDelivery`); its `CatalogId`
 and `Quality` fields move to the deferred acquisition layer. See
-[Release tracking](release-tracking.md) for those entities.
+[Release tracking](release-tracking/feature.md) for those entities.
 
 **WatchlistItem** *(superseded by the release-tracking split above)*: Id,
 Providers (JSON), Type, CatalogId (FK), Monitored, Quality (JSON preferences),
