@@ -82,16 +82,7 @@ public sealed class SidecarPlacementService(
             return;
         }
 
-        // Titles are inferred for the whole set at once: what tells these tracks apart is only visible in
-        // their siblings — one release labels by folder, another by file name.
-        var inferredTitles = AudioTrackLabeler.InferTitles(
-            [.. companions.Select(companion => companion.RelativePath)], video.RelativePath);
-
-        var labelled = new List<(SourceFile File, string? Language, string? Title)>(companions.Count);
-        for (var index = 0; index < companions.Count; index++)
-        {
-            labelled.Add(await LabelAsync(companions[index], inferredTitles[index], catalog, cancellationToken));
-        }
+        var labelled = await LabelAsync(companions, video.RelativePath, catalog, cancellationToken);
 
         var folder = FolderOf(video.RelativePath);
         var existing = await database.MediaStreams
@@ -199,30 +190,70 @@ public sealed class SidecarPlacementService(
     /// internally, which is why the file name never has to be the source of truth — and an elementary
     /// stream (<c>.ac3</c>, <c>.dts</c>) has nowhere to put them, so the path is read instead.
     /// </summary>
-    private async Task<(SourceFile File, string? Language, string? Title)> LabelAsync(
-        SourceFile companion, string? fromPathTitle, Catalog catalog, CancellationToken cancellationToken)
+    private async Task<List<(SourceFile File, string? Language, string? Title)>> LabelAsync(
+        IReadOnlyList<SourceFile> companions, string videoRelativePath, Catalog catalog, CancellationToken cancellationToken)
     {
-        var fromPathLanguage = AudioTrackLabeler.InferLanguage(companion.RelativePath);
+        // What a container states about itself wins, so it is read first — and the language it yields is
+        // what the cohorts below are built from.
+        var tags = new List<(string? Language, string? Title)>(companions.Count);
+        foreach (var companion in companions)
+        {
+            tags.Add(await ReadTagsAsync(companion, catalog, cancellationToken));
+        }
 
+        var languages = companions
+            .Select((companion, index) => tags[index].Language ?? AudioTrackLabeler.InferLanguage(companion.RelativePath))
+            .ToList();
+
+        // Titles are inferred per cohort — same kind, same language — because that is exactly the group a
+        // name has to tell apart, and the group SidecarNaming will later add a slug for. Inferring across
+        // the whole set instead would let an unrelated companion decide the question: one subtitle named
+        // differently from a release's dubs is enough to make file names look like the varying component,
+        // and the dubs would then all share one title and lose the folders that actually named them.
+        var titles = new string?[companions.Count];
+        var cohorts = Enumerable.Range(0, companions.Count)
+            .GroupBy(index => (
+                Kind: MediaFormats.IsCompanionAudio(companions[index].RelativePath),
+                Language: languages[index]?.ToLowerInvariant()));
+
+        foreach (var cohort in cohorts)
+        {
+            var indexes = cohort.ToList();
+            var inferred = AudioTrackLabeler.InferTitles(
+                [.. indexes.Select(index => companions[index].RelativePath)], videoRelativePath);
+            for (var position = 0; position < indexes.Count; position++)
+            {
+                titles[indexes[position]] = inferred[position];
+            }
+        }
+
+        return [.. companions.Select((companion, index) =>
+            (companion, languages[index], tags[index].Title ?? titles[index]))];
+    }
+
+    /// <summary>
+    /// What the file states about itself. A tagged container carries both — a <c>.mka</c> names its own
+    /// language and dub group — while an elementary stream (<c>.ac3</c>, <c>.dts</c>) has nowhere to put
+    /// them, which is the case the path inference exists for.
+    /// </summary>
+    private async Task<(string? Language, string? Title)> ReadTagsAsync(
+        SourceFile companion, Catalog catalog, CancellationToken cancellationToken)
+    {
         if (!sandbox.TryResolve(catalog, companion.RelativePath, out var absolute) || !File.Exists(absolute))
         {
-            return (companion, fromPathLanguage, fromPathTitle);
+            return (null, null);
         }
 
         try
         {
             var result = await probe.ProbeAsync(absolute, cancellationToken);
             var stream = result.Streams.FirstOrDefault();
-            return (
-                companion,
-                TaggedLanguage(stream?.Language) ?? fromPathLanguage,
-                Tagged(stream?.Title) ?? fromPathTitle);
+            return (TaggedLanguage(stream?.Language), Tagged(stream?.Title));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // An untagged elementary stream is not a failure — it is the case the path inference exists for.
             logger.LogDebug(exception, "Could not read tags from {Path}; using its path instead.", companion.RelativePath);
-            return (companion, fromPathLanguage, fromPathTitle);
+            return (null, null);
         }
     }
 

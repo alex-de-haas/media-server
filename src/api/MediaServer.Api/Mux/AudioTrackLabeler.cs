@@ -77,6 +77,12 @@ internal static class AudioTrackLabeler
     /// name and no way to tell them apart.
     /// </para>
     /// <para>
+    /// The caller passes <b>one cohort</b> — the tracks of a single kind and language, which is the group a
+    /// title actually has to tell apart. Mixing kinds would let a subtitle named unlike a release's dubs
+    /// decide the question for them: its name alone makes names look like the varying component, and every
+    /// dub then falls back to the same label.
+    /// </para>
+    /// <para>
     /// Within a name, the label is what it carries beyond the video's own name (<c>Movie.rus.AniDUB.mka</c>
     /// — also the shape this app writes, so its output reads back on a later scan), or the whole name when
     /// it shares nothing with the video's. Either way language and flag tokens drop out, as does anything

@@ -1,7 +1,7 @@
 # External Track Sidecars
 
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-28
 
 A release's separate audio tracks and subtitles are kept as files beside the
 library file they belong to, and recorded as external streams of its media
@@ -25,6 +25,14 @@ an external `MediaStream`.
 Both audio and subtitle companions are admitted from a torrent's file list in the
 first place: one that never became a `SourceFile` could not reach this stage, and
 would be swept as an untracked staging leftover.
+
+Identify treats both as companions too — matched against the batch's videos rather
+than searched for as content of their own. A subtitle is a subtitle *of* a film,
+not a film named `Форсированные.srt`; identified as content it would invent an item
+and make a one-movie batch look like several, which parks the dubs beside it.
+The review surface says the same thing: a companion row offers no "Extra"
+decision, and states which video the track lands beside — or, when no video here
+claims it, that it stays where it downloaded rather than being discarded.
 
 Companions are never organized by `OrganizerService` — their names derive from the
 video's — so its recursive staging sweep deliberately spares any root still
@@ -70,6 +78,12 @@ isolation both look like a label:
 Whichever component varies across the set is the one carrying the labels. Getting
 this backwards is not a cosmetic error: it gives every track the release name and
 no way to tell them apart at all.
+
+The set is a **cohort** — one kind, one language — because that is the group a
+title has to tell apart, and the same group the slug rule below adds a slug for.
+Reading the question across everything at once lets an unrelated companion answer
+it: one subtitle named unlike a release's dubs is enough to make file names look
+like the varying component, and every dub then falls back to the same label.
 
 Within a name, the label is what it carries beyond the video's own name
 (`Movie.rus.AniDUB.mka` — also the shape this app writes, so its output reads back
@@ -154,8 +168,9 @@ has nothing to talk to without it.
   by their group folders, a tagged container naming its own track (including one
   whose title cannot be a file name), the emptied staging folder being cleared once
   the files are out, sidecar indexes staying unique across drives and past the
-  container's own numbering, and a dub-only batch keeping its tracks instead of
-  discarding them.
+  container's own numbering, a subtitle in the batch neither creating a movie of
+  its own nor deciding how the dubs beside it are labelled, and a dub-only batch
+  keeping its tracks instead of discarding them.
 - `SidecarDeletionTests` — dropping the entry leaving the file, erasing taking it,
   the video and its own streams untouched, the staged row going back to unassigned,
   an identically-placed sidecar of another catalog left alone, an embedded stream

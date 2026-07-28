@@ -223,6 +223,45 @@ public sealed class IngestSidecarTests
     }
 
     [Fact]
+    public async Task A_subtitle_alongside_folder_labelled_dubs_does_not_decide_how_they_are_labelled()
+    {
+        // Titles are inferred per cohort — same kind, same language — because that is the group a name has
+        // to tell apart. Inferring across everything at once would let this subtitle, whose name differs
+        // from the dubs', make file names look like the varying component; both dubs would then share one
+        // title and lose the folders that actually named them.
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [SomeMovie];
+        ProbeCompanionsAs(harness, _ => UntaggedAudioProbe());
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Some Movie 2020",
+            "Some.Movie.2020/Some.Movie.2020.mkv",
+            additionalSourceRelativePaths:
+            [
+                "Some.Movie.2020/RUS Sound/[AniDUB]/Some.Movie.2020.mka",
+                "Some.Movie.2020/RUS Sound/[MCA]/Some.Movie.2020.mka",
+                "Some.Movie.2020/Subs/Форсированные.srt",
+            ]);
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var externals = await database.MediaStreams.Where(stream => stream.IsExternal).ToListAsync();
+
+        var dubs = externals.Where(stream => stream.StreamType == StreamType.Audio).ToList();
+        Assert.Equal(2, dubs.Count);
+        Assert.Contains(dubs, stream => stream.ExternalPath!.Contains("AniDUB", StringComparison.Ordinal));
+        Assert.Contains(dubs, stream => stream.ExternalPath!.Contains("MCA", StringComparison.Ordinal));
+
+        // And the subtitle is a companion of this film, not a film called "Форсированные": identified as
+        // content it would invent a second movie, which is also what parked the dubs above ("this batch has
+        // several movies") before they could be labelled at all.
+        Assert.Single(externals, stream => stream.StreamType == StreamType.Subtitle);
+        Assert.Single(await database.MediaItems.Where(item => item.Kind == MediaKind.Movie).ToListAsync());
+    }
+
+    [Fact]
     public async Task A_dub_only_batch_keeps_its_tracks_instead_of_discarding_them()
     {
         // The case that motivated the whole feature: tracks whose videos are not in this batch used to be

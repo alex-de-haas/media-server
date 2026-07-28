@@ -113,7 +113,7 @@ public static class IngestEndpoints
                 AssignExtrasOutcome.NotFound => Results.NotFound(),
                 AssignExtrasOutcome.FileNotFound => Results.NotFound(new { error = "One or more source files were not found on this ingest." }),
                 AssignExtrasOutcome.MovieCatalog => Results.BadRequest(new { error = "Extras attach to a series; this is a movie catalog." }),
-                AssignExtrasOutcome.AudioFile => Results.BadRequest(new { error = "An audio track can't be kept as an extra — match it to its episode (it will be merged into that video), or skip it." }),
+                AssignExtrasOutcome.CompanionFile => Results.BadRequest(new { error = "A companion track can't be kept as an extra — match it to its episode (it is placed beside that video), or skip it." }),
                 AssignExtrasOutcome.AlreadyOrganized => Results.Conflict(new { error = "This item has already been identified — remap it from its library page instead." }),
                 AssignExtrasOutcome.CatalogConflict => Results.Conflict(new { error = "That series is already in another catalog — a title lives in one catalog only. Move this download to that catalog, or move the existing series here first." }),
                 _ => Results.Accepted(),

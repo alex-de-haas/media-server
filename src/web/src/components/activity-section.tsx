@@ -495,7 +495,7 @@ function IngestRow({
   // query is still loading `catalog` is undefined, and treating that as a movie would route a series pack
   // to the per-movie dialog for the first render.
   const canPreMatch =
-    canPin && catalog?.type === "Movie" && item.sourceFiles.filter((file) => !file.isAudio).length > 1;
+    canPin && catalog?.type === "Movie" && item.sourceFiles.filter((file) => file.companionKind == null).length > 1;
 
   // One identity action, never two: "what is this?" is a single question, so the row offers a single
   // control and picks the surface that can answer it here.

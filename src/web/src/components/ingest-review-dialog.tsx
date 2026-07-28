@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, Combine, FileAudio2, FileVideo2, Film, FolderInput, Loader2, Search } from "lucide-react";
+import { Captions, Check, Combine, FileAudio2, FileVideo2, Film, FolderInput, Loader2, Search } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type IngestItem, type IngestSourceFile, type MetadataCandidate } from "@/lib/media-server";
 import { errorMessage } from "@/lib/ui";
@@ -22,10 +22,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 // with their current mapping, untouched unless the operator explicitly re-decides them via Change.
 type FileDecision = "keep" | "match" | "extra" | "skip";
 
-// How an audio track relates to the mux that runs after approval: rendered inside a merge group with its
-// video ("grouped"), merging into a video listed in the other section ("linked"), or matched to an
-// episode/movie no video here targets — the mux stage drops such tracks ("orphan").
-type MergeState = "grouped" | "linked" | "orphan" | null;
+// Which video a companion track is placed beside after approval: rendered inside a pairing group with it
+// ("grouped"), landing beside one listed in the other section ("linked"), or matched to an episode/movie
+// no video here targets, leaving the track where it downloaded ("orphan").
+type PairingState = "grouped" | "linked" | "orphan" | null;
 
 // A confirmed provider identity. Series batches resolve against one of these for the whole batch (an
 // episodic torrent never mixes shows); movie batches carry one per group — a franchise pack maps each
@@ -395,14 +395,14 @@ export function IngestReviewDialog({
     }
 
     // Movie catalogs pre-group the pending files by parsed title+year — a franchise pack parses into
-    // distinct titles, one group per movie. Audio tracks join the video bucket whose title prefixes
+    // distinct titles, one group per movie. Companion tracks join the video bucket whose title prefixes
     // theirs ("Movie One Rus" → "Movie One"), the sole video bucket when there is only one, or their own
     // bucket otherwise. A pinned identity means the operator already declared the batch one movie.
     const videoBuckets = new Map<string, { title: string; year: number | null; fileIds: string[] }>();
-    const audioFiles: IngestSourceFile[] = [];
+    const companionFiles: IngestSourceFile[] = [];
     for (const file of pendingFiles) {
-      if (file.isAudio) {
-        audioFiles.push(file);
+      if (file.companionKind != null) {
+        companionFiles.push(file);
         continue;
       }
       const title = (file.parsedTitle ?? "").trim();
@@ -412,14 +412,19 @@ export function IngestReviewDialog({
       else videoBuckets.set(key, { title, year: file.parsedYear ?? null, fileIds: [file.id] });
     }
     const buckets = [...videoBuckets.values()];
-    for (const audio of audioFiles) {
-      const parsed = (audio.parsedTitle ?? "").trim().toLowerCase();
+    for (const companion of companionFiles) {
+      const parsed = (companion.parsedTitle ?? "").trim().toLowerCase();
       const host =
         buckets.length === 1
           ? buckets[0]
           : buckets.find((bucket) => bucket.title.length > 0 && parsed.startsWith(bucket.title.toLowerCase()));
-      if (host) host.fileIds.push(audio.id);
-      else buckets.push({ title: (audio.parsedTitle ?? "").trim(), year: audio.parsedYear ?? null, fileIds: [audio.id] });
+      if (host) host.fileIds.push(companion.id);
+      else
+        buckets.push({
+          title: (companion.parsedTitle ?? "").trim(),
+          year: companion.parsedYear ?? null,
+          fileIds: [companion.id],
+        });
     }
 
     const seededGroups: MovieGroup[] = pinnedIdentity
@@ -506,10 +511,10 @@ export function IngestReviewDialog({
 
   const title = item.downloadName ?? fileNameOf(item.sourceFiles[0]?.relativePath) ?? "Untitled item";
 
-  // The mux pairing target a file's current decision points it at, or null when the decision doesn't land
-  // it on a media item. `key` mirrors the MediaItemId the file resolves to after Apply — provider identity
-  // plus episode/movie — which is exactly what the sidecar stage groups by (SidecarPlacementService places confirmed
-  // staged files sharing a MediaItemId); `label` is the episode part shown in a group header. Match files
+  // The pairing target a file's current decision points it at, or null when the decision doesn't land it
+  // on a media item. `key` mirrors the MediaItemId the file resolves to after Apply — provider identity
+  // plus episode/movie — which is exactly what the sidecar stage groups by (SidecarPlacementService places
+  // confirmed staged files sharing a MediaItemId); `label` is the episode part shown in a group header. Match files
   // key on the batch's selected identity — grouping them together is correct even while it's unpicked
   // (they all receive the same one on Apply) — while keep files key on their existing mapping's identity,
   // so a kept file only pairs with re-matched ones when the operator selected the series/movie it's
@@ -541,9 +546,9 @@ export function IngestReviewDialog({
     return null;
   };
 
-  // A section's rows, with audio+video files that target the same episode/movie collapsed into one merge
-  // group (rendered at the first member's position). Buckets with only one kind stay as plain rows — an
-  // audio-only bucket means the track has nothing to merge into.
+  // A section's rows, with companion+video files that target the same episode/movie collapsed into one
+  // pairing group (rendered at the first member's position). Buckets with only one kind stay as plain rows
+  // — a companion-only bucket means the track has no video here to sit beside.
   const rowsOf = (files: IngestSourceFile[]): (IngestSourceFile | IngestSourceFile[])[] => {
     const buckets = new Map<string, IngestSourceFile[]>();
     for (const file of files) {
@@ -559,7 +564,11 @@ export function IngestReviewDialog({
       if (claimed.has(file.id)) continue;
       const key = targetOf(file)?.key;
       const bucket = key != null ? buckets.get(key) : undefined;
-      if (bucket && bucket.some((member) => member.isAudio) && bucket.some((member) => !member.isAudio)) {
+      if (
+        bucket &&
+        bucket.some((member) => member.companionKind != null) &&
+        bucket.some((member) => member.companionKind == null)
+      ) {
         for (const member of bucket) claimed.add(member.id);
         rows.push(bucket);
       } else {
@@ -569,20 +578,23 @@ export function IngestReviewDialog({
     return rows;
   };
 
-  // Merge state for an audio row rendered outside a group: its video may still exist in the other section
-  // (pending vs. already-mapped are listed separately, so they can't share a group), or nowhere at all —
-  // then the mux stage will drop the track, which the row warns about.
-  const mergeStateOf = (file: IngestSourceFile): { merge: MergeState; mergeIntoName?: string } => {
-    if (!file.isAudio) return { merge: null };
+  // Placement state for a companion row rendered outside a group: its video may still exist in the other
+  // section (pending vs. already-mapped are listed separately, so they can't share a group), or nowhere at
+  // all — then there is nothing in this batch to sit beside and the track stays where it downloaded, which
+  // the row says.
+  const pairingOf = (file: IngestSourceFile): { pairing: PairingState; pairedWithName?: string } => {
+    if (file.companionKind == null) return { pairing: null };
     const key = targetOf(file)?.key;
-    if (key == null) return { merge: null };
-    const video = item.sourceFiles.find((candidate) => !candidate.isAudio && targetOf(candidate)?.key === key);
+    if (key == null) return { pairing: null };
+    const video = item.sourceFiles.find(
+      (candidate) => candidate.companionKind == null && targetOf(candidate)?.key === key,
+    );
     return video
-      ? { merge: "linked", mergeIntoName: fileNameOf(video.relativePath) ?? video.relativePath }
-      : { merge: "orphan" };
+      ? { pairing: "linked", pairedWithName: fileNameOf(video.relativePath) ?? video.relativePath }
+      : { pairing: "orphan" };
   };
 
-  const renderRow = (file: IngestSourceFile, merge: MergeState, mergeIntoName?: string) => (
+  const renderRow = (file: IngestSourceFile, pairing: PairingState, pairedWithName?: string) => (
     <FileRow
       key={file.id}
       file={file}
@@ -590,8 +602,8 @@ export function IngestReviewDialog({
       decision={decisionFor(file)}
       numbers={numbersFor(file)}
       busy={busy}
-      merge={merge}
-      mergeIntoName={mergeIntoName}
+      pairing={pairing}
+      pairedWithName={pairedWithName}
       groupPicker={groupPickerFor(file)}
       onDecision={(decision) => {
         // A movie file re-decided to "match" needs a group to resolve against (see ensureInGroup).
@@ -641,25 +653,25 @@ export function IngestReviewDialog({
   const renderFileRows = (files: IngestSourceFile[]) =>
     rowsOf(files).map((row) => {
       if (!Array.isArray(row)) {
-        const { merge, mergeIntoName } = mergeStateOf(row);
-        return renderRow(row, merge, mergeIntoName);
+        const { pairing, pairedWithName } = pairingOf(row);
+        return renderRow(row, pairing, pairedWithName);
       }
-      // A merge group: the video(s) first, then the track(s) that mux into them, boxed together so the
+      // A pairing group: the video(s) first, then the track(s) placed beside them, boxed together so the
       // pairing is visible before Approve. Groups follow the decisions live — retargeting an episode
       // number moves the file in or out.
-      const videos = row.filter((file) => !file.isAudio);
-      const audios = row.filter((file) => file.isAudio);
+      const videos = row.filter((file) => file.companionKind == null);
+      const companions = row.filter((file) => file.companionKind != null);
       return (
         <div key={row[0].id} className="flex flex-col gap-1.5 rounded-lg border border-dashed p-1.5">
           <div className="text-muted-foreground flex items-center gap-1.5 px-1 text-xs">
             <Combine className="size-3.5 shrink-0" aria-hidden="true" />
             <span>
               {isEpisodic && <span className="font-medium">{targetOf(row[0])?.label} — </span>}
-              {audios.length === 1 ? "the audio track merges" : `${audios.length} audio tracks merge`} into{" "}
+              {companions.length === 1 ? "the track lands" : `${companions.length} tracks land`} beside{" "}
               {videos.length === 1 ? "the video file" : "each video file"} on import.
             </span>
           </div>
-          {[...videos, ...audios].map((file) => renderRow(file, "grouped"))}
+          {[...videos, ...companions].map((file) => renderRow(file, "grouped"))}
         </div>
       );
     });
@@ -971,8 +983,8 @@ function FileRow({
   decision,
   numbers,
   busy,
-  merge,
-  mergeIntoName,
+  pairing,
+  pairedWithName,
   groupPicker,
   onDecision,
   onNumbers,
@@ -982,8 +994,8 @@ function FileRow({
   decision: FileDecision;
   numbers: { season: number; episode: number };
   busy: boolean;
-  merge: MergeState;
-  mergeIntoName?: string;
+  pairing: PairingState;
+  pairedWithName?: string;
   groupPicker?: ReactNode;
   onDecision: (decision: FileDecision) => void;
   onNumbers: (patch: Partial<{ season: number; episode: number }>) => void;
@@ -994,8 +1006,10 @@ function FileRow({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="bg-muted/60 flex min-w-0 items-start gap-2 rounded-md px-2.5 py-2" title={file.relativePath}>
-        {file.isAudio ? (
+        {file.companionKind === "Audio" ? (
           <FileAudio2 className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        ) : file.companionKind === "Subtitle" ? (
+          <Captions className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
         ) : (
           <FileVideo2 className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
         )}
@@ -1035,7 +1049,7 @@ function FileRow({
               disabled={busy}
               onClick={() => onDecision("match")}
             />
-            {isEpisodic && !file.isAudio && (
+            {isEpisodic && file.companionKind == null && (
               <DecisionButton label="Extra" active={decision === "extra"} disabled={busy} onClick={() => onDecision("extra")} />
             )}
             <DecisionButton label="Skip" active={decision === "skip"} disabled={busy} onClick={() => onDecision("skip")} />
@@ -1053,23 +1067,25 @@ function FileRow({
           {file.extraSuggestSkip ? " — usually junk; Skip is suggested." : "."}
         </span>
       )}
-      {/* Mux preview for an audio row outside a merge group: where the track ends up ("linked" — its
-          video is listed in the other section), or that it ends up nowhere — the mux stage drops tracks
-          whose episode/movie has no video in the batch. Grouped rows say this via the group header. */}
-      {file.isAudio && merge === "orphan" && (
+      {/* Placement preview for a companion row outside a pairing group: where the track ends up ("linked"
+          — its video is listed in the other section), or that no video here claims it, in which case it is
+          left where it downloaded rather than discarded. Grouped rows say this via the group header. */}
+      {file.companionKind != null && pairing === "orphan" && (
         <span className="text-xs text-amber-600 dark:text-amber-500">
           No video file here targets the same {isEpisodic ? "episode" : "movie"} — the track has nothing to
-          merge into and will be dropped.
+          sit beside and stays where it downloaded.
         </span>
       )}
-      {file.isAudio && merge === "linked" && (
+      {file.companionKind != null && pairing === "linked" && (
         <span className="text-muted-foreground text-xs">
-          Merges into <span className="font-medium">{mergeIntoName}</span> on import.
+          Lands beside <span className="font-medium">{pairedWithName}</span> on import.
         </span>
       )}
-      {decision !== "keep" && file.isAudio && merge == null && (
+      {decision !== "keep" && file.companionKind != null && pairing == null && (
         <span className="text-muted-foreground text-xs">
-          Audio track — matched to {isEpisodic ? "an episode" : "the movie"}, it merges into that video file.
+          {file.companionKind === "Audio" ? "Audio track" : "Subtitle"} — matched to{" "}
+          {isEpisodic ? "an episode" : "the movie"}, it is placed beside that video file
+          {file.companionKind === "Audio" ? ", where merging it in is a later, separate action" : ""}.
         </span>
       )}
 
