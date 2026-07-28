@@ -5,7 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
-import { formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
+import { formatBytes, formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
+import { transferredBytes } from "@/lib/downloads";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
@@ -740,11 +741,19 @@ function DownloadProgress({ download, vpnDown }: { download: Download; vpnDown: 
       : null);
 
   const active = !vpnDown && !isDownloadPaused(download);
+  // Size readout stays outside the paused/VPN-down branch below: rates and ETA are meaningless once a
+  // transfer stops, but how much is already on disk still is.
+  const transferred = transferredBytes(download);
 
   return (
     <ActivityProgress value={percent}>
       <ActivityStats>
         <span>{formatPercent(download.percentComplete)}</span>
+        {transferred != null && (
+          <span>
+            {formatBytes(transferred)} / {formatBytes(download.sizeBytes)}
+          </span>
+        )}
         {vpnDown ? (
           // Transfer is gated by the killswitch — show why instead of a misleading 0 B/s.
           <span className="text-amber-500">Paused · VPN down</span>

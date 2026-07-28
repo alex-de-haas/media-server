@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-07-25
+Updated: 2026-07-28
 
 ## Description
 
@@ -54,7 +54,8 @@ routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
   under labelled headers and rendered as **one shared card**: a bordered shell
   holding a title with inline markers, a muted meta line, a right-aligned row of
   tooltip-labelled icon actions, and, below them, a progress bar with a
-  monospace tabular stat line (percent, rates, ETA). Work that is waiting shows a
+  monospace tabular stat line (percent, transferred/total bytes for a download,
+  rates, ETA). Work that is waiting shows a
   queued line instead of a bar. The same card renders a conversion wherever it
   appears, including the Conversions block on movie detail.
 - **Catalogs** (`/catalogs`, admin) — configured catalogs (with free space and
@@ -135,6 +136,9 @@ coverage:
 - Activity card behavior per work type: the actions each state offers (their
   accessible names), and that a queued item shows the queued line rather than a
   progress bar.
+- The download card's transferred/total readout: derivation from the bytes still
+  remaining, the downloaded-total and percentage fallbacks, clamping into the
+  torrent's size, and no readout while the size is unknown.
 - Episode and season deletion: the actions exist only for an admin, the request
   carries `deleteFiles` only when the checkbox is ticked, a delete that prunes the
   series navigates back to the library grid, and a season with no episodes left is
