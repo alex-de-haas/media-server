@@ -47,12 +47,19 @@ describe("transferredBytes", () => {
     expect(transferredBytes(overshooting)).toBe(6 * GB);
   });
 
-  it("falls back to the engine's downloaded total when remaining bytes are absent", () => {
-    expect(transferredBytes(download({ sizeBytes: 8 * GB, downloadedBytes: 3 * GB }))).toBe(3 * GB);
+  it("falls back to the percentage when remaining bytes are absent", () => {
+    expect(transferredBytes(download({ sizeBytes: 8 * GB, percentComplete: 25 }))).toBe(2 * GB);
   });
 
-  it("falls back to the percentage when the engine reports neither byte count", () => {
-    expect(transferredBytes(download({ sizeBytes: 8 * GB, percentComplete: 25 }))).toBe(2 * GB);
+  it("prefers the percentage over the engine's downloaded total", () => {
+    // Wasted pieces would clamp `downloadedBytes` to a full "8 GB / 8 GB" next to a 25% — the percentage
+    // keeps the two halves of the stat line telling the same story.
+    const overshooting = download({ sizeBytes: 8 * GB, percentComplete: 25, downloadedBytes: 9 * GB });
+    expect(transferredBytes(overshooting)).toBe(2 * GB);
+  });
+
+  it("falls back to the engine's downloaded total when neither is reported", () => {
+    expect(transferredBytes(download({ sizeBytes: 8 * GB, downloadedBytes: 3 * GB }))).toBe(3 * GB);
   });
 
   it("reads as nothing downloaded when no progress field is reported at all", () => {
