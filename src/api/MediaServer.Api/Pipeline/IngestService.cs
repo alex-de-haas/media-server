@@ -318,11 +318,11 @@ public sealed class IngestService(
             return AssignExtrasOutcome.FileNotFound;
         }
 
-        // An audio track kept as an extra would publish an item with no playable source (Organize/Probe
-        // only handle video payloads) — it belongs to an episode, where the mux stage merges it in.
-        if (files.Any(file => MediaFormats.IsCompanionAudio(file.RelativePath)))
+        // A companion track kept as an extra would publish an item with no playable source (Organize/Probe
+        // only handle video payloads) — it belongs beside an episode, where the sidecar stage places it.
+        if (files.Any(file => MediaFormats.IsCompanion(file.RelativePath)))
         {
-            return AssignExtrasOutcome.AudioFile;
+            return AssignExtrasOutcome.CompanionFile;
         }
 
         // Attaching extras creates (or adopts) the series itself, so it passes the same one-catalog gate

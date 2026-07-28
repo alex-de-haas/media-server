@@ -528,9 +528,9 @@ test("a downloading movie pack matches per file ahead of the transfer finishing"
             sizeBytes: 1024,
             assignmentStatus: "Unassigned",
             mediaItemId: null,
-            // Explicit: the row counts videos as `!isAudio`, which is what routes this pack to the
-            // matching dialog rather than the single-movie pin.
-            isAudio: false,
+            // Explicit: the row counts videos as those with no companionKind, which is what routes this
+            // pack to the matching dialog rather than the single-movie pin.
+            companionKind: null,
             parsedTitle: "Die Hard",
             parsedYear: 1988,
             parsedSeason: null,
@@ -542,7 +542,7 @@ test("a downloading movie pack matches per file ahead of the transfer finishing"
             sizeBytes: 1024,
             assignmentStatus: "Unassigned",
             mediaItemId: null,
-            isAudio: false,
+            companionKind: null,
             parsedTitle: "Die Hard 2",
             parsedYear: 1990,
             parsedSeason: null,

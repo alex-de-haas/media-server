@@ -44,13 +44,16 @@ public sealed class IdentifyService(
         var conflictCatalogIds = new HashSet<Guid>();
         var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
 
-        // Videos resolve first; external audio tracks then match against the videos' items (they carry no
-        // searchable identity of their own — "[Group] Show 05.mka" is a dub of this batch's episode 5).
-        var videoFiles = sourceFiles.Where(file => !MediaFormats.IsCompanionAudio(file.RelativePath)).ToList();
-        var audioFiles = sourceFiles.Where(file => MediaFormats.IsCompanionAudio(file.RelativePath)).ToList();
+        // Videos resolve first; companion tracks then match against the videos' items. A companion carries
+        // no searchable identity of its own — "[Group] Show 05.mka" is a dub of this batch's episode 5, and
+        // "Форсированные.srt" is a subtitle for its film, not a film called "Форсированные". Subtitles are
+        // grouped with the dubs here for exactly that reason: identified as content they would each invent
+        // a title of their own and make the batch look like it holds several.
+        var videoFiles = sourceFiles.Where(file => !MediaFormats.IsCompanion(file.RelativePath)).ToList();
+        var companionFiles = sourceFiles.Where(file => MediaFormats.IsCompanion(file.RelativePath)).ToList();
 
         // The items this run resolves, collected as we go: movies added by ResolveMovieAsync aren't flushed
-        // until the final save, so a store query couldn't see them for the audio pass below.
+        // until the final save, so a store query couldn't see them for the companion pass below.
         var assignedItems = new Dictionary<Guid, MediaItem>();
 
         foreach (var sourceFile in videoFiles)
@@ -150,10 +153,10 @@ public sealed class IdentifyService(
                 sourceFile.RelativePath, mediaItem.Kind, mediaItem.Title, mediaItem.IdentityProvider, mediaItem.IdentityProviderId);
         }
 
-        if (audioFiles.Count > 0)
+        if (companionFiles.Count > 0)
         {
             // Videos confirmed before this run (an operator match, or a prior drive) skipped the loop above;
-            // load their items so the audio pass can match against the whole batch.
+            // load their items so the companion pass can match against the whole batch.
             var priorIds = videoFiles
                 .Where(file => file is { AssignmentStatus: SourceFileAssignmentStatus.Confirmed, MediaItemId: { } id } && !assignedItems.ContainsKey(id))
                 .Select(file => file.MediaItemId!.Value)
@@ -164,7 +167,7 @@ public sealed class IdentifyService(
                 assignedItems[item.Id] = item;
             }
 
-            MatchAudioTracks(catalog, audioFiles, assignedItems.Values, releaseGroups, reviewReasons);
+            MatchCompanionTracks(catalog, companionFiles, assignedItems.Values, releaseGroups, reviewReasons);
         }
 
         await database.SaveChangesAsync(cancellationToken);
@@ -221,28 +224,30 @@ public sealed class IdentifyService(
         identity.Year is { } year ? $"'{identity.Title}' ({year})" : $"'{identity.Title}'";
 
     /// <summary>
-    /// Matches external audio tracks to this batch's resolved videos: the single movie for a movie batch,
-    /// otherwise by the episode number parsed from the track's file name (the season disambiguates when
-    /// two seasons share an episode number). Matching assigns the video's own media item — the mux stage
-    /// later merges the track into that item's video file. A track that can't be placed routes to review,
-    /// where the operator matches it to its episode or skips it.
+    /// Matches external audio tracks and subtitles to this batch's resolved videos: the single movie for a
+    /// movie batch, otherwise by the episode number parsed from the track's file name (the season
+    /// disambiguates when two seasons share an episode number). Matching assigns the video's own media item
+    /// — the sidecar stage later places the track beside that item's video file. A track that can't be
+    /// placed routes to review, where the operator matches it to its episode or skips it.
     /// </summary>
-    private void MatchAudioTracks(
-        Catalog catalog, IReadOnlyList<SourceFile> audioFiles, IReadOnlyCollection<MediaItem> videoItems,
+    private void MatchCompanionTracks(
+        Catalog catalog, IReadOnlyList<SourceFile> companionFiles, IReadOnlyCollection<MediaItem> videoItems,
         IReadOnlyCollection<string> releaseGroups, List<string> reviewReasons)
     {
         var movies = videoItems.Where(item => item.Kind == MediaKind.Movie).ToList();
         var episodes = videoItems.Where(item => item.Kind == MediaKind.Episode).ToList();
 
-        foreach (var audio in audioFiles)
+        foreach (var companion in companionFiles)
         {
-            if ((audio.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && audio.MediaItemId is not null) ||
-                audio.AssignmentStatus is SourceFileAssignmentStatus.Skipped or SourceFileAssignmentStatus.Merged)
+            if ((companion.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && companion.MediaItemId is not null) ||
+                companion.AssignmentStatus is SourceFileAssignmentStatus.Skipped or SourceFileAssignmentStatus.Merged)
             {
                 continue;
             }
 
-            var name = Path.GetFileName(audio.RelativePath);
+            var name = Path.GetFileName(companion.RelativePath);
+            // Named for what the file is, so the review reason reads true for a .srt as well as an .mka.
+            var kind = MediaFormats.IsCompanionAudio(companion.RelativePath) ? "an audio track" : "a subtitle";
             MediaItem? matched = null;
             string? failure = null;
 
@@ -253,12 +258,12 @@ public sealed class IdentifyService(
             else if (catalog.Type == CatalogType.Movie)
             {
                 failure = movies.Count == 0
-                    ? $"'{name}' looks like an audio track, but no movie is matched in this batch yet"
-                    : $"'{name}' looks like an audio track, but this batch has several movies";
+                    ? $"'{name}' looks like {kind}, but no movie is matched in this batch yet"
+                    : $"'{name}' looks like {kind}, but this batch has several movies";
             }
             else if (parser.Parse(name, catalog.Type, releaseGroups) is not { Episode: { } episode } parsed)
             {
-                failure = $"'{name}' looks like an audio track, but no episode number was found in its name";
+                failure = $"'{name}' looks like {kind}, but no episode number was found in its name";
             }
             else
             {
@@ -271,30 +276,30 @@ public sealed class IdentifyService(
                 (matched, failure) = candidates switch
                 {
                     [var single] => (single, (string?)null),
-                    [] => (null, $"'{name}' looks like an audio track, but episode {episode} has no video in this batch"),
-                    _ => (null, $"'{name}' looks like an audio track, but episode {episode} is ambiguous in this batch"),
+                    [] => (null, $"'{name}' looks like {kind}, but episode {episode} has no video in this batch"),
+                    _ => (null, $"'{name}' looks like {kind}, but episode {episode} is ambiguous in this batch"),
                 };
             }
 
             if (matched is not null)
             {
-                audio.MediaItemId = matched.Id;
-                audio.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
-                audio.UpdatedAt = DateTimeOffset.UtcNow;
-                logger.LogInformation("Matched audio track {File} → {Kind} '{Title}' for muxing.",
-                    audio.RelativePath, matched.Kind, matched.Title);
+                companion.MediaItemId = matched.Id;
+                companion.AssignmentStatus = SourceFileAssignmentStatus.Confirmed;
+                companion.UpdatedAt = DateTimeOffset.UtcNow;
+                logger.LogInformation("Matched companion track {File} → {Kind} '{Title}' for placement.",
+                    companion.RelativePath, matched.Kind, matched.Title);
             }
             else
             {
                 // The reason is re-reported every drive, but an already-parked row isn't re-written —
                 // no redundant UPDATE/broadcast when identify re-runs over a parked batch.
-                if (audio.AssignmentStatus != SourceFileAssignmentStatus.NeedsReview)
+                if (companion.AssignmentStatus != SourceFileAssignmentStatus.NeedsReview)
                 {
-                    audio.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
-                    audio.UpdatedAt = DateTimeOffset.UtcNow;
+                    companion.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                    companion.UpdatedAt = DateTimeOffset.UtcNow;
                 }
 
-                reviewReasons.Add($"{failure} — match it to its episode (the track is merged into that video), or skip it.");
+                reviewReasons.Add($"{failure} — match it to its episode (the track is placed beside that video), or skip it.");
             }
         }
     }

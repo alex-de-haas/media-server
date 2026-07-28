@@ -28,9 +28,11 @@ public sealed record IngestSourceFileResponse(
     long SizeBytes,
     string AssignmentStatus,
     Guid? MediaItemId,
-    // External audio track (an .mka/.ac3 dub riding alongside the videos): matching it to an episode/movie
-    // means "merge into that item's video file" rather than importing it as content of its own.
-    bool IsAudio,
+    // "Audio" or "Subtitle" for a companion track riding alongside the videos (an .mka dub, a .srt);
+    // null for content. Matching one to an episode/movie means "place it beside that item's video file"
+    // rather than importing it as an item of its own. The kind is carried, not just the fact, because the
+    // review UI says different things about the two: a dub is inert until merged, a subtitle just works.
+    string? CompanionKind,
     // The current mapping for a Confirmed file (what the review UI shows and lets the operator change
     // while the batch is still in review), null while unmapped.
     IngestAssignedMedia? Assigned,
@@ -120,15 +122,19 @@ public sealed record IngestItemResponse(
                 }
 
                 var parsed = parser.Parse(name, catalogType, releaseGroups);
-                // Extras classification never applies to audio tracks — a dub in an extras-looking folder
-                // must not pre-suggest "keep as extra" (audio can't be one; see AssignExtrasOutcome.AudioFile).
-                var extra = MediaFormats.IsCompanionAudio(file.RelativePath)
+                // Extras classification never applies to companion tracks — a dub in an extras-looking
+                // folder must not pre-suggest "keep as extra" (a track can't be one; see
+                // AssignExtrasOutcome.CompanionFile).
+                var companionKind = MediaFormats.IsCompanionAudio(file.RelativePath) ? "Audio"
+                    : MediaFormats.IsCompanionSubtitle(file.RelativePath) ? "Subtitle"
+                    : null;
+                var extra = companionKind is not null
                     ? null
                     : ExtraClassifier.Classify(file.RelativePath, catalogType);
                 var assigned = file.MediaItemId is { } mediaItemId ? assignedMedia.GetValueOrDefault(mediaItemId) : null;
                 return new IngestSourceFileResponse(
                     file.Id, file.RelativePath, file.SizeBytes, file.AssignmentStatus.ToString(), file.MediaItemId,
-                    MediaFormats.IsCompanionAudio(file.RelativePath), assigned,
+                    companionKind, assigned,
                     parsed.Title, parsed.Year, parsed.Season, parsed.Episode,
                     extra?.Kind.ToString(), extra?.Title, extra?.SuggestSkip ?? false);
             }).ToList(),
@@ -227,9 +233,9 @@ public enum AssignExtrasOutcome
     NotFound,
     FileNotFound,
     MovieCatalog,
-    /// <summary>An external audio track can't be a playable extra of its own — Organize/Probe only handle
+    /// <summary>A companion track can't be a playable extra of its own — Organize/Probe only handle
     /// video payloads, so the item would publish with no source. Match it to its episode instead.</summary>
-    AudioFile,
+    CompanionFile,
     AlreadyOrganized,
     /// <summary>The chosen series is already published in another catalog — a work lives in one catalog.</summary>
     CatalogConflict,
