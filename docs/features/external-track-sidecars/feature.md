@@ -55,6 +55,30 @@ exception, rather than every file paying for a rare collision.
 Audio and subtitles do not crowd each other: a lone dub and a lone subtitle both
 keep the plain form.
 
+### Where the label comes from
+
+A title has to **distinguish** the tracks, and only the siblings reveal what does —
+so an item's companions are labelled as a set rather than one at a time. Releases
+label in two opposite ways, and a single path cannot tell them apart because in
+isolation both look like a label:
+
+| release | what varies | what repeats |
+| --- | --- | --- |
+| `RUS Sound/[AniDUB]/Movie.mka`, `RUS Sound/[MCA]/Movie.mka` | the folder | the file name |
+| `Володарский.ac3`, `Гаврилов.ac3`, `Сербин.dts` beside the film | the file name | the folder |
+
+Whichever component varies across the set is the one carrying the labels. Getting
+this backwards is not a cosmetic error: it gives every track the release name and
+no way to tell them apart at all.
+
+Within a name, the label is what it carries beyond the video's own name
+(`Movie.rus.AniDUB.mka` — also the shape this app writes, so its output reads back
+on a later scan), or the whole name when it shares nothing with the video's.
+Language and flag tokens drop out, as does anything that merely restates the
+release or names a bucket — a folder called `RUS Subs`, a file called `dub.ac3`.
+The comparison against the video is on word tokens, because a staging folder and
+the organized file differ in punctuation far more often than in words.
+
 Slugs are sanitized, because real titles are not file names — one release in the
 development library labels a track `DUB | DD5.1 @ 640 kbps`, and `|` is invalid on
 Windows, exFAT and SMB. The forbidden set is fixed rather than taken from
@@ -140,5 +164,7 @@ has nothing to talk to without it.
   streams while sparing the sidecar rows beside it.
 - `DownloadFileServiceTests` — a torrent's dubs *and* subtitles admitted as source
   files, junk still refused.
-- `AudioTrackLabelerTests` — the language and title inference both layouts rely on,
-  including reading this feature's own output back on a later scan.
+- `AudioTrackLabelerTests` — the language and title inference all three layouts
+  rely on, including which component the set reveals as the label, a name or folder
+  that only repeats the release yielding nothing, and reading this feature's own
+  output back on a later scan.

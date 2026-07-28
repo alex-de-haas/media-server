@@ -82,10 +82,15 @@ public sealed class SidecarPlacementService(
             return;
         }
 
+        // Titles are inferred for the whole set at once: what tells these tracks apart is only visible in
+        // their siblings — one release labels by folder, another by file name.
+        var inferredTitles = AudioTrackLabeler.InferTitles(
+            [.. companions.Select(companion => companion.RelativePath)], video.RelativePath);
+
         var labelled = new List<(SourceFile File, string? Language, string? Title)>(companions.Count);
-        foreach (var companion in companions)
+        for (var index = 0; index < companions.Count; index++)
         {
-            labelled.Add(await LabelAsync(companion, video.RelativePath, catalog, cancellationToken));
+            labelled.Add(await LabelAsync(companions[index], inferredTitles[index], catalog, cancellationToken));
         }
 
         var folder = FolderOf(video.RelativePath);
@@ -195,10 +200,9 @@ public sealed class SidecarPlacementService(
     /// stream (<c>.ac3</c>, <c>.dts</c>) has nowhere to put them, so the path is read instead.
     /// </summary>
     private async Task<(SourceFile File, string? Language, string? Title)> LabelAsync(
-        SourceFile companion, string videoRelativePath, Catalog catalog, CancellationToken cancellationToken)
+        SourceFile companion, string? fromPathTitle, Catalog catalog, CancellationToken cancellationToken)
     {
         var fromPathLanguage = AudioTrackLabeler.InferLanguage(companion.RelativePath);
-        var fromPathTitle = AudioTrackLabeler.InferTitle(companion.RelativePath, videoRelativePath);
 
         if (!sandbox.TryResolve(catalog, companion.RelativePath, out var absolute) || !File.Exists(absolute))
         {

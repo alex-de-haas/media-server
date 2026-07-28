@@ -67,28 +67,54 @@ internal static class AudioTrackLabeler
     };
 
     /// <summary>
-    /// A display title for the companion track, taken from whatever identifies it beyond its video.
+    /// Display titles for one video's companion tracks, one per input path, taken from whatever identifies
+    /// each beyond the video itself.
     /// <para>
-    /// The file name is consulted first: releases that keep everything in one folder put the label in a
-    /// suffix (<c>Movie.rus.AniDUB.mka</c>, <c>Movie.Гаврилов.mka</c>), and this is also the shape this
-    /// app writes, so its own output reads back on a later scan. Whatever the companion's name carries
-    /// beyond the video's base name is split on dots, and language and flag tokens drop out; what is left
-    /// is the label.
+    /// The whole set is labelled together on purpose. A title has to <b>distinguish</b> the tracks, and only
+    /// the siblings reveal what does: releases label either by folder — one per dub group, every file
+    /// carrying the video's own name — or by file name, with "Гаврилов.ac3" and "Сербин.dts" dropped beside
+    /// the film. Seen one at a time both look alike, and picking the wrong one gives every track the release
+    /// name and no way to tell them apart.
     /// </para>
     /// <para>
-    /// Only when the name carries nothing extra — releases that instead nest per-group folders and reuse
-    /// the video's exact file name — does the folder speak, as in "Rus Sound [AniLibria]". A folder made
-    /// up entirely of language and category words ("RUS Subs") names a bucket rather than a track, and
-    /// yields no title.
+    /// Within a name, the label is what it carries beyond the video's own name (<c>Movie.rus.AniDUB.mka</c>
+    /// — also the shape this app writes, so its output reads back on a later scan), or the whole name when
+    /// it shares nothing with the video's. Either way language and flag tokens drop out, as does anything
+    /// that merely restates the release or names a bucket ("RUS Subs", a file called <c>dub.ac3</c>).
     /// </para>
     /// </summary>
-    public static string? InferTitle(string companionRelativePath, string videoRelativePath)
+    public static IReadOnlyList<string?> InferTitles(
+        IReadOnlyList<string> companionRelativePaths, string videoRelativePath)
     {
-        if (TitleFromName(companionRelativePath, videoRelativePath) is { } fromName)
-        {
-            return fromName;
-        }
+        var names = companionRelativePaths
+            .Select(path => TitleFromName(path, videoRelativePath) ?? TitleFromOwnName(path, videoRelativePath))
+            .ToList();
+        var folders = companionRelativePaths
+            .Select(path => TitleFromFolder(path, videoRelativePath))
+            .ToList();
 
+        // Whichever of the two actually varies across this video's companions is the one carrying the
+        // labels; the other is repeating the release. Releases do it both ways — one nests a folder per dub
+        // group and gives every file the video's name, another drops "Гаврилов.ac3" and "Сербин.dts" beside
+        // the film — and a single path cannot tell which, because in isolation both look like a label.
+        var useNames = companionRelativePaths.Count == 1
+            ? names.Any(name => name is not null)
+            : Varies(names);
+
+        return useNames || !Varies(folders)
+            // Falling back to the folder for a lone companion, or when neither varies: still better than
+            // nothing when the name said nothing.
+            ? [.. names.Select((name, index) => name ?? folders[index])]
+            : folders;
+    }
+
+    /// <summary>True when the values are not all the same — the test for "this is what tells them apart".</summary>
+    private static bool Varies(IReadOnlyList<string?> values) =>
+        values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+
+    /// <summary>The nearest folder, when it names a group rather than a bucket or the release itself.</summary>
+    private static string? TitleFromFolder(string companionRelativePath, string videoRelativePath)
+    {
         var companionFolder = FolderOf(companionRelativePath);
         if (companionFolder.Length == 0 ||
             string.Equals(companionFolder, FolderOf(videoRelativePath), StringComparison.OrdinalIgnoreCase))
@@ -97,13 +123,19 @@ internal static class AudioTrackLabeler
         }
 
         var nearest = companionFolder.Split('/')[^1];
-        return Tokenize(nearest).Any(token => !LanguageTokens.ContainsKey(token) && !CategoryTokens.Contains(token))
-            ? nearest
-            : null;
+        return NamesSomething(nearest) && !RestatesVideo(nearest, videoRelativePath) ? nearest : null;
     }
 
-    /// <summary>The part of the companion's name past the video's base name, minus language and flag
-    /// tokens; null when the names match or nothing meaningful is left.</summary>
+    /// <summary>
+    /// What the companion's own name says about it, minus language and flag tokens; null when nothing
+    /// meaningful is left.
+    /// <para>
+    /// A name that builds on the video's — <c>Movie.rus.AniDUB.mka</c> — contributes only the part past it.
+    /// A name that shares nothing with the video's is a label in its entirety: a release that keeps
+    /// everything in one folder and calls its tracks <c>Гаврилов.ac3</c> and <c>Сербин.dts</c> is naming
+    /// each by its author, and that is the only thing telling them apart.
+    /// </para>
+    /// </summary>
     private static string? TitleFromName(string companionRelativePath, string videoRelativePath)
     {
         var companion = Path.GetFileNameWithoutExtension(companionRelativePath.Replace('\\', '/'));
@@ -124,6 +156,63 @@ internal static class AudioTrackLabeler
             .Where(part => !IsLanguageOnly(part) && !FlagTokens.Contains(part))
             .ToList();
         return kept.Count == 0 ? null : string.Join(' ', kept);
+    }
+
+    /// <summary>
+    /// The companion's whole file name as a label, for a release that keeps everything in one folder and
+    /// names each track by its author — <c>Гаврилов.ac3</c>, <c>Сербин.dts</c> beside the film they dub.
+    /// There the name is the only thing telling the tracks apart.
+    /// <para>
+    /// Refused when the name merely restates the video's own — a companion called
+    /// <c>Some.Movie.2020.mka</c> next to <c>Some Movie (2020).mkv</c> carries no information, and the two
+    /// differ only in punctuation, so the comparison is on word tokens rather than on the strings.
+    /// </para>
+    /// </summary>
+    private static string? TitleFromOwnName(string companionRelativePath, string videoRelativePath)
+    {
+        var companion = Path.GetFileNameWithoutExtension(companionRelativePath.Replace('\\', '/'))
+            .Trim('.', ' ', '-', '_');
+        if (companion.Length == 0)
+        {
+            return null;
+        }
+
+        // Language and flag parts go first: they describe the track, they are already carried by the
+        // language field, and leaving them in would make "Movie.rus" look like it says something the video's
+        // own name does not.
+        var kept = companion
+            .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(part => !IsLanguageOnly(part) && !FlagTokens.Contains(part))
+            .ToList();
+        if (kept.Count == 0)
+        {
+            return null;
+        }
+
+        var label = string.Join(' ', kept);
+        return NamesSomething(label) && !RestatesVideo(label, videoRelativePath) ? label : null;
+    }
+
+    /// <summary>
+    /// True when a candidate label identifies a particular track rather than classifying it. "Дубляж" and
+    /// "[AniDUB]" do; "RUS Subs" and a file called <c>dub.ac3</c> do not — they name the bucket the track
+    /// sits in, which the language field already carries.
+    /// </summary>
+    private static bool NamesSomething(string candidate) =>
+        Tokenize(candidate).Any(token => !LanguageTokens.ContainsKey(token) && !CategoryTokens.Contains(token));
+
+    /// <summary>
+    /// True when a candidate label says nothing the video's own name does not. Compared on word tokens
+    /// rather than on the strings, because a release folder and the organized file differ in punctuation
+    /// far more often than in words — "Some.Movie.2020" against "Some Movie (2020)".
+    /// </summary>
+    private static bool RestatesVideo(string candidate, string videoRelativePath)
+    {
+        var videoTokens = Tokenize(Path.GetFileNameWithoutExtension(videoRelativePath.Replace('\\', '/')))
+            .Select(token => token.ToLowerInvariant())
+            .ToHashSet();
+        var candidateTokens = Tokenize(candidate).Select(token => token.ToLowerInvariant()).ToList();
+        return candidateTokens.Count > 0 && candidateTokens.All(videoTokens.Contains);
     }
 
     /// <summary>True when the part says nothing but a language — "rus", "Russian", but not "Russian DUB".</summary>
