@@ -78,9 +78,23 @@ internal static class LanguageTags
         return map;
     }
 
-    /// <summary>Every tag a track may be stored with, ordered — what the language field offers and validates
-    /// against, so the app and its UI cannot disagree about which languages exist.</summary>
-    public static IReadOnlyList<string> All { get; } = [.. Recognized.Order(StringComparer.Ordinal)];
+    /// <summary>
+    /// Every tag <see cref="Normalize"/> will take, ordered — the canonical forms plus the terminological
+    /// spellings and ISO 639-1 pairs that fold onto them. This is what the language field validates against,
+    /// so the app and its UI cannot disagree about what is acceptable.
+    /// <para>
+    /// It is deliberately the <b>accepted</b> set and not the stored one. Serving only the canonical forms
+    /// made the dialog refuse <c>ru</c>, <c>deu</c> and <c>pt-BR</c> — three spellings this service accepts
+    /// and normalizes — so the UI was stricter than the API it was validating for, which is the one direction
+    /// a client-side check must never be wrong in.
+    /// </para>
+    /// <para>
+    /// A BCP-47 region or script subtag is not enumerable, so a caller strips it before the membership test
+    /// exactly as <see cref="Normalize"/> does.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<string> Accepted { get; } =
+        [.. Recognized.Concat(Aliases.Keys).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal)];
 
     /// <summary>
     /// The stored form of a language tag, or null when it is not one this library knows. Accepts the

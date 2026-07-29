@@ -1284,7 +1284,18 @@ function SidecarSection({
         );
       })}
       {canManage && canMerge && selected.length > 0 && (
-        <Button size="sm" variant="outline" className="mt-2" onClick={() => onMerge(selected)}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-2"
+          onClick={() => {
+            // Handing the selection to the dialog consumes it. Keeping it checked here would leave two
+            // places claiming to hold the answer, and the stale one wins the next time this button is
+            // pressed — after the dialog's own selection has moved on.
+            onMerge(selected);
+            setSelected([]);
+          }}
+        >
           Merge {selected.length} into a new version…
         </Button>
       )}

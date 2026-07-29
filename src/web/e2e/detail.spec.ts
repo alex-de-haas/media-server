@@ -153,6 +153,10 @@ test("merging opens the convert dialog with those tracks checked, instead of sta
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Convert version" })).toBeVisible();
 
+  // The hand-off consumes the tab's selection: leaving it checked would leave two places claiming to hold
+  // the answer, and the stale one wins the next time the button is pressed.
+  await expect(page.getByRole("button", { name: /Merge \d+ into a new version/ })).toHaveCount(0);
+
   // It arrives checked, and the video defaults to untouched: the operator asked for more tracks, not for a
   // re-encode of a 9.5 GB file.
   await expect(dialog.getByRole("checkbox", { name: /Copy Гаврилов/ })).toBeChecked();
@@ -209,6 +213,79 @@ test("a track's language can be corrected, and a tag nobody knows blocks the sub
 
   // Only what changed travels: the corrected dub, and nothing for the tracks left alone.
   expect(body.metadataEdits).toEqual([{ streamId: "x1", language: "rus" }]);
+});
+
+test("the language field accepts every spelling the API does", async ({ page }) => {
+  // The served list is the accepted set, not the stored one, and the check drops a BCP-47 subtag the way
+  // the service does. Being stricter here than the API would block a submit the server would have taken.
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: { m1: escapeFromNewYork() },
+    transcodeAvailable: true,
+    transcodeLanguages: ["de", "deu", "eng", "ger", "por", "pt", "ru", "rus"],
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Convert to a smaller version" }).click();
+
+  const dialog = page.getByRole("dialog");
+  const language = dialog.getByRole("textbox", { name: /Language for Гаврилов/ });
+  await dialog.getByRole("checkbox", { name: /Copy Гаврилов/ }).check();
+
+  for (const accepted of ["ru", "deu", "pt-BR", "RUS"]) {
+    await language.fill(accepted);
+    await expect(dialog.getByText(/isn’t an ISO 639-2 tag/)).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: /^Start convert/ })).toBeEnabled();
+  }
+});
+
+test("dropping a track clears the bad language that was blocking the submit", async ({ page }) => {
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: { m1: escapeFromNewYork() },
+    transcodeAvailable: true,
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Convert to a smaller version" }).click();
+
+  const dialog = page.getByRole("dialog");
+  const sidecar = dialog.getByRole("checkbox", { name: /Copy Гаврилов/ });
+  await sidecar.check();
+  await dialog.getByRole("textbox", { name: /Language for Гаврилов/ }).fill("rsu");
+  await expect(dialog.getByRole("button", { name: /^Start convert/ })).toBeDisabled();
+
+  // The track is no longer in the output, so its value is not going anywhere — the submit has to come back.
+  await sidecar.uncheck();
+  await expect(dialog.getByRole("button", { name: /^Start convert/ })).toBeEnabled();
+});
+
+test("clearing a language means keep, not erase", async ({ page }) => {
+  // There is no override that removes a tag, so sending "" would fail the whole submit over a field the
+  // operator emptied rather than filled.
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: { m1: escapeFromNewYork() },
+    transcodeAvailable: true,
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Convert to a smaller version" }).click();
+
+  const dialog = page.getByRole("dialog");
+  // The embedded English track arrives with "eng" already in its field.
+  await dialog.getByRole("textbox", { name: /Language for eng DTS 5\.1/ }).fill("");
+
+  const submitted = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/transcode") && request.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: /^Start convert/ }).click();
+  const body = JSON.parse((await submitted).postData() ?? "{}");
+
+  expect(body.metadataEdits).toEqual([]);
 });
 
 test("tells sidecar dubs from sidecar subtitles, by kind and by file name", async ({ page }) => {

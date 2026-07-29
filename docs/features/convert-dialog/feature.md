@@ -14,6 +14,11 @@ checked. Merging used to submit a job the moment it was clicked, which meant no 
 to see what the result would carry, or to fix a mislabelled dub, before gigabytes
 started moving.
 
+That hand-off **consumes** the tab's selection: its checkboxes clear as the dialog
+opens. Keeping them would leave two places claiming to hold the answer, and the stale
+one wins the next time the button is pressed — after the dialog's own selection has
+moved on.
+
 The whole surface follows the engine's availability, since it has nothing to talk to
 without it. The Media tab itself does not: listing versions and picking which one
 plays is database-side and works with no engine attached.
@@ -80,6 +85,24 @@ the whole form be filled in and rejected. It is served rather than duplicated in
 web bundle because two copies drift, and the half that drifts is the one that lets an
 operator submit what the service then refuses.
 
+What it serves is the **accepted** set, not the stored one — the canonical forms plus
+the terminological spellings and 639-1 pairs that fold onto them. A client filtering
+by the stored forms alone would refuse `ru`, `deu` and `pt-BR`, which this service
+takes: stricter than the API is the one direction a client-side check must never be
+wrong in, because it blocks a submit the server would have accepted. A region subtag
+is not enumerable, so the dialog drops it before the membership test exactly as
+`Normalize` does.
+
+Two things a language field cannot do, both because the job carries *overrides* and
+none of them removes a tag:
+
+- **Clearing a language means keep, not erase.** An emptied field sends nothing, so
+  the source's own tag survives. Sending `""` would fail the whole submit over a field
+  the operator emptied rather than filled.
+- **A dropped track's language stops mattering.** Typing a bad tag and then unchecking
+  the track unblocks the submit — the edit is not built for a track that is not in the
+  output, so there is nothing left to be wrong.
+
 The same vocabulary is shared with the probe, but not the same decision: an
 unrecognized tag *in a file* is kept, because it is what the file claims and dropping
 it would unlabel a labelled track. Only typed input is refused.
@@ -93,7 +116,14 @@ it would unlabel a labelled track. Only typed input is refused.
 - `StreamMetadataEditTests` — language normalization across the 639-1 pair, the
   terminological spelling, case, whitespace and a BCP-47 region; an unrecognized tag
   refused; a title-only edit leaving the language alone.
+- `LanguageTagsTests` — the vocabulary itself: every accepted spelling folding onto
+  the stored one, what is refused, the served set carrying the aliases as well as the
+  canonical forms, and every entry in that set surviving `Normalize` — so the dialog
+  cannot offer a value the submit then refuses.
 - `detail.spec.ts` — Merge opening this dialog with those tracks checked instead of
-  starting a job, a second sidecar added here, and the submitted payload carrying
-  both ids with the explicit track lists a merge needs; a language corrected in the
-  dialog, a bad tag blocking the submit, and only the changed field travelling.
+  starting a job and clearing the tab's selection as it does, a second sidecar added
+  here, and the submitted payload carrying both ids with the explicit track lists a
+  merge needs; a language corrected in the dialog, a bad tag blocking the submit, and
+  only the changed field travelling; every spelling the API accepts accepted here too,
+  a dropped track unblocking the submit its bad tag was holding, and a cleared field
+  sending no edit at all.

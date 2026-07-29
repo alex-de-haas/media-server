@@ -178,11 +178,33 @@ export function TranscodeDialog({
     });
   };
 
-  // A language the API will refuse, flagged before the whole form is submitted rather than after. An empty
-  // list (the fetch failed, or has not landed) judges nothing.
-  const badLanguages = Object.entries(languages).filter(
-    ([, value]) => value.trim() !== "" && knownLanguages?.length && !knownLanguages.includes(value.trim().toLowerCase()),
-  );
+  // Whether a track ends up in the output, and can therefore carry an edit at all.
+  const isKept = (stream: MediaStream) =>
+    stream.isExternal
+      ? merged.has(stream.id)
+      : stream.type === "Audio"
+        ? audioKept.has(stream.index)
+        : subtitleKept.has(stream.index);
+
+  // A language the API will refuse, flagged before the whole form is submitted rather than after.
+  //
+  // The comparison mirrors the service's own normalization: a BCP-47 region or script subtag is dropped
+  // ("pt-BR" is Portuguese), and the served list carries the spellings that fold onto a canonical tag, so
+  // "ru" and "deu" pass here exactly as they do there. Being stricter than the API is the one direction this
+  // check must never be wrong in — it would block a submit the server would have accepted.
+  //
+  // An empty list (the fetch failed, or has not landed) judges nothing.
+  const isBadLanguage = (value: string) => {
+    const primary = value.trim().split(/[-_]/)[0].toLowerCase();
+    return primary !== "" && !!knownLanguages?.length && !knownLanguages.includes(primary);
+  };
+
+  // Only tracks that are actually kept: typing a bad tag and then dropping the track has to unblock the
+  // submit, because that value is no longer going anywhere — the edit is not even built for it below.
+  const badLanguages = Object.entries(languages).filter(([id, value]) => {
+    const stream = source.streams.find((candidate) => candidate.id === id);
+    return stream !== undefined && isKept(stream) && isBadLanguage(value);
+  });
 
   const convert = useMutation({
     mutationFn: () => {
@@ -219,7 +241,13 @@ export function TranscodeDialog({
             // Undefined is "keep what the source has" — so only a value that actually differs is sent, and
             // correcting one field never freezes the other.
             title: title !== undefined && title !== (stream?.title ?? "") ? title : undefined,
-            language: language !== undefined && language !== (stream?.language ?? "") ? language : undefined,
+            // A cleared language is "keep", not "erase". The job carries overrides, and there is no override
+            // that removes a tag — sending "" would just be refused as not a language, failing the whole
+            // submit over a field the operator emptied rather than filled.
+            language:
+              language !== undefined && language !== "" && language !== (stream?.language ?? "")
+                ? language
+                : undefined,
           };
         })
         .filter((edit) => edit.title !== undefined || edit.language !== undefined);
@@ -377,7 +405,7 @@ export function TranscodeDialog({
             onTitle={setTitles}
             languages={languages}
             onLanguage={setLanguages}
-            knownLanguages={knownLanguages}
+            isBadLanguage={isBadLanguage}
           />
           <TrackList
             title="Subtitles"
@@ -390,7 +418,7 @@ export function TranscodeDialog({
             onTitle={setTitles}
             languages={languages}
             onLanguage={setLanguages}
-            knownLanguages={knownLanguages}
+            isBadLanguage={isBadLanguage}
           />
           <TrackList
             title="Files beside this version"
@@ -402,7 +430,7 @@ export function TranscodeDialog({
             onTitle={setTitles}
             languages={languages}
             onLanguage={setLanguages}
-            knownLanguages={knownLanguages}
+            isBadLanguage={isBadLanguage}
           />
 
           <DialogFooter className="mt-2">
@@ -436,7 +464,7 @@ function TrackList({
   onTitle,
   languages,
   onLanguage,
-  knownLanguages,
+  isBadLanguage,
 }: {
   title: string;
   description?: string;
@@ -451,7 +479,8 @@ function TrackList({
   onTitle: (update: (current: Record<string, string>) => Record<string, string>) => void;
   languages: Record<string, string>;
   onLanguage: (update: (current: Record<string, string>) => Record<string, string>) => void;
-  knownLanguages: string[] | undefined;
+  /** The submit gate's own rule, passed down so a row cannot flag by a different one than it blocks by. */
+  isBadLanguage: (value: string) => boolean;
 }) {
   if (!streams.length) {
     return null;
@@ -467,8 +496,9 @@ function TrackList({
           // A sidecar routinely carries neither codec nor language — its release name is all it has.
           const label = stream.displayTitle ?? stream.codec ?? stream.title?.trim() ?? stream.fileName ?? "—";
           const language = languages[stream.id] ?? stream.language ?? "";
-          const badLanguage =
-            language.trim() !== "" && !!knownLanguages?.length && !knownLanguages.includes(language.trim().toLowerCase());
+          // Only while the track is kept: a dropped track carries no edit, so flagging its field would point
+          // at something that is not blocking anything.
+          const badLanguage = checked && isBadLanguage(language);
           return (
             <li key={stream.id} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
