@@ -129,7 +129,11 @@ public sealed record MediaStreamDto(
     int? SampleRate,
     bool IsDefault,
     bool IsForced,
-    bool IsExternal);
+    bool IsExternal,
+    // A sidecar's own file name (with extension), null for an embedded track. Sidecars often carry neither
+    // codec nor language, so the name is what actually tells two dubs apart on screen — and it is the file
+    // an operator sees in the folder.
+    string? FileName);
 
 /// <summary>One season of a series, with its episode count and watched rollup.</summary>
 public sealed record SeasonSummaryDto(

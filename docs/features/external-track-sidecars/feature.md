@@ -1,7 +1,7 @@
 # External Track Sidecars
 
 Created: 2026-07-27
-Updated: 2026-07-28
+Updated: 2026-07-29
 
 A release's separate audio tracks and subtitles are kept as files beside the
 library file they belong to, and recorded as external streams of its media
@@ -104,14 +104,21 @@ crowded track with no title at all falls back to its position.
 
 ## Merging
 
-Merging submits a stream-copy job to the transcode engine with the sidecars as
-additional inputs, and produces a new version — `<video> - Merged.mkv` — alongside
-them. It reuses the transcode job machinery: same queue, same progress, same
-import of the result as a version.
+Merging submits a job to the transcode engine with the sidecars as additional
+inputs, and produces a new version alongside them. It reuses the transcode job
+machinery: same queue, same progress, same import of the result as a version.
 
-Because a merge is a copy by definition, the encode-only options (`maxHeight`,
-`crf`) are rejected rather than ignored, and the caller does not have to say
-`copy` to get one.
+**It is composed in the [Convert dialog](../convert-dialog/feature.md), not started
+from here.** The Media tab's Merge button opens that dialog with the checked
+sidecars already selected; more can be added there, each track's name and language
+corrected, and the video re-encoded in the same pass if wanted. Merging used to
+submit a job on the click, with no way to see what the result would carry or fix a
+mislabelled dub before gigabytes started moving.
+
+A merge no longer implies a stream copy — it says what joins the output, not what
+happens to the picture. It keeps only the *default*: with no codec named the video
+is copied and the output is `<video> - Merged.mkv`, which is what every merge has
+produced so far.
 
 **A merge keeps its sidecars.** The files stay on disk untouched — not removed and
 not rewritten. Normalizing an untagged `.ac3` into a tagged `.mka` was considered
@@ -126,11 +133,32 @@ and leaves external rows alone. Without that, refreshing — or the media backfi
 which runs on exactly the items most likely to have sidecars — would delete entries
 whose files are still on disk.
 
+Which is also why the **media backfill probes sidecars separately**, by their own
+paths: the refresh pass it is built on can never reach them. It fills in the codec,
+channels and sample rate of rows that lack them — those placed before the specs were
+recorded, and any whose file the engine could not answer for at the time. A missing
+codec is the marker for "never answered", so a file that still cannot be read is
+picked up again on the next run instead of being recorded as having no codec.
+
+It writes **only those three fields**. Language and title are a labelling decision
+made across a whole cohort of files, weighing what each container tagged against
+what the paths reveal; re-reading one file's tags in isolation would overwrite that
+with strictly less information.
+
 Removing one is therefore a deliberate act: its own operation, presented in the
 Media tab the way deleting an unwanted version is, with the same explicit choice
 between dropping the entry and erasing the file. It is its own operation and not a
 call into `DeleteSourceAsync` because a sidecar is a `MediaStream` on a source, not
 a `MediaSource` — there is no version to drop.
+
+**Deleting what a sidecar hangs off takes it along.** Removing a movie or a single
+version with "delete files" erases the sidecars beside that video too, and their
+staged rows go back to unassigned. A sidecar is a file of its own but not an item
+of its own: it exists only as an external stream of a source, so once that source
+is gone nothing in the library refers to it. Leaving them behind stranded a dub
+next to a deleted film — in a folder the eraser could then not prune either, since
+it was no longer empty. This is the one case where the files go without being
+named individually; every other removal is the deliberate per-track act above.
 
 ## The limitation, stated plainly
 
@@ -150,9 +178,38 @@ is parked in [external-subtitle-delivery](../external-subtitle-delivery/plan.md)
 
 Sidecars are listed apart from the container's own tracks, because they behave
 differently: each is a file that can be removed on its own, and an external audio
-track is inert until merged. Selecting some offers a merge; each row offers a
-removal. The merge control follows the transcode engine's availability, since it
-has nothing to talk to without it.
+track is inert until merged. Selecting some opens the Convert dialog on them; each
+row offers a removal. The merge control follows the transcode engine's availability,
+since it has nothing to talk to without it.
+
+They are then **grouped by kind** — audio under an audio heading, subtitles under
+theirs, each with an icon — and every row carries **its own file name** under the
+label. Neither is decoration. A sidecar routinely has no language and no codec to
+show: an `.ac3` dub named only after its voice-over group leaves the row with
+nothing that says whether it is a dub or a subtitle, and four of them read as one
+undifferentiated list. The kind answers that, the file name is what an operator
+sees when they open the folder, and the extension answers it a second time. For
+the same reason the label leads the row when there is nothing else to lead it —
+`Гаврилов`, not `— "Гаврилов"`.
+
+The icons are the **same marks the container's own tracks carry** in the list
+above — video, audio, subtitles — so the two lists read as one vocabulary rather
+than as a labelled list above an iconned one.
+
+A sidecar also carries **its codec, channel count and sample rate**, so it reads
+like any other track — `rus AC3 5.1 · 48 kHz` with its release name in quotes —
+rather than being the one kind of track in the library with nothing but a name.
+Nothing in the UI was added for this: the same `DisplayTitle` and specs that render
+an embedded track render a sidecar once the fields are there.
+
+They come from the probe the sidecar stage **already runs** to read the file's tags,
+which used to discard everything else it returned. An elementary stream read without
+the engine still answers nothing — a container-header parser has nothing to parse in
+a raw `.ac3` — so those fields stay null until an engine is attached and the backfill
+is run from **Media data** on Settings.
+
+The "only plays once merged" caveat sits on the audio heading rather than under
+the whole list, because it is true of audio and false of subtitles.
 
 ## Testing Expectations
 
@@ -169,14 +226,21 @@ has nothing to talk to without it.
   whose title cannot be a file name), the emptied staging folder being cleared once
   the files are out, sidecar indexes staying unique across drives and past the
   container's own numbering, a subtitle in the batch neither creating a movie of
-  its own nor deciding how the dubs beside it are labelled, and a dub-only batch
-  keeping its tracks instead of discarding them.
+  its own nor deciding how the dubs beside it are labelled, a placed sidecar
+  carrying the codec, channels and sample rate the same probe reported, and a
+  dub-only batch keeping its tracks instead of discarding them.
 - `SidecarDeletionTests` — dropping the entry leaving the file, erasing taking it,
   the video and its own streams untouched, the staged row going back to unassigned,
   an identically-placed sidecar of another catalog left alone, an embedded stream
-  not being deletable this way, and an unknown id reported.
+  not being deletable this way, and an unknown id reported. Plus the deletes one
+  level up: a movie or a version removed with its files taking the sidecars beside
+  it and pruning the emptied folder, the same delete without the flag leaving every
+  file where it is, and a version's sidecar rows returning to unassigned.
 - `LibraryMaintenanceServiceTests` — re-probing a video replacing its embedded
-  streams while sparing the sidecar rows beside it.
+  streams while sparing the sidecar rows beside it; the backfill filling in a
+  sidecar's missing specs, leaving its language and title alone (its probe answers
+  a different language on purpose), and leaving a file it cannot read for the next
+  run rather than marking it done.
 - `DownloadFileServiceTests` — a torrent's dubs *and* subtitles admitted as source
   files, junk still refused.
 - `AudioTrackLabelerTests` — the language and title inference all three layouts

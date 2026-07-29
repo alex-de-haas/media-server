@@ -7,6 +7,7 @@ using MediaServer.Api.IO;
 using MediaServer.Api.Library;
 using MediaServer.Api.People;
 using MediaServer.Api.Pipeline;
+using MediaServer.Api.Probe;
 using MediaServer.Api.Tests.Pipeline;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -31,11 +32,11 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         Directory.CreateDirectory(_root);
     }
 
-    private LibraryMaintenanceService Service() => new(
+    private LibraryMaintenanceService Service(FakeMediaProbe? probe = null) => new(
         _database,
         new CatalogPathSandbox(),
         new FilesystemInspector(),
-        new FakeMediaProbe(),
+        probe ?? new FakeMediaProbe(),
         new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }, new PersonSyncService(_database), new CollectionSyncService(_database)),
         _core,
         NullLogger<LibraryMaintenanceService>.Instance);
@@ -303,5 +304,89 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         Assert.Equal("rus", external.Language);
         // The embedded set was still replaced by the fresh probe.
         Assert.Equal(2, streams.Count(stream => !stream.IsExternal));
+    }
+
+    /// <summary>Seeds a movie with one sidecar beside it, both present on disk, and answers null for the
+    /// sidecar's own specs — the state of every row placed before they were recorded.</summary>
+    private async Task<MediaStream> SeedSidecarWithoutSpecsAsync()
+    {
+        var catalog = SeedCatalog();
+        var relative = Path.Combine("library", "A", "a.mkv");
+        var absolute = Path.Combine(_root, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        await File.WriteAllBytesAsync(absolute, new byte[16]);
+        await File.WriteAllBytesAsync(Path.Combine(_root, "library", "A", "a.rus.mka"), new byte[16]);
+        var itemId = SeedItemWithSource(catalog, relative);
+
+        var sourceId = (await _database.MediaSources.SingleAsync(source => source.MediaItemId == itemId)).Id;
+        var sidecar = new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = sourceId, StreamType = StreamType.Audio,
+            Index = 1000, Language = "rus", Title = "Гаврилов",
+            IsExternal = true, ExternalPath = "library/A/a.rus.mka",
+        };
+        _database.MediaStreams.Add(sidecar);
+        await _database.SaveChangesAsync();
+        return sidecar;
+    }
+
+    private static FakeMediaProbe ProbeAnsweringForSidecars(ProbedStream? sidecarTrack) => new()
+    {
+        OnProbe = path => path.EndsWith(".mka", StringComparison.Ordinal)
+            ? new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 320_000, 50_000_000,
+                sidecarTrack is null ? [] : [sidecarTrack])
+            : new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 8_000_000, 1_000_000,
+                [new ProbedStream(StreamType.Video, 0, "h264", "High", null, 1920, 1080, 23.976, 8, null, null, null, true, false, null)]),
+    };
+
+    [Fact]
+    public async Task Backfill_fills_in_a_sidecars_missing_specs()
+    {
+        // The rows placed before specs were recorded. RefreshMediaAsync cannot do this — it deliberately
+        // never touches external rows — so the backfill probes the sidecar's own file.
+        var sidecar = await SeedSidecarWithoutSpecsAsync();
+        var probe = ProbeAnsweringForSidecars(
+            new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, 6, 48000, true, false, null));
+
+        var report = await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+
+        Assert.Equal(1, report.SidecarsFilled);
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        var filled = await fresh.MediaStreams.SingleAsync(stream => stream.Id == sidecar.Id);
+        Assert.Equal("ac3", filled.Codec);
+        Assert.Equal(6, filled.Channels);
+        Assert.Equal(48000, filled.SampleRate);
+    }
+
+    [Fact]
+    public async Task Backfill_leaves_a_sidecars_label_alone()
+    {
+        // Language and title are a labelling decision the sidecar stage made across a whole cohort, weighing
+        // tags against paths. Re-reading one file here would overwrite it with strictly less information —
+        // and this probe answers a different language on purpose to prove it does not.
+        var sidecar = await SeedSidecarWithoutSpecsAsync();
+        var probe = ProbeAnsweringForSidecars(
+            new ProbedStream(StreamType.Audio, 0, "ac3", null, "eng", null, null, null, null, null, 6, 48000, true, false, "Something else"));
+
+        await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        var filled = await fresh.MediaStreams.SingleAsync(stream => stream.Id == sidecar.Id);
+        Assert.Equal("rus", filled.Language);
+        Assert.Equal("Гаврилов", filled.Title);
+    }
+
+    [Fact]
+    public async Task Backfill_leaves_a_sidecar_it_cannot_read_for_the_next_run()
+    {
+        // An elementary stream read without the engine answers nothing. Recording that as "no codec" would
+        // mark the row done and never look at it again once the engine is attached.
+        var sidecar = await SeedSidecarWithoutSpecsAsync();
+
+        var report = await Service(ProbeAnsweringForSidecars(null)).BackfillHeaderProbedAsync(CancellationToken.None);
+
+        Assert.Equal(0, report.SidecarsFilled);
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        Assert.Null((await fresh.MediaStreams.SingleAsync(stream => stream.Id == sidecar.Id)).Codec);
     }
 }

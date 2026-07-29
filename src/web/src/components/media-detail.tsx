@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2 } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileQuestion, Film, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -777,14 +777,11 @@ const STREAM_TYPE_LABELS: Record<string, string> = { Subtitle: "Subtitles" };
 
 type StreamGroup = { type: string; label: string; streams: MediaStream[]; defaultIndex: number | null };
 
-// Group the flat stream list by type, preserving each individual track (no dedup) and container order.
-// `defaultIndex` is the track a player treats as default — an explicitly flagged track, or (audio only) the
-// first track when none is flagged; subtitles stay off unless flagged. Matches the Convert dialog.
-function groupStreams(streams: MediaStream[]): StreamGroup[] {
+// Group a stream list by type, preserving each individual track (no dedup) and container order. Types we
+// don't know sort last under their raw name.
+function groupByType(streams: MediaStream[]): { type: string; label: string; streams: MediaStream[] }[] {
   const byType = new Map<string, MediaStream[]>();
-  // External tracks are sidecar files beside the video, not tracks inside it. They are listed separately,
-  // with their own actions, so this grouping covers only what the container itself carries.
-  for (const stream of streams.filter((stream) => !stream.isExternal)) {
+  for (const stream of streams) {
     const list = byType.get(stream.type) ?? [];
     list.push(stream);
     byType.set(stream.type, list);
@@ -797,12 +794,19 @@ function groupStreams(streams: MediaStream[]): StreamGroup[] {
 
   return [...byType.keys()]
     .sort((a, b) => rank(a) - rank(b))
-    .map((type) => {
-      const list = byType.get(type)!;
-      const flagged = list.find((stream) => stream.isDefault)?.index;
-      const defaultIndex = flagged ?? (type === "Audio" ? list[0]?.index : undefined) ?? null;
-      return { type, label: STREAM_TYPE_LABELS[type] ?? type, streams: list, defaultIndex };
-    });
+    .map((type) => ({ type, label: STREAM_TYPE_LABELS[type] ?? type, streams: byType.get(type)! }));
+}
+
+// The container's own tracks. `defaultIndex` is the track a player treats as default — an explicitly
+// flagged track, or (audio only) the first track when none is flagged; subtitles stay off unless flagged.
+// Matches the Convert dialog. External tracks are sidecar files beside the video, not tracks inside it:
+// they are listed separately, with their own actions, so they are left out here.
+function groupStreams(streams: MediaStream[]): StreamGroup[] {
+  return groupByType(streams.filter((stream) => !stream.isExternal)).map((group) => {
+    const flagged = group.streams.find((stream) => stream.isDefault)?.index;
+    const defaultIndex = flagged ?? (group.type === "Audio" ? group.streams[0]?.index : undefined) ?? null;
+    return { ...group, defaultIndex };
+  });
 }
 
 // Secondary technical specs shown muted after a track: video → profile · bit depth · frame rate; audio →
@@ -821,9 +825,13 @@ function streamSpecs(stream: MediaStream): string {
 
 // The per-track summary text, its optional container label ("Director's Commentary", "SDH") — dropping a
 // label that just restates the summary — and the muted secondary specs.
-function TrackText({ stream }: { stream: MediaStream }) {
-  const text = stream.displayTitle ?? stream.codec ?? "—";
-  const raw = stream.title?.trim();
+//
+// `titleLeads` is for sidecars, which routinely have neither language nor codec: an `.ac3` dub named only
+// after its voice-over group has nothing else to head the row, and `— "Гаврилов"` says less than
+// `Гаврилов` does. When the label leads, it stops being repeated as a trailing quote on its own.
+function TrackText({ stream, titleLeads = false }: { stream: MediaStream; titleLeads?: boolean }) {
+  const raw = stream.title?.trim() || null;
+  const text = stream.displayTitle ?? stream.codec ?? (titleLeads ? raw : null) ?? "—";
   const title = raw && raw.toLowerCase() !== text.toLowerCase() ? raw : null;
   const specs = streamSpecs(stream);
   return (
@@ -832,6 +840,22 @@ function TrackText({ stream }: { stream: MediaStream }) {
       {title ? <span className="text-muted-foreground"> “{title}”</span> : null}
       {specs ? <span className="text-muted-foreground"> · {specs}</span> : null}
     </>
+  );
+}
+
+// What each kind of track is, at a glance — the same mark on the container's own tracks and on the sidecars
+// below them, so the two lists read as one vocabulary. A type the probe reports that isn't one of these gets
+// the fallback rather than a guess.
+const STREAM_ICONS: Record<string, LucideIcon> = { Video: Film, Audio: AudioLines, Subtitle: Captions };
+
+// The type's icon and name, as the left column of a track row. Wide enough for "Subtitles" beside an icon.
+function StreamTypeLabel({ type, label }: { type: string; label: string }) {
+  const Icon = STREAM_ICONS[type] ?? FileQuestion;
+  return (
+    <dt className="text-muted-foreground flex w-24 shrink-0 items-center gap-1.5 pt-px text-xs leading-5">
+      <Icon className="size-3.5 shrink-0" />
+      <span className="truncate">{label}</span>
+    </dt>
   );
 }
 
@@ -844,7 +868,7 @@ function StreamSection({ group }: { group: StreamGroup }) {
     const stream = group.streams[0];
     return (
       <div className="flex gap-2">
-        <dt className="text-muted-foreground w-16 shrink-0 pt-px text-xs leading-5">{group.label}</dt>
+        <StreamTypeLabel type={group.type} label={group.label} />
         <dd className="leading-5">{stream ? <TrackText stream={stream} /> : "—"}</dd>
       </div>
     );
@@ -852,7 +876,7 @@ function StreamSection({ group }: { group: StreamGroup }) {
 
   return (
     <div className="flex gap-2">
-      <dt className="text-muted-foreground w-16 shrink-0 pt-px text-xs leading-5">{group.label}</dt>
+      <StreamTypeLabel type={group.type} label={group.label} />
       <dd className="min-w-0 flex-1">
         <button
           type="button"
@@ -916,6 +940,8 @@ function SourceCard({
   });
   const canConvert = canManage && (transcode?.available ?? false);
   const [convertOpen, setConvertOpen] = useState(false);
+  // Sidecars the Convert dialog opens with already checked — set when it is reached through Merge below.
+  const [preselectedSidecars, setPreselectedSidecars] = useState<string[]>([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat;
@@ -1002,10 +1028,13 @@ function SourceCard({
 
       <SidecarSection
         sidecars={source.streams.filter((stream) => stream.isExternal)}
-        sourceId={source.id}
         itemId={itemId}
         canManage={canManage}
         canMerge={canConvert}
+        onMerge={(streamIds) => {
+          setPreselectedSidecars(streamIds);
+          setConvertOpen(true);
+        }}
       />
 
       {canManage && (
@@ -1018,7 +1047,18 @@ function SourceCard({
           onOpenChange={setEditOpen}
         />
       )}
-      {canManage && canConvert && <TranscodeDialog source={source} open={convertOpen} onOpenChange={setConvertOpen} />}
+      {canManage && canConvert && (
+        <TranscodeDialog
+          source={source}
+          open={convertOpen}
+          onOpenChange={(next) => {
+            setConvertOpen(next);
+            // A later Convert click must not reopen with the last merge's selection still checked.
+            if (!next) setPreselectedSidecars([]);
+          }}
+          preselectedSidecars={preselectedSidecars}
+        />
+      )}
       {canManage && <DeleteVersionDialog source={source} itemId={itemId} open={deleteOpen} onOpenChange={setDeleteOpen} />}
     </div>
   );
@@ -1144,29 +1184,21 @@ function EditVersionDialog({
 // removed on its own, and a player will not use an external *audio* track at all until it is merged in.
 function SidecarSection({
   sidecars,
-  sourceId,
   itemId,
   canManage,
   canMerge,
+  onMerge,
 }: {
   sidecars: MediaStream[];
-  sourceId: string;
   itemId: string;
   canManage: boolean;
   canMerge: boolean;
+  /** Hands the checked sidecars to the Convert dialog. Merging used to submit a job straight from here, so
+   *  there was no way to see what the result would carry, or fix a track's name, before it started. */
+  onMerge: (streamIds: string[]) => void;
 }) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
-
-  const merge = useMutation({
-    mutationFn: () => mediaServer.createTranscodeJob({ sourceId, mergeStreamIds: selected }),
-    onSuccess: () => {
-      setSelected([]);
-      queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
-      toast.success("Merging tracks into a new version");
-    },
-    onError: (error) => toast.error("Couldn’t start the merge", { description: errorMessage(error) }),
-  });
 
   const remove = useMutation({
     mutationFn: ({ id, deleteFile }: { id: string; deleteFile: boolean }) =>
@@ -1182,60 +1214,89 @@ function SidecarSection({
     return null;
   }
 
-  const audioCount = sidecars.filter((stream) => stream.type === "Audio").length;
+  // Grouped by kind, because a dub and a subtitle are not interchangeable and a sidecar row often has
+  // nothing on it that would say which is which — no language, no codec, just the label its release gave
+  // it. The kind heads the group; the file name under each row is the other half of the answer, and the
+  // thing an operator sees when they open the folder.
+  const groups = groupByType(sidecars);
 
   return (
     <div className="mt-2 border-t pt-2">
       <p className="text-muted-foreground text-xs">
         {sidecars.length} separate {sidecars.length === 1 ? "file" : "files"} beside this version
       </p>
-      {audioCount > 0 && (
-        // Worth stating plainly: keeping a dub as a file preserves it, but no player will use it there.
-        <p className="text-muted-foreground mt-0.5 text-xs">
-          External audio only plays once merged into the video.
-        </p>
-      )}
-      <ul className="mt-1.5 flex flex-col gap-1">
-        {sidecars.map((stream) => (
-          <li key={stream.id} className="flex items-center gap-2 text-sm leading-6">
-            {canManage && canMerge && (
-              <Checkbox
-                checked={selected.includes(stream.id)}
-                onCheckedChange={(checked) =>
-                  setSelected((current) =>
-                    checked ? [...current, stream.id] : current.filter((id) => id !== stream.id),
-                  )
-                }
-                aria-label={`Merge ${stream.displayTitle ?? stream.type} into a new version`}
-              />
-            )}
-            <span className="min-w-0 flex-1 truncate">
-              <TrackText stream={stream} />
-            </span>
-            {canManage && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Remove this track"
-                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                disabled={remove.isPending}
-                onClick={() => remove.mutate({ id: stream.id, deleteFile: true })}
-              >
-                <Trash2 />
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
+      {groups.map((group) => {
+        const Icon = STREAM_ICONS[group.type] ?? FileQuestion;
+        return (
+          // The gap before a heading has to beat the gap inside a group, or the last row of one kind reads
+          // as belonging to the next.
+          <div key={group.type} className="mt-3">
+            <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+              <Icon className="size-3.5 shrink-0" />
+              <span className="font-medium">{group.label}</span>
+              {group.type === "Audio" && (
+                // Worth stating plainly, and right where the dubs are: keeping one as a file preserves it,
+                // but no player will use it there.
+                <span>— only plays once merged into the video</span>
+              )}
+            </p>
+            <ul className="mt-1 flex flex-col gap-1">
+              {group.streams.map((stream) => (
+                <li key={stream.id} className="flex items-start gap-2 text-sm">
+                  {canManage && canMerge && (
+                    <Checkbox
+                      className="mt-1"
+                      checked={selected.includes(stream.id)}
+                      onCheckedChange={(checked) =>
+                        setSelected((current) =>
+                          checked ? [...current, stream.id] : current.filter((id) => id !== stream.id),
+                        )
+                      }
+                      aria-label={`Merge ${stream.fileName ?? stream.displayTitle ?? stream.type} into a new version`}
+                    />
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate leading-6">
+                      <TrackText stream={stream} titleLeads />
+                    </span>
+                    {stream.fileName && (
+                      <span className="text-muted-foreground block truncate font-mono text-xs">
+                        {stream.fileName}
+                      </span>
+                    )}
+                  </span>
+                  {canManage && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove ${stream.fileName ?? "this track"}`}
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      disabled={remove.isPending}
+                      onClick={() => remove.mutate({ id: stream.id, deleteFile: true })}
+                    >
+                      <Trash2 />
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
       {canManage && canMerge && selected.length > 0 && (
         <Button
           size="sm"
           variant="outline"
           className="mt-2"
-          disabled={merge.isPending}
-          onClick={() => merge.mutate()}
+          onClick={() => {
+            // Handing the selection to the dialog consumes it. Keeping it checked here would leave two
+            // places claiming to hold the answer, and the stale one wins the next time this button is
+            // pressed — after the dialog's own selection has moved on.
+            onMerge(selected);
+            setSelected([]);
+          }}
         >
-          Merge {selected.length} into a new version
+          Merge {selected.length} into a new version…
         </Button>
       )}
     </div>

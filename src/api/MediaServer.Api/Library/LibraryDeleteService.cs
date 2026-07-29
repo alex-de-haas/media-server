@@ -220,7 +220,8 @@ public sealed class LibraryDeleteService(
     /// Deletes a single <see cref="MediaSource"/> (one version of a movie) — used to drop the original after
     /// a verified transcode "replace". Removes the source + its streams (and cascades any transcode-job
     /// history that fed off it); with <paramref name="deleteFile"/> it also erases the file from disk and
-    /// unlinks the originating source file. Returns false if no such source exists.
+    /// unlinks the originating source file. The sidecars beside that file go with it: they hang off this
+    /// source and nothing refers to them once it is gone. Returns false if no such source exists.
     /// </summary>
     public async Task<bool> DeleteSourceAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
     {
@@ -233,13 +234,18 @@ public sealed class LibraryDeleteService(
             return false;
         }
 
-        // Resolve the catalog up front (the rows are the source of truth for the path) when erasing the file.
+        // Resolve the catalog and the sidecar paths up front (the rows are the source of truth for both)
+        // when erasing the file — by the time the erase runs, the rows holding them are gone.
         Catalog? catalog = deleteFile
             ? await database.MediaItems.AsNoTracking()
                 .Where(item => item.Id == source.MediaItemId)
                 .Join(database.Catalogs.AsNoTracking(), item => item.CatalogId, candidate => (Guid?)candidate.Id, (_, candidate) => candidate)
                 .FirstOrDefaultAsync(cancellationToken)
             : null;
+        var sidecarPaths = await database.MediaStreams.AsNoTracking()
+            .Where(stream => stream.MediaSourceId == sourceId && stream.IsExternal && stream.ExternalPath != null)
+            .Select(stream => stream.ExternalPath!)
+            .ToListAsync(cancellationToken);
 
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
@@ -248,6 +254,17 @@ public sealed class LibraryDeleteService(
             {
                 await database.SourceFiles.Where(file => file.Id == sourceFileId)
                     .ExecuteUpdateAsync(setters => setters.SetProperty(file => file.MediaItemId, (Guid?)null), cancellationToken);
+            }
+
+            // The sidecars' staged rows too — same reasoning as a single sidecar's removal, scoped to this
+            // item so an identically-placed sidecar of another catalog keeps its assignment.
+            if (sidecarPaths.Count > 0)
+            {
+                await database.SourceFiles
+                    .Where(file => file.MediaItemId == source.MediaItemId && sidecarPaths.Contains(file.RelativePath))
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(file => file.MediaItemId, (Guid?)null)
+                        .SetProperty(file => file.AssignmentStatus, SourceFileAssignmentStatus.Unassigned), cancellationToken);
             }
 
             await database.MediaStreams.Where(stream => stream.MediaSourceId == sourceId).ExecuteDeleteAsync(cancellationToken);
@@ -259,6 +276,10 @@ public sealed class LibraryDeleteService(
         if (deleteFile && catalog is not null)
         {
             fileEraser.Erase(catalog, source.Path);
+            foreach (var path in sidecarPaths)
+            {
+                fileEraser.Erase(catalog, path);
+            }
         }
 
         return true;
@@ -428,18 +449,31 @@ public sealed class LibraryDeleteService(
         return ids.Distinct().ToList();
     }
 
+    /// <summary>
+    /// Every file these items own: each source's video, plus the sidecars sitting beside it. A sidecar is a
+    /// file of its own but not a file of its own item — it exists only as an external stream of a source, so
+    /// once that source is gone nothing in the library refers to it any more. Leaving it behind would strand
+    /// a dub next to a deleted movie, in a folder that then cannot be pruned either.
+    /// </summary>
     private async Task<List<(Catalog Catalog, string Path)>> GatherLibraryFilesAsync(
         IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
     {
         var sources = await database.MediaSources.AsNoTracking()
             .Where(source => itemIds.Contains(source.MediaItemId))
             .Join(database.MediaItems.AsNoTracking(), source => source.MediaItemId, media => media.Id,
-                (source, media) => new { source.Path, media.CatalogId })
+                (source, media) => new { source.Id, source.Path, media.CatalogId })
             .ToListAsync(cancellationToken);
         if (sources.Count == 0)
         {
             return [];
         }
+
+        var sourceIds = sources.Select(source => source.Id).ToList();
+        var sidecars = await database.MediaStreams.AsNoTracking()
+            .Where(stream => sourceIds.Contains(stream.MediaSourceId) && stream.IsExternal && stream.ExternalPath != null)
+            .Select(stream => new { stream.MediaSourceId, stream.ExternalPath })
+            .ToListAsync(cancellationToken);
+        var byCatalog = sources.ToDictionary(source => source.Id, source => source.CatalogId);
 
         var catalogIds = sources.Where(source => source.CatalogId != null)
             .Select(source => source.CatalogId!.Value).Distinct().ToList();
@@ -447,10 +481,17 @@ public sealed class LibraryDeleteService(
             .Where(catalog => catalogIds.Contains(catalog.Id))
             .ToDictionaryAsync(catalog => catalog.Id, cancellationToken);
 
-        return sources
+        // Videos first, then the sidecars beside them, so the eraser's empty-parent prune sees the folder
+        // once everything in it is gone rather than after the first file.
+        var files = sources
             .Where(source => source.CatalogId is { } catalogId && catalogs.ContainsKey(catalogId))
             .Select(source => (catalogs[source.CatalogId!.Value], source.Path))
             .ToList();
+        files.AddRange(sidecars
+            .Where(sidecar => byCatalog.GetValueOrDefault(sidecar.MediaSourceId) is { } catalogId &&
+                catalogs.ContainsKey(catalogId))
+            .Select(sidecar => (catalogs[byCatalog[sidecar.MediaSourceId]!.Value], sidecar.ExternalPath!)));
+        return files;
     }
 }
 

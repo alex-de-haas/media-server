@@ -85,6 +85,54 @@ public sealed class StreamMetadataEditTests
         Assert.Contains("language or a title", error.Message);
     }
 
+    // A language is the one value here that is typed rather than read out of a file, and it is written into
+    // the output permanently — so it is normalized onto the library's vocabulary before it travels.
+    [Theory]
+    [InlineData("rus", "rus")]
+    [InlineData("ru", "rus")]
+    [InlineData("RUS", "rus")]
+    [InlineData(" rus ", "rus")]
+    [InlineData("deu", "ger")] // The terminological spelling, folded onto the bibliographic one stored here.
+    [InlineData("de", "ger")]
+    [InlineData("pt-BR", "por")] // A BCP-47 region subtag: the library stores the language.
+    public void A_language_is_normalized_onto_the_librarys_vocabulary(string typed, string expected)
+    {
+        var track = Embedded(1);
+
+        var result = Assert.Single(TranscodeService.ResolveMetadataOverrides(
+            Request(new StreamMetadataEdit(track.Id, typed)), SourceWith(track), [])!);
+
+        Assert.Equal(expected, result.Language);
+    }
+
+    [Theory]
+    [InlineData("rsu")]
+    [InlineData("russian")]
+    [InlineData("r")]
+    [InlineData("zzz")]
+    public void A_language_nobody_recognizes_is_refused_rather_than_written(string typed)
+    {
+        // Writing it would put the track beyond every "play my language" control there is, and finding out
+        // afterwards means re-encoding the file again.
+        var track = Embedded(1);
+
+        var error = Assert.Throws<TranscodeRequestException>(() => TranscodeService.ResolveMetadataOverrides(
+            Request(new StreamMetadataEdit(track.Id, typed)), SourceWith(track), []));
+        Assert.Contains("ISO 639-2", error.Message);
+    }
+
+    [Fact]
+    public void A_title_only_edit_still_leaves_the_language_alone()
+    {
+        // The refusal above must not reach an edit that sets no language: null is "keep what the source has".
+        var track = Embedded(1);
+
+        var result = Assert.Single(TranscodeService.ResolveMetadataOverrides(
+            Request(new StreamMetadataEdit(track.Id, Title: "Original")), SourceWith(track), [])!);
+
+        Assert.Null(result.Language);
+    }
+
     [Fact]
     public void Embedded_and_merged_edits_travel_together()
     {

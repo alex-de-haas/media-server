@@ -2,6 +2,7 @@ using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Probe;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Transcoding;
@@ -43,15 +44,8 @@ public sealed class TranscodeService(
 
         var catalog = item.Catalog ?? throw new TranscodeRequestException("Source's catalog is unavailable.");
 
-        // Merging is a stream copy by definition: the video is untouched and only tracks are added, so the
-        // caller does not have to also say "copy" and the encode-only options are contradictory.
         var isMerge = request.MergeStreamIds is { Count: > 0 };
-        if (isMerge && (request.MaxHeight is not null || request.Crf is not null))
-        {
-            throw new TranscodeRequestException("maxHeight and crf cannot be set when merging tracks.");
-        }
-
-        var codec = isMerge ? "copy" : NormalizeCodec(request.VideoCodec);
+        var codec = ResolveCodec(request, isMerge);
         var hardware = NormalizeHardware(request.HardwareAcceleration);
         if (request.Crf is < 0 or > 51)
         {
@@ -94,7 +88,7 @@ public sealed class TranscodeService(
             throw new TranscodeRequestException("Source file not found on disk.");
         }
 
-        var outputRelative = BuildOutputRelative(source.Path, isMerge ? "Merged" : VersionLabel(codec, targetHeight));
+        var outputRelative = BuildOutputRelative(source.Path, VersionLabel(codec, targetHeight, isMerge));
         if (!sandbox.TryResolve(catalog, outputRelative, out var outputAbsolute))
         {
             throw new TranscodeRequestException("Could not place the output inside the catalog.");
@@ -241,13 +235,59 @@ public sealed class TranscodeService(
         return directory.Length > 0 ? $"{directory}/{name}" : name;
     }
 
-    /// <summary>The version label used for the output filename: "Merged" when sidecar tracks are folded in,
-    /// "Remux" for a plain video copy, otherwise the codec plus the target height when downscaling (e.g.
-    /// "HEVC 1080p") or just the codec at full resolution.</summary>
-    internal static string VersionLabel(string codec, int? targetHeight) =>
-        codec == "copy"
+    /// <summary>
+    /// What happens to the video, and the refusal of the knobs that then make no sense.
+    /// <para>
+    /// Merging says what joins the output, not what happens to the picture, so a merge may re-encode too —
+    /// shrinking a remux while folding its dubs in is one pass over the file rather than two, and the second
+    /// pass would re-encode what the first had just written. What a merge keeps is the <b>default</b>: with
+    /// no <c>videoCodec</c> at all the video is copied, where a plain job encodes to HEVC. Re-encoding is the
+    /// expensive and lossy direction, and it must never be what omission buys.
+    /// </para>
+    /// <para>
+    /// The engine enforces the same rule. This mirrors it so a contradictory combination fails here, with a
+    /// message naming the app's own vocabulary, rather than coming back as a rejected job.
+    /// </para>
+    /// </summary>
+    internal static string ResolveCodec(CreateTranscodeRequest request, bool isMerge)
+    {
+        var unstated = string.IsNullOrWhiteSpace(request.VideoCodec);
+        var codec = isMerge && unstated ? "copy" : NormalizeCodec(request.VideoCodec);
+        if (codec == "copy" && (request.MaxHeight is not null || request.Crf is not null))
+        {
+            throw new TranscodeRequestException(isMerge && unstated
+                ? "maxHeight and crf need a videoCodec — a merge that names none copies the video."
+                : "maxHeight and crf cannot be set when the video is copied.");
+        }
+
+        return codec;
+    }
+
+    /// <summary>
+    /// The version label used for the output filename: "Remux" for a plain video copy, otherwise the codec
+    /// plus the target height when downscaling (e.g. "HEVC 1080p") or just the codec at full resolution.
+    /// A merge appends "Merged" — on its own for the copy it used to always be, after the encode label when
+    /// it is both.
+    /// <para>
+    /// The label is not decoration: it is the whole of what distinguishes one output path from another, and
+    /// the duplicate check refuses a second job producing a path that already exists. Folding the encode
+    /// into "Merged" would make "merge these dubs" and "merge these dubs into a 1080p HEVC" collide.
+    /// </para>
+    /// </summary>
+    internal static string VersionLabel(string codec, int? targetHeight, bool isMerge = false)
+    {
+        var encoded = codec == "copy"
             ? "Remux"
             : targetHeight is { } height ? $"{CodecLabel(codec)} {height}p" : CodecLabel(codec);
+        if (!isMerge)
+        {
+            return encoded;
+        }
+
+        // A merged copy stays plain "Merged": that is the name every merge has produced so far, and a
+        // "Remux Merged" would be a new path for the identical job.
+        return codec == "copy" ? "Merged" : $"{encoded} Merged";
+    }
 
     private static string CodecLabel(string codec) => codec == "h264" ? "H.264" : "HEVC";
 
@@ -366,6 +406,12 @@ public sealed class TranscodeService(
     /// input by its own index; a sidecar being merged becomes its own input, where it is the only track and
     /// therefore index 0. An edit naming a sidecar that is not part of this merge has no output stream to
     /// write to and is refused rather than silently dropped.
+    /// <para>
+    /// A language is normalized onto the library's vocabulary and <b>refused when unrecognized</b>. This is
+    /// the one place a language is typed rather than read out of a file, and the value is written into the
+    /// output permanently: a track tagged <c>ru</c> or <c>rsu</c> is one no "play my language" control will
+    /// ever find, and re-encoding gigabytes is a bad way to learn it.
+    /// </para>
     /// </summary>
     internal static IReadOnlyList<EngineMetadataOverride>? ResolveMetadataOverrides(
         CreateTranscodeRequest request, MediaSource source, IReadOnlyList<MediaStream> mergeStreams)
@@ -383,10 +429,18 @@ public sealed class TranscodeService(
                 throw new TranscodeRequestException("A track edit must set a language or a title.");
             }
 
+            var language = edit.Language;
+            if (language is not null)
+            {
+                language = LanguageTags.Normalize(language)
+                    ?? throw new TranscodeRequestException(
+                        $"'{edit.Language}' is not a language code this library knows. Use an ISO 639-2 tag (e.g. 'rus', 'eng').");
+            }
+
             var mergeOrdinal = mergeStreams.ToList().FindIndex(stream => stream.Id == edit.StreamId);
             if (mergeOrdinal >= 0)
             {
-                overrides.Add(new EngineMetadataOverride(mergeOrdinal + 1, 0, edit.Language, edit.Title));
+                overrides.Add(new EngineMetadataOverride(mergeOrdinal + 1, 0, language, edit.Title));
                 continue;
             }
 
@@ -394,7 +448,7 @@ public sealed class TranscodeService(
                 ?? throw new TranscodeRequestException(
                     "A track edit names a track that is neither in this version nor among the tracks being merged.");
 
-            overrides.Add(new EngineMetadataOverride(0, embedded.Index, edit.Language, edit.Title));
+            overrides.Add(new EngineMetadataOverride(0, embedded.Index, language, edit.Title));
         }
 
         return overrides;

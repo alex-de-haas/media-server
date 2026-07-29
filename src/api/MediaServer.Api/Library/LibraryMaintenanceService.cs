@@ -36,7 +36,8 @@ public sealed record LibraryScanReport(
 /// </summary>
 /// <param name="ItemsRefreshed">How many media items were re-probed.</param>
 /// <param name="Remaining">Sources still carrying header-read data.</param>
-public sealed record MediaBackfillReport(int ItemsRefreshed, int Remaining);
+/// <param name="SidecarsFilled">How many sidecar tracks gained the codec/channels/sample rate they lacked.</param>
+public sealed record MediaBackfillReport(int ItemsRefreshed, int Remaining, int SidecarsFilled = 0);
 
 /// <summary>
 /// M4 automation polish: on-demand and scheduled library maintenance. The scan verifies every published
@@ -175,8 +176,9 @@ public sealed class LibraryMaintenanceService(
 
     /// <summary>
     /// Re-probes every source whose media data came from the container-header reader rather than the engine,
-    /// so a library built while the transcode engine was detached can be filled in once it is back. Returns
-    /// how many items were touched and how many sources were re-probed.
+    /// so a library built while the transcode engine was detached can be filled in once it is back, and
+    /// fills in the sidecar tracks that predate their specs being recorded. Returns how many items were
+    /// touched, how many sources are still without engine data, and how many sidecars were filled.
     /// <para>
     /// Deliberately an explicit action rather than something that fires when the dependency reconnects: a
     /// probe is fast, so a whole-library pass is a foreground operation an operator can simply run, and
@@ -191,30 +193,109 @@ public sealed class LibraryMaintenanceService(
             .Distinct()
             .ToListAsync(cancellationToken);
 
-        if (itemIds.Count == 0)
-        {
-            return new MediaBackfillReport(0, 0);
-        }
-
-        logger.LogInformation("Backfilling media data for {Count} item(s) probed without the engine.", itemIds.Count);
-
         var refreshed = 0;
-        foreach (var itemId in itemIds)
+        if (itemIds.Count > 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (await RefreshMediaAsync(itemId, cancellationToken))
+            logger.LogInformation("Backfilling media data for {Count} item(s) probed without the engine.", itemIds.Count);
+            foreach (var itemId in itemIds)
             {
-                refreshed++;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (await RefreshMediaAsync(itemId, cancellationToken))
+                {
+                    refreshed++;
+                }
             }
         }
+
+        // Sidecars ride along rather than getting their own action: both answer the same question — "what
+        // could not be known when this row was written, that can be now" — and a `RefreshMediaAsync` pass
+        // cannot do it, because it deliberately never touches external rows.
+        var sidecarsFilled = await BackfillSidecarSpecsAsync(cancellationToken);
 
         var remaining = await database.MediaSources.AsNoTracking()
             .CountAsync(source => source.ProbeSource == ProbeSource.Header, cancellationToken);
 
         logger.LogInformation(
-            "Media backfill finished: {Refreshed} item(s) refreshed, {Remaining} source(s) still without engine data.",
-            refreshed, remaining);
-        return new MediaBackfillReport(refreshed, remaining);
+            "Media backfill finished: {Refreshed} item(s) refreshed, {Sidecars} sidecar(s) filled, {Remaining} source(s) still without engine data.",
+            refreshed, sidecarsFilled, remaining);
+        return new MediaBackfillReport(refreshed, remaining, sidecarsFilled);
+    }
+
+    /// <summary>
+    /// Reads codec, channel count and sample rate into the sidecar rows that lack them — the ones placed
+    /// before those were recorded, and any whose file the engine could not answer for at the time.
+    /// <para>
+    /// Only the technical fields are written. Language and title are a <b>labelling decision</b> the sidecar
+    /// stage made across a whole cohort of files, weighing what the container tagged against what the paths
+    /// reveal; re-reading one file's tags here would undo that with strictly less information.
+    /// </para>
+    /// <para>
+    /// A missing codec is the marker for "never answered", so a file the engine still cannot read is simply
+    /// picked up again next run rather than being recorded as having no codec.
+    /// </para>
+    /// </summary>
+    private async Task<int> BackfillSidecarSpecsAsync(CancellationToken cancellationToken)
+    {
+        // Projected to plain values rather than entities: `AsNoTracking()` on any source sets the whole
+        // query's tracking behavior, so a joined entity here would come back untracked and mutating it would
+        // silently save nothing. The writes below are explicit instead.
+        var pending = await database.MediaStreams.AsNoTracking()
+            .Where(stream => stream.IsExternal && stream.Codec == null && stream.ExternalPath != null)
+            .Join(database.MediaSources.AsNoTracking(), stream => stream.MediaSourceId, source => source.Id,
+                (stream, source) => new { stream.Id, stream.ExternalPath, source.MediaItemId })
+            .Join(database.MediaItems.AsNoTracking(), pair => pair.MediaItemId, item => item.Id,
+                (pair, item) => new { pair.Id, pair.ExternalPath, item.CatalogId })
+            .ToListAsync(cancellationToken);
+        if (pending.Count == 0)
+        {
+            return 0;
+        }
+
+        var catalogIds = pending.Where(entry => entry.CatalogId != null)
+            .Select(entry => entry.CatalogId!.Value).Distinct().ToList();
+        var catalogs = await database.Catalogs.AsNoTracking()
+            .Where(catalog => catalogIds.Contains(catalog.Id))
+            .ToDictionaryAsync(catalog => catalog.Id, cancellationToken);
+
+        var filled = 0;
+        foreach (var entry in pending)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (entry.CatalogId is not { } catalogId || !catalogs.TryGetValue(catalogId, out var catalog))
+            {
+                continue;
+            }
+
+            if (!sandbox.TryResolve(catalog, entry.ExternalPath!, out var absolute) || !File.Exists(absolute))
+            {
+                continue;
+            }
+
+            ProbedStream? track;
+            try
+            {
+                track = (await probe.ProbeAsync(absolute, cancellationToken)).Streams.FirstOrDefault();
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                logger.LogDebug(exception, "Could not probe sidecar {Path}.", entry.ExternalPath);
+                continue;
+            }
+
+            if (track?.Codec is null)
+            {
+                continue; // Nothing to record — an elementary stream read without the engine, typically.
+            }
+
+            await database.MediaStreams.Where(stream => stream.Id == entry.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(stream => stream.Codec, track.Codec)
+                    .SetProperty(stream => stream.Channels, track.Channels)
+                    .SetProperty(stream => stream.SampleRate, track.SampleRate), cancellationToken);
+            filled++;
+        }
+
+        return filled;
     }
 
     public async Task<LibraryScanReport> ScanAsync(CancellationToken cancellationToken)

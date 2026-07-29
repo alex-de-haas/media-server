@@ -163,6 +163,32 @@ public sealed class IngestSidecarTests
     }
 
     [Fact]
+    public async Task A_sidecars_specs_come_from_the_same_probe_its_tags_did()
+    {
+        // The probe that answers "what does this file call itself" answers "what is in it" at the same time,
+        // so recording the second costs nothing — and without it a sidecar is the only kind of track in the
+        // library with nothing to show but a name.
+        using var harness = new PipelineTestHarness();
+        harness.MetadataProvider.OnSearch = _ => [SomeMovie];
+        ProbeCompanionsAs(harness, _ => TaggedAudioProbe("rus", "Гаврилов"));
+
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Some Movie 2020",
+            "Some.Movie.2020/Some.Movie.2020.mkv",
+            additionalSourceRelativePaths: ["Some.Movie.2020/Some.Movie.2020.rus.mka"]);
+
+        await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var scope = harness.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var external = Assert.Single(await database.MediaStreams.Where(stream => stream.IsExternal).ToListAsync());
+
+        Assert.Equal("ac3", external.Codec);
+        Assert.Equal(6, external.Channels);
+        Assert.Equal(48000, external.SampleRate);
+    }
+
+    [Fact]
     public async Task The_emptied_staging_folder_is_cleared_once_the_tracks_are_out()
     {
         // Organize spares a staging root that still holds a companion — its recursive sweep would take the

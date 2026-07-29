@@ -1,7 +1,7 @@
 # Media Probe Providers
 
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-29
 
 Probing a library file runs through two providers behind one `IMediaProbe`. The
 external `transcode-engine` leads, because it runs `ffprobe` and therefore knows
@@ -67,10 +67,19 @@ the same things, so a null field means different things depending on it, and row
 read by the weaker provider have to be findable again.
 
 `POST /api/library/backfill-media` re-probes every source still carrying
-header-read data. It is deliberately an explicit action rather than something that
-fires when the dependency reconnects: a probe is fast enough that a whole-library
-pass is a foreground operation, and rewriting stored data on its own the moment a
-dependency reappears would be a surprise.
+header-read data, and fills in the sidecar tracks whose specs were never recorded
+(see [external-track-sidecars](../external-track-sidecars/feature.md)). It is
+deliberately an explicit action rather than something that fires when the
+dependency reconnects: a probe is fast enough that a whole-library pass is a
+foreground operation, and rewriting stored data on its own the moment a dependency
+reappears would be a surprise.
+
+The **Media data** section on Settings runs it and reports what it filled: titles
+re-probed, sidecar tracks filled, and how many sources are still without engine
+data — almost always a catalog root that is not bound into the engine. The control
+follows the engine's availability and says so when it is detached, because every
+answer it could produce is read through the engine's probe: without it the pass
+would re-read the same files with the header parser and change nothing.
 
 ## HDR says how sure it is
 
@@ -147,3 +156,6 @@ for transcoding itself.
   read still failing, and the divergence report: logged with the writing application
   when material, silent for container noise and when only one provider answered.
 - `AudioTrackLabelerTests` — language and title inference over both release layouts.
+- `settings.spec.ts` — the Media data control: running the backfill and reporting
+  what it filled and what is still unanswered, saying why it is unavailable with no
+  engine attached rather than offering a no-op, and staying hidden from a viewer.

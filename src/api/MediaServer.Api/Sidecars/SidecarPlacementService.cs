@@ -107,7 +107,10 @@ public sealed class SidecarPlacementService(
             : Math.Max(FirstExternalIndex, existing.Max(stream => stream.Index) + 1);
 
         var placed = 0;
-        foreach (var named in SidecarNaming.For(Path.GetFileName(video.RelativePath), labelled))
+        // Naming argues only over the tags, so it is handed only those — the technical facts alongside them
+        // have no say in what a file is called.
+        var forNaming = labelled.Select(entry => (entry.File, entry.Language, entry.Title)).ToList();
+        foreach (var named in SidecarNaming.For(Path.GetFileName(video.RelativePath), forNaming))
         {
             var target = folder.Length == 0 ? named.FileName : $"{folder}/{named.FileName}";
             if (existing.Any(stream => string.Equals(stream.ExternalPath, target, StringComparison.Ordinal)))
@@ -120,7 +123,7 @@ public sealed class SidecarPlacementService(
                 continue;
             }
 
-            var (_, language, title) = labelled.First(entry => entry.File.Id == named.Source.Id);
+            var (_, language, title, track) = labelled.First(entry => entry.File.Id == named.Source.Id);
             database.MediaStreams.Add(new MediaStream
             {
                 Id = Guid.NewGuid(),
@@ -132,6 +135,11 @@ public sealed class SidecarPlacementService(
                 Index = nextExternalIndex++,
                 Language = language,
                 Title = title,
+                // From the same probe the tags came from: a sidecar then reads like any other track —
+                // "rus AC3 5.1 · 48 kHz" — instead of being the one kind with nothing but a name.
+                Codec = track.Codec,
+                Channels = track.Channels,
+                SampleRate = track.SampleRate,
                 IsExternal = true,
                 ExternalPath = target,
             });
@@ -188,14 +196,15 @@ public sealed class SidecarPlacementService(
     /// <summary>
     /// The language and title to record. A tagged container states its own — a <c>.mka</c> carries both
     /// internally, which is why the file name never has to be the source of truth — and an elementary
-    /// stream (<c>.ac3</c>, <c>.dts</c>) has nowhere to put them, so the path is read instead.
+    /// stream (<c>.ac3</c>, <c>.dts</c>) has nowhere to put them, so the path is read instead. The probe
+    /// that answers the tag question rides along, because it answers the technical one at the same time.
     /// </summary>
-    private async Task<List<(SourceFile File, string? Language, string? Title)>> LabelAsync(
+    private async Task<List<(SourceFile File, string? Language, string? Title, CompanionTrack Track)>> LabelAsync(
         IReadOnlyList<SourceFile> companions, string videoRelativePath, Catalog catalog, CancellationToken cancellationToken)
     {
         // What a container states about itself wins, so it is read first — and the language it yields is
         // what the cohorts below are built from.
-        var tags = new List<(string? Language, string? Title)>(companions.Count);
+        var tags = new List<CompanionTrack>(companions.Count);
         foreach (var companion in companions)
         {
             tags.Add(await ReadTagsAsync(companion, catalog, cancellationToken));
@@ -228,7 +237,7 @@ public sealed class SidecarPlacementService(
         }
 
         return [.. companions.Select((companion, index) =>
-            (companion, languages[index], tags[index].Title ?? titles[index]))];
+            (companion, languages[index], tags[index].Title ?? titles[index], tags[index]))];
     }
 
     /// <summary>
@@ -236,25 +245,43 @@ public sealed class SidecarPlacementService(
     /// language and dub group — while an elementary stream (<c>.ac3</c>, <c>.dts</c>) has nowhere to put
     /// them, which is the case the path inference exists for.
     /// </summary>
-    private async Task<(string? Language, string? Title)> ReadTagsAsync(
+    private async Task<CompanionTrack> ReadTagsAsync(
         SourceFile companion, Catalog catalog, CancellationToken cancellationToken)
     {
         if (!sandbox.TryResolve(catalog, companion.RelativePath, out var absolute) || !File.Exists(absolute))
         {
-            return (null, null);
+            return CompanionTrack.Unknown;
         }
 
         try
         {
             var result = await probe.ProbeAsync(absolute, cancellationToken);
-            var stream = result.Streams.FirstOrDefault();
-            return (TaggedLanguage(stream?.Language), Tagged(stream?.Title));
+            return CompanionTrack.From(result.Streams.FirstOrDefault());
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogDebug(exception, "Could not read tags from {Path}; using its path instead.", companion.RelativePath);
-            return (null, null);
+            return CompanionTrack.Unknown;
         }
+    }
+
+    /// <summary>
+    /// What a companion's own file says about the single track it holds: the tags the naming rules argue
+    /// over, and the technical facts they do not — codec, channel count, sample rate.
+    /// <para>
+    /// The two travel together because one probe answers both, and a sidecar is otherwise the only kind of
+    /// track in the library with nothing to show but a name. Every field is null when the file could not be
+    /// read at all, and the technical ones are also null for an elementary stream read without the engine:
+    /// a container header parser has nothing to parse in a raw <c>.ac3</c>.
+    /// </para>
+    /// </summary>
+    private sealed record CompanionTrack(string? Language, string? Title, string? Codec, int? Channels, int? SampleRate)
+    {
+        public static readonly CompanionTrack Unknown = new(null, null, null, null, null);
+
+        public static CompanionTrack From(ProbedStream? stream) => stream is null
+            ? Unknown
+            : new(TaggedLanguage(stream.Language), Tagged(stream.Title), stream.Codec, stream.Channels, stream.SampleRate);
     }
 
     /// <summary>A tag that is actually usable: a probe reports an absent one as null, but some containers

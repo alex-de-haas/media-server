@@ -1,18 +1,20 @@
 # Stream Title Editing
 
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-29
 
-An operator can correct a track's name while submitting a conversion or a merge,
-instead of living with whatever the release wrote. Real releases make the case:
-`Mercy (2026).mkv` labels its English track with nothing at all, and
-`Zootopia (2016).mkv` calls one `DUB | DD5.1 @ 640 kbps`.
+An operator can correct a track's **name and language** while submitting a
+conversion or a merge, instead of living with whatever the release wrote. Real
+releases make the case: `Mercy (2026).mkv` labels its English track with nothing at
+all, and `Zootopia (2016).mkv` calls one `DUB | DD5.1 @ 640 kbps`. Sidecar dubs are
+worse: `Escape from New York (1981).rus.Володарский.mka` has a title and no language
+at all, and a track with no language is one no player can pick by language.
 
 ## Where it is offered, and why only there
 
-The Convert dialog lists each track with an editable name beside its keep/default
-controls. Merging sidecars in offers the same, for the tracks coming from those
-files as well as the video's own.
+The [Convert dialog](../convert-dialog/feature.md) lists each track with an editable
+name and language beside its keep/default controls — the video's own tracks and the
+sidecars being folded in alike, since both become streams of the same output.
 
 There is **no standalone rename**. Changing nothing but a title still rewrites the
 whole file — a stream copy, but a full pass over a multi-gigabyte remux — so
@@ -39,6 +41,12 @@ An edit naming a sidecar that is not part of this merge has no output stream to
 write to and is **refused** rather than dropped — silently ignoring it would look
 like the rename worked. So is an edit that sets neither a language nor a title.
 
+A **language** is additionally normalized onto the library's vocabulary and refused
+when it is not one `LanguageTags` knows. A name is free text and nothing can be
+wrong with it; a language is a code with a meaning, and a wrong one is written into
+the output permanently. The rule and the vocabulary live in
+[convert-dialog](../convert-dialog/feature.md).
+
 ## Nothing edits the database
 
 The values travel with the job and are applied by the engine as output metadata.
@@ -53,4 +61,6 @@ something the operator types into a row.
   addressed within the video by its own index, a merged sidecar addressed as its
   own input at index 0, embedded and merged edits travelling together, and the
   refusals — a sidecar that is not being merged, an unknown track, and an edit that
-  sets nothing.
+  sets nothing. Plus the language rule: normalization across the 639-1 pair, the
+  terminological spelling, case, whitespace and a BCP-47 region; an unrecognized tag
+  refused; a title-only edit leaving the language alone.

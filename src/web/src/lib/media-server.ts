@@ -330,6 +330,8 @@ export interface MediaStream {
   isDefault: boolean;
   isForced: boolean;
   isExternal: boolean;
+  /** A sidecar's own file name (with extension); null for an embedded track. */
+  fileName: string | null;
 }
 
 export interface LibraryMediaSource {
@@ -754,6 +756,18 @@ export interface LibraryScanReport {
   crossCatalogDuplicates: CrossCatalogDuplicate[];
 }
 
+/**
+ * The outcome of filling in media data that was read without the transcode engine. `remaining` counts the
+ * sources still on header-read data afterwards — files the engine could not answer for either, typically
+ * because their catalog root is not bound into it.
+ */
+export interface MediaBackfillReport {
+  itemsRefreshed: number;
+  remaining: number;
+  /** Sidecar tracks that gained the codec, channel count and sample rate they lacked. */
+  sidecarsFilled: number;
+}
+
 // A title published in two catalogs at once — the shape new imports are refused, so anything here
 // pre-dates that rule. Its copies keep separate watched state and favorites until they are merged.
 export interface CrossCatalogDuplicate {
@@ -856,8 +870,9 @@ export interface CreateTranscodeInput {
   defaultSubtitleStreamIndex?: number | null;
   /**
    * External stream ids of this source — sidecar dubs and subtitles beside the file — whose tracks join the
-   * output. Naming any makes the job a merge: the video is copied untouched, so `maxHeight` and `crf` must
-   * be left unset. The sidecars are not consumed; the merge writes a new version alongside them.
+   * output. Naming any makes the job a merge, which says nothing about the video: a merge may re-encode too.
+   * It only changes the default — a merge with no `videoCodec` copies, where a plain job encodes. The
+   * sidecars are not consumed; the merge writes a new version alongside them.
    */
   mergeStreamIds?: string[];
   /**
@@ -910,6 +925,9 @@ export const mediaServer = {
   // Whether the transcode-engine dependency is attached. The Media tab works without it — versions and the
   // default-version pick are database-side — so only the conversion controls key off this.
   transcodeAvailability: () => apiJson<{ available: boolean }>(`${BASE}/transcode/availability`),
+  // The language tags a track edit may carry, from the service that validates them — so the dialog cannot
+  // accept a value the API then refuses.
+  transcodeLanguages: () => apiJson<string[]>(`${BASE}/transcode/languages`),
   listTranscodeJobs: () => apiJson<TranscodeJob[]>(`${BASE}/transcode`),
   createTranscodeJob: (input: CreateTranscodeInput) =>
     apiJson<TranscodeJob>(`${BASE}/transcode`, {
@@ -1023,6 +1041,9 @@ export const mediaServer = {
   // In-flight cross-catalog moves; seeds the Activity progress list, then kept live by RealtimeBridge over SSE.
   listActiveMoves: () => apiJson<LibraryMoveJob[]>(`${BASE}/library/move/active`),
   scanLibrary: () => apiJson<LibraryScanReport>(`${BASE}/library/scan`, { method: "POST" }),
+  // Re-probe what was read without the transcode engine, and fill in the sidecar specs that predate them
+  // being recorded. A foreground pass over the library, so the caller waits for the report.
+  backfillMedia: () => apiJson<MediaBackfillReport>(`${BASE}/library/backfill-media`, { method: "POST" }),
 
   // Person page, keyed by the provider identity its cast members carry (CastMember.provider/providerId).
   getPerson: (provider: string, providerId: string) =>

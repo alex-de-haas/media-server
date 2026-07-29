@@ -48,6 +48,9 @@ export interface AppMock {
   watchHistoryCalendar?: unknown; // GET /watch-history/calendar (an envelope, not a list)
   watchHistoryUndated?: unknown; // GET /watch-history/calendar/undated ({ entries, total })
   recommendations?: unknown; // GET /recommendations ({ items, sources, selectedSources })
+  transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
+  transcodeLanguages?: string[]; // GET /transcode/languages — what the language field validates against
+  mediaBackfill?: { itemsRefreshed: number; remaining: number; sidecarsFilled: number }; // POST /library/backfill-media
 }
 
 export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
@@ -124,6 +127,23 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/watch-history/calendar") {
       return route.fulfill({
         json: mock.watchHistoryCalendar ?? { events: [], undated: { movies: 0, episodes: 0 }, latestWatchedAt: null },
+      });
+    }
+
+    // The engine is an optional dependency, so it is off unless a test says otherwise — the Convert and
+    // Merge controls follow it.
+    if (path === "/transcode/availability") {
+      return route.fulfill({ json: { available: mock.transcodeAvailable ?? false } });
+    }
+    if (path === "/transcode/languages") {
+      return route.fulfill({ json: mock.transcodeLanguages ?? ["eng", "ger", "rus", "ukr"] });
+    }
+    if (path === "/transcode" && method === "POST") {
+      return route.fulfill({ status: 201, json: { id: "job-1" } });
+    }
+    if (path === "/library/backfill-media" && method === "POST") {
+      return route.fulfill({
+        json: mock.mediaBackfill ?? { itemsRefreshed: 0, remaining: 0, sidecarsFilled: 0 },
       });
     }
 
