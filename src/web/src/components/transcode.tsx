@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Trash2, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
@@ -58,15 +58,19 @@ export function TranscodeDialog({
   source,
   open,
   onOpenChange,
+  preselectedSidecars,
 }: {
   source: LibraryMediaSource;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Sidecar stream ids to open with already checked — how the Media tab's Merge button arrives here. */
+  preselectedSidecars?: string[];
 }) {
-  // Only the container's own tracks. A sidecar is a separate file: it has no index inside this video to
-  // copy or address, and folding one in is the merge action on the Media tab, not a conversion option.
   const audioStreams = source.streams.filter((stream) => stream.type === "Audio" && !stream.isExternal);
   const subtitleStreams = source.streams.filter((stream) => stream.type === "Subtitle" && !stream.isExternal);
+  // The files beside the video. They are not tracks of this container — each is an input of its own — so
+  // they carry ids rather than indexes and are selected separately from the two lists above.
+  const sidecars = source.streams.filter((stream) => stream.isExternal);
   const sourceDefaultAudio = audioStreams.find((stream) => stream.isDefault)?.index ?? audioStreams[0]?.index ?? null;
   const sourceDefaultSubtitle = subtitleStreams.find((stream) => stream.isDefault)?.index ?? null;
   const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat ?? null;
@@ -81,16 +85,23 @@ export function TranscodeDialog({
   const resolutionId = useId();
   const crfId = useId();
 
-  const [mode, setMode] = useState("encode");
+  // Opening from Merge means the operator already said "fold these in", and folding in is a copy unless
+  // they ask for more — so the dialog opens on "keep the video" rather than silently proposing a re-encode
+  // of a file they only wanted more tracks in.
+  const initialMode = preselectedSidecars?.length ? "copy" : "encode";
+  const [mode, setMode] = useState(initialMode);
   const [codec, setCodec] = useState("hevc");
   const [hardware, setHardware] = useState("auto");
   const [resolution, setResolution] = useState("source");
   const [crf, setCrf] = useState("");
-  // Titles the operator corrected, keyed by stream id. Only what actually changed is sent: an untouched
-  // field keeps whatever the source stream carries, so relabelling one track never freezes the others.
+  // Names and languages the operator corrected, keyed by stream id. Only what actually changed is sent: an
+  // untouched field keeps whatever the source stream carries, so correcting one track never freezes the
+  // others' metadata.
   const [titles, setTitles] = useState<Record<string, string>>({});
+  const [languages, setLanguages] = useState<Record<string, string>>({});
   const [audioKept, setAudioKept] = useState<Set<number>>(() => new Set(audioStreams.map((stream) => stream.index)));
   const [subtitleKept, setSubtitleKept] = useState<Set<number>>(() => new Set(subtitleStreams.map((stream) => stream.index)));
+  const [merged, setMerged] = useState<Set<string>>(() => new Set(preselectedSidecars ?? []));
   const [defaultAudio, setDefaultAudio] = useState<number | null>(sourceDefaultAudio);
   const [defaultSubtitle, setDefaultSubtitle] = useState<number | null>(sourceDefaultSubtitle);
 
@@ -99,18 +110,30 @@ export function TranscodeDialog({
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
-      setMode("encode");
+      setMode(initialMode);
       setCodec("hevc");
       setHardware("auto");
       setResolution("source");
       setCrf("");
       setTitles({});
+      setLanguages({});
       setAudioKept(new Set(audioStreams.map((stream) => stream.index)));
       setSubtitleKept(new Set(subtitleStreams.map((stream) => stream.index)));
+      setMerged(new Set(preselectedSidecars ?? []));
       setDefaultAudio(sourceDefaultAudio);
       setDefaultSubtitle(sourceDefaultSubtitle);
     }
   }
+
+  // The tags a language may be corrected to, from the service that validates them. Fetched once the dialog
+  // is open and only for as long as it stays a fixed list — an empty answer means "don't judge", so a failed
+  // fetch leaves the field permissive and lets the API have the last word rather than blocking a submit.
+  const { data: knownLanguages } = useQuery({
+    queryKey: ["transcode-languages"],
+    queryFn: mediaServer.transcodeLanguages,
+    staleTime: Infinity,
+    enabled: open,
+  });
 
   const toggleAudio = (index: number, checked: boolean) => {
     setAudioKept((prev) => {
@@ -143,17 +166,63 @@ export function TranscodeDialog({
     }
   };
 
+  const toggleSidecar = (id: string, checked: boolean) => {
+    setMerged((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  // A language the API will refuse, flagged before the whole form is submitted rather than after. An empty
+  // list (the fetch failed, or has not landed) judges nothing.
+  const badLanguages = Object.entries(languages).filter(
+    ([, value]) => value.trim() !== "" && knownLanguages?.length && !knownLanguages.includes(value.trim().toLowerCase()),
+  );
+
   const convert = useMutation({
     mutationFn: () => {
       const isCopy = mode === "copy";
+      const mergeStreamIds = sidecars.filter((stream) => merged.has(stream.id)).map((stream) => stream.id);
       const keptAudio = audioStreams.filter((stream) => audioKept.has(stream.index)).map((stream) => stream.index);
       const keptSubtitles = subtitleStreams.filter((stream) => subtitleKept.has(stream.index)).map((stream) => stream.index);
       const audioDefaultChanged = defaultAudio != null && defaultAudio !== sourceDefaultAudio;
       const subtitleDefaultChanged = defaultSubtitle != null && defaultSubtitle !== sourceDefaultSubtitle;
       // Only send an explicit list when the selection is a subset or the default moved — otherwise let the
       // backend copy every track (the robust "0:a?" path).
-      const audioChanged = keptAudio.length !== audioStreams.length || audioDefaultChanged;
-      const subtitlesChanged = keptSubtitles.length !== subtitleStreams.length || subtitleDefaultChanged;
+      //
+      // A merge is the exception: an appended track's output position is only knowable when the primary
+      // list is explicit, so the engine refuses to relabel one otherwise. Sending the full list costs
+      // nothing (it maps to exactly the same streams) and keeps a merged dub's name editable.
+      const merging = mergeStreamIds.length > 0;
+      const audioChanged = merging || keptAudio.length !== audioStreams.length || audioDefaultChanged;
+      const subtitlesChanged = merging || keptSubtitles.length !== subtitleStreams.length || subtitleDefaultChanged;
+
+      // Only tracks that end up in the output can carry an edit: an unchecked sidecar has no output stream
+      // to write to, and the API refuses the edit rather than dropping it silently.
+      const editable = new Set([
+        ...audioStreams.map((stream) => stream.id),
+        ...subtitleStreams.map((stream) => stream.id),
+        ...mergeStreamIds,
+      ]);
+      const metadataEdits = [...editable]
+        .map((streamId) => {
+          const stream = source.streams.find((candidate) => candidate.id === streamId);
+          const title = titles[streamId]?.trim();
+          const language = languages[streamId]?.trim().toLowerCase();
+          return {
+            streamId,
+            // Undefined is "keep what the source has" — so only a value that actually differs is sent, and
+            // correcting one field never freezes the other.
+            title: title !== undefined && title !== (stream?.title ?? "") ? title : undefined,
+            language: language !== undefined && language !== (stream?.language ?? "") ? language : undefined,
+          };
+        })
+        .filter((edit) => edit.title !== undefined || edit.language !== undefined);
 
       const input: CreateTranscodeInput = {
         sourceId: source.id,
@@ -166,9 +235,8 @@ export function TranscodeDialog({
         subtitleStreamIndexes: subtitlesChanged ? keptSubtitles : undefined,
         defaultAudioStreamIndex: audioDefaultChanged ? defaultAudio : undefined,
         defaultSubtitleStreamIndex: subtitleDefaultChanged ? defaultSubtitle : undefined,
-        metadataEdits: Object.entries(titles)
-          .filter(([id, title]) => title.trim() !== (source.streams.find((s) => s.id === id)?.title ?? ""))
-          .map(([streamId, title]) => ({ streamId, title: title.trim() })),
+        mergeStreamIds: merging ? mergeStreamIds : undefined,
+        metadataEdits,
       };
       return mediaServer.createTranscodeJob(input);
     },
@@ -181,17 +249,23 @@ export function TranscodeDialog({
   });
 
   const isCopy = mode === "copy";
+  const mergeCount = sidecars.filter((stream) => merged.has(stream.id)).length;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      {/* Wider than the default: a release with three dubs and two subtitle tracks is eight rows of
+          controls, each carrying a name and a language field. */}
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Convert version</DialogTitle>
           <DialogDescription>Create a new version of this movie. The original stays until you delete it.</DialogDescription>
         </DialogHeader>
 
         <form
-          className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto text-sm"
+          // The scroll container reaches the dialog's edge (-mr-6 cancels its padding) and re-pads its own
+          // content, so the scrollbar gets a gutter of its own instead of running down the side of the
+          // inputs — while the fields stay inset the same 24px as the header above them.
+          className="-mr-6 flex max-h-[70vh] flex-col gap-3 overflow-y-auto pr-6 text-sm"
           onSubmit={(e) => {
             e.preventDefault();
             convert.mutate();
@@ -292,24 +366,55 @@ export function TranscodeDialog({
             </>
           )}
 
-          <TrackList title="Audio" streams={audioStreams} kept={audioKept} onToggle={toggleAudio} defaultIndex={defaultAudio} onDefault={setDefaultAudio} titles={titles} onTitle={setTitles} />
+          <TrackList
+            title="Audio"
+            streams={audioStreams}
+            isKept={(stream) => audioKept.has(stream.index)}
+            onToggle={(stream, checked) => toggleAudio(stream.index, checked)}
+            defaultIndex={defaultAudio}
+            onDefault={setDefaultAudio}
+            titles={titles}
+            onTitle={setTitles}
+            languages={languages}
+            onLanguage={setLanguages}
+            knownLanguages={knownLanguages}
+          />
           <TrackList
             title="Subtitles"
             streams={subtitleStreams}
-            kept={subtitleKept}
-            onToggle={toggleSubtitle}
+            isKept={(stream) => subtitleKept.has(stream.index)}
+            onToggle={(stream, checked) => toggleSubtitle(stream.index, checked)}
             defaultIndex={defaultSubtitle}
             onDefault={setDefaultSubtitle}
-          titles={titles}
+            titles={titles}
             onTitle={setTitles}
-            />
+            languages={languages}
+            onLanguage={setLanguages}
+            knownLanguages={knownLanguages}
+          />
+          <TrackList
+            title="Files beside this version"
+            description="Each is folded into the output as an extra track. The files stay on disk."
+            streams={sidecars}
+            isKept={(stream) => merged.has(stream.id)}
+            onToggle={(stream, checked) => toggleSidecar(stream.id, checked)}
+            titles={titles}
+            onTitle={setTitles}
+            languages={languages}
+            onLanguage={setLanguages}
+            knownLanguages={knownLanguages}
+          />
 
           <DialogFooter className="mt-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={convert.isPending}>
-              {convert.isPending ? "Starting…" : "Start convert"}
+            <Button type="submit" size="sm" disabled={convert.isPending || badLanguages.length > 0}>
+              {convert.isPending
+                ? "Starting…"
+                : mergeCount > 0
+                  ? `Start convert + merge ${mergeCount}`
+                  : "Start convert"}
             </Button>
           </DialogFooter>
         </form>
@@ -321,22 +426,32 @@ export function TranscodeDialog({
 /** One stream type's tracks: a checkbox to copy each, and a toggle to mark one kept track the default. */
 function TrackList({
   title,
+  description,
   streams,
-  kept,
+  isKept,
   onToggle,
   defaultIndex,
   onDefault,
   titles,
   onTitle,
+  languages,
+  onLanguage,
+  knownLanguages,
 }: {
   title: string;
+  description?: string;
   streams: MediaStream[];
-  kept: Set<number>;
-  onToggle: (index: number, checked: boolean) => void;
-  defaultIndex: number | null;
-  onDefault: (index: number) => void;
+  /** Whether a track is kept. A predicate rather than a set, because an embedded track is selected by its
+   *  index inside the container and a sidecar — a file, with no index here — by its id. */
+  isKept: (stream: MediaStream) => boolean;
+  onToggle: (stream: MediaStream, checked: boolean) => void;
+  defaultIndex?: number | null;
+  onDefault?: (index: number) => void;
   titles: Record<string, string>;
   onTitle: (update: (current: Record<string, string>) => Record<string, string>) => void;
+  languages: Record<string, string>;
+  onLanguage: (update: (current: Record<string, string>) => Record<string, string>) => void;
+  knownLanguages: string[] | undefined;
 }) {
   if (!streams.length) {
     return null;
@@ -345,39 +460,65 @@ function TrackList({
   return (
     <Field>
       <FieldLabel>{title}</FieldLabel>
-      <ul className="flex flex-col gap-1.5">
+      {description ? <p className="text-muted-foreground text-xs">{description}</p> : null}
+      <ul className="flex flex-col gap-2">
         {streams.map((stream) => {
-          const checked = kept.has(stream.index);
-          const label = stream.displayTitle ?? stream.codec ?? "—";
+          const checked = isKept(stream);
+          // A sidecar routinely carries neither codec nor language — its release name is all it has.
+          const label = stream.displayTitle ?? stream.codec ?? stream.title?.trim() ?? stream.fileName ?? "—";
+          const language = languages[stream.id] ?? stream.language ?? "";
+          const badLanguage =
+            language.trim() !== "" && !!knownLanguages?.length && !knownLanguages.includes(language.trim().toLowerCase());
           return (
-            <li key={stream.index} className="flex flex-col gap-1">
+            <li key={stream.id} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
-                <Checkbox checked={checked} onCheckedChange={(value) => onToggle(stream.index, value === true)} aria-label={`Copy ${label}`} />
+                <Checkbox checked={checked} onCheckedChange={(value) => onToggle(stream, value === true)} aria-label={`Copy ${label}`} />
                 <span className="min-w-0 flex-1 truncate leading-6">{label}</span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={defaultIndex === stream.index ? "secondary" : "ghost"}
-                  className="h-6 shrink-0 px-2 text-xs"
-                  disabled={!checked}
-                  aria-pressed={defaultIndex === stream.index}
-                  onClick={() => onDefault(stream.index)}
-                >
-                  Default
-                </Button>
+                {stream.fileName ? (
+                  <span className="text-muted-foreground hidden shrink-0 font-mono text-xs sm:inline">{stream.fileName}</span>
+                ) : null}
+                {onDefault ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={defaultIndex === stream.index ? "secondary" : "ghost"}
+                    className="h-6 shrink-0 px-2 text-xs"
+                    disabled={!checked}
+                    aria-pressed={defaultIndex === stream.index}
+                    onClick={() => onDefault(stream.index)}
+                  >
+                    Default
+                  </Button>
+                ) : null}
               </div>
-              {/* The name written into the output. Editing is offered here because a job is being submitted
-                  anyway — changing metadata alone would still rewrite the whole file. */}
-              <Input
-                value={titles[stream.id] ?? stream.title ?? ""}
-                onChange={(event) =>
-                  onTitle((current) => ({ ...current, [stream.id]: event.target.value }))
-                }
-                disabled={!checked}
-                placeholder="Track name"
-                aria-label={`Name for ${label}`}
-                className="ml-6 h-7 text-xs"
-              />
+              {/* The name and language written into the output. Editing is offered here because a job is
+                  being submitted anyway — changing metadata alone would still rewrite the whole file.
+                  Indented under the checkbox with padding rather than a margin: a w-full input plus a margin
+                  is wider than its row, which is what used to push these past the dialog's edge. */}
+              <div className="flex gap-2 pl-6">
+                <Input
+                  value={titles[stream.id] ?? stream.title ?? ""}
+                  onChange={(event) => onTitle((current) => ({ ...current, [stream.id]: event.target.value }))}
+                  disabled={!checked}
+                  placeholder="Track name"
+                  aria-label={`Name for ${label}`}
+                  className="h-7 min-w-0 flex-1 text-xs"
+                />
+                <Input
+                  value={language}
+                  onChange={(event) => onLanguage((current) => ({ ...current, [stream.id]: event.target.value }))}
+                  disabled={!checked}
+                  aria-invalid={badLanguage}
+                  placeholder="Language"
+                  aria-label={`Language for ${label}`}
+                  className="h-7 w-28 shrink-0 text-xs"
+                />
+              </div>
+              {badLanguage ? (
+                <p className="text-destructive pl-6 text-xs">
+                  “{language.trim()}” isn’t an ISO 639-2 tag — try “rus”, “eng”.
+                </p>
+              ) : null}
             </li>
           );
         })}

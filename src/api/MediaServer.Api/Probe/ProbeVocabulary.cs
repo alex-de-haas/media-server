@@ -53,24 +53,6 @@ internal static class ProbeVocabulary
         ["c608"] = "eia_608",
     };
 
-    /// <summary>
-    /// Two-letter ISO 639-1 codes mapped to the three-letter form ffprobe reports. Matroska's newer
-    /// <c>LanguageBCP47</c> element yields <c>ru</c> where the legacy element and ffprobe both say
-    /// <c>rus</c>, so without this the same library would hold both spellings depending on which muxer wrote
-    /// each file. Covers the languages the labeler already knows about.
-    /// </summary>
-    private static readonly Dictionary<string, string> Languages = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["ru"] = "rus", ["en"] = "eng", ["ja"] = "jpn", ["uk"] = "ukr", ["de"] = "ger",
-        ["fr"] = "fre", ["es"] = "spa", ["it"] = "ita", ["pl"] = "pol", ["pt"] = "por",
-        ["ko"] = "kor", ["zh"] = "chi", ["cs"] = "cze", ["nl"] = "dut", ["sv"] = "swe",
-        ["tr"] = "tur", ["ar"] = "ara", ["he"] = "heb", ["hi"] = "hin", ["fi"] = "fin",
-        ["no"] = "nor", ["da"] = "dan", ["hu"] = "hun", ["el"] = "gre", ["ro"] = "rum",
-        ["bg"] = "bul", ["sr"] = "srp", ["hr"] = "hrv", ["sk"] = "slo", ["th"] = "tha",
-        ["vi"] = "vie", ["id"] = "ind", ["fa"] = "per", ["lv"] = "lav", ["lt"] = "lit",
-        ["et"] = "est", ["be"] = "bel", ["ka"] = "geo", ["hy"] = "arm", ["kk"] = "kaz",
-    };
-
     /// <summary>The library's name for a codec, whichever container spelled it.</summary>
     public static string? Codec(string? raw)
     {
@@ -84,9 +66,14 @@ internal static class ProbeVocabulary
     }
 
     /// <summary>
-    /// A three-letter language tag, or null when the container said nothing. A BCP-47 value may carry a
-    /// region or script ("pt-BR"), which is dropped: the library stores the language, and keeping the
-    /// subtag would make the same dub sort differently depending on its muxer.
+    /// A three-letter language tag, or null when the container said nothing. Normalization — the ISO 639-1
+    /// pair, the terminological spelling, a dropped BCP-47 region — lives in <see cref="LanguageTags"/>, so
+    /// what a file claims and what an operator types land on the same vocabulary.
+    /// <para>
+    /// A tag <see cref="LanguageTags"/> does not know is kept anyway, lowercased. This is where the probe
+    /// parts company with operator input: the value is not a typo to reject but what the file says, and
+    /// dropping it would silently unlabel a track that is labelled.
+    /// </para>
     /// </summary>
     public static string? Language(string? raw)
     {
@@ -101,7 +88,7 @@ internal static class ProbeVocabulary
             return null;
         }
 
-        return Languages.TryGetValue(primary, out var mapped) ? mapped : primary.ToLowerInvariant();
+        return LanguageTags.Normalize(primary) ?? primary.ToLowerInvariant();
     }
 
     /// <summary>

@@ -111,6 +111,213 @@ test("shows movie cast, media, and tags as ordered detail tabs", async ({ page }
   await expect(page.getByText("first contact")).toBeVisible();
 });
 
+// The movie the merge tests drive: an H264 remux with one embedded track of each kind and two dubs beside
+// it, neither carrying a language — which is what makes the language field worth having.
+const escapeFromNewYork = () => ({
+  ...movieDetail("m1", "Escape from New York"),
+  mediaSources: [
+    {
+      id: "source-1",
+      versionName: null,
+      fileName: "Escape from New York (1981).mkv",
+      container: "mkv",
+      sizeBytes: 10_200_547_000,
+      bitrate: 13_696_000,
+      durationTicks: 59_400_000_000,
+      streams: [
+        { id: "v0", type: "Video", index: 0, codec: "h264", language: null, displayTitle: "1080p H264", title: null, isExternal: false, fileName: null },
+        { id: "a0", type: "Audio", index: 1, codec: "dts", language: "eng", displayTitle: "eng DTS 5.1", title: null, isExternal: false, fileName: null },
+        { id: "s0", type: "Subtitle", index: 2, codec: "subrip", language: "eng", displayTitle: "eng", title: null, isExternal: false, fileName: null },
+        { id: "x1", type: "Audio", index: 1000, codec: null, language: null, displayTitle: null, title: "Гаврилов", isExternal: true, fileName: "Escape from New York (1981).rus.Гаврилов.mka" },
+        { id: "x2", type: "Subtitle", index: 1001, codec: null, language: null, displayTitle: null, title: "Сербин", isExternal: true, fileName: "Escape from New York (1981).rus.Сербин.srt" },
+      ],
+    },
+  ],
+});
+
+test("merging opens the convert dialog with those tracks checked, instead of starting a job", async ({ page }) => {
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: { m1: escapeFromNewYork() },
+    transcodeAvailable: true,
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+
+  // Checking a sidecar on the Media tab and pressing Merge must not submit anything on its own — the point
+  // of the change is that the job is composed first.
+  await page.getByRole("checkbox", { name: /Merge .*Гаврилов/ }).check();
+  await page.getByRole("button", { name: /Merge 1 into a new version/ }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Convert version" })).toBeVisible();
+
+  // It arrives checked, and the video defaults to untouched: the operator asked for more tracks, not for a
+  // re-encode of a 9.5 GB file.
+  await expect(dialog.getByRole("checkbox", { name: /Copy Гаврилов/ })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: /Copy Сербин/ })).not.toBeChecked();
+  await expect(dialog.getByText("Keep original video — lossless, HDR-safe")).toBeVisible();
+
+  // The other sidecar can still be added here, which is the "довыбрать" half of the request.
+  await dialog.getByRole("checkbox", { name: /Copy Сербин/ }).check();
+
+  const submitted = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/transcode") && request.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: /Start convert \+ merge 2/ }).click();
+  const body = JSON.parse((await submitted).postData() ?? "{}");
+
+  expect(body.mergeStreamIds).toEqual(["x1", "x2"]);
+  expect(body.videoCodec).toBe("copy");
+  // An appended track's name is only addressable when the primary list is explicit, so a merge always sends
+  // one — otherwise the engine refuses any edit naming a merged track.
+  expect(body.audioStreamIndexes).toEqual([1]);
+  expect(body.subtitleStreamIndexes).toEqual([2]);
+});
+
+test("a track's language can be corrected, and a tag nobody knows blocks the submit", async ({ page }) => {
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: { m1: escapeFromNewYork() },
+    transcodeAvailable: true,
+    transcodeLanguages: ["eng", "ger", "rus", "ukr"],
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Convert to a smaller version" }).click();
+
+  const dialog = page.getByRole("dialog");
+  const language = dialog.getByRole("textbox", { name: /Language for Гаврилов/ });
+  await dialog.getByRole("checkbox", { name: /Copy Гаврилов/ }).check();
+
+  // Wrong tags are caught here rather than after the whole form is filled in and submitted — the value is
+  // written into the output permanently, and finding out later means re-encoding again.
+  await language.fill("rsu");
+  await expect(dialog.getByText(/isn’t an ISO 639-2 tag/)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Start convert/ })).toBeDisabled();
+
+  await language.fill("rus");
+  await expect(dialog.getByText(/isn’t an ISO 639-2 tag/)).toHaveCount(0);
+
+  const submitted = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/transcode") && request.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: /^Start convert/ }).click();
+  const body = JSON.parse((await submitted).postData() ?? "{}");
+
+  // Only what changed travels: the corrected dub, and nothing for the tracks left alone.
+  expect(body.metadataEdits).toEqual([{ streamId: "x1", language: "rus" }]);
+});
+
+test("tells sidecar dubs from sidecar subtitles, by kind and by file name", async ({ page }) => {
+  // The case that made this necessary: three voice-over dubs and one subtitle, none of them carrying a
+  // language or a codec. Every row then reads the same, and nothing on screen says which is which.
+  const sidecar = (id: string, type: string, title: string | null, fileName: string, index: number) => ({
+    id,
+    type,
+    index,
+    codec: null,
+    language: null,
+    displayTitle: null,
+    title,
+    isExternal: true,
+    fileName,
+  });
+
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: {
+      m1: {
+        ...movieDetail("m1", "Escape from New York"),
+        mediaSources: [
+          {
+            id: "source-1",
+            versionName: null,
+            fileName: "Escape from New York (1981).mkv",
+            container: "mkv",
+            sizeBytes: 1024,
+            bitrate: null,
+            durationTicks: 70_560_000_000,
+            streams: [
+              { type: "Video", index: 0, codec: "h264", language: null, displayTitle: "1080p H264", title: null, isExternal: false, fileName: null },
+              sidecar("x1", "Audio", "Володарский", "Escape from New York (1981).rus.Володарский.mka", 1000),
+              sidecar("x2", "Audio", "Гаврилов", "Escape from New York (1981).rus.Гаврилов.mka", 1001),
+              sidecar("x3", "Audio", "Горчаков", "Escape from New York (1981).rus.Горчаков.mka", 1002),
+              sidecar("x4", "Subtitle", "Сербин", "Escape from New York (1981).rus.Сербин.srt", 1003),
+            ],
+          },
+        ],
+      },
+    },
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+
+  await expect(page.getByText("4 separate files beside this version")).toBeVisible();
+
+  // Each kind heads its own group, and the "merge it first" caveat sits on the audio one — it is false
+  // of subtitles, which clients read straight off the disk.
+  const audio = page.getByText(/^Audio— only plays once merged into the video$/);
+  await expect(audio).toBeVisible();
+  await expect(page.getByText("Subtitles", { exact: true })).toBeVisible();
+
+  // The label leads the row rather than trailing a bare "—", and the file name is under it.
+  await expect(page.getByText("Гаврилов", { exact: true })).toBeVisible();
+  await expect(page.getByText("Escape from New York (1981).rus.Гаврилов.mka")).toBeVisible();
+  await expect(page.getByText("Escape from New York (1981).rus.Сербин.srt")).toBeVisible();
+  await expect(page.getByText("— “Гаврилов”")).toHaveCount(0);
+});
+
+test("a sidecar with specs reads like an embedded track", async ({ page }) => {
+  // Once the probe's codec, channels and sample rate are stored, the sidecar row renders through exactly
+  // the same DisplayTitle and specs an embedded track does — no separate rendering path.
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: {
+      m1: {
+        ...movieDetail("m1", "Escape from New York"),
+        mediaSources: [
+          {
+            id: "source-1",
+            versionName: null,
+            fileName: "Escape from New York (1981).mkv",
+            container: "mkv",
+            sizeBytes: 1024,
+            bitrate: null,
+            durationTicks: 70_560_000_000,
+            streams: [
+              { id: "v0", type: "Video", index: 0, codec: "h264", language: null, displayTitle: "1080p H264", title: null, isExternal: false, fileName: null },
+              {
+                id: "x1",
+                type: "Audio",
+                index: 1000,
+                codec: "ac3",
+                language: "rus",
+                // The server builds this the same way for both kinds: language + codec + channel label.
+                displayTitle: "rus AC3 5.1",
+                title: "Гаврилов",
+                channels: 6,
+                sampleRate: 48000,
+                isExternal: true,
+                fileName: "Escape from New York (1981).rus.Гаврилов.mka",
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+
+  // The specs lead and the release name trails in quotes — the shape an embedded track has.
+  await expect(page.getByText(/rus AC3 5\.1\s*“Гаврилов”\s*·\s*48 kHz/)).toBeVisible();
+});
+
 test("shows series cast, episodes, and tags as ordered detail tabs", async ({ page }) => {
   await setupApp(page, {
     library: [aSeries("s1", "Severance")],

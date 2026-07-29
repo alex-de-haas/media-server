@@ -612,7 +612,8 @@ public sealed class LibraryReadService(
         stream.SampleRate,
         stream.IsDefault,
         stream.IsForced,
-        stream.IsExternal);
+        stream.IsExternal,
+        stream.IsExternal ? EmptyToNull(Path.GetFileName(stream.ExternalPath)) : null);
 
     private static string? DisplayTitle(MediaStream stream) => stream.StreamType switch
     {

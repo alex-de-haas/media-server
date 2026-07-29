@@ -18,9 +18,11 @@ public sealed class SidecarDeletionTests : IDisposable
     private readonly MediaServerDbContext _context;
     private readonly string _root;
     private readonly string _sidecarRelative = "The Rock (1996)/The Rock (1996).rus.mka";
+    private readonly string _videoRelative = "The Rock (1996)/The Rock (1996).mkv";
 
     private Guid _streamId;
     private Guid _sourceId;
+    private Guid _movieId;
 
     public SidecarDeletionTests()
     {
@@ -44,6 +46,8 @@ public sealed class SidecarDeletionTests : IDisposable
         new(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
     private string SidecarAbsolute => Path.Combine(_root, _sidecarRelative.Replace('/', Path.DirectorySeparatorChar));
+
+    private string VideoAbsolute => Path.Combine(_root, _videoRelative.Replace('/', Path.DirectorySeparatorChar));
 
     [Fact]
     public async Task Dropping_the_entry_leaves_the_file_on_disk()
@@ -141,6 +145,48 @@ public sealed class SidecarDeletionTests : IDisposable
     public async Task An_unknown_stream_is_reported_rather_than_silently_ignored() =>
         Assert.False(await Service().DeleteExternalStreamAsync(Guid.NewGuid(), deleteFile: false, CancellationToken.None));
 
+    [Fact]
+    public async Task Deleting_the_movie_with_its_files_takes_the_sidecars_beside_it()
+    {
+        // A sidecar has no item of its own: it exists as a stream of a source, so once the movie is gone
+        // nothing in the library refers to it. Leaving it behind stranded a dub next to a deleted film — in
+        // a folder that could not be pruned either, since it was no longer empty.
+        Assert.True(await Service().DeleteAsync(_movieId, deleteFiles: true, deleteUserData: false, CancellationToken.None));
+
+        Assert.False(File.Exists(VideoAbsolute));
+        Assert.False(File.Exists(SidecarAbsolute));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(VideoAbsolute)), "the emptied folder is pruned");
+    }
+
+    [Fact]
+    public async Task Deleting_the_movie_without_its_files_leaves_the_sidecars_alone()
+    {
+        Assert.True(await Service().DeleteAsync(_movieId, deleteFiles: false, deleteUserData: false, CancellationToken.None));
+
+        Assert.True(File.Exists(VideoAbsolute));
+        Assert.True(File.Exists(SidecarAbsolute), "without the erase flag a rescan must still find everything");
+    }
+
+    [Fact]
+    public async Task Deleting_the_version_with_its_file_takes_its_sidecars_too()
+    {
+        // Same reasoning one level down: the sidecars hang off this source, and its streams go with it.
+        Assert.True(await Service().DeleteSourceAsync(_sourceId, deleteFile: true, CancellationToken.None));
+
+        Assert.False(File.Exists(VideoAbsolute));
+        Assert.False(File.Exists(SidecarAbsolute));
+    }
+
+    [Fact]
+    public async Task Deleting_the_version_returns_its_sidecars_staged_rows_to_unassigned()
+    {
+        await Service().DeleteSourceAsync(_sourceId, deleteFile: true, CancellationToken.None);
+
+        var file = await _context.SourceFiles.SingleAsync(candidate => candidate.RelativePath == _sidecarRelative);
+        Assert.Null(file.MediaItemId);
+        Assert.Equal(SourceFileAssignmentStatus.Unassigned, file.AssignmentStatus);
+    }
+
     private void Seed()
     {
         var now = DateTimeOffset.UtcNow;
@@ -155,7 +201,7 @@ public sealed class SidecarDeletionTests : IDisposable
 
         var movie = new MediaItem
         {
-            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id,
+            Id = _movieId = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id,
             Kind = MediaKind.Movie, Title = "The Rock", Year = 1996, AddedAt = now, UpdatedAt = now,
         };
         context.MediaItems.Add(movie);
@@ -163,7 +209,7 @@ public sealed class SidecarDeletionTests : IDisposable
         var source = new MediaSource
         {
             Id = Guid.NewGuid(), MediaItemId = movie.Id, Container = "mkv",
-            Path = "The Rock (1996)/The Rock (1996).mkv", SizeBytes = 1024, CreatedAt = now,
+            Path = _videoRelative, SizeBytes = 1024, CreatedAt = now,
         };
         _sourceId = source.Id;
         context.MediaSources.Add(source);
@@ -199,5 +245,6 @@ public sealed class SidecarDeletionTests : IDisposable
 
         Directory.CreateDirectory(Path.GetDirectoryName(SidecarAbsolute)!);
         File.WriteAllBytes(SidecarAbsolute, new byte[512]);
+        File.WriteAllBytes(VideoAbsolute, new byte[1024]);
     }
 }

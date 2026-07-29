@@ -1,4 +1,5 @@
 using MediaServer.Api.Hosty;
+using MediaServer.Api.Probe;
 
 namespace MediaServer.Api.Transcoding;
 
@@ -17,6 +18,11 @@ public static class TranscodeEndpoints
         // action that can only fail.
         group.MapGet("/availability", (ITranscodeEngine engine) =>
             Results.Ok(new { available = engine is not DisabledTranscodeEngine }));
+
+        // The language tags a track edit may carry. Served rather than duplicated in the web bundle: the two
+        // copies would drift, and the half that drifts is the one that lets an operator submit a value this
+        // service then refuses — after they have filled in the whole dialog.
+        group.MapGet("/languages", () => Results.Ok(LanguageTags.All));
 
         group.MapGet("/", async (TranscodeService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListAsync(cancellationToken)));
