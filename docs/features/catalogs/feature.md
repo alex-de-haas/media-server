@@ -118,7 +118,7 @@ its canonical place (an atomic, zero-copy move within the one filesystem):
   multi-version feature). The reserved layout is
   `{Title} ({Year}) - [{Version}].<ext>` — Jellyfin groups files that share the
   base name in one folder as alternate versions of a single item (see
-  [Jellyfin compatibility](../jellyfin-compatibility.md)); reserving it now avoids a
+  [Jellyfin compatibility](../jellyfin-compatibility/feature.md)); reserving it now avoids a
   path migration later.
 - Series layout: `<Show> (<Year>)/Season 01/<Show> S01E02.<ext>`.
 
@@ -140,7 +140,7 @@ for the pre-download space check (see
 - Items map to `Movie`, `Series`, `Season`, `Episode`, or `Video` (unmatched).
 - Public item IDs are stable across rescans and based on the catalog plus the
   canonical provider identity, not on physical path or database row id. See
-  [Jellyfin compatibility](../jellyfin-compatibility.md).
+  [Jellyfin compatibility](../jellyfin-compatibility/feature.md).
 
 ## Browser UI Mapping
 

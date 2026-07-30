@@ -12,7 +12,7 @@ without re-deriving it. Nothing here is scheduled.
 
 Let a sidecar subtitle file reach a client without being merged into the video.
 
-[external-track-sidecars](../external-track-sidecars/plan.md) keeps mapped
+[external-track-sidecars](../external-track-sidecars/feature.md) keeps mapped
 subtitles as files next to the library file and can merge them on request. Until
 they are merged they are invisible over the API — which is a real gap for
 subtitles specifically, because both Jellyfin and Infuse have a standard mechanism
@@ -49,7 +49,7 @@ can stay a sidecar and still be usable.
       between subtitle formats is explicitly not in scope.
 - [ ] **Unit tests** covering the route, the sandbox check, and the DTO.
 - [ ] **Docs.** `feature.md` for this folder; update
-      `jellyfin-compatibility.md`.
+      `jellyfin-compatibility/feature.md`.
 - [ ] **Version bump** — new functionality, so a minor bump while the app is `0.x`.
 
 ## Open questions
