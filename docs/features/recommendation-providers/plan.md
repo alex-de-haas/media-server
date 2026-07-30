@@ -1,6 +1,6 @@
 # Recommendations on the Jellyfin Surface — plan
 
-Status: Draft
+Status: Ready
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -108,9 +108,10 @@ for all three.
 
 ### Filtering happens on read, not by invalidation
 
-The shelf holds **candidates** — an order of magnitude more than a row shows.
-`watched` and `hidden` are applied on every read by joining `UserItemData` and
-`RecommendationHides`.
+The shelf holds **100 candidates** — an order of magnitude more than a row shows,
+so that read-time filtering still leaves a full row of 20 after a heavy watching
+session. `watched` and `hidden` are applied on every read by joining
+`UserItemData` and `RecommendationHides`.
 
 The alternative — a ready-made shelf invalidated when the user marks something
 played — was rejected: it couples `/UserPlayedItems` to this feature, and it
@@ -120,7 +121,8 @@ answering the only question it is good at: *has the user's taste moved?*
 
 ### Refresh
 
-Lazy, on read, like the existing caches:
+Lazy, on read, like the existing caches. The TTL is **one day** — long enough
+that the shelf is not a slot machine, short enough to follow taste:
 
 - No shelf at all → build it synchronously.
 - Shelf present but past its TTL → serve it and refresh behind the request, so
@@ -208,13 +210,6 @@ order could distinguish the server's order from a client-side re-sort. Infuse
   `GetViewAsync` and `GetLatestAsync` branches are both on the client's path.
 
 The probe was never merged.
-
-## Open questions
-
-- **TTL.** Long enough that the shelf is not a slot machine, short enough to
-  follow taste. A day is the starting proposal.
-- **Shelf size.** 100 candidates is the starting proposal: enough that read-time
-  filtering still leaves a full row of 20 after a heavy watching session.
 
 ## Verification steps
 
