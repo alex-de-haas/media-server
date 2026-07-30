@@ -45,7 +45,7 @@ Native clients authenticate with a Media Server-owned credential bound to an
 internal Media Server user, which is itself linked to a Hosty user: `username`
 (the Hosty email) + a 6–8 digit PIN. The PIN is verified only at login and
 yields an opaque, hashed, revocable access token (see
-[Jellyfin compatibility](jellyfin-compatibility.md)).
+[Jellyfin compatibility](jellyfin-compatibility/feature.md)).
 
 Because a short numeric PIN sits on a public endpoint, brute-force protection is
 mandatory:

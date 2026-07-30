@@ -1,8 +1,7 @@
 # Jellyfin Compatibility
 
-Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-07-30
 
 ## Description
 
@@ -10,7 +9,7 @@ Media Server exposes a Jellyfin-compatible HTTP API subset so clients such as
 Infuse can browse catalogs, fetch metadata and artwork, Direct Play media, and
 synchronize playback progress. This is a compatibility layer, not a full Jellyfin
 server. It is served on the public `jellyfin` endpoint of the `api` service (see
-[Hosty runtime app](hosty-runtime-app/feature.md)).
+[Hosty runtime app](../hosty-runtime-app/feature.md)).
 
 Protocol references:
 
@@ -28,14 +27,15 @@ Protocol references:
 - Synchronize watched state and playback position.
 - Keep all file access constrained to configured catalog roots.
 
-## Non-Goals (initial)
+## Non-Goals
 
 - Full Jellyfin administration API.
 - Live TV, DVR, music, photos, books, plugins, playlists. (Movie *collections* —
-  TMDb franchises as `BoxSet`s — are now supported; see
-  [collections.md](collections.md).)
+  TMDb franchises as `BoxSet`s — are supported; see
+  [collections.md](../collections.md).)
 - DLNA.
-- On-the-fly transcoding (Media Server does no conversion).
+- On-the-fly transcoding: this surface serves original files only. Offline
+  conversion is a separate feature and never happens in a playback request.
 
 ## External Access Model
 
@@ -45,9 +45,9 @@ The `jellyfin` endpoint is published as a public app endpoint; the operator sets
 Core-assigned local port. Hosty adds no auth to that endpoint — and none is
 needed, because Jellyfin endpoints are protected by Media Server-owned tokens.
 
-- v1 relies on **manual server URL entry** in Infuse.
-- UDP auto-discovery on `7359/udp` does not map cleanly onto Core port
-  assignment; it is optional and deferred.
+- The operator enters the server URL in Infuse **by hand**.
+- UDP auto-discovery on `7359/udp` is not implemented: it does not map cleanly
+  onto Core port assignment.
 
 ## Authentication Model
 
@@ -93,7 +93,7 @@ The server accepts:
   redacted in logs, and must not be accepted by internal `/api` routes.
 
 PIN brute-force protection (short numeric secret on a public endpoint) is defined
-in [Security](security.md): rate limiting, temporary lockout after 10 failed
+in [Security](../security.md): rate limiting, temporary lockout after 10 failed
 attempts, permanent lockout after 100 (cleared by regenerating the credential).
 
 ```json
@@ -105,17 +105,21 @@ attempts, permanent lockout after 100 (cleared by regenerating the credential).
 }
 ```
 
-## Required Endpoints
+## Endpoints
 
-The first Jellyfin baseline should be the endpoint set already proven by the
-previous Haas.Media implementation, adapted from the old `/jellyfin` route group
-to the new public Jellyfin endpoint.
+Everything below is served on the public `jellyfin` endpoint, without a route
+prefix. (The credential management API a signed-in user drives from the web UI is
+*not* part of this surface: it lives on the internal API under `/api/jellyfin`.)
+
+Several routes exist in two forms — a `/Users/{userId}/…` path form and a newer
+form taking `userId` as a query parameter. Both are served, because Jellyfin
+clients disagree about which to use and Infuse picks the newer one.
 
 Anonymous discovery/auth:
 
 - `POST /Users/AuthenticateByName`
 - `GET /System/Info/Public`
-- `GET /System/Ping`
+- `GET|POST /System/Ping`
 - `GET /Users/Public`
 - `GET /Branding/Configuration`
 
@@ -126,28 +130,37 @@ Authenticated system/user/session:
 - `GET /Users/Me`
 - `GET /Users/{userId}`
 - `GET /Sessions`
-- `POST /Sessions/Logout` (new token revocation requirement)
+- `POST /Sessions/Logout` (revokes the token)
+- `POST /Sessions/Capabilities`, `POST /Sessions/Capabilities/Full` (accepted and
+  discarded — this server drives no client)
 
 Library and browsing:
 
 - `GET /Library/MediaFolders`
 - `GET /Library/VirtualFolders`
-- `GET /Users/{userId}/Views`
+- `GET /UserViews` — the one Infuse calls; `GET /Users/{userId}/Views` is the
+  legacy alias
+- `GET /UserViews/GroupingOptions`, `GET /Users/{userId}/GroupingOptions`
 - `GET /Items`
 - `GET /Items/{itemId}`
 - `GET /Users/{userId}/Items`
 - `GET /Users/{userId}/Items/{itemId}`
-- `GET /Users/{userId}/Items/Latest`
-- `GET /Users/{userId}/Items/Resume`
+- `GET /Items/Latest`, `GET /Users/{userId}/Items/Latest`
+- `GET /UserItems/Resume`, `GET /Users/{userId}/Items/Resume`
 - `GET /Shows/{seriesId}/Seasons`
 - `GET /Shows/{seriesId}/Episodes`
 - `GET /Shows/NextUp`
-- `GET /Users/{userId}/GroupingOptions`
+- `GET /Items/{itemId}/LocalTrailers`
+- `GET /Items/{itemId}/SpecialFeatures`,
+  `GET /Users/{userId}/Items/{itemId}/SpecialFeatures`
+- `GET /Persons`
+- `GET /MediaSegments/{itemId}`
 - `GET|POST /DisplayPreferences/{displayPreferencesId}`
 
 Artwork:
 
 - `GET|HEAD /Items/{itemId}/Images/{imageType}`
+- `GET|HEAD /Items/{itemId}/Images/{imageType}/{imageIndex}`
 
 Playback negotiation and streaming:
 
@@ -166,18 +179,18 @@ Playback state:
 - `POST|DELETE /Users/{userId}/FavoriteItems/{itemId}`
 - `POST|DELETE /UserFavoriteItems/{itemId}` (10.9+ form)
 
-Deferred compatibility endpoints:
+### Not implemented
 
-- `POST /Sessions/Capabilities`
-- `POST /Sessions/Capabilities/Full`
-- `GET /Items/Counts`
-- `GET /Search/Hints`
-- `GET|POST /UserItems/{itemId}/UserData`
-- `POST|DELETE /UserItems/{itemId}/Rating`
-- `GET /Videos/{itemId}/master.m3u8`
-- `GET /Videos/{itemId}/main.m3u8`
-- `GET /Videos/{itemId}/hls/{playlistId}/...`
-- `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}`
+- `GET /Items/Counts`, `GET /Search/Hints`, `GET|POST /UserItems/{itemId}/UserData`,
+  `POST|DELETE /UserItems/{itemId}/Rating`.
+- HLS (`/Videos/{itemId}/master.m3u8`, `main.m3u8`, `/hls/{playlistId}/…`) —
+  excluded by the no-conversion design above, not merely unbuilt.
+- `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` —
+  see [external subtitle delivery](../external-subtitle-delivery/plan.md).
+- Jellyfin's own recommendation endpoints (`/Movies/Recommendations`,
+  `/Items/{itemId}/Similar` and its per-type variants, `/Items/Suggestions`).
+  Infuse never requests them: six weeks of this app's own request log contain
+  zero calls to any of them.
 
 ## Media Model Mapping
 
@@ -185,7 +198,7 @@ Deferred compatibility endpoints:
 - Catalog (`series`) → `CollectionFolder` with `CollectionType = tvshows`.
 - The synthetic Collections view → `CollectionFolder` with
   `CollectionType = boxsets`; each qualifying `MovieCollection` → `BoxSet` whose
-  children are its owned movies. See [collections.md](collections.md).
+  children are its owned movies. See [collections.md](../collections.md).
 - Movie → `Movie`; Series → `Series`; Season → `Season`; Episode → `Episode`.
   Unmatched files are represented internally as `Video` but are **not exposed to
   Jellyfin clients** until they have a canonical identity.
@@ -198,7 +211,7 @@ Deferred compatibility endpoints:
   first identified, so the only time a client-visible id changes is an operator
   remap to a different title; clients re-sync user data from the server on refresh.
 
-`BaseItemDto` should include at least `Id`, `Name`, `Type`, `ServerId`, parent
+`BaseItemDto` carries `Id`, `Name`, `Type`, `ServerId`, parent
 links, `ProductionYear`/`PremiereDate`/`RunTimeTicks`, `Overview`/`Genres`/
 `OfficialRating`/`CommunityRating`, image tags, `UserData`
 (`PlaybackPositionTicks`, `Played`, `IsFavorite`, `PlayedPercentage`), and
@@ -216,26 +229,33 @@ links, `ProductionYear`/`PremiereDate`/`RunTimeTicks`, `Overview`/`Genres`/
 
 ## Media Probing
 
-The pipeline runs `ffprobe` for each playable file and persists container, size,
-duration, bitrate, video codec/profile/resolution/frame rate/bit depth/HDR, audio
-streams (codec, language, channels, default/forced), subtitle streams (codec,
-language, text/picture, external path, default/forced), and chapters where
-available. This builds accurate `MediaSourceInfo` / `MediaStream` objects.
+The pipeline probes each playable file and persists container, size, duration,
+bitrate, video codec/profile/resolution/frame rate/bit depth/HDR, audio streams
+(codec, language, channels, default/forced), subtitle streams (codec, language,
+text/picture, external path, default/forced), and chapters where available. This
+builds the `MediaSourceInfo` / `MediaStream` objects this surface returns.
+
+This app no longer runs `ffprobe` itself — probing goes through the providers
+described in [media probe providers](../media-probe-providers/feature.md), and
+what a probe can answer therefore depends on which one served it. A file probed
+by the container-header reader alone reports less than one the external engine
+saw, so a `MediaStream` list may be thinner than a full `ffprobe` would produce.
 
 ## Playback Negotiation and Direct Streaming
 
 `PlaybackInfo` returns a `PlaybackInfoResponse` with `MediaSources` and a
-`PlaySessionId`. Default behavior:
+`PlaySessionId`:
 
-- For a local file the user may stream, return a Direct Stream source.
-- Respect `EnableDirectPlay` / `EnableDirectStream` request flags.
-- Include media stream indexes for audio/subtitle selection.
-- Never return raw host paths; address media by item id and HTTP URLs.
-- When a title has multiple versions, return all of them in `MediaSources` and
-  **honor an explicit `MediaSourceId`** on the stream request. Do not always serve
-  the first/highest-resolution source — Infuse can otherwise play the wrong version.
-- Return a compatible error when an item is unavailable, still in the pipeline, or
-  outside policy.
+- A local file the user may stream is offered as a Direct Stream source.
+- `EnableDirectPlay` / `EnableDirectStream` request flags are respected.
+- Media stream indexes are included for audio/subtitle selection.
+- Raw host paths are never returned; media is addressed by item id and HTTP URLs.
+- When a title has multiple versions, all of them appear in `MediaSources` and an
+  explicit `MediaSourceId` on the stream request is **honored**. The first or
+  highest-resolution source is not served unconditionally — Infuse would otherwise
+  play the wrong version.
+- An item that is unavailable, still in the pipeline, or outside policy yields a
+  compatible error.
 
 The direct streaming endpoint serves the original file with `GET`/`HEAD`, `Range`
 and `If-Range`, `206 Partial Content`, `Accept-Ranges`/`Content-Range`/
@@ -244,25 +264,29 @@ whole-file buffering. Supported direct containers: `.mp4`, `.m4v`, `.mov`,
 `.mkv`, `.webm`, `.avi`, `.ts`, `.m2ts`. The endpoint validates that the item
 resolves to a file inside a catalog root and that the user may access the catalog.
 
-HLS, remux, and transcoding are out of scope for Media Server's no-conversion
-design and are not planned for the initial milestones.
+HLS, remux, and transcoding are out of scope for this surface's no-conversion
+design.
 
 ## Subtitles
 
-- v1 relies on **Direct Play**: embedded subtitles are played by the client
-  (Infuse) directly from the container. Media Server does not extract or convert
-  embedded subtitles (no FFmpeg in v1 — see [root](../root.md)).
+- Embedded subtitles reach the viewer by **Direct Play**: the client (Infuse)
+  reads them from the container. This surface neither extracts nor converts them
+  — the `api` image ships without ffmpeg.
 - External sidecar `.srt` / `.vtt` files alongside the media are surfaced as
-  external subtitle streams.
+  external subtitle streams, but no delivery URL is emitted yet, so a client is
+  told the stream exists and given no way to fetch it. Closing that gap is
+  [external subtitle delivery](../external-subtitle-delivery/plan.md).
 - Subtitle stream metadata is reported in `MediaSources[].MediaStreams` from
-  `ffprobe`.
+  whatever the probe providers could determine.
 
 ## Playback Progress and User Data
 
-- Store progress per internal Media Server user and item.
-- Mark played past a configurable threshold (e.g. 90%) or on explicit mark.
-- Reset progress when marked watched; preserve progress when stopped earlier.
-- Apply season/series aggregate watched state from episode state.
+- Progress is stored per internal Media Server user and item.
+- An item is marked played past a fixed 90% threshold
+  (`UserDataService.WatchedThreshold`) or on an explicit mark; below 5% no resume
+  point is kept.
+- Marking watched resets progress; stopping earlier preserves it.
+- Season and series watched state is aggregated from episode state.
 
 ## Security and Abuse Controls
 
@@ -273,24 +297,13 @@ design and are not planned for the initial milestones.
 - Stream URLs never bypass catalog authorization; access is by item id, so path
   traversal is impossible.
 - Query-string tokens are redacted in logs/metrics.
-- Rate-limit authentication, image, search, and streaming session creation.
+- Authentication, image, search, and streaming session creation are rate-limited.
 - No administrator operations are exposed through this layer.
-
-## Implementation Milestones
-
-1. Connect, browse, Direct Play: anonymous discovery, credential auth + token
-   store, users/views/items, images, `PlaybackInfo`, and range streaming. Tests
-   for auth, mapping, authorization, and range handling.
-2. Playback state sync: `Sessions/Playing*`, played/unplayed, favorites, resume,
-   latest, and next-up. Tests for thresholds and progress persistence.
-3. Additional compatibility: capabilities, item counts, search hints, ratings,
-   subtitles, and multi-version playback. Tests for stream selection and subtitle
-   authorization.
 
 ## Testing Expectations
 
-Backend tests should use xUnit and Imposter (mock catalog repositories, root
-resolvers, token/credential stores, ffprobe runner, authorization). Required
+Backend tests use xUnit and Imposter (mock catalog repositories, root resolvers,
+token/credential stores, probe providers, authorization). Required
 coverage: MediaBrowser header parsing and token validation; credential auth
 success/failure/lockout/logout/revocation; DTO mapping for catalogs, movies,
 series, seasons, episodes, images, media sources, streams, and user data; item

@@ -7,7 +7,7 @@ Updated: 2026-06-24
 > Phased scope, both shipped. **Phase 1** adds a web "Collections" page that groups
 > owned movies by their TMDb franchise. **Phase 2** exposes those collections to
 > Infuse as a separate Jellyfin catalog (`BoxSet`s) — this extends a documented
-> Jellyfin non-goal (see [jellyfin-compatibility.md](jellyfin-compatibility.md)),
+> Jellyfin non-goal (see [jellyfin-compatibility](jellyfin-compatibility/feature.md)),
 > taken on deliberately after Phase 1.
 
 ## Description

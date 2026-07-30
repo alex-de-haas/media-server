@@ -56,7 +56,7 @@ navigation across profiles so switching runtime is reviewable and reversible.
 - `ui` → `web:http`, `public: true`. The Shell UI entrypoint.
 - `jellyfin` → `api:jellyfin`, `public: true`. Reachable by native Jellyfin
   clients with Media Server-owned tokens (see
-  [Jellyfin compatibility](../jellyfin-compatibility.md)).
+  [Jellyfin compatibility](../jellyfin-compatibility/feature.md)).
 
 The internal `api` port is not exposed as a public endpoint; only `web` reaches
 it, through the injected dependency URL.
@@ -121,7 +121,7 @@ row so it can re-link by unique email if Hosty user ids change.
 
 **Jellyfin clients (app-owned).** Infuse cannot perform the app-code flow, so the
 `jellyfin` endpoint uses Media Server-owned credentials and opaque access tokens.
-See [Jellyfin compatibility](../jellyfin-compatibility.md) and [Security](../security.md).
+See [Jellyfin compatibility](../jellyfin-compatibility/feature.md) and [Security](../security.md).
 
 ## Scoped User Directory
 

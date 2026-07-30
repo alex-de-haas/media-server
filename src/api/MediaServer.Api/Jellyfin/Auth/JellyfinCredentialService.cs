@@ -37,7 +37,7 @@ public sealed record ValidatedToken(JellyfinAccessToken Token, AppUser User);
 /// Manages Media Server-owned Jellyfin credentials and access tokens: creation/regeneration with an
 /// argon2id PIN, PIN login with consecutive-failure lockout (temporary at 10 with a growing window,
 /// permanent at 100), opaque-token issuance/validation, and logout/revocation. See
-/// <c>docs/features/security.md</c> and <c>docs/features/jellyfin-compatibility.md</c>.
+/// <c>docs/features/security.md</c> and <c>docs/features/jellyfin-compatibility/feature.md</c>.
 /// </summary>
 public sealed class JellyfinCredentialService(MediaServerDbContext database, IPinHasher pinHasher, TimeProvider time)
 {

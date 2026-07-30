@@ -11,7 +11,7 @@ namespace MediaServer.Api.Jellyfin.Endpoints;
 /// 10.9+ <c>/UserPlayedItems/…</c> query-user form clients pick against our reported server version.
 /// Progress reports apply the resume + watched-threshold policy in <see cref="UserDataService"/>; the
 /// toggles return the updated <see cref="UserItemDataDto"/>. See
-/// <c>docs/features/jellyfin-compatibility.md</c> ("Playback state").
+/// <c>docs/features/jellyfin-compatibility/feature.md</c> ("Playback state").
 /// </summary>
 internal static class JellyfinPlaybackEndpoints
 {
