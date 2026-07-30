@@ -162,6 +162,16 @@ user can press play on rather than read about.
   explicit `IncludeItemTypes` is still honored.
 - **Held titles only.** A discovery card has no meaning on a surface whose only
   verb is Play; acquisition stays in the web UI.
+- **The row is labelled by the client, from the view's name.** Infuse renders it
+  as *"Latest Recommended - Local"* — its own template around the library name,
+  which is why the view is called `Recommended` rather than anything longer.
+- **A newly appearing view reaches the home screen one step late.** The home
+  screen is built from the client's cached library list, not from a fresh
+  `/UserViews`: the fan-out of `Items/Latest` goes out before the new list is
+  read, and the new library's row is fetched as a follow-up request right after.
+  So the first time a user's shelf becomes non-empty, the library is browsable
+  immediately while its row appears on the next library-list refresh. Nothing to
+  fix server-side — the client drives both.
 - Rows are ordinary `MediaItem`s, so playback, artwork, resume and watched state
   work unchanged, and a film appears both here and in its own catalog — how
   Jellyfin models a title belonging to two views.
