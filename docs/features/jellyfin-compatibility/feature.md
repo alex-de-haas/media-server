@@ -247,7 +247,10 @@ saw, so a `MediaStream` list may be thinner than a full `ffprobe` would produce.
 `PlaySessionId`:
 
 - A local file the user may stream is offered as a Direct Stream source.
-- `EnableDirectPlay` / `EnableDirectStream` request flags are respected.
+- The `EnableDirectPlay` / `EnableDirectStream` request flags are parsed into the
+  request DTO and then **ignored**: the same sources come back either way. A
+  client that turns both off would, on a real Jellyfin server, be offered a
+  transcode — which this surface does not do, so there is nothing else to return.
 - Media stream indexes are included for audio/subtitle selection.
 - Raw host paths are never returned; media is addressed by item id and HTTP URLs.
 - When a title has multiple versions, all of them appear in `MediaSources` and an
@@ -297,7 +300,11 @@ design.
 - Stream URLs never bypass catalog authorization; access is by item id, so path
   traversal is impossible.
 - Query-string tokens are redacted in logs/metrics.
-- Authentication, image, search, and streaming session creation are rate-limited.
+- **Only `POST /Users/AuthenticateByName` is rate-limited** (`jellyfin-auth`: a
+  fixed window of 10 requests per 30 seconds, partitioned by source IP; the
+  per-username dimension is covered by credential lockout instead). Image, search
+  and `PlaybackInfo` requests carry no rate-limit policy — an authenticated token
+  is the only thing standing between a caller and those endpoints.
 - No administrator operations are exposed through this layer.
 
 ## Testing Expectations
