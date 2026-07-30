@@ -161,6 +161,12 @@ computing shelves for users who never open Infuse is waste.
       it. Rank order is therefore projected directly, which the probe below
       confirms survives to the screen.
 - [ ] **Tests** (below).
+- [ ] **Live verification of the home row.** Against a real Infuse: confirm the
+      row appears, note **where it lands and how the client labels it**, and record
+      that in `feature.md`. If the label reads "Recently Added in …", renaming the
+      view is the only lever available — so this may feed back into the view's
+      name. Every other deliverable here is provable without a device; this one is
+      not, and it is the last thing standing between this plan and completion.
 - [ ] **Docs.** A new surface section in `feature.md`; the view recorded in
       [jellyfin-compatibility](../jellyfin-compatibility/feature.md); `docs/root.md`
       index regenerated; this file deleted on completion. That document has already
@@ -175,8 +181,8 @@ One branch, one PR — individual phases deliver nothing usable on their own.
 1. **Shelf** — entity, migration, in-library feed mode, shelf service, unit tests.
    Verifiable without any client.
 2. **Surface** — ids, mapper, view wiring, browsing, `Latest`, Jellyfin tests.
-3. **Live verification** — the row's placement and label on the home screen can
-   only be seen on a device.
+3. **Live verification** — the home-row deliverable above; it can only be seen on
+   a device, so it cannot be folded into phase 2.
 
 ## Settled by the probe
 
@@ -205,10 +211,6 @@ The probe was never merged.
 
 ## Open questions
 
-- **Row title.** Infuse labels a library's `Latest` row itself. If it reads
-  "Recently Added in …", naming the view is the only lever available. Cosmetic,
-  and only observable once the real row exists — folded into phase 3 rather than
-  blocking the plan.
 - **TTL.** Long enough that the shelf is not a slot machine, short enough to
   follow taste. A day is the starting proposal.
 - **Shelf size.** 100 candidates is the starting proposal: enough that read-time
