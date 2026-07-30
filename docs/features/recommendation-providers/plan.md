@@ -1,6 +1,6 @@
 # Recommendations on the Jellyfin Surface — plan
 
-Status: Draft
+Status: Ready
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -60,9 +60,10 @@ at the web page.
   to a franchise" is meaningless, so that one returns empty
   ([JellyfinLibraryService.cs](../../../src/api/MediaServer.Api/Jellyfin/JellyfinLibraryService.cs)),
   whereas for a shelf, "latest" *is* the current selection.
-- Opening the view returns the same items, honoring `IncludeItemTypes` — Infuse
-  asks for `Movie` and `Series` in separate requests, so a mixed view must not
-  answer one with the other.
+- Opening the view returns the same items **in rank order**. Infuse asks an
+  untyped view once, with no `IncludeItemTypes` at all (see the probe below), but
+  the filter is still honored when a client sends one — the typed catalog views
+  do send it, one request per type.
 - **In-library titles only.** A discovery card has no meaning on a surface whose
   only verb is Play; acquisition stays in the web UI and in
   [Watchlist and discovery](../watchlist-and-discovery.md).
@@ -107,9 +108,10 @@ for all three.
 
 ### Filtering happens on read, not by invalidation
 
-The shelf holds **candidates** — an order of magnitude more than a row shows.
-`watched` and `hidden` are applied on every read by joining `UserItemData` and
-`RecommendationHides`.
+The shelf holds **100 candidates** — an order of magnitude more than a row shows,
+so that read-time filtering still leaves a full row of 20 after a heavy watching
+session. `watched` and `hidden` are applied on every read by joining
+`UserItemData` and `RecommendationHides`.
 
 The alternative — a ready-made shelf invalidated when the user marks something
 played — was rejected: it couples `/UserPlayedItems` to this feature, and it
@@ -119,7 +121,8 @@ answering the only question it is good at: *has the user's taste moved?*
 
 ### Refresh
 
-Lazy, on read, like the existing caches:
+Lazy, on read, like the existing caches. The TTL is **one day** — long enough
+that the shelf is not a slot machine, short enough to follow taste:
 
 - No shelf at all → build it synchronously.
 - Shelf present but past its TTL → serve it and refresh behind the request, so
@@ -153,14 +156,24 @@ computing shelves for users who never open Infuse is waste.
       `IncludeItemTypes` and paging, and returns real `MediaItem` DTOs.
 - [ ] **`GetLatestAsync`** returns the shelf for this view — the opposite of the
       early-return it uses for the Collections view and BoxSets.
-- [ ] **Ordering.** Decide and implement how rank survives the grid (see open
-      questions).
+- [ ] **Ordering.** The shelf must **not** go through `ResolveItemsAsync`: that
+      path ends in `.OrderBy(ParentIndexNumber).ThenBy(IndexNumber).ThenBy(Title)`,
+      and since both index fields are null on movies it sorts every grid
+      alphabetically — the server would destroy rank before the client ever saw
+      it. Rank order is therefore projected directly, which the probe below
+      confirms survives to the screen.
 - [ ] **Tests** (below).
+- [ ] **Live verification of the home row.** Against a real Infuse: confirm the
+      row appears, note **where it lands and how the client labels it**, and record
+      that in `feature.md`. If the label reads "Recently Added in …", renaming the
+      view is the only lever available — so this may feed back into the view's
+      name. Every other deliverable here is provable without a device; this one is
+      not, and it is the last thing standing between this plan and completion.
 - [ ] **Docs.** A new surface section in `feature.md`; the view recorded in
       [jellyfin-compatibility](../jellyfin-compatibility/feature.md); `docs/root.md`
       index regenerated; this file deleted on completion. That document has already
       been migrated out of its legacy flat location, so this work only edits it.
-- [ ] **Version bump** to `0.45.0` (new functionality) in the same commit as the
+- [ ] **Version bump** to `0.46.0` (new functionality) in the same commit as the
       work.
 
 ## Phases
@@ -170,27 +183,33 @@ One branch, one PR — individual phases deliver nothing usable on their own.
 1. **Shelf** — entity, migration, in-library feed mode, shelf service, unit tests.
    Verifiable without any client.
 2. **Surface** — ids, mapper, view wiring, browsing, `Latest`, Jellyfin tests.
-3. **Live verification and ordering** — the open questions below can only be
-   closed against a real Infuse, and the ordering decision depends on what it
-   does.
+3. **Live verification** — the home-row deliverable above; it can only be seen on
+   a device, so it cannot be folded into phase 2.
 
-## Open questions
+## Settled by the probe
 
-- **`CollectionType` for a mixed view.** `movies` is wrong (the shelf holds
-  series too) and `boxsets` lies. `null`/mixed is the likely answer, but some
-  clients gate behavior on the library type, so it needs a live check.
-- **Does Infuse re-sort the grid?** It asks for
-  `sortBy=SortName,ProductionYear&sortOrder=Ascending`, which the server ignores
-  today. If Infuse honors its own request locally, rank survives only in the
-  `Latest` row and the grid becomes alphabetical. Encoding rank into `SortName`
-  would defeat that, at the cost of a visible lie in a field clients also display.
-  Decide only after observing the client.
-- **TTL.** Long enough that the shelf is not a slot machine, short enough to
-  follow taste. A day is the starting proposal.
-- **Shelf size.** 100 candidates is the starting proposal: enough that read-time
-  filtering still leaves a full row of 20 after a heavy watching session.
-- **Row title.** Infuse labels a library's `Latest` row itself; if it reads
-  "Recently Added in Recommended", naming the view is the only lever available.
+Both questions that blocked this plan were closed on 2026-07-30 with a throwaway
+diagnostic view — a `CollectionFolder` with a null `CollectionType` holding four
+movies and one series, served **reverse** alphabetically so that the displayed
+order could distinguish the server's order from a client-side re-sort. Infuse
+8.x on macOS, against this dev instance.
+
+- **`CollectionType = null` works.** The view appears as an ordinary library,
+  browsable, with posters and years rendered for both the movies and the series.
+  Nothing gates on the missing type.
+- **An untyped view is queried once, unfiltered:**
+  `GET /Items?parentId=…&sortBy=IsFolder,SortName&sortOrder=Ascending&startIndex=0&limit=50`
+  — no `IncludeItemTypes`. Typed catalog views, by contrast, are queried once per
+  type. The earlier assumption that a mixed view would be asked twice was wrong.
+- **The client does not re-sort.** It asked for `sortBy=IsFolder,SortName`
+  ascending and then rendered the server's reverse-alphabetical order verbatim.
+  Rank therefore survives to the screen, and the `SortName`-encoding hack that
+  was on the table is unnecessary.
+- Infuse also resolved the view itself (`GET /Items/{viewId}`) and requested its
+  row (`GET /Items/Latest?parentId=…&limit=20`), both answered 200 — so the
+  `GetViewAsync` and `GetLatestAsync` branches are both on the client's path.
+
+The probe was never merged.
 
 ## Verification steps
 
@@ -199,14 +218,15 @@ One branch, one PR — individual phases deliver nothing usable on their own.
    that the view appears in `/UserViews` and that `Items/Latest` is called for it
    with the others.
 3. Confirm the home row and the opened view contain the same titles in the same
-   order, and note whether the grid is alphabetical.
+   order, and note how Infuse labels the row.
 4. Play a title from the shelf; confirm it disappears on the next refresh without
    waiting out the TTL, and that playback, resume and watched state behave exactly
    as they do from the title's own catalog.
 5. Confirm the view is absent for a user with no playback history, rather than
    present and empty.
 6. Confirm a series with one played episode never appears (it belongs to Next Up),
-   and that opening the view as "Movies" does not return series.
+   and that a client sending `IncludeItemTypes=Movie` does not get series back —
+   Infuse does not send it for an untyped view, but the filter must still hold.
 
 ## Testing Expectations
 
