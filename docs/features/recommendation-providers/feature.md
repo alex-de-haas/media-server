@@ -1,7 +1,7 @@
 # Recommendation Providers
 
 Created: 2026-07-25
-Updated: 2026-07-25
+Updated: 2026-07-30
 
 ## Description
 
@@ -141,6 +141,53 @@ to all available rather than silently emptying the feed.
 - Hiding is one click, so undo is one click: the toast carries it.
 - A title both engines chose is badged **Both**.
 
+## Jellyfin surface — the Recommended view
+
+The held half of the feed is also a library on the [Jellyfin
+surface](../jellyfin-compatibility/feature.md), so a suggestion is something the
+user can press play on rather than read about.
+
+- A synthetic **Recommended** `CollectionFolder` sits beside the catalog views
+  and Collections, advertised only while the requesting user's shelf holds
+  something — an empty library tile explains nothing. Its `CollectionType` is
+  null (Jellyfin's mixed content): the shelf holds series as well as films.
+- `Items/Latest` for this view returns **the shelf itself**, in rank order. This
+  is the deliberate opposite of the Collections view, which returns empty —
+  "recently added to a franchise" means nothing, whereas for a shelf the current
+  selection *is* the latest thing about it. It is also the only per-library hook
+  a client offers onto its home screen.
+- Opening the view returns the same titles in the same order. The listing
+  bypasses the regular browse path, which ends in an alphabetical sort and would
+  otherwise replace rank with the alphabet before a client ever saw it. An
+  explicit `IncludeItemTypes` is still honored.
+- **Held titles only.** A discovery card has no meaning on a surface whose only
+  verb is Play; acquisition stays in the web UI.
+- Rows are ordinary `MediaItem`s, so playback, artwork, resume and watched state
+  work unchanged, and a film appears both here and in its own catalog — how
+  Jellyfin models a title belonging to two views.
+
+### The shelf
+
+`RecommendationShelfItem` stores an ordered list of media-item foreign keys per
+user, and nothing else. Title, artwork, sources and user data are read live, so
+the snapshot pins only what is expensive to recompute and must stay still: which
+titles, in what order. The row and the grid are two separate requests that have
+to agree, and anything with an independent expiry could lapse between them.
+
+- **100 candidates**, an order of magnitude more than a row shows. The build asks
+  providers for far more than the web feed does, because held titles are a small
+  fraction of any list — and it costs nothing, since the built-in engine fetches
+  every seed either way and only trims at the end.
+- **Watched and hidden are applied on read**, not by invalidating the shelf, so a
+  title leaves the moment it is played rather than when the generation expires.
+  A series counts as seen once any episode has been played.
+- **One-day TTL**, refreshed lazily: a missing shelf is built synchronously, a
+  stale one is served while a rebuild runs behind the request. Rebuilds are
+  single-flight per user — a client fans `Items/Latest` across every library at
+  once, and without that each would start its own.
+- No poster lookup ever happens on this path; every surviving row has local
+  artwork.
+
 ## Not included
 
 Deliberately out of scope: propagating a hide to Trakt's
@@ -172,6 +219,20 @@ direct hand-off from a discovery card into torrent intake.
   vanished-source fallback, poster backfill only for surviving cards, and
   multi-copy titles — a play on any copy excluding the title, and a stable
   representative for the link.
+- `RecommendationShelfServiceTests` — held-only contents with the library filter
+  applied before the limit; no poster lookup on this path; rank preserved as
+  stored; read-time exclusion of watched, part-watched series and hidden titles;
+  another user's plays and hides not touching this shelf; a stale generation
+  served rather than rebuilt in the request, and rebuilt behind it; concurrent
+  readers building once; a deleted title leaving without breaking the rest; a
+  shelf whose every title is watched counting as empty; a rebuild replacing the
+  generation rather than appending.
+- `JellyfinRecommendationsTests` — the view advertised only when the shelf has
+  something, as mixed content, and never to an anonymous caller; its id
+  resolving as a view only while non-empty; `Latest` returning the shelf in rank
+  order and passing its limit through, while the Collections view still returns
+  empty; browsing keeping rank rather than sorting by title, honoring a type
+  filter and paging; and the view never appearing as an item in a flat scan.
 - `e2e/recommendations.spec.ts` — the library/discovery split, the Both badge,
   the availability filter, hide-with-undo, the conditional source control, the
   self-explaining empty state, and the conditional home row.

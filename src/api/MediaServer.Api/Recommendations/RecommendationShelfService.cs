@@ -18,16 +18,18 @@ namespace MediaServer.Api.Recommendations;
 public sealed class RecommendationShelfRefresher(
     IServiceScopeFactory scopes, ILogger<RecommendationShelfRefresher> logger)
 {
-    private readonly ConcurrentDictionary<int, Task> inFlight = new();
+    private readonly ConcurrentDictionary<int, Lazy<Task>> inFlight = new();
 
     /// <summary>Rebuilds this user's shelf, joining the running rebuild if there already is one.</summary>
     public Task RefreshAsync(int appUserId, CancellationToken cancellationToken)
     {
-        // GetOrAdd's factory can run more than once under contention, so the task is created lazily and
-        // only the winner's copy is ever started.
-        var lazy = new Lazy<Task>(() => RunAsync(appUserId), LazyThreadSafetyMode.ExecutionAndPublication);
-        var task = inFlight.GetOrAdd(appUserId, _ => lazy.Value);
-        return task.WaitAsync(cancellationToken);
+        // The dictionary holds the Lazy, not the Task. GetOrAdd's factory can run more than once under
+        // contention, and starting a rebuild from a losing factory would defeat the whole point — so the
+        // factory only constructs (constructing a Lazy has no side effect) and just one stored instance
+        // is ever forced.
+        var lazy = inFlight.GetOrAdd(
+            appUserId, id => new Lazy<Task>(() => RunAsync(id), LazyThreadSafetyMode.ExecutionAndPublication));
+        return lazy.Value.WaitAsync(cancellationToken);
     }
 
     /// <summary>

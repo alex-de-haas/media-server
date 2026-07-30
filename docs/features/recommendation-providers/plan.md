@@ -162,18 +162,19 @@ computing shelves for users who never open Infuse is waste.
       alphabetically — the server would destroy rank before the client ever saw
       it. Rank order is therefore projected directly, which the probe below
       confirms survives to the screen.
-- [ ] **Tests** (below).
+- [x] **Tests** (below).
 - [ ] **Live verification of the home row.** Against a real Infuse: confirm the
       row appears, note **where it lands and how the client labels it**, and record
       that in `feature.md`. If the label reads "Recently Added in …", renaming the
       view is the only lever available — so this may feed back into the view's
       name. Every other deliverable here is provable without a device; this one is
-      not, and it is the last thing standing between this plan and completion.
-- [ ] **Docs.** A new surface section in `feature.md`; the view recorded in
+      not, and it is the last thing standing between this plan and completion — the
+      change that closes it also deletes this file.
+- [x] **Docs.** A new surface section in `feature.md`; the view recorded in
       [jellyfin-compatibility](../jellyfin-compatibility/feature.md); `docs/root.md`
-      index regenerated; this file deleted on completion. That document has already
-      been migrated out of its legacy flat location, so this work only edits it.
-- [ ] **Version bump** to `0.46.0` (new functionality) in the same commit as the
+      index regenerated. That document had already been migrated out of its legacy
+      flat location, so this work only edited it.
+- [x] **Version bump** to `0.46.0` (new functionality) in the same commit as the
       work.
 
 ## Phases
