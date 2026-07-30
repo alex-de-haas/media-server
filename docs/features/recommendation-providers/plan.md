@@ -1,6 +1,6 @@
 # Recommendations on the Jellyfin Surface — plan
 
-Status: Ready
+Status: In Progress
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -136,27 +136,27 @@ computing shelves for users who never open Infuse is waste.
 
 ## Deliverables
 
-- [ ] **`RecommendationShelfItem` entity + migration**, with the indexes above and
+- [x] **`RecommendationShelfItem` entity + migration**, with the indexes above and
       a cascade from `MediaItem` so a deleted title cannot leave a dangling rank.
-- [ ] **In-library-only feed mode.** `RecommendationFeedService.ProjectAsync`
+- [x] **In-library-only feed mode.** `RecommendationFeedService.ProjectAsync`
       applies its limit while walking the fused list, so filtering to held titles
       afterwards would return a nearly empty shelf. The in-library filter must run
       *before* the limit, and `WithPostersAsync` must be skipped entirely — every
       surviving card has local artwork.
-- [ ] **`RecommendationShelfService`**: build, TTL, single-flight,
+- [x] **`RecommendationShelfService`**: build, TTL, single-flight,
       stale-while-revalidate, and read-time `watched`/`hidden` filtering.
-- [ ] **Jellyfin identity and mapping**: `JellyfinIds.RecommendationsView()` and
+- [x] **Jellyfin identity and mapping**: `JellyfinIds.RecommendationsView()` and
       `JellyfinItemMapper.MapRecommendationsView()`.
-- [ ] **View wiring.** `JellyfinLibraryService.GetViewsAsync` gains the acting
+- [x] **View wiring.** `JellyfinLibraryService.GetViewsAsync` gains the acting
       user (it takes none today — catalog views are global, a shelf is not) and
       appends the view when the shelf is non-empty; `GetViewAsync` resolves its id.
       All three routes that surface views — `/UserViews`, `/Library/MediaFolders`,
       `/Library/VirtualFolders` — go through it.
-- [ ] **Browsing.** `ListItemsAsync` branches on the view id, honors
+- [x] **Browsing.** `ListItemsAsync` branches on the view id, honors
       `IncludeItemTypes` and paging, and returns real `MediaItem` DTOs.
-- [ ] **`GetLatestAsync`** returns the shelf for this view — the opposite of the
+- [x] **`GetLatestAsync`** returns the shelf for this view — the opposite of the
       early-return it uses for the Collections view and BoxSets.
-- [ ] **Ordering.** The shelf must **not** go through `ResolveItemsAsync`: that
+- [x] **Ordering.** The shelf must **not** go through `ResolveItemsAsync`: that
       path ends in `.OrderBy(ParentIndexNumber).ThenBy(IndexNumber).ThenBy(Title)`,
       and since both index fields are null on movies it sorts every grid
       alphabetically — the server would destroy rank before the client ever saw

@@ -70,6 +70,46 @@ public sealed class TmdbPosterCacheEntry
     public DateTimeOffset FetchedAt { get; set; }
 }
 
+/// <summary>
+/// One title on one user's Jellyfin recommendation shelf, at a fixed rank.
+/// </summary>
+/// <remarks>
+/// A snapshot of a <em>choice</em>, not of data: title, artwork, media sources, watched state and
+/// version pins are all read from <see cref="MediaItem"/> at request time and are therefore always
+/// current. What is pinned is the only part that is expensive to recompute and must stay still —
+/// which titles, in what order — because the client's row and the opened grid are two separate
+/// requests that have to agree.
+/// <para>
+/// Every row is by definition held locally, so unlike the web feed's DTO this stores no TMDb id,
+/// poster URL or title: the media item is the better source for all three.
+/// </para>
+/// <para>
+/// The shelf holds candidates, not the finished row. <c>watched</c> and <c>hidden</c> are applied on
+/// read instead of invalidating the shelf, so a title leaves it the moment it is played.
+/// </para>
+/// </remarks>
+public sealed class RecommendationShelfItem
+{
+    public Guid Id { get; set; }
+
+    public int AppUserId { get; set; }
+
+    /// <summary>Position in the fused feed, ascending and dense from zero.</summary>
+    public int Rank { get; set; }
+
+    public Guid MediaItemId { get; set; }
+
+    /// <summary>
+    /// When the generation this row belongs to was built. Identical across one user's rows, so the
+    /// TTL is a property of the shelf rather than of any single title.
+    /// </summary>
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    public AppUser? AppUser { get; set; }
+
+    public MediaItem? MediaItem { get; set; }
+}
+
 /// <summary>Per-user recommendation settings that must outlive a browser.</summary>
 /// <remarks>
 /// Server-side rather than browser storage so the choice follows the user between devices — the same

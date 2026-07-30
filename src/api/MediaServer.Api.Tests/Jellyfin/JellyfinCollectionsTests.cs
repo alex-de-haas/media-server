@@ -28,14 +28,14 @@ public sealed class JellyfinCollectionsTests : IDisposable
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
             _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
-            new JellyfinCollectionService(_db.Create()), new UserDataService(_db.Create(), TimeProvider.System), _settings);
+            new JellyfinCollectionService(_db.Create()), new EmptyShelf(), new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
 
     [Fact]
     public async Task Views_append_a_boxsets_collections_view_when_a_franchise_qualifies()
     {
-        var views = await _library.GetViewsAsync(CancellationToken.None);
+        var views = await _library.GetViewsAsync(null, CancellationToken.None);
 
         var collections = Assert.Single(views, view => view.Id == JellyfinIds.CollectionsView());
         Assert.Equal("CollectionFolder", collections.Type);
@@ -93,7 +93,7 @@ public sealed class JellyfinCollectionsTests : IDisposable
         var server = new JellyfinServerContext(hosty, _settings);
         var library = new JellyfinLibraryService(
             bare.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(bare.Create()),
-            new JellyfinCollectionService(bare.Create()), new UserDataService(bare.Create(), TimeProvider.System), _settings);
+            new JellyfinCollectionService(bare.Create()), new EmptyShelf(), new UserDataService(bare.Create(), TimeProvider.System), _settings);
 
         using (var context = bare.Create())
         {
@@ -110,10 +110,10 @@ public sealed class JellyfinCollectionsTests : IDisposable
             context.SaveChanges();
         }
 
-        var views = await library.GetViewsAsync(CancellationToken.None);
+        var views = await library.GetViewsAsync(null, CancellationToken.None);
         Assert.DoesNotContain(views, view => view.Id == JellyfinIds.CollectionsView());
 
-        var view = await library.GetViewAsync(JellyfinIds.CollectionsView(), CancellationToken.None);
+        var view = await library.GetViewAsync(JellyfinIds.CollectionsView(), null, CancellationToken.None);
         Assert.Null(view);
     }
 

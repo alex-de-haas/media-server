@@ -40,6 +40,30 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
     };
 
     /// <summary>
+    /// The synthetic top-level "Recommended" view: the part of the recommendation feed this instance
+    /// actually holds, so a suggestion is something the user can press play on.
+    /// </summary>
+    /// <remarks>
+    /// <c>CollectionType</c> is deliberately null. The shelf mixes movies and series, so <c>movies</c>
+    /// would be a lie and <c>boxsets</c> a different one; a null type is Jellyfin's mixed-content
+    /// library. Verified against Infuse 8.x: it renders such a view as an ordinary library, and queries
+    /// it once with no type filter rather than once per type.
+    /// <para>
+    /// Like the Collections view it advertises no artwork of its own — its contents change with the
+    /// user's taste, so any fixed tile would go stale.
+    /// </para>
+    /// </remarks>
+    public BaseItemDto MapRecommendationsView() => new()
+    {
+        Id = JellyfinIds.RecommendationsView(),
+        ServerId = server.ServerId,
+        Name = "Recommended",
+        Type = "CollectionFolder",
+        CollectionType = null,
+        IsFolder = true,
+    };
+
+    /// <summary>
     /// The synthetic top-level "Collections" view: a Jellyfin <c>boxsets</c> collection folder that holds the
     /// movie franchises. Unlike catalog views it advertises no artwork of its own (its children — the
     /// <c>BoxSet</c>s — carry the posters), so Infuse renders it as a labelled library tile.
@@ -207,6 +231,9 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             DeliveryMethod = stream.StreamType == StreamType.Subtitle ? (stream.IsExternal ? "External" : "Embed") : null,
         };
     }
+
+    /// <summary>The Jellyfin type name a kind maps to, for callers filtering by <c>IncludeItemTypes</c>.</summary>
+    public static string TypeNameFor(MediaKind kind) => ShapeFor(kind).Type;
 
     private static (string Type, bool IsFolder, string? MediaType) ShapeFor(MediaKind kind) => kind switch
     {

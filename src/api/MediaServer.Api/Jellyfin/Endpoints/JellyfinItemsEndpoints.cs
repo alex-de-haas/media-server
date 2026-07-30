@@ -33,7 +33,7 @@ internal static class JellyfinItemsEndpoints
         {
             // A library (collection folder) resolves as a view; everything else as a media item.
             var item = await library.GetItemAsync(itemId, includeMediaSources: true, JellyfinPrincipal.AppUserId(principal), cancellationToken)
-                ?? await library.GetViewAsync(itemId, cancellationToken);
+                ?? await library.GetViewAsync(itemId, JellyfinPrincipal.AppUserId(principal), cancellationToken);
             return item is null ? Results.NotFound() : JellyfinJson.Ok(item);
         });
 

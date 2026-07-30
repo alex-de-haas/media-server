@@ -1,6 +1,7 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Recommendations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Jellyfin;
@@ -28,12 +29,22 @@ public sealed class JellyfinLibraryService(
     JellyfinItemMapper mapper,
     JellyfinCatalogArtwork catalogArtwork,
     JellyfinCollectionService collections,
+    IRecommendationShelf shelf,
     UserDataService userData,
     MediaServerSettings settings)
 {
     private string PreferredLanguage => settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
 
-    public async Task<IReadOnlyList<BaseItemDto>> GetViewsAsync(CancellationToken cancellationToken)
+    /// <summary>Whether a public id addresses the synthetic Recommended view.</summary>
+    internal static bool IsRecommendationsView(string? publicId) =>
+        !string.IsNullOrEmpty(publicId) &&
+        string.Equals(publicId, JellyfinIds.RecommendationsView(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The user's libraries. Catalog views are global, but the Recommended view is not — it exists only
+    /// for a user whose shelf has something in it, which is why this takes the acting user.
+    /// </summary>
+    public async Task<IReadOnlyList<BaseItemDto>> GetViewsAsync(int? appUserId, CancellationToken cancellationToken)
     {
         var catalogs = await database.Catalogs.AsNoTracking().OrderBy(catalog => catalog.Name).ToListAsync(cancellationToken);
         var backdropTags = await catalogArtwork.GetLatestBackdropTagsAsync(
@@ -49,16 +60,31 @@ public sealed class JellyfinLibraryService(
             views.Add(mapper.MapCollectionsView());
         }
 
+        // Same rule for the shelf: a user with nothing watched yet has no recommendations, and an empty
+        // library tile explains nothing.
+        if (appUserId is { } userId && await shelf.AnyAsync(userId, cancellationToken))
+        {
+            views.Add(mapper.MapRecommendationsView());
+        }
+
         return views;
     }
 
     /// <summary>A single library/view (collection folder) by its public id, or null if it is not a view.</summary>
-    public async Task<BaseItemDto?> GetViewAsync(string publicId, CancellationToken cancellationToken)
+    public async Task<BaseItemDto?> GetViewAsync(string publicId, int? appUserId, CancellationToken cancellationToken)
     {
         // The synthetic Collections view exists only while a franchise qualifies.
         if (JellyfinCollectionService.IsView(publicId))
         {
             return await collections.AnyEligibleAsync(cancellationToken) ? mapper.MapCollectionsView() : null;
+        }
+
+        // And the Recommended view only while this user's shelf holds something.
+        if (IsRecommendationsView(publicId))
+        {
+            return appUserId is { } userId && await shelf.AnyAsync(userId, cancellationToken)
+                ? mapper.MapRecommendationsView()
+                : null;
         }
 
         // Otherwise a view is always a catalog, so query catalogs directly rather than probing MediaItems first.
@@ -101,6 +127,14 @@ public sealed class JellyfinLibraryService(
             return await ListBoxSetsAsync(query, cancellationToken);
         }
 
+        // The shelf is an ordered selection, so it must not go through ResolveItemsAsync: that path
+        // sorts by title at the end, which would replace rank with the alphabet before the client ever
+        // saw it.
+        if (IsRecommendationsView(query.ParentId))
+        {
+            return await ListShelfAsync(query, appUserId, cancellationToken);
+        }
+
         var items = await ResolveItemsAsync(query, cancellationToken);
 
         var total = items.Count;
@@ -113,6 +147,47 @@ public sealed class JellyfinLibraryService(
 
         var dtos = await MapManyAsync(page.ToList(), query.IncludeMediaSources, appUserId, cancellationToken);
         return new QueryResult<BaseItemDto>(dtos, total, start);
+    }
+
+    /// <summary>
+    /// The Recommended view's contents: this user's shelf in rank order, honoring an explicit type
+    /// filter, search and paging.
+    /// </summary>
+    /// <remarks>
+    /// Infuse queries an untyped view once with no <c>IncludeItemTypes</c>, but other clients do send
+    /// one, and a mixed view must not answer a request for movies with series.
+    /// </remarks>
+    private async Task<QueryResult<BaseItemDto>> ListShelfAsync(
+        JellyfinItemsQuery query, int? appUserId, CancellationToken cancellationToken)
+    {
+        var start = query.StartIndex ?? 0;
+        if (appUserId is not { } userId)
+        {
+            return new QueryResult<BaseItemDto>([], 0, start);
+        }
+
+        IEnumerable<MediaItem> ranked = await shelf.GetAsync(userId, limit: null, cancellationToken);
+
+        if (query.IncludeItemTypes is { Count: > 0 } types)
+        {
+            ranked = ranked.Where(item => types.Contains(JellyfinItemMapper.TypeNameFor(item.Kind)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.SearchTerm))
+        {
+            var term = query.SearchTerm.Trim();
+            ranked = ranked.Where(item => item.Title.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var all = ranked.ToList();
+        IEnumerable<MediaItem> page = all.Skip(start);
+        if (query.Limit is { } limit)
+        {
+            page = page.Take(limit);
+        }
+
+        var dtos = await MapManyAsync(page.ToList(), query.IncludeMediaSources, appUserId, cancellationToken);
+        return new QueryResult<BaseItemDto>(dtos, all.Count, start);
     }
 
     /// <summary>The BoxSets under the Collections view, honoring an explicit type filter, search, and paging.</summary>
@@ -205,6 +280,21 @@ public sealed class JellyfinLibraryService(
         var query = TopLevelItems();
         if (!string.IsNullOrEmpty(parentPublicId))
         {
+            // The one view where "latest" means something other than "recently added": for a shelf the
+            // current selection *is* the latest thing about it, and this row is how it reaches the home
+            // screen at all.
+            if (IsRecommendationsView(parentPublicId))
+            {
+                if (appUserId is not { } shelfUserId)
+                {
+                    return new QueryResult<BaseItemDto>([], 0);
+                }
+
+                var ranked = await shelf.GetAsync(shelfUserId, limit, cancellationToken);
+                var rankedDtos = await MapManyAsync(ranked, includeMediaSources: false, appUserId, cancellationToken);
+                return new QueryResult<BaseItemDto>(rankedDtos, rankedDtos.Count);
+            }
+
             // "Latest" is meaningless for the synthetic Collections view / a BoxSet, and must not silently fall
             // back to the whole library — that would leak unrelated titles into those rows.
             if (JellyfinCollectionService.IsView(parentPublicId) ||

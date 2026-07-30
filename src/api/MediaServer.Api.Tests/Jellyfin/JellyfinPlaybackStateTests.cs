@@ -45,7 +45,7 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         _userData = new UserDataService(_context, _time);
         _library = new JellyfinLibraryService(
             _context, new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_context),
-            new JellyfinCollectionService(_context), _userData, settings);
+            new JellyfinCollectionService(_context), new EmptyShelf(), _userData, settings);
         Seed();
     }
 
