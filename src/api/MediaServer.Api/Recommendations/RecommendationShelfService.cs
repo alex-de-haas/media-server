@@ -117,15 +117,22 @@ public sealed class RecommendationShelfService(
     public async Task<IReadOnlyList<MediaItem>> GetAsync(
         int appUserId, int? limit, CancellationToken cancellationToken)
     {
+        var generation = await GenerationAsync(appUserId, cancellationToken);
+
+        if (generation is null)
+        {
+            // Never built for this user, so there is nothing to fall back on and this one is worth
+            // waiting for. Note the test is the generation, not the rows: a shelf that came out empty
+            // has still been built, and rebuilding it on every view listing is exactly the cost this
+            // snapshot exists to avoid.
+            await refresher.RefreshAsync(appUserId, cancellationToken);
+        }
+        // Read before starting any background work, so the caller is served the generation it just
+        // observed. Kicking the rebuild off first would race it against this read and make "serve the
+        // stale one" mean "serve whichever won".
         var stored = await StoredAsync(appUserId, cancellationToken);
 
-        if (stored.Count == 0)
-        {
-            // Nothing to serve and nothing to fall back on, so this one is worth waiting for.
-            await refresher.RefreshAsync(appUserId, cancellationToken);
-            stored = await StoredAsync(appUserId, cancellationToken);
-        }
-        else if (IsStale(stored[0].GeneratedAt))
+        if (generation is not null && IsStale(generation.GeneratedAt))
         {
             // Serve the old generation and rebuild behind the request: the hourly /UserViews must
             // never pay for a rebuild.
@@ -172,6 +179,22 @@ public sealed class RecommendationShelfService(
             .ToListAsync(cancellationToken);
         database.RecommendationShelfItems.RemoveRange(existing);
 
+        // Stamped even when nothing survived the library filter: "asked, and the answer was nothing"
+        // is a generation, and without it the next read would ask again.
+        if (await database.RecommendationShelfGenerations
+                .FirstOrDefaultAsync(row => row.AppUserId == appUserId, cancellationToken) is { } generation)
+        {
+            generation.GeneratedAt = generatedAt;
+        }
+        else
+        {
+            database.RecommendationShelfGenerations.Add(new RecommendationShelfGeneration
+            {
+                AppUserId = appUserId,
+                GeneratedAt = generatedAt,
+            });
+        }
+
         // Replaced wholesale rather than patched: ranks are positions in one list, so a partial update
         // would leave two generations interleaved, and the unique (user, rank) index would reject it.
         for (var rank = 0; rank < ranked.Count; rank++)
@@ -182,7 +205,6 @@ public sealed class RecommendationShelfService(
                 AppUserId = appUserId,
                 Rank = rank,
                 MediaItemId = ranked[rank],
-                GeneratedAt = generatedAt,
             });
         }
 
@@ -192,6 +214,11 @@ public sealed class RecommendationShelfService(
 
     private bool IsStale(DateTimeOffset generatedAt) => clock.GetUtcNow() - generatedAt >= Ttl;
 
+    private async Task<RecommendationShelfGeneration?> GenerationAsync(
+        int appUserId, CancellationToken cancellationToken) =>
+        await database.RecommendationShelfGenerations.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.AppUserId == appUserId, cancellationToken);
+
     private async Task<List<RecommendationShelfItem>> StoredAsync(int appUserId, CancellationToken cancellationToken) =>
         await database.RecommendationShelfItems.AsNoTracking()
             .Include(row => row.MediaItem)
@@ -200,20 +227,64 @@ public sealed class RecommendationShelfService(
             .ToListAsync(cancellationToken);
 
     /// <summary>
+    /// Every local copy of each stored title, keyed by the stored (pinned) item id.
+    /// </summary>
+    /// <remarks>
+    /// A title is identified by its provider id, not by its row, so two catalogs holding the same film
+    /// are two copies of one title. A stored item with no provider id is its own only copy.
+    /// </remarks>
+    private async Task<Dictionary<Guid, List<Guid>>> CopiesAsync(
+        IReadOnlyList<RecommendationShelfItem> stored, CancellationToken cancellationToken)
+    {
+        var identities = stored
+            .Select(row => row.MediaItem!)
+            .Where(item => item.IdentityProviderId != null)
+            .Select(item => item.IdentityProviderId!)
+            .Distinct()
+            .ToList();
+
+        var siblings = identities.Count == 0
+            ? []
+            : await database.MediaItems.AsNoTracking()
+                .Where(item => item.IdentityProviderId != null && identities.Contains(item.IdentityProviderId))
+                .Select(item => new { item.Id, item.Kind, item.IdentityProviderId })
+                .ToListAsync(cancellationToken);
+
+        var copies = new Dictionary<Guid, List<Guid>>(stored.Count);
+        foreach (var row in stored)
+        {
+            var item = row.MediaItem!;
+            copies[row.MediaItemId] = item.IdentityProviderId is { } providerId
+                ? [.. siblings
+                    .Where(sibling => sibling.IdentityProviderId == providerId && sibling.Kind == item.Kind)
+                    .Select(sibling => sibling.Id)]
+                : [row.MediaItemId];
+        }
+
+        return copies;
+    }
+
+    /// <summary>
     /// The stored titles this user should not be offered right now: already watched, or dismissed.
     /// </summary>
     private async Task<HashSet<Guid>> ExcludedAsync(
         int appUserId, IReadOnlyList<RecommendationShelfItem> stored, CancellationToken cancellationToken)
     {
-        var itemIds = stored.Select(row => row.MediaItemId).ToHashSet();
+        // Every local copy of every stored title, not just the stored one. The same film can sit in two
+        // catalogs (a 4K edition beside a regular one) and the shelf pins only one of them, so a play
+        // recorded against the other would otherwise go unnoticed and the title stay on the shelf.
+        var copies = await CopiesAsync(stored, cancellationToken);
+        var watchable = copies.Values.SelectMany(ids => ids).ToHashSet();
 
         var played = await database.UserItemData.AsNoTracking()
-            .Where(row => row.AppUserId == appUserId && row.Played && itemIds.Contains(row.MediaItemId))
+            .Where(row => row.AppUserId == appUserId && row.Played && watchable.Contains(row.MediaItemId))
             .Select(row => row.MediaItemId)
             .ToListAsync(cancellationToken);
 
         // A series counts as seen once any episode has been played — a part-watched show belongs to
-        // Next Up, not here — which is why this joins episodes back to their series.
+        // Next Up, not here — which is why this joins episodes back to their series. Narrowed to the
+        // shelf in the query rather than afterwards: a long watch history has no business being read
+        // in full to answer a question about a hundred titles.
         var playedSeries = await database.PlaybackHistoryEntries.AsNoTracking()
             .Where(entry => entry.AppUserId == appUserId)
             .Join(
@@ -221,10 +292,15 @@ public sealed class RecommendationShelfService(
                 entry => entry.MediaItemId,
                 item => item.Id,
                 (_, item) => item.Kind == MediaKind.Episode && item.SeriesId != null ? item.SeriesId!.Value : item.Id)
+            .Where(id => watchable.Contains(id))
             .Distinct()
             .ToListAsync(cancellationToken);
 
-        var excluded = played.Concat(playedSeries).Where(itemIds.Contains).ToHashSet();
+        var seen = played.Concat(playedSeries).ToHashSet();
+        var excluded = copies
+            .Where(pair => pair.Value.Any(seen.Contains))
+            .Select(pair => pair.Key)
+            .ToHashSet();
 
         // Hides are keyed by TMDb identity rather than by local item, so they survive a title being
         // removed and re-added; resolving them means reading each stored item's provider id.

@@ -263,6 +263,57 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AnEmptyShelfIsNotRebuiltOnEveryRead()
+    {
+        // An empty result is still an answer. Without a recorded generation every /UserViews would
+        // rebuild from scratch — for a Trakt-backed user, an upstream call per library refresh.
+        var provider = Provider("library", Candidate("99999", 0));
+
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
+        Assert.False(await Shelf().AnyAsync(_userId, CancellationToken.None));
+
+        Assert.Equal(1, provider.Calls);
+    }
+
+    [Fact]
+    public async Task AnEmptyShelfIsStillRebuiltOnceItsTtlExpires()
+    {
+        var provider = Provider("library", Candidate("99999", 0));
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
+
+        // Taste moves: what was not held before may be held now.
+        var held = AddItem(MediaKind.Movie, "Acquired", "99999");
+        _time.Advance(RecommendationShelfService.Ttl + TimeSpan.FromMinutes(1));
+
+        // Still behind the request, not blocking it: an expired generation is a generation, and a view
+        // listing must never wait on a rebuild even when the previous answer was nothing.
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
+        await WaitForShelfAsync(held.Id);
+
+        Assert.Equal([held.Id], (await Shelf().GetAsync(_userId, limit: null, CancellationToken.None))
+            .Select(item => item.Id));
+        Assert.Equal(2, provider.Calls);
+    }
+
+    [Fact]
+    public async Task WatchingAnotherCopyOfATitleAlsoTakesItOffTheShelf()
+    {
+        // Two catalogs can hold the same film; the shelf pins one of them. A play against the other
+        // still means "seen", exactly as the web feed treats it.
+        var pinned = AddItem(MediaKind.Movie, "Dune", "438631");
+        var fourK = AddItem(MediaKind.Movie, "Dune 4K", "438631");
+        Provider("library", Candidate("438631", 0));
+
+        Assert.Equal([pinned.Id], (await Shelf().GetAsync(_userId, limit: null, CancellationToken.None))
+            .Select(item => item.Id));
+
+        MarkPlayed(_userId, fourK.Id);
+
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ADeletedTitleLeavesTheShelfWithoutBreakingTheRest()
     {
         var first = AddItem(MediaKind.Movie, "First", "100");

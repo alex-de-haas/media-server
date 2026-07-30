@@ -190,7 +190,14 @@ to agree, and anything with an independent expiry could lapse between them.
   every seed either way and only trims at the end.
 - **Watched and hidden are applied on read**, not by invalidating the shelf, so a
   title leaves the moment it is played rather than when the generation expires.
-  A series counts as seen once any episode has been played.
+  A series counts as seen once any episode has been played, and a play against
+  *any* local copy counts — the shelf pins one copy, but watching the 4K edition
+  still means you watched it.
+- **The generation is recorded separately from the rows**, because an empty shelf
+  is still an answer. A user whose feed legitimately yields nothing — no history
+  yet, or no overlap between the suggestions and the library — would otherwise
+  have nothing saying the question was asked, and every view listing would
+  rebuild from scratch: for a Trakt-backed user, an upstream call per refresh.
 - **One-day TTL**, refreshed lazily: a missing shelf is built synchronously, a
   stale one is served while a rebuild runs behind the request. Rebuilds are
   single-flight per user — a client fans `Items/Latest` across every library at
@@ -231,12 +238,14 @@ direct hand-off from a discovery card into torrent intake.
   representative for the link.
 - `RecommendationShelfServiceTests` — held-only contents with the library filter
   applied before the limit; no poster lookup on this path; rank preserved as
-  stored; read-time exclusion of watched, part-watched series and hidden titles;
-  another user's plays and hides not touching this shelf; a stale generation
-  served rather than rebuilt in the request, and rebuilt behind it; concurrent
-  readers building once; a deleted title leaving without breaking the rest; a
-  shelf whose every title is watched counting as empty; a rebuild replacing the
-  generation rather than appending.
+  stored; read-time exclusion of watched, part-watched series and hidden titles,
+  including a play against another copy of a stored title; another user's plays
+  and hides not touching this shelf; a stale generation served rather than
+  rebuilt in the request, and rebuilt behind it; an empty generation not rebuilt
+  on every read but still rebuilt once its TTL expires; concurrent readers
+  building once; a deleted title leaving without breaking the rest; a shelf whose
+  every title is watched counting as empty; a rebuild replacing the generation
+  rather than appending.
 - `JellyfinRecommendationsTests` — the view advertised only when the shelf has
   something, as mixed content, and never to an anonymous caller; its id
   resolving as a view only while non-empty; `Latest` returning the shelf in rank

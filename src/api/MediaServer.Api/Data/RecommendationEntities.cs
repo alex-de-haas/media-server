@@ -99,15 +99,30 @@ public sealed class RecommendationShelfItem
 
     public Guid MediaItemId { get; set; }
 
-    /// <summary>
-    /// When the generation this row belongs to was built. Identical across one user's rows, so the
-    /// TTL is a property of the shelf rather than of any single title.
-    /// </summary>
-    public DateTimeOffset GeneratedAt { get; set; }
-
     public AppUser? AppUser { get; set; }
 
     public MediaItem? MediaItem { get; set; }
+}
+
+/// <summary>
+/// When one user's shelf was last built.
+/// </summary>
+/// <remarks>
+/// Separate from the rows themselves because <em>an empty shelf is still a generation</em>. Hanging
+/// the timestamp off the rows would mean a user whose feed legitimately yields nothing — no history
+/// yet, or no overlap between the recommendations and the library — has nothing recording that the
+/// question was asked, so every view listing would rebuild from scratch. That is the exact cost this
+/// whole snapshot exists to avoid, and for a Trakt-backed user it would be upstream API calls on
+/// every library refresh.
+/// </remarks>
+public sealed class RecommendationShelfGeneration
+{
+    /// <summary>The key: one generation per user, replaced in place.</summary>
+    public int AppUserId { get; set; }
+
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    public AppUser? AppUser { get; set; }
 }
 
 /// <summary>Per-user recommendation settings that must outlive a browser.</summary>

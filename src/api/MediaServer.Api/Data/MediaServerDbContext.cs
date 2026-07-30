@@ -41,6 +41,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<TmdbRecommendationCacheEntry> TmdbRecommendationCache => Set<TmdbRecommendationCacheEntry>();
     public DbSet<TmdbPosterCacheEntry> TmdbPosterCache => Set<TmdbPosterCacheEntry>();
     public DbSet<RecommendationShelfItem> RecommendationShelfItems => Set<RecommendationShelfItem>();
+    public DbSet<RecommendationShelfGeneration> RecommendationShelfGenerations => Set<RecommendationShelfGeneration>();
     public DbSet<TmdbTitleDetailCacheEntry> TmdbTitleDetailCache => Set<TmdbTitleDetailCacheEntry>();
     public DbSet<RecommendationPreference> RecommendationPreferences => Set<RecommendationPreference>();
 
@@ -569,6 +570,13 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         shelf.HasOne(entity => entity.MediaItem)
             .WithMany()
             .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var shelfGeneration = modelBuilder.Entity<RecommendationShelfGeneration>();
+        shelfGeneration.HasKey(entity => entity.AppUserId);
+        shelfGeneration.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
             .OnDelete(DeleteBehavior.Cascade);
 
         var recommendationCache = modelBuilder.Entity<TmdbRecommendationCacheEntry>();
