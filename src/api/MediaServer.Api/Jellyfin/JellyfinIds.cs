@@ -25,6 +25,13 @@ public static class JellyfinIds
     /// <summary>A movie franchise surfaces as a Jellyfin <c>BoxSet</c> folder under the Collections view.</summary>
     public static string Collection(Guid collectionId) => Hex($"collection|{collectionId:N}");
 
+    /// <summary>
+    /// The synthetic "Recommended" view. One id for every user, not one per user: its <em>contents</em>
+    /// are personal, but a client stores the id it browsed, and a per-user id would change the library's
+    /// identity under any client signed in as someone else.
+    /// </summary>
+    public static string RecommendationsView() => Hex("view|recommendations");
+
     /// <summary>Per playable source; lets clients pin a specific version via <c>MediaSourceId</c>.</summary>
     public static string MediaSource(Guid mediaSourceId) => Hex($"source|{mediaSourceId:N}");
 

@@ -40,6 +40,8 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<RecommendationHide> RecommendationHides => Set<RecommendationHide>();
     public DbSet<TmdbRecommendationCacheEntry> TmdbRecommendationCache => Set<TmdbRecommendationCacheEntry>();
     public DbSet<TmdbPosterCacheEntry> TmdbPosterCache => Set<TmdbPosterCacheEntry>();
+    public DbSet<RecommendationShelfItem> RecommendationShelfItems => Set<RecommendationShelfItem>();
+    public DbSet<RecommendationShelfGeneration> RecommendationShelfGenerations => Set<RecommendationShelfGeneration>();
     public DbSet<TmdbTitleDetailCacheEntry> TmdbTitleDetailCache => Set<TmdbTitleDetailCacheEntry>();
     public DbSet<RecommendationPreference> RecommendationPreferences => Set<RecommendationPreference>();
 
@@ -548,6 +550,31 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         hides.Property(entity => entity.Kind).HasConversion<int>();
         hides.Property(entity => entity.TmdbId).HasMaxLength(32);
         hides.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var shelf = modelBuilder.Entity<RecommendationShelfItem>();
+        shelf.HasKey(entity => entity.Id);
+        // A rank is a position in one user's shelf, so it can hold only one title; the whole shelf is
+        // rewritten on refresh rather than patched, and uniqueness makes a half-written one impossible
+        // to commit.
+        shelf.HasIndex(entity => new { entity.AppUserId, entity.Rank }).IsUnique();
+        shelf.HasIndex(entity => entity.AppUserId);
+        shelf.HasOne(entity => entity.AppUser)
+            .WithMany()
+            .HasForeignKey(entity => entity.AppUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+        // Cascade from the item too: a title removed from the library must not leave a rank pointing
+        // at nothing, and a shelf with a hole is better than a read that throws.
+        shelf.HasOne(entity => entity.MediaItem)
+            .WithMany()
+            .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var shelfGeneration = modelBuilder.Entity<RecommendationShelfGeneration>();
+        shelfGeneration.HasKey(entity => entity.AppUserId);
+        shelfGeneration.HasOne(entity => entity.AppUser)
             .WithMany()
             .HasForeignKey(entity => entity.AppUserId)
             .OnDelete(DeleteBehavior.Cascade);

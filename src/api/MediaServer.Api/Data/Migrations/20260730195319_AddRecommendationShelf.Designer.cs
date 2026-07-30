@@ -3,6 +3,7 @@ using System;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    partial class MediaServerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260730195319_AddRecommendationShelf")]
+    partial class AddRecommendationShelf
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -1022,20 +1025,6 @@ namespace MediaServer.Api.Data.Migrations
                     b.ToTable("RecommendationPreferences");
                 });
 
-            modelBuilder.Entity("MediaServer.Api.Data.RecommendationShelfGeneration", b =>
-                {
-                    b.Property<int>("AppUserId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("GeneratedAt")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("AppUserId");
-
-                    b.ToTable("RecommendationShelfGenerations");
-                });
-
             modelBuilder.Entity("MediaServer.Api.Data.RecommendationShelfItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1044,6 +1033,10 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.Property<int>("AppUserId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("GeneratedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<Guid>("MediaItemId")
                         .HasColumnType("TEXT");
@@ -2037,17 +2030,6 @@ namespace MediaServer.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("MediaServer.Api.Data.RecommendationPreference", b =>
-                {
-                    b.HasOne("MediaServer.Api.Data.AppUser", "AppUser")
-                        .WithMany()
-                        .HasForeignKey("AppUserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AppUser");
-                });
-
-            modelBuilder.Entity("MediaServer.Api.Data.RecommendationShelfGeneration", b =>
                 {
                     b.HasOne("MediaServer.Api.Data.AppUser", "AppUser")
                         .WithMany()

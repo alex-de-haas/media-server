@@ -199,6 +199,12 @@ Playback state:
 - The synthetic Collections view → `CollectionFolder` with
   `CollectionType = boxsets`; each qualifying `MovieCollection` → `BoxSet` whose
   children are its owned movies. See [collections.md](../collections.md).
+- The synthetic Recommended view → `CollectionFolder` with a **null**
+  `CollectionType` (mixed content), holding the part of the recommendation feed
+  this instance actually has. It is personal, so unlike the catalog views it is
+  listed only for a user whose shelf is non-empty, and it is the one view whose
+  `Items/Latest` returns a ranked selection rather than recently added titles.
+  See [recommendation providers](../recommendation-providers/feature.md).
 - Movie → `Movie`; Series → `Series`; Season → `Season`; Episode → `Episode`.
   Unmatched files are represented internally as `Video` but are **not exposed to
   Jellyfin clients** until they have a canonical identity.

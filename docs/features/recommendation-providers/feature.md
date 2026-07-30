@@ -1,7 +1,7 @@
 # Recommendation Providers
 
 Created: 2026-07-25
-Updated: 2026-07-25
+Updated: 2026-07-30
 
 ## Description
 
@@ -141,6 +141,70 @@ to all available rather than silently emptying the feed.
 - Hiding is one click, so undo is one click: the toast carries it.
 - A title both engines chose is badged **Both**.
 
+## Jellyfin surface — the Recommended view
+
+The held half of the feed is also a library on the [Jellyfin
+surface](../jellyfin-compatibility/feature.md), so a suggestion is something the
+user can press play on rather than read about.
+
+- A synthetic **Recommended** `CollectionFolder` sits beside the catalog views
+  and Collections, advertised only while the requesting user's shelf holds
+  something — an empty library tile explains nothing. Its `CollectionType` is
+  null (Jellyfin's mixed content): the shelf holds series as well as films.
+- `Items/Latest` for this view returns **the shelf itself**, in rank order. This
+  is the deliberate opposite of the Collections view, which returns empty —
+  "recently added to a franchise" means nothing, whereas for a shelf the current
+  selection *is* the latest thing about it. It is also the only per-library hook
+  a client offers onto its home screen.
+- Opening the view returns the same titles in the same order. The listing
+  bypasses the regular browse path, which ends in an alphabetical sort and would
+  otherwise replace rank with the alphabet before a client ever saw it. An
+  explicit `IncludeItemTypes` is still honored.
+- **Held titles only.** A discovery card has no meaning on a surface whose only
+  verb is Play; acquisition stays in the web UI.
+- **The row is labelled by the client, from the view's name.** Infuse renders it
+  as *"Latest Recommended - Local"* — its own template around the library name,
+  which is why the view is called `Recommended` rather than anything longer.
+- **A newly appearing view reaches the home screen one step late.** The home
+  screen is built from the client's cached library list, not from a fresh
+  `/UserViews`: the fan-out of `Items/Latest` goes out before the new list is
+  read, and the new library's row is fetched as a follow-up request right after.
+  So the first time a user's shelf becomes non-empty, the library is browsable
+  immediately while its row appears on the next library-list refresh. Nothing to
+  fix server-side — the client drives both.
+- Rows are ordinary `MediaItem`s, so playback, artwork, resume and watched state
+  work unchanged, and a film appears both here and in its own catalog — how
+  Jellyfin models a title belonging to two views.
+
+### The shelf
+
+`RecommendationShelfItem` stores an ordered list of media-item foreign keys per
+user, and nothing else. Title, artwork, sources and user data are read live, so
+the snapshot pins only what is expensive to recompute and must stay still: which
+titles, in what order. The row and the grid are two separate requests that have
+to agree, and anything with an independent expiry could lapse between them.
+
+- **100 candidates**, an order of magnitude more than a row shows. The build asks
+  providers for far more than the web feed does, because held titles are a small
+  fraction of any list — and it costs nothing, since the built-in engine fetches
+  every seed either way and only trims at the end.
+- **Watched and hidden are applied on read**, not by invalidating the shelf, so a
+  title leaves the moment it is played rather than when the generation expires.
+  A series counts as seen once any episode has been played, and a play against
+  *any* local copy counts — the shelf pins one copy, but watching the 4K edition
+  still means you watched it.
+- **The generation is recorded separately from the rows**, because an empty shelf
+  is still an answer. A user whose feed legitimately yields nothing — no history
+  yet, or no overlap between the suggestions and the library — would otherwise
+  have nothing saying the question was asked, and every view listing would
+  rebuild from scratch: for a Trakt-backed user, an upstream call per refresh.
+- **One-day TTL**, refreshed lazily: a missing shelf is built synchronously, a
+  stale one is served while a rebuild runs behind the request. Rebuilds are
+  single-flight per user — a client fans `Items/Latest` across every library at
+  once, and without that each would start its own.
+- No poster lookup ever happens on this path; every surviving row has local
+  artwork.
+
 ## Not included
 
 Deliberately out of scope: propagating a hide to Trakt's
@@ -172,6 +236,22 @@ direct hand-off from a discovery card into torrent intake.
   vanished-source fallback, poster backfill only for surviving cards, and
   multi-copy titles — a play on any copy excluding the title, and a stable
   representative for the link.
+- `RecommendationShelfServiceTests` — held-only contents with the library filter
+  applied before the limit; no poster lookup on this path; rank preserved as
+  stored; read-time exclusion of watched, part-watched series and hidden titles,
+  including a play against another copy of a stored title; another user's plays
+  and hides not touching this shelf; a stale generation served rather than
+  rebuilt in the request, and rebuilt behind it; an empty generation not rebuilt
+  on every read but still rebuilt once its TTL expires; concurrent readers
+  building once; a deleted title leaving without breaking the rest; a shelf whose
+  every title is watched counting as empty; a rebuild replacing the generation
+  rather than appending.
+- `JellyfinRecommendationsTests` — the view advertised only when the shelf has
+  something, as mixed content, and never to an anonymous caller; its id
+  resolving as a view only while non-empty; `Latest` returning the shelf in rank
+  order and passing its limit through, while the Collections view still returns
+  empty; browsing keeping rank rather than sorting by title, honoring a type
+  filter and paging; and the view never appearing as an item in a flat scan.
 - `e2e/recommendations.spec.ts` — the library/discovery split, the Both badge,
   the availability filter, hide-with-undo, the conditional source control, the
   self-explaining empty state, and the conditional home row.

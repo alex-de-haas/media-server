@@ -48,6 +48,19 @@ public sealed class RecommendationFeedService(
     /// <summary>How many each provider is asked for before fusion. Bounded so one long tail cannot drown the other's head.</summary>
     internal const int PerProvider = 50;
 
+    /// <summary>
+    /// What the shelf asks for instead — an order of magnitude more, because it then discards most of
+    /// it: only titles this instance holds survive, and that intersection is a small fraction of any
+    /// provider's list. At <see cref="PerProvider"/> the pool would be roughly a hundred titles and
+    /// the held part of it a handful.
+    /// </summary>
+    /// <remarks>
+    /// This costs no extra TMDb requests. The built-in engine fetches every seed's list either way and
+    /// only trims at the very end (<c>LibraryRecommendationProvider.GetAsync</c>), so a wider ask buys
+    /// reach for free; it merely stops throwing away candidates the library filter would have kept.
+    /// </remarks>
+    internal const int PerProviderForShelf = 500;
+
     public async Task<RecommendationFeedDto> BuildAsync(
         int appUserId, RecommendationKind? kind, int limit, CancellationToken cancellationToken)
     {
@@ -59,12 +72,80 @@ public sealed class RecommendationFeedService(
         var selected = await SelectedSourcesAsync(appUserId, available, cancellationToken);
         var active = available.Where(provider => selected.Contains(provider.Key, StringComparer.OrdinalIgnoreCase)).ToList();
 
+        var lists = await AskAsync(active, appUserId, PerProvider, cancellationToken);
+
+        // Fuse generously, then filter: excluding watched and hidden titles afterwards would otherwise
+        // eat into the limit and hand back a short feed.
+        var fused = RecommendationFusion.Fuse(lists, limit * 4);
+        var items = await ProjectAsync(appUserId, fused, kind, limit, cancellationToken);
+
+        return new RecommendationFeedDto(items, descriptors, [.. selected]);
+    }
+
+    /// <summary>
+    /// The held part of the feed, in rank order: the media items backing one user's Jellyfin shelf.
+    /// </summary>
+    /// <remarks>
+    /// Two things separate this from <see cref="BuildAsync"/>, and both follow from the surface it
+    /// feeds — one whose only verb is Play.
+    /// <para>
+    /// The in-library filter runs <em>before</em> the limit. Applying it afterwards would hand back a
+    /// nearly empty shelf, because held titles are a small fraction of any provider's list.
+    /// </para>
+    /// <para>
+    /// No poster lookup happens here at all: every surviving row is in the library and therefore has
+    /// local artwork, so the TMDb call <see cref="WithPostersAsync"/> makes would buy nothing.
+    /// </para>
+    /// <para>
+    /// Watched and hidden titles are deliberately <em>kept</em>. This is a candidate pool, not a
+    /// finished row — the reader excludes them on every read, so a title leaves the shelf the moment
+    /// it is played rather than when the shelf next expires.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<Guid>> BuildShelfAsync(
+        int appUserId, int limit, CancellationToken cancellationToken)
+    {
+        var available = await registry.AvailableForAsync(appUserId, cancellationToken);
+        var selected = await SelectedSourcesAsync(appUserId, available, cancellationToken);
+        var active = available.Where(provider => selected.Contains(provider.Key, StringComparer.OrdinalIgnoreCase)).ToList();
+
+        var lists = await AskAsync(active, appUserId, PerProviderForShelf, cancellationToken);
+        if (lists.Count == 0)
+        {
+            return [];
+        }
+
+        var fused = RecommendationFusion.Fuse(lists, PerProviderForShelf);
+        var library = await LibraryByTmdbIdAsync(cancellationToken);
+
+        var ids = new List<Guid>(limit);
+        foreach (var entry in fused)
+        {
+            if (library.GetValueOrDefault(entry.Identity) is not { } held)
+            {
+                continue;
+            }
+
+            ids.Add(held.Representative.Id);
+            if (ids.Count == limit)
+            {
+                break;
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>Asks every active provider for its ranked list, surviving any one of them failing.</summary>
+    private async Task<List<RankedList>> AskAsync(
+        IReadOnlyList<IRecommendationProvider> active, int appUserId, int perProvider, CancellationToken cancellationToken)
+    {
         var lists = new List<RankedList>(active.Count);
         foreach (var provider in active)
         {
             try
             {
-                var candidates = await provider.GetAsync(appUserId, PerProvider, cancellationToken);
+                var candidates = await provider.GetAsync(appUserId, perProvider, cancellationToken);
                 lists.Add(new RankedList(provider.Key, candidates));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -74,12 +155,7 @@ public sealed class RecommendationFeedService(
             }
         }
 
-        // Fuse generously, then filter: excluding watched and hidden titles afterwards would otherwise
-        // eat into the limit and hand back a short feed.
-        var fused = RecommendationFusion.Fuse(lists, limit * 4);
-        var items = await ProjectAsync(appUserId, fused, kind, limit, cancellationToken);
-
-        return new RecommendationFeedDto(items, descriptors, [.. selected]);
+        return lists;
     }
 
     private async Task<List<RecommendationDto>> ProjectAsync(

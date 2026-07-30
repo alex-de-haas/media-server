@@ -193,6 +193,10 @@ builder.Services.AddScoped<IRecommendationProvider, LibraryRecommendationProvide
 builder.Services.AddScoped<IRecommendationProvider, MediaServer.Api.Recommendations.Trakt.TraktRecommendationProvider>();
 builder.Services.AddScoped<ITmdbPosterLookup, TmdbPosterLookup>();
 builder.Services.AddScoped<RecommendationFeedService>();
+builder.Services.AddScoped<RecommendationShelfService>();
+builder.Services.AddScoped<IRecommendationShelf>(services => services.GetRequiredService<RecommendationShelfService>());
+// Singleton: it collapses concurrent rebuilds, and the thing it guards is shared across requests.
+builder.Services.AddSingleton<RecommendationShelfRefresher>();
 builder.Services.AddHostedService<WatchHistoryDeliveryWorker>();
 // An abandoned device flow is never polled again, so nothing else would remove its row or its stored
 // device code.

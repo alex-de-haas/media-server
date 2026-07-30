@@ -30,14 +30,14 @@ public sealed class JellyfinMappingTests : IDisposable
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
             _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
-            new JellyfinCollectionService(_db.Create()), new UserDataService(_db.Create(), TimeProvider.System), _settings);
+            new JellyfinCollectionService(_db.Create()), new EmptyShelf(), new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
 
     [Fact]
     public async Task Views_map_catalogs_to_collection_folders()
     {
-        var views = await _library.GetViewsAsync(CancellationToken.None);
+        var views = await _library.GetViewsAsync(null, CancellationToken.None);
 
         Assert.Equal(2, views.Count);
         Assert.All(views, view => Assert.Equal("CollectionFolder", view.Type));
@@ -48,7 +48,7 @@ public sealed class JellyfinMappingTests : IDisposable
     [Fact]
     public async Task View_borrows_latest_titles_backdrop_so_infuse_shows_a_tile()
     {
-        var views = await _library.GetViewsAsync(CancellationToken.None);
+        var views = await _library.GetViewsAsync(null, CancellationToken.None);
 
         // The movie catalog's only title has a backdrop; the view advertises it as both Primary and Backdrop.
         var moviesView = Assert.Single(views, view => view.Id == JellyfinIds.Catalog(_movieCatalogId));

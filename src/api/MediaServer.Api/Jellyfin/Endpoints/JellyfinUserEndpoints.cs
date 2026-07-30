@@ -41,27 +41,30 @@ internal static class JellyfinUserEndpoints
             return user is null ? Results.NotFound() : JellyfinJson.Ok(JellyfinEndpoints.BuildUserDto(user, server));
         });
 
-        secured.MapGet("/Users/{userId}/Views", async (string userId, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        secured.MapGet("/Users/{userId}/Views", async (string userId, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
             if (!JellyfinPrincipal.CanActAs(principal, userId))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var views = await library.GetViewsAsync(cancellationToken);
+            var actingUserId = await JellyfinPrincipal.ResolveActingUserIdAsync(principal, userId, database, cancellationToken);
+            var views = await library.GetViewsAsync(actingUserId, cancellationToken);
             return JellyfinJson.Ok(new QueryResult<BaseItemDto>(views, views.Count));
         });
 
         // Newer Jellyfin route Infuse actually calls: /UserViews?userId=… (the per-user path form above
-        // is the legacy alias). Views are the global catalogs, so the user only gates authorization.
-        secured.MapGet("/UserViews", async (string? userId, ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        // is the legacy alias). Catalog views are global, so the user gates authorization — and now also
+        // decides whether the personal Recommended view is among them.
+        secured.MapGet("/UserViews", async (string? userId, HttpRequest request, ClaimsPrincipal principal, MediaServerDbContext database, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
             if (!string.IsNullOrEmpty(userId) && !JellyfinPrincipal.CanActAs(principal, userId))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var views = await library.GetViewsAsync(cancellationToken);
+            var actingUserId = await JellyfinPrincipal.ResolveQueryUserIdAsync(request, principal, database, cancellationToken);
+            var views = await library.GetViewsAsync(actingUserId, cancellationToken);
             return JellyfinJson.Ok(new QueryResult<BaseItemDto>(views, views.Count));
         });
 
@@ -72,15 +75,15 @@ internal static class JellyfinUserEndpoints
         secured.MapGet("/UserViews/GroupingOptions", (string? userId) =>
             JellyfinJson.Ok(Array.Empty<SpecialViewOptionDto>()));
 
-        secured.MapGet("/Library/MediaFolders", async (JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        secured.MapGet("/Library/MediaFolders", async (ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            var views = await library.GetViewsAsync(cancellationToken);
+            var views = await library.GetViewsAsync(JellyfinPrincipal.AppUserId(principal), cancellationToken);
             return JellyfinJson.Ok(new QueryResult<BaseItemDto>(views, views.Count));
         });
 
-        secured.MapGet("/Library/VirtualFolders", async (JellyfinLibraryService library, CancellationToken cancellationToken) =>
+        secured.MapGet("/Library/VirtualFolders", async (ClaimsPrincipal principal, JellyfinLibraryService library, CancellationToken cancellationToken) =>
         {
-            var views = await library.GetViewsAsync(cancellationToken);
+            var views = await library.GetViewsAsync(JellyfinPrincipal.AppUserId(principal), cancellationToken);
             var folders = views.Select(view => new
             {
                 Name = view.Name,
