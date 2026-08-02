@@ -11,6 +11,8 @@ public sealed record JellyfinItemsQuery
 {
     public string? ParentId { get; init; }
     public IReadOnlyList<string>? Ids { get; init; }
+    /// <summary>Person public ids; narrows the result to the items those people are credited on.</summary>
+    public IReadOnlyList<string>? PersonIds { get; init; }
     public IReadOnlySet<string>? IncludeItemTypes { get; init; }
     public string? SearchTerm { get; init; }
     public bool Recursive { get; init; }
@@ -29,6 +31,7 @@ public sealed class JellyfinLibraryService(
     JellyfinItemMapper mapper,
     JellyfinCatalogArtwork catalogArtwork,
     JellyfinCollectionService collections,
+    JellyfinPersonService people,
     IRecommendationShelf shelf,
     UserDataService userData,
     MediaServerSettings settings)
@@ -111,11 +114,32 @@ public sealed class JellyfinLibraryService(
                     collection, count, JellyfinCollectionService.PrimaryTag(collection), JellyfinCollectionService.BackdropTag(collection));
             }
 
-            return null;
+            // Nor is a person: a client that fetches one before listing its titles must not dead-end.
+            return await people.ResolveAsync(publicId, cancellationToken) is { } person
+                ? mapper.MapPerson(person)
+                : null;
         }
 
-        var dtos = await MapManyAsync([item], includeMediaSources, appUserId, cancellationToken);
+        // People ride along with the detail response only — a list would need this query per row.
+        var dtos = await MapManyAsync([item], includeMediaSources, appUserId, cancellationToken, includePeople: true);
         return dtos.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// The people credited on something in the library, as Jellyfin <c>Person</c> items. This route must
+    /// answer rather than 404 even when it has nothing: Infuse's search fans out to it first and treats a
+    /// 404 as a hard failure, so a title that is in the library would never surface.
+    /// </summary>
+    public async Task<QueryResult<BaseItemDto>> ListPeopleAsync(
+        string? searchTerm, int? startIndex, int? limit, CancellationToken cancellationToken)
+    {
+        // Negative paging is not rejected downstream — SQLite reads `OFFSET -1` as no offset and
+        // `LIMIT -1` as no limit, so a malformed query would quietly return every person and echo a
+        // nonsense StartIndex back. Both are pinned to zero instead.
+        var start = Math.Max(startIndex ?? 0, 0);
+        var take = limit is { } requested ? Math.Max(requested, 0) : (int?)null;
+        var (found, total) = await people.SearchAsync(searchTerm, start, take, cancellationToken);
+        return new QueryResult<BaseItemDto>(found.Select(mapper.MapPerson).ToList(), total, start);
     }
 
     public async Task<QueryResult<BaseItemDto>> ListItemsAsync(
@@ -501,16 +525,16 @@ public sealed class JellyfinLibraryService(
 
     private async Task<IReadOnlyList<MediaItem>> ResolveItemsAsync(JellyfinItemsQuery query, CancellationToken cancellationToken)
     {
+        IQueryable<MediaItem> source;
         if (query.Ids is { Count: > 0 } ids)
         {
-            var byId = await database.MediaItems.AsNoTracking()
-                .Where(item => item.PublicId != null && ids.Contains(item.PublicId))
-                .ToListAsync(cancellationToken);
-            return byId;
+            // An explicit id set is the starting point, not a shortcut past the filters below: a client
+            // may send Ids together with PersonIds, and answering with every requested item regardless of
+            // who is credited on it would silently ignore the narrower filter.
+            source = database.MediaItems.AsNoTracking()
+                .Where(item => item.PublicId != null && ids.Contains(item.PublicId));
         }
-
-        IQueryable<MediaItem> source;
-        if (string.IsNullOrEmpty(query.ParentId))
+        else if (string.IsNullOrEmpty(query.ParentId))
         {
             // No parent: top-level browsable items (optionally recursive search across the library).
             source = query.Recursive
@@ -539,6 +563,16 @@ public sealed class JellyfinLibraryService(
             {
                 return [];
             }
+        }
+
+        if (query.PersonIds is { Count: > 0 } personIds)
+        {
+            var matched = await people.ResolveManyAsync(personIds, cancellationToken);
+            // An id that resolves to nobody must narrow the result to nothing, not be ignored — otherwise
+            // "titles with this person" answers with the whole library.
+            var creditedItemIds = await people.CreditedItemIdsAsync(
+                matched.Select(person => person.Id).ToList(), cancellationToken);
+            source = source.Where(item => creditedItemIds.Contains(item.Id));
         }
 
         if (query.IncludeItemTypes is { Count: > 0 } types)
@@ -594,7 +628,8 @@ public sealed class JellyfinLibraryService(
     }
 
     private async Task<IReadOnlyList<BaseItemDto>> MapManyAsync(
-        IReadOnlyList<MediaItem> items, bool includeMediaSources, int? appUserId, CancellationToken cancellationToken)
+        IReadOnlyList<MediaItem> items, bool includeMediaSources, int? appUserId, CancellationToken cancellationToken,
+        bool includePeople = false)
     {
         if (items.Count == 0)
         {
@@ -626,6 +661,10 @@ public sealed class JellyfinLibraryService(
                 .ToDictionary(group => group.Key, group => (IReadOnlyList<MediaSource>)group.ToList());
         }
 
+        var creditsByItem = includePeople
+            ? await people.LoadAsync(itemIds, cancellationToken)
+            : [];
+
         var parents = await LoadParentsAsync(items, cancellationToken);
         var childCounts = await LoadChildCountsAsync(items, cancellationToken);
         var extrasCounts = await LoadExtrasCountsAsync(items, cancellationToken);
@@ -644,7 +683,8 @@ public sealed class JellyfinLibraryService(
                 BuildParents(item, parents),
                 includeMediaSources,
                 childCounts.GetValueOrDefault(item.Id),
-                extrasCounts.TryGetValue(item.Id, out var extras) ? extras : null));
+                extrasCounts.TryGetValue(item.Id, out var extras) ? extras : null,
+                creditsByItem.GetValueOrDefault(item.Id)));
         }
 
         return result;

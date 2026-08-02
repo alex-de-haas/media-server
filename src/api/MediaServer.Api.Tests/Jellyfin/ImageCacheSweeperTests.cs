@@ -141,6 +141,38 @@ public sealed class ImageCacheSweeperTests : IDisposable
     }
 
     [Fact]
+    public async Task Sweep_keeps_live_person_photos_and_reclaims_the_superseded_one()
+    {
+        // A person photo has no ImageAsset row either, so the sweep has to recompute its name — otherwise
+        // every cast portrait would be reclaimed on the next pass and refetched forever.
+        var person = SeedPerson("https://images.test/profile-v2.jpg");
+        var name = Assert.Single(JellyfinImageService.PersonCacheNames(person.Id, person.ProfileUrl));
+        var live = WriteCached(name + ".jpg", aged: true);
+        var superseded = WriteCached($"person-{person.Id:N}-0123456789abcdef.jpg", aged: true);
+
+        var report = await Sweeper().SweepAsync(CancellationToken.None);
+
+        Assert.True(File.Exists(live));
+        Assert.False(File.Exists(superseded));
+        Assert.Equal(1, report.FilesDeleted);
+    }
+
+    [Fact]
+    public async Task Sweep_reclaims_the_photo_of_a_deleted_person()
+    {
+        var person = SeedPerson("https://images.test/profile.jpg");
+        var path = WriteCached(JellyfinImageService.PersonCacheNames(person.Id, person.ProfileUrl).Single() + ".jpg", aged: true);
+
+        _database.Persons.Remove(person);
+        await _database.SaveChangesAsync();
+
+        var report = await Sweeper().SweepAsync(CancellationToken.None);
+
+        Assert.False(File.Exists(path));
+        Assert.Equal(1, report.FilesDeleted);
+    }
+
+    [Fact]
     public async Task Sweep_reclaims_stale_temp_files_from_failed_writes()
     {
         var leftover = WriteCached($"abc123.jpg.{Guid.NewGuid():N}.tmp", aged: true);
@@ -229,6 +261,22 @@ public sealed class ImageCacheSweeperTests : IDisposable
         _database.ImageAssets.Add(image);
         _database.SaveChanges();
         return image;
+    }
+
+    private Person SeedPerson(string? profileUrl)
+    {
+        var person = new Person
+        {
+            Id = Guid.NewGuid(),
+            Provider = "tmdb",
+            ProviderId = "6193",
+            Name = "A Person",
+            ProfileUrl = profileUrl,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        _database.Persons.Add(person);
+        _database.SaveChanges();
+        return person;
     }
 
     private MovieCollection SeedCollection(string? posterUrl, string? backdropUrl)

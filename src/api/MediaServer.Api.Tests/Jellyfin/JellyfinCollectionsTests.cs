@@ -28,7 +28,7 @@ public sealed class JellyfinCollectionsTests : IDisposable
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
             _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
-            new JellyfinCollectionService(_db.Create()), new EmptyShelf(), new UserDataService(_db.Create(), TimeProvider.System), _settings);
+            new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), new EmptyShelf(), new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
 
@@ -93,7 +93,8 @@ public sealed class JellyfinCollectionsTests : IDisposable
         var server = new JellyfinServerContext(hosty, _settings);
         var library = new JellyfinLibraryService(
             bare.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(bare.Create()),
-            new JellyfinCollectionService(bare.Create()), new EmptyShelf(), new UserDataService(bare.Create(), TimeProvider.System), _settings);
+            new JellyfinCollectionService(bare.Create()), new JellyfinPersonService(bare.Create()), new EmptyShelf(),
+            new UserDataService(bare.Create(), TimeProvider.System), _settings);
 
         using (var context = bare.Create())
         {

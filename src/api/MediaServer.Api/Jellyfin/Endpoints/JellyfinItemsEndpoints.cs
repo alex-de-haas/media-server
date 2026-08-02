@@ -143,11 +143,18 @@ internal static class JellyfinItemsEndpoints
             return JellyfinJson.Ok(await library.GetSpecialFeaturesAsync(itemId, actingUserId, cancellationToken));
         });
 
-        // Endpoints Infuse probes that we have no data for. They must return an empty result, not 404 —
-        // Infuse's search fans out to /Persons first and treats its 404 as a hard failure ("Nothing
-        // Found"), so a movie that IS in the library never surfaces. LocalTrailers/MediaSegments are
-        // detail/playback probes that likewise must answer rather than 404.
-        secured.MapGet("/Persons", () => JellyfinJson.Ok(new QueryResult<BaseItemDto>([], 0)));
+        // The people credited somewhere in the library. This must answer even when it finds nothing, not
+        // 404: Infuse's search fans out here first and treats a 404 as a hard failure ("Nothing Found"),
+        // so a movie that IS in the library would never surface.
+        secured.MapGet("/Persons", async (HttpRequest request, JellyfinLibraryService library, CancellationToken cancellationToken) =>
+            JellyfinJson.Ok(await library.ListPeopleAsync(
+                NullIfEmpty(request.Query["SearchTerm"]),
+                ParseInt(request.Query["StartIndex"]),
+                ParseInt(request.Query["Limit"]),
+                cancellationToken)));
+
+        // Endpoints Infuse probes that we have no data for; detail/playback probes that must answer
+        // rather than 404.
         secured.MapGet("/Items/{itemId}/LocalTrailers", (string itemId) => JellyfinJson.Ok(Array.Empty<BaseItemDto>()));
         secured.MapGet("/MediaSegments/{itemId}", (string itemId) => JellyfinJson.Ok(new QueryResult<object>([], 0)));
 
@@ -171,6 +178,7 @@ internal static class JellyfinItemsEndpoints
         {
             ParentId = NullIfEmpty(query["ParentId"]),
             Ids = SplitList(query["Ids"]),
+            PersonIds = SplitList(query["PersonIds"]),
             IncludeItemTypes = SplitList(query["IncludeItemTypes"])?.ToHashSet(StringComparer.OrdinalIgnoreCase),
             SearchTerm = NullIfEmpty(query["SearchTerm"]),
             Recursive = bool.TryParse(query["Recursive"], out var recursive) && recursive,

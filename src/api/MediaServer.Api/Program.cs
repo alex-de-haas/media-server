@@ -292,6 +292,7 @@ builder.Services.AddScoped<JellyfinCredentialService>();
 builder.Services.AddScoped<UserDataService>();
 builder.Services.AddScoped<JellyfinCatalogArtwork>();
 builder.Services.AddScoped<JellyfinCollectionService>();
+builder.Services.AddScoped<JellyfinPersonService>();
 builder.Services.AddScoped<JellyfinLibraryService>();
 builder.Services.AddScoped<JellyfinImageService>();
 builder.Services.AddScoped<JellyfinStreamResolver>();

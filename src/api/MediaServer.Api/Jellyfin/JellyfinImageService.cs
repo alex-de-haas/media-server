@@ -15,6 +15,7 @@ public sealed class JellyfinImageService(
     MediaServerDbContext database,
     JellyfinCatalogArtwork catalogArtwork,
     JellyfinCollectionService collections,
+    JellyfinPersonService people,
     IHttpClientFactory httpFactory,
     HostyOptions hosty)
 {
@@ -33,8 +34,10 @@ public sealed class JellyfinImageService(
         if (asset is null)
         {
             // Not a media item or catalog: it may be a BoxSet (collection), whose art is the collection's own
-            // remote poster/backdrop rather than a stored ImageAsset.
-            return await GetCollectionImageAsync(itemPublicId, type, cancellationToken);
+            // remote poster/backdrop rather than a stored ImageAsset — or a person, whose photo is likewise
+            // a remote URL with no ImageAsset row.
+            return await GetCollectionImageAsync(itemPublicId, type, cancellationToken)
+                ?? await GetPersonImageAsync(itemPublicId, type, cancellationToken);
         }
 
         if (asset.LocalPath is { Length: > 0 } cached && File.Exists(cached))
@@ -96,9 +99,42 @@ public sealed class JellyfinImageService(
             ?? JellyfinCollectionService.PrimaryTag(collection)
             ?? string.Empty;
 
-        var directory = CacheDirectory(hosty);
         var slot = type == ImageType.Backdrop ? BackdropSlot : PrimarySlot;
-        var path = Path.Combine(directory, CollectionCacheName(collection.Id, slot, tag) + ExtensionFor(remote));
+        return await ServeRemoteAsync(remote, CollectionCacheName(collection.Id, slot, tag), tag, cancellationToken);
+    }
+
+    /// <summary>
+    /// Serves a person's profile photo. Like collection artwork it is a remote provider URL with no
+    /// <see cref="ImageAsset"/> row behind it, so it caches under its own deterministic name. A person has
+    /// exactly one image — a request for anything but <see cref="ImageType.Primary"/> is answered with
+    /// nothing rather than with the portrait in the wrong slot.
+    /// </summary>
+    private async Task<ImagePayload?> GetPersonImageAsync(string itemPublicId, ImageType type, CancellationToken cancellationToken)
+    {
+        if (type != ImageType.Primary)
+        {
+            return null;
+        }
+
+        var person = await people.ResolveAsync(itemPublicId, cancellationToken);
+        if (person?.ProfileUrl is not { Length: > 0 } remote)
+        {
+            return null;
+        }
+
+        var tag = JellyfinPersonService.PrimaryTag(person) ?? string.Empty;
+        return await ServeRemoteAsync(remote, PersonCacheName(person.Id, tag), tag, cancellationToken);
+    }
+
+    /// <summary>
+    /// Serves a remote image that has no <see cref="ImageAsset"/> row to track it — collection artwork and
+    /// person photos — from a cache file named after its identity, fetching it on the first request.
+    /// </summary>
+    private async Task<ImagePayload?> ServeRemoteAsync(
+        string remote, string cacheName, string tag, CancellationToken cancellationToken)
+    {
+        var directory = CacheDirectory(hosty);
+        var path = Path.Combine(directory, cacheName + ExtensionFor(remote));
         if (File.Exists(path))
         {
             return new ImagePayload(await File.ReadAllBytesAsync(path, cancellationToken), ContentTypeFor(path), tag);
@@ -172,6 +208,26 @@ public sealed class JellyfinImageService(
             {
                 yield return CollectionCacheName(collection.Id, BackdropSlot, primary);
             }
+        }
+    }
+
+    /// <summary>
+    /// The cache file name (extension aside) of a person's profile photo. Same reasoning as
+    /// <see cref="CollectionCacheName"/>: no row records what is on disk, and the tag in the name makes a
+    /// replaced photo land in a new file instead of serving stale bytes forever.
+    /// </summary>
+    private static string PersonCacheName(Guid personId, string tag) => $"person-{personId:N}-{tag}";
+
+    /// <summary>
+    /// The cache file name <see cref="GetPersonImageAsync"/> writes for a person, or nothing when the
+    /// provider has no photo. <see cref="ImageCacheSweeper"/> deletes every file it cannot name as live,
+    /// so a person photo missing from here would be reclaimed on the next pass and refetched forever.
+    /// </summary>
+    public static IEnumerable<string> PersonCacheNames(Guid personId, string? profileUrl)
+    {
+        if (JellyfinPersonService.PrimaryTag(personId, profileUrl) is { } tag)
+        {
+            yield return PersonCacheName(personId, tag);
         }
     }
 

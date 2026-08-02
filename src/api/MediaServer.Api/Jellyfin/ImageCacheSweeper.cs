@@ -120,6 +120,20 @@ public sealed class ImageCacheSweeper(
             live.Add(name);
         }
 
+        // Person photos have no row either. Unlike collections there are thousands of them, so this loads
+        // only the columns the name is derived from.
+        var people = await database.Persons.AsNoTracking()
+            .Where(person => person.ProfileUrl != null)
+            .Select(person => new { person.Id, person.ProfileUrl })
+            .ToListAsync(cancellationToken);
+        foreach (var person in people)
+        {
+            foreach (var name in JellyfinImageService.PersonCacheNames(person.Id, person.ProfileUrl))
+            {
+                live.Add(name);
+            }
+        }
+
         return live;
     }
 }
