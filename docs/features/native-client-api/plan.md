@@ -42,7 +42,7 @@ short numeric secret on a public endpoint is only safe because of the lockout
 machinery in [security.md](../security.md).
 
 **Core already solves this**, and this app writes no authentication code at all.
-Hosty's [access tokens](../../../../docker-host/docs/features/access-tokens/feature.md)
+Hosty's [access tokens](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/access-tokens/feature.md)
 feature ships a device authorization flow, and the app-identity exchange composes
 on top of it:
 
