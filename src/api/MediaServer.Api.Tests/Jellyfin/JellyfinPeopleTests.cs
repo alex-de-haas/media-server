@@ -211,6 +211,62 @@ public sealed class JellyfinPeopleTests : IDisposable
     }
 
     [Fact]
+    public async Task Persons_pins_negative_paging_to_zero()
+    {
+        // SQLite reads OFFSET -1 as no offset and LIMIT -1 as no limit, so nothing downstream rejects
+        // these: unclamped, a malformed query returns the whole table and echoes StartIndex -1 back.
+        var all = await _library.ListPeopleAsync(null, startIndex: null, limit: null, CancellationToken.None);
+
+        var negativeStart = await _library.ListPeopleAsync(null, startIndex: -1, limit: 2, CancellationToken.None);
+        Assert.Equal(0, negativeStart.StartIndex);
+        Assert.Equal(2, negativeStart.Items.Count);
+
+        var negativeLimit = await _library.ListPeopleAsync(null, startIndex: 0, limit: -1, CancellationToken.None);
+        Assert.Empty(negativeLimit.Items);
+        Assert.Equal(all.TotalRecordCount, negativeLimit.TotalRecordCount); // The total still reports the truth.
+    }
+
+    [Fact]
+    public async Task An_id_set_and_a_person_filter_compose()
+    {
+        // A client may send both. Answering with every requested id regardless of who is credited on it
+        // would silently drop the narrower filter.
+        var writerId = JellyfinIds.Person("tmdb", _writer.ProviderId);
+
+        var both = await _library.ListItemsAsync(
+            new JellyfinItemsQuery { Ids = [_moviePublicId, _sequelPublicId], PersonIds = [writerId] },
+            appUserId: null, CancellationToken.None);
+
+        // The writer is credited on the first movie only, so the sequel drops out of the id set.
+        Assert.Equal(_moviePublicId, Assert.Single(both.Items).Id);
+
+        // And an id set narrowed by someone credited on none of them comes back empty.
+        var none = await _library.ListItemsAsync(
+            new JellyfinItemsQuery { Ids = [_sequelPublicId], PersonIds = [writerId] },
+            appUserId: null, CancellationToken.None);
+        Assert.Empty(none.Items);
+
+        // Without the person filter the id set is still served in full.
+        var unfiltered = await _library.ListItemsAsync(
+            new JellyfinItemsQuery { Ids = [_moviePublicId, _sequelPublicId] }, appUserId: null, CancellationToken.None);
+        Assert.Equal(2, unfiltered.Items.Count);
+    }
+
+    [Fact]
+    public async Task Only_people_credited_in_the_library_resolve_by_id()
+    {
+        // The pipeline stores a person per parsed credit; a client can only ever have learned an id for
+        // someone credited on something it can see, so resolution is scoped to that set.
+        var credited = await _library.GetItemAsync(
+            JellyfinIds.Person("tmdb", _lead.ProviderId), includeMediaSources: false, appUserId: null, CancellationToken.None);
+        Assert.NotNull(credited);
+
+        var uncredited = await _library.GetItemAsync(
+            JellyfinIds.Person("tmdb", _stranger.ProviderId), includeMediaSources: false, appUserId: null, CancellationToken.None);
+        Assert.Null(uncredited);
+    }
+
+    [Fact]
     public async Task A_person_id_resolves_to_a_person_item()
     {
         var personId = JellyfinIds.Person("tmdb", _lead.ProviderId);
@@ -255,6 +311,7 @@ public sealed class JellyfinPeopleTests : IDisposable
         Assert.Empty(result.Items);
         Assert.Equal(0, result.TotalRecordCount);
     }
+
 
     private JellyfinImageService ImageService(string appDataDir) => new(
         _db.Create(), new JellyfinCatalogArtwork(_db.Create()), new JellyfinCollectionService(_db.Create()),

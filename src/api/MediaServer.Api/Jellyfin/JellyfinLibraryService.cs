@@ -133,8 +133,12 @@ public sealed class JellyfinLibraryService(
     public async Task<QueryResult<BaseItemDto>> ListPeopleAsync(
         string? searchTerm, int? startIndex, int? limit, CancellationToken cancellationToken)
     {
-        var start = startIndex ?? 0;
-        var (found, total) = await people.SearchAsync(searchTerm, start, limit, cancellationToken);
+        // Negative paging is not rejected downstream — SQLite reads `OFFSET -1` as no offset and
+        // `LIMIT -1` as no limit, so a malformed query would quietly return every person and echo a
+        // nonsense StartIndex back. Both are pinned to zero instead.
+        var start = Math.Max(startIndex ?? 0, 0);
+        var take = limit is { } requested ? Math.Max(requested, 0) : (int?)null;
+        var (found, total) = await people.SearchAsync(searchTerm, start, take, cancellationToken);
         return new QueryResult<BaseItemDto>(found.Select(mapper.MapPerson).ToList(), total, start);
     }
 
@@ -521,16 +525,16 @@ public sealed class JellyfinLibraryService(
 
     private async Task<IReadOnlyList<MediaItem>> ResolveItemsAsync(JellyfinItemsQuery query, CancellationToken cancellationToken)
     {
+        IQueryable<MediaItem> source;
         if (query.Ids is { Count: > 0 } ids)
         {
-            var byId = await database.MediaItems.AsNoTracking()
-                .Where(item => item.PublicId != null && ids.Contains(item.PublicId))
-                .ToListAsync(cancellationToken);
-            return byId;
+            // An explicit id set is the starting point, not a shortcut past the filters below: a client
+            // may send Ids together with PersonIds, and answering with every requested item regardless of
+            // who is credited on it would silently ignore the narrower filter.
+            source = database.MediaItems.AsNoTracking()
+                .Where(item => item.PublicId != null && ids.Contains(item.PublicId));
         }
-
-        IQueryable<MediaItem> source;
-        if (string.IsNullOrEmpty(query.ParentId))
+        else if (string.IsNullOrEmpty(query.ParentId))
         {
             // No parent: top-level browsable items (optionally recursive search across the library).
             source = query.Recursive

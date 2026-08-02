@@ -71,11 +71,16 @@ public sealed class JellyfinPersonService(MediaServerDbContext database)
 
     /// <summary>
     /// Resolves person public ids back to their people. The id is a one-way hash of the provider identity,
-    /// so this projects the identity columns and re-derives the hash rather than querying by id. That is a
-    /// scan, but of three narrow columns over a table that holds one row per credited person — the same
+    /// so this projects the identity columns and re-derives the hash rather than querying by id — the same
     /// trade <see cref="JellyfinCollectionService.ResolveAsync"/> makes, and it keeps the id derivable from
     /// the provider identity alone instead of persisting a second key.
     /// </summary>
+    /// <remarks>
+    /// The scan is over the credited people only, not the whole table: the metadata pipeline stores a person
+    /// for every credit it parses, including titles that are no longer published, and a client can only ever
+    /// have learned an id for someone credited on something it can see. Restricting it keeps the per-request
+    /// work tied to the visible library rather than to everything ever fetched.
+    /// </remarks>
     public async Task<IReadOnlyList<Person>> ResolveManyAsync(
         IReadOnlyList<string> publicIds, CancellationToken cancellationToken)
     {
@@ -85,7 +90,7 @@ public sealed class JellyfinPersonService(MediaServerDbContext database)
         }
 
         var wanted = publicIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var identities = await database.Persons.AsNoTracking()
+        var identities = await CreditedPeople()
             .Select(person => new { person.Id, person.Provider, person.ProviderId })
             .ToListAsync(cancellationToken);
 
