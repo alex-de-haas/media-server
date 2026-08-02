@@ -5,6 +5,9 @@ using MediaServer.Api.Jellyfin.Streaming;
 
 namespace MediaServer.Api.Jellyfin;
 
+/// <summary>One loaded credit for an item: the join row plus the person it points at.</summary>
+public sealed record ItemCredit(Person Person, MediaItemPerson Credit);
+
 /// <summary>Resolved parent links for an item, already translated from internal ids to public ids.</summary>
 public sealed record ItemParents(
     string? ParentId = null,
@@ -20,6 +23,27 @@ public sealed record ItemParents(
 /// </summary>
 public sealed class JellyfinItemMapper(JellyfinServerContext server)
 {
+    /// <summary>Cast credits emitted per item, by billing order. A TMDb credit block runs to hundreds.</summary>
+    public const int MaxCastCredits = 30;
+
+    /// <summary>Crew credits emitted per item, after job filtering.</summary>
+    public const int MaxCrewCredits = 10;
+
+    /// <summary>
+    /// The crew jobs worth emitting, mapped to Jellyfin's person kinds. Everything else — the animators,
+    /// lighting artists and stunt performers that dominate a TMDb crew list — is dropped, matching what
+    /// Jellyfin's own TMDb metadata plugin stores. The original job survives as <c>Role</c>, so a client
+    /// still shows "Screenplay" rather than the flattened kind.
+    /// </summary>
+    private static readonly Dictionary<string, string> CrewKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Director"] = "Director",
+        ["Writer"] = "Writer",
+        ["Screenplay"] = "Writer",
+        ["Story"] = "Writer",
+        ["Producer"] = "Producer",
+    };
+
     /// <summary>
     /// Projects a catalog as a Jellyfin collection folder (view). Catalogs have no artwork of their own,
     /// so <paramref name="backdropTag"/> (the latest title's backdrop) is advertised as both the Primary
@@ -101,6 +125,24 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         BackdropImageTags = backdropTag is { Length: > 0 } backdrop ? [backdrop] : null,
     };
 
+    /// <summary>
+    /// Projects a person as a Jellyfin <c>Person</c> item, as <c>/Persons</c> and a person-id lookup return
+    /// them. A person is not a library entry, so it is <c>Virtual</c> and carries no path.
+    /// </summary>
+    public BaseItemDto MapPerson(Person person) => new()
+    {
+        Id = JellyfinPersonService.PublicId(person),
+        ServerId = server.ServerId,
+        Name = person.Name,
+        SortName = person.Name,
+        Type = "Person",
+        LocationType = "Virtual",
+        Overview = person.Biography,
+        ImageTags = JellyfinPersonService.PrimaryTag(person) is { } tag
+            ? new Dictionary<string, string> { ["Primary"] = tag }
+            : null,
+    };
+
     public BaseItemDto MapItem(
         MediaItem item,
         MetadataRecord? meta,
@@ -110,7 +152,8 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         ItemParents parents,
         bool includeMediaSources,
         int? childCount = null,
-        int? specialFeatureCount = null)
+        int? specialFeatureCount = null,
+        IReadOnlyList<ItemCredit>? credits = null)
     {
         var (type, isFolder, mediaType) = ShapeFor(item.Kind);
         var name = !string.IsNullOrWhiteSpace(meta?.Title) ? meta!.Title! : item.Title;
@@ -157,6 +200,7 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             ImageTags = PrimaryImageTags(images),
             BackdropImageTags = BackdropTags(images),
             ProviderIds = ProviderIds(item),
+            People = People(credits),
             UserData = userData with { ItemId = item.PublicId },
             MediaSources = includeMediaSources && sources.Count > 0
                 ? sources.Select(source => MapMediaSource(item, source)).ToList()
@@ -289,6 +333,61 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             .ToList();
         return backdrops.Count > 0 ? backdrops : null;
     }
+
+    /// <summary>
+    /// Projects an item's credits into the client-facing people list: cast by billing order, then the crew
+    /// jobs in <see cref="CrewKinds"/> with the director first. A person appears once per kind, so someone
+    /// who both acted and directed is listed under each — as Jellyfin does — but two writing credits for
+    /// the same person collapse to the first. Null when nothing survives, which keeps the field off items
+    /// whose credits were never fetched.
+    /// </summary>
+    private static IReadOnlyList<BaseItemPerson>? People(IReadOnlyList<ItemCredit>? credits)
+    {
+        if (credits is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var cast = credits
+            .Where(entry => entry.Credit.Role == PersonRole.Cast)
+            .OrderBy(entry => entry.Credit.Order)
+            .DistinctBy(entry => entry.Person.Id)
+            .Take(MaxCastCredits)
+            .Select(entry => MapCredit(entry, "Actor", entry.Credit.Character));
+
+        var crew = credits
+            .Where(entry => entry.Credit.Role == PersonRole.Crew)
+            .Select(entry => (Entry: entry, Kind: CrewKind(entry.Credit.Job)))
+            .Where(pair => pair.Kind is not null)
+            .OrderBy(pair => CrewRank(pair.Kind!))
+            .ThenBy(pair => pair.Entry.Credit.Order)
+            .DistinctBy(pair => (pair.Entry.Person.Id, pair.Kind))
+            .Take(MaxCrewCredits)
+            .Select(pair => MapCredit(pair.Entry, pair.Kind!, pair.Entry.Credit.Job));
+
+        var people = cast.Concat(crew).ToList();
+        return people.Count > 0 ? people : null;
+    }
+
+    private static BaseItemPerson MapCredit(ItemCredit entry, string type, string? role) => new()
+    {
+        Id = JellyfinPersonService.PublicId(entry.Person),
+        Name = entry.Person.Name,
+        Type = type,
+        Role = string.IsNullOrWhiteSpace(role) ? null : role,
+        PrimaryImageTag = JellyfinPersonService.PrimaryTag(entry.Person),
+    };
+
+    private static string? CrewKind(string? job) =>
+        job is { Length: > 0 } && CrewKinds.TryGetValue(job, out var kind) ? kind : null;
+
+    // Directing before writing before producing: a client showing only the first names should show those.
+    private static int CrewRank(string kind) => kind switch
+    {
+        "Director" => 0,
+        "Writer" => 1,
+        _ => 2,
+    };
 
     private static IReadOnlyDictionary<string, string>? ProviderIds(MediaItem item)
     {

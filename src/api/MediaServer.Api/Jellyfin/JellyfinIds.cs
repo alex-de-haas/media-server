@@ -35,6 +35,13 @@ public static class JellyfinIds
     /// <summary>Per playable source; lets clients pin a specific version via <c>MediaSourceId</c>.</summary>
     public static string MediaSource(Guid mediaSourceId) => Hex($"source|{mediaSourceId:N}");
 
+    /// <summary>
+    /// A cast/crew member. Keyed by the provider identity rather than the database row, so the id a client
+    /// stored stays valid across a rescan exactly like item ids do.
+    /// </summary>
+    public static string Person(string provider, string providerId) =>
+        Hex($"person|{provider.ToLowerInvariant()}|{providerId}");
+
     private static string Hex(string key) =>
         Convert.ToHexStringLower(MD5.HashData(Encoding.UTF8.GetBytes(key)));
 }

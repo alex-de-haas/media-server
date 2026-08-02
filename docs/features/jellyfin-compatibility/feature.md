@@ -1,7 +1,7 @@
 # Jellyfin Compatibility
 
 Created: 2026-06-15
-Updated: 2026-07-30
+Updated: 2026-08-02
 
 ## Description
 
@@ -115,6 +115,10 @@ Several routes exist in two forms — a `/Users/{userId}/…` path form and a ne
 form taking `userId` as a query parameter. Both are served, because Jellyfin
 clients disagree about which to use and Infuse picks the newer one.
 
+`GET /Items` supports the `PersonIds` filter, which narrows the result to the
+titles those people are credited on. An id that resolves to nobody narrows it to
+nothing rather than being ignored.
+
 Anonymous discovery/auth:
 
 - `POST /Users/AuthenticateByName`
@@ -153,7 +157,11 @@ Library and browsing:
 - `GET /Items/{itemId}/LocalTrailers`
 - `GET /Items/{itemId}/SpecialFeatures`,
   `GET /Users/{userId}/Items/{itemId}/SpecialFeatures`
-- `GET /Persons`
+- `GET /Persons` — the people credited on something in the library, honoring
+  `SearchTerm`, `StartIndex` and `Limit`. It answers with an empty result rather
+  than 404 even when it matches nothing: Infuse's search fans out here first and
+  treats a 404 as a hard failure, so a title that *is* in the library would
+  never surface.
 - `GET /MediaSegments/{itemId}`
 - `GET|POST /DisplayPreferences/{displayPreferencesId}`
 
@@ -161,6 +169,13 @@ Artwork:
 
 - `GET|HEAD /Items/{itemId}/Images/{imageType}`
 - `GET|HEAD /Items/{itemId}/Images/{imageType}/{imageIndex}`
+
+The same routes serve a person's profile photo, addressed by the person id.
+Person and collection artwork are remote provider URLs with no `ImageAsset` row
+behind them, so they cache under deterministic file names that the periodic
+cache sweep recomputes; a person has one image, and a request for anything but
+`Primary` is answered with nothing rather than with the portrait in the wrong
+slot.
 
 Playback negotiation and streaming:
 
@@ -217,11 +232,40 @@ Playback state:
   first identified, so the only time a client-visible id changes is an operator
   remap to a different title; clients re-sync user data from the server on refresh.
 
+- A `Person` (cast or crew member) → a `Person` item with `LocationType`
+  `Virtual`. Its client-facing id is derived from the provider identity
+  (`tmdb` + the provider's person id), not from the database row, so it survives
+  a rescan like item ids do. A person is not part of any catalog and appears
+  only through `/Persons`, a direct id lookup, or an item's `People`.
+
 `BaseItemDto` carries `Id`, `Name`, `Type`, `ServerId`, parent
 links, `ProductionYear`/`PremiereDate`/`RunTimeTicks`, `Overview`/`Genres`/
 `OfficialRating`/`CommunityRating`, image tags, `UserData`
 (`PlaybackPositionTicks`, `Played`, `IsFavorite`, `PlayedPercentage`), and
 `MediaSources` when requested with `fields=MediaSources`.
+
+## People
+
+An item's credits reach the client as `BaseItemDto.People`, each entry carrying
+the person id, name, the Jellyfin person kind and the free-text role under it.
+
+- The field is emitted on the **item detail** responses only (`GET /Items/{id}`
+  and `GET /Users/{userId}/Items/{itemId}`). A list response would need a credit
+  query per row, and no observed client asks for `Fields=People` there.
+- Cast comes first in the provider's billing order with the portrayed character
+  as `Role`, then crew with the director first.
+- Only directing, writing and producing credits are emitted; the animators,
+  lighting artists and stunt performers that dominate a TMDb crew list are
+  dropped. `Role` keeps the provider's own job string, so a client shows
+  "Screenplay" rather than the kind it was mapped to.
+- Cast is capped at 30 entries and crew at 10. A person is listed once per kind,
+  so someone who both acted in and directed a title appears under each.
+- An item whose credits were never fetched carries no `People` field at all.
+
+The credits themselves are produced by the metadata pipeline (`PersonSyncService`
+and `PersonBackfillService` parse them out of the cached provider payload); this
+surface only projects what is already stored, and a title with no stored credits
+shows none.
 
 ## Item IDs and Server Version
 
@@ -321,4 +365,8 @@ coverage: MediaBrowser header parsing and token validation; credential auth
 success/failure/lockout/logout/revocation; DTO mapping for catalogs, movies,
 series, seasons, episodes, images, media sources, streams, and user data; item
 access authorization across users and catalogs; range request handling including
-invalid ranges and `HEAD`; playback thresholds, resume, and watched state.
+invalid ranges and `HEAD`; playback thresholds, resume, and watched state; the
+people projection — person id derivation, cast/crew ordering, the dropped crew
+jobs, the per-kind caps, people staying off list responses, person id lookup and
+photo serving, `/Persons` search and paging, the `PersonIds` filter, and the
+cache sweep keeping live person photos while reclaiming superseded ones.

@@ -121,6 +121,23 @@ public sealed record BaseItemDto
     public IReadOnlyDictionary<string, string>? ProviderIds { get; init; }
     public UserItemDataDto? UserData { get; init; }
     public IReadOnlyList<MediaSourceInfo>? MediaSources { get; init; }
+    // Cast and crew. Emitted on the item-detail responses only: a list response would need a credit
+    // query per row, and no client asks for the field there.
+    public IReadOnlyList<BaseItemPerson>? People { get; init; }
+}
+
+/// <summary>
+/// One credit on an item. <see cref="Type"/> is Jellyfin's person kind (<c>Actor</c>, <c>Director</c>,
+/// <c>Writer</c>, <c>Producer</c>) and <see cref="Role"/> the free-text detail under it — the portrayed
+/// character for a cast credit, the provider's own job string for a crew one.
+/// </summary>
+public sealed record BaseItemPerson
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public required string Type { get; init; }
+    public string? Role { get; init; }
+    public string? PrimaryImageTag { get; init; }
 }
 
 public sealed record MediaSourceInfo

@@ -110,7 +110,7 @@ public sealed class JellyfinCatalogArtworkTests : IDisposable
             AppDataDir = Path.GetTempPath(),
         };
         return new JellyfinImageService(
-            _db.Create(), new JellyfinCatalogArtwork(_db.Create()), new JellyfinCollectionService(_db.Create()),
+            _db.Create(), new JellyfinCatalogArtwork(_db.Create()), new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()),
             new StubHttpClientFactory(), hosty);
     }
 
