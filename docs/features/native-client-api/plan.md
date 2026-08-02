@@ -87,9 +87,12 @@ What this costs, stated plainly:
   presents itself as narrower is not an authorization boundary, and Core's own
   documentation says so.
 - **Core must be reachable by the client**, which the Jellyfin surface never
-  required. `GET /native/v1/server` therefore advertises `CorePublicOrigin`, which
-  `HostyOptions` already holds, so the client is configured with one URL — this
-  app's — and discovers where to pair.
+  required. The client is configured with one URL — this app's — and discovers
+  where to pair from `GET /native/v1/server/public`, which **must be anonymous**:
+  a client that has never paired holds no token, so putting `CorePublicOrigin`
+  behind the token would mean needing a token to find out where tokens come from.
+  The Jellyfin surface already splits exactly this way (`/System/Info/Public`
+  anonymous, `/System/Info` authenticated).
 - **`/api/*` is already served on the public port** (there is no per-port route
   filtering), so a native caller reaches it today by accident. This feature makes
   that deliberate and documents it, rather than leaving it as an artifact.
@@ -105,11 +108,18 @@ a Core credential, and redacted in logs.
 
 ## Target behavior
 
-### Server description
+### Server description, in two halves
 
-`GET /native/v1/server` — server name, version, the surface version, and the
-**capabilities this instance actually has**: whether a transcode engine is
-attached, whether packaging is available, whether recommendations and Trakt are
+`GET /native/v1/server/public` — **anonymous**, and deliberately thin: server
+name, the surface version, the app id, and `CorePublicOrigin` (which
+`HostyOptions` already holds). This is the bootstrap a never-paired client reads
+to learn where to run the device flow. It is served on a public endpoint to
+unauthenticated callers, so it carries nothing about the library, the users, or
+which optional integrations are configured — only what a client needs to begin.
+
+`GET /native/v1/server` — authenticated, and the full answer: the **capabilities
+this instance actually has**, including whether a transcode engine is attached,
+whether packaging is available, and whether recommendations and Trakt are
 configured. The client hides what the server cannot do rather than failing on
 use; the macOS operator surfaces key off the same answer.
 
@@ -214,8 +224,9 @@ and what remains is the URL-token half that Core cannot cover.
 
 - [ ] **`/native/v1` route group** with the version prefix and its own JSON
       options, beside `MapJellyfinEndpoints`, on the `Hosty` scheme.
-- [ ] **`GET /native/v1/server`** with the capability answers and
-      `CorePublicOrigin`, so one URL configures the client.
+- [ ] **`GET /native/v1/server/public`** (anonymous) with `CorePublicOrigin`, and
+      **`GET /native/v1/server`** (authenticated) with the capability answers, so
+      one URL configures the client and pairing can start from a cold install.
 - [ ] **Signed URL tokens** for media, segment, and image URLs: minted from an
       authenticated request, short-lived, scoped to one item, redacted in logs,
       and refused on any route outside that set.
@@ -224,7 +235,9 @@ and what remains is the URL-token half that Core cannot cover.
       [security.md](../security.md), with a test pinning which route groups are
       expected there.
 - [ ] **Unit tests**: URL-token minting, expiry, scope, and rejection on a
-      non-media route.
+      non-media route; and that `/server/public` answers without a token while
+      `/server` does not, with the public half carrying none of the capability
+      fields.
 
 ### Phase 2 — sync and items
 
@@ -271,9 +284,9 @@ and what remains is the URL-token half that Core cannot cover.
       [security.md](../security.md) with the Core device flow, the URL tokens, and
       what is now deliberately reachable on the public port.
 - [ ] **Index** — `node scripts/docs-index.mjs --fix`.
-- [ ] **Version bump** — new functionality, so a minor: `0.46.0` → `0.47.0` as of
-      today. The [Jellyfin people plan](../jellyfin-compatibility/plan.md) claims
-      the same number; whichever lands second takes the next one.
+- [ ] **Version bump** — new functionality, so a minor. `manifest.json` is the
+      source of truth and reads `0.47.0` today, making the target `0.48.0`; read
+      it again when the work lands, since releases in between move it.
 
 ## Open questions
 
@@ -283,7 +296,7 @@ and what remains is the URL-token half that Core cannot cover.
   monthly on a device with a remote for a keyboard. The plan assumes it is kept, in
   the Keychain — and the question goes away entirely if Core grows a device flow
   that names the app, filed as [platform request
-  7a](../hosty-platform-requests.md#7a-device-flow-that-names-the-app--high). That
+  7a](../hosty-platform-requests/feature.md#7a-device-flow-that-names-the-app--high). That
   request is not a blocker: the two-step chain works today, and the client's
   pairing code changes by one field if it lands.
 - **How much of the local mirror is worth it.** Full mirror (instant, offline

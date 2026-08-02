@@ -1,10 +1,14 @@
 # Hosty Platform Requests
 
-Status: Active (partially implemented — see per-item status)
 Created: 2026-06-15
 Updated: 2026-08-02
 
 ## Description
+
+This is a standing register, not a plan: it records the current state of what
+Media Server has asked the platform for, and each entry carries its own status.
+There is no document-level status — `feature.md` describes reality, and the
+reality here is the register itself.
 
 Capabilities Media Server needs that Hosty Core does not (yet) provide. Each entry
 is a small spec: the **problem** it solves for Media Server, a **proposed

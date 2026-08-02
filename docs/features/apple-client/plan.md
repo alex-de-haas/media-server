@@ -250,7 +250,7 @@ and can be reordered by appetite.
 - **Push notifications** — reminders and "your download is ready" want APNs, which
   needs a push certificate and a sender. Whether that belongs to this app or to
   Hosty Core is a platform question, not a client one; see [Hosty platform
-  requests](../hosty-platform-requests.md).
+  requests](../hosty-platform-requests/feature.md).
 - **Ingest review on iPad** — excluded above because it is operator work, but it
   is the one operator surface that is genuinely pleasant on a couch. Reconsider
   after Phase 5.

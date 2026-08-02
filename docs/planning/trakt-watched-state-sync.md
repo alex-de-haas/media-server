@@ -160,7 +160,7 @@ exists would be speculative structure with no consumer.
 **Token storage (settled 2026-07-22).** Per-user OAuth tokens live in the Hosty
 Core app secrets store, which shipped in Core 0.60.0
 ([feature](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/app-secrets-store.md);
-[platform request #15](../features/hosty-platform-requests.md)). Media Server
+[platform request #15](../features/hosty-platform-requests/feature.md)). Media Server
 stores one secret per connection through `HostySecretsClient`
 (`HostySdk.App` 0.3.0) and keeps only the key reference in SQLite. There is no
 app-side credential encryption: Core holds the values in
@@ -1104,7 +1104,7 @@ Live Trakt verification uses a dedicated non-production application and account:
 
 - [Originating idea](../ideas/trakt-watched-state-sync.md)
 - [Watch-history calendar](../features/watch-history-calendar/feature.md)
-- [Hosty platform request #15: Core-managed app secrets store](../features/hosty-platform-requests.md)
+- [Hosty platform request #15: Core-managed app secrets store](../features/hosty-platform-requests/feature.md)
 - [docker-host idea: App Secrets Store](https://github.com/alex-de-haas/docker-host/blob/main/docs/ideas/app-secrets-store.md)
 - [Jellyfin compatibility](../features/jellyfin-compatibility/feature.md)
 - [Storage and data](../features/storage-and-data/feature.md)
