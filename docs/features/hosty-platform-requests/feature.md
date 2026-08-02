@@ -1,10 +1,14 @@
 # Hosty Platform Requests
 
-Status: Active (partially implemented — see per-item status)
 Created: 2026-06-15
-Updated: 2026-07-27
+Updated: 2026-08-02
 
 ## Description
+
+This is a standing register, not a plan: it records the current state of what
+Media Server has asked the platform for, and each entry carries its own status.
+There is no document-level status — `feature.md` describes reality, and the
+reality here is the register itself.
 
 Capabilities Media Server needs that Hosty Core does not (yet) provide. Each entry
 is a small spec: the **problem** it solves for Media Server, a **proposed
@@ -223,29 +227,108 @@ valid until the next validation point.
 - At-least-once delivery with a poll/reconcile fallback for missed events.
 - Covers assign / unassign / disable / email-change.
 
-## 7. Reusable native-client auth primitive — Medium
+## 7. Reusable native-client auth primitive — Implemented (2026-07-31), one gap open
 
-**Problem.** Clients that cannot perform the app-code flow (Infuse) force every app
-to hand-roll credential storage, opaque tokens, brute-force protection, and lockout.
+**Status.** Implemented in Hosty Core as **access tokens**: a device authorization
+flow (`POST /api/auth/device/code` → `POST /api/auth/device/token`) approved in
+Shell → Settings → Access tokens, alongside manually created credentials. A
+bearer-presented Core session is deliberately CSRF-exempt, so a browserless client
+can then run `POST /api/auth/apps/authorize` → `POST /api/auth/apps/token` and hold
+an app identity token that the SDK's `HostyAuthenticationHandler` already accepts.
 
-**Proposed contract.** A Hosty primitive for native-client pairing bound to a Hosty
-user — e.g. short-lived pairing codes or per-device tokens issued by Core, with
-built-in rate limiting and temporary/permanent lockout — that the app exchanges for
-its own session.
+The PIN and lockout machinery this item originally asked for turned out to be
+unnecessary — the app writes no authentication code at all. See
+[native-client-api](native-client-api/plan.md#authentication-hostys-device-flow-not-one-of-our-own).
 
-**How Media Server uses it.** Delegate PIN/lockout to the primitive instead of
-maintaining argon2id PINs and failure counters locally.
+### 7a. Device flow that names the app — High
 
-**Workaround.** App-owned credential + token store with local argon2id hashing,
-rate limiting, and temporary/permanent lockout (already specced in
-[Security](security.md)).
+**Problem.** Pairing is two flows, and the first one earns the wrong credential.
+The device receives a **Core-wide** access token and only then exchanges it for an
+app-scoped grant. It cannot discard the Core token afterwards, because the app
+grant is 7 days idle / 30 days absolute while the access token is 90 days idle
+with no absolute expiry — so the long-lived credential is the Core-wide one, and
+Core has no scopes to narrow it. An Apple TV in a living room ends up holding a
+credential that can install apps, read every app's secrets, and manage users if
+its owner is a `host.admin`. Nothing in the app can mitigate that; a client that
+presents itself as narrower than its credential is not an authorization boundary,
+as Core's own documentation says.
+
+**Proposed contract.** One optional field, and a grant issued directly:
+
+```jsonc
+POST /api/auth/device/code
+{ "label": "Living room Apple TV", "appId": "com.haas.media-server" }  // appId optional
+```
+
+- **Absent `appId` → today's behavior, unchanged.** The request is host-wide and
+  yields a Core access token, exactly as the CLI and the Cardputer console use it.
+- **Present `appId`** → the pending request is app-scoped. Core validates the app
+  exists at *creation* (fail while a machine is waiting, not while a human is),
+  and `GET /api/auth/device/requests` and the Shell approval row say **which app**
+  is being asked for — "Living room Apple TV wants access to Media Server", never
+  an unqualified "wants access".
+- On approve, instead of `IssueAsync(..., AccessTokenKinds.Device, ...)`, Core
+  mints an app grant through `AppIdentityService` and hands its token to the
+  collecting poll. The device never holds a Core-wide credential at any point.
+
+Three details decide whether it is correct, and each already has a precedent in
+Core:
+
+- **`issuedVia = AppGrantIssuedVia.Device`**, a third constant beside `Code` and
+  `CliDiagnostic`. `AuthLifetimes.ForGrant` already branches on this value.
+- **`authorizingSessionId: null`.** A device grant must not be parented to the
+  approver's browser session, or logging out of Shell would kill the television.
+  `CreateLaunchTokenAsync` already passes null for the same reason.
+- **An idle-only window** — mirror `AccessTokenIdle` (90 days) with the absolute
+  expiry set to the maximum, the same shape access tokens already use, under
+  `HOSTY_AUTH_DEVICE_GRANT_IDLE_HOURS`. A credential in a living room should die
+  of disuse, not of the calendar; a 30-day absolute expiry means re-pairing
+  monthly with a remote for a keyboard.
+
+**Revocation is the part that is not free.** Device-issued grants live in
+`AppSessionGrantStore`, not in the `AuthSessionRecord` list the Access tokens tab
+renders, so without new work a lost Apple TV has no revoke button — which would
+remove the main safety property the flow exists for. The tab needs to list and
+revoke them beside access tokens.
+
+**How Media Server uses it.** The client pairs once and holds exactly one
+credential, scoped to this app, revocable in Shell, renewed by use. The
+`native-client-api` plan's open question about where the Core access token lives
+disappears with it.
+
+**Compatibility with the existing consumers.** The guarantee that matters is
+structural, not per-client: **a request without `appId` takes the path it takes
+today, and the change is additive on both the request and the response.** Any
+current or in-flight consumer is then unaffected by construction.
+
+Checked against the code:
+
+- `hosty login` (CLI) is on `main` and rides the host-wide path unchanged.
+- The endpoint already binds `DeviceAuthorizationCodeRequest?` as nullable and
+  reads `input?.Label`, so an added optional field cannot 400 an older caller.
+- The **Cardputer console is not on `main`** — it lives on the
+  `feat/cardputer-firmware` branch and is still being written. Its device-code
+  parser reads the response key by key and ignores unknown keys, requiring only
+  `deviceCode`, `userCode` and a positive `expiresInSeconds`, and it never sends
+  `appId` — so as that branch stands it needs no change. Because it is a moving
+  target, the additive guarantee above is what protects it, not this reading of
+  it; whoever implements 7a should re-check the branch at that point.
+- The per-source pending cap (`MaxPendingPerSource = 5`) is shared between both
+  kinds of request. That is fine, and worth stating rather than discovering.
+
+**Workaround.** The two-step chain above, with the Core access token kept in the
+device's keychain and revoked from Shell if the device is lost.
 
 **Acceptance criteria.**
-- Per-user/per-device credentials with revocation.
-- Configurable lockout (temporary + permanent) shared across apps.
-- Tokens hashed at rest.
-- *Confidence note:* may belong in the app rather than the platform; raise only if
-  the pattern recurs across apps.
+- A device flow carrying `appId` yields an app identity token and never a
+  Core-wide credential.
+- Assignment is enforced at approval, and revalidation keeps re-checking it.
+- The approver sees which app a pending request names.
+- The grant survives the approver logging out of Shell.
+- The grant is listable and revocable in Shell, and revoking it takes effect at
+  once.
+- A request without `appId` behaves exactly as before, proven by the Cardputer
+  console and `hosty login` continuing to pair unchanged.
 
 ## 8. Raw L4 (TCP/UDP) port allocation and forwarding declaration — Implemented (2026-06-17)
 

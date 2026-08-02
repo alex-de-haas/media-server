@@ -80,7 +80,7 @@ Confirmed for v1 (changes require updating this section and `docs/root.md`).
 
 The specs were written defensively with workarounds because Core lacked several
 capabilities. Most blockers are now implemented. This table is authoritative;
-`hosty-platform-requests.md` should be updated to match (see §8).
+`hosty-platform-requests/feature.md` should be updated to match (see §8).
 
 | Capability | Status | Concrete contract | Consequence for us |
 | --- | --- | --- | --- |
@@ -206,7 +206,7 @@ the internal management surface from the public Jellyfin surface.
 
 > ✅ Resolved in M0 (verified against `docker-host` 2026-06-17): `web` discovers
 > the **internal** `api` URL via Core's intra-app service discovery
-> ([platform request #14](hosty-platform-requests.md)). Because `web` declares
+> ([platform request #14](hosty-platform-requests/feature.md)). Because `web` declares
 > `dependsOn: ["api"]`, Core injects `HOSTY_SERVICE_API_URL` into `web`, resolving
 > to `api`'s first non-public port (`internal`). Under `docker` this is
 > `http://api:8080` over a per-app user network (service-name DNS; the internal
@@ -570,7 +570,7 @@ M5a's entities. M6 (MCP/AI) remains future.
    Core). Dependency: the Core change must land before M4 docker delivery.
 2. **`web` → `api` internal URL — resolved (2026-06-17).** Core injects
    `HOSTY_SERVICE_API_URL` into `web` from its `dependsOn: ["api"]` (intra-app
-   service discovery, [request #14](hosty-platform-requests.md)); verified against
+   service discovery, [request #14](hosty-platform-requests/feature.md)); verified against
    `docker-host`. No fallback needed.
 3. **Backup consistency without a quiesce hook** — WAL + periodic online-backup snapshot.
 4. **Cloudflare tunnel for `jellyfin` Range streaming** — validate throughput and
@@ -580,7 +580,7 @@ M5a's entities. M6 (MCP/AI) remains future.
 
 ## 8. Documentation Reconciliation (done in this PR)
 
-- `hosty-platform-requests.md`: #1, #2, #3, #5 marked **Implemented**; #8 marked
+- `hosty-platform-requests/feature.md`: #1, #2, #3, #5 marked **Implemented**; #8 marked
   **Planned** (raw-port extension); #4, #6, #10, #11 remain outstanding.
 - `hosty-runtime-app.md`, `build-and-deployment.md`, `root.md`: `docker` is the v1
   delivery target (no longer deferred); the sample manifest uses the array-based

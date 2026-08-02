@@ -81,7 +81,7 @@ The two services differ, and the difference is a property of what they touch:
 Dropping privileges in `api` therefore needs a uid/gid or supplementary-group
 contract from Hosty Core, which does not exist today — Core sets no `--user` and
 injects no uid. Recorded as a platform request (see
-[Hosty platform requests](hosty-platform-requests.md), item 16). Until it lands, a
+[Hosty platform requests](hosty-platform-requests/feature.md), item 16). Until it lands, a
 non-root `api` would fail to organize, ingest or mux on any catalog root it does
 not happen to own.
 

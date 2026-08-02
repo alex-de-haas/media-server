@@ -71,7 +71,7 @@ VAAPI needs `--device /dev/dri`. Hosty Core already passes manifest `devices` th
 install-review gated), so the engine's manifest just declares `"devices": ["/dev/dri"]`. App containers run
 as root by default (Core sets no `--user`), so the render node is accessible without `--group-add`. A
 non-root container would need a `group_add: video|render` capability — the only *potential* new platform
-request, and only if we drop root. See [Hosty platform requests](../features/hosty-platform-requests.md).
+request, and only if we drop root. See [Hosty platform requests](../features/hosty-platform-requests/feature.md).
 
 ### 2. File hand-off — read input, write output on one filesystem
 
@@ -134,5 +134,5 @@ the output appears in the catalog with no cross-container copy.
 ## Relationship to other work
 
 - **[Torrent engine app](torrent-engine-app.md)** — the structural template; this app is a deliberate mirror.
-- **[Hosty platform requests](../features/hosty-platform-requests.md)** — the `devices` capability this
+- **[Hosty platform requests](../features/hosty-platform-requests/feature.md)** — the `devices` capability this
   relies on is already implemented; only a non-root `group_add` and NVIDIA GPU passthrough would be new.
