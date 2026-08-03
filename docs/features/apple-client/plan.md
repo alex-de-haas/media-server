@@ -158,30 +158,38 @@ Each gets its own folder, its own `plan.md`, and its own PR under the
 one-PR-per-feature rule. They are listed here with their boundary, not their
 deliverables.
 
-1. **`native-client-api`** *(server)* — the `/native/v1` surface: Core's own
-   device authorization flow in place of the Jellyfin PIN credential; cursor-based
-   delta sync over items and tombstones; a DTO that carries catalogs, named
-   editions, sidecar tracks *with delivery URLs*, chapters, segments, people ids,
-   collection membership and probe provenance; client capability negotiation
-   (replacing the `EnableDirectPlay` flags the Jellyfin surface parses and
-   ignores); per-user track preferences scoped to an item or a series; and richer
-   playback sessions feeding `PlaybackHistoryEntries`. Generated OpenAPI, so the
-   Swift client cannot drift from the server.
-2. **`remux-streaming`** *(server + `transcode-engine`)* — the packaging session
-   described in decision 2.
-3. **`apple-client-core`** — the shared `MediaKit` package (domain, networking,
-   local SQLite mirror, playback), pairing and profile storage in the Keychain,
-   library browsing, the version picker, playback with track selection and
-   resume. The first shippable app on all four platforms.
-4. **`apple-client-discovery`** — recommendations with provenance, release
+The split below is deliberately finer than the first draft, which put the whole
+server surface in one feature and all four platforms in the next. Each slice here
+still delivers something observable on its own — the rule is one PR per feature,
+not one PR per layer.
+
+1. **`native-client-api`** *(server)* — everything up to **browsing**: Core's own
+   device authorization flow in place of the Jellyfin PIN credential, the public
+   binding's allowlist, delta sync over a monotonic change log, the item DTO
+   (catalogs, named editions, sidecar tracks *with delivery URLs*, chapters, people
+   ids, collection membership, probe provenance), and thin routes for
+   recommendations, the calendar, reminders, people, history and the realtime
+   stream. Generated OpenAPI, so the Swift client cannot drift from the server.
+2. **`native-playback`** *(server)* — capability negotiation, per-user track
+   preferences, and playback sessions feeding `PlaybackHistoryEntries`. Split from
+   the above because together they were one unreviewable PR.
+3. **`remux-streaming`** *(server + `transcode-engine`)* — the packaging described
+   in decision 2, with the acceptance gate below.
+4. **`apple-client-core`** — the shared `MediaKit` package (domain, networking,
+   local SQLite mirror, playback) and the **first tvOS app**: pairing, browsing,
+   the version picker, track selection, play/resume/watched. The first release
+   worth using.
+5. **`apple-client-shells`** — the macOS, iOS and iPadOS apps over the same
+   `MediaKit`.
+6. **`apple-client-discovery`** — recommendations with provenance, release
    calendar and reminders, people pages, the watch diary, and the title-preview
    surface for titles the instance does not hold.
-5. **`apple-client-offline`** *(iOS/iPadOS)* — pick a quality, the server submits
+7. **`apple-client-offline`** *(iOS/iPadOS)* — pick a quality, the server submits
    a transcode job, a notification when it is ready, background download, smart
    season retention, offline progress that syncs back.
-6. **`apple-client-macos-operator`** — torrents, the convert/merge dialog, the
+8. **`apple-client-macos-operator`** — torrents, the convert/merge dialog, the
    transcode queue, the ingest review queue, and the storage view.
-7. **`apple-client-platform`** — Top Shelf, widgets, Live Activities, App
+9. **`apple-client-platform`** — Top Shelf, widgets, Live Activities, App
    Intents/Shortcuts, Spotlight, Handoff, SharePlay, and the Watch remote.
 
 ## Deliverables
@@ -226,6 +234,11 @@ throwaway spike, on real hardware and real files, before any surface is designed
       several concurrent clients, cancel/restart/cleanup, multi-audio and sidecar
       audio and subtitles, DV profiles 5 and 8, E-AC-3/Atmos, and the same tooling
       running inside the Linux `transcode-engine` container rather than on macOS.
+      One requirement is easy to miss: **Dolby Vision must be reproduced without
+      the elementary-stream detour**. The spike got DV only by extracting a raw
+      `.hevc` and re-importing it with a hand-set frame rate — the very path it
+      then recorded as a liability — so a result obtained that way does not
+      validate a pipeline that will not use it.
 - [ ] **Audio passthrough on the receiver** — the pass packaged a single AC-3
       track and never exercised E-AC-3/Atmos passthrough, which is the half of
       "picture and sound" still unanswered.
