@@ -2,7 +2,7 @@
 
 Status: Draft
 Created: 2026-08-02
-Updated: 2026-08-02
+Updated: 2026-08-03
 
 > **Umbrella epic.** This document owns the decisions, the platform split, and the
 > playback spike that everything else depends on. The features it spans keep their
@@ -54,8 +54,9 @@ decoder on an Apple TV cannot match.
 
 What it costs, accepted deliberately:
 
-- **DTS, DTS-HD and TrueHD are not supported in v1.** They are rare in this
-  library, and neither AVFoundation nor HLS carries them. A source whose *only*
+- **DTS, DTS-HD and TrueHD are not supported in v1.** Neither AVFoundation nor
+  HLS carries them, and the spike found none: every audio track across both
+  sampled files is AC-3 or E-AC-3. A source whose *only*
   audio is one of those is not playable by this client; it stays playable in
   Infuse. The cheap escape hatch, if it turns out to matter, is an audio-only
   re-encode to E-AC-3 while the video is copied — one cheap pass, no HDR risk —
@@ -63,7 +64,8 @@ What it costs, accepted deliberately:
 - **PGS and VobSub subtitles cannot be rendered.** HLS carries WebVTT and IMSC1;
   bitmap subtitles need either an OCR conversion or a custom overlay above
   `AVPlayerLayer`. Out of scope for v1: text subtitles (SRT/ASS→WebVTT) cover the
-  sidecars this library actually has.
+  sidecars this library actually has, and the spike found every subtitle track in
+  both sampled files to be SubRip.
 
 ### 2. The container gap is closed by remux, not by a second decoder
 
@@ -87,7 +89,10 @@ not a transcoding one, and a stream copy solves it.
   sandbox → user access.
 
 This is the highest-risk decision in the epic, which is why the spike below comes
-before anything else is built.
+before anything else is built. Its local pass has since confirmed the mechanism —
+stream copy to HLS/fMP4, played by AVFoundation — at the cost of Dolby Vision
+signalling, which does not survive the copy. See [the
+results](#results-of-the-local-pass-2026-08-03); the Apple TV half is still open.
 
 ### 3. Distribution: local builds and TestFlight
 
@@ -170,9 +175,11 @@ The umbrella's own work. Everything else belongs to the features above.
 The whole epic rests on decision 2 being true. This phase answers it with a
 throwaway spike, on real hardware and real files, before any surface is designed.
 
-- [ ] **Packaging prototype** — a script (not the engine, not yet) that turns a
-      real 4K HDR MKV remux from this library into an HLS/fMP4 playlist by stream
-      copy, and a second one for a 1080p H.264 + AC-3 file.
+- [x] **Packaging prototype** — a script (not the engine, not yet) that turns real
+      MKV remuxes from this library into an HLS/fMP4 playlist by stream copy.
+      Done on a 4K Dolby Vision remux and a 1080p HEVC HDR10 one; see the results
+      below. No H.264 source was exercised — this library's samples are HEVC, and
+      H.264 is the case least at risk.
 - [ ] **Playback on an Apple TV 4K** of both, confirming: picture (Dolby Vision
       and HDR10 flagged correctly, not tone-mapped to SDR), E-AC-3/Atmos reaching
       the receiver as passthrough, seeking that lands where it is asked, and no
@@ -185,10 +192,62 @@ throwaway spike, on real hardware and real files, before any surface is designed
 - [ ] **Session lifecycle answer** — what a seek costs, what is cached and for how
       long, what cleans up after a client that vanishes mid-file, and how many
       concurrent sessions one engine container sustains.
+- [ ] **Dolby Vision decision** — the local pass showed DV signalling is lost in
+      packaging (below). Audit the library for profile 5, where the loss stops
+      being graceful, and then either accept HDR10 as the packaged picture or find
+      a muxer that writes `dvvC`.
+- [ ] **Multi-track packaging** — the local pass packaged one audio track. HLS
+      alternate renditions for the remaining audio tracks, and SubRip → WebVTT for
+      subtitles, are still unproven.
 - [ ] **Written outcome** in this document: the design that survived, or the
       decision to fall back (candidates, in order: pre-packaged fMP4 as a second
       `MediaSource` at the cost of disk; a second decoder stack after all;
       accepting that MKV plays only in Infuse).
+
+#### Results of the local pass (2026-08-03)
+
+Run on macOS against two files from the dev library: `The Mandalorian and Grogu
+(2026).mkv` (25 GB, 2160p HEVC, 26.5 Mbit/s, 6 audio + 7 subtitle tracks) and
+`TRON Legacy (2010).mkv` (6.7 GB, 1080p HEVC HDR10, 7.7 Mbit/s).
+
+**The approach holds.** Both packaged to HLS/fMP4 by stream copy and both played
+through AVFoundation: `AVPlayerItem` reached `readyToPlay`, resolved 3840×2160 and
+1920×1080, and the playhead advanced 1.46 s over 1.5 s of wall time — frames
+moving, not merely an item reporting itself ready.
+
+**Packaging is effectively free**, as a stream copy should be: 30 s of the 4K
+26.5 Mbit/s source packaged in 0.11 s, 30 s of the 1080p one in 0.39 s. Nothing
+decodes.
+
+**What the probes settled**, each removing a risk this plan had only assumed:
+
+- The 4K source is **Dolby Vision profile 8 with `bl_compat=1`** — single-layer,
+  HDR10-compatible base. Not profile 7, which Apple cannot play at all.
+- Every audio track across both files is **AC-3 or E-AC-3**. No DTS, no TrueHD, so
+  the codec exclusion in decision 1 costs nothing on this content.
+- Every subtitle track is **SubRip**. No PGS, so the bitmap-subtitle exclusion
+  costs nothing either.
+- Correct output tagging matters and was verified in the boxes: video lands as
+  `hvc1`/`hvcC` (Apple rejects HEVC tagged `hev1`) and audio as `ac-3`/`dac3`.
+
+**Two traps found, both worth keeping:**
+
+- The 4K file's MJPEG cover-art track is **not flagged `attached_pic`**, so a bare
+  `-map 0:v` packages the cover as a second video rendition. The video stream must
+  be mapped explicitly as `0:v:0`.
+- **Dolby Vision signalling does not survive the copy.** The packaged output
+  carries no `dvvC`/`dvcC` box and `ffprobe` reports no DOVI side data on the
+  copied stream. It is not the HLS muxer — a plain fMP4 copy loses it too — and
+  ffmpeg 8.1.2 exposes no muxer option for it. The picture therefore plays as
+  **HDR10, not Dolby Vision**. On profile 8.1 that is graceful, because the base
+  layer is HDR10 by definition; on a profile 5 source it would not be, which is
+  what the audit deliverable above is for.
+
+**What this pass did not establish.** It ran on macOS AVFoundation, not on an
+Apple TV: container and codec acceptance carry over, but DV engagement, Atmos
+passthrough, and 4K decode headroom do not. It used 30-second slices from a
+keyframe, so it says nothing about seeking, full-length playback, keyframe
+indexing, or session lifecycle — the deliverables above that remain unchecked.
 
 ### Phase 0.1 — foundations
 
