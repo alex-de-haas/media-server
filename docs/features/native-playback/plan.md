@@ -1,6 +1,6 @@
 # Native Playback — plan
 
-Status: Draft
+Status: Ready
 Created: 2026-08-03
 Updated: 2026-08-03
 
@@ -98,21 +98,33 @@ One PR.
 - [ ] **Version bump** — new functionality, so a minor; read `manifest.json` when
       the work lands.
 
-## Open questions
+## Settled before Ready
 
-- **Does resolution need to know about the packager's readiness?** A `remux` answer
-  is a promise that a URL will serve something. Whether it may be returned before
-  the packaging has started — and what the client does while it has not — is a
-  contract detail that only becomes answerable once `remux-streaming` has measured
-  its own cold start.
-- **How much of the capability profile is worth modelling.** A full profile is
-  large and mostly constant per platform; a coarse device class would be smaller
-  and would age worse. The spike suggests the interesting axes are few — container,
-  HDR form, audio codec and passthrough — but that is from two files.
-- **Sidecar audio at playback time.** The API promises the file is fetchable; what
-  the client does with it depends on the packaging answer, so the resolution
-  response may eventually need to say whether a sidecar was folded into the
-  repackaged output or must be played alongside it.
+- **Whether resolution knows the packager's readiness** — decided: `remux` is
+  returned **only when the server reports packaging as available**, which
+  `GET /native/v1/server` already answers. What happens between the answer and the
+  first byte — cold start, queueing, cancellation — belongs to `remux-streaming`
+  and is deliberately invisible here: the client follows a URL, and this contract
+  does not describe how that URL becomes ready.
+- **How much of the capability profile to model** — decided: the four axes the
+  spike showed actually matter — **container, HDR form, audio codec, passthrough**
+  — and nothing else in v1. The profile is a request body, not a stored entity, so
+  adding an axis later is additive and costs no migration. A coarse device class is
+  rejected: it ages badly and cannot express the one distinction the spike proved
+  is real, which is whether a client engages Dolby Vision.
+- **Sidecar audio at playback time** — decided for v1: the resolution response
+  says nothing about sidecars, and a client fetches them as separate files. If
+  `remux-streaming` later folds them into its output, the response gains a field
+  saying so; that is additive and does not block this feature.
+
+## Accepted residual risks
+
+- A client that misreports its capabilities gets media it cannot play. There is no
+  server-side verification of a capability profile, and inventing one would be
+  guesswork about a device the server cannot see.
+- Serving `dvh1` to a client that claimed Dolby Vision support and does not have it
+  fails at the device, not at the API. That is the cost of trusting the profile,
+  and the fallback is the cross-compatible form, which the user can force.
 
 ## Verification steps
 

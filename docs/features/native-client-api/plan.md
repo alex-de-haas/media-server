@@ -1,8 +1,8 @@
 # Native Client API — plan
 
-Status: Draft
+Status: Ready
 Created: 2026-08-02
-Updated: 2026-08-02
+Updated: 2026-08-03
 
 > Part of the [Apple client](../apple-client/plan.md) epic. This feature ends where
 > the client can **browse**: pairing, server discovery, delta sync, the item
@@ -285,15 +285,17 @@ and what remains is the URL-token half that Core cannot cover.
       watermark + last sequence, idempotent pages, bounded initial snapshot, and
       `resetRequired` past the 30-day retention.
 - [ ] **Retention pruning** for the log.
-- [ ] **Item projection** from `LibraryReadService` with the fields listed above.
+- [ ] **Item projection** from `LibraryReadService` with the fields listed above,
+      carrying chapters only where the probe recorded them.
 - [ ] **Sidecar delivery endpoint** resolving external paths through
       `ICatalogPathSandbox`, serving audio and subtitle sidecars alike.
 - [ ] **Image URLs** in the DTO, served by the existing image service with ETag
       and cache headers.
 - [ ] **Unit tests**: cursor round-trips and idempotent replay, a purged item
       reaching the client, `resetRequired` past retention, a mutation and its log
-      row committing atomically, sandbox containment on sidecar delivery, and the
-      projection's parity with what the web detail page shows.
+      row committing atomically, sandbox containment on sidecar delivery, a
+      header-reader-probed source yielding an empty chapter list rather than a
+      wrong one, and the projection's parity with what the web detail page shows.
 
 ### Phase 3 — the client-facing surfaces
 
@@ -324,24 +326,35 @@ and what remains is the URL-token half that Core cannot cover.
       source of truth and reads `0.47.0` today, making the target `0.48.0`; read
       it again when the work lands, since releases in between move it.
 
-## Open questions
+## Settled before Ready
 
-- **How much of the local mirror is worth it.** Full mirror (instant, offline
-  browsing, more client complexity) versus cache-on-demand. The plan assumes full;
-  the sync contract supports either, so it can be settled in the client.
-- **Sidecar audio delivery is new ground.** Subtitles have a client convention;
-  external audio does not, because no existing client can use it. What the client
-  does with the URL depends on the packaging answer from the
-  [spike](../apple-client/plan.md#phase-0--the-playback-spike) — folded into the
-  repackaged output as an extra track, or fetched separately and played in sync.
-  Until that is known, the API only promises the file is fetchable.
-- **Admin operations, without scopes to narrow them.** Operator routes are off the
-  public binding, so the exposure is bounded by the network rather than by the
-  token. What remains is that an administrator's token, used from any device on the
-  local network, can reach them — Core has no scopes to say otherwise, and
-  narrowing it in the client is presentation, not authorization.
-- **Chapters.** The probe records them "where available", and the header reader
-  path may not. Worth checking on real data before the DTO promises them.
+The questions this plan carried are closed. Each is recorded with its answer
+rather than deleted, because the reasoning is what a reviewer needs later.
+
+- **How much of the local mirror is worth it** — not this feature's question. The
+  sync contract supports a full mirror and a cache-on-demand client equally, so it
+  belongs to `apple-client-core`. Moved there rather than answered here.
+- **Sidecar audio delivery** — decided: **this API promises only that the file is
+  fetchable.** Whether a client folds it into a repackaged output or plays it
+  alongside is a playback concern, and it is recorded as an open question in
+  [`native-playback`](../native-playback/plan.md), which is where it can actually
+  be answered.
+- **Admin operations without scopes** — answered by the allowlist. Operator routes
+  are off the public binding, so exposure is bounded by the network. The residual
+  risk is stated and **accepted**: an administrator's token, used from a device on
+  the local network, reaches operator routes, because Core has no scopes and
+  narrowing it in a client is presentation rather than authorization.
+- **Chapters** — resolved into a deliverable rather than a question: the DTO
+  carries chapters **only where the probe actually recorded them**, and the
+  projection test asserts a header-reader-probed source yields an empty list rather
+  than a wrong one.
+
+## Accepted residual risks
+
+- An administrator's app identity token can reach operator routes from any device
+  on the local network. Bounded by the allowlist, not by scopes.
+- A `resetRequired` after 30 days of a client being offline costs that client a
+  full re-snapshot. Deliberate: the alternative is unbounded log retention.
 
 ## Verification steps
 
