@@ -89,10 +89,11 @@ not a transcoding one, and a stream copy solves it.
   sandbox → user access.
 
 This was the highest-risk decision in the epic, which is why the spike below came
-before anything else was built. **It has since been confirmed on an Apple TV 4K**:
-stream copy to HLS/fMP4 plays 4K HEVC with no stalls and no dropped frames. The
-one measured cost is Dolby Vision, which does not survive the copy and plays as
-HDR10. See [the results](#results-of-the-local-pass-2026-08-03) and [the device
+before anything else was built. **The playback half is confirmed on an Apple TV
+4K**: stream copy to HLS/fMP4 plays 4K HEVC with no stalls and no dropped frames.
+**The dynamic-range half is not** — HDR is negotiated by a master playlist that
+tvOS currently refuses to open, so the device plays 4K in SDR today. See [the
+results](#results-of-the-local-pass-2026-08-03) and [the device
 pass](#device-pass-on-an-apple-tv-4k-2026-08-03).
 
 ### 3. Distribution: local builds and TestFlight
@@ -182,9 +183,17 @@ throwaway spike, on real hardware and real files, before any surface is designed
       below. No H.264 source was exercised — this library's samples are HEVC, and
       H.264 is the case least at risk.
 - [x] **Playback on an Apple TV 4K** — both packages played on the device
-      (tvOS 26.5): real HDR, accurate seeking, zero stalls and zero dropped
-      frames. Picture is HDR10 and **not** Dolby Vision, confirming on hardware
-      what the missing `dvvC` box predicted. See the device pass below.
+      (tvOS 26.5) with accurate seeking, zero stalls and zero dropped frames,
+      including 4K HEVC at 26.5 Mbit/s. See the device pass below.
+- [ ] **Get HDR working on the device at all.** Dynamic range is negotiated by the
+      master playlist's `VIDEO-RANGE`, and any master playlist currently yields
+      `Cannot open` on tvOS while the same variant played directly works. Until
+      that is resolved the client can play 4K, but only in SDR. Try
+      `#EXT-X-PLAYLIST-TYPE:VOD` and `#EXT-X-MEDIA-SEQUENCE:0` on the variant,
+      then Apple's `mediastreamvalidator`.
+- [ ] **Full-screen presentation is a requirement, not a preference** — record it
+      wherever the client's playback surface is specified. An `AVPlayer` embedded
+      under any UI composites into the SDR layer: dark picture, no display switch.
 - [ ] **Audio passthrough on the receiver** — the pass packaged a single AC-3
       track and never exercised E-AC-3/Atmos passthrough, which is the half of
       "picture and sound" still unanswered.
@@ -203,18 +212,19 @@ throwaway spike, on real hardware and real files, before any surface is designed
 - [ ] **Session lifecycle answer** — what a seek costs, what is cached and for how
       long, what cleans up after a client that vanishes mid-file, and how many
       concurrent sessions one engine container sustains.
-- [ ] **Dolby Vision: try a muxer that signals it.** What the spike proved is that
-      *this* toolchain drops the signalling, not that the format is out of reach —
-      the RPU metadata rides inside the HEVC bitstream and a stream copy keeps it,
-      while HLS has a documented way to declare it (`dvvC` in the init segment plus
-      `SUPPLEMENTAL-CODECS` on the variant, which needs the master playlist above).
-      Candidates in order: GPAC `MP4Box`, Bento4. Apple's `mediafilesegmenter`
-      would also do it but is macOS-only, which the Linux engine container rules
-      out.
-- [ ] **Dolby Vision: decide, once that is answered.** Either DV is signalled and
-      the question closes, or HDR10 is accepted as the packaged picture — in which
-      case audit the library for profile 5, where the degradation stops being
-      graceful the way it is for the 8.1 sample.
+- [x] **Dolby Vision: find a muxer that signals it.** GPAC `MP4Box` writes `dvvC`
+      and preserves every RPU, and the Apple TV switched the display into Dolby
+      Vision on the strength of the resulting declarations. ffmpeg does not. The
+      format is reachable; see below for the timing trap that comes with GPAC.
+- [ ] **Dolby Vision: decide, once the master playlist opens.** DV is signalled but
+      unproven end to end, because the declaration that triggers it rides on the
+      playlist that fails. If it turns out to be unreachable, HDR10 is the
+      fallback — and then the library needs auditing for profile 5, where the
+      degradation stops being graceful the way it is for the 8.1 sample.
+- [ ] **Choose the packager, now that neither tool is sufficient alone.** ffmpeg
+      segments cleanly but drops DV; GPAC signals DV but emits a contradictory
+      master playlist and needs an elementary-stream detour that loses frame
+      timing. The engine will need one of them fixed up, or a hybrid.
 - [ ] **Multi-track packaging** — the local pass packaged one audio track. HLS
       alternate renditions for the remaining audio tracks, and SubRip → WebVTT for
       subtitles, are still unproven.
@@ -254,13 +264,11 @@ decodes.
 - The 4K file's MJPEG cover-art track is **not flagged `attached_pic`**, so a bare
   `-map 0:v` packages the cover as a second video rendition. The video stream must
   be mapped explicitly as `0:v:0`.
-- **Dolby Vision signalling does not survive the copy.** The packaged output
-  carries no `dvvC`/`dvcC` box and `ffprobe` reports no DOVI side data on the
-  copied stream. It is not the HLS muxer — a plain fMP4 copy loses it too — and
-  ffmpeg 8.1.2 exposes no muxer option for it. The picture therefore plays as
-  **HDR10, not Dolby Vision**. On profile 8.1 that is graceful, because the base
-  layer is HDR10 by definition; on a profile 5 source it would not be, which is
-  what the audit deliverable above is for.
+- **ffmpeg does not carry Dolby Vision signalling through a copy.** Its output has
+  no `dvvC`/`dvcC` box and `ffprobe` reports no DOVI side data on the copied
+  stream. It is not the HLS muxer — a plain fMP4 copy loses it too — and ffmpeg
+  8.1.2 exposes no muxer option for it. **GPAC does write it** (below), so this is
+  a property of the tool, not of the approach.
 
 **What this pass did not establish.** It ran on macOS AVFoundation, not on an
 Apple TV: container and codec acceptance carry over, but DV engagement, Atmos
@@ -288,21 +296,73 @@ eye.
 apparent 1.5–1.9 s overshoot in the raw numbers was the harness sleeping two
 seconds before reading the clock, not the player missing.
 
-**Dolby Vision is confirmed lost.** The television reports the 4K stream as
-**HDR10**, not Dolby Vision — exactly what the absent `dvvC` box predicted, now
-observed rather than inferred. Because the source is profile 8.1, the picture is
-still correct HDR; it is the DV layer that is gone.
-
-Two numbers are easy to misread and are recorded here so they are not:
-
-- `observedBitrate` (154 and 686 Mbit/s) measures **delivery throughput**, not the
-  media bitrate. It says the LAN had enormous headroom over the content's
-  26.5 Mbit/s, nothing more.
-- `indicatedBitrate` came back empty because the pass served a **media** playlist
-  with no master above it, so no `BANDWIDTH` was ever declared.
+`observedBitrate` (154 and 686 Mbit/s) is easy to misread and is recorded here so
+it is not: it measures **delivery throughput**, not media bitrate. It says the LAN
+had enormous headroom over the content's 26.5 Mbit/s, nothing more.
 
 Audio was not answered: one AC-3 track was packaged and no receiver was checked,
 so E-AC-3/Atmos passthrough remains open.
+
+##### The dynamic range half, and a retracted claim
+
+An earlier revision of this document said the device pass confirmed the picture as
+HDR10. **That was wrong, and the mistake is worth keeping.** The harness drew the
+video with `VideoPlayer` inside a `ZStack` under a log overlay; an embedded player
+composites its frames into the app's SDR UI layer, so the picture was tone-mapped
+dark and the display never switched at all. The television was reporting the
+interface's format, not the content's. Every measurement above survives — they come
+from `AVPlayerItemAccessLog` and do not depend on presentation — but the eye-read
+conclusion did not.
+
+Rebuilding the harness around a full-screen `AVPlayerViewController` with nothing
+above it removed the dark picture. It did **not**, on its own, make the display
+switch. What actually drives the switch is the **master playlist**:
+
+| What the master declares | What the television did |
+| --- | --- |
+| `VIDEO-RANGE=PQ` + `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"` | switched to **Dolby Vision** |
+| `VIDEO-RANGE=PQ` alone | switched to **HDR10** |
+| no master playlist at all | stayed **SDR** |
+
+The segments were identical in all three cases and always carried correct PQ
+signalling (`colr`, `mdcv`, `clli`). **Dynamic range is negotiated in the playlist,
+not discovered in the media** — and the switch happens on parsing the declaration,
+before playback succeeds or fails.
+
+Which matters, because the master playlist is exactly what does not work:
+
+- **Any master playlist yields `Cannot open` on tvOS.** Proven by an A/B in a
+  single run over identical files in one directory: reached through a master →
+  fails; the same variant fetched directly → plays, 3840×2160, zero stalls.
+- It is not the codec string. It fails with GPAC's own `CODECS="dvh1.08.06"`, with
+  a corrected `hvc1.2.4.H150.B0` computed from the `hvcC` record, and with no
+  `CODECS` attribute at all. It is not `SUPPLEMENTAL-CODECS` either — removing it
+  changes the badge from DV to HDR10 and nothing else.
+- macOS AVFoundation plays the same master-mediated package without complaint, so
+  this is a tvOS-specific strictness.
+
+**So HDR is not yet achieved on the device.** The two halves work separately and
+not together: HDR needs the master playlist, and the master playlist does not open.
+That is the state, and it is what the Dolby Vision deliverables above now cover.
+
+Not yet tried, in the order worth trying: `#EXT-X-PLAYLIST-TYPE:VOD` and
+`#EXT-X-MEDIA-SEQUENCE:0` on the variant (GPAC emits neither, and the ffmpeg
+package that plays has both), and Apple's `mediastreamvalidator`, which exists
+precisely to answer this and was not run.
+
+##### What GPAC settled about Dolby Vision
+
+- **`dvvC` is written**, next to `hvcC`, `colr`, `mdcv` and `clli` in the init
+  segment — the cross-compatible profile 8.1 form with an `hvc1` sample entry.
+- **The RPU metadata survives**: 756 DV RPU NAL units in the source elementary
+  stream and 756 after the import, one per frame.
+- **GPAC's own master playlist is internally inconsistent** — it declares
+  `CODECS="dvh1.08.06"` while the sample entry it just wrote is `hvc1`, and it
+  omits `VIDEO-RANGE` entirely.
+- **A round trip through a raw elementary stream loses frame timing.** MP4Box
+  defaults to 25 fps, silently, which on this 24 fps source drifts the audio by
+  1.09 s per 30 s — nearly five minutes across the film. `:fps=` is mandatory, and
+  the wider lesson is that the elementary-stream detour is a liability.
 
 ### Phase 0.1 — foundations
 
