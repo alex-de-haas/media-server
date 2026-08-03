@@ -100,11 +100,16 @@ What this costs, stated plainly:
 ### The one credential this app still owns
 
 `AVPlayer` cannot be relied on to attach an `Authorization` header to media and
-image requests — least of all to HLS segment requests it issues itself. So stream,
-segment, and image URLs carry a **short-lived, item-scoped URL token** minted by
-this app and signed by it, exactly as the Jellyfin surface uses `api_key=` for the
-same reason. It is derived from an authenticated session, never long-lived, never
-a Core credential, and redacted in logs.
+image requests — least of all to the ranged requests it issues itself. So stream
+and image URLs carry a **short-lived signed URL token** minted by this app, exactly
+as the Jellyfin surface uses `api_key=` for the same reason. It is derived from an
+authenticated session, never a Core credential, and redacted in logs.
+
+Scoping it to an item is not enough. A single playback issues many ranged requests
+over hours, so the token must be bound to the **user, the media source (not just
+the title), the methods it may be used with, and the lifetime of the playback
+session** — and it must not be able to expire *between* two `Range` requests of the
+same file, which is the failure a naive short expiry produces.
 
 ## Target behavior
 
@@ -176,15 +181,26 @@ What it must carry beyond the Jellyfin projection:
 (containers, video and audio codecs, HDR formats, channel layouts, passthrough)
 and answers per media source with one of:
 
-- `directPlay` — a URL served by byte range, the existing direct-stream path;
-- `package` — an HLS/fMP4 URL, filled in by `remux-streaming`;
+- `directPlay` — the original file, served by byte range, the existing
+  direct-stream path;
+- `remux` — a URL for the same streams repackaged into a container the client can
+  open, filled in by `remux-streaming`. **What that container is, and how it is
+  delivered, belongs to that feature and deliberately not to this contract** — the
+  client follows a URL either way, so a change of packaging must not be a change of
+  API;
 - `unsupported` — with a machine-readable reason, so the client can say "this
   copy's only audio track is DTS" instead of failing silently.
 
 This replaces the Jellyfin surface's `EnableDirectPlay`/`EnableDirectStream`
 flags, which are parsed and then ignored because that surface has only one answer.
-Until packaging lands, `package` is simply never returned; the contract does not
+Until packaging lands, `remux` is simply never returned; the contract does not
 change when it does.
+
+Resolution also decides **which signalling a client is served**, which is not
+cosmetic: a Dolby Vision `dvh1` sample entry engages DV on a device that supports
+it and breaks one that does not, while the cross-compatible form reads as HDR10
+everywhere. That ordering constraint belongs here — DV cannot be served at all
+until this endpoint exists to ask.
 
 ### Track preferences
 
@@ -227,7 +243,7 @@ and what remains is the URL-token half that Core cannot cover.
 - [ ] **`GET /native/v1/server/public`** (anonymous) with `CorePublicOrigin`, and
       **`GET /native/v1/server`** (authenticated) with the capability answers, so
       one URL configures the client and pairing can start from a cold install.
-- [ ] **Signed URL tokens** for media, segment, and image URLs: minted from an
+- [ ] **Signed URL tokens** for media and image URLs: minted from an
       authenticated request, short-lived, scoped to one item, redacted in logs,
       and refused on any route outside that set.
 - [ ] **Public-port intent** — the `/api` surface being reachable on the public
@@ -306,7 +322,7 @@ and what remains is the URL-token half that Core cannot cover.
   external audio does not, because no existing client can use it. What the client
   does with the URL depends on the packaging answer from the
   [spike](../apple-client/plan.md#phase-0--the-playback-spike) — folded into the
-  HLS output as an extra rendition, or fetched separately and played in sync.
+  repackaged output as an extra track, or fetched separately and played in sync.
   Until that is known, the API only promises the file is fetchable.
 - **Admin operations, without scopes to narrow them.** The macOS client wants
   torrents and conversions; they already exist under `/api`, gated on the admin

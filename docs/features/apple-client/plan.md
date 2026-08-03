@@ -75,9 +75,15 @@ not a transcoding one, and a stream copy solves it.
 
 - Files already in `.mp4` / `.m4v` / `.mov` with supported codecs keep the current
   path: byte-range direct play from the existing stream endpoint. No packaging.
-- Everything else is remuxed by stream copy into a **progressive fMP4, served over
+- Everything else is remuxed by stream copy into a **progressive MP4, served over
   byte ranges** — the same shape the existing stream endpoint already serves, not
   a second delivery mechanism.
+
+  "Progressive" here means precisely what the spike tested: a **non-fragmented**
+  MP4 whose `moov` sits before the media data, so a player can seek by range
+  without reading the file end to end. Fragmented MP4 is a different artifact with
+  a different index, and nothing here has tested it; the two must not be used as
+  synonyms when the packaging feature is written.
 - Packaging runs in the **`transcode-engine` app**, not in `api`: `api` has
   deliberately shipped without ffmpeg since [external track
   sidecars](../external-track-sidecars/feature.md), and the engine already has the
@@ -89,7 +95,7 @@ not a transcoding one, and a stream copy solves it.
 **HLS is deliberately not used.** The spike started from HLS and found it bought
 nothing here and cost a great deal: dynamic range has to be negotiated in a master
 playlist, and every master playlist tvOS was offered failed to open, while the
-identical media played fine when the playlist was skipped. A progressive fMP4 has
+identical media played fine when the playlist was skipped. A progressive MP4 has
 no playlist to get wrong — the dynamic-range signalling rides in the `moov` — and
 it is what finally produced Dolby Vision on the television. HLS earns its
 complexity when there are bitrate ladders to switch between; there are none here,
@@ -102,10 +108,17 @@ pass](#device-pass-on-an-apple-tv-4k-2026-08-03).
 
 ### 3. Distribution: local builds and TestFlight
 
-No App Store submission. Consequences worth stating once: a paid Apple Developer
-Program membership is required for TestFlight and for installs that outlive
-free provisioning's 7 days; and no App Store review means no licensing constraint
-on dependencies — which the AVPlayer-only decision makes moot anyway.
+No App Store submission. Consequences worth stating once, because TestFlight is a
+beta channel and not a quiet way to keep an app installed:
+
+- A paid Apple Developer Program membership is required for TestFlight and for
+  installs that outlive free provisioning's seven days.
+- **A TestFlight build expires after 90 days**, and the first build distributed to
+  external testers goes through App Review. So this is a release cadence with CI
+  behind it, not a one-time upload.
+- Dependency licences bind regardless of the distribution channel — skipping App
+  Review does not relax them. (Moot in practice, since the AVPlayer-only decision
+  leaves no third-party decoder to license.)
 
 ### 4. The client lives in this repository
 
@@ -137,8 +150,7 @@ platforms see conversion only as "download this in a smaller quality".
 **Why tvOS has no downloads.** Apple TV gives an app no dependable persistent
 storage for multi-gigabyte files — the caches directory is purgeable at any time
 and on-demand resources are capped. A "download" there would be a copy the system
-may delete before the flight. Apple TV streams; it is the one platform that is
-always on the same network as the server anyway.
+may delete before the flight. Apple TV streams.
 
 ## Constituent features
 
@@ -187,20 +199,33 @@ throwaway spike, on real hardware and real files, before any surface is designed
       below. No H.264 source was exercised — this library's samples are HEVC, and
       H.264 is the case least at risk.
 - [x] **Playback on an Apple TV 4K** — both packages played on the device
-      (tvOS 26.5) with accurate seeking, zero stalls and zero dropped frames,
-      including 4K HEVC at 26.5 Mbit/s. See the device pass below.
+      (tvOS 26.5) with zero stalls and zero dropped frames, including 4K HEVC at
+      26.5 Mbit/s. See the device pass below. Seeking was verified only on the HLS
+      packages; the seek test was dropped when the harness was rebuilt, so **no
+      seek was ever measured on a progressive MP4** — it is part of the gate below.
 - [x] **HDR and Dolby Vision on the device** — reached by dropping HLS for a
-      progressive fMP4 over byte ranges: `hvc1` + `dvvC` gives HDR10, and forcing
+      progressive MP4 over byte ranges: `hvc1` + `dvvC` gives HDR10, and forcing
       the `dvh1` sample entry gives Dolby Vision, both bright and correct on the
       television.
-- [ ] **Full-screen presentation is a requirement, not a preference** — record it
-      wherever the client's playback surface is specified. An `AVPlayer` embedded
-      under any UI composites into the SDR layer: dark picture, no display switch.
+- [ ] **Playback presentation belongs to `AVPlayerViewController`** — record it
+      wherever the client's playback surface is specified. The spike proved one
+      concrete failure, not a universal law: a SwiftUI `VideoPlayer` inside a
+      `ZStack` under an overlay composited into the SDR layer, giving a dark
+      picture and no display switch. The rule that follows is narrower and keeps
+      the system transport UI, chapters and track selection: **`AVPlayerViewController`
+      owns the presentation, and custom UI is added only through its supported
+      overlay APIs** (`contentOverlayView`, `customOverlayViewController`), never
+      by compositing a player into an app-drawn view hierarchy.
 - [ ] **Decide how the progressive file is produced** — the question that replaces
-      segment boundaries. A progressive fMP4 needs its `moov` up front, so either
+      segment boundaries. A progressive MP4 needs its `moov` up front, so either
       it is generated on demand (and the whole index must be known before the first
-      byte is served) or pre-generated beside the source at the cost of disk. Seek
-      cost on a remuxed file is untested either way.
+      byte is served) or pre-generated beside the source at the cost of disk.
+      **This is an acceptance gate, not a note**: the answer is only credible when
+      measured on a whole film rather than a 30-second slice, covering time to
+      first frame from cold, seeking into a part not yet produced, 60–80 Mbit/s,
+      several concurrent clients, cancel/restart/cleanup, multi-audio and sidecar
+      audio and subtitles, DV profiles 5 and 8, E-AC-3/Atmos, and the same tooling
+      running inside the Linux `transcode-engine` container rather than on macOS.
 - [ ] **Audio passthrough on the receiver** — the pass packaged a single AC-3
       track and never exercised E-AC-3/Atmos passthrough, which is the half of
       "picture and sound" still unanswered.
@@ -350,7 +375,7 @@ Which matters, because the master playlist is exactly what does not work:
 
 **So HDR was unreachable over HLS.** Within that design the two halves worked
 separately and never together: HDR needed the master playlist, and the master
-playlist did not open. That dead end is what sent the spike to progressive fMP4
+playlist did not open. That dead end is what sent the spike to progressive MP4
 below, where both halves hold at once.
 
 Not yet tried, in the order worth trying: `#EXT-X-PLAYLIST-TYPE:VOD` and
