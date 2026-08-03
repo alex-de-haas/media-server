@@ -88,11 +88,12 @@ not a transcoding one, and a stream copy solves it.
   requests to it. Authorization stays where it already is: item id → catalog
   sandbox → user access.
 
-This is the highest-risk decision in the epic, which is why the spike below comes
-before anything else is built. Its local pass has since confirmed the mechanism —
-stream copy to HLS/fMP4, played by AVFoundation — at the cost of Dolby Vision
-signalling, which does not survive the copy. See [the
-results](#results-of-the-local-pass-2026-08-03); the Apple TV half is still open.
+This was the highest-risk decision in the epic, which is why the spike below came
+before anything else was built. **It has since been confirmed on an Apple TV 4K**:
+stream copy to HLS/fMP4 plays 4K HEVC with no stalls and no dropped frames. The
+one measured cost is Dolby Vision, which does not survive the copy and plays as
+HDR10. See [the results](#results-of-the-local-pass-2026-08-03) and [the device
+pass](#device-pass-on-an-apple-tv-4k-2026-08-03).
 
 ### 3. Distribution: local builds and TestFlight
 
@@ -180,10 +181,20 @@ throwaway spike, on real hardware and real files, before any surface is designed
       Done on a 4K Dolby Vision remux and a 1080p HEVC HDR10 one; see the results
       below. No H.264 source was exercised — this library's samples are HEVC, and
       H.264 is the case least at risk.
-- [ ] **Playback on an Apple TV 4K** of both, confirming: picture (Dolby Vision
-      and HDR10 flagged correctly, not tone-mapped to SDR), E-AC-3/Atmos reaching
-      the receiver as passthrough, seeking that lands where it is asked, and no
-      stutter on a 60–80 Mbit remux over the real network.
+- [x] **Playback on an Apple TV 4K** — both packages played on the device
+      (tvOS 26.5): real HDR, accurate seeking, zero stalls and zero dropped
+      frames. Picture is HDR10 and **not** Dolby Vision, confirming on hardware
+      what the missing `dvvC` box predicted. See the device pass below.
+- [ ] **Audio passthrough on the receiver** — the pass packaged a single AC-3
+      track and never exercised E-AC-3/Atmos passthrough, which is the half of
+      "picture and sound" still unanswered.
+- [ ] **Higher-bitrate headroom** — the 4K sample is 26.5 Mbit/s and played with
+      room to spare, but the 60–80 Mbit/s remux this deliverable originally named
+      was never tried.
+- [ ] **Master playlist** — the pass served a media playlist directly, so there is
+      no `BANDWIDTH` attribute and the player reported no indicated bitrate. A
+      master playlist is needed regardless, since alternate audio renditions
+      cannot be declared without one.
 - [ ] **Segment-boundary answer** — the hard part. Segments must start on
       keyframes, so the playlist needs a keyframe index; measure what building one
       costs per file, whether it can be derived at probe time and persisted beside
@@ -192,10 +203,18 @@ throwaway spike, on real hardware and real files, before any surface is designed
 - [ ] **Session lifecycle answer** — what a seek costs, what is cached and for how
       long, what cleans up after a client that vanishes mid-file, and how many
       concurrent sessions one engine container sustains.
-- [ ] **Dolby Vision decision** — the local pass showed DV signalling is lost in
-      packaging (below). Audit the library for profile 5, where the loss stops
-      being graceful, and then either accept HDR10 as the packaged picture or find
-      a muxer that writes `dvvC`.
+- [ ] **Dolby Vision: try a muxer that signals it.** What the spike proved is that
+      *this* toolchain drops the signalling, not that the format is out of reach —
+      the RPU metadata rides inside the HEVC bitstream and a stream copy keeps it,
+      while HLS has a documented way to declare it (`dvvC` in the init segment plus
+      `SUPPLEMENTAL-CODECS` on the variant, which needs the master playlist above).
+      Candidates in order: GPAC `MP4Box`, Bento4. Apple's `mediafilesegmenter`
+      would also do it but is macOS-only, which the Linux engine container rules
+      out.
+- [ ] **Dolby Vision: decide, once that is answered.** Either DV is signalled and
+      the question closes, or HDR10 is accepted as the packaged picture — in which
+      case audit the library for profile 5, where the degradation stops being
+      graceful the way it is for the 8.1 sample.
 - [ ] **Multi-track packaging** — the local pass packaged one audio track. HLS
       alternate renditions for the remaining audio tracks, and SubRip → WebVTT for
       subtitles, are still unproven.
@@ -246,8 +265,44 @@ decodes.
 **What this pass did not establish.** It ran on macOS AVFoundation, not on an
 Apple TV: container and codec acceptance carry over, but DV engagement, Atmos
 passthrough, and 4K decode headroom do not. It used 30-second slices from a
-keyframe, so it says nothing about seeking, full-length playback, keyframe
-indexing, or session lifecycle — the deliverables above that remain unchecked.
+keyframe, so it says nothing about full-length playback, keyframe indexing, or
+session lifecycle — the deliverables above that remain unchecked.
+
+#### Device pass on an Apple TV 4K (2026-08-03)
+
+Same packages, played on an Apple TV 4K (2nd generation, `AppleTV11,1`, tvOS
+26.5) from the dev Mac over the LAN, driven by a throwaway tvOS harness that
+reports `AVPlayerItemAccessLog` rather than asking anyone to judge smoothness by
+eye.
+
+| | TRON 1080p HDR10 | Mandalorian 2160p DV |
+| --- | --- | --- |
+| Resolved | 1920×1080 | 3840×2160 |
+| Played in 20 s of wall clock | 18.80 s | 19.92 s |
+| Stalls | **0** | **0** |
+| Dropped frames | **0** | **0** |
+| Segments | 6 in 1.87 s | 6 in 0.87 s |
+
+**Decision 2 holds on the target hardware.** A stream copy plays 4K HEVC at
+26.5 Mbit/s with nothing dropped and nothing stalling. Seeking is accurate: the
+apparent 1.5–1.9 s overshoot in the raw numbers was the harness sleeping two
+seconds before reading the clock, not the player missing.
+
+**Dolby Vision is confirmed lost.** The television reports the 4K stream as
+**HDR10**, not Dolby Vision — exactly what the absent `dvvC` box predicted, now
+observed rather than inferred. Because the source is profile 8.1, the picture is
+still correct HDR; it is the DV layer that is gone.
+
+Two numbers are easy to misread and are recorded here so they are not:
+
+- `observedBitrate` (154 and 686 Mbit/s) measures **delivery throughput**, not the
+  media bitrate. It says the LAN had enormous headroom over the content's
+  26.5 Mbit/s, nothing more.
+- `indicatedBitrate` came back empty because the pass served a **media** playlist
+  with no master above it, so no `BANDWIDTH` was ever declared.
+
+Audio was not answered: one AC-3 track was packaged and no receiver was checked,
+so E-AC-3/Atmos passthrough remains open.
 
 ### Phase 0.1 — foundations
 
