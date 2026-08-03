@@ -60,7 +60,7 @@ Core injects the active binds at runtime as comma-joined `label=path` entries, e
 these are bind mounts; under `dev` they are the configured host paths read directly).
 The label is the per-bind key Media Server forwards to the torrent-engine (`mountLabel`)
 so it picks the downloads mount on the same host path — see
-[Torrent engine app](../ideas/torrent-engine-app.md).
+[Torrent engine app](../../ideas/torrent-engine-app.md).
 
 **How Media Server uses it.** Reads the injected roots and uses a transient
 `.incoming/` staging dir plus the canonical media tree under each for download and
@@ -238,7 +238,7 @@ an app identity token that the SDK's `HostyAuthenticationHandler` already accept
 
 The PIN and lockout machinery this item originally asked for turned out to be
 unnecessary — the app writes no authentication code at all. See
-[native-client-api](native-client-api/plan.md#authentication-hostys-device-flow-not-one-of-our-own).
+[native-client-api](../native-client-api/plan.md#authentication-hostys-device-flow-not-one-of-our-own).
 
 ### 7a. Device flow that names the app — High
 
@@ -343,7 +343,7 @@ predates this merge, so docker delivery needs a Core build that includes it.
 > torrent engine was extracted into the standalone `torrent-engine` app, which now
 > owns the raw listen port (behind its VPN). The capability is still required by the
 > platform — it is just the `torrent-engine` app, not media-server, that declares the
-> pinned raw port. See [Torrent engine app](../ideas/torrent-engine-app.md).
+> pinned raw port. See [Torrent engine app](../../ideas/torrent-engine-app.md).
 
 **Problem.** The torrent engine needs a stable raw listen port for peer
 connectivity and DHT, ideally with router port mapping. Hosty only manages and
@@ -405,7 +405,7 @@ paths before the app starts, then injects the corrected binds.
 **How Media Server uses it.** Starts with corrected roots; no offline storm.
 
 **Workaround.** App marks unreachable roots Offline; operator re-points paths and
-rescans (see [Catalogs](catalogs/feature.md)).
+rescans (see [Catalogs](../catalogs/feature.md)).
 
 **Acceptance criteria.**
 - Restore flow surfaces declared external mounts for remapping.
@@ -501,7 +501,7 @@ Why the `web → api` hop has no channel today:
 
 So there is no Core-provided way for `web` to learn `api`'s internal address. This
 is the same gap tracked as Open Risk #2 in the
-[implementation plan](implementation-plan.md). It blocks a clean `web → api` proxy;
+[implementation plan](../implementation-plan.md). It blocks a clean `web → api` proxy;
 the `docker` profile (the v1 delivery target) cannot ship it without the security
 regression below.
 
@@ -564,7 +564,7 @@ directory. SDK clients ship in `HostySdk.App` 0.3.0 (`HostySecretsClient`,
 `AddHostySecrets`) and `@hosty-sdk/app` 0.4.0 (server-only), both with a
 write-through cache and classified errors. See the
 [feature document](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/app-secrets-store.md).
-The [Trakt plan](../planning/trakt-watched-state-sync.md) now stores its OAuth
+The [Trakt plan](../../planning/trakt-watched-state-sync.md) now stores its OAuth
 tokens here and no longer specs an app-side encryption key.
 
 **Problem (historical).** The Trakt integration must persist per-user OAuth access/refresh
