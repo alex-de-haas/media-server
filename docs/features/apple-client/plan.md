@@ -1,6 +1,6 @@
 # Apple Client — plan
 
-Status: Draft
+Status: In Progress
 Created: 2026-08-02
 Updated: 2026-08-03
 
@@ -277,8 +277,8 @@ decodes.
 **What this pass did not establish.** It ran on macOS AVFoundation, not on an
 Apple TV: container and codec acceptance carry over, but DV engagement, Atmos
 passthrough, and 4K decode headroom do not. It used 30-second slices from a
-keyframe, so it says nothing about full-length playback, keyframe indexing, or
-session lifecycle — the deliverables above that remain unchecked.
+keyframe, so it says nothing about full-length playback or about producing a
+`moov` for a whole film — the deliverables above that remain unchecked.
 
 #### Device pass on an Apple TV 4K (2026-08-03)
 
@@ -322,16 +322,19 @@ Rebuilding the harness around a full-screen `AVPlayerViewController` with nothin
 above it removed the dark picture. It did **not**, on its own, make the display
 switch. What actually drives the switch is the **master playlist**:
 
-| What the master declares | What the television did |
-| --- | --- |
-| `VIDEO-RANGE=PQ` + `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"` | switched to **Dolby Vision** |
-| `VIDEO-RANGE=PQ` alone | switched to **HDR10** |
-| no master playlist at all | stayed **SDR** |
+All three rows below are **HLS**, and all three serve identical segments:
 
-The segments were identical in all three cases and always carried correct PQ
-signalling (`colr`, `mdcv`, `clli`). **Dynamic range is negotiated in the playlist,
-not discovered in the media** — and the switch happens on parsing the declaration,
-before playback succeeds or fails.
+| How the HLS was served | What the television did |
+| --- | --- |
+| master declaring `VIDEO-RANGE=PQ` + `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"` | switched to **Dolby Vision** |
+| master declaring `VIDEO-RANGE=PQ` alone | switched to **HDR10** |
+| variant fetched directly, with no master above it | stayed **SDR** |
+
+The segments always carried correct PQ signalling (`colr`, `mdcv`, `clli`), so
+**within HLS, dynamic range is negotiated in the playlist rather than discovered in
+the media** — and the switch happens on parsing the declaration, before playback
+succeeds or fails. (Progressive fMP4, further down, has no playlist and reaches the
+same result from the `moov`.)
 
 Which matters, because the master playlist is exactly what does not work:
 
@@ -345,9 +348,10 @@ Which matters, because the master playlist is exactly what does not work:
 - macOS AVFoundation plays the same master-mediated package without complaint, so
   this is a tvOS-specific strictness.
 
-**So HDR is not yet achieved on the device.** The two halves work separately and
-not together: HDR needs the master playlist, and the master playlist does not open.
-That is the state, and it is what the Dolby Vision deliverables above now cover.
+**So HDR was unreachable over HLS.** Within that design the two halves worked
+separately and never together: HDR needed the master playlist, and the master
+playlist did not open. That dead end is what sent the spike to progressive fMP4
+below, where both halves hold at once.
 
 Not yet tried, in the order worth trying: `#EXT-X-PLAYLIST-TYPE:VOD` and
 `#EXT-X-MEDIA-SEQUENCE:0` on the variant (GPAC emits neither, and the ffmpeg
@@ -443,16 +447,17 @@ and can be reordered by appetite.
 ## Open questions
 
 - **Does the packaging path hold for a 60–80 Mbit 4K remux over Wi-Fi?** Phase 0
-  answers it. If segment production cannot keep ahead of playback, the fallback
-  order in Phase 0's last deliverable applies.
-- **Where does the keyframe index live?** Derived per session (simple, repeated
-  cost) or persisted beside the probe data (needs a migration and a story for
-  files probed by the header reader, which never sees packets).
-- **Do sidecar audio tracks survive packaging?** They are separate files; ffmpeg
-  can take them as extra inputs in the same copy pass, which would make "watch
-  with the Russian dub, no merge" work on Apple TV — the single most valuable
-  thing Infuse cannot do. Whether that composes cleanly with on-demand segmenting
-  is unverified.
+  answered it only at 26.5 Mbit/s over the wire, where there was ample headroom.
+- **Is the progressive file produced on demand or pre-generated?** A progressive
+  fMP4 needs its `moov` up front, which is the one real constraint the approach
+  carries. Producing it per playback means reading the source's index first;
+  pre-generating means a second copy on disk. This replaces the keyframe-index
+  question the HLS design had.
+- **Do sidecar audio tracks survive packaging?** They are separate files and can
+  be taken as extra inputs in the same copy pass, which would make "watch with the
+  Russian dub, no merge" work on Apple TV — the single most valuable thing Infuse
+  cannot do. With a progressive file they become ordinary tracks in the output
+  rather than alternate renditions, which is simpler, but it is still unverified.
 - ~~**Pairing UX on tvOS.**~~ Settled: Core already ships a device authorization
   flow with approval in Shell, and the app-identity exchange composes on top of
   it, so this app writes no authentication code. See
