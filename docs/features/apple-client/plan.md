@@ -75,24 +75,28 @@ not a transcoding one, and a stream copy solves it.
 
 - Files already in `.mp4` / `.m4v` / `.mov` with supported codecs keep the current
   path: byte-range direct play from the existing stream endpoint. No packaging.
-- Everything else is served as **HLS with fMP4 (CMAF) segments**, produced by
-  stream copy on demand.
+- Everything else is remuxed by stream copy into a **progressive fMP4, served over
+  byte ranges** — the same shape the existing stream endpoint already serves, not
+  a second delivery mechanism.
 - Packaging runs in the **`transcode-engine` app**, not in `api`: `api` has
   deliberately shipped without ffmpeg since [external track
-  sidecars](../external-track-sidecars/feature.md), and the engine already has
-  ffmpeg, the shared-mount contract, a job/SSE API, and cross-app discovery via
-  `HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL`. This extends the engine with a
-  *session* model beside its existing *job* model — the "live transcode" epic its
-  own idea document deferred, narrowed to stream copy.
-- The engine is not publicly exposed, so `api` proxies playlist and segment
-  requests to it. Authorization stays where it already is: item id → catalog
-  sandbox → user access.
+  sidecars](../external-track-sidecars/feature.md), and the engine already has the
+  tooling, the shared-mount contract, a job/SSE API, and cross-app discovery via
+  `HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL`.
+- The engine is not publicly exposed, so `api` proxies the byte-range requests.
+  Authorization stays where it already is: item id → catalog sandbox → user access.
 
-This was the highest-risk decision in the epic, which is why the spike below came
-before anything else was built. **The playback half is confirmed on an Apple TV
-4K**: stream copy to HLS/fMP4 plays 4K HEVC with no stalls and no dropped frames.
-**The dynamic-range half is not** — HDR is negotiated by a master playlist that
-tvOS currently refuses to open, so the device plays 4K in SDR today. See [the
+**HLS is deliberately not used.** The spike started from HLS and found it bought
+nothing here and cost a great deal: dynamic range has to be negotiated in a master
+playlist, and every master playlist tvOS was offered failed to open, while the
+identical media played fine when the playlist was skipped. A progressive fMP4 has
+no playlist to get wrong — the dynamic-range signalling rides in the `moov` — and
+it is what finally produced Dolby Vision on the television. HLS earns its
+complexity when there are bitrate ladders to switch between; there are none here,
+because nothing is being re-encoded.
+
+**Confirmed end to end on an Apple TV 4K.** 4K HEVC at 26.5 Mbit/s plays with no
+stalls, the display switches, and the picture is Dolby Vision. See [the
 results](#results-of-the-local-pass-2026-08-03) and [the device
 pass](#device-pass-on-an-apple-tv-4k-2026-08-03).
 
@@ -185,53 +189,53 @@ throwaway spike, on real hardware and real files, before any surface is designed
 - [x] **Playback on an Apple TV 4K** — both packages played on the device
       (tvOS 26.5) with accurate seeking, zero stalls and zero dropped frames,
       including 4K HEVC at 26.5 Mbit/s. See the device pass below.
-- [ ] **Get HDR working on the device at all.** Dynamic range is negotiated by the
-      master playlist's `VIDEO-RANGE`, and any master playlist currently yields
-      `Cannot open` on tvOS while the same variant played directly works. Until
-      that is resolved the client can play 4K, but only in SDR. Try
-      `#EXT-X-PLAYLIST-TYPE:VOD` and `#EXT-X-MEDIA-SEQUENCE:0` on the variant,
-      then Apple's `mediastreamvalidator`.
+- [x] **HDR and Dolby Vision on the device** — reached by dropping HLS for a
+      progressive fMP4 over byte ranges: `hvc1` + `dvvC` gives HDR10, and forcing
+      the `dvh1` sample entry gives Dolby Vision, both bright and correct on the
+      television.
 - [ ] **Full-screen presentation is a requirement, not a preference** — record it
       wherever the client's playback surface is specified. An `AVPlayer` embedded
       under any UI composites into the SDR layer: dark picture, no display switch.
+- [ ] **Decide how the progressive file is produced** — the question that replaces
+      segment boundaries. A progressive fMP4 needs its `moov` up front, so either
+      it is generated on demand (and the whole index must be known before the first
+      byte is served) or pre-generated beside the source at the cost of disk. Seek
+      cost on a remuxed file is untested either way.
 - [ ] **Audio passthrough on the receiver** — the pass packaged a single AC-3
       track and never exercised E-AC-3/Atmos passthrough, which is the half of
       "picture and sound" still unanswered.
 - [ ] **Higher-bitrate headroom** — the 4K sample is 26.5 Mbit/s and played with
       room to spare, but the 60–80 Mbit/s remux this deliverable originally named
       was never tried.
-- [ ] **Master playlist** — the pass served a media playlist directly, so there is
-      no `BANDWIDTH` attribute and the player reported no indicated bitrate. A
-      master playlist is needed regardless, since alternate audio renditions
-      cannot be declared without one.
-- [ ] **Segment-boundary answer** — the hard part. Segments must start on
-      keyframes, so the playlist needs a keyframe index; measure what building one
-      costs per file, whether it can be derived at probe time and persisted beside
-      the other probe data, and what a file with sparse or irregular keyframes
-      does to segment duration.
-- [ ] **Session lifecycle answer** — what a seek costs, what is cached and for how
-      long, what cleans up after a client that vanishes mid-file, and how many
-      concurrent sessions one engine container sustains.
-- [x] **Dolby Vision: find a muxer that signals it.** GPAC `MP4Box` writes `dvvC`
-      and preserves every RPU, and the Apple TV switched the display into Dolby
-      Vision on the strength of the resulting declarations. ffmpeg does not. The
-      format is reachable; see below for the timing trap that comes with GPAC.
-- [ ] **Dolby Vision: decide, once the master playlist opens.** DV is signalled but
-      unproven end to end, because the declaration that triggers it rides on the
-      playlist that fails. If it turns out to be unreachable, HDR10 is the
-      fallback — and then the library needs auditing for profile 5, where the
-      degradation stops being graceful the way it is for the 8.1 sample.
-- [ ] **Choose the packager, now that neither tool is sufficient alone.** ffmpeg
-      segments cleanly but drops DV; GPAC signals DV but emits a contradictory
-      master playlist and needs an elementary-stream detour that loses frame
-      timing. The engine will need one of them fixed up, or a hybrid.
-- [ ] **Multi-track packaging** — the local pass packaged one audio track. HLS
-      alternate renditions for the remaining audio tracks, and SubRip → WebVTT for
-      subtitles, are still unproven.
-- [ ] **Written outcome** in this document: the design that survived, or the
-      decision to fall back (candidates, in order: pre-packaged fMP4 as a second
-      `MediaSource` at the cost of disk; a second decoder stack after all;
-      accepting that MKV plays only in Infuse).
+> **Dropped with HLS.** The master-playlist, segment-boundary and HLS session
+> deliverables this phase originally carried no longer describe any work: without
+> segments there is no keyframe index to build, no playlist to declare, and no
+> streaming session to expire. They are recorded here rather than deleted because
+> the reasoning that removed them is worth keeping.
+
+- [x] **Dolby Vision: find a muxer that signals it.** GPAC `MP4Box` writes `dvvC`,
+      preserves every RPU, and can force the `dvh1` sample entry that actually
+      engages DV. ffmpeg does none of it. See below for the timing trap that comes
+      with GPAC.
+- [ ] **Decide which sample entry to serve, and to whom.** `dvh1` engages Dolby
+      Vision but is DV-only signalling; `hvc1` + `dvvC` is cross-compatible and
+      reads as HDR10. A client that reports DV support should get the first and
+      everything else the second, which makes this the first real consumer of the
+      capability negotiation in
+      [native-client-api](../native-client-api/plan.md#playback-resolution).
+- [ ] **Audit the library for Dolby Vision profile 5**, where a source served as
+      cross-compatible would not degrade gracefully the way the 8.1 sample does.
+- [ ] **Settle the GPAC elementary-stream detour.** DV signalling currently costs a
+      round trip through a raw `.hevc`, which silently loses frame timing. Find
+      whether `MP4Box` can take the MKV directly and still write `dvvC`, or make the
+      detour safe by always passing the source's exact frame rate.
+- [ ] **Multi-track packaging** — the local pass packaged one audio track. A
+      progressive file carries the rest as ordinary tracks, which is simpler than
+      the HLS renditions this deliverable first assumed, but it is still unproven,
+      as is SubRip → WebVTT (or leaving subtitles as tracks in the file).
+- [x] **Written outcome** in this document: remux by stream copy into a progressive
+      fMP4 served over byte ranges, `dvh1` for Dolby Vision clients. No fallback
+      was needed — HLS was the thing dropped, not the approach.
 
 #### Results of the local pass (2026-08-03)
 
@@ -349,6 +353,38 @@ Not yet tried, in the order worth trying: `#EXT-X-PLAYLIST-TYPE:VOD` and
 `#EXT-X-MEDIA-SEQUENCE:0` on the variant (GPAC emits neither, and the ffmpeg
 package that plays has both), and Apple's `mediastreamvalidator`, which exists
 precisely to answer this and was not run.
+
+##### The answer: drop HLS
+
+Asked why any of this needed HLS at all — AVPlayer decodes these codecs natively —
+the spike tried the obvious alternative and it worked immediately:
+
+| What was served | Opens on tvOS | Television reports |
+| --- | --- | --- |
+| HLS via master playlist | **no** | (switched, then failed) |
+| HLS variant fetched directly | yes | SDR |
+| **Progressive fMP4, `hvc1` + `dvvC`, byte ranges** | **yes** | **HDR10**, bright |
+| **Progressive fMP4, forced `dvh1` sample entry** | **yes** | **Dolby Vision** |
+
+Both progressive files play 4K HEVC at 26.5 Mbit/s with zero stalls. The last row
+is the whole goal of decision 2, reached with no playlist of any kind.
+
+The final missing piece was one field. `hvc1` + `dvvC` is the *cross-compatible*
+form, and a player is entitled to read it as HDR10 — which is exactly what
+AVFoundation did. Forcing the Dolby Vision codec type so the sample entry reads
+`dvh1` (GPAC's `dvp=f8.hdr10`) is what engages DV. Everything else about the two
+files is identical.
+
+An earlier progressive attempt in this spike appeared to fail; that was the test
+server having no `Range` support, not the format. Serving byte ranges properly is a
+precondition, and the existing stream endpoint already does it.
+
+Consequences worth carrying into the design: there is no master playlist, no
+segmenting, no keyframe index for segment boundaries, and no HLS session lifecycle
+to manage — several of the deliverables this phase opened simply stop existing.
+What replaces them is narrower: a progressive file needs its `moov` up front (the
+spike's did), so the open question is whether that is produced on demand or
+pre-generated, and what seeking costs when it is.
 
 ##### What GPAC settled about Dolby Vision
 
