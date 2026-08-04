@@ -64,6 +64,13 @@ builder.Services.AddSingleton<NativeUrlSigningKey>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<NativeUrlTokenService>();
 builder.Services.AddScoped<NativeSyncService>();
+
+// OpenAPI for the first-party client surface only. The generated Swift client is built from this
+// document, so it is what keeps client and server from drifting; the internal /api surface stays out
+// of it deliberately, since it is a BFF contract and not a published one.
+builder.Services.AddOpenApi(NativeSurface.OpenApiDocumentName, options =>
+    options.ShouldInclude = description =>
+        description.RelativePath?.StartsWith("native/v1", StringComparison.OrdinalIgnoreCase) == true);
 builder.Services.AddScoped<NativeMediaResolver>();
 builder.Services.AddHostedService<ChangeLogPruner>();
 
@@ -490,6 +497,10 @@ app.MapJellyfinEndpoints();
 
 // First-party client surface, also public. See docs/features/native-client-api/plan.md.
 app.MapNativeEndpoints();
+
+// The document itself is NOT published on the public binding: a client generator reads it at
+// development time, and nothing on a television needs it.
+app.MapOpenApi();
 
 // Root marker so the public `jellyfin` port responds to a bare probe.
 app.MapGet("/", () => Results.Ok(new { service = "media-server", status = "ok" })).AllowPublic();

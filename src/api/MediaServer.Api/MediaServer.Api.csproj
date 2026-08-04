@@ -11,6 +11,7 @@
   <ItemGroup>
     <PackageReference Include="HostySdk.App" Version="0.1.0" />
     <InternalsVisibleTo Include="MediaServer.Api.Tests" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup>

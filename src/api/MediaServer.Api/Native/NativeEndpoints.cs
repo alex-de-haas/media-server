@@ -96,6 +96,9 @@ public static class NativeSurface
 {
     /// <summary>The surface version, distinct from the app's release version.</summary>
     public const string Version = "1";
+
+    /// <summary>Name of the OpenAPI document describing this surface, served at /openapi/native.json.</summary>
+    public const string OpenApiDocumentName = "native";
 }
 
 /// <summary>Anonymous bootstrap: enough to find Core and start pairing, and nothing else.</summary>
