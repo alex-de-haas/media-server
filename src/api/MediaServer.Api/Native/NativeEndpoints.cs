@@ -54,6 +54,7 @@ public static class NativeEndpoints
             .RequireAuthorization();
 
         group.MapNativeMediaEndpoints();
+        group.MapNativeDiscoveryEndpoints();
 
         group.MapGet("/items/{id:guid}", async (
             Guid id,
@@ -63,7 +64,7 @@ public static class NativeEndpoints
             NativeUrlTokenService tokens,
             CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } appUserId)
+            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } appUserId)
             {
                 return Results.Unauthorized();
             }
@@ -81,28 +82,13 @@ public static class NativeEndpoints
             NativeSyncService sync,
             CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } appUserId)
+            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } appUserId)
             {
                 return Results.Unauthorized();
             }
 
             return Results.Ok(await sync.SyncAsync(cursor, appUserId, cancellationToken));
         }).RequireAuthorization();
-    }
-
-    private static async Task<int?> ResolveAppUserIdAsync(
-        ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
-    {
-        var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(hostUserId))
-        {
-            return null;
-        }
-
-        return await database.AppUsers.AsNoTracking()
-            .Where(user => user.HostUserId == hostUserId)
-            .Select(user => (int?)user.Id)
-            .FirstOrDefaultAsync(cancellationToken);
     }
 }
 

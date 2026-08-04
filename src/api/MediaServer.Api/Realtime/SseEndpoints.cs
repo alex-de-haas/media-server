@@ -16,7 +16,7 @@ public static class SseEndpoints
         routes.MapGet("/api/events", StreamAsync).RequireAuthorization();
     }
 
-    private static async Task StreamAsync(HttpContext context, SseRealtimeNotifier notifier)
+    internal static async Task StreamAsync(HttpContext context, SseRealtimeNotifier notifier)
     {
         var response = context.Response;
         response.ContentType = "text/event-stream";
