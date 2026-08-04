@@ -2,7 +2,6 @@ using System.Security.Claims;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
-using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Library;
 
@@ -25,7 +24,7 @@ public static class LibraryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             var items = await library.ListAsync(catalogId, ParseKind(kind), appUserId, cancellationToken);
             return Results.Ok(items);
         });
@@ -37,7 +36,7 @@ public static class LibraryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             var detail = await library.GetDetailAsync(id, appUserId, cancellationToken);
             return detail is null ? Results.NotFound() : Results.Ok(detail);
         });
@@ -50,7 +49,7 @@ public static class LibraryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             var episodes = await library.GetEpisodesAsync(id, seasonId, appUserId, cancellationToken);
             return Results.Ok(episodes);
         });
@@ -59,14 +58,14 @@ public static class LibraryEndpoints
         group.MapGet("/recent", async (
             int? limit, ClaimsPrincipal principal, LibraryReadService library, MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             return Results.Ok(await library.GetRecentAsync(limit ?? 20, appUserId, cancellationToken));
         });
 
         group.MapGet("/resume", async (
             int? limit, ClaimsPrincipal principal, LibraryReadService library, MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             return appUserId is { } userId
                 ? Results.Ok(await library.GetResumeAsync(userId, limit ?? 20, cancellationToken))
                 : Results.Ok(Array.Empty<LibraryRailItemDto>());
@@ -75,7 +74,7 @@ public static class LibraryEndpoints
         group.MapGet("/nextup", async (
             int? limit, ClaimsPrincipal principal, LibraryReadService library, MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             return appUserId is { } userId
                 ? Results.Ok(await library.GetNextUpAsync(userId, limit ?? 20, cancellationToken))
                 : Results.Ok(Array.Empty<LibraryRailItemDto>());
@@ -96,14 +95,14 @@ public static class LibraryEndpoints
         group.MapGet("/removed", async (
             ClaimsPrincipal principal, RemovedTitlesService removed, MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             return Results.Ok(await removed.ListAsync(appUserId, cancellationToken));
         });
 
         group.MapDelete("/removed/{id:guid}/favorite", async (
             Guid id, ClaimsPrincipal principal, RemovedTitlesService removed, MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             if (appUserId is not { } userId)
             {
                 return Results.Unauthorized();
@@ -295,22 +294,6 @@ public static class LibraryEndpoints
     private static MediaKind? ParseKind(string? kind) =>
         Enum.TryParse<MediaKind>(kind, ignoreCase: true, out var parsed) ? parsed : null;
 
-    /// <summary>Maps the validated Host principal to the internal app user id (null if not yet provisioned).</summary>
-    private static async Task<int?> ResolveAppUserIdAsync(
-        ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
-    {
-        var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(hostUserId))
-        {
-            return null;
-        }
-
-        return await database.AppUsers.AsNoTracking()
-            .Where(user => user.HostUserId == hostUserId)
-            .Select(user => (int?)user.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-    }
-
     private static async Task<IResult> SetPlayedAsync(
         Guid id, bool played, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database,
         PlaybackDiagnostics diagnostics, CancellationToken cancellationToken)
@@ -318,7 +301,7 @@ public static class LibraryEndpoints
         // The Phase 0 matrix compares Infuse against the web player, so the web toggle is recorded
         // through the same instrument. The route kind stays PlayedItems*: it is the same intent, and
         // the absent playSessionId/itemId shape already distinguishes the surfaces.
-        var userId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+        var userId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
         diagnostics.BeginRequest(
             played ? PlaybackRouteKinds.PlayedItemsPost : PlaybackRouteKinds.PlayedItemsDelete,
             userId,
@@ -346,7 +329,7 @@ public static class LibraryEndpoints
     private static async Task<IResult> SetFavoriteAsync(
         Guid id, bool favorite, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken)
     {
-        if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+        if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
         {
             return Results.Unauthorized();
         }

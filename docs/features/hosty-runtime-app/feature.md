@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-06-15
-Updated: 2026-07-27
+Updated: 2026-08-04
 
 ## Description
 
@@ -118,6 +118,13 @@ After validation, Media Server upserts an internal app user in SQLite. Hosty
 admins map to Media Server `admin`; other assigned Hosty users map to Media
 Server `user`. The app stores the Hosty user id and email on the internal user
 row so it can re-link by unique email if Hosty user ids change.
+
+Every Host-identity endpoint maps the caller onto that row through one shared
+resolver (`MediaServer.Api.Hosty.HostIdentity`), which reads the Hosty user id
+from the principal's `NameIdentifier` claim. It resolves to nothing both when the
+claim is absent and when no internal user has been provisioned yet — an
+authenticated caller can reach an endpoint before the upsert above has run — so
+routes that need a user answer `401` rather than falling back to another user.
 
 **Jellyfin clients (app-owned).** Infuse cannot perform the app-code flow, so the
 `jellyfin` endpoint uses Media Server-owned credentials and opaque access tokens.
@@ -264,6 +271,9 @@ servers can validate UI and business logic only.
 - Unit coverage for the injected-environment readers (`HostyOptions`, the
   `HOSTY_MOUNT_CATALOGROOTS` parser, `HOSTY_DEPENDENCY_*` discovery): a missing
   dependency URL degrades the feature instead of failing startup.
+- Unit coverage for the shared Host identity resolver: it picks the internal user
+  belonging to the calling Hosty user id, and resolves to nothing when the claim
+  is absent or empty and when no internal user exists yet.
 - The manifest itself is validated against the Core contract through the local
   lifecycle above (`hosty apps install . --runtime dev`); no automated test
   substitutes for it.
