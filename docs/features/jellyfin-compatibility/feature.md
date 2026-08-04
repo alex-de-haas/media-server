@@ -27,6 +27,11 @@ Protocol references:
 - Synchronize watched state and playback position.
 - Keep all file access constrained to configured catalog roots.
 
+This is no longer the only surface native clients can use: `/native/v1` exists
+beside it for Media Server's own clients, carrying what a Jellyfin DTO cannot. See
+[native-client-api](../native-client-api/feature.md). Nothing here is deprecated by
+it — Infuse and any other third-party client keep this surface unchanged.
+
 ## Non-Goals
 
 - Full Jellyfin administration API.
@@ -93,7 +98,7 @@ The server accepts:
   redacted in logs, and must not be accepted by internal `/api` routes.
 
 PIN brute-force protection (short numeric secret on a public endpoint) is defined
-in [Security](../security.md): rate limiting, temporary lockout after 10 failed
+in [Security](../security/feature.md): rate limiting, temporary lockout after 10 failed
 attempts, permanent lockout after 100 (cleared by regenerating the credential).
 
 ```json

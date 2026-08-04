@@ -274,7 +274,7 @@ Query keeps slow `refetchInterval`s only as a reconnect fallback.
 
 ### M2 — Jellyfin Direct Play
 **Goal:** Infuse connects, browses, plays. Depends on M1.
-Specs: [jellyfin-compatibility](jellyfin-compatibility/feature.md), [security](security.md).
+Specs: [jellyfin-compatibility](jellyfin-compatibility/feature.md), [security](security/feature.md).
 - `jellyfin` surface: System / Users / UserViews / Items / Images, `PlaybackInfo`,
   range-based (`206`) direct streaming.
 - App-owned native-client auth (PIN + opaque tokens, argon2id, rate limit/lockout).

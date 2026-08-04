@@ -411,6 +411,33 @@ public sealed class LibraryDeleteService(
             await database.MediaItems.Where(media => purgeIds.Contains(media.Id) &&
                 (media.Kind == MediaKind.Series || media.Kind == MediaKind.Movie)).ExecuteDeleteAsync(cancellationToken);
         }
+
+        // Everything above runs through ExecuteDelete/ExecuteUpdate, which bypass the change tracker,
+        // so the DbContext's own change-log hook never sees any of it. A purge is precisely the case a
+        // native client cannot discover any other way — the row is gone and, unlike a tombstone, leaves
+        // nothing behind to poll — so the notifications are appended here by hand, inside the caller's
+        // transaction. See docs/features/native-client-api/plan.md.
+        await AppendChangeLogAsync(tombstoneIds, ChangeKind.Upsert, cancellationToken);
+        await AppendChangeLogAsync(purgeIds, ChangeKind.Delete, cancellationToken);
+    }
+
+    private async Task AppendChangeLogAsync(
+        IReadOnlyCollection<Guid> mediaItemIds, ChangeKind kind, CancellationToken cancellationToken)
+    {
+        if (mediaItemIds.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        database.ChangeLog.AddRange(mediaItemIds.Select(id => new ChangeLogEntry
+        {
+            EntityType = ChangeEntityType.MediaItem,
+            EntityId = id.ToString("N"),
+            Kind = kind,
+            OccurredAt = now,
+        }));
+        await database.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>

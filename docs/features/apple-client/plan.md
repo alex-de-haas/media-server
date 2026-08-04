@@ -179,6 +179,9 @@ not one PR per layer.
    local SQLite mirror, playback) and the **first tvOS app**: pairing, browsing,
    the version picker, track selection, play/resume/watched. The first release
    worth using.
+   It also owns proving the generated Swift client compiles against the committed
+   OpenAPI document, since it owns the package that consumes it; the server half —
+   a document CI diffs on every build — is done.
 5. **`apple-client-shells`** — the macOS, iOS and iPadOS apps over the same
    `MediaKit`.
 6. **`apple-client-discovery`** — recommendations with provenance, release

@@ -1,0 +1,2446 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "MediaServer.Api | native",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/native/v1/server/public": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeServerBootstrap"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/server": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeServerDescription"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/media/{mediaSourceId}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "mediaSourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "mediaSourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/media/{mediaSourceId}/tracks/{streamId}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "mediaSourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "streamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "mediaSourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "streamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/items/{id}/images/{imageType}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "imageType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "index",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/recommendations": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/RecommendationKind"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationFeedDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/watchlist": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WatchlistItemDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/releases/calendar": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CalendarEventDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/reminders": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReminderDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/people/{provider}/{providerId}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/history/calendar": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "toExclusive",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchHistoryCalendarResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/history/calendar/undated": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/MediaKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchHistoryUndatedPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/events": {
+      "get": {
+        "tags": [
+          "SseEndpoints"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/native/v1/items/{id}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeItemDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/sync": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeSyncPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CalendarEventDto": {
+        "required": [
+          "releaseId",
+          "entryId",
+          "trackedTitleId",
+          "kind",
+          "title",
+          "posterUrl",
+          "provider",
+          "providerId",
+          "type",
+          "date",
+          "previousDate",
+          "season",
+          "episode",
+          "note",
+          "hasReminder",
+          "inLibrary"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trackedTitleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MediaKind"
+          },
+          "title": {
+            "type": "string"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ReleaseType"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "previousDate": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date"
+          },
+          "season": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "episode": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hasReminder": {
+            "type": "boolean"
+          },
+          "inLibrary": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CastMemberDto": {
+        "required": [
+          "provider",
+          "providerId",
+          "name",
+          "character",
+          "profileUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "character": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "profileUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "LibraryDetailDto": {
+        "required": [
+          "id",
+          "publicId",
+          "tmdbId",
+          "catalogId",
+          "catalogName",
+          "catalogRoot",
+          "kind",
+          "title",
+          "originalTitle",
+          "year",
+          "overview",
+          "tagline",
+          "genres",
+          "officialRating",
+          "communityRating",
+          "runtimeTicks",
+          "indexNumber",
+          "indexNumberEnd",
+          "parentIndexNumber",
+          "posterUrl",
+          "backdropUrl",
+          "logoUrl",
+          "libraryPath",
+          "contentPath",
+          "userData",
+          "defaultSourceId",
+          "mediaSources",
+          "seasons",
+          "networks",
+          "status",
+          "voteCount",
+          "seasonCount",
+          "episodeCount",
+          "collectionName",
+          "homepage",
+          "imdbId",
+          "trailerUrl",
+          "cast",
+          "directors",
+          "creators",
+          "studios",
+          "keywords"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publicId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tmdbId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogName": {
+            "type": "string"
+          },
+          "catalogRoot": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "originalTitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "year": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "overview": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tagline": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "officialRating": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "communityRating": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "runtimeTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "indexNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "indexNumberEnd": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "parentIndexNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "backdropUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "logoUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "libraryPath": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "contentPath": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userData": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserItemDataDto"
+              }
+            ]
+          },
+          "defaultSourceId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "mediaSources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaSourceDto"
+            }
+          },
+          "seasons": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SeasonSummaryDto"
+            }
+          },
+          "networks": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/NetworkDto"
+            }
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "voteCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "seasonCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "episodeCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "collectionName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "homepage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "imdbId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "trailerUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "cast": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CastMemberDto"
+            }
+          },
+          "directors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "creators": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "studios": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StudioDto"
+            }
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "LibraryGapDto": {
+        "required": [
+          "ownedEpisodes",
+          "airedEpisodes",
+          "missingAired"
+        ],
+        "type": "object",
+        "properties": {
+          "ownedEpisodes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "airedEpisodes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "missingAired": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "LibraryItemDto": {
+        "required": [
+          "id",
+          "publicId",
+          "catalogId",
+          "kind",
+          "title",
+          "year",
+          "posterUrl",
+          "userData"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publicId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userData": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserItemDataDto"
+              }
+            ]
+          }
+        }
+      },
+      "MediaKind": {
+        "enum": [
+          "Movie",
+          "Series",
+          "Season",
+          "Episode",
+          "Video"
+        ]
+      },
+      "MediaSourceDto": {
+        "required": [
+          "id",
+          "versionName",
+          "fileName",
+          "container",
+          "sizeBytes",
+          "bitrate",
+          "durationTicks",
+          "streams"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "container": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "bitrate": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "durationTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaStreamDto"
+            }
+          }
+        }
+      },
+      "MediaStreamDto": {
+        "required": [
+          "id",
+          "type",
+          "index",
+          "codec",
+          "language",
+          "displayTitle",
+          "title",
+          "width",
+          "height",
+          "hdrFormat",
+          "channels",
+          "profile",
+          "frameRate",
+          "bitDepth",
+          "sampleRate",
+          "isDefault",
+          "isForced",
+          "isExternal",
+          "fileName"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          },
+          "index": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "codec": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "language": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayTitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "width": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "height": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "hdrFormat": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "channels": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "profile": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "frameRate": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "bitDepth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "sampleRate": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "isForced": {
+            "type": "boolean"
+          },
+          "isExternal": {
+            "type": "boolean"
+          },
+          "fileName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "NativeImagesDto": {
+        "required": [
+          "primary",
+          "backdrop",
+          "logo"
+        ],
+        "type": "object",
+        "properties": {
+          "primary": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "backdrop": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "logo": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "NativeItemDto": {
+        "required": [
+          "detail",
+          "sources",
+          "images"
+        ],
+        "type": "object",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/LibraryDetailDto"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NativeSourceUrlsDto"
+            }
+          },
+          "images": {
+            "$ref": "#/components/schemas/NativeImagesDto"
+          }
+        }
+      },
+      "NativeServerBootstrap": {
+        "required": [
+          "serverName",
+          "appId",
+          "surfaceVersion",
+          "coreOrigin"
+        ],
+        "type": "object",
+        "properties": {
+          "serverName": {
+            "type": "string"
+          },
+          "appId": {
+            "type": "string"
+          },
+          "surfaceVersion": {
+            "type": "string"
+          },
+          "coreOrigin": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "NativeServerCapabilities": {
+        "required": [
+          "transcodeEngine",
+          "packaging",
+          "recommendations",
+          "trakt"
+        ],
+        "type": "object",
+        "properties": {
+          "transcodeEngine": {
+            "type": "boolean"
+          },
+          "packaging": {
+            "type": "boolean"
+          },
+          "recommendations": {
+            "type": "boolean"
+          },
+          "trakt": {
+            "type": "boolean"
+          }
+        }
+      },
+      "NativeServerDescription": {
+        "required": [
+          "serverName",
+          "appId",
+          "surfaceVersion",
+          "coreOrigin",
+          "capabilities"
+        ],
+        "type": "object",
+        "properties": {
+          "serverName": {
+            "type": "string"
+          },
+          "appId": {
+            "type": "string"
+          },
+          "surfaceVersion": {
+            "type": "string"
+          },
+          "coreOrigin": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/NativeServerCapabilities"
+          }
+        }
+      },
+      "NativeSourceUrlsDto": {
+        "required": [
+          "mediaSourceId",
+          "versionName",
+          "streamUrl",
+          "tracks"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaSourceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "streamUrl": {
+            "type": "string"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NativeTrackUrlDto"
+            }
+          }
+        }
+      },
+      "NativeSyncPage": {
+        "required": [
+          "items",
+          "removedIds",
+          "cursor",
+          "hasMore",
+          "resetRequired"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryItemDto"
+            }
+          },
+          "removedIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "resetRequired": {
+            "type": "boolean"
+          }
+        }
+      },
+      "NativeTrackUrlDto": {
+        "required": [
+          "streamId",
+          "type",
+          "language",
+          "fileName",
+          "url"
+        ],
+        "type": "object",
+        "properties": {
+          "streamId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          },
+          "language": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fileName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "NetworkDto": {
+        "required": [
+          "name",
+          "logoUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "logoUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "NextReleaseDto": {
+        "required": [
+          "type",
+          "date",
+          "season",
+          "episode"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/ReleaseType"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "season": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "episode": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "PersonCrewGroupDto": {
+        "required": [
+          "department",
+          "credits"
+        ],
+        "type": "object",
+        "properties": {
+          "department": {
+            "type": "string"
+          },
+          "credits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonFilmographyEntryDto"
+            }
+          }
+        }
+      },
+      "PersonDetailDto": {
+        "required": [
+          "provider",
+          "providerId",
+          "name",
+          "profileUrl",
+          "biography",
+          "knownForDepartment",
+          "birthday",
+          "deathday",
+          "placeOfBirth",
+          "cast",
+          "crew"
+        ],
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "profileUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "biography": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "knownForDepartment": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "birthday": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deathday": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "placeOfBirth": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "cast": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonFilmographyEntryDto"
+            }
+          },
+          "crew": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonCrewGroupDto"
+            }
+          }
+        }
+      },
+      "PersonFilmographyEntryDto": {
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "year",
+          "posterUrl",
+          "character",
+          "job"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "character": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "job": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RecommendationDto": {
+        "required": [
+          "kind",
+          "tmdbId",
+          "title",
+          "year",
+          "posterUrl",
+          "inLibrary",
+          "mediaItemId",
+          "sources"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "tmdbId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "inLibrary": {
+            "type": "boolean"
+          },
+          "mediaItemId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RecommendationFeedDto": {
+        "required": [
+          "items",
+          "sources",
+          "selectedSources"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecommendationDto"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecommendationProviderDescriptor"
+            }
+          },
+          "selectedSources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RecommendationKind": {
+        "enum": [
+          "Movie",
+          "Series",
+          null
+        ]
+      },
+      "RecommendationProviderDescriptor": {
+        "required": [
+          "key",
+          "displayName"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        }
+      },
+      "ReleaseType": {
+        "enum": [
+          "Premiere",
+          "Theatrical",
+          "Digital",
+          "EpisodeAir"
+        ]
+      },
+      "ReminderDto": {
+        "required": [
+          "id",
+          "trackedTitleId",
+          "title",
+          "posterUrl",
+          "kind",
+          "releaseType",
+          "leadDays",
+          "notifyAt",
+          "active",
+          "state",
+          "date"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trackedTitleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MediaKind"
+          },
+          "releaseType": {
+            "$ref": "#/components/schemas/ReleaseType"
+          },
+          "leadDays": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "notifyAt": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string"
+          },
+          "date": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date"
+          }
+        }
+      },
+      "SeasonSummaryDto": {
+        "required": [
+          "id",
+          "publicId",
+          "seasonNumber",
+          "title",
+          "episodeCount",
+          "userData"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publicId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "seasonNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "title": {
+            "type": "string"
+          },
+          "episodeCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "userData": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserItemDataDto"
+              }
+            ]
+          }
+        }
+      },
+      "SeriesMonitorScope": {
+        "enum": [
+          "WholeShow",
+          "Seasons",
+          "FutureEpisodes",
+          null
+        ]
+      },
+      "StudioDto": {
+        "required": [
+          "name",
+          "logoUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "logoUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "UserItemDataDto": {
+        "required": [
+          "key"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "playbackPositionTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          },
+          "playCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 0
+          },
+          "isFavorite": {
+            "type": "boolean",
+            "default": false
+          },
+          "played": {
+            "type": "boolean",
+            "default": false
+          },
+          "playedPercentage": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "lastPlayedDate": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "unplayedItemCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "itemId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "WatchHistoryCalendarEvent": {
+        "required": [
+          "entryId",
+          "watchedAt",
+          "mediaItemId",
+          "publicId",
+          "kind",
+          "title",
+          "posterUrl",
+          "seriesId",
+          "seriesTitle",
+          "seasonNumber",
+          "episodeNumber",
+          "origin"
+        ],
+        "type": "object",
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "watchedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mediaItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publicId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "seriesId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "seriesTitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "seasonNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "episodeNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "origin": {
+            "type": "string"
+          }
+        }
+      },
+      "WatchHistoryCalendarResponse": {
+        "required": [
+          "events",
+          "undated",
+          "latestWatchedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WatchHistoryCalendarEvent"
+            }
+          },
+          "undated": {
+            "$ref": "#/components/schemas/WatchHistoryUndatedCounts"
+          },
+          "latestWatchedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "WatchHistoryUndatedCounts": {
+        "required": [
+          "movies",
+          "episodes"
+        ],
+        "type": "object",
+        "properties": {
+          "movies": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "episodes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "WatchHistoryUndatedEntry": {
+        "required": [
+          "entryId",
+          "mediaItemId",
+          "publicId",
+          "kind",
+          "title",
+          "posterUrl",
+          "seriesTitle",
+          "seasonNumber",
+          "episodeNumber",
+          "origin"
+        ],
+        "type": "object",
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mediaItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publicId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "seriesTitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "seasonNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "episodeNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "origin": {
+            "type": "string"
+          }
+        }
+      },
+      "WatchHistoryUndatedPage": {
+        "required": [
+          "entries",
+          "total"
+        ],
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WatchHistoryUndatedEntry"
+            }
+          },
+          "total": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "WatchlistItemDto": {
+        "required": [
+          "id",
+          "trackedTitleId",
+          "kind",
+          "title",
+          "year",
+          "posterUrl",
+          "provider",
+          "providerId",
+          "productionStatus",
+          "inLibrary",
+          "libraryItemId",
+          "monitorScope",
+          "monitoredSeasons",
+          "regionOverride",
+          "note",
+          "nextRelease",
+          "hasDates",
+          "libraryGap",
+          "reminders"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trackedTitleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MediaKind"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "productionStatus": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "inLibrary": {
+            "type": "boolean"
+          },
+          "libraryItemId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "monitorScope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SeriesMonitorScope"
+              }
+            ]
+          },
+          "monitoredSeasons": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          "regionOverride": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nextRelease": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NextReleaseDto"
+              }
+            ]
+          },
+          "hasDates": {
+            "type": "boolean"
+          },
+          "libraryGap": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LibraryGapDto"
+              }
+            ]
+          },
+          "reminders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReminderDto"
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "MediaServer.Api"
+    },
+    {
+      "name": "SseEndpoints"
+    }
+  ]
+}

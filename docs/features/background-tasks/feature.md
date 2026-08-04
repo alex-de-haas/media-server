@@ -70,7 +70,7 @@ signals for operator-grade debugging and metrics:
 - **Export.** OTLP exporter with a configurable endpoint; in dev it can fall back
   to console. The collector is optional — the app must run without one.
 - **Redaction.** Tokens, PINs, and `api_key` query values never appear in spans,
-  logs, or metric attributes (see [Security](../security.md)).
+  logs, or metric attributes (see [Security](../security/feature.md)).
 
 ## Persistence and Recovery
 

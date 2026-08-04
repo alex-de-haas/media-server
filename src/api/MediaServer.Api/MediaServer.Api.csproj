@@ -6,11 +6,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Required by source-generated [LibraryImport] P/Invoke (hardlink syscalls). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <OpenApiGenerateDocuments>true</OpenApiGenerateDocuments>
+    <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)/../openapi</OpenApiDocumentsDirectory>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="HostySdk.App" Version="0.1.0" />
     <InternalsVisibleTo Include="MediaServer.Api.Tests" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <!-- Microsoft.AspNetCore.OpenApi 10.0.10 pulls Microsoft.OpenApi 2.0.0, which has GHSA-v5pm-xwqc-g5wc;
+         pin the patched line until ASP.NET Core ships it, same as the SQLitePCLRaw pin above. -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.11.0" />
+    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>

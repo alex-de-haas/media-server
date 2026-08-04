@@ -263,6 +263,15 @@ public sealed class CatalogService(
                 .Where(session => database.MediaItems.Any(item => item.Id == session.MediaItemId && item.CatalogId == id))
                 .ExecuteDeleteAsync(cancellationToken);
 
+            // Notify native clients before anything mutates MediaItems, while `CatalogId == id` still
+            // names the whole set. Every item here disappears from a client's view: the purged ones are
+            // gone, and the tombstoned ones lose their public id, so one Delete row each is the honest
+            // answer either way. The bulk statements below bypass the change tracker, so the DbContext
+            // hook never sees any of this — without these rows a client would keep the deleted catalog
+            // forever. Read in pages rather than one list: the surrounding code avoids materializing a
+            // catalog for good reason, and this keeps the peak bounded without giving up correctness.
+            await AppendCatalogDeletionToChangeLogAsync(id, cancellationToken);
+
             // Tombstone the survivors before anything else touches MediaItems: one update per hierarchy
             // level, top-down, so each statement's descendant subqueries only read rows a later statement
             // will update. Setting CatalogId to null here is what excludes ghosts from every
@@ -331,6 +340,44 @@ public sealed class CatalogService(
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Records one <see cref="ChangeKind.Delete"/> per item in the catalog, so a native client's mirror
+    /// drops them. Paged, because a catalog is unbounded and the point of the surrounding code is to
+    /// never hold one in memory.
+    /// </summary>
+    private async Task AppendCatalogDeletionToChangeLogAsync(Guid catalogId, CancellationToken cancellationToken)
+    {
+        const int PageSize = 500;
+        var now = DateTimeOffset.UtcNow;
+        var after = Guid.Empty;
+
+        while (true)
+        {
+            var page = await database.MediaItems.AsNoTracking()
+                .Where(item => item.CatalogId == catalogId && item.Id.CompareTo(after) > 0)
+                .OrderBy(item => item.Id)
+                .Select(item => item.Id)
+                .Take(PageSize)
+                .ToListAsync(cancellationToken);
+
+            if (page.Count == 0)
+            {
+                return;
+            }
+
+            database.ChangeLog.AddRange(page.Select(itemId => new ChangeLogEntry
+            {
+                EntityType = ChangeEntityType.MediaItem,
+                EntityId = itemId.ToString("N"),
+                Kind = ChangeKind.Delete,
+                OccurredAt = now,
+            }));
+            await database.SaveChangesAsync(cancellationToken);
+
+            after = page[^1];
+        }
     }
 
     /// <summary>

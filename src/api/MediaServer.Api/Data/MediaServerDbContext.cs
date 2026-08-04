@@ -44,6 +44,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<RecommendationShelfGeneration> RecommendationShelfGenerations => Set<RecommendationShelfGeneration>();
     public DbSet<TmdbTitleDetailCacheEntry> TmdbTitleDetailCache => Set<TmdbTitleDetailCacheEntry>();
     public DbSet<RecommendationPreference> RecommendationPreferences => Set<RecommendationPreference>();
+    public DbSet<ChangeLogEntry> ChangeLog => Set<ChangeLogEntry>();
 
     /// <summary>
     /// Registers <see cref="UtcDateTimeOffsetConverter"/> for every <see cref="DateTimeOffset"/> and
@@ -75,6 +76,22 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureUserItemData(modelBuilder);
         ConfigureAppSettings(modelBuilder);
         ConfigureReleaseTracking(modelBuilder);
+        ConfigureChangeLog(modelBuilder);
+    }
+
+    private static void ConfigureChangeLog(ModelBuilder modelBuilder)
+    {
+        var log = modelBuilder.Entity<ChangeLogEntry>();
+        log.HasKey(entry => entry.Sequence);
+        log.Property(entry => entry.Sequence).ValueGeneratedOnAdd();
+        log.Property(entry => entry.EntityId).IsRequired();
+
+        // Sync pages by sequence and filters per-user rows, so the read is a range scan over exactly
+        // this pair.
+        log.HasIndex(entry => new { entry.Sequence, entry.AppUserId });
+
+        // Pruning is by age; the index makes finding the cut cheap.
+        log.HasIndex(entry => entry.OccurredAt);
     }
 
     /// <summary>
@@ -88,6 +105,23 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     /// while it was running, and nothing would look wrong at the time.
     /// </remarks>
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        BeforeSave();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// The synchronous twin. It exists because a hook that only covers the async overload has a hole
+    /// exactly the width of one `SaveChanges()` call, and the resulting miss is silent: the row saves,
+    /// the notification does not.
+    /// </summary>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        BeforeSave();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    private void BeforeSave()
     {
         foreach (var entry in ChangeTracker.Entries<IngestItem>())
         {
@@ -105,7 +139,58 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
             }
         }
 
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        AppendChangeLog();
+    }
+
+    /// <summary>
+    /// Records what a native client mirrors, in the same unit of work as the mutation, so the two
+    /// commit together or not at all. Same reasoning as the concurrency tokens above: a per-site call
+    /// is a call a later contributor forgets, and the failure is invisible — the row simply stops
+    /// reaching clients.
+    /// </summary>
+    /// <remarks>
+    /// This covers writes that go through the change tracker. <c>ExecuteDelete</c>/<c>ExecuteUpdate</c>
+    /// bypass it entirely and must append explicitly; see <c>LibraryDeleteService</c>, which does so
+    /// inside its own transaction.
+    /// </remarks>
+    private void AppendChangeLog()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var rows = new List<ChangeLogEntry>();
+
+        foreach (var entry in ChangeTracker.Entries<MediaItem>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                rows.Add(new ChangeLogEntry
+                {
+                    EntityType = ChangeEntityType.MediaItem,
+                    EntityId = entry.Entity.Id.ToString("N"),
+                    Kind = entry.State == EntityState.Deleted ? ChangeKind.Delete : ChangeKind.Upsert,
+                    OccurredAt = now,
+                });
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<UserItemData>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                rows.Add(new ChangeLogEntry
+                {
+                    EntityType = ChangeEntityType.UserItemData,
+                    EntityId = entry.Entity.MediaItemId.ToString("N"),
+                    AppUserId = entry.Entity.AppUserId,
+                    Kind = entry.State == EntityState.Deleted ? ChangeKind.Delete : ChangeKind.Upsert,
+                    OccurredAt = now,
+                });
+            }
+        }
+
+        if (rows.Count > 0)
+        {
+            ChangeLog.AddRange(rows);
+        }
     }
 
     private static void ConfigureAppUser(ModelBuilder modelBuilder)

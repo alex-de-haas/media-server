@@ -128,7 +128,7 @@ routes that need a user answer `401` rather than falling back to another user.
 
 **Jellyfin clients (app-owned).** Infuse cannot perform the app-code flow, so the
 `jellyfin` endpoint uses Media Server-owned credentials and opaque access tokens.
-See [Jellyfin compatibility](../jellyfin-compatibility/feature.md) and [Security](../security.md).
+See [Jellyfin compatibility](../jellyfin-compatibility/feature.md) and [Security](../security/feature.md).
 
 ## Scoped User Directory
 

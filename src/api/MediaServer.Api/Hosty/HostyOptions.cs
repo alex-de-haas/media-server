@@ -40,6 +40,23 @@ public sealed class HostyOptions
     /// <summary>True when running inside a container (docker profile); set by the .NET base image.</summary>
     public bool RunningInContainer { get; init; }
 
+    /// <summary>
+    /// Container bind ports, fixed by the manifest's <c>containerPort</c>s and the image's
+    /// <c>ASPNETCORE_URLS</c>. Under <c>docker</c>, <c>HOSTY_PORT_*</c> is the published <em>host</em>
+    /// port, not what Kestrel listens on, so the bind port cannot be read from the environment there.
+    /// </summary>
+    private const int ContainerInternalPort = 8080;
+    private const int ContainerJellyfinPort = 8096;
+
+    /// <summary>
+    /// The port Kestrel actually listens on for the public surface, which is what a request must be
+    /// matched against to know whether it arrived from outside. Null when no public surface is bound.
+    /// </summary>
+    public int? PublicBindPort => RunningInContainer ? ContainerJellyfinPort : JellyfinPort;
+
+    /// <summary>The port Kestrel listens on for the internal surface. Null when it is not bound.</summary>
+    public int? InternalBindPort => RunningInContainer ? ContainerInternalPort : InternalPort;
+
     /// <summary>True only when Core has provisioned a service token, i.e. we run under Core.</summary>
     public bool IsCoreManaged => !string.IsNullOrWhiteSpace(ServiceToken);
 
