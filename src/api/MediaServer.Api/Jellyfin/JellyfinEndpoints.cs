@@ -3,6 +3,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin.Auth;
 using MediaServer.Api.Jellyfin.Endpoints;
+using MediaServer.Api.Native;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Jellyfin;
@@ -16,11 +17,15 @@ public static class JellyfinEndpoints
 {
     public static void MapJellyfinEndpoints(this IEndpointRouteBuilder routes)
     {
-        routes.MapJellyfinSystemEndpoints();
-        routes.MapJellyfinUserEndpoints();
-        routes.MapJellyfinItemsEndpoints();
-        routes.MapJellyfinMediaEndpoints();
-        routes.MapJellyfinPlaybackEndpoints();
+        // Grouped with an empty prefix purely to carry metadata: this is the one surface besides
+        // /native/v1 that is meant to answer on the public binding. See Native/PublicSurface.cs.
+        var group = routes.MapGroup(string.Empty).AllowPublic();
+
+        group.MapJellyfinSystemEndpoints();
+        group.MapJellyfinUserEndpoints();
+        group.MapJellyfinItemsEndpoints();
+        group.MapJellyfinMediaEndpoints();
+        group.MapJellyfinPlaybackEndpoints();
     }
 
     /// <summary>Authorization for the authenticated Jellyfin routes (Jellyfin token scheme only).</summary>

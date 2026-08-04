@@ -9,6 +9,7 @@ using HostySdk.App;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.Native;
 using MediaServer.Api.Recommendations;
 using MediaServer.Api.WatchHistory;
 using MediaServer.Api.WatchHistory.Trakt;
@@ -55,6 +56,13 @@ builder.Services.AddSingleton(settings);
 
 // Operator-editable settings persisted in the DB (e.g. custom release groups stripped before identify).
 builder.Services.AddScoped<AppSettingsService>();
+
+// Signed URL tokens for the media/image URLs handed to AVPlayer, which will not attach an
+// Authorization header to the ranged requests it issues itself. The key is persisted under the app
+// data dir so a restart does not invalidate a viewer's in-flight playback.
+builder.Services.AddSingleton<NativeUrlSigningKey>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<NativeUrlTokenService>();
 
 // Phase 0 playback observation (docs/planning/trakt-watched-state-sync.md). Off unless the operator
 // turns it on, and the writer simply does not exist then, so the recorder short-circuits.
@@ -447,6 +455,11 @@ if (settings.PlaybackDiagnosticsEnabled)
         app.Services.GetRequiredService<PlaybackDiagnosticsWriter>().Path);
 }
 
+// Routing first, so the allowlist below can see which endpoint matched; then the allowlist, so an
+// unpublished route 404s on the public binding before authentication ever looks at a credential.
+app.UseRouting();
+app.UsePublicSurfaceAllowlist(hosty);
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
@@ -472,8 +485,11 @@ app.MapRealtimeEndpoints();
 // Jellyfin-compatible surface served on the public `jellyfin` endpoint.
 app.MapJellyfinEndpoints();
 
+// First-party client surface, also public. See docs/features/native-client-api/plan.md.
+app.MapNativeEndpoints();
+
 // Root marker so the public `jellyfin` port responds to a bare probe.
-app.MapGet("/", () => Results.Ok(new { service = "media-server", status = "ok" }));
+app.MapGet("/", () => Results.Ok(new { service = "media-server", status = "ok" })).AllowPublic();
 
 // Returns the validated Host identity and upserts the internal app user (admin/user mapping).
 app.MapGet("/api/me", async (ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken) =>
