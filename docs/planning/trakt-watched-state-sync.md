@@ -1108,7 +1108,7 @@ Live Trakt verification uses a dedicated non-production application and account:
 - [docker-host idea: App Secrets Store](https://github.com/alex-de-haas/docker-host/blob/main/docs/ideas/app-secrets-store.md)
 - [Jellyfin compatibility](../features/jellyfin-compatibility/feature.md)
 - [Storage and data](../features/storage-and-data/feature.md)
-- [Security](../features/security.md)
+- [Security](../features/security/feature.md)
 - [Background tasks and progress](../features/background-tasks/feature.md)
 - [Frontend application](../features/frontend-application/feature.md)
 - [Hosty runtime app](../features/hosty-runtime-app/feature.md)

@@ -25,6 +25,13 @@ public sealed class NativeUrlTokenService(NativeUrlSigningKey key, TimeProvider 
 
     private const string Version = "v1";
 
+    /// <summary>
+    /// A ceiling on what we will even look at. These routes are anonymous by design — the token is the
+    /// credential — so an unbounded query string would otherwise buy an attacker arbitrary allocation
+    /// and HMAC work per request. A real token is well under a hundred characters.
+    /// </summary>
+    private const int MaxTokenLength = 256;
+
     public string Mint(int appUserId, Guid mediaSourceId, NativeUrlTokenMethods methods, TimeSpan? lifetime = null)
     {
         var expires = time.GetUtcNow().Add(lifetime ?? DefaultLifetime).ToUnixTimeSeconds();
@@ -41,6 +48,11 @@ public sealed class NativeUrlTokenService(NativeUrlSigningKey key, TimeProvider 
         if (string.IsNullOrWhiteSpace(token))
         {
             return NativeUrlTokenResult.Invalid(NativeUrlTokenFailure.Missing);
+        }
+
+        if (token.Length > MaxTokenLength)
+        {
+            return NativeUrlTokenResult.Invalid(NativeUrlTokenFailure.Malformed);
         }
 
         var separator = token.LastIndexOf('.');
@@ -100,12 +112,10 @@ public readonly record struct NativeUrlTokenMethods(bool Get, bool Head)
 {
     public static readonly NativeUrlTokenMethods Read = new(Get: true, Head: true);
 
-    public bool Allows(string httpMethod) => httpMethod.ToUpperInvariant() switch
-    {
-        "GET" => Get,
-        "HEAD" => Head,
-        _ => false,
-    };
+    // Compared case-insensitively rather than upper-cased: these routes take one call per ranged
+    // request, and a hot path should not allocate a string to answer a two-way question.
+    public bool Allows(string httpMethod) =>
+        (Get && HttpMethods.IsGet(httpMethod)) || (Head && HttpMethods.IsHead(httpMethod));
 
     public static NativeUrlTokenMethods Parse(string value) =>
         new(Get: value.Contains('G', StringComparison.Ordinal), Head: value.Contains('H', StringComparison.Ordinal));

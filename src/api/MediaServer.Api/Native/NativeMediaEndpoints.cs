@@ -32,7 +32,9 @@ public static class NativeMediaEndpoints
 
             var resolved = await resolver.ResolveSourceAsync(mediaSourceId, cancellationToken);
             return resolved is null ? Results.NotFound() : JellyfinStreamResults.File(resolved);
-        }).AllowAnonymous();
+        }).AllowAnonymous()
+          .Produces(StatusCodes.Status200OK, contentType: "application/octet-stream")
+          .Produces(StatusCodes.Status404NotFound);
 
         // A sidecar track: an external audio dub or subtitle living beside the video. No existing
         // client can play external audio at all, which is the point of serving it here.
@@ -54,7 +56,9 @@ public static class NativeMediaEndpoints
 
             var resolved = await resolver.ResolveSidecarAsync(mediaSourceId, streamId, cancellationToken);
             return resolved is null ? Results.NotFound() : JellyfinStreamResults.File(resolved);
-        }).AllowAnonymous();
+        }).AllowAnonymous()
+          .Produces(StatusCodes.Status200OK, contentType: "application/octet-stream")
+          .Produces(StatusCodes.Status404NotFound);
     }
 
 }

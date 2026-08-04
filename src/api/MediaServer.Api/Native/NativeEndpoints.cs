@@ -32,7 +32,8 @@ public static class NativeEndpoints
                 ServerName: server.ServerName,
                 AppId: hosty.AppId,
                 SurfaceVersion: NativeSurface.Version,
-                CoreOrigin: hosty.CorePublicOrigin)));
+                CoreOrigin: hosty.CorePublicOrigin)))
+            .Produces<NativeServerBootstrap>();
 
         // Authenticated, and the full answer: what this instance can actually do, so a client hides
         // what the server cannot do rather than failing on use.
@@ -51,7 +52,8 @@ public static class NativeEndpoints
                     Packaging: false,
                     Recommendations: !string.IsNullOrWhiteSpace(settings.TmdbApiKey),
                     Trakt: settings.IsTraktConfigured))))
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .Produces<NativeServerDescription>();
 
         group.MapNativeMediaEndpoints();
         group.MapNativeDiscoveryEndpoints();
@@ -64,7 +66,7 @@ public static class NativeEndpoints
             NativeUrlTokenService tokens,
             CancellationToken cancellationToken) =>
         {
-            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } appUserId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
             {
                 return Results.Unauthorized();
             }
@@ -73,7 +75,7 @@ public static class NativeEndpoints
             return detail is null
                 ? Results.NotFound()
                 : Results.Ok(new NativeItemDto(detail, NativeItemUrls.Build(detail, appUserId, tokens)));
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<NativeItemDto>().Produces(StatusCodes.Status404NotFound);
 
         group.MapGet("/sync", async (
             string? cursor,
@@ -82,13 +84,13 @@ public static class NativeEndpoints
             NativeSyncService sync,
             CancellationToken cancellationToken) =>
         {
-            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } appUserId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
             {
                 return Results.Unauthorized();
             }
 
             return Results.Ok(await sync.SyncAsync(cursor, appUserId, cancellationToken));
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<NativeSyncPage>();
     }
 }
 

@@ -98,7 +98,7 @@ The server accepts:
   redacted in logs, and must not be accepted by internal `/api` routes.
 
 PIN brute-force protection (short numeric secret on a public endpoint) is defined
-in [Security](../security.md): rate limiting, temporary lockout after 10 failed
+in [Security](../security/feature.md): rate limiting, temporary lockout after 10 failed
 attempts, permanent lockout after 100 (cleared by regenerating the credential).
 
 ```json

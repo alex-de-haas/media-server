@@ -1,8 +1,7 @@
 # Security
 
-Status: Implemented
 Created: 2026-06-15
-Updated: 2026-06-21
+Updated: 2026-08-04
 
 ## Description
 
@@ -15,7 +14,7 @@ Media Server-owned credentials for Jellyfin clients.
 
 - The UI uses the Hosty app-code flow and an app-origin session; the app never
   sees Host passwords or Host session cookies (see
-  [Hosty runtime app](hosty-runtime-app/feature.md)).
+  [Hosty runtime app](../hosty-runtime-app/feature.md)).
 - `api` trusts a forwarded Host identity only after validating it against Core
   (`/api/auth/apps/revalidate`).
 - Never trust client-supplied forwarding or proxy headers (for example
@@ -45,7 +44,7 @@ Native clients authenticate with a Media Server-owned credential bound to an
 internal Media Server user, which is itself linked to a Hosty user: `username`
 (the Hosty email) + a 6–8 digit PIN. The PIN is verified only at login and
 yields an opaque, hashed, revocable access token (see
-[Jellyfin compatibility](jellyfin-compatibility/feature.md)).
+[Jellyfin compatibility](../jellyfin-compatibility/feature.md)).
 
 Because a short numeric PIN sits on a public endpoint, brute-force protection is
 mandatory:
@@ -75,7 +74,7 @@ mandatory:
 authorization flow issues the credential and the app-identity exchange scopes it to
 this app; assignment is enforced at issuance and re-checked on every request, and
 revocation lives in Shell. See
-[native-client-api](native-client-api/feature.md).
+[native-client-api](../native-client-api/feature.md).
 
 Two app-owned controls sit around it:
 
@@ -95,7 +94,7 @@ Two app-owned controls sit around it:
 ## File Safety
 
 - All file access is sandboxed to configured catalog roots; traversal and symlink
-  escapes are rejected (see [File and directory management](file-directory-management/feature.md)).
+  escapes are rejected (see [File and directory management](../file-directory-management/feature.md)).
 - Jellyfin clients address media by item id, never by path, so stream URLs cannot
   bypass catalog authorization.
 

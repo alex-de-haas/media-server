@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using MediaServer.Api.Data;
-using Microsoft.EntityFrameworkCore;
+using MediaServer.Api.Hosty;
 
 namespace MediaServer.Api.Recommendations;
 
@@ -36,7 +36,7 @@ public static class RecommendationEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -54,7 +54,7 @@ public static class RecommendationEndpoints
             TimeProvider time,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -82,7 +82,7 @@ public static class RecommendationEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -107,7 +107,7 @@ public static class RecommendationEndpoints
             TimeProvider time,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -116,14 +116,5 @@ public static class RecommendationEndpoints
             await feed.SetSourcesAsync(user.Id, request.Sources, time.GetUtcNow(), cancellationToken);
             return Results.NoContent();
         });
-    }
-
-    private static async Task<AppUser?> ResolveUserAsync(
-        ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
-    {
-        var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        return string.IsNullOrEmpty(hostUserId)
-            ? null
-            : await database.AppUsers.FirstOrDefaultAsync(user => user.HostUserId == hostUserId, cancellationToken);
     }
 }

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using MediaServer.Api.Data;
+using MediaServer.Api.Hosty;
 using MediaServer.Api.People;
 using MediaServer.Api.Realtime;
 using MediaServer.Api.Recommendations;
@@ -33,14 +34,14 @@ public static class NativeDiscoveryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
 
             var bounded = Math.Clamp(limit ?? DefaultRecommendationLimit, 1, MaxRecommendationLimit);
             return Results.Ok(await feed.BuildAsync(userId, kind, bounded, cancellationToken));
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<RecommendationFeedDto>();
 
         group.MapGet("/watchlist", async (
             ClaimsPrincipal principal,
@@ -48,13 +49,13 @@ public static class NativeDiscoveryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
 
             return Results.Ok(await service.ListAsync(userId, cancellationToken));
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<IReadOnlyList<WatchlistItemDto>>();
 
         group.MapGet("/releases/calendar", async (
             DateOnly from,
@@ -64,7 +65,7 @@ public static class NativeDiscoveryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -75,7 +76,7 @@ public static class NativeDiscoveryEndpoints
             }
 
             return Results.Ok(await service.CalendarAsync(userId, from, to, cancellationToken));
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<IReadOnlyList<CalendarEventDto>>();
 
         group.MapGet("/reminders", async (
             ClaimsPrincipal principal,
@@ -83,13 +84,13 @@ public static class NativeDiscoveryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
 
             return Results.Ok(await service.ListAsync(userId, cancellationToken));
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<IReadOnlyList<ReminderDto>>();
 
         group.MapGet("/people/{provider}/{providerId}", async (
             string provider,
@@ -99,7 +100,7 @@ public static class NativeDiscoveryEndpoints
         {
             var person = await people.GetAsync(provider, providerId, cancellationToken);
             return person is null ? Results.NotFound() : Results.Ok(person);
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<PersonDetailDto>().Produces(StatusCodes.Status404NotFound);
 
         group.MapGet("/history/calendar", async (
             DateTimeOffset from,
@@ -109,7 +110,7 @@ public static class NativeDiscoveryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -130,7 +131,7 @@ public static class NativeDiscoveryEndpoints
             }
 
             return Results.Ok(await calendar.LoadAsync(userId, from, toExclusive, cancellationToken));
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<WatchHistoryCalendarResponse>();
 
         group.MapGet("/history/calendar/undated", async (
             MediaKind? kind,
@@ -139,16 +140,18 @@ public static class NativeDiscoveryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await NativePrincipal.AppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
 
             return Results.Ok(await calendar.LoadUndatedAsync(userId, kind, cancellationToken));
-        }).RequireAuthorization();
+        }).RequireAuthorization().Produces<WatchHistoryUndatedPage>();
 
         // The same stream the web UI consumes, mapped here so a native client does not have to reach
         // through the BFF proxy for it. Server→client only; operator actions go through REST.
-        group.MapGet("/events", SseEndpoints.StreamAsync).RequireAuthorization();
+        group.MapGet("/events", SseEndpoints.StreamAsync)
+            .RequireAuthorization()
+            .Produces(StatusCodes.Status200OK, contentType: "text/event-stream");
     }
 }
