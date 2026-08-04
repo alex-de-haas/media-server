@@ -52,6 +52,8 @@ public static class NativeEndpoints
                     Trakt: settings.IsTraktConfigured))))
             .RequireAuthorization();
 
+        group.MapNativeMediaEndpoints();
+
         group.MapGet("/sync", async (
             string? cursor,
             ClaimsPrincipal principal,

@@ -64,6 +64,7 @@ builder.Services.AddSingleton<NativeUrlSigningKey>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<NativeUrlTokenService>();
 builder.Services.AddScoped<NativeSyncService>();
+builder.Services.AddScoped<NativeMediaResolver>();
 builder.Services.AddHostedService<ChangeLogPruner>();
 
 // Phase 0 playback observation (docs/planning/trakt-watched-state-sync.md). Off unless the operator
