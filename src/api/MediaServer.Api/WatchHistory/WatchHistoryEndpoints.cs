@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using MediaServer.Api.Data;
+using MediaServer.Api.Hosty;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.WatchHistory;
@@ -81,7 +82,7 @@ public static class WatchHistoryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -184,7 +185,7 @@ public static class WatchHistoryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -215,7 +216,7 @@ public static class WatchHistoryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             return user is null
                 ? Results.Unauthorized()
                 : Results.Ok(await calendar.LoadUndatedAsync(user.Id, kind, cancellationToken));
@@ -371,7 +372,7 @@ public static class WatchHistoryEndpoints
         MediaServerDbContext database,
         CancellationToken cancellationToken)
     {
-        var user = await ResolveUserAsync(principal, database, cancellationToken);
+        var user = await principal.ResolveAppUserAsync(database, cancellationToken);
         if (user is null)
         {
             return new ResolvedContext(null, null, providerKey, Results.Unauthorized());
@@ -462,16 +463,4 @@ public static class WatchHistoryEndpoints
                 connection.FavoritesRemoteCount,
                 connection.FavoritesCapacity,
                 favoriteFailures?.GetValueOrDefault(connection.Id) ?? []);
-
-    private static async Task<AppUser?> ResolveUserAsync(
-        ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
-    {
-        var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(hostUserId))
-        {
-            return null;
-        }
-
-        return await database.AppUsers.FirstOrDefaultAsync(user => user.HostUserId == hostUserId, cancellationToken);
-    }
 }

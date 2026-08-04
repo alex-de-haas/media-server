@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using MediaServer.Api.Data;
-using Microsoft.EntityFrameworkCore;
+using MediaServer.Api.Hosty;
 
 namespace MediaServer.Api.Collections;
 
@@ -31,25 +31,9 @@ public static class CollectionEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var appUserId = await ResolveAppUserIdAsync(principal, database, cancellationToken);
+            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
             var detail = await collections.GetAsync(id, appUserId, cancellationToken);
             return detail is null ? Results.NotFound() : Results.Ok(detail);
         });
-    }
-
-    /// <summary>Maps the validated Host principal to the internal app user id (null if not yet provisioned).</summary>
-    private static async Task<int?> ResolveAppUserIdAsync(
-        ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
-    {
-        var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(hostUserId))
-        {
-            return null;
-        }
-
-        return await database.AppUsers.AsNoTracking()
-            .Where(user => user.HostUserId == hostUserId)
-            .Select(user => (int?)user.Id)
-            .FirstOrDefaultAsync(cancellationToken);
     }
 }

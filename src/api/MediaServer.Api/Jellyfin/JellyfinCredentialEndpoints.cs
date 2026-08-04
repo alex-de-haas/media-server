@@ -2,7 +2,6 @@ using System.Security.Claims;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin.Auth;
-using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Jellyfin;
 
@@ -37,7 +36,7 @@ public static class JellyfinCredentialEndpoints
             TimeProvider time,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -63,7 +62,7 @@ public static class JellyfinCredentialEndpoints
             HostyOptions hosty,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -86,7 +85,7 @@ public static class JellyfinCredentialEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var user = await ResolveUserAsync(principal, database, cancellationToken);
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
             if (user is null)
             {
                 return Results.Unauthorized();
@@ -95,16 +94,5 @@ public static class JellyfinCredentialEndpoints
             var revoked = await credentials.RevokeCredentialAsync(user.Id, cancellationToken);
             return revoked ? Results.NoContent() : Results.NotFound();
         });
-    }
-
-    private static async Task<AppUser?> ResolveUserAsync(ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
-    {
-        var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(hostUserId))
-        {
-            return null;
-        }
-
-        return await database.AppUsers.FirstOrDefaultAsync(user => user.HostUserId == hostUserId, cancellationToken);
     }
 }

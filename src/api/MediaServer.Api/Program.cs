@@ -478,8 +478,7 @@ app.MapGet("/", () => Results.Ok(new { service = "media-server", status = "ok" }
 // Returns the validated Host identity and upserts the internal app user (admin/user mapping).
 app.MapGet("/api/me", async (ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken) =>
 {
-    var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-    if (string.IsNullOrEmpty(hostUserId))
+    if (principal.GetHostUserId() is not { } hostUserId)
     {
         return Results.Unauthorized();
     }

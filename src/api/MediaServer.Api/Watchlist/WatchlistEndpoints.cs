@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using MediaServer.Api.Data;
-using Microsoft.EntityFrameworkCore;
+using MediaServer.Api.Hosty;
 
 namespace MediaServer.Api.Watchlist;
 
@@ -18,7 +18,7 @@ public static class WatchlistEndpoints
         watchlist.MapGet("/", async (
             ClaimsPrincipal principal, WatchlistService service, MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -30,7 +30,7 @@ public static class WatchlistEndpoints
             AddWatchlistRequest request, ClaimsPrincipal principal, WatchlistService service, MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -49,7 +49,7 @@ public static class WatchlistEndpoints
             Guid id, UpdateWatchlistRequest request, ClaimsPrincipal principal, WatchlistService service,
             MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -62,7 +62,7 @@ public static class WatchlistEndpoints
             Guid id, ClaimsPrincipal principal, WatchlistService service, MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -74,7 +74,7 @@ public static class WatchlistEndpoints
             DateOnly from, DateOnly to, ClaimsPrincipal principal, WatchlistService service, MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -91,7 +91,7 @@ public static class WatchlistEndpoints
             Guid id, ClaimsPrincipal principal, WatchlistService service, MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -104,7 +104,7 @@ public static class WatchlistEndpoints
         reminders.MapGet("/", async (
             ClaimsPrincipal principal, ReminderService service, MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -116,7 +116,7 @@ public static class WatchlistEndpoints
             CreateReminderRequest request, ClaimsPrincipal principal, ReminderService service, MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -136,7 +136,7 @@ public static class WatchlistEndpoints
             Guid id, UpdateReminderRequest request, ClaimsPrincipal principal, ReminderService service,
             MediaServerDbContext database, CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
@@ -149,28 +149,12 @@ public static class WatchlistEndpoints
             Guid id, ClaimsPrincipal principal, ReminderService service, MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } userId)
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
             {
                 return Results.Unauthorized();
             }
 
             return await service.DeleteAsync(userId, id, cancellationToken) ? Results.NoContent() : Results.NotFound();
         });
-    }
-
-    /// <summary>Maps the validated Host principal to the internal app user id (null if not yet provisioned).</summary>
-    private static async Task<int?> ResolveAppUserIdAsync(
-        ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
-    {
-        var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(hostUserId))
-        {
-            return null;
-        }
-
-        return await database.AppUsers.AsNoTracking()
-            .Where(user => user.HostUserId == hostUserId)
-            .Select(user => (int?)user.Id)
-            .FirstOrDefaultAsync(cancellationToken);
     }
 }
