@@ -34,6 +34,16 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release --no-build --verbosity normal
 
+      # The build regenerates the OpenAPI document for /native/v1. If it differs from what is
+      # committed, a route changed without the contract being refreshed — and the generated Swift
+      # client would drift from the server.
+      - name: OpenAPI document is current
+        run: |
+          if ! git diff --exit-code -- openapi; then
+            echo "::error::The /native/v1 OpenAPI document is stale. Run 'dotnet build' in src/api and commit src/api/openapi." >&2
+            exit 1
+          fi
+
   web:
     name: web (Next.js)
     runs-on: ubuntu-latest
