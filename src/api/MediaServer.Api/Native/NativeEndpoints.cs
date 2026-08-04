@@ -3,6 +3,7 @@ using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
+using MediaServer.Api.Library;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Native;
@@ -53,6 +54,25 @@ public static class NativeEndpoints
             .RequireAuthorization();
 
         group.MapNativeMediaEndpoints();
+
+        group.MapGet("/items/{id:guid}", async (
+            Guid id,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            LibraryReadService library,
+            NativeUrlTokenService tokens,
+            CancellationToken cancellationToken) =>
+        {
+            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            var detail = await library.GetDetailAsync(id, appUserId, cancellationToken);
+            return detail is null
+                ? Results.NotFound()
+                : Results.Ok(new NativeItemDto(detail, NativeItemUrls.Build(detail, appUserId, tokens)));
+        }).RequireAuthorization();
 
         group.MapGet("/sync", async (
             string? cursor,
