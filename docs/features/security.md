@@ -69,6 +69,29 @@ mandatory:
   and during token refresh or session validation. Tokens for users no longer
   assigned to the app are rejected or revoked at those validation points.
 
+## Native Client Surface (Core-owned identity)
+
+`/native/v1` writes no authentication code of its own. Hosty Core's device
+authorization flow issues the credential and the app-identity exchange scopes it to
+this app; assignment is enforced at issuance and re-checked on every request, and
+revocation lives in Shell. See
+[native-client-api](native-client-api/feature.md).
+
+Two app-owned controls sit around it:
+
+- **The public binding carries an allowlist.** Kestrel serves one route table on
+  both bindings, so without it the whole internal surface — catalog administration
+  included — answers from outside, held shut only by Host identity. Only the
+  Jellyfin surface, `/native/v1` and its signed media URLs are published; anything
+  else returns **404** there, not 401, since an unauthenticated caller has no
+  business confirming that an administration surface exists. The check is endpoint
+  metadata, so a new route group is unpublished until marked deliberately.
+- **Signed URL tokens** for media, because `AVPlayer` attaches no `Authorization`
+  header to the ranged requests it issues. Each is bound to the user, the media
+  source and the permitted methods, lives long enough to outlast one playback (a
+  token that expires between two `Range` requests of a file is broken), is signed
+  with a key persisted under the app data directory, and is redacted in logs.
+
 ## File Safety
 
 - All file access is sandboxed to configured catalog roots; traversal and symlink
