@@ -1,6 +1,9 @@
+using System.Security.Claims;
 using MediaServer.Api.Configuration;
+using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
+using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Native;
 
@@ -48,6 +51,36 @@ public static class NativeEndpoints
                     Recommendations: !string.IsNullOrWhiteSpace(settings.TmdbApiKey),
                     Trakt: settings.IsTraktConfigured))))
             .RequireAuthorization();
+
+        group.MapGet("/sync", async (
+            string? cursor,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativeSyncService sync,
+            CancellationToken cancellationToken) =>
+        {
+            if (await ResolveAppUserIdAsync(principal, database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(await sync.SyncAsync(cursor, appUserId, cancellationToken));
+        }).RequireAuthorization();
+    }
+
+    private static async Task<int?> ResolveAppUserIdAsync(
+        ClaimsPrincipal principal, MediaServerDbContext database, CancellationToken cancellationToken)
+    {
+        var hostUserId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(hostUserId))
+        {
+            return null;
+        }
+
+        return await database.AppUsers.AsNoTracking()
+            .Where(user => user.HostUserId == hostUserId)
+            .Select(user => (int?)user.Id)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 }
 

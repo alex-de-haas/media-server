@@ -63,6 +63,8 @@ builder.Services.AddScoped<AppSettingsService>();
 builder.Services.AddSingleton<NativeUrlSigningKey>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<NativeUrlTokenService>();
+builder.Services.AddScoped<NativeSyncService>();
+builder.Services.AddHostedService<ChangeLogPruner>();
 
 // Phase 0 playback observation (docs/planning/trakt-watched-state-sync.md). Off unless the operator
 // turns it on, and the writer simply does not exist then, so the recorder short-circuits.

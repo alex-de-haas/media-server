@@ -106,6 +106,23 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     /// </remarks>
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        BeforeSave();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// The synchronous twin. It exists because a hook that only covers the async overload has a hole
+    /// exactly the width of one `SaveChanges()` call, and the resulting miss is silent: the row saves,
+    /// the notification does not.
+    /// </summary>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        BeforeSave();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    private void BeforeSave()
+    {
         foreach (var entry in ChangeTracker.Entries<IngestItem>())
         {
             if (entry.State is EntityState.Added or EntityState.Modified)
@@ -123,8 +140,6 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         }
 
         AppendChangeLog();
-
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
     /// <summary>

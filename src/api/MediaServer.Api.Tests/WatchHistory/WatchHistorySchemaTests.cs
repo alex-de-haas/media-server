@@ -315,7 +315,12 @@ public sealed class WatchHistorySchemaTests : IDisposable
 
         var row = _database.UserItemData.AsNoTracking().Single();
         Assert.Equal(DateTimeOffset.UnixEpoch.AddDays(3), row.LastWatchedAt);
-        Assert.Equal(7, row.StateRevision);
+
+        // The context bumps the revision on every insert and update — that is the whole point of the
+        // token, and it is what a long-running sync re-checks before applying a remote snapshot. The
+        // seeded 7 is therefore stored as 8. This used to read back unchanged only because the
+        // synchronous SaveChanges bypassed the hook; it no longer does.
+        Assert.Equal(8, row.StateRevision);
     }
 
     [Fact]
