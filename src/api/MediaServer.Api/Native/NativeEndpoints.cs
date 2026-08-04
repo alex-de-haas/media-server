@@ -4,6 +4,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
 using MediaServer.Api.Library;
+using MediaServer.Api.Native.Playback;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Native;
@@ -82,6 +83,24 @@ public static class NativeEndpoints
             return Results.Ok(new NativeItemDto(detail, NativeItemUrls.Build(detail, appUserId, tokens), images));
         }).RequireAuthorization().Produces<NativeItemDto>().Produces(StatusCodes.Status404NotFound);
 
+        group.MapPost("/playback/resolve", async (
+            NativePlaybackResolveRequest body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativePlaybackResolver resolver,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            var resolved = await resolver.ResolveAsync(body.ItemId, appUserId, body.Profile, cancellationToken);
+            return resolved is null ? Results.NotFound() : Results.Ok(resolved);
+        }).RequireAuthorization()
+          .Produces<NativePlaybackResolutionResponse>()
+          .Produces(StatusCodes.Status404NotFound);
+
         group.MapGet("/sync", async (
             string? cursor,
             ClaimsPrincipal principal,
@@ -98,6 +117,9 @@ public static class NativeEndpoints
         }).RequireAuthorization().Produces<NativeSyncPage>();
     }
 }
+
+/// <summary>What to resolve, and for which client.</summary>
+public sealed record NativePlaybackResolveRequest(Guid ItemId, NativeCapabilityProfile Profile);
 
 public static class NativeSurface
 {

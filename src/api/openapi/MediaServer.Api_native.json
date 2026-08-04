@@ -520,6 +520,38 @@
         }
       }
     },
+    "/native/v1/playback/resolve": {
+      "post": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativePlaybackResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePlaybackResolutionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/native/v1/sync": {
       "get": {
         "tags": [
@@ -1315,6 +1347,50 @@
           }
         }
       },
+      "NativeCapabilityProfile": {
+        "required": [
+          "containers",
+          "videoCodecs",
+          "audioCodecs",
+          "hdrFormats"
+        ],
+        "type": "object",
+        "properties": {
+          "containers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "videoCodecs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "audioCodecs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hdrFormats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxAudioChannels": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "NativeImagesDto": {
         "required": [
           "primary",
@@ -1362,6 +1438,92 @@
           },
           "images": {
             "$ref": "#/components/schemas/NativeImagesDto"
+          }
+        }
+      },
+      "NativePlaybackDecision": {
+        "enum": [
+          "DirectPlay",
+          "Remux",
+          "Unsupported"
+        ]
+      },
+      "NativePlaybackResolution": {
+        "required": [
+          "mediaSourceId",
+          "versionName",
+          "decision",
+          "url",
+          "signalling",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaSourceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "decision": {
+            "$ref": "#/components/schemas/NativePlaybackDecision"
+          },
+          "url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "signalling": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "NativePlaybackResolutionResponse": {
+        "required": [
+          "itemId",
+          "sources"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NativePlaybackResolution"
+            }
+          }
+        }
+      },
+      "NativePlaybackResolveRequest": {
+        "required": [
+          "itemId",
+          "profile"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/NativeCapabilityProfile"
           }
         }
       },
