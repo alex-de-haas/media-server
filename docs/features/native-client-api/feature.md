@@ -130,6 +130,18 @@ drift about what a title contains — plus the URLs only this surface adds.
 One token is minted per edition and covers the video and every sidecar of that
 source: a viewer choosing an external dub reads two files as one playback.
 
+Artwork is served **from this instance**, not from the metadata provider's CDN:
+`GET /native/v1/items/{id}/images/{type}` reads the local cache through the same
+service the Jellyfin surface uses, so a first request for an image nobody has
+fetched yet fills the cache rather than 404ing. A client on the same network as the
+server therefore needs no internet at all, and browsing a library stops being
+visible to TMDb; the cost is our bandwidth for something a CDN does well, which is
+why it is a deliberate choice. The URLs carry the asset's content-hash tag, so they
+can be cached hard — new artwork means a new tag and therefore a new URL — and the
+item DTO lists only the types the instance actually holds, so a client never asks
+for one that cannot exist. These are bearer-authenticated: only `AVPlayer`'s
+self-issued ranged requests need a signed URL.
+
 `GET|HEAD /native/v1/media/{mediaSourceId}` serves the file by byte range, and
 `…/tracks/{streamId}` serves a sidecar dub or subtitle — a file no existing client
 can play at all, and the thing the Jellyfin surface can only announce without a way
@@ -181,3 +193,5 @@ Backend tests use xUnit and Imposter. Required coverage:
   out of the catalog root.
 - Item URLs built from the real detail projection, so the test breaks if the
   projection stops carrying what they are built from.
+- Artwork URLs offered only for the types the instance holds, carrying the tag, and
+  absent entirely for an item with no artwork.

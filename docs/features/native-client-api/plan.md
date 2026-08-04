@@ -4,23 +4,12 @@ Status: In Progress
 Created: 2026-08-02
 Updated: 2026-08-04
 
-> Every phase this plan defined has shipped — see [feature.md](feature.md). What
-> is left is one design question the implementation raised, and verification that
-> needs a running instance. Work that turned out to belong to other features has
-> moved to them: chapters and probe provenance to [media probe
+> Every deliverable this plan defined has shipped — see [feature.md](feature.md).
+> All that is left is verification that needs a running instance, which no unit
+> test can stand in for. Work that turned out to belong to other features moved to
+> them: chapters and probe provenance to [media probe
 > providers](../media-probe-providers/plan.md), Swift client generation to
 > [apple-client](../apple-client/plan.md).
-
-## The one open decision
-
-- [ ] **Where artwork comes from.** The detail projection hands out the provider's
-      own URLs (`ImageAsset.RemotePath`, i.e. TMDb), which the web UI has always
-      used and which work today. Serving artwork from our local cache instead
-      (`ImageAsset.LocalPath`, which the Jellyfin surface already reads) would keep
-      a LAN-only client working without internet and stop TMDb seeing what a user
-      browses — at the cost of our bandwidth and cache for something a CDN does
-      better. It is a decision, not an oversight, and it wants answering before the
-      client's browsing surface is built rather than after.
 
 ## Verification that needs a running instance
 

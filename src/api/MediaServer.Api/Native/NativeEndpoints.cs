@@ -56,6 +56,7 @@ public static class NativeEndpoints
             .Produces<NativeServerDescription>();
 
         group.MapNativeMediaEndpoints();
+        group.MapNativeImageEndpoints();
         group.MapNativeDiscoveryEndpoints();
 
         group.MapGet("/items/{id:guid}", async (
@@ -72,9 +73,13 @@ public static class NativeEndpoints
             }
 
             var detail = await library.GetDetailAsync(id, appUserId, cancellationToken);
-            return detail is null
-                ? Results.NotFound()
-                : Results.Ok(new NativeItemDto(detail, NativeItemUrls.Build(detail, appUserId, tokens)));
+            if (detail is null)
+            {
+                return Results.NotFound();
+            }
+
+            var images = await NativeImageEndpoints.BuildAsync(database, id, cancellationToken);
+            return Results.Ok(new NativeItemDto(detail, NativeItemUrls.Build(detail, appUserId, tokens), images));
         }).RequireAuthorization().Produces<NativeItemDto>().Produces(StatusCodes.Status404NotFound);
 
         group.MapGet("/sync", async (

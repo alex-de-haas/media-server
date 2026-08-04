@@ -189,6 +189,59 @@
         }
       }
     },
+    "/native/v1/items/{id}/images/{imageType}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "imageType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "index",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/native/v1/recommendations": {
       "get": {
         "tags": [
@@ -1262,10 +1315,39 @@
           }
         }
       },
+      "NativeImagesDto": {
+        "required": [
+          "primary",
+          "backdrop",
+          "logo"
+        ],
+        "type": "object",
+        "properties": {
+          "primary": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "backdrop": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "logo": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "NativeItemDto": {
         "required": [
           "detail",
-          "sources"
+          "sources",
+          "images"
         ],
         "type": "object",
         "properties": {
@@ -1277,6 +1359,9 @@
             "items": {
               "$ref": "#/components/schemas/NativeSourceUrlsDto"
             }
+          },
+          "images": {
+            "$ref": "#/components/schemas/NativeImagesDto"
           }
         }
       },

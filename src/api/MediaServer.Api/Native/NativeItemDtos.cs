@@ -10,7 +10,10 @@ namespace MediaServer.Api.Native;
 /// client and a web page disagreeing about what a title contains is a bug rather than a platform
 /// difference. See <c>docs/features/native-client-api/plan.md</c>.
 /// </summary>
-public sealed record NativeItemDto(LibraryDetailDto Detail, IReadOnlyList<NativeSourceUrlsDto> Sources);
+public sealed record NativeItemDto(
+    LibraryDetailDto Detail,
+    IReadOnlyList<NativeSourceUrlsDto> Sources,
+    NativeImagesDto Images);
 
 /// <summary>
 /// Where to fetch one edition and the sidecar files that belong to it. URLs are relative: the client
