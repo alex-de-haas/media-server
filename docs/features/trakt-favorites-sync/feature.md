@@ -98,8 +98,10 @@ the latter.
   reported as skipped, and the 100-favorite cap surfacing in the sync result.
 
 Live contract verification against a real Trakt account was never run, and is
-not expected to be: Trakt development was wound down on 2026-07-30. The plan
-holding that deliverable was retired rather than parked — see the wind-down note
-in [watched-history providers](../watch-history-providers/feature.md), which
-records the reason and what Trakt's connection limit actually says. The shipped
-code stays and keeps working for a connected account.
+not expected to be: Trakt development was wound down on 2026-07-30 because
+registering the OAuth application a self-hosted deployment needs now requires
+Trakt VIP. The plan holding that deliverable was retired rather than parked —
+see the wind-down note in [watched-history
+providers](../watch-history-providers/feature.md), which records the evidence.
+The code stays in the repository and applies unchanged for an operator who does
+hold VIP.

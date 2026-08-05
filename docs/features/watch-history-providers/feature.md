@@ -3,18 +3,30 @@
 Created: 2026-07-30
 Updated: 2026-07-30
 
-> **Development is wound down** — an operator decision taken on 2026-07-30, not
-> a limitation derived from Trakt's published terms. The shipped code stays and
-> keeps working for a connected account; nothing further is being built, and the
-> remaining plans were retired rather than parked.
+> **Development is wound down**, and the integration is inert for any operator
+> without Trakt VIP. Nothing further is being built; the remaining plans were
+> retired rather than parked. The code stays in the repository.
 >
-> What Trakt's connection limit actually says, verified against its announcement
-> on both 2026-07-24 and 2026-07-30: a **free account may connect one Community
-> App**, and VIP is required only for a second. Official Trakt clients do not
-> count toward it. So a free account with its slot free can still connect this
-> app; a free account whose slot is already spent — on Infuse's own Trakt
-> integration, say — cannot add this one without VIP, and that is the wall the
-> operator hit.
+> **Why.** A self-hosted deployment needs its *operator* to register their own
+> Trakt OAuth application — that is where `TRAKT_CLIENT_ID` and
+> `TRAKT_CLIENT_SECRET` come from. Observed on the operator's account on
+> 2026-07-30: Settings → Apps → **API Applications** now says *"Creating new
+> apps requires Trakt VIP"*, and the application registered there on 2026-07-24
+> is **gone**. Sync had stopped working days earlier, which is what a revoked
+> client id looks like from this side. Community reports describe the same
+> disappearance for other developers; Trakt's own API documentation has not been
+> updated to state the requirement.
+>
+> This is the **developer-registration** limit, and it is not the same rule as
+> the Community-App **connection** limit that Trakt announced on 2026-07-22
+> (free accounts may *connect* one community app; VIP is needed for a second).
+> That announcement is about authorizing an app someone else registered, and
+> re-reading it does not contradict the above — a self-hosted app has no
+> pre-registered application to authorize.
+>
+> Consequence: without VIP there is no client id to configure, so this feature
+> cannot start regardless of what the code does. An operator who does hold VIP
+> can register an application and everything below applies unchanged.
 >
 > The **per-play history** below is not affected by any of this. It is
 > provider-neutral, it is what the [watch-history
