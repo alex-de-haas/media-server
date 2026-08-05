@@ -84,6 +84,20 @@ Deleting the last entry can also make a title genuinely disposable: history
 presence is one of the signals that makes a library delete leave a tombstone rather
 than purge.
 
+## The session gate is reopened
+
+`PlaybackSession` counts one viewing per client session and outlives the entry —
+rows are kept for 24 hours. Deleting a play therefore clears `CompletedAt` and
+`HistoryEntryId` on the session that recorded it, in the same transaction.
+
+Without that, the gate would keep answering "already counted" for a play that no
+longer exists: the same client session crossing the watched threshold again would
+mark the item played, count nothing, and record no entry at all — the deletion
+would quietly break re-recording for the rest of the day.
+`ObservedBelowThreshold` is left alone, because that the session once played below
+the threshold is an observation about the session, and deleting a play does not
+unmake it.
+
 ## What the provider is told
 
 Only entries this app created **and** whose remote id it resolved are removed
@@ -95,6 +109,13 @@ carrying that one id, delivered by the same owned-only path an unwatch uses.
 When there is nothing owned to remove, **no event is queued at all**. An empty one
 would complete as a no-op, but until the worker reached it the user's explicit sync
 would refuse to start, counting it as undelivered work.
+
+A removal is addressed by that remote id and never reads an identity, so unlike
+every other outbound operation it is not gated on one — neither when it is queued
+nor when it is delivered. Requiring a resolvable identity would drop the removal
+for an item that has since been re-identified or lost its metadata, leaving the
+remote entry behind for the next sync to re-import: exactly the play the user
+deleted.
 
 That is the common case today, and worth stating plainly: ownership is only ever
 recorded for timeless marks — the exact-play push does not resolve the id it
@@ -118,9 +139,11 @@ library delete and the sync already cover.
   never raised on an unwatched item; a count ahead of its entries loses one play,
   the last entry leaves a clean slate however far it had drifted, and a deletion
   never increases the count; a non-latest play leaves `LastWatchedAt` alone while a
-  surviving timeless mark leaves it null; an owned entry queues its removal with
-  the remote id; imported, `Unresolved` and unlinked entries queue nothing at all;
-  no connection means no event; and two deletions on one item queue both removals.
+  surviving timeless mark leaves it null; the session that recorded the play is
+  reopened while another play's session is left alone; an owned entry queues its
+  removal with the remote id, including when its item can no longer be identified;
+  imported, `Unresolved` and unlinked entries queue nothing at all; no connection
+  means no event; and two deletions on one item queue both removals.
 - `WatchHistoryDeliveryServiceTests` covers the dispatch: `RemoveOwnedEntries`
   reaches the provider with the snapshot ids and leaves everything else in place,
   and is terminal — never broadened — for a provider that cannot remove one entry.

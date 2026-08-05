@@ -188,6 +188,23 @@ public sealed class WatchHistoryRecorder(
 
         database.PlaybackHistoryEntries.Remove(entry);
 
+        // The session gate outlives the entry — sessions are kept for 24 hours — and it decides
+        // whether a crossing counts by asking whether this session already completed. Left pointing at
+        // a play that no longer exists, it would answer "already counted" for the rest of the day: the
+        // same client session crossing the threshold again would mark the item played, count nothing,
+        // and record no entry at all. Deleting the play has to reopen the session that produced it.
+        var completions = await database.PlaybackSessions
+            .Where(session => session.AppUserId == appUserId && session.HistoryEntryId == entry.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var session in completions)
+        {
+            session.CompletedAt = null;
+            session.HistoryEntryId = null;
+            // ObservedBelowThreshold is left alone: that the session once played below the threshold
+            // is an observation about the session, and deleting a play does not unmake it.
+        }
+
         var remaining = await database.PlaybackHistoryEntries
             .Where(other => other.AppUserId == appUserId
                 && other.MediaItemId == item.Id
@@ -279,7 +296,11 @@ public sealed class WatchHistoryRecorder(
             return;
         }
 
-        if (!identity.Resolved)
+        // A removal is addressed by the remote ids captured on the event and never reads the identity,
+        // so gating it on one would drop the removal for an item that has since been re-identified or
+        // lost its metadata — leaving the remote entry behind for the next sync to re-import, which is
+        // exactly the play the user just deleted.
+        if (!identity.Resolved && operation is not WatchHistoryOutboxOperation.RemoveOwnedEntries)
         {
             // Queueing work that can never be addressed would retry forever. The local change already
             // succeeded; the user sees the gap as a sync issue rather than a failed action.

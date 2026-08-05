@@ -216,6 +216,40 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         Assert.Empty(_database.PlaybackHistoryEntries);
     }
 
+    // ---- The session gate ----
+
+    [Fact]
+    public async Task DeletingAPlayReopensTheSessionThatRecordedIt()
+    {
+        // Sessions are kept for 24 hours and decide a crossing by asking whether this session already
+        // completed. Left pointing at a deleted play it would answer "already counted" all day: the
+        // same client session finishing again would mark the item played and record nothing.
+        var entry = AddPlay("2026-08-01T20:00:00Z");
+        var session = AddSession(entry.Id, observedBelowThreshold: true);
+
+        await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
+
+        var reloaded = await _database.PlaybackSessions.AsNoTracking().SingleAsync(row => row.Id == session.Id);
+        Assert.Null(reloaded.CompletedAt);
+        Assert.Null(reloaded.HistoryEntryId);
+        // Still a true observation about the session; deleting a play does not unmake it.
+        Assert.True(reloaded.ObservedBelowThreshold);
+    }
+
+    [Fact]
+    public async Task AnotherPlaysSessionIsLeftAlone()
+    {
+        var first = AddPlay("2026-08-01T20:00:00Z");
+        var second = AddPlay("2026-08-02T21:00:00Z");
+        var untouched = AddSession(first.Id, observedBelowThreshold: true);
+
+        await Service().DeleteAsync(_userId, second.Id, CancellationToken.None);
+
+        var reloaded = await _database.PlaybackSessions.AsNoTracking().SingleAsync(row => row.Id == untouched.Id);
+        Assert.NotNull(reloaded.CompletedAt);
+        Assert.Equal(first.Id, reloaded.HistoryEntryId);
+    }
+
     // ---- Outbound removal ----
 
     [Fact]
@@ -270,6 +304,23 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
 
         Assert.Empty(_database.WatchHistoryOutboxEvents);
+    }
+
+    [Fact]
+    public async Task AnOwnedEntryIsStillRemovedWhenItsItemCanNoLongerBeIdentified()
+    {
+        // The removal is addressed by the remote id alone. Refusing it because the item has since been
+        // re-identified or lost its metadata would leave the remote entry behind — and the next sync
+        // would re-import the very play the user deleted.
+        Connect();
+        var unidentifiable = AddItem(identified: false);
+        var entry = AddPlay("2026-08-01T20:00:00Z", itemId: unidentifiable.Id, remoteId: "111", owned: true);
+
+        await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
+
+        var queued = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
+        Assert.Equal(WatchHistoryOutboxOperation.RemoveOwnedEntries, queued.Operation);
+        Assert.Contains("111", queued.RemoteIdSnapshot);
     }
 
     [Fact]
@@ -332,9 +383,45 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         _database.SaveChanges();
     }
 
+    /// <summary>A second item, optionally one the identity mapper cannot resolve.</summary>
+    private MediaItem AddItem(bool identified)
+    {
+        var item = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = _movie.CatalogId,
+            Kind = MediaKind.Movie, Title = "Solaris",
+            IdentityProvider = identified ? "tmdb" : null,
+            IdentityProviderId = identified ? "1000" : null,
+            AddedAt = _time.GetUtcNow(), UpdatedAt = _time.GetUtcNow(),
+        };
+        _database.MediaItems.Add(item);
+        _database.SaveChanges();
+        return item;
+    }
+
+    private PlaybackSession AddSession(Guid historyEntryId, bool observedBelowThreshold)
+    {
+        var session = new PlaybackSession
+        {
+            Id = Guid.NewGuid(),
+            AppUserId = _userId,
+            MediaItemId = _movie.Id,
+            SessionKey = $"session-{historyEntryId:N}",
+            StartedAt = _time.GetUtcNow(),
+            LastReportAt = _time.GetUtcNow(),
+            ObservedBelowThreshold = observedBelowThreshold,
+            CompletedAt = _time.GetUtcNow(),
+            HistoryEntryId = historyEntryId,
+        };
+        _database.PlaybackSessions.Add(session);
+        _database.SaveChanges();
+        return session;
+    }
+
     private PlaybackHistoryEntry AddPlay(
         string watchedAt,
         int? appUserId = null,
+        Guid? itemId = null,
         string? remoteId = null,
         bool owned = false,
         PlaybackHistoryOrigin origin = PlaybackHistoryOrigin.LocalPlayback,
@@ -344,7 +431,7 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         {
             Id = Guid.NewGuid(),
             AppUserId = appUserId ?? _userId,
-            MediaItemId = _movie.Id,
+            MediaItemId = itemId ?? _movie.Id,
             CreatedAt = _time.GetUtcNow(),
             WatchedAt = DateTimeOffset.Parse(watchedAt),
             Origin = origin,
