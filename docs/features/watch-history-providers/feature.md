@@ -1,7 +1,7 @@
 # Watched-History Providers: Trakt
 
-Created: 2026-07-30
-Updated: 2026-07-30
+Created: 2026-08-05
+Updated: 2026-08-05
 
 > **Development is wound down**, and the integration is inert for any operator
 > without Trakt VIP. Nothing further is being built; the remaining plans were
@@ -10,7 +10,7 @@ Updated: 2026-07-30
 > **Why.** A self-hosted deployment needs its *operator* to register their own
 > Trakt OAuth application — that is where `TRAKT_CLIENT_ID` and
 > `TRAKT_CLIENT_SECRET` come from. Observed on the operator's account on
-> 2026-07-30: Settings → Apps → **API Applications** now says *"Creating new
+> 2026-08-05: Settings → Apps → **API Applications** now says *"Creating new
 > apps requires Trakt VIP"*, and the application registered there on 2026-07-24
 > is **gone**. Sync had stopped working days earlier, which is what a revoked
 > client id looks like from this side. Community reports describe the same

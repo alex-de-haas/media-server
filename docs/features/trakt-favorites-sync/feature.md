@@ -1,7 +1,7 @@
 # Trakt Favorites Sync
 
 Created: 2026-07-26
-Updated: 2026-07-30
+Updated: 2026-08-05
 
 The local favorite flag is portable through Trakt: a movie or series favorited
 here reaches the user's Trakt favorites, and favorites kept there arrive here.
@@ -98,7 +98,7 @@ the latter.
   reported as skipped, and the 100-favorite cap surfacing in the sync result.
 
 Live contract verification against a real Trakt account was never run, and is
-not expected to be: Trakt development was wound down on 2026-07-30 because
+not expected to be: Trakt development was wound down on 2026-08-05 because
 registering the OAuth application a self-hosted deployment needs now requires
 Trakt VIP. The plan holding that deliverable was retired rather than parked —
 see the wind-down note in [watched-history
