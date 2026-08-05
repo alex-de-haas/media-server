@@ -36,9 +36,10 @@ public sealed class WatchHistoryOutboxEvent
     /// <list type="bullet">
     /// <item>for <see cref="WatchHistoryOutboxOperation.EnsureTimelessWatched"/>, the ids present
     /// <b>before</b> the add, so the new one is the set difference afterwards;</item>
-    /// <item>for <see cref="WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries"/>, the ids to
-    /// remove — captured before the local entries are deleted, because after that there is nothing
-    /// left to read them from.</item>
+    /// <item>for <see cref="WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries"/> and
+    /// <see cref="WatchHistoryOutboxOperation.RemoveOwnedEntries"/>, the ids to remove — captured
+    /// before the local entries are deleted, because after that there is nothing left to read them
+    /// from.</item>
     /// </list>
     /// Persisted either way so a crash cannot leave the worker unable to finish what it started.
     /// </summary>
@@ -100,6 +101,18 @@ public enum WatchHistoryOutboxOperation
     /// is hygiene, not a statement about the work.
     /// </summary>
     RemoveFavorite,
+
+    /// <summary>
+    /// Remove the specific entries named in <see cref="WatchHistoryOutboxEvent.RemoteIdSnapshot"/>,
+    /// queued when the user deletes one play from their history. Same ownership rule as
+    /// <see cref="RemoveOwnedTimelessEntries"/> — only entries this app created and resolved travel
+    /// here — but scoped to one entry rather than to an item's timeless marks.
+    /// </summary>
+    /// <remarks>
+    /// Appended rather than slotted next to its sibling: the column stores the enum as an int, so
+    /// inserting a member would silently repoint every queued row.
+    /// </remarks>
+    RemoveOwnedEntries,
 }
 
 /// <summary>Delivery state of one outbox event.</summary>

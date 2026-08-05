@@ -1133,4 +1133,8 @@ export const mediaServer = {
     ),
   disconnectWatchHistoryProvider: (providerKey: string) =>
     send(`/watch-history/connections/${providerKey}`, "DELETE"),
+  // Deletes one recorded play. 404 for an id this user doesn't own, so a failed delete can't be read
+  // as proof that someone else's entry exists.
+  deleteWatchHistoryEntry: (entryId: string) =>
+    send(`/watch-history/entries/${entryId}`, "DELETE"),
 };

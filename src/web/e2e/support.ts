@@ -24,6 +24,17 @@ function userData(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * A payload that may change between requests. Pass a function when a test mutates state and then
+ * relies on a refetch showing it — a fixed object replays the old answer and hides the bug.
+ */
+type Served<T> = T | (() => T);
+
+function serve<T>(value: Served<T> | undefined, fallback: T): T {
+  if (typeof value === "function") return (value as () => T)();
+  return value ?? fallback;
+}
+
 export interface AppMock {
   role?: "admin" | "user" | null; // null → unauthenticated (401, or sessionStatus)
   sessionStatus?: 401 | 403; // failure status when role is null (default 401)
@@ -45,8 +56,9 @@ export interface AppMock {
   releaseCalendar?: unknown[]; // GET /watchlist/calendar
   watchlist?: unknown[]; // GET /watchlist
   titlePreview?: Record<string, unknown>; // GET /metadata/{provider}/{id}, keyed by provider id
-  watchHistoryCalendar?: unknown; // GET /watch-history/calendar (an envelope, not a list)
-  watchHistoryUndated?: unknown; // GET /watch-history/calendar/undated ({ entries, total })
+  watchHistoryCalendar?: Served<Record<string, unknown>>; // GET /watch-history/calendar (an envelope, not a list)
+  watchHistoryUndated?: Served<Record<string, unknown>>; // GET /watch-history/calendar/undated ({ entries, total })
+  deleteWatchHistoryEntry?: (entryId: string) => void; // DELETE /watch-history/entries/{id} — runs before the 204
   recommendations?: unknown; // GET /recommendations ({ items, sources, selectedSources })
   transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
   transcodeLanguages?: string[]; // GET /transcode/languages — what the language field validates against
@@ -122,12 +134,24 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     }
 
     if (path === "/watch-history/calendar/undated") {
-      return route.fulfill({ json: mock.watchHistoryUndated ?? { entries: [], total: 0 } });
+      return route.fulfill({ json: serve(mock.watchHistoryUndated, { entries: [], total: 0 }) });
     }
     if (path === "/watch-history/calendar") {
       return route.fulfill({
-        json: mock.watchHistoryCalendar ?? { events: [], undated: { movies: 0, episodes: 0 }, latestWatchedAt: null },
+        json: serve(mock.watchHistoryCalendar, {
+          events: [],
+          undated: { movies: 0, episodes: 0 },
+          latestWatchedAt: null,
+        }),
       });
+    }
+    // Matched explicitly rather than left to the catch-all below, which answers 200 to anything — a
+    // misspelled path would then pass this test suite and fail only against the real API.
+    const deletedEntryId =
+      method === "DELETE" ? path.match(/^\/watch-history\/entries\/([^/]+)$/)?.[1] : undefined;
+    if (deletedEntryId) {
+      mock.deleteWatchHistoryEntry?.(deletedEntryId);
+      return route.fulfill({ status: 204, body: "" });
     }
 
     // The engine is an optional dependency, so it is off unless a test says otherwise — the Convert and

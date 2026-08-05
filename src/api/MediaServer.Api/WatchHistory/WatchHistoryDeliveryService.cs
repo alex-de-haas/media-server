@@ -135,7 +135,7 @@ public sealed class WatchHistoryDeliveryService(
                 await AddExactAsync(provider, item, identity, cancellationToken),
             WatchHistoryOutboxOperation.EnsureTimelessWatched =>
                 await EnsureTimelessAsync(provider, item, identity, cancellationToken),
-            WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries =>
+            WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries or WatchHistoryOutboxOperation.RemoveOwnedEntries =>
                 await RemoveOwnedAsync(provider, item, cancellationToken),
             _ => (WatchHistoryFailure.Unsupported, $"Unknown operation {item.Operation}.", null),
         };
@@ -396,8 +396,9 @@ public sealed class WatchHistoryDeliveryService(
         }
 
         // Read from the event, not from the entries: the recorder deleted those in the same
-        // transaction as the unwatch, so by the time this runs there is nothing local left to read.
-        // The ids were captured onto the event before that deletion for exactly this reason.
+        // transaction as the unwatch or the entry deletion, so by the time this runs there is nothing
+        // local left to read. The ids were captured onto the event before that deletion for exactly
+        // this reason.
         var owned = ParseRemoteIds(item.RemoteIdSnapshot)?.ToList() ?? [];
 
         if (owned.Count == 0)

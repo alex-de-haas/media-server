@@ -66,6 +66,12 @@ Genuine rewatches are kept as separate entries. At most one timeless entry
 exists per user and item, because "watched, time unknown" says nothing more the
 second time.
 
+An entry is removed on the user's say-so by
+[watch-history-deletion](../watch-history-deletion/feature.md), which reprojects
+the aggregates and queues the remote removal under the ownership rule below. The
+unwatch toggle is a different statement and drops only the timeless marks this app
+created.
+
 ## Provider boundary
 
 `IWatchHistoryProvider` and `IWatchHistoryProviderAuthorization` are resolved by
@@ -117,6 +123,18 @@ returns counts, not ids, so the remote id is found from the difference between
 the two reads. An add whose id cannot be pinned down settles as `Unresolved` and
 is **never** reposted or deleted remotely — guessing there means destroying
 history this app did not create.
+
+Ownership is resolved for the **timeless mark only**. `AddExactWatch` posts the
+play and does not read back the id it created, so an exact play is never owned and
+never removable remotely. Deleting one therefore leaves the remote entry in place,
+and an explicit sync can re-import it. Resolving ownership for exact plays would
+be the fix; it is not scheduled, per the wind-down above.
+
+Removals travel as one of two operations, both landing in the same owned-only
+path: `RemoveOwnedTimelessEntries` from an unwatch, and `RemoveOwnedEntries` from
+a single-entry deletion. They stay distinct because the idempotency key embeds the
+operation name, and reusing one would let an unwatch and a deletion of the same
+item collide.
 
 ## Explicit sync
 

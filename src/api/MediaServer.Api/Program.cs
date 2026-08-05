@@ -210,6 +210,7 @@ builder.Services.AddScoped<WatchHistorySyncApplyService>();
 builder.Services.AddScoped<FavoritesRecorder>();
 builder.Services.AddScoped<FavoritesSyncService>();
 builder.Services.AddScoped<WatchHistoryCalendarService>();
+builder.Services.AddScoped<WatchHistoryEntryService>();
 
 builder.Services.AddScoped<IRecommendationProviderRegistry, RecommendationProviderRegistry>();
 builder.Services.AddScoped<RecommendationSeedSelector>();
