@@ -1,7 +1,7 @@
 # Storage and Data
 
 Created: 2026-06-15
-Updated: 2026-07-25
+Updated: 2026-08-05
 
 ## Description
 
@@ -120,9 +120,9 @@ continuously backup-safe on its own:
 - Run SQLite in WAL mode so a hot copy of `*.db` + `*.db-wal` + `*.db-shm` is
   recoverable, and checkpoint periodically.
 - Additionally maintain a periodic consistent snapshot via the SQLite Online
-  Backup API (for example `media-server.snapshot.db`) inside the data directory,
-  so any directory copy always contains a known-good database even if the live
-  file is mid-write.
+  Backup API (`media-server.db.snapshot`, written through a `.tmp` sibling and
+  moved into place) inside the data directory, so any directory copy always
+  contains a known-good database even if the live file is mid-write.
 - Validate restore by stopping the app, restoring the directory, and starting it.
 
 If Hosty later adds an app-facing pre-backup lifecycle hook, the app can use it to
