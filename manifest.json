@@ -3,7 +3,7 @@
   "id": "com.haas.media-server",
   "name": "Media Server",
   "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
-  "version": "0.50.0",
+  "version": "0.50.1",
   "runtimeProfiles": [
     {
       "key": "docker",
@@ -222,14 +222,14 @@
       "key": "TRAKT_CLIENT_ID",
       "type": "string",
       "label": "Trakt client ID",
-      "description": "Client ID of the Trakt API application for this instance. Create one at https://trakt.tv/oauth/applications; leave blank to keep the Trakt integration switched off."
+      "description": "Client ID of the Trakt API application for this instance. Registering one at https://trakt.tv/oauth/applications requires Trakt VIP as of 2026-07-30, so without VIP this integration cannot be switched on at all. Leave blank to keep it off; Trakt development is wound down and nothing else depends on it."
     },
     {
       "key": "TRAKT_CLIENT_SECRET",
       "type": "string",
       "secret": true,
       "label": "Trakt client secret",
-      "description": "Client secret of the same Trakt application. Required alongside the client ID before any user can connect their Trakt account."
+      "description": "Client secret of the same Trakt application. Required alongside the client ID before any user can connect their Trakt account — and obtainable only by registering that application, which requires Trakt VIP."
     },
     {
       "key": "SUPPORTED_LANGUAGES",

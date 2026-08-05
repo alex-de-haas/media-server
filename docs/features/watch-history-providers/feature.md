@@ -26,7 +26,10 @@ Updated: 2026-07-30
 >
 > Consequence: without VIP there is no client id to configure, so this feature
 > cannot start regardless of what the code does. An operator who does hold VIP
-> can register an application and everything below applies unchanged.
+> can register an application and everything below applies unchanged. The
+> `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` setting descriptions say so, so an
+> operator learns it before spending time at Trakt's application page rather
+> than after.
 >
 > The **per-play history** below is not affected by any of this. It is
 > provider-neutral, it is what the [watch-history
