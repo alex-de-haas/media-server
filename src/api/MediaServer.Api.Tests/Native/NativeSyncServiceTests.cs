@@ -184,6 +184,45 @@ public sealed class NativeSyncServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_preference_change_reaches_the_client_instead_of_being_dropped()
+    {
+        // Its scope is not an item id — the default is the literal "global" — so before this it was
+        // silently discarded while the cursor advanced past it, and a choice made on one device never
+        // reached another.
+        var item = AddMovie("One");
+        var first = await Service().SyncAsync(cursor: null, UserId, CancellationToken.None);
+
+        await new MediaServer.Api.Native.Playback.NativePreferenceService(_context)
+            .SetAsync(
+                UserId,
+                new MediaServer.Api.Native.Playback.NativePreferenceDto(null, "rus", null, false, false),
+                CancellationToken.None);
+
+        var next = await Service().SyncAsync(first.Cursor, UserId, CancellationToken.None);
+
+        Assert.Equal("global", Assert.Single(next.ChangedPreferenceScopes));
+        Assert.Empty(next.Items);
+        Assert.Empty(next.RemovedIds);
+    }
+
+    [Fact]
+    public async Task A_title_scoped_preference_carries_the_title_it_applies_to()
+    {
+        var item = AddMovie("One");
+        var first = await Service().SyncAsync(cursor: null, UserId, CancellationToken.None);
+
+        await new MediaServer.Api.Native.Playback.NativePreferenceService(_context)
+            .SetAsync(
+                UserId,
+                new MediaServer.Api.Native.Playback.NativePreferenceDto(item.Id, "rus", null, false, false),
+                CancellationToken.None);
+
+        var next = await Service().SyncAsync(first.Cursor, UserId, CancellationToken.None);
+
+        Assert.Equal(item.Id.ToString("N"), Assert.Single(next.ChangedPreferenceScopes));
+    }
+
+    [Fact]
     public async Task An_unreadable_cursor_starts_over_rather_than_failing()
     {
         AddMovie("One");

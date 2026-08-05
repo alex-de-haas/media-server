@@ -63,7 +63,7 @@ public sealed class NativePlaybackResolver(
         NativeCapabilityProfile profile)
     {
         NativePlaybackResolution Unsupported(string reason) =>
-            new(sourceId, versionName, NativePlaybackDecision.Unsupported, null, null, reason);
+            new(sourceId, versionName, NativePlaybackDecision.Unsupported, null, null, null, reason);
 
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -90,11 +90,9 @@ public sealed class NativePlaybackResolver(
             return Unsupported(NativePlaybackReasons.UnsupportedAudioCodec);
         }
 
-        // Dynamic range is decided before the container, because it decides *what* we would serve, not
-        // merely how: a client without Dolby Vision is offered the cross-compatible signalling, and one
-        // that cannot manage the source's range at all is not offered the source.
-        var signalling = SignallingFor(video?.HdrFormat, profile);
-        if (signalling is null)
+        // Can this client manage the source's range at all? Separate question from which signalling we
+        // would write, and the only one that applies to a file served as it is.
+        if (!CanPresent(video?.HdrFormat, profile))
         {
             return Unsupported(NativePlaybackReasons.UnsupportedDynamicRange);
         }
@@ -107,7 +105,11 @@ public sealed class NativePlaybackResolver(
                 NativePlaybackDecision.DirectPlay,
                 Url: $"{NativeEndpoints.RoutePrefix}/media/{sourceId:D}?token=" +
                      tokens.Mint(appUserId, sourceId, NativeUrlTokenMethods.Read),
-                Signalling: signalling,
+                // Deliberately null. Direct play serves the file byte for byte, so its sample entry is
+                // whatever was written on disk — promising a choice here would be a promise nothing
+                // keeps. The choice exists only where we build the container, which is the remux path.
+                Signalling: null,
+                SourceDynamicRange: video?.HdrFormat,
                 Reason: null);
         }
 
@@ -115,36 +117,54 @@ public sealed class NativePlaybackResolver(
         // honestly beats offering a URL that will not open.
         return packaging.IsAvailable
             ? new NativePlaybackResolution(
-                sourceId, versionName, NativePlaybackDecision.Remux, Url: null, Signalling: signalling, Reason: null)
+                sourceId,
+                versionName,
+                NativePlaybackDecision.Remux,
+                Url: null,
+                // Here the signalling is ours to choose, because we are the ones writing the container.
+                Signalling: SignallingFor(video?.HdrFormat, profile),
+                SourceDynamicRange: video?.HdrFormat,
+                Reason: null)
             : Unsupported(NativePlaybackReasons.PackagingUnavailable);
     }
 
     /// <summary>
-    /// The sample entry to serve, or null when this client cannot manage the source's range at all.
-    /// A Dolby Vision source falls back to the cross-compatible form for a client without DV, which is
-    /// correct because profile 8.1's base layer is HDR10 by definition.
+    /// Whether this client can present the source's dynamic range in some form. A Dolby Vision source
+    /// is presentable to a client with only HDR10, because profile 8.1's base layer is HDR10 by
+    /// definition — what changes is the signalling, not whether it can be shown.
+    /// </summary>
+    private static bool CanPresent(string? hdrFormat, NativeCapabilityProfile profile)
+    {
+        if (IsSdr(hdrFormat))
+        {
+            return true;
+        }
+
+        return hdrFormat!.Equals(DolbyVision, StringComparison.OrdinalIgnoreCase)
+            ? Supports(profile.HdrFormats, DolbyVision) || Supports(profile.HdrFormats, "HDR10")
+            : Supports(profile.HdrFormats, hdrFormat);
+    }
+
+    /// <summary>
+    /// Which sample entry to write when <b>we</b> produce the container. Only meaningful on the remux
+    /// path: a file served as it is carries whatever signalling it was written with, which nothing here
+    /// gets to choose.
     /// </summary>
     private static string? SignallingFor(string? hdrFormat, NativeCapabilityProfile profile)
     {
-        if (string.IsNullOrWhiteSpace(hdrFormat) || hdrFormat.Equals("SDR", StringComparison.OrdinalIgnoreCase))
+        if (IsSdr(hdrFormat))
         {
             return NativeSignalling.CrossCompatible;
         }
 
-        if (hdrFormat.Equals(DolbyVision, StringComparison.OrdinalIgnoreCase))
-        {
-            if (Supports(profile.HdrFormats, DolbyVision))
-            {
-                return NativeSignalling.DolbyVision;
-            }
-
-            // No DV on this client: serve the cross-compatible form, which it reads as HDR10 — but only
-            // if it can manage HDR10 at all.
-            return Supports(profile.HdrFormats, "HDR10") ? NativeSignalling.CrossCompatible : null;
-        }
-
-        return Supports(profile.HdrFormats, hdrFormat) ? NativeSignalling.CrossCompatible : null;
+        return hdrFormat!.Equals(DolbyVision, StringComparison.OrdinalIgnoreCase)
+               && Supports(profile.HdrFormats, DolbyVision)
+            ? NativeSignalling.DolbyVision
+            : NativeSignalling.CrossCompatible;
     }
+
+    private static bool IsSdr(string? hdrFormat) =>
+        string.IsNullOrWhiteSpace(hdrFormat) || hdrFormat.Equals("SDR", StringComparison.OrdinalIgnoreCase);
 
     private static bool WithinChannels(NativeCapabilityProfile profile, StreamFacts track) =>
         profile.MaxAudioChannels is not { } max || track.Channels is not { } channels || channels <= max;

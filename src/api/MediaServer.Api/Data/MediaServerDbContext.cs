@@ -90,6 +90,14 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         // row for the same scope would make "which one wins" a question nobody can answer.
         preference.HasIndex(row => new { row.AppUserId, row.MediaItemId }).IsUnique();
 
+        // The composite index above does not constrain the default: SQL treats NULLs as distinct, so
+        // two rows of (user, NULL) satisfy it and the user ends up with two defaults. A filtered index
+        // is what actually enforces one.
+        preference.HasIndex(row => row.AppUserId)
+            .IsUnique()
+            .HasFilter("\"MediaItemId\" IS NULL")
+            .HasDatabaseName("IX_PlaybackPreferences_AppUserId_Global");
+
         preference.HasOne<AppUser>().WithMany()
             .HasForeignKey(row => row.AppUserId).OnDelete(DeleteBehavior.Cascade);
 

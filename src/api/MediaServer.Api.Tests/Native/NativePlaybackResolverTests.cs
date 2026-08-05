@@ -114,15 +114,31 @@ public sealed class NativePlaybackResolverTests : IDisposable
     public async Task A_dolby_vision_source_is_offered_as_dolby_vision_only_to_a_client_that_has_it()
     {
         // The ordering constraint the spike produced: dvh1 engages DV on a device that supports it and
-        // breaks one that does not, so the answer depends on what the client said.
-        AddSource("mp4", "hevc", "Dolby Vision", ("eac3", 6));
+        // breaks one that does not, so the answer depends on what the client said. An mkv, because the
+        // choice only exists where we build the container.
+        AddSource("mkv", "hevc", "Dolby Vision", ("eac3", 6));
 
-        var withDv = await ResolveOneAsync(AppleTv(dolbyVision: true));
+        // Remux is where the choice exists, because that is where we write the container.
+        var withDv = await ResolveOneAsync(AppleTv(dolbyVision: true), packaging: true);
         Assert.Equal(NativeSignalling.DolbyVision, withDv.Signalling);
 
-        var withoutDv = await ResolveOneAsync(AppleTv(dolbyVision: false));
+        var withoutDv = await ResolveOneAsync(AppleTv(dolbyVision: false), packaging: true);
         Assert.Equal(NativeSignalling.CrossCompatible, withoutDv.Signalling);
-        Assert.Equal(NativePlaybackDecision.DirectPlay, withoutDv.Decision);
+    }
+
+    [Fact]
+    public async Task Direct_play_promises_no_signalling_because_it_serves_the_file_as_written()
+    {
+        // The file goes out byte for byte, so its sample entry is whatever is on disk. Advertising a
+        // choice here would be a promise nothing keeps: a client without Dolby Vision could still be
+        // handed a dvh1 file while the response claimed otherwise.
+        AddSource("mp4", "hevc", "Dolby Vision", ("eac3", 6));
+
+        var resolution = await ResolveOneAsync(AppleTv(dolbyVision: false));
+
+        Assert.Equal(NativePlaybackDecision.DirectPlay, resolution.Decision);
+        Assert.Null(resolution.Signalling);
+        Assert.Equal("Dolby Vision", resolution.SourceDynamicRange);
     }
 
     [Fact]

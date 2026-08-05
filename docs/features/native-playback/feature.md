@@ -37,19 +37,31 @@ cannot express the one distinction the [Apple TV
 spike](../apple-client/plan.md#device-pass-on-an-apple-tv-4k-2026-08-03) proved is
 real.
 
-### Which signalling a client is served
+### Which signalling a client is served, and where that choice exists
 
 That distinction is Dolby Vision, and it is not cosmetic: a `dvh1` sample entry
 engages DV on a device that supports it and **breaks one that does not**, while the
 cross-compatible `hvc1` + `dvvC` form reads as HDR10 everywhere.
 
-So a DV source is offered as `dvh1` only to a client that reported DV support, and
-as the cross-compatible form otherwise — correct, because profile 8.1's base layer
-is HDR10 by definition. A client with no HDR at all is not offered the source; it
-gets `unsupported_dynamic_range`.
+The choice exists **only on the remux path**, because that is where the container is
+written. A `directPlay` answer serves the file byte for byte, so its sample entry is
+whatever was put on disk — the response therefore reports `signalling: null` there
+and carries `sourceDynamicRange` instead, so a client knows what it is opening
+without being promised something nothing keeps.
 
-This is why Dolby Vision could not be served to anyone before this feature existed:
-without a client saying what it is, the server has no safe answer.
+On remux, a DV source is written as `dvh1` for a client that reported DV support and
+as the cross-compatible form otherwise — correct, because profile 8.1's base layer
+is HDR10 by definition.
+
+Whether a source can be **presented at all** is a separate question and applies
+everywhere: a client with no HDR is refused an HDR source with
+`unsupported_dynamic_range`, while a client with HDR10 but no DV is offered a DV
+source, since its base layer is HDR10.
+
+One gap follows from this and is not closed here: nothing records a file's stored
+sample entry, so a DV file served by direct play goes out as written, and a client
+without DV may fail to open one tagged `dvh1`. Recording it belongs with the other
+[probe gaps](../media-probe-providers/plan.md).
 
 ### Packaging
 
@@ -82,8 +94,16 @@ original, and falls back when it does not — the flag for a viewer who normally
 takes a dub but watches one show subtitled.
 
 Preferences ride the [change log](../native-client-api/feature.md#the-change-log)
-as their own entity type, so a choice made on the Apple TV reaches the iPhone
-through the same feed as everything else.
+as their own entity type, and a sync page carries the scopes that changed —
+an item id, or the literal `global` — so a choice made on the Apple TV reaches the
+iPhone through the same feed as everything else. Ids rather than the payload: it is
+small and rarely changes, so the client re-reads it rather than having its shape
+duplicated in two places.
+
+A preference's scope is validated when it is written: a title that does not exist,
+or one that is unpublished or tombstoned, is refused with 404 rather than left to
+the foreign key, which would produce either a 500 or a preference stored against
+nothing.
 
 ## Sessions
 
@@ -116,6 +136,11 @@ Backend tests use xUnit and Imposter. Required coverage:
   ceiling, and an MKV both with and without packaging available.
 - The Dolby Vision decision in both directions — a client that reports DV support
   and one that does not — and a client with no HDR at all being refused.
+- That direct play promises no signalling, and that a ragged capability profile —
+  the null and blank entries a client can actually send — is answered rather than
+  thrown at.
+- That one user cannot end up with two defaults, which the composite index alone
+  does not prevent because SQL treats NULLs as distinct.
 - Track selection resolved against **two editions with different track orders**
   using the same preference, a sidecar dub as a candidate, the original-audio
   preference winning and falling back, and both silence rules above.

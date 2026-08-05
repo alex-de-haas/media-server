@@ -61,7 +61,14 @@ public sealed record NativePlaybackResolution(
     string? VersionName,
     NativePlaybackDecision Decision,
     string? Url,
+    /// <summary>
+    /// Which sample entry the output will carry — <b>only</b> on <c>remux</c>, where we write the
+    /// container. Null on <c>directPlay</c>: the file is served byte for byte, so its signalling is
+    /// whatever is on disk, and this API does not get to promise otherwise.
+    /// </summary>
     string? Signalling,
+    /// <summary>The source's own dynamic range, so a client knows what it is about to open.</summary>
+    string? SourceDynamicRange,
     string? Reason);
 
 public sealed record NativePlaybackResolutionResponse(

@@ -62,6 +62,7 @@ public sealed class NativeSyncService(MediaServerDbContext database, LibraryRead
         return new NativeSyncPage(
             Items: projected,
             RemovedIds: [],
+            ChangedPreferenceScopes: [],
             Cursor: next.Encode(),
             HasMore: items.Count == PageSize,
             ResetRequired: false);
@@ -81,6 +82,7 @@ public sealed class NativeSyncService(MediaServerDbContext database, LibraryRead
             return new NativeSyncPage(
                 Items: [],
                 RemovedIds: [],
+                ChangedPreferenceScopes: [],
                 Cursor: NativeSyncCursor.StartSnapshot(await HighWatermarkAsync(cancellationToken)).Encode(),
                 HasMore: false,
                 ResetRequired: true);
@@ -95,12 +97,23 @@ public sealed class NativeSyncService(MediaServerDbContext database, LibraryRead
 
         if (changes.Count == 0)
         {
-            return new NativeSyncPage([], [], position.Encode(), HasMore: false, ResetRequired: false);
+            return new NativeSyncPage([], [], [], position.Encode(), HasMore: false, ResetRequired: false);
         }
+
+        // Preferences are their own entity type and their scope is not an item id — the user's default
+        // is the literal "global" — so they are split out before anything tries to read an item from
+        // them. Without this they were dropped while the cursor advanced past them, and a choice made
+        // on one device never reached another.
+        var preferenceScopes = changes
+            .Where(entry => entry.EntityType == ChangeEntityType.PlaybackPreference)
+            .Select(entry => entry.EntityId)
+            .Distinct()
+            .ToList();
 
         // One row per changed item is what the client wants, not one per event: an item touched five
         // times in a page is still one fetch.
         var touched = changes
+            .Where(entry => entry.EntityType != ChangeEntityType.PlaybackPreference)
             .Select(entry => Guid.TryParseExact(entry.EntityId, "N", out var id) ? id : Guid.Empty)
             .Where(id => id != Guid.Empty)
             .Distinct()
@@ -121,6 +134,7 @@ public sealed class NativeSyncService(MediaServerDbContext database, LibraryRead
         return new NativeSyncPage(
             Items: projected,
             RemovedIds: removed,
+            ChangedPreferenceScopes: preferenceScopes,
             Cursor: NativeSyncCursor.Delta(last).Encode(),
             HasMore: changes.Count == PageSize,
             ResetRequired: false);
@@ -134,6 +148,12 @@ public sealed class NativeSyncService(MediaServerDbContext database, LibraryRead
 public sealed record NativeSyncPage(
     IReadOnlyList<LibraryItemDto> Items,
     IReadOnlyList<string> RemovedIds,
+    /// <summary>
+    /// Preference scopes that changed: an item id, or the literal <c>global</c> for the user's default.
+    /// The client re-reads them from the preferences endpoint — the payload is small and rarely
+    /// changes, so carrying ids beats duplicating the shape here.
+    /// </summary>
+    IReadOnlyList<string> ChangedPreferenceScopes,
     string Cursor,
     bool HasMore,
     bool ResetRequired);

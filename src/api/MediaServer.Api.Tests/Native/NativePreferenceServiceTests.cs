@@ -140,6 +140,26 @@ public sealed class NativePreferenceServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task The_database_refuses_a_second_default_for_the_same_user()
+    {
+        // The composite (AppUserId, MediaItemId) index does not cover this: SQL treats NULLs as
+        // distinct, so two rows of (user, NULL) satisfy it and the user quietly ends up with two
+        // defaults. A filtered index is what actually enforces one.
+        _context.PlaybackPreferences.Add(new PlaybackPreference
+        {
+            Id = Guid.NewGuid(), AppUserId = UserId, MediaItemId = null, AudioLanguage = "rus",
+        });
+        await _context.SaveChangesAsync();
+
+        _context.PlaybackPreferences.Add(new PlaybackPreference
+        {
+            Id = Guid.NewGuid(), AppUserId = UserId, MediaItemId = null, AudioLanguage = "eng",
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => _context.SaveChangesAsync());
+    }
+
+    [Fact]
     public async Task Blank_languages_are_stored_as_absent_rather_than_as_empty_strings()
     {
         var saved = await Service().SetAsync(
