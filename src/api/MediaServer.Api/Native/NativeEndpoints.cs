@@ -101,6 +101,55 @@ public static class NativeEndpoints
           .Produces<NativePlaybackResolutionResponse>()
           .Produces(StatusCodes.Status404NotFound);
 
+        group.MapGet("/playback/preferences", async (
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativePreferenceService preferences,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(await preferences.ListAsync(appUserId, cancellationToken));
+        }).RequireAuthorization().Produces<IReadOnlyList<NativePreferenceDto>>();
+
+        group.MapPut("/playback/preferences", async (
+            NativePreferenceDto body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativePreferenceService preferences,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(await preferences.SetAsync(appUserId, body, cancellationToken));
+        }).RequireAuthorization().Produces<NativePreferenceDto>();
+
+        // The default is cleared by omitting the scope, a title's override by naming it.
+        group.MapDelete("/playback/preferences", async (
+            Guid? mediaItemId,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativePreferenceService preferences,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return await preferences.ClearAsync(appUserId, mediaItemId, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
+        }).RequireAuthorization()
+          .Produces(StatusCodes.Status204NoContent)
+          .Produces(StatusCodes.Status404NotFound);
+
         group.MapGet("/sync", async (
             string? cursor,
             ClaimsPrincipal principal,

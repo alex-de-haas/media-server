@@ -552,6 +552,78 @@
         }
       }
     },
+    "/native/v1/playback/preferences": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NativePreferenceDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativePreferenceDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePreferenceDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "mediaItemId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/native/v1/sync": {
       "get": {
         "tags": [
@@ -1524,6 +1596,43 @@
           },
           "profile": {
             "$ref": "#/components/schemas/NativeCapabilityProfile"
+          }
+        }
+      },
+      "NativePreferenceDto": {
+        "required": [
+          "mediaItemId",
+          "audioLanguage",
+          "subtitleLanguage",
+          "subtitlesForcedOnly",
+          "preferOriginalAudio"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaItemId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "audioLanguage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "subtitleLanguage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "subtitlesForcedOnly": {
+            "type": "boolean"
+          },
+          "preferOriginalAudio": {
+            "type": "boolean"
           }
         }
       },

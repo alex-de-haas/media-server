@@ -40,6 +40,9 @@ public enum ChangeEntityType
 {
     MediaItem = 0,
     UserItemData = 1,
+
+    /// <summary>A track preference. Per-user, so the row carries the user it belongs to.</summary>
+    PlaybackPreference = 2,
 }
 
 public enum ChangeKind

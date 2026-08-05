@@ -77,6 +77,7 @@ builder.Services.AddScoped<NativeMediaResolver>();
 // offering a URL that would not open.
 builder.Services.AddSingleton(new NativePackagingAvailability { IsAvailable = false });
 builder.Services.AddScoped<NativePlaybackResolver>();
+builder.Services.AddScoped<NativePreferenceService>();
 builder.Services.AddHostedService<ChangeLogPruner>();
 
 // Phase 0 playback observation (docs/planning/trakt-watched-state-sync.md). Off unless the operator
