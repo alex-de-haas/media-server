@@ -37,10 +37,22 @@ public sealed class NativePreferenceService(MediaServerDbContext database)
             ?? rows.FirstOrDefault(row => row.MediaItemId == null);
     }
 
-    /// <summary>Upserts one scope. Writing through the change tracker is what puts it in the sync feed.</summary>
-    public async Task<NativePreferenceDto> SetAsync(
+    /// <summary>
+    /// Upserts one scope, or null when the scope names a title this caller cannot see. Validated
+    /// up front rather than left to the foreign key: an unknown id would otherwise be either a 500
+    /// from the constraint or a preference stored against something that does not exist, and neither
+    /// is an answer. Unpublished and tombstoned titles are refused like everywhere else here.
+    ///
+    /// Writing through the change tracker is what puts the result in the sync feed.
+    /// </summary>
+    public async Task<NativePreferenceDto?> SetAsync(
         int appUserId, NativePreferenceDto requested, CancellationToken cancellationToken)
     {
+        if (requested.MediaItemId is { } scopeId && !await IsVisibleAsync(scopeId, cancellationToken))
+        {
+            return null;
+        }
+
         var row = await database.PlaybackPreferences
             .FirstOrDefaultAsync(
                 candidate => candidate.AppUserId == appUserId && candidate.MediaItemId == requested.MediaItemId,
@@ -89,6 +101,10 @@ public sealed class NativePreferenceService(MediaServerDbContext database)
         await database.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    private async Task<bool> IsVisibleAsync(Guid itemId, CancellationToken cancellationToken) =>
+        await database.MediaItems.AsNoTracking()
+            .AnyAsync(item => item.Id == itemId && item.PublicId != null && item.RemovedAt == null, cancellationToken);
 
     private static string? Normalize(string? language) =>
         string.IsNullOrWhiteSpace(language) ? null : language.Trim();

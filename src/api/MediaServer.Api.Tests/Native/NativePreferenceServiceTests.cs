@@ -116,12 +116,37 @@ public sealed class NativePreferenceServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_scope_naming_a_title_that_does_not_exist_is_refused()
+    {
+        // Left to the foreign key this would be either a 500 from the constraint or a preference
+        // stored against nothing; neither is an answer.
+        var saved = await Service().SetAsync(
+            UserId, new NativePreferenceDto(Guid.NewGuid(), "rus", null, false, false), CancellationToken.None);
+
+        Assert.Null(saved);
+        Assert.Empty(await _context.PlaybackPreferences.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_scope_naming_a_tombstoned_title_is_refused_like_everywhere_else()
+    {
+        var series = _context.MediaItems.Single(item => item.Id == _seriesId);
+        series.PublicId = null;
+        series.RemovedAt = DateTimeOffset.UtcNow;
+        _context.SaveChanges();
+
+        Assert.Null(await Service().SetAsync(
+            UserId, new NativePreferenceDto(_seriesId, "rus", null, false, false), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Blank_languages_are_stored_as_absent_rather_than_as_empty_strings()
     {
         var saved = await Service().SetAsync(
             UserId, new NativePreferenceDto(null, "  ", "", false, false), CancellationToken.None);
 
-        Assert.Null(saved.AudioLanguage);
+        Assert.NotNull(saved);
+        Assert.Null(saved!.AudioLanguage);
         Assert.Null(saved.SubtitleLanguage);
     }
 }

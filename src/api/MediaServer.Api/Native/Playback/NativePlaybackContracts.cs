@@ -7,7 +7,7 @@ namespace MediaServer.Api.Native.Playback;
 /// The axes are the ones the Apple TV spike showed actually decide playback — container, video codec,
 /// audio codec, dynamic range, channel count. A coarse "device class" was rejected: it ages badly and
 /// cannot express the one distinction the spike proved is real, which is whether a client engages
-/// Dolby Vision. See <c>docs/features/native-playback/plan.md</c>.
+/// Dolby Vision. See <c>docs/features/native-playback/feature.md</c>.
 /// </summary>
 public sealed record NativeCapabilityProfile(
     IReadOnlyList<string> Containers,

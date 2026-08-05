@@ -149,10 +149,14 @@ public sealed class NativePlaybackResolver(
     private static bool WithinChannels(NativeCapabilityProfile profile, StreamFacts track) =>
         profile.MaxAudioChannels is not { } max || track.Channels is not { } channels || channels <= max;
 
+    // The profile is request input, so a null or blank entry is something a client can actually send.
+    // Treated as a non-match rather than dereferenced: a malformed body must not become a 500.
     private static bool Supports(IReadOnlyList<string>? declared, string? value) =>
         !string.IsNullOrWhiteSpace(value)
         && declared is not null
-        && declared.Any(entry => entry.Trim().Equals(value.Trim(), StringComparison.OrdinalIgnoreCase));
+        && declared.Any(entry =>
+               !string.IsNullOrWhiteSpace(entry)
+               && entry.Trim().Equals(value.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private sealed record StreamFacts(
         StreamType StreamType, string? Codec, string? HdrFormat, int? Channels, bool IsExternal);

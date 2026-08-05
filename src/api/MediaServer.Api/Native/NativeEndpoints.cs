@@ -185,8 +185,11 @@ public static class NativeEndpoints
                 return Results.Unauthorized();
             }
 
-            return Results.Ok(await preferences.SetAsync(appUserId, body, cancellationToken));
-        }).RequireAuthorization().Produces<NativePreferenceDto>();
+            var saved = await preferences.SetAsync(appUserId, body, cancellationToken);
+            return saved is null ? Results.NotFound() : Results.Ok(saved);
+        }).RequireAuthorization()
+          .Produces<NativePreferenceDto>()
+          .Produces(StatusCodes.Status404NotFound);
 
         // The default is cleared by omitting the scope, a title's override by naming it.
         group.MapDelete("/playback/preferences", async (

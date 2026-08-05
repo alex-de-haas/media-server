@@ -192,6 +192,22 @@ public sealed class NativePlaybackResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task A_profile_carrying_blank_entries_is_answered_rather_than_thrown_at()
+    {
+        // The profile is request input: a client can send [null] or [""], and a malformed body must
+        // not become a 500.
+        AddSource("mp4", "hevc", "SDR", ("aac", 2));
+
+        var ragged = new NativeCapabilityProfile(
+            Containers: ["", "mp4"],
+            VideoCodecs: [" ", "hevc"],
+            AudioCodecs: ["aac", ""],
+            HdrFormats: ["SDR", "  "]);
+
+        Assert.Equal(NativePlaybackDecision.DirectPlay, (await ResolveOneAsync(ragged)).Decision);
+    }
+
+    [Fact]
     public async Task An_unpublished_item_resolves_to_nothing()
     {
         AddSource("mp4", "hevc", "SDR", ("aac", 2));

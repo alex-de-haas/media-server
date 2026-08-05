@@ -679,6 +679,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Not Found"
           }
         }
       },

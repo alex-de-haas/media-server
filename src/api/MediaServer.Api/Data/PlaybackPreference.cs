@@ -8,7 +8,7 @@ namespace MediaServer.Api.Data;
 ///
 /// Scoped globally (<see cref="MediaItemId"/> null) or to one title; for a show the id is the series,
 /// so a preference set on one episode applies to the next. See
-/// <c>docs/features/native-playback/plan.md</c>.
+/// <c>docs/features/native-playback/feature.md</c>.
 /// </summary>
 public sealed class PlaybackPreference
 {
