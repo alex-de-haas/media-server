@@ -78,6 +78,7 @@ builder.Services.AddScoped<NativeMediaResolver>();
 builder.Services.AddSingleton(new NativePackagingAvailability { IsAvailable = false });
 builder.Services.AddScoped<NativePlaybackResolver>();
 builder.Services.AddScoped<NativePreferenceService>();
+builder.Services.AddScoped<NativeSessionService>();
 builder.Services.AddHostedService<ChangeLogPruner>();
 
 // Phase 0 playback observation (docs/planning/trakt-watched-state-sync.md). Off unless the operator

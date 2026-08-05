@@ -101,6 +101,64 @@ public static class NativeEndpoints
           .Produces<NativePlaybackResolutionResponse>()
           .Produces(StatusCodes.Status404NotFound);
 
+        group.MapPost("/playback/sessions/start", async (
+            NativeSessionStart body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativeSessionService sessions,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            var playSessionId = await sessions.StartAsync(appUserId, body, cancellationToken);
+            return playSessionId is null
+                ? Results.NotFound()
+                : Results.Ok(new NativeSessionStarted(playSessionId));
+        }).RequireAuthorization()
+          .Produces<NativeSessionStarted>()
+          .Produces(StatusCodes.Status404NotFound);
+
+        group.MapPost("/playback/sessions/progress", async (
+            NativeSessionReport body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativeSessionService sessions,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return await sessions.ReportAsync(appUserId, body, isStopped: false, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
+        }).RequireAuthorization()
+          .Produces(StatusCodes.Status204NoContent)
+          .Produces(StatusCodes.Status404NotFound);
+
+        group.MapPost("/playback/sessions/stop", async (
+            NativeSessionReport body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativeSessionService sessions,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return await sessions.ReportAsync(appUserId, body, isStopped: true, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
+        }).RequireAuthorization()
+          .Produces(StatusCodes.Status204NoContent)
+          .Produces(StatusCodes.Status404NotFound);
+
         group.MapGet("/playback/preferences", async (
             ClaimsPrincipal principal,
             MediaServerDbContext database,

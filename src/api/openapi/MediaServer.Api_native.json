@@ -552,6 +552,88 @@
         }
       }
     },
+    "/native/v1/playback/sessions/start": {
+      "post": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeSessionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeSessionStarted"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/playback/sessions/progress": {
+      "post": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeSessionReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/playback/sessions/stop": {
+      "post": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeSessionReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/native/v1/playback/preferences": {
       "get": {
         "tags": [
@@ -1712,6 +1794,97 @@
           },
           "capabilities": {
             "$ref": "#/components/schemas/NativeServerCapabilities"
+          }
+        }
+      },
+      "NativeSessionReport": {
+        "required": [
+          "itemId",
+          "playSessionId",
+          "positionTicks"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "playSessionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "positionTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "NativeSessionStart": {
+        "required": [
+          "itemId",
+          "mediaSourceId",
+          "audioStreamId",
+          "subtitleStreamId",
+          "deviceId"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mediaSourceId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "audioStreamId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "subtitleStreamId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "positionTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          }
+        }
+      },
+      "NativeSessionStarted": {
+        "required": [
+          "playSessionId"
+        ],
+        "type": "object",
+        "properties": {
+          "playSessionId": {
+            "type": "string"
           }
         }
       },
