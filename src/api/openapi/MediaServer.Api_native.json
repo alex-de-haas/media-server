@@ -520,6 +520,195 @@
         }
       }
     },
+    "/native/v1/playback/resolve": {
+      "post": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativePlaybackResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePlaybackResolutionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/playback/sessions/start": {
+      "post": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeSessionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeSessionStarted"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/playback/sessions/progress": {
+      "post": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeSessionReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/playback/sessions/stop": {
+      "post": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeSessionReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/playback/preferences": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NativePreferenceDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativePreferenceDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePreferenceDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "mediaItemId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/native/v1/sync": {
       "get": {
         "tags": [
@@ -1315,6 +1504,50 @@
           }
         }
       },
+      "NativeCapabilityProfile": {
+        "required": [
+          "containers",
+          "videoCodecs",
+          "audioCodecs",
+          "hdrFormats"
+        ],
+        "type": "object",
+        "properties": {
+          "containers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "videoCodecs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "audioCodecs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hdrFormats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxAudioChannels": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "NativeImagesDto": {
         "required": [
           "primary",
@@ -1362,6 +1595,136 @@
           },
           "images": {
             "$ref": "#/components/schemas/NativeImagesDto"
+          }
+        }
+      },
+      "NativePlaybackDecision": {
+        "enum": [
+          "DirectPlay",
+          "Remux",
+          "Unsupported"
+        ]
+      },
+      "NativePlaybackResolution": {
+        "required": [
+          "mediaSourceId",
+          "versionName",
+          "decision",
+          "url",
+          "signalling",
+          "sourceDynamicRange",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaSourceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "decision": {
+            "$ref": "#/components/schemas/NativePlaybackDecision"
+          },
+          "url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "signalling": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceDynamicRange": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "NativePlaybackResolutionResponse": {
+        "required": [
+          "itemId",
+          "sources"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NativePlaybackResolution"
+            }
+          }
+        }
+      },
+      "NativePlaybackResolveRequest": {
+        "required": [
+          "itemId",
+          "profile"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/NativeCapabilityProfile"
+          }
+        }
+      },
+      "NativePreferenceDto": {
+        "required": [
+          "mediaItemId",
+          "audioLanguage",
+          "subtitleLanguage",
+          "subtitlesForcedOnly",
+          "preferOriginalAudio"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaItemId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "audioLanguage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "subtitleLanguage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "subtitlesForcedOnly": {
+            "type": "boolean"
+          },
+          "preferOriginalAudio": {
+            "type": "boolean"
           }
         }
       },
@@ -1444,6 +1807,97 @@
           }
         }
       },
+      "NativeSessionReport": {
+        "required": [
+          "itemId",
+          "playSessionId",
+          "positionTicks"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "playSessionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "positionTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "NativeSessionStart": {
+        "required": [
+          "itemId",
+          "mediaSourceId",
+          "audioStreamId",
+          "subtitleStreamId",
+          "deviceId"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mediaSourceId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "audioStreamId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "subtitleStreamId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "positionTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          }
+        }
+      },
+      "NativeSessionStarted": {
+        "required": [
+          "playSessionId"
+        ],
+        "type": "object",
+        "properties": {
+          "playSessionId": {
+            "type": "string"
+          }
+        }
+      },
       "NativeSourceUrlsDto": {
         "required": [
           "mediaSourceId",
@@ -1478,6 +1932,7 @@
         "required": [
           "items",
           "removedIds",
+          "changedPreferenceScopes",
           "cursor",
           "hasMore",
           "resetRequired"
@@ -1491,6 +1946,12 @@
             }
           },
           "removedIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "changedPreferenceScopes": {
             "type": "array",
             "items": {
               "type": "string"

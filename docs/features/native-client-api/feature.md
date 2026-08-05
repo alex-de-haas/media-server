@@ -15,7 +15,7 @@ supported. Both read the same services and write through the same ones, so a
 title's watched state is identical whichever client set it.
 
 This feature ends where a client can **browse**. Playback negotiation, track
-preferences and playback sessions are [native-playback](../native-playback/plan.md).
+preferences and playback sessions are [native-playback](../native-playback/feature.md).
 
 ## Where it is served
 

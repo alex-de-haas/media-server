@@ -3,6 +3,7 @@ using System;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    partial class MediaServerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260805070949_AddPlaybackPreferences")]
+    partial class AddPlaybackPreferences
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -983,11 +986,6 @@ namespace MediaServer.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("AppUserId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_PlaybackPreferences_AppUserId_Global")
-                        .HasFilter("\"MediaItemId\" IS NULL");
 
                     b.HasIndex("MediaItemId");
 

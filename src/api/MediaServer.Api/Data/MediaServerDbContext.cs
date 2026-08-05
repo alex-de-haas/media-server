@@ -45,6 +45,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<TmdbTitleDetailCacheEntry> TmdbTitleDetailCache => Set<TmdbTitleDetailCacheEntry>();
     public DbSet<RecommendationPreference> RecommendationPreferences => Set<RecommendationPreference>();
     public DbSet<ChangeLogEntry> ChangeLog => Set<ChangeLogEntry>();
+    public DbSet<PlaybackPreference> PlaybackPreferences => Set<PlaybackPreference>();
 
     /// <summary>
     /// Registers <see cref="UtcDateTimeOffsetConverter"/> for every <see cref="DateTimeOffset"/> and
@@ -77,6 +78,32 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureAppSettings(modelBuilder);
         ConfigureReleaseTracking(modelBuilder);
         ConfigureChangeLog(modelBuilder);
+        ConfigurePlaybackPreference(modelBuilder);
+    }
+
+    private static void ConfigurePlaybackPreference(ModelBuilder modelBuilder)
+    {
+        var preference = modelBuilder.Entity<PlaybackPreference>();
+        preference.HasKey(row => row.Id);
+
+        // One preference per scope: the user's default, and at most one override per title. A second
+        // row for the same scope would make "which one wins" a question nobody can answer.
+        preference.HasIndex(row => new { row.AppUserId, row.MediaItemId }).IsUnique();
+
+        // The composite index above does not constrain the default: SQL treats NULLs as distinct, so
+        // two rows of (user, NULL) satisfy it and the user ends up with two defaults. A filtered index
+        // is what actually enforces one.
+        preference.HasIndex(row => row.AppUserId)
+            .IsUnique()
+            .HasFilter("\"MediaItemId\" IS NULL")
+            .HasDatabaseName("IX_PlaybackPreferences_AppUserId_Global");
+
+        preference.HasOne<AppUser>().WithMany()
+            .HasForeignKey(row => row.AppUserId).OnDelete(DeleteBehavior.Cascade);
+
+        // A deleted title takes its override with it; the user's default is untouched.
+        preference.HasOne<MediaItem>().WithMany()
+            .HasForeignKey(row => row.MediaItemId).OnDelete(DeleteBehavior.Cascade);
     }
 
     private static void ConfigureChangeLog(ModelBuilder modelBuilder)
@@ -180,6 +207,22 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
                 {
                     EntityType = ChangeEntityType.UserItemData,
                     EntityId = entry.Entity.MediaItemId.ToString("N"),
+                    AppUserId = entry.Entity.AppUserId,
+                    Kind = entry.State == EntityState.Deleted ? ChangeKind.Delete : ChangeKind.Upsert,
+                    OccurredAt = now,
+                });
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<PlaybackPreference>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                rows.Add(new ChangeLogEntry
+                {
+                    EntityType = ChangeEntityType.PlaybackPreference,
+                    // The scope it applies to, so a client can key its local copy the same way.
+                    EntityId = entry.Entity.MediaItemId?.ToString("N") ?? "global",
                     AppUserId = entry.Entity.AppUserId,
                     Kind = entry.State == EntityState.Deleted ? ChangeKind.Delete : ChangeKind.Upsert,
                     OccurredAt = now,

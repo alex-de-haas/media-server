@@ -4,6 +4,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
 using MediaServer.Api.Library;
+using MediaServer.Api.Native.Playback;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Native;
@@ -82,6 +83,134 @@ public static class NativeEndpoints
             return Results.Ok(new NativeItemDto(detail, NativeItemUrls.Build(detail, appUserId, tokens), images));
         }).RequireAuthorization().Produces<NativeItemDto>().Produces(StatusCodes.Status404NotFound);
 
+        group.MapPost("/playback/resolve", async (
+            NativePlaybackResolveRequest body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativePlaybackResolver resolver,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            var resolved = await resolver.ResolveAsync(body.ItemId, appUserId, body.Profile, cancellationToken);
+            return resolved is null ? Results.NotFound() : Results.Ok(resolved);
+        }).RequireAuthorization()
+          .Produces<NativePlaybackResolutionResponse>()
+          .Produces(StatusCodes.Status404NotFound);
+
+        group.MapPost("/playback/sessions/start", async (
+            NativeSessionStart body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativeSessionService sessions,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            var playSessionId = await sessions.StartAsync(appUserId, body, cancellationToken);
+            return playSessionId is null
+                ? Results.NotFound()
+                : Results.Ok(new NativeSessionStarted(playSessionId));
+        }).RequireAuthorization()
+          .Produces<NativeSessionStarted>()
+          .Produces(StatusCodes.Status404NotFound);
+
+        group.MapPost("/playback/sessions/progress", async (
+            NativeSessionReport body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativeSessionService sessions,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return await sessions.ReportAsync(appUserId, body, isStopped: false, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
+        }).RequireAuthorization()
+          .Produces(StatusCodes.Status204NoContent)
+          .Produces(StatusCodes.Status404NotFound);
+
+        group.MapPost("/playback/sessions/stop", async (
+            NativeSessionReport body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativeSessionService sessions,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return await sessions.ReportAsync(appUserId, body, isStopped: true, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
+        }).RequireAuthorization()
+          .Produces(StatusCodes.Status204NoContent)
+          .Produces(StatusCodes.Status404NotFound);
+
+        group.MapGet("/playback/preferences", async (
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativePreferenceService preferences,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(await preferences.ListAsync(appUserId, cancellationToken));
+        }).RequireAuthorization().Produces<IReadOnlyList<NativePreferenceDto>>();
+
+        group.MapPut("/playback/preferences", async (
+            NativePreferenceDto body,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativePreferenceService preferences,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            var saved = await preferences.SetAsync(appUserId, body, cancellationToken);
+            return saved is null ? Results.NotFound() : Results.Ok(saved);
+        }).RequireAuthorization()
+          .Produces<NativePreferenceDto>()
+          .Produces(StatusCodes.Status404NotFound);
+
+        // The default is cleared by omitting the scope, a title's override by naming it.
+        group.MapDelete("/playback/preferences", async (
+            Guid? mediaItemId,
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            NativePreferenceService preferences,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
+            {
+                return Results.Unauthorized();
+            }
+
+            return await preferences.ClearAsync(appUserId, mediaItemId, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
+        }).RequireAuthorization()
+          .Produces(StatusCodes.Status204NoContent)
+          .Produces(StatusCodes.Status404NotFound);
+
         group.MapGet("/sync", async (
             string? cursor,
             ClaimsPrincipal principal,
@@ -98,6 +227,9 @@ public static class NativeEndpoints
         }).RequireAuthorization().Produces<NativeSyncPage>();
     }
 }
+
+/// <summary>What to resolve, and for which client.</summary>
+public sealed record NativePlaybackResolveRequest(Guid ItemId, NativeCapabilityProfile Profile);
 
 public static class NativeSurface
 {

@@ -10,6 +10,7 @@ using MediaServer.Api.Hosty;
 using MediaServer.Api.IO;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Native;
+using MediaServer.Api.Native.Playback;
 using MediaServer.Api.Recommendations;
 using MediaServer.Api.WatchHistory;
 using MediaServer.Api.WatchHistory.Trakt;
@@ -72,6 +73,12 @@ builder.Services.AddOpenApi(NativeSurface.OpenApiDocumentName, options =>
     options.ShouldInclude = description =>
         description.RelativePath?.StartsWith("native/v1", StringComparison.OrdinalIgnoreCase) == true);
 builder.Services.AddScoped<NativeMediaResolver>();
+// Packaging is `remux-streaming`; until it ships the resolver answers "not available" rather than
+// offering a URL that would not open.
+builder.Services.AddSingleton(new NativePackagingAvailability { IsAvailable = false });
+builder.Services.AddScoped<NativePlaybackResolver>();
+builder.Services.AddScoped<NativePreferenceService>();
+builder.Services.AddScoped<NativeSessionService>();
 builder.Services.AddHostedService<ChangeLogPruner>();
 
 // Phase 0 playback observation (docs/planning/trakt-watched-state-sync.md). Off unless the operator
