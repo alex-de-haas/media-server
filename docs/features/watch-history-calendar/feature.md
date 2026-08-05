@@ -1,15 +1,17 @@
 # Watch-History Calendar
 
 Created: 2026-07-24
-Updated: 2026-07-24
+Updated: 2026-08-05
 
 ## Description
 
 `/calendar` answers two questions behind one `Releases | Watched` switch.
 **Releases** is unchanged: tracked release dates, reminders, and the Add-title
-and Tracked/Reminders actions. **Watched** is a read-only screening diary over
-the per-play history in `PlaybackHistoryEntries` — what the signed-in user
-finished, and when.
+and Tracked/Reminders actions. **Watched** is a screening diary over the per-play
+history in `PlaybackHistoryEntries` — what the signed-in user finished, and when.
+It is a read view with one exception: a single play that should not be there can
+be deleted from it (see
+[watch-history-deletion](../watch-history-deletion/feature.md)).
 
 Both modes share a shell that owns the heading, the mode switch, month
 navigation, and the Monday-first grid frame. Each mode supplies its own toolbar
@@ -60,6 +62,12 @@ only here — an imported play is labelled `Imported`; the grid treats local and
 imported plays identically, because provenance matters for diagnosis, not for
 the memory.
 
+Each play also carries a delete control, behind a confirmation naming that exact
+play. It is the one edit this view offers, and the day's own card follows it —
+deleting one episode of a binge takes the card from `2 episodes` to `1 episode`.
+The semantics live in
+[watch-history-deletion](../watch-history-deletion/feature.md).
+
 ### Filters and undated marks
 
 `All | Movies | Episodes` narrows the grid. Timeless marks — a manual toggle, or
@@ -67,7 +75,9 @@ pre-migration history — never receive a fabricated date; they are counted per
 kind and listed in **Watched without a date**, reachable from the `Undated N`
 control, whose count follows the active filter. The counts must come from the
 server per kind: those rows are absent from `events` by design, so a single
-total could not be re-filtered in the browser.
+total could not be re-filtered in the browser. Marks in that list are deletable
+too; emptying it says so in place, because the control that opened the dialog is
+by then gone.
 
 An empty month says `Nothing watched this month`, and offers
 `Jump to last watched month` when older dated history exists — driven by
@@ -126,9 +136,9 @@ opens, not with the calendar.
 
 ## Not included
 
-Deliberately out of scope: a combined releases-plus-watched overlay, editing or
-deleting history from the calendar, viewing-duration or streak analytics, and an
-activity heatmap.
+Deliberately out of scope: a combined releases-plus-watched overlay, editing an
+entry's timestamp or deleting a whole day's history at once, viewing-duration or
+streak analytics, and an activity heatmap.
 
 ## Testing Expectations
 
@@ -148,5 +158,6 @@ activity heatmap.
 - `e2e/calendar.spec.ts` covers the surface: releases unchanged and default,
   mode switching preserving a non-current month, watched deep links, a binge
   rendering as one card that expands to every episode, the undated count
-  tracking the filter, the empty-month jump, and the phone agenda replacing the
-  grid.
+  tracking the filter, the empty-month jump, the phone agenda replacing the
+  grid, and the delete affordance described in
+  [watch-history-deletion](../watch-history-deletion/feature.md).

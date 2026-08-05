@@ -121,6 +121,15 @@ public sealed class WatchHistoryDeliveryService(
             return (WatchHistoryFailure.Unsupported, $"No adapter is registered for '{connection.ProviderKey}'.", null);
         }
 
+        // Removal speaks in remote ids, not identities. Resolved before the identity is read so a
+        // removal is never refused over a snapshot it does not consult — an entry this app owns stays
+        // deletable even once its item has been re-identified or has lost its metadata.
+        if (item.Operation is WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries
+            or WatchHistoryOutboxOperation.RemoveOwnedEntries)
+        {
+            return await RemoveOwnedAsync(provider, item, cancellationToken);
+        }
+
         var identity = Deserialize(item.IdentitySnapshot);
         if (identity is null)
         {
@@ -135,8 +144,6 @@ public sealed class WatchHistoryDeliveryService(
                 await AddExactAsync(provider, item, identity, cancellationToken),
             WatchHistoryOutboxOperation.EnsureTimelessWatched =>
                 await EnsureTimelessAsync(provider, item, identity, cancellationToken),
-            WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries =>
-                await RemoveOwnedAsync(provider, item, cancellationToken),
             _ => (WatchHistoryFailure.Unsupported, $"Unknown operation {item.Operation}.", null),
         };
     }
@@ -396,8 +403,9 @@ public sealed class WatchHistoryDeliveryService(
         }
 
         // Read from the event, not from the entries: the recorder deleted those in the same
-        // transaction as the unwatch, so by the time this runs there is nothing local left to read.
-        // The ids were captured onto the event before that deletion for exactly this reason.
+        // transaction as the unwatch or the entry deletion, so by the time this runs there is nothing
+        // local left to read. The ids were captured onto the event before that deletion for exactly
+        // this reason.
         var owned = ParseRemoteIds(item.RemoteIdSnapshot)?.ToList() ?? [];
 
         if (owned.Count == 0)
