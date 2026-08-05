@@ -1,7 +1,7 @@
 # Trakt Favorites Sync
 
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-30
 
 The local favorite flag is portable through Trakt: a movie or series favorited
 here reaches the user's Trakt favorites, and favorites kept there arrive here.
@@ -97,5 +97,10 @@ the latter.
   favorites landing on a tombstone, remote favorites absent from the library
   reported as skipped, and the cap reported in the plan.
 
-Live contract verification against a real Trakt account has not been run yet;
-it is tracked as the one open deliverable in [plan.md](plan.md).
+Live contract verification against a real Trakt account was never run, and is
+no longer expected to be: on 2026-07-30 Trakt stopped allowing a community
+application to be connected without a VIP subscription, so Trakt development is
+wound down. The plan holding that deliverable was retired rather than parked —
+see the wind-down note in [watched-history
+providers](../watch-history-providers/feature.md). The shipped code stays and
+keeps working for an account that is already connected.

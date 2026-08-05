@@ -564,8 +564,8 @@ directory. SDK clients ship in `HostySdk.App` 0.3.0 (`HostySecretsClient`,
 `AddHostySecrets`) and `@hosty-sdk/app` 0.4.0 (server-only), both with a
 write-through cache and classified errors. See the
 [feature document](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/app-secrets-store.md).
-The [Trakt plan](../../planning/trakt-watched-state-sync.md) now stores its OAuth
-tokens here and no longer specs an app-side encryption key.
+[Watched-history providers](../watch-history-providers/feature.md) stores its
+OAuth tokens here rather than under an app-side encryption key.
 
 **Problem (historical).** The Trakt integration must persist per-user OAuth access/refresh
 tokens acquired at runtime. They cannot be hashed — the app has to present them
