@@ -384,11 +384,11 @@ succeeds or fails. (Progressive fMP4, further down, has no playlist and reaches 
 same result from the `moov`.)
 
 Which matters, because the master playlist appeared to be exactly what does not
-work. **The three findings below were measured by a harness that ran every case in
-one launch and reported "plays" for cases that showed a badge and no picture; its
-hold phase was never logged.** All three were disproven on 2026-08-05 — see [the
-second HLS pass](#second-hls-pass-2026-08-05). They are kept because the way they
-were reached is the lesson:
+work. **The findings below were measured by a harness that ran every case in one
+launch and reported "plays" for cases that showed a badge and no picture; its hold
+phase was never logged.** The first two were disproven on 2026-08-05 — see [the
+second HLS pass](#second-hls-pass-2026-08-05) — and are kept struck through, because
+the way they were reached is the lesson. The third survived re-measurement.
 
 - ~~**Any master playlist yields `Cannot open` on tvOS.**~~ A master at
   `#EXT-X-VERSION:10` plays, and Apple's own published `v6` master plays in Dolby
@@ -412,13 +412,16 @@ the spike tried the obvious alternative and it worked immediately:
 
 | What was served | Opens on tvOS | Television reports |
 | --- | --- | --- |
-| HLS via master playlist | **no** | (switched, then failed) |
+| ~~HLS via master playlist~~ **retracted** | ~~no~~ — see [the second pass](#second-hls-pass-2026-08-05) | ~~(switched, then failed)~~ HDR10 |
 | HLS variant fetched directly | yes | SDR |
 | **Progressive fMP4, `hvc1` + `dvvC`, byte ranges** | **yes** | **HDR10**, bright |
 | **Progressive fMP4, forced `dvh1` sample entry** | **yes** | **Dolby Vision** |
 
-Both progressive files play 4K HEVC at 26.5 Mbit/s with zero stalls. The last row
-is the whole goal of decision 2, reached with no playlist of any kind.
+Only the first row is retracted — a master playlist does open, and drives the
+television to HDR10. The comparison that decided the outcome is untouched: both
+progressive files play 4K HEVC at 26.5 Mbit/s with zero stalls, and the last row is
+the whole goal of decision 2, reached with no playlist of any kind and by nothing
+else tried since.
 
 The final missing piece was one field. `hvc1` + `dvvC` is the *cross-compatible*
 form, and a player is entitled to read it as HDR10 — which is exactly what
