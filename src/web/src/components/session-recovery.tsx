@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildCoreOpenUrl } from "@hosty-sdk/app";
+import { buildCoreOpenUrl, detectLaunchMode } from "@hosty-sdk/app";
 import type { SessionFailureStatus } from "@/lib/host-auth";
 
 // Once-per-tab guard so a standalone tab that comes back from Core still unauthorized does not
@@ -68,7 +68,7 @@ export function SessionRecovery({
 
     const openUrl = buildCoreOpenUrl(corePublicOrigin, appId, window.location);
 
-    if (window.self !== window.top) {
+    if (detectLaunchMode(window) === "embedded") {
       // Embedded: the iframe sandbox forbids top navigation, so ask Shell to reissue a code.
       // The payload carries no secret, so targetOrigin "*" is safe — Shell verifies the sender
       // (source window, frame origin, app id) before acting.

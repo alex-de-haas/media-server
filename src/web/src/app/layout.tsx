@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Fraunces, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { launchModeBootstrapScript } from "@hosty-sdk/app";
+import { HostLaunchBridge } from "@hosty-sdk/app/react";
 import { Providers } from "@/components/providers";
 import { HostThemeBridge } from "@/components/host-theme-bridge";
 import { AppShell } from "@/components/app-shell";
@@ -39,8 +41,13 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${inter.variable} ${fraunces.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* Ahead of any body markup, so chrome a shell already renders is never painted. */}
+        <script dangerouslySetInnerHTML={{ __html: launchModeBootstrapScript }} />
+      </head>
       <body className="bg-background text-foreground min-h-full">
         <HostThemeBridge />
+        <HostLaunchBridge />
         <Providers>
           <AppShell>{children}</AppShell>
         </Providers>

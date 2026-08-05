@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-06-15
-Updated: 2026-08-04
+Updated: 2026-08-05
 
 ## Description
 
@@ -244,6 +244,19 @@ The `web` UI runs inside the Hosty Shell sandboxed iframe. It must:
 - validate SignalR transport (WebSocket, SSE, long-polling fallback) through the
   Core-managed runtime, because behavior can depend on the embed route.
 
+### Launch Mode
+
+The root layout runs the app SDK's `launchModeBootstrapScript` in `<head>` and mounts
+`HostLaunchBridge`, which resolve the launch mode — a shell-declared `hosty_launch`
+query parameter (`embedded`, `native`, or `standalone`) first, then the value
+persisted for the tab, then the frame heuristic — and stamp it onto `<html>` as
+`data-hosty-launch`. The top tab bar (wordmark plus the manifest `ui.navigation`
+pages) carries the SDK's `hosty-shell-chrome` class and is hidden by an unlayered
+CSS rule whenever the mode is not `standalone`, because a surrounding shell already
+renders that navigation. Session recovery keeps branching on the structural frame
+heuristic (`detectLaunchMode`) when choosing between the embedded
+`hosty:auth-required` postMessage flow and the standalone Core `/open` redirect.
+
 ## Capabilities
 
 `["backup", "logs"]` — the optional features this app offers a client. Lifecycle
@@ -277,3 +290,6 @@ servers can validate UI and business logic only.
 - The manifest itself is validated against the Core contract through the local
   lifecycle above (`hosty apps install . --runtime dev`); no automated test
   substitutes for it.
+- After changes to the tab bar or the launch bridges, verify a plain tab shows
+  the tab bar while `?hosty_launch=embedded` hides it, and that the parameter is
+  cleaned from the URL.
