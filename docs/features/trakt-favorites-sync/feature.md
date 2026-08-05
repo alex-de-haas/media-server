@@ -95,12 +95,11 @@ the latter.
   retries; an unrecognised title ends the event.
 - `FavoritesSyncTests` — each of the four reconciliation directions, inbound
   favorites landing on a tombstone, remote favorites absent from the library
-  reported as skipped, and the cap reported in the plan.
+  reported as skipped, and the 100-favorite cap surfacing in the sync result.
 
 Live contract verification against a real Trakt account was never run, and is
-no longer expected to be: on 2026-07-30 Trakt stopped allowing a community
-application to be connected without a VIP subscription, so Trakt development is
-wound down. The plan holding that deliverable was retired rather than parked —
-see the wind-down note in [watched-history
-providers](../watch-history-providers/feature.md). The shipped code stays and
-keeps working for an account that is already connected.
+not expected to be: Trakt development was wound down on 2026-07-30. The plan
+holding that deliverable was retired rather than parked — see the wind-down note
+in [watched-history providers](../watch-history-providers/feature.md), which
+records the reason and what Trakt's connection limit actually says. The shipped
+code stays and keeps working for a connected account.

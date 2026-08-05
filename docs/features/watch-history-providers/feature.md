@@ -3,13 +3,18 @@
 Created: 2026-07-30
 Updated: 2026-07-30
 
-> **Development is wound down.** On 2026-07-30 the operator reported that Trakt
-> no longer lets an account connect a community application without a VIP
-> subscription, which closes the only door this integration comes through. The
-> shipped code stays and keeps working for an account that is already connected;
-> nothing further is being built, and the remaining plan was retired rather than
-> parked. (For contrast, on 2026-07-24 a free account still allowed exactly one
-> community app — the constraint tightened after that.)
+> **Development is wound down** — an operator decision taken on 2026-07-30, not
+> a limitation derived from Trakt's published terms. The shipped code stays and
+> keeps working for a connected account; nothing further is being built, and the
+> remaining plans were retired rather than parked.
+>
+> What Trakt's connection limit actually says, verified against its announcement
+> on both 2026-07-24 and 2026-07-30: a **free account may connect one Community
+> App**, and VIP is required only for a second. Official Trakt clients do not
+> count toward it. So a free account with its slot free can still connect this
+> app; a free account whose slot is already spent — on Infuse's own Trakt
+> integration, say — cannot add this one without VIP, and that is the wall the
+> operator hit.
 >
 > The **per-play history** below is not affected by any of this. It is
 > provider-neutral, it is what the [watch-history
