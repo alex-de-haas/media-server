@@ -37,7 +37,7 @@ export function RecommendationCard({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={item.posterUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
       ) : (
-        <span className="text-muted-foreground flex h-full w-full items-center justify-center text-xs">
+        <span className="text-muted-foreground flex h-full w-full items-center justify-center p-2 text-center text-xs">
           No poster
         </span>
       )}
@@ -71,8 +71,10 @@ export function RecommendationCard({
         </button>
       )}
 
-      <div className="flex flex-col gap-0.5">
-        <span className="truncate text-sm font-medium" title={item.title}>
+      {/* Same two lines as an ordinary poster card — 13px name over a 12px muted caption — so a
+          recommendation sitting next to a library tile on Home reads at the same weight. */}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-[13px] font-medium" title={item.title}>
           {item.title}
         </span>
         <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
