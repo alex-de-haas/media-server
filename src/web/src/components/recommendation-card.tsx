@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { EyeOff, Plus, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Check, EyeOff, Plus, Sparkles } from "lucide-react";
 import type { Recommendation } from "@/lib/media-server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -77,14 +76,17 @@ export function RecommendationCard({
         <span className="truncate text-[13px] font-medium" title={item.title}>
           {item.title}
         </span>
-        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          {item.year ?? "—"}
-          <span
-            data-testid="rec-availability"
-            className={cn(item.inLibrary ? "text-brand" : "text-muted-foreground")}
-          >
-            {item.inLibrary ? "In library" : "Not in library"}
+        {/* The same `kind · year` caption an ordinary poster card carries. Availability is the amber check
+            the tracked drawer and the calendar already use for "you have this" — only held titles are
+            marked, since saying "not in library" on almost every card spends the line to say nothing. */}
+        <span className="text-muted-foreground flex items-center gap-1 text-xs">
+          <span className="truncate">
+            {item.kind}
+            {item.year ? ` · ${item.year}` : ""}
           </span>
+          {item.inLibrary && (
+            <Check data-testid="rec-availability" className="text-brand size-3.5 shrink-0" aria-label="In library" />
+          )}
         </span>
       </div>
 
