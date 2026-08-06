@@ -28,8 +28,11 @@ section).
 - **Movies / Series** (`/movies`, `/series`) — poster grids with an optional
   catalog selector when more than one applicable catalog exists. Every poster
   card — here, in the Home rails, on Collections, and on a person's credits —
-  names its title under the art, with the type·year caption below the name; a
-  card without artwork says "No poster" in place of the image. The selection
+  names its title under the art, over one muted caption line the surface fills
+  in: `Movie · 2019` in these grids and the Recently Added rail, the member
+  count on Collections, the year and the role in a person's credits, nothing at
+  all where the caller has nothing to add. A card without artwork says "No
+  poster" in place of the image. The selection
   is stored in `?catalog=<id>`, applied by the backend, and preserved through
   detail navigation and refresh. Movies offers `Movie` catalogs; Series offers
   `Series` and `Anime` catalogs. Offline catalogs remain selectable and are

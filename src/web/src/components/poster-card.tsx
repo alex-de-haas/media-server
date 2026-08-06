@@ -55,8 +55,12 @@ export function PosterCard({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={posterUrl} alt="" className="h-full w-full object-cover" />
         ) : (
-          // The title is rendered below the card, so the empty art says only that art is what is missing.
-          <div className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-xs">
+          // The title is rendered below the card, so the empty art says only that art is what is missing —
+          // and says it to the eye alone: inside the link, the words would join the link's accessible name.
+          <div
+            aria-hidden
+            className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-xs"
+          >
             No poster
           </div>
         )}
