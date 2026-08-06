@@ -1,7 +1,7 @@
 # External Track Sidecars
 
 Created: 2026-07-27
-Updated: 2026-07-29
+Updated: 2026-08-06
 
 A release's separate audio tracks and subtitles are kept as files beside the
 library file they belong to, and recorded as external streams of its media
@@ -135,12 +135,24 @@ whose files are still on disk.
 
 Which is also why the **media backfill probes sidecars separately**, by their own
 paths: the refresh pass it is built on can never reach them. It fills in the codec,
-channels and sample rate of rows that lack them — those placed before the specs were
-recorded, and any whose file the engine could not answer for at the time. A missing
-codec is the marker for "never answered", so a file that still cannot be read is
-picked up again on the next run instead of being recorded as having no codec.
+channels, sample rate and bitrate of rows that lack them — those placed before the
+specs were recorded, and any whose file the engine could not answer for at the time.
+A missing codec is the marker for "never answered", so a file that still cannot be
+read is picked up again on the next run instead of being recorded as having no codec.
 
-It writes **only those three fields**. Language and title are a labelling decision
+A missing **bitrate on an audio row** is a second marker, because bitrate arrived
+after the other three did: a row placed in between carries a codec, so a
+missing-codec test alone would never revisit it — and since the refresh deliberately
+spares external rows, this is the only path that can. Audio only: a subtitle sidecar
+has no bitrate to find, and selecting on a null one would re-probe it every run
+forever for an answer that never comes.
+
+A row reached that way may already hold engine-read specs while the provider
+answering now is the weaker one, so each field **keeps what it has when this probe
+cannot better it**. Writing the header reader's nulls over an engine's answers would
+lose information the run never had.
+
+It writes **only those four fields**. Language and title are a labelling decision
 made across a whole cohort of files, weighing what each container tagged against
 what the paths reveal; re-reading one file's tags in isolation would overwrite that
 with strictly less information.
@@ -240,7 +252,9 @@ the whole list, because it is true of audio and false of subtitles.
   streams while sparing the sidecar rows beside it; the backfill filling in a
   sidecar's missing specs, leaving its language and title alone (its probe answers
   a different language on purpose), and leaving a file it cannot read for the next
-  run rather than marking it done.
+  run rather than marking it done; a row that has its codec but no bitrate reached
+  anyway, a weaker probe's nulls not overwriting the specs already there, and a
+  subtitle sidecar left alone once it has a codec.
 - `DownloadFileServiceTests` — a torrent's dubs *and* subtitles admitted as source
   files, junk still refused.
 - `AudioTrackLabelerTests` — the language and title inference all three layouts

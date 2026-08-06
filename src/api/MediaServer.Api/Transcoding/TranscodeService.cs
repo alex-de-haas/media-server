@@ -47,10 +47,7 @@ public sealed class TranscodeService(
         var isMerge = request.MergeStreamIds is { Count: > 0 };
         var codec = ResolveCodec(request, isMerge);
         var hardware = NormalizeHardware(request.HardwareAcceleration);
-        if (request.Crf is < 0 or > 51)
-        {
-            throw new TranscodeRequestException("crf must be between 0 and 51.");
-        }
+        var qualityLevel = codec == "copy" ? null : NormalizeQualityLevel(request.QualityLevel);
 
         // Resolve track selection and target resolution against the source's probed streams.
         var orderedAudio = source.Streams.Where(stream => stream.StreamType == StreamType.Audio)
@@ -88,7 +85,13 @@ public sealed class TranscodeService(
             throw new TranscodeRequestException("Source file not found on disk.");
         }
 
-        var outputRelative = BuildOutputRelative(source.Path, VersionLabel(codec, targetHeight, isMerge));
+        // Resolved here rather than with the other engine arguments below, because what a job re-encodes is
+        // part of what separates its output from another's.
+        var audioTargets = ResolveAudioTargets(request, source, audioSelection);
+
+        var outputRelative = BuildOutputRelative(
+            source.Path,
+            VersionLabel(codec, targetHeight, isMerge, qualityLevel, audioTargets?.Select(target => target.Codec).ToList()));
         if (!sandbox.TryResolve(catalog, outputRelative, out var outputAbsolute))
         {
             throw new TranscodeRequestException("Could not place the output inside the catalog.");
@@ -125,9 +128,9 @@ public sealed class TranscodeService(
         {
             descriptor = await engine.CreateAsync(
                 new TranscodeJobRequest(
-                    input.Label, input.Relative, output.Label, output.Relative, codec, hardware, request.Crf,
+                    input.Label, input.Relative, output.Label, output.Relative, codec, hardware, qualityLevel,
                     targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
-                    additionalInputs, metadataOverrides),
+                    additionalInputs, metadataOverrides, audioTargets),
                 cancellationToken);
         }
         catch (InvalidOperationException exception)
@@ -148,7 +151,8 @@ public sealed class TranscodeService(
             OutputPath = outputRelative,
             VideoCodec = codec,
             HardwareAcceleration = hardware,
-            Crf = request.Crf,
+            QualityLevel = qualityLevel,
+            ReEncodedAudioTracks = audioTargets?.Count ?? 0,
             State = TranscodeJobState.Queued,
             CreatedAt = DateTimeOffset.UtcNow,
         };
@@ -253,11 +257,11 @@ public sealed class TranscodeService(
     {
         var unstated = string.IsNullOrWhiteSpace(request.VideoCodec);
         var codec = isMerge && unstated ? "copy" : NormalizeCodec(request.VideoCodec);
-        if (codec == "copy" && (request.MaxHeight is not null || request.Crf is not null))
+        if (codec == "copy" && (request.MaxHeight is not null || request.QualityLevel is not null))
         {
             throw new TranscodeRequestException(isMerge && unstated
-                ? "maxHeight and crf need a videoCodec — a merge that names none copies the video."
-                : "maxHeight and crf cannot be set when the video is copied.");
+                ? "maxHeight and qualityLevel need a videoCodec — a merge that names none copies the video."
+                : "maxHeight and qualityLevel cannot be set when the video is copied.");
         }
 
         return codec;
@@ -274,20 +278,58 @@ public sealed class TranscodeService(
     /// into "Merged" would make "merge these dubs" and "merge these dubs into a 1080p HEVC" collide.
     /// </para>
     /// </summary>
-    internal static string VersionLabel(string codec, int? targetHeight, bool isMerge = false)
+    internal static string VersionLabel(
+        string codec,
+        int? targetHeight,
+        bool isMerge = false,
+        string? qualityLevel = null,
+        IReadOnlyCollection<string>? audioCodecs = null)
     {
-        var encoded = codec == "copy"
-            ? "Remux"
-            : targetHeight is { } height ? $"{CodecLabel(codec)} {height}p" : CodecLabel(codec);
-        if (!isMerge)
-        {
-            return encoded;
-        }
+        var parts = new List<string>(4);
 
         // A merged copy stays plain "Merged": that is the name every merge has produced so far, and a
         // "Remux Merged" would be a new path for the identical job.
-        return codec == "copy" ? "Merged" : $"{encoded} Merged";
+        if (!isMerge || codec != "copy")
+        {
+            parts.Add(codec == "copy"
+                ? "Remux"
+                : targetHeight is { } height ? $"{CodecLabel(codec)} {height}p" : CodecLabel(codec));
+        }
+
+        // Two jobs differing only by quality must not collide. The default is left out: it never varies, and
+        // adding a word to every existing path would rename versions that are already on disk.
+        if (codec != "copy" && qualityLevel is not null && qualityLevel != DefaultQualityLevel)
+        {
+            parts.Add($"{char.ToUpperInvariant(qualityLevel[0])}{qualityLevel[1..]}");
+        }
+
+        // Re-encoded audio changes what comes out as surely as the picture settings do — and on a video copy
+        // it is the *only* thing that changes, so "shrink the dubs, keep every frame" would otherwise land on
+        // the path a plain remux already holds and be refused as a duplicate. Named only when there is one,
+        // for the same reason the default level is: every path on disk today was produced with audio copied.
+        if (AudioLabel(audioCodecs) is { } audio)
+        {
+            parts.Add(audio);
+        }
+
+        if (isMerge)
+        {
+            parts.Add("Merged");
+        }
+
+        return string.Join(" ", parts);
     }
+
+    /// <summary>The codecs a job re-encodes audio to, as one uppercase token — "EAC3", or "AC3+EAC3" for a
+    /// request naming both. Null when every track is copied, which is the case the label stays silent about.
+    /// Sorted so the token depends on what a job does, not on the order the tracks were listed in.</summary>
+    private static string? AudioLabel(IReadOnlyCollection<string>? audioCodecs) =>
+        audioCodecs is { Count: > 0 }
+            ? string.Join("+", audioCodecs
+                .Select(codec => codec.ToUpperInvariant())
+                .Distinct()
+                .OrderBy(codec => codec, StringComparer.Ordinal))
+            : null;
 
     private static string CodecLabel(string codec) => codec == "h264" ? "H.264" : "HEVC";
 
@@ -454,6 +496,54 @@ public sealed class TranscodeService(
         return overrides;
     }
 
+    /// <summary>
+    /// Turns the request's per-track audio targets into the engine's (input, streamIndex) form. Only the
+    /// version's own embedded tracks can be re-encoded: a sidecar being merged in arrives as its own input
+    /// whose single stream the engine addresses by ordinal, and re-encoding a dub while folding it in is a
+    /// combination nothing has asked for — better refused than half-supported.
+    /// </summary>
+    internal static IReadOnlyList<EngineAudioTarget>? ResolveAudioTargets(
+        CreateTranscodeRequest request, MediaSource source, IReadOnlyList<int>? audioSelection)
+    {
+        if (request.AudioTargets is not { Count: > 0 } targets)
+        {
+            return null;
+        }
+
+        var resolved = new List<EngineAudioTarget>(targets.Count);
+        var seen = new HashSet<Guid>();
+        foreach (var target in targets)
+        {
+            var codec = NormalizeAudioCodec(target.Codec);
+            if (target.Bitrate is not null and (< 32 or > 1536))
+            {
+                throw new TranscodeRequestException("An audio bitrate must be between 32 and 1536 kbps.");
+            }
+
+            if (!seen.Add(target.StreamId))
+            {
+                throw new TranscodeRequestException("A track cannot be given two audio targets.");
+            }
+
+            var stream = source.Streams.FirstOrDefault(entry =>
+                entry.Id == target.StreamId && !entry.IsExternal && entry.StreamType == StreamType.Audio)
+                ?? throw new TranscodeRequestException(
+                    "An audio target names a track that is not an audio track of this version.");
+
+            // Dropping a track and re-encoding it are contradictory instructions, and the engine can only
+            // attach -c:a:N to a position it maps.
+            if (audioSelection?.Contains(stream.Index) == false)
+            {
+                throw new TranscodeRequestException(
+                    "An audio target names a track this job is dropping.");
+            }
+
+            resolved.Add(new EngineAudioTarget(0, stream.Index, codec, target.Bitrate));
+        }
+
+        return resolved;
+    }
+
     private (string? Label, string Relative)? ToMount(string absolutePath) =>
         CatalogMounts.TryResolve(settings, absolutePath, out var label, out var relative)
             ? (label, relative)
@@ -465,6 +555,28 @@ public sealed class TranscodeService(
         "h264" or "avc" or "x264" => "h264",
         "copy" or "remux" => "copy",
         _ => throw new TranscodeRequestException($"videoCodec '{raw}' is not supported (use 'h264', 'hevc' or 'copy')."),
+    };
+
+    /// <summary>The default level is the measured point where the software and hardware encoders come out
+    /// equal, so omitting it behaves the same whichever encoder the host reaches.</summary>
+    internal const string DefaultQualityLevel = "high";
+
+    private static string NormalizeQualityLevel(string? raw) => raw?.Trim().ToLowerInvariant() switch
+    {
+        null or "" => DefaultQualityLevel,
+        "highest" => "highest",
+        "high" => "high",
+        "balanced" => "balanced",
+        "small" => "small",
+        _ => throw new TranscodeRequestException(
+            $"qualityLevel '{raw}' is not supported (use 'highest', 'high', 'balanced' or 'small')."),
+    };
+
+    private static string NormalizeAudioCodec(string? raw) => raw?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "eac3" or "e-ac-3" or "ddp" => "eac3",
+        "ac3" or "ac-3" => "ac3",
+        _ => throw new TranscodeRequestException($"Audio codec '{raw}' is not supported (use 'eac3')."),
     };
 
     private static string NormalizeHardware(string? raw) => raw?.Trim().ToLowerInvariant() switch

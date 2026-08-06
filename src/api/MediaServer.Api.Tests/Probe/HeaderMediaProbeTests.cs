@@ -75,6 +75,10 @@ public sealed class HeaderMediaProbeTests : IDisposable
         Assert.Equal("Дубляж", audio.Title);
         Assert.Equal(6, audio.Channels);
         Assert.Equal(48000, audio.SampleRate);
+        // A per-track bitrate is beyond this reader, and a null from it means "could not tell" rather than
+        // "the file states none" — which is exactly why the source's provider is recorded alongside it.
+        Assert.Null(audio.Bitrate);
+        Assert.Null(video.Bitrate);
     }
 
     [Fact]

@@ -306,6 +306,75 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         Assert.Equal(2, streams.Count(stream => !stream.IsExternal));
     }
 
+    [Fact]
+    public async Task Backfill_reaches_a_sidecar_that_has_its_codec_but_no_bitrate()
+    {
+        // Bitrate arrived after codec did, so a row placed in between carries a codec and would never be
+        // revisited if a missing codec were the only marker. The item-level refresh deliberately never
+        // touches external rows, which makes this the one path that can reach it.
+        var sidecar = await SeedSidecarWithSpecsButNoBitrateAsync();
+        var probe = ProbeAnsweringForSidecars(
+            new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, 6, 48000, 640_000, true, false, null));
+
+        var report = await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+
+        Assert.Equal(1, report.SidecarsFilled);
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        Assert.Equal(640_000, (await fresh.MediaStreams.SingleAsync(stream => stream.Id == sidecar.Id)).Bitrate);
+    }
+
+    [Fact]
+    public async Task Backfill_keeps_specs_the_probe_answering_now_cannot_better()
+    {
+        // Re-probing a row for its missing bitrate can land on the header reader, which answers less than
+        // the engine that filled the row in. Writing its nulls over what is there would lose information
+        // this run never had.
+        var sidecar = await SeedSidecarWithSpecsButNoBitrateAsync();
+        var probe = ProbeAnsweringForSidecars(
+            new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, null, null, null, true, false, null));
+
+        await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        var kept = await fresh.MediaStreams.SingleAsync(stream => stream.Id == sidecar.Id);
+        Assert.Equal(6, kept.Channels);
+        Assert.Equal(48000, kept.SampleRate);
+        Assert.Null(kept.Bitrate);
+    }
+
+    [Fact]
+    public async Task Backfill_leaves_a_subtitle_sidecar_alone_once_it_has_a_codec()
+    {
+        // A subtitle track has no bitrate to find, so selecting it on a null one would re-probe it on every
+        // run forever for an answer that never comes.
+        var sidecar = await SeedSidecarWithSpecsButNoBitrateAsync();
+        await _database.MediaStreams.Where(stream => stream.Id == sidecar.Id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(stream => stream.StreamType, StreamType.Subtitle)
+                .SetProperty(stream => stream.Codec, "subrip")
+                .SetProperty(stream => stream.Channels, (int?)null)
+                .SetProperty(stream => stream.SampleRate, (int?)null));
+        var probe = ProbeAnsweringForSidecars(
+            new ProbedStream(StreamType.Subtitle, 0, "subrip", null, "rus", null, null, null, null, null, null, null, null, true, false, null));
+
+        var report = await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+
+        Assert.Equal(0, report.SidecarsFilled);
+    }
+
+    /// <summary>A sidecar row as the version before this one left it: codec and layout recorded, bitrate
+    /// null because the column did not exist yet.</summary>
+    private async Task<MediaStream> SeedSidecarWithSpecsButNoBitrateAsync()
+    {
+        var sidecar = await SeedSidecarWithoutSpecsAsync();
+        await _database.MediaStreams.Where(stream => stream.Id == sidecar.Id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(stream => stream.Codec, "ac3")
+                .SetProperty(stream => stream.Channels, 6)
+                .SetProperty(stream => stream.SampleRate, 48000));
+        return sidecar;
+    }
+
     /// <summary>Seeds a movie with one sidecar beside it, both present on disk, and answers null for the
     /// sidecar's own specs — the state of every row placed before they were recorded.</summary>
     private async Task<MediaStream> SeedSidecarWithoutSpecsAsync()
@@ -336,7 +405,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
             ? new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 320_000, 50_000_000,
                 sidecarTrack is null ? [] : [sidecarTrack])
             : new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 8_000_000, 1_000_000,
-                [new ProbedStream(StreamType.Video, 0, "h264", "High", null, 1920, 1080, 23.976, 8, null, null, null, true, false, null)]),
+                [new ProbedStream(StreamType.Video, 0, "h264", "High", null, 1920, 1080, 23.976, 8, null, null, null, null, true, false, null)]),
     };
 
     [Fact]
@@ -346,7 +415,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         // never touches external rows — so the backfill probes the sidecar's own file.
         var sidecar = await SeedSidecarWithoutSpecsAsync();
         var probe = ProbeAnsweringForSidecars(
-            new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, 6, 48000, true, false, null));
+            new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, 6, 48000, 640_000, true, false, null));
 
         var report = await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
 
@@ -356,6 +425,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         Assert.Equal("ac3", filled.Codec);
         Assert.Equal(6, filled.Channels);
         Assert.Equal(48000, filled.SampleRate);
+        Assert.Equal(640_000, filled.Bitrate);
     }
 
     [Fact]
@@ -366,7 +436,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         // and this probe answers a different language on purpose to prove it does not.
         var sidecar = await SeedSidecarWithoutSpecsAsync();
         var probe = ProbeAnsweringForSidecars(
-            new ProbedStream(StreamType.Audio, 0, "ac3", null, "eng", null, null, null, null, null, 6, 48000, true, false, "Something else"));
+            new ProbedStream(StreamType.Audio, 0, "ac3", null, "eng", null, null, null, null, null, 6, 48000, null, true, false, "Something else"));
 
         await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
 

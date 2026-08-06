@@ -1,7 +1,7 @@
 # Media Probe Providers
 
 Created: 2026-07-27
-Updated: 2026-07-29
+Updated: 2026-08-06
 
 Probing a library file runs through two providers behind one `IMediaProbe`. The
 external `transcode-engine` leads, because it runs `ffprobe` and therefore knows
@@ -27,7 +27,14 @@ only a file **neither** can read fails.
 `RemoteMediaProbe` addresses files the way job creation does — by media mount label
 and relative path — so a file whose catalog root is not bound into the engine
 cannot be probed there and falls through. It reports codec profiles, colour read
-out of the codec bitstream, and Dolby Vision.
+out of the codec bitstream, Dolby Vision, and each stream's own **bitrate** — the
+last from `ffprobe`'s `bit_rate`, or from the `BPS` tag `mkvmerge` writes where
+Matroska records no per-track rate at all.
+
+A stream that states neither keeps a null bitrate, and it is never filled in from
+the source's overall rate. The convert dialog sizes a re-encode against this figure,
+and a share of the whole file is a guess a caller cannot tell apart from a
+measurement once it is stored.
 
 `HeaderMediaProbe` reads the file's own header and nothing else:
 
@@ -43,7 +50,8 @@ audio track lengths, not a parse error — reading 11.4 KB in total against 1.66
 process time.
 
 It answers `null` wherever a header cannot say. A transport stream's duration, a
-codec profile, HDR10 versus HDR10+ — all stay unanswered for the engine to fill in.
+codec profile, HDR10 versus HDR10+, a per-track bitrate — all stay unanswered for
+the engine to fill in.
 
 ## Three container traps, handled
 

@@ -1,3 +1,4 @@
+using MediaServer.Api.Data;
 using MediaServer.Api.Transcoding;
 
 namespace MediaServer.Api.Tests.Transcoding;
@@ -36,8 +37,8 @@ public sealed class TranscodeServiceTests
     public void VersionLabel_AppendsMerged_WhenSidecarsJoinTheOutput(string codec, int? targetHeight, string expected) =>
         Assert.Equal(expected, TranscodeService.VersionLabel(codec, targetHeight, isMerge: true));
 
-    private static CreateTranscodeRequest Request(string? codec, int? maxHeight = null, int? crf = null, bool merge = false) =>
-        new(Guid.NewGuid(), codec, null, crf, maxHeight, MergeStreamIds: merge ? [Guid.NewGuid()] : null);
+    private static CreateTranscodeRequest Request(string? codec, int? maxHeight = null, string? quality = null, bool merge = false) =>
+        new(Guid.NewGuid(), codec, null, quality, maxHeight, MergeStreamIds: merge ? [Guid.NewGuid()] : null);
 
     // Merging says what joins the output, not what happens to the picture — so it no longer forces a copy.
     // What it keeps is the default: omitting the codec copies, where a plain job would encode to HEVC.
@@ -64,14 +65,139 @@ public sealed class TranscodeServiceTests
     [Fact]
     public void ResolveCodec_AcceptsEncodeOnlyKnobs_OnAMergeThatNamesOne() =>
         Assert.Equal("hevc", TranscodeService.ResolveCodec(
-            Request("hevc", maxHeight: 1080, crf: 24, merge: true), isMerge: true));
+            Request("hevc", maxHeight: 1080, quality: "small", merge: true), isMerge: true));
 
     [Fact]
     public void ResolveCodec_StillRefusesEncodeOnlyKnobs_OnAnExplicitCopy()
     {
         var error = Assert.Throws<TranscodeRequestException>(() =>
-            TranscodeService.ResolveCodec(Request("copy", crf: 24), isMerge: false));
+            TranscodeService.ResolveCodec(Request("copy", quality: "small"), isMerge: false));
 
         Assert.Contains("video is copied", error.Message);
     }
+
+    // Two jobs differing only by quality must not produce the same path, or the duplicate check refuses the
+    // second one. The default is left out on purpose: it never varies, and putting it in every label would
+    // rename versions already on disk.
+    [Theory]
+    [InlineData("hevc", null, "high", "HEVC")]
+    [InlineData("hevc", null, null, "HEVC")]
+    [InlineData("hevc", null, "small", "HEVC Small")]
+    [InlineData("hevc", 1080, "highest", "HEVC 1080p Highest")]
+    [InlineData("copy", null, null, "Remux")]
+    public void VersionLabel_CarriesTheQualityLevel_OnlyWhenItIsNotTheDefault(
+        string codec, int? targetHeight, string? quality, string expected) =>
+        Assert.Equal(expected, TranscodeService.VersionLabel(codec, targetHeight, isMerge: false, qualityLevel: quality));
+
+    [Fact]
+    public void VersionLabel_PlacesQualityBeforeMerged() =>
+        Assert.Equal("HEVC 1080p Small Merged", TranscodeService.VersionLabel("hevc", 1080, isMerge: true, qualityLevel: "small"));
+
+    // Re-encoded audio has to reach the label too. On a video copy it is the only thing that changes, so
+    // without it "shrink the dubs, keep every frame of picture" lands on the path a plain remux already
+    // holds and the duplicate check refuses it — which is exactly the cheap conversion this feature exists
+    // for. Copied audio stays silent, so no path already on disk is renamed.
+    [Theory]
+    [InlineData("copy", false, null, "Remux")]
+    [InlineData("copy", false, new[] { "eac3" }, "Remux EAC3")]
+    [InlineData("copy", true, null, "Merged")]
+    [InlineData("copy", true, new[] { "eac3" }, "EAC3 Merged")]
+    [InlineData("hevc", false, null, "HEVC 1080p")]
+    [InlineData("hevc", false, new[] { "eac3" }, "HEVC 1080p EAC3")]
+    [InlineData("hevc", true, new[] { "ac3" }, "HEVC 1080p AC3 Merged")]
+    public void VersionLabel_NamesTheAudioCodec_OnlyWhenTracksAreReEncoded(
+        string codec, bool isMerge, string[]? audioCodecs, string expected) =>
+        Assert.Equal(expected, TranscodeService.VersionLabel(codec, 1080, isMerge, qualityLevel: null, audioCodecs: audioCodecs));
+
+    [Fact]
+    public void VersionLabel_CollapsesRepeatedAudioCodecs_SoTheTokenFollowsWhatTheJobDoes()
+    {
+        // Nineteen dubs to E-AC-3 is one decision, not nineteen, and two requests naming the same targets in
+        // a different order must not produce two paths.
+        Assert.Equal(
+            "HEVC 1080p EAC3",
+            TranscodeService.VersionLabel("hevc", 1080, audioCodecs: ["eac3", "eac3", "eac3"]));
+        Assert.Equal(
+            TranscodeService.VersionLabel("hevc", 1080, audioCodecs: ["eac3", "ac3"]),
+            TranscodeService.VersionLabel("hevc", 1080, audioCodecs: ["ac3", "eac3"]));
+    }
+
+    private static MediaSource SourceWithAudio(params (Guid Id, int Index)[] tracks)
+    {
+        var source = new MediaSource { Container = "mkv", Path = "movie.mkv" };
+        foreach (var (id, index) in tracks)
+        {
+            source.Streams.Add(new MediaStream
+            {
+                Id = id,
+                Index = index,
+                StreamType = StreamType.Audio,
+            });
+        }
+
+        return source;
+    }
+
+    private static CreateTranscodeRequest RequestWithAudioTargets(
+        IReadOnlyList<AudioTargetEdit> targets) =>
+        new(Guid.NewGuid(), "copy", null, null, AudioTargets: targets);
+
+    [Fact]
+    public void ResolveAudioTargets_TranslatesStreamIdsToEngineIndexes()
+    {
+        var dub = Guid.NewGuid();
+        var source = SourceWithAudio((Guid.NewGuid(), 1), (dub, 4));
+
+        var resolved = TranscodeService.ResolveAudioTargets(
+            RequestWithAudioTargets([new AudioTargetEdit(dub, "eac3", 640)]), source, [1, 4]);
+
+        var target = Assert.Single(resolved!);
+        Assert.Equal(0, target.Input);
+        Assert.Equal(4, target.StreamIndex);
+        Assert.Equal("eac3", target.Codec);
+        Assert.Equal(640, target.BitrateKbps);
+    }
+
+    [Fact]
+    public void ResolveAudioTargets_RefusesATrackTheJobIsDropping()
+    {
+        // Dropping a track and re-encoding it are contradictory, and the engine has no position to attach
+        // the codec to once the track is gone.
+        var dropped = Guid.NewGuid();
+        var source = SourceWithAudio((Guid.NewGuid(), 1), (dropped, 4));
+
+        var error = Assert.Throws<TranscodeRequestException>(() => TranscodeService.ResolveAudioTargets(
+            RequestWithAudioTargets([new AudioTargetEdit(dropped, "eac3")]), source, [1]));
+
+        Assert.Contains("dropping", error.Message);
+    }
+
+    [Fact]
+    public void ResolveAudioTargets_RefusesATrackThatIsNotAudio()
+    {
+        var unknown = Guid.NewGuid();
+        var source = SourceWithAudio((Guid.NewGuid(), 1));
+
+        var error = Assert.Throws<TranscodeRequestException>(() => TranscodeService.ResolveAudioTargets(
+            RequestWithAudioTargets([new AudioTargetEdit(unknown, "eac3")]), source, [1]));
+
+        Assert.Contains("not an audio track", error.Message);
+    }
+
+    [Fact]
+    public void ResolveAudioTargets_RefusesAnUnsupportedCodec()
+    {
+        var track = Guid.NewGuid();
+        var source = SourceWithAudio((track, 1));
+
+        var error = Assert.Throws<TranscodeRequestException>(() => TranscodeService.ResolveAudioTargets(
+            RequestWithAudioTargets([new AudioTargetEdit(track, "flac")]), source, [1]));
+
+        Assert.Contains("'flac'", error.Message);
+    }
+
+    [Fact]
+    public void ResolveAudioTargets_IsNullWhenNothingIsReEncoded() =>
+        Assert.Null(TranscodeService.ResolveAudioTargets(
+            new CreateTranscodeRequest(Guid.NewGuid(), "copy", null, null), SourceWithAudio((Guid.NewGuid(), 1)), [1]));
 }

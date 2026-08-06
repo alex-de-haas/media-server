@@ -327,6 +327,10 @@ export interface MediaStream {
   frameRate: number | null;
   bitDepth: number | null;
   sampleRate: number | null;
+  /** This track's own bitrate in bits per second — what it costs, as against what the whole file does. Null
+   *  when the source states none, which is an answer in itself: it must not be inferred from the overall
+   *  rate, so anything sized from it is absent rather than guessed. */
+  bitrate: number | null;
   isDefault: boolean;
   isForced: boolean;
   isExternal: boolean;
@@ -843,7 +847,10 @@ export interface TranscodeJob {
   outputPath: string;
   videoCodec: string;
   hardwareAcceleration: string;
-  crf: number | null;
+  /** "highest" | "high" | "balanced" | "small"; null when the video was copied. */
+  qualityLevel: string | null;
+  /** How many audio tracks this job re-encoded rather than copied. */
+  reEncodedAudioTracks: number;
   state: string;
   percentComplete: number;
   error: string | null;
@@ -859,7 +866,12 @@ export interface CreateTranscodeInput {
   sourceId: string;
   videoCodec?: string;
   hardwareAcceleration?: string;
-  crf?: number | null;
+  /**
+   * How much picture to spend bits on: "highest" | "high" (default) | "balanced" | "small". Not a CRF — the
+   * engine maps it onto whichever encoder the host reaches, so the same level means the same picture on all
+   * of them. Rejected when videoCodec is "copy".
+   */
+  qualityLevel?: string | null;
   /** Downscale target height; omit to keep the source resolution. Ignored when videoCodec is "copy". */
   maxHeight?: number | null;
   /** Source stream indexes to copy; omit to copy all of that type. */
@@ -881,6 +893,13 @@ export interface CreateTranscodeInput {
    * metadata alone still rewrites the file, so editing rides along with a job.
    */
   metadataEdits?: { streamId: string; language?: string; title?: string }[];
+  /**
+   * Audio tracks to re-encode rather than copy, named by stream id. Per track, because one file's tracks
+   * want opposite answers — a lossless multichannel dub is most of a remux's size, while the original
+   * track beside it must not be touched. Independent of what happens to the picture, so shrinking only the
+   * audio is one job. `bitrate` is kbps; omit it to let the encoder scale one to the channel count.
+   */
+  audioTargets?: { streamId: string; codec: string; bitrate?: number | null }[];
 }
 
 export const mediaServer = {

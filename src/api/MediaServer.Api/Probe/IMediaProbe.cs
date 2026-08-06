@@ -15,6 +15,9 @@ public sealed record ProbedStream(
     string? HdrFormat,
     int? Channels,
     int? SampleRate,
+    /// <summary>This stream's own bitrate in bits per second, or null when the file states none. The header
+    /// reader always answers null: a per-track rate is not in the bytes it reads.</summary>
+    int? Bitrate,
     bool IsDefault,
     bool IsForced,
     string? Title);

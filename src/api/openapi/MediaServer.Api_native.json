@@ -1375,6 +1375,7 @@
           "frameRate",
           "bitDepth",
           "sampleRate",
+          "bitrate",
           "isDefault",
           "isForced",
           "isExternal",
@@ -1479,6 +1480,15 @@
             "format": "int32"
           },
           "sampleRate": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "bitrate": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "null",
