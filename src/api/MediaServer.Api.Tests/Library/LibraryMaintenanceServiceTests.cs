@@ -336,7 +336,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
             ? new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 320_000, 50_000_000,
                 sidecarTrack is null ? [] : [sidecarTrack])
             : new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 8_000_000, 1_000_000,
-                [new ProbedStream(StreamType.Video, 0, "h264", "High", null, 1920, 1080, 23.976, 8, null, null, null, true, false, null)]),
+                [new ProbedStream(StreamType.Video, 0, "h264", "High", null, 1920, 1080, 23.976, 8, null, null, null, null, true, false, null)]),
     };
 
     [Fact]
@@ -346,7 +346,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         // never touches external rows — so the backfill probes the sidecar's own file.
         var sidecar = await SeedSidecarWithoutSpecsAsync();
         var probe = ProbeAnsweringForSidecars(
-            new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, 6, 48000, true, false, null));
+            new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, 6, 48000, 640_000, true, false, null));
 
         var report = await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
 
@@ -356,6 +356,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         Assert.Equal("ac3", filled.Codec);
         Assert.Equal(6, filled.Channels);
         Assert.Equal(48000, filled.SampleRate);
+        Assert.Equal(640_000, filled.Bitrate);
     }
 
     [Fact]
@@ -366,7 +367,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         // and this probe answers a different language on purpose to prove it does not.
         var sidecar = await SeedSidecarWithoutSpecsAsync();
         var probe = ProbeAnsweringForSidecars(
-            new ProbedStream(StreamType.Audio, 0, "ac3", null, "eng", null, null, null, null, null, 6, 48000, true, false, "Something else"));
+            new ProbedStream(StreamType.Audio, 0, "ac3", null, "eng", null, null, null, null, null, 6, 48000, null, true, false, "Something else"));
 
         await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
 

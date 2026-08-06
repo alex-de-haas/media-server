@@ -144,6 +144,7 @@ change is intended; clients re-sync `UserData` from the server on refresh.
 | Index / Codec / Profile / Language | mixed | |
 | Width / Height / FrameRate / BitDepth / HdrFormat | nullable | video |
 | Channels / SampleRate | nullable | audio |
+| Bitrate | int? | this track's own rate, bits/s; engine probe only, and null rather than derived from the source's overall rate |
 | IsDefault / IsForced / IsExternal | bool | |
 | ExternalPath | string? | external subtitles |
 

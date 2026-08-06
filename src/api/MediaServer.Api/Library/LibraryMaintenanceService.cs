@@ -159,6 +159,7 @@ public sealed class LibraryMaintenanceService(
                     HdrFormat = stream.HdrFormat,
                     Channels = stream.Channels,
                     SampleRate = stream.SampleRate,
+                    Bitrate = stream.Bitrate,
                     IsDefault = stream.IsDefault,
                     IsForced = stream.IsForced,
                 });
@@ -291,7 +292,8 @@ public sealed class LibraryMaintenanceService(
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(stream => stream.Codec, track.Codec)
                     .SetProperty(stream => stream.Channels, track.Channels)
-                    .SetProperty(stream => stream.SampleRate, track.SampleRate), cancellationToken);
+                    .SetProperty(stream => stream.SampleRate, track.SampleRate)
+                    .SetProperty(stream => stream.Bitrate, track.Bitrate), cancellationToken);
             filled++;
         }
 

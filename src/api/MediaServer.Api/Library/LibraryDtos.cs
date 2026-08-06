@@ -127,6 +127,10 @@ public sealed record MediaStreamDto(
     double? FrameRate,
     int? BitDepth,
     int? SampleRate,
+    // What this one track costs, in bits per second — the figure the convert dialog sizes a re-encode
+    // against. Null when the file states none, and deliberately not filled in from the source's overall
+    // rate: a caller has to be able to tell "not recorded" from "measured".
+    int? Bitrate,
     bool IsDefault,
     bool IsForced,
     bool IsExternal,

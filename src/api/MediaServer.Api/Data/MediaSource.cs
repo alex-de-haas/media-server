@@ -62,6 +62,12 @@ public sealed class MediaStream
     /// Commentary", "SDH", "Forced". Null when the file doesn't tag the stream.</summary>
     public string? Title { get; set; }
 
+    /// <summary>This track's own bitrate in bits per second — what it costs, as opposed to what the whole
+    /// file does. Null when the file states none: only the engine probe answers this, and only for a
+    /// container that records a per-track rate or carries mkvmerge's <c>BPS</c> tag. Never derived from the
+    /// source's overall bitrate, so a null here stays a null rather than becoming a guess downstream.</summary>
+    public int? Bitrate { get; set; }
+
     // Video
     public int? Width { get; set; }
     public int? Height { get; set; }

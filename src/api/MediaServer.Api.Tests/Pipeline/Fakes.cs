@@ -42,8 +42,8 @@ public sealed class FakeMediaProbe : IMediaProbe
     public Func<string, ProbeResult> OnProbe { get; set; } = _ =>
         new ProbeResult("matroska", TimeSpan.FromMinutes(120).Ticks, 8_000_000, 1_000_000,
         [
-            new ProbedStream(StreamType.Video, 0, "h264", "High", null, 1920, 1080, 23.976, 8, null, null, null, true, false, null),
-            new ProbedStream(StreamType.Audio, 1, "aac", null, "en", null, null, null, null, null, 6, 48000, true, false, null),
+            new ProbedStream(StreamType.Video, 0, "h264", "High", null, 1920, 1080, 23.976, 8, null, null, null, null, true, false, null),
+            new ProbedStream(StreamType.Audio, 1, "aac", null, "en", null, null, null, null, null, 6, 48000, null, true, false, null),
         ]);
 
     public Task<ProbeResult> ProbeAsync(string absolutePath, CancellationToken cancellationToken) =>

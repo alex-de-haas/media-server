@@ -116,6 +116,10 @@ public sealed class HeaderMediaProbe(ILogger<HeaderMediaProbe> logger) : IMediaP
                 Hdr(track.Hdr),
                 track.Channels,
                 track.SampleRate,
+                // A per-track bitrate is not in the bytes this reads: MP4 states it in an elementary-stream
+                // descriptor it does not walk, and Matroska keeps mkvmerge's BPS tag in a Tags element that
+                // sits at the far end of the file. ffprobe territory as well.
+                null,
                 track.IsDefault,
                 track.IsForced,
                 track.Title);

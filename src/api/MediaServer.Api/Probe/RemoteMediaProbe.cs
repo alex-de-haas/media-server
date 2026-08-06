@@ -105,6 +105,7 @@ public sealed class RemoteMediaProbe(HttpClient http, MediaServerSettings settin
                 Hdr(stream.Hdr),
                 stream.Channels,
                 stream.SampleRate,
+                stream.Bitrate,
                 stream.IsDefault,
                 stream.IsForced,
                 stream.Title);
@@ -145,5 +146,6 @@ public sealed class RemoteMediaProbe(HttpClient http, MediaServerSettings settin
         int? BitDepth,
         string? Hdr,
         int? Channels,
-        int? SampleRate);
+        int? SampleRate,
+        int? Bitrate);
 }
