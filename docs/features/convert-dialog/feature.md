@@ -1,7 +1,7 @@
 # Convert Dialog
 
 Created: 2026-07-29
-Updated: 2026-07-29
+Updated: 2026-08-06
 
 The one place a new version of a movie is composed. It submits a single job to the
 transcode engine, and everything that job can carry is decided here: what happens
@@ -25,16 +25,99 @@ plays is database-side and works with no engine attached.
 
 ## What it composes
 
-- **Video** — re-encode (codec, downscale target, encoder, CRF for software) or keep
+- **Video** — re-encode (codec, downscale target, encoder, quality level) or keep
   the original picture untouched, which is lossless and the only HDR-safe answer.
   A Dolby Vision or HDR10+ source says so, in the dialog, before it is re-encoded.
 - **The container's own tracks** — each audio and subtitle track kept or dropped,
-  and one of each marked the default a player starts on.
+  one of each marked the default a player starts on, and each kept audio track
+  copied or re-encoded.
 - **The files beside it** — each sidecar dub or subtitle folded into the output as
   an extra track. The files themselves stay on disk; see
   [external-track-sidecars](../external-track-sidecars/feature.md).
 - **Each track's name and language**, written into the output as it is produced.
   See [stream-title-editing](../stream-title-editing/feature.md).
+
+## Quality is a level, not a CRF
+
+The picture setting is one of four levels — `highest`, `high` (the default),
+`balanced`, `small` — and it is shown for **every** encoder. It used to be a CRF box
+that appeared only when the encoder was set to Software, which meant a job running on
+a GPU had no way to ask for a smaller file at all.
+
+A level is not a CRF because the engine's encoder choice is opportunistic: a job can
+land on `hevc_amf` or on `libx265` depending on the host. The engine holds the
+mapping and translates the level for whichever encoder runs, so the same level means
+the same picture either way — see
+[transcode-engine / compression controls](https://github.com/alex-de-haas/transcode-engine/blob/main/docs/features/compression-controls/feature.md).
+
+Beside the level, the dialog states **what it is expected to cost**: "About 2.5 GB
+of video, from 8.3 GB." A level is a quality target, and "Balanced" tells an operator
+weighing a day of CPU nothing about whether it is worth spending. The estimate is the
+source's own video bitrate times the share that level came out at on the file the
+engine's mapping was measured on — an anchor, not a prediction, and the dialog says
+so: a source that is already an efficient encode has far less left to give up. A
+downscale is named rather than modelled ("or less at 1080p"), because the same level
+at fewer pixels lands under the figure and by how much is content's business.
+
+The level rides into the **version label** only when it is not the default:
+`- HEVC 1080p Merged` is unchanged for an ordinary job, and a non-default one reads
+`- HEVC 1080p Small Merged`. The label is the whole of what separates one output path
+from another and a second job producing an existing path is refused, so two jobs
+differing only by quality must not collide — but the common case should not grow a
+word that never varies.
+
+## Audio is re-encoded per track
+
+Each kept audio track carries a **Re-encode** toggle: off it is copied byte for byte,
+on it becomes E-AC-3 at a bitrate picked from its channel count (640 kbps above
+stereo, 256 for stereo, 128 for mono).
+
+Per track rather than per job, because one file's tracks want opposite answers. A UHD
+remux can carry nineteen voice-over dubs stored as lossless DTS-HD MA 7.1 — 4.1 GB
+each, 55% of a 141 GB file — beside an original TrueHD Atmos track that must not be
+touched.
+
+A re-encoded row states the trade in full — `3.9 GB → E-AC-3, 8 channels → 5.1,
+640 kbps · about 618 MB`. Both sizes are a bitrate times the duration, so they
+compare like for like. Two things it is careful about:
+
+- **The downmix is on the row, not in a footnote.** E-AC-3 stops at 5.1, so a 7.1
+  source loses its height channels — a real loss, and invisible in the output.
+- **A track with no recorded bitrate has no "before".** The row drops the comparison
+  and leads with the result, which is still exact. It does not fall back on a share
+  of the file's overall rate.
+
+Re-encoding audio says nothing about the picture, so the cheapest useful conversion —
+shrink the dubs, copy every frame of video — is one job with the video left on
+"keep original".
+
+## The dialog leads with the cheap lever
+
+When a source's audio outweighs its video, a line above the video controls says so:
+"Audio is the larger half of this file: 15 GB across 4 tracks, against 11 GB of
+video." It sits there, before anything about the picture, because the dialog opens on
+"re-encode" — the expensive, lossy, day-long option — and on a file like this the
+cheap one is worth more. A 141.7 GB 4K remux in the development library is 54.1 GB of
+video and 87.5 GB of audio; track selection alone takes it to ~61 GB without touching
+a frame of picture.
+
+Only tracks that state a bitrate are counted. Leaving the silent ones out can only
+understate the audio side, which is the safe direction: the line claims audio is the
+larger half, and it must never make that claim on a total it filled in itself.
+
+## Every size comes from a recorded bitrate, or is absent
+
+The estimate beside the quality level, the audio/video split, and a re-encoded row's
+"before" all rest on `MediaStream.Bitrate`, which the engine probe reads per track —
+from `ffprobe`'s `bit_rate`, or from the `BPS` tag `mkvmerge` writes, which is what
+the remuxes this feature exists for actually carry. See
+[media-probe-providers](../media-probe-providers/feature.md).
+
+A source with no per-track bitrates shows **none of the three**. The overall rate is
+known and could be divided across the streams, and that is exactly what is not done:
+an operator cannot tell a derived number from a measured one, and these numbers are
+the basis for deciding whether to spend a day of CPU. A library filled in before the
+column existed answers them after "Refresh media data" re-probes the item.
 
 ## Merging and re-encoding are one job
 
@@ -127,3 +210,8 @@ it would unlabel a labelled track. Only typed input is refused.
   only the changed field travelling; every spelling the API accepts accepted here too,
   a dropped track unblocking the submit its bad tag was holding, and a cleared field
   sending no edit at all.
+- `detail.spec.ts`, sizing — the quality estimate shown for the default level and
+  following the level actually selected; a re-encoded row stating both its before and
+  its after; the split line on a source whose dubs outweigh its picture, with the
+  7.1 → 5.1 note on the row; and a source with no per-track bitrate showing no
+  estimate and no split line while its row still states the resulting size.

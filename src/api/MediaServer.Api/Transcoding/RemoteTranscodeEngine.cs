@@ -88,7 +88,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
             request.OutputRelativePath,
             request.VideoCodec,
             request.HardwareAcceleration,
-            request.Crf,
+            request.QualityLevel,
             request.MaxHeight,
             request.AudioStreamIndexes,
             request.SubtitleStreamIndexes,
@@ -100,6 +100,9 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
                 .ToList(),
             request.MetadataOverrides?
                 .Select(entry => new WireMetadataOverride(entry.Input, entry.StreamIndex, entry.Language, entry.Title))
+                .ToList(),
+            request.AudioTargets?
+                .Select(entry => new WireAudioTarget(entry.Input, entry.StreamIndex, entry.Codec, entry.BitrateKbps))
                 .ToList());
 
         using var cts = ControlCts(cancellationToken);
@@ -286,13 +289,16 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
     }
 
     private sealed record WireCreateJobRequest(
-        string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, int? Crf,
+        string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, string? QualityLevel,
         int? MaxHeight = null, IReadOnlyList<int>? AudioStreamIndexes = null, IReadOnlyList<int>? SubtitleStreamIndexes = null,
         int? DefaultAudioStreamIndex = null, int? DefaultSubtitleStreamIndex = null,
         IReadOnlyList<WireAdditionalInput>? AdditionalInputs = null,
-        IReadOnlyList<WireMetadataOverride>? MetadataOverrides = null);
+        IReadOnlyList<WireMetadataOverride>? MetadataOverrides = null,
+        IReadOnlyList<WireAudioTarget>? AudioTargets = null);
 
     private sealed record WireMetadataOverride(int Input, int StreamIndex, string? Language, string? Title);
+
+    private sealed record WireAudioTarget(int Input, int StreamIndex, string Codec, int? Bitrate);
 
     private sealed record WireAdditionalInput(
         string? MountLabel, string Path, IReadOnlyList<int>? AudioStreamIndexes, IReadOnlyList<int>? SubtitleStreamIndexes);

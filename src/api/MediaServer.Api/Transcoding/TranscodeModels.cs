@@ -12,23 +12,41 @@ namespace MediaServer.Api.Transcoding;
 /// <see cref="VideoCodec"/>
 /// (<c>h264</c>/<c>hevc</c>, default <c>hevc</c>, or <c>copy</c> to remux the video untouched — lossless and
 /// HDR-safe), <see cref="HardwareAcceleration"/> (<c>auto</c>/<c>vaapi</c>/<c>none</c>, default <c>auto</c>)
-/// and <see cref="Crf"/> (software only) fall back to defaults when omitted. <see cref="MaxHeight"/>
+/// and <see cref="QualityLevel"/> (<c>highest</c>/<c>high</c>/<c>balanced</c>/<c>small</c>, default
+/// <c>high</c>) fall back to defaults when omitted. A level is not a CRF: the engine maps it onto whichever
+/// encoder the host can reach, so the same level means the same picture on every one of them.
+/// <see cref="MaxHeight"/>
 /// downscales to that height (ignored for <c>copy</c> or when the source is already smaller).
 /// <see cref="AudioStreamIndexes"/>/<see cref="SubtitleStreamIndexes"/> are the source stream indexes to copy
 /// (null = all); <see cref="DefaultAudioStreamIndex"/>/<see cref="DefaultSubtitleStreamIndex"/> mark one
-/// copied track as the container default.</summary>
+/// copied track as the container default. <see cref="AudioTargets"/> re-encodes chosen audio tracks while
+/// the rest are copied — independent of what happens to the picture, so shrinking only the audio is one
+/// job.</summary>
 public sealed record CreateTranscodeRequest(
     Guid SourceId,
     string? VideoCodec,
     string? HardwareAcceleration,
-    int? Crf,
+    string? QualityLevel,
     int? MaxHeight = null,
     IReadOnlyList<int>? AudioStreamIndexes = null,
     IReadOnlyList<int>? SubtitleStreamIndexes = null,
     int? DefaultAudioStreamIndex = null,
     int? DefaultSubtitleStreamIndex = null,
     IReadOnlyList<Guid>? MergeStreamIds = null,
-    IReadOnlyList<StreamMetadataEdit>? MetadataEdits = null);
+    IReadOnlyList<StreamMetadataEdit>? MetadataEdits = null,
+    IReadOnlyList<AudioTargetEdit>? AudioTargets = null);
+
+/// <summary>
+/// Re-encodes one of the source's audio tracks instead of copying it. Named by <see cref="StreamId"/>, the
+/// same way a metadata edit names its track, so callers never deal in engine stream indexes.
+/// <para>
+/// Per track rather than per job, because one file's tracks want opposite answers: a lossless multichannel
+/// voice-over dub is the bulk of a UHD remux's size, while the original Atmos track beside it must not be
+/// touched. <see cref="Bitrate"/> is in kbps and optional — omitted, the encoder scales one to the track's
+/// channel count.
+/// </para>
+/// </summary>
+public sealed record AudioTargetEdit(Guid StreamId, string Codec, int? Bitrate = null);
 
 /// <summary>
 /// Corrects one output stream's language or title while it is written. <see cref="StreamId"/> names a
@@ -53,7 +71,8 @@ public sealed record TranscodeJobResponse(
     string OutputPath,
     string VideoCodec,
     string HardwareAcceleration,
-    int? Crf,
+    string? QualityLevel,
+    int ReEncodedAudioTracks,
     string State,
     double PercentComplete,
     string? Error,
@@ -78,7 +97,8 @@ public sealed record TranscodeJobResponse(
             job.OutputPath,
             job.VideoCodec,
             job.HardwareAcceleration,
-            job.Crf,
+            job.QualityLevel,
+            job.ReEncodedAudioTracks,
             job.State.ToString(),
             complete ? 100 : snapshot?.PercentComplete ?? job.PercentComplete,
             job.Error,

@@ -125,8 +125,8 @@ const escapeFromNewYork = () => ({
       bitrate: 13_696_000,
       durationTicks: 59_400_000_000,
       streams: [
-        { id: "v0", type: "Video", index: 0, codec: "h264", language: null, displayTitle: "1080p H264", title: null, isExternal: false, fileName: null },
-        { id: "a0", type: "Audio", index: 1, codec: "dts", language: "eng", displayTitle: "eng DTS 5.1", title: null, isExternal: false, fileName: null },
+        { id: "v0", type: "Video", index: 0, codec: "h264", language: null, displayTitle: "1080p H264", title: null, channels: null, bitrate: 12_000_000, isExternal: false, fileName: null },
+        { id: "a0", type: "Audio", index: 1, codec: "dts", language: "eng", displayTitle: "eng DTS 5.1", title: null, channels: 6, bitrate: 1_509_000, isExternal: false, fileName: null },
         { id: "s0", type: "Subtitle", index: 2, codec: "subrip", language: "eng", displayTitle: "eng", title: null, isExternal: false, fileName: null },
         { id: "x1", type: "Audio", index: 1000, codec: null, language: null, displayTitle: null, title: "Гаврилов", isExternal: true, fileName: "Escape from New York (1981).rus.Гаврилов.mka" },
         { id: "x2", type: "Subtitle", index: 1001, codec: null, language: null, displayTitle: null, title: "Сербин", isExternal: true, fileName: "Escape from New York (1981).rus.Сербин.srt" },
@@ -178,6 +178,131 @@ test("merging opens the convert dialog with those tracks checked, instead of sta
   // one — otherwise the engine refuses any edit naming a merged track.
   expect(body.audioStreamIndexes).toEqual([1]);
   expect(body.subtitleStreamIndexes).toEqual([2]);
+});
+
+test("the quality level reaches every encoder, and an audio track can be re-encoded on its own", async ({ page }) => {
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: { m1: escapeFromNewYork() },
+    transcodeAvailable: true,
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Convert to a smaller version" }).click();
+
+  const dialog = page.getByRole("dialog");
+  // Quality used to appear only for the software encoder, which left no way to ask a GPU for a smaller
+  // file. It is now part of every encode, whichever encoder ends up running it.
+  await expect(dialog.getByLabel("Quality")).toBeVisible();
+
+  // What a level is worth, in the only unit an operator weighing a day of CPU can act on — the default
+  // level first, then the estimate following the level actually selected.
+  await expect(dialog.getByText("About 2.5 GB of video, from 8.3 GB.")).toBeVisible();
+  await dialog.getByLabel("Quality").click();
+  await page.getByRole("option", { name: /Small/ }).click();
+  await expect(dialog.getByText("About 850 MB of video, from 8.3 GB.")).toBeVisible();
+
+  // Re-encoding audio is per track and says nothing about the picture.
+  await dialog.getByRole("button", { name: "Re-encode" }).click();
+  // What the track costs now against what it would cost, plus the downmix — a real loss that is invisible
+  // in the output, so the row has to state it before the job starts.
+  await expect(dialog.getByText("1.0 GB → E-AC-3, 6 channels, 640 kbps · about 453 MB")).toBeVisible();
+
+  const submitted = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/transcode") && request.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: /^Start convert$/ }).click();
+  const body = JSON.parse((await submitted).postData() ?? "{}");
+
+  expect(body.qualityLevel).toBe("small");
+  expect(body.audioTargets).toEqual([{ streamId: "a0", codec: "eac3", bitrate: 640 }]);
+  // A level is not a CRF, and the old field is gone from the wire entirely.
+  expect(body.crf).toBeUndefined();
+});
+
+// The shape the compression controls exist for: a remux whose lossless dubs outweigh the picture, so the
+// cheap lever (drop and re-encode tracks) is worth more than the expensive one (re-encode the video).
+const aRemuxWithLosslessDubs = () => ({
+  ...movieDetail("m1", "Stalker"),
+  mediaSources: [
+    {
+      id: "source-1",
+      versionName: null,
+      fileName: "Stalker (1979).mkv",
+      container: "mkv",
+      sizeBytes: 30_000_000_000,
+      bitrate: 29_000_000,
+      durationTicks: 81_000_000_000,
+      streams: [
+        { id: "v0", type: "Video", index: 0, codec: "hevc", language: null, displayTitle: "2160p HEVC", title: null, channels: null, bitrate: 12_000_000, isExternal: false, fileName: null },
+        ...[1, 2, 3, 4].map((index) => ({
+          id: `a${index}`,
+          type: "Audio",
+          index,
+          codec: "dts",
+          language: "rus",
+          displayTitle: `rus DTS-HD MA 7.1 #${index}`,
+          title: null,
+          channels: 8,
+          bitrate: 4_100_000,
+          isExternal: false,
+          fileName: null,
+        })),
+      ],
+    },
+  ],
+});
+
+test("a file whose dubs outweigh its picture says so before the video controls", async ({ page }) => {
+  await setupApp(page, {
+    library: [aMovie("m1", "Stalker")],
+    detail: { m1: aRemuxWithLosslessDubs() },
+    transcodeAvailable: true,
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Convert to a smaller version" }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByText(/Audio is the larger half of this file: 15 GB across 4 tracks, against 11 GB of video/),
+  ).toBeVisible();
+
+  // 7.1 does not survive E-AC-3, and the row is the only honest place to say so.
+  await dialog.getByRole("button", { name: "Re-encode" }).first().click();
+  await expect(dialog.getByText("3.9 GB → E-AC-3, 8 channels → 5.1, 640 kbps · about 618 MB").first()).toBeVisible();
+});
+
+test("a source that recorded no per-track bitrate shows no estimate rather than a guess", async ({ page }) => {
+  // The library was built before the column existed, or by the header reader, which cannot answer this. An
+  // overall bitrate is still known — and deliberately not divided up to fill the gap.
+  const source = escapeFromNewYork().mediaSources[0];
+  const detail = {
+    ...escapeFromNewYork(),
+    mediaSources: [{ ...source, streams: source.streams.map((stream) => ({ ...stream, bitrate: null })) }],
+  };
+
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: { m1: detail },
+    transcodeAvailable: true,
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Convert to a smaller version" }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Quality")).toBeVisible();
+  await expect(dialog.getByText(/of video, from/)).toHaveCount(0);
+  await expect(dialog.getByText(/Audio is the larger half/)).toHaveCount(0);
+
+  // The resulting size is still exact — it is the engine's own bitrate times the duration — so the row keeps
+  // stating it, and simply leads with the result instead of a comparison it cannot make.
+  await dialog.getByRole("button", { name: "Re-encode" }).click();
+  await expect(dialog.getByText("→ E-AC-3, 6 channels, 640 kbps · about 453 MB")).toBeVisible();
 });
 
 test("a track's language can be corrected, and a tag nobody knows blocks the submit", async ({ page }) => {
