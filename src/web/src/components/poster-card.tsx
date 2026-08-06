@@ -78,7 +78,7 @@ export function PosterCard({
           under the art, with the type·year caption below it. `title` carries the full text for a name the
           single line has to truncate. */}
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate text-sm font-medium" title={title}>
+        <span className="truncate text-[13px] font-medium" title={title}>
           {title}
         </span>
         {subtitle && <span className="text-muted-foreground truncate text-xs">{subtitle}</span>}
