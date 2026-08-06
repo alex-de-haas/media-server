@@ -288,6 +288,11 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         _http.Dispose(); // Owned: created per-instance in Program.cs.
     }
 
+    // The Wire* records below are the engine's JSON schema, not this app's vocabulary: every member name is
+    // serialized verbatim (camelCased by JsonSerializerDefaults.Web) and has to keep matching the engine's
+    // own contract types. Renaming one for readability silently drops the field rather than failing — a
+    // positional record parameter the engine cannot bind simply stays null — so clarity belongs in a comment
+    // here, and the names that carry units live on the domain types these are mapped from.
     private sealed record WireCreateJobRequest(
         string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, string? QualityLevel,
         int? MaxHeight = null, IReadOnlyList<int>? AudioStreamIndexes = null, IReadOnlyList<int>? SubtitleStreamIndexes = null,
@@ -298,6 +303,9 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
 
     private sealed record WireMetadataOverride(int Input, int StreamIndex, string? Language, string? Title);
 
+    /// <summary><c>Bitrate</c> is in <b>kbps</b>, which is the unit the engine's <c>bitrate</c> field takes —
+    /// unlike <c>MediaStream.Bitrate</c>, which is bits per second. It is mapped from
+    /// <see cref="EngineAudioTarget.BitrateKbps"/>, where the unit is stated in the name.</summary>
     private sealed record WireAudioTarget(int Input, int StreamIndex, string Codec, int? Bitrate);
 
     private sealed record WireAdditionalInput(
