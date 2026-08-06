@@ -66,6 +66,13 @@ from another and a second job producing an existing path is refused, so two jobs
 differing only by quality must not collide — but the common case should not grow a
 word that never varies.
 
+Re-encoded audio enters the label the same way, as the codec it targets: `- Remux
+EAC3`, or `- EAC3 Merged` for a merged copy. It has to, and on a video copy it is the
+*only* thing that changes — without it "shrink the dubs, keep every frame of picture"
+would land on the path a plain remux already holds and be refused as a duplicate,
+which is precisely the cheap conversion this feature exists to make reachable. Copied
+audio stays silent, so nothing already on disk is renamed.
+
 ## Audio is re-encoded per track
 
 Each kept audio track carries a **Re-encode** toggle: off it is copied byte for byte,
@@ -195,7 +202,10 @@ it would unlabel a labelled track. Only typed input is refused.
 - `TranscodeServiceTests` — `ResolveCodec`: a merge re-encoding when it names a codec
   and copying when it does not, the encode-only knobs refused on a merge that names
   none and on an explicit copy but accepted once one is named; `VersionLabel`
-  appending "Merged" after the encode label, and staying plain "Merged" for a copy.
+  appending "Merged" after the encode label, and staying plain "Merged" for a copy;
+  the quality level carried only when it is not the default; the audio codec carried
+  only when tracks are re-encoded, across every copy/encode/merge combination, with
+  repeated codecs collapsed and their order not changing the path.
 - `StreamMetadataEditTests` — language normalization across the 639-1 pair, the
   terminological spelling, case, whitespace and a BCP-47 region; an unrecognized tag
   refused; a title-only edit leaving the language alone.

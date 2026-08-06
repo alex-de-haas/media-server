@@ -223,8 +223,8 @@ public sealed class LibraryMaintenanceService(
     }
 
     /// <summary>
-    /// Reads codec, channel count and sample rate into the sidecar rows that lack them — the ones placed
-    /// before those were recorded, and any whose file the engine could not answer for at the time.
+    /// Reads codec, channel count, sample rate and bitrate into the sidecar rows that lack them — the ones
+    /// placed before those were recorded, and any whose file the engine could not answer for at the time.
     /// <para>
     /// Only the technical fields are written. Language and title are a <b>labelling decision</b> the sidecar
     /// stage made across a whole cohort of files, weighing what the container tagged against what the paths
@@ -234,6 +234,12 @@ public sealed class LibraryMaintenanceService(
     /// A missing codec is the marker for "never answered", so a file the engine still cannot read is simply
     /// picked up again next run rather than being recorded as having no codec.
     /// </para>
+    /// <para>
+    /// A missing bitrate on an <b>audio</b> sidecar is a second marker, because bitrate arrived after codec
+    /// did: a row placed in between has a codec and would otherwise never be revisited, and the item-level
+    /// refresh deliberately never touches external rows — so this is the only path that can reach it. Audio
+    /// only, since a subtitle sidecar has no bitrate to find and would be re-probed on every run forever.
+    /// </para>
     /// </summary>
     private async Task<int> BackfillSidecarSpecsAsync(CancellationToken cancellationToken)
     {
@@ -241,7 +247,9 @@ public sealed class LibraryMaintenanceService(
         // query's tracking behavior, so a joined entity here would come back untracked and mutating it would
         // silently save nothing. The writes below are explicit instead.
         var pending = await database.MediaStreams.AsNoTracking()
-            .Where(stream => stream.IsExternal && stream.Codec == null && stream.ExternalPath != null)
+            .Where(stream => stream.IsExternal && stream.ExternalPath != null &&
+                (stream.Codec == null ||
+                 (stream.StreamType == StreamType.Audio && stream.Bitrate == null)))
             .Join(database.MediaSources.AsNoTracking(), stream => stream.MediaSourceId, source => source.Id,
                 (stream, source) => new { stream.Id, stream.ExternalPath, source.MediaItemId })
             .Join(database.MediaItems.AsNoTracking(), pair => pair.MediaItemId, item => item.Id,
@@ -288,12 +296,15 @@ public sealed class LibraryMaintenanceService(
                 continue; // Nothing to record — an elementary stream read without the engine, typically.
             }
 
+            // Each field keeps what it has when this probe cannot better it. A row selected for a missing
+            // bitrate may already carry engine-read specs, and the provider answering now can be the weaker
+            // one — writing its nulls over them would lose information this run never had.
             await database.MediaStreams.Where(stream => stream.Id == entry.Id)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(stream => stream.Codec, track.Codec)
-                    .SetProperty(stream => stream.Channels, track.Channels)
-                    .SetProperty(stream => stream.SampleRate, track.SampleRate)
-                    .SetProperty(stream => stream.Bitrate, track.Bitrate), cancellationToken);
+                    .SetProperty(stream => stream.Channels, stream => track.Channels ?? stream.Channels)
+                    .SetProperty(stream => stream.SampleRate, stream => track.SampleRate ?? stream.SampleRate)
+                    .SetProperty(stream => stream.Bitrate, stream => track.Bitrate ?? stream.Bitrate), cancellationToken);
             filled++;
         }
 

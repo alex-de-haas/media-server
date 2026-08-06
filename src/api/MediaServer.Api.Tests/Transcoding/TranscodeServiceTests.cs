@@ -93,6 +93,35 @@ public sealed class TranscodeServiceTests
     public void VersionLabel_PlacesQualityBeforeMerged() =>
         Assert.Equal("HEVC 1080p Small Merged", TranscodeService.VersionLabel("hevc", 1080, isMerge: true, qualityLevel: "small"));
 
+    // Re-encoded audio has to reach the label too. On a video copy it is the only thing that changes, so
+    // without it "shrink the dubs, keep every frame of picture" lands on the path a plain remux already
+    // holds and the duplicate check refuses it — which is exactly the cheap conversion this feature exists
+    // for. Copied audio stays silent, so no path already on disk is renamed.
+    [Theory]
+    [InlineData("copy", false, null, "Remux")]
+    [InlineData("copy", false, new[] { "eac3" }, "Remux EAC3")]
+    [InlineData("copy", true, null, "Merged")]
+    [InlineData("copy", true, new[] { "eac3" }, "EAC3 Merged")]
+    [InlineData("hevc", false, null, "HEVC 1080p")]
+    [InlineData("hevc", false, new[] { "eac3" }, "HEVC 1080p EAC3")]
+    [InlineData("hevc", true, new[] { "ac3" }, "HEVC 1080p AC3 Merged")]
+    public void VersionLabel_NamesTheAudioCodec_OnlyWhenTracksAreReEncoded(
+        string codec, bool isMerge, string[]? audioCodecs, string expected) =>
+        Assert.Equal(expected, TranscodeService.VersionLabel(codec, 1080, isMerge, qualityLevel: null, audioCodecs: audioCodecs));
+
+    [Fact]
+    public void VersionLabel_CollapsesRepeatedAudioCodecs_SoTheTokenFollowsWhatTheJobDoes()
+    {
+        // Nineteen dubs to E-AC-3 is one decision, not nineteen, and two requests naming the same targets in
+        // a different order must not produce two paths.
+        Assert.Equal(
+            "HEVC 1080p EAC3",
+            TranscodeService.VersionLabel("hevc", 1080, audioCodecs: ["eac3", "eac3", "eac3"]));
+        Assert.Equal(
+            TranscodeService.VersionLabel("hevc", 1080, audioCodecs: ["eac3", "ac3"]),
+            TranscodeService.VersionLabel("hevc", 1080, audioCodecs: ["ac3", "eac3"]));
+    }
+
     private static MediaSource SourceWithAudio(params (Guid Id, int Index)[] tracks)
     {
         var source = new MediaSource { Container = "mkv", Path = "movie.mkv" };

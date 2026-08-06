@@ -85,7 +85,13 @@ public sealed class TranscodeService(
             throw new TranscodeRequestException("Source file not found on disk.");
         }
 
-        var outputRelative = BuildOutputRelative(source.Path, VersionLabel(codec, targetHeight, isMerge, qualityLevel));
+        // Resolved here rather than with the other engine arguments below, because what a job re-encodes is
+        // part of what separates its output from another's.
+        var audioTargets = ResolveAudioTargets(request, source, audioSelection);
+
+        var outputRelative = BuildOutputRelative(
+            source.Path,
+            VersionLabel(codec, targetHeight, isMerge, qualityLevel, audioTargets?.Select(target => target.Codec).ToList()));
         if (!sandbox.TryResolve(catalog, outputRelative, out var outputAbsolute))
         {
             throw new TranscodeRequestException("Could not place the output inside the catalog.");
@@ -116,7 +122,6 @@ public sealed class TranscodeService(
         var mergeStreams = await ResolveMergeStreamsAsync(request, source, cancellationToken);
         var additionalInputs = ResolveMergeInputs(mergeStreams, catalog);
         var metadataOverrides = ResolveMetadataOverrides(request, source, mergeStreams);
-        var audioTargets = ResolveAudioTargets(request, source, audioSelection);
 
         JobDescriptor descriptor;
         try
@@ -273,29 +278,58 @@ public sealed class TranscodeService(
     /// into "Merged" would make "merge these dubs" and "merge these dubs into a 1080p HEVC" collide.
     /// </para>
     /// </summary>
-    internal static string VersionLabel(string codec, int? targetHeight, bool isMerge = false, string? qualityLevel = null)
+    internal static string VersionLabel(
+        string codec,
+        int? targetHeight,
+        bool isMerge = false,
+        string? qualityLevel = null,
+        IReadOnlyCollection<string>? audioCodecs = null)
     {
-        var encoded = codec == "copy"
-            ? "Remux"
-            : targetHeight is { } height ? $"{CodecLabel(codec)} {height}p" : CodecLabel(codec);
-
-        // The label is the whole of what separates one output path from another, so two jobs differing only
-        // by quality must not collide. The default is left out: it never varies, and adding a word to every
-        // existing path would rename versions that are already on disk.
-        if (codec != "copy" && qualityLevel is not null && qualityLevel != DefaultQualityLevel)
-        {
-            encoded = $"{encoded} {char.ToUpperInvariant(qualityLevel[0])}{qualityLevel[1..]}";
-        }
-
-        if (!isMerge)
-        {
-            return encoded;
-        }
+        var parts = new List<string>(4);
 
         // A merged copy stays plain "Merged": that is the name every merge has produced so far, and a
         // "Remux Merged" would be a new path for the identical job.
-        return codec == "copy" ? "Merged" : $"{encoded} Merged";
+        if (!isMerge || codec != "copy")
+        {
+            parts.Add(codec == "copy"
+                ? "Remux"
+                : targetHeight is { } height ? $"{CodecLabel(codec)} {height}p" : CodecLabel(codec));
+        }
+
+        // Two jobs differing only by quality must not collide. The default is left out: it never varies, and
+        // adding a word to every existing path would rename versions that are already on disk.
+        if (codec != "copy" && qualityLevel is not null && qualityLevel != DefaultQualityLevel)
+        {
+            parts.Add($"{char.ToUpperInvariant(qualityLevel[0])}{qualityLevel[1..]}");
+        }
+
+        // Re-encoded audio changes what comes out as surely as the picture settings do — and on a video copy
+        // it is the *only* thing that changes, so "shrink the dubs, keep every frame" would otherwise land on
+        // the path a plain remux already holds and be refused as a duplicate. Named only when there is one,
+        // for the same reason the default level is: every path on disk today was produced with audio copied.
+        if (AudioLabel(audioCodecs) is { } audio)
+        {
+            parts.Add(audio);
+        }
+
+        if (isMerge)
+        {
+            parts.Add("Merged");
+        }
+
+        return string.Join(" ", parts);
     }
+
+    /// <summary>The codecs a job re-encodes audio to, as one uppercase token — "EAC3", or "AC3+EAC3" for a
+    /// request naming both. Null when every track is copied, which is the case the label stays silent about.
+    /// Sorted so the token depends on what a job does, not on the order the tracks were listed in.</summary>
+    private static string? AudioLabel(IReadOnlyCollection<string>? audioCodecs) =>
+        audioCodecs is { Count: > 0 }
+            ? string.Join("+", audioCodecs
+                .Select(codec => codec.ToUpperInvariant())
+                .Distinct()
+                .OrderBy(codec => codec, StringComparer.Ordinal))
+            : null;
 
     private static string CodecLabel(string codec) => codec == "h264" ? "H.264" : "HEVC";
 
