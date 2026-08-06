@@ -50,7 +50,7 @@ export function CollectionDetail({ id }: { id: string }) {
         </div>
 
         <div className="flex min-w-0 flex-col gap-1 sm:pt-2">
-          <h1 className="font-serif text-3xl leading-tight font-medium sm:text-4xl">{data.name}</h1>
+          <h1 className="text-3xl leading-tight font-semibold tracking-tight sm:text-4xl">{data.name}</h1>
           <p className="text-muted-foreground text-sm">{data.items.length} movies</p>
         </div>
       </header>

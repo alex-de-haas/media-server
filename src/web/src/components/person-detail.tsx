@@ -59,7 +59,7 @@ export function PersonDetail({ id }: { id: string }) {
 
         <div className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <h1 className="font-serif text-3xl leading-tight font-medium sm:text-4xl">{data.name}</h1>
+            <h1 className="text-3xl leading-tight font-semibold tracking-tight sm:text-4xl">{data.name}</h1>
             {data.knownForDepartment && (
               <p className="text-muted-foreground text-sm">Known for {data.knownForDepartment}</p>
             )}

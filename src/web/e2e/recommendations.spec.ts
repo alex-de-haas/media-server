@@ -39,11 +39,20 @@ test("the page separates what you hold from what you would have to find", async 
   await page.goto("/recommendations");
 
   await expect(page.getByText("Inception")).toBeVisible();
-  // Scoped to the card labels: the filter buttons carry the same words.
-  await expect(page.getByTestId("rec-availability").filter({ hasText: /^In library$/ })).toHaveCount(1);
-  await expect(page.getByTestId("rec-availability").filter({ hasText: "Not in library" })).toHaveCount(1);
+  // Only what you hold is marked, and with an icon: writing "not in library" on every other card would
+  // spend the caption line to say nothing.
+  await expect(page.getByTestId("rec-availability")).toHaveCount(1);
+  await expect(page.getByTestId("rec-availability")).toHaveAttribute("aria-label", "In library");
   // Only the discovery offers Track; a held title links to its detail page instead.
   await expect(page.getByRole("button", { name: "Track" })).toHaveCount(1);
+});
+
+test("a card names its kind and year the way the library grids do", async ({ page }) => {
+  await setupApp(page, { recommendations: feed });
+  await page.goto("/recommendations");
+
+  await expect(page.getByText("Movie · 2010")).toBeVisible();
+  await expect(page.getByText("Series · 2022")).toBeVisible();
 });
 
 test("a title both engines agreed on says so", async ({ page }) => {

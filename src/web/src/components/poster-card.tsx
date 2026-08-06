@@ -28,8 +28,8 @@ export function parsePersonId(id: string): { provider: string; providerId: strin
   return { provider: id.slice(0, dash), providerId: id.slice(dash + 1) };
 }
 
-// A poster tile used in both the library grids and the Home rails. Title is set in the serif display
-// face ("content speaks serif"); the amber accent carries the resume bar and the watched badge.
+// A poster tile used in both the library grids and the Home rails. The title sits under the art with
+// the type·year caption beneath it; the amber accent carries the resume bar and the watched badge.
 export function PosterCard({
   href,
   title,
@@ -50,11 +50,18 @@ export function PosterCard({
     <Link href={href} className="group flex w-full flex-col gap-1.5">
       <div className="bg-secondary relative aspect-[2/3] w-full overflow-hidden rounded-md transition-opacity group-hover:opacity-90">
         {posterUrl ? (
+          // Decorative: the title below the art already names the link, and an alt repeating it would make
+          // a screen reader announce the same name twice.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={posterUrl} alt={title} className="h-full w-full object-cover" />
+          <img src={posterUrl} alt="" className="h-full w-full object-cover" />
         ) : (
-          <div className="text-muted-foreground flex h-full items-center justify-center p-2 text-center font-serif text-sm">
-            {title}
+          // The title is rendered below the card, so the empty art says only that art is what is missing —
+          // and says it to the eye alone: inside the link, the words would join the link's accessible name.
+          <div
+            aria-hidden
+            className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-xs"
+          >
+            No poster
           </div>
         )}
         {userData?.played && (
@@ -71,9 +78,15 @@ export function PosterCard({
           </span>
         )}
       </div>
-      {/* Title lives on the poster art itself; only the type·year caption is repeated below. The title is
-          still the image alt / no-poster fallback, so it stays accessible. */}
-      {subtitle && <span className="text-muted-foreground truncate text-xs">{subtitle}</span>}
+      {/* Poster art alone identifies a title only for someone who recognises it, so the name is spelled out
+          under the art, with the type·year caption below it. `title` carries the full text for a name the
+          single line has to truncate. */}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-[13px] font-medium" title={title}>
+          {title}
+        </span>
+        {subtitle && <span className="text-muted-foreground truncate text-xs">{subtitle}</span>}
+      </div>
     </Link>
   );
 }
