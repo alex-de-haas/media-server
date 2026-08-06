@@ -2,7 +2,7 @@
 
 Status: Active
 Created: 2026-06-17
-Updated: 2026-07-14
+Updated: 2026-08-06
 
 > **Storage-model change (2026-06-21).** The catalog storage model was reworked
 > from two hardlinked subtrees (`files/` + `library/`) to a **single tree**: a
@@ -404,7 +404,10 @@ api: 92 xUnit tests green (Release). Slice 3 (visual language) is done: Inter (U
 Fraunces serif (media titles) + Geist Mono, a single amber "projector" brand accent
 (`--brand`, used for resume/progress/active-nav/favorites) over the inherited neutral
 theme, lucide icons + a brand active-tab underline, and serif card titles with an amber
-resume bar / watched badge — "content speaks serif, the app speaks sans". Slice 4
+resume bar / watched badge — "content speaks serif, the app speaks sans". (Superseded
+2026-08-06: the Fraunces serif was dropped; every title, media included, is set in Inter,
+and a poster card now spells its title out under the art above the type·year caption.)
+Slice 4
 (detail pages + Home rails) is done: `/movies/[id]` & `/series/[id]` detail (backdrop
 hero with the serif title + amber resume, watched/favorite toggles, Play→Infuse, media
 streams, per-season episodes), Home rails (Continue Watching / Next Up / Recently

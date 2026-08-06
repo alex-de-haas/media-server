@@ -512,7 +512,7 @@ function Hero({ item }: { item: LibraryDetail }) {
                   <h1 className="sr-only">{item.title}</h1>
                 </>
               ) : (
-                <h1 className="font-serif text-3xl leading-tight font-medium sm:text-4xl">{item.title}</h1>
+                <h1 className="text-3xl leading-tight font-semibold tracking-tight sm:text-4xl">{item.title}</h1>
               )}
               {meta && <p className="text-muted-foreground text-sm">{meta}</p>}
               <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">

@@ -377,7 +377,7 @@ function PlayRow({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-serif text-sm font-medium">{heading}</p>
+        <p className="truncate text-sm font-medium">{heading}</p>
         {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
         {event.origin === "ProviderSync" && (
           <p className="text-muted-foreground text-[11px]">Imported</p>
@@ -509,7 +509,7 @@ function UndatedRow({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-serif text-sm font-medium">{heading}</p>
+        <p className="truncate text-sm font-medium">{heading}</p>
         {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
       </div>
       <DeleteEntryButton

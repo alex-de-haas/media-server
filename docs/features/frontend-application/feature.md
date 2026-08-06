@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Description
 
@@ -26,7 +26,10 @@ section).
   (resume), Next Up, and Recently Added, plus an admin-only ops strip (active
   downloads, items needing review, catalog warnings).
 - **Movies / Series** (`/movies`, `/series`) — poster grids with an optional
-  catalog selector when more than one applicable catalog exists. The selection
+  catalog selector when more than one applicable catalog exists. Every poster
+  card — here, in the Home rails, on Collections, and on a person's credits —
+  names its title under the art, with the type·year caption below the name; a
+  card without artwork says "No poster" in place of the image. The selection
   is stored in `?catalog=<id>`, applied by the backend, and preserved through
   detail navigation and refresh. Movies offers `Movie` catalogs; Series offers
   `Series` and `Anime` catalogs. Offline catalogs remain selectable and are
