@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Info, Trash2, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
-import { formatBytes, formatEta, formatPercent, formatTimeAgo } from "@/lib/format";
+import { formatBytes, formatEta, formatPercent, formatTimeAgo, objectAudioFormat } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { ActivityCard, ActivityCardHeader, ActivityProgress, ActivityQueued, ActivityStats, IconAction } from "@/components/activity-card";
 import { Button } from "@/components/ui/button";
@@ -83,7 +83,15 @@ function audioReEncodeHint(stream: MediaStream, durationSeconds: number): string
   const channels = stream.channels ?? 2;
   const layout = channels > 6 ? `${channels} channels → 5.1` : `${channels} channels`;
   const before = streamBytes(stream, durationSeconds);
-  return `${before ? `${formatBytes(before)} ` : ""}→ E-AC-3, ${layout}, ${kbps} kbps · about ${size}`;
+  // Losing the object layer outweighs every other number on this line, so it leads. ffmpeg encodes neither
+  // JOC nor DTS:X, so there is no bitrate at which this track keeps them — the only way to keep them is to
+  // copy the track.
+  // The separator only earns its place when a "before" size follows it to be separated from; with no
+  // recorded bitrate the arrow reads straight off the loss note — "drops Atmos → E-AC-3, …" — rather than
+  // leaving a dangling "· →".
+  const objects = objectAudioFormat(stream.profile);
+  const loss = objects ? `drops ${objects} ${before ? "· " : ""}` : "";
+  return `${loss}${before ? `${formatBytes(before)} ` : ""}→ E-AC-3, ${layout}, ${kbps} kbps · about ${size}`;
 }
 
 function plural(count: number, noun: string): string {
@@ -625,11 +633,21 @@ function TrackList({
           // Only while the track is kept: a dropped track carries no edit, so flagging its field would point
           // at something that is not blocking anything.
           const badLanguage = checked && isBadLanguage(language);
+          const objects = objectAudioFormat(stream.profile);
           return (
             <li key={stream.id} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <Checkbox checked={checked} onCheckedChange={(value) => onToggle(stream, value === true)} aria-label={`Copy ${label}`} />
-                <span className="min-w-0 flex-1 truncate leading-6">{label}</span>
+                <span className="min-w-0 truncate leading-6">{label}</span>
+                {/* Atmos and DTS:X are invisible in the summary beside it — the codec reads TrueHD either
+                    way — and they are the one reason to leave a track alone. Flagged here rather than only
+                    in the re-encode hint, which is not shown until the track is already being re-encoded. */}
+                {objects ? (
+                  <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 text-[11px] leading-5">
+                    {objects}
+                  </span>
+                ) : null}
+                <span className="flex-1" />
                 {stream.fileName ? (
                   <span className="text-muted-foreground hidden shrink-0 font-mono text-xs sm:inline">{stream.fileName}</span>
                 ) : null}

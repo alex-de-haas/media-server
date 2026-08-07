@@ -1,7 +1,7 @@
 # Convert Dialog
 
 Created: 2026-07-29
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 The one place a new version of a movie is composed. It submits a single job to the
 transcode engine, and everything that job can carry is decided here: what happens
@@ -93,6 +93,22 @@ compare like for like. Two things it is careful about:
 - **A track with no recorded bitrate has no "before".** The row drops the comparison
   and leads with the result, which is still exact. It does not fall back on a share
   of the file's overall rate.
+
+## An object-based track says so before it is touched
+
+A track carrying **Atmos** or **DTS:X** is marked on its row, and a re-encode of one
+leads with what it costs — `drops Atmos · 2.3 GB → E-AC-3, …`.
+
+It earns the marker because nothing else on the row carries it. The codec reads
+`truehd` whether or not there are objects, so the summary beside it — `eng TrueHD
+7.1` — is identical either way; the fact lives only in the probe's codec profile.
+And it is the one audio fact that settles what may be done to a track: ffmpeg encodes
+neither JOC nor DTS:X, so there is no bitrate at which a re-encode keeps them.
+Copying is the only way.
+
+The marker is absent, not negative, on a source probed from container headers alone —
+a header carries no codec profile, so nobody looked. See
+[media-probe-providers](../media-probe-providers/feature.md).
 
 Re-encoding audio says nothing about the picture, so the cheapest useful conversion —
 shrink the dubs, copy every frame of video — is one job with the video left on
