@@ -79,4 +79,59 @@ public sealed class RemoteTranscodeEngineWireTests
 
         Assert.Contains("\"audioTargets\":null", body);
     }
+
+    private static async Task<string> PostExtractionAsync(params EngineExtractionOutput[] outputs)
+    {
+        var handler = new StubHandler();
+        using var engine = new RemoteTranscodeEngine(
+            new HttpClient(handler) { BaseAddress = new Uri("http://engine.local/") },
+            new MediaServerSettings(),
+            NullLogger<RemoteTranscodeEngine>.Instance);
+
+        await engine.CreateAsync(
+            new TranscodeJobRequest(
+                "movies", "in.mkv", OutputMountLabel: null, OutputRelativePath: null,
+                "copy", "auto", null, Outputs: outputs),
+            CancellationToken.None);
+
+        return handler.RequestBody!;
+    }
+
+    [Fact]
+    public async Task An_extractions_outputs_travel_under_the_names_the_engine_binds()
+    {
+        var body = await PostExtractionAsync(
+            new EngineExtractionOutput("movies", "movie.rus.mka", 3, Codec: null, Language: "rus", Title: "AniDUB"));
+
+        // The engine's OutputRequest names the destination `path`, not `relativePath` — the spelling the
+        // domain type uses. A rename here is silent: the engine binds nothing, the entry arrives with an
+        // empty path, and the job fails on something that reads nothing like a renamed field.
+        Assert.Contains("\"path\":\"movie.rus.mka\"", body);
+        Assert.DoesNotContain("relativePath", body);
+        Assert.Contains("\"mountLabel\":\"movies\"", body);
+        Assert.Contains("\"streamIndex\":3", body);
+        Assert.Contains("\"language\":\"rus\"", body);
+        Assert.Contains("\"title\":\"AniDUB\"", body);
+        // A stream copy names no codec, which is what every extraction but a text conversion asks for.
+        Assert.Contains("\"codec\":null", body);
+    }
+
+    [Fact]
+    public async Task An_extraction_composes_no_output_of_its_own()
+    {
+        var body = await PostExtractionAsync(new EngineExtractionOutput(null, "movie.eng.srt", 5, "srt"));
+
+        // outputPath and outputs are mutually exclusive on the engine: sending both is a 400, so an
+        // extraction must send a null one.
+        Assert.Contains("\"outputPath\":null", body);
+        Assert.Contains("\"codec\":\"srt\"", body);
+    }
+
+    [Fact]
+    public async Task An_ordinary_job_sends_no_outputs()
+    {
+        var body = await PostAsync();
+
+        Assert.Contains("\"outputs\":null", body);
+    }
 }

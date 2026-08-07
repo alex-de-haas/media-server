@@ -180,6 +180,61 @@ test("merging opens the convert dialog with those tracks checked, instead of sta
   expect(body.subtitleStreamIndexes).toEqual([2]);
 });
 
+// The same movie with a picture-based subtitle beside its text one — the case extraction has to refuse
+// before anything is submitted, rather than after gigabytes have been read.
+const withAPictureSubtitle = () => {
+  const detail = escapeFromNewYork();
+  detail.mediaSources[0].streams.splice(3, 0, {
+    id: "s1", type: "Subtitle", index: 3, codec: "hdmv_pgs_subtitle", language: "ger",
+    displayTitle: "ger", title: null, isExternal: false, fileName: null,
+  } as (typeof detail.mediaSources)[0]["streams"][number]);
+  return detail;
+};
+
+test("extracting writes the container's own tracks out as files, and refuses the ones no file can hold", async ({ page }) => {
+  await setupApp(page, {
+    library: [aMovie("m1", "Escape from New York")],
+    detail: { m1: withAPictureSubtitle() },
+    transcodeAvailable: true,
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Extract tracks to files" }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Extract tracks to files" })).toBeVisible();
+
+  // The caveat that is true of audio and false of subtitles sits on the audio heading, where the dubs are.
+  await expect(dialog.getByText(/only plays once merged back into a video/)).toBeVisible();
+
+  // Audio always becomes Matroska, which carries its own language and title; a text subtitle keeps the
+  // format clients read off disk.
+  await expect(dialog.getByText(".mka")).toBeVisible();
+  await expect(dialog.getByText(".srt")).toBeVisible();
+
+  // A picture-based subtitle is not selectable, and the row says why instead of leaving the operator to
+  // discover it from a rejected job.
+  const pgs = dialog.getByRole("checkbox", { name: /Extract ger/ });
+  await expect(pgs).toBeDisabled();
+  await expect(dialog.getByText(/picture-based/)).toBeVisible();
+
+  // A sidecar is already a file: there is nothing to extract it from, so it is not offered here at all.
+  await expect(dialog.getByRole("checkbox", { name: /Гаврилов/ })).toHaveCount(0);
+
+  await dialog.getByRole("checkbox", { name: /Extract eng DTS 5.1/ }).check();
+  await dialog.getByRole("checkbox", { name: /Extract eng$/ }).check();
+
+  const submitted = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/transcode/extract") && request.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: /Extract 2 tracks/ }).click();
+  const body = JSON.parse((await submitted).postData() ?? "{}");
+
+  expect(body.sourceId).toBe("source-1");
+  expect(body.streamIds).toEqual(["a0", "s0"]);
+});
+
 test("the quality level reaches every encoder, and an audio track can be re-encoded on its own", async ({ page }) => {
   await setupApp(page, {
     library: [aMovie("m1", "Escape from New York")],

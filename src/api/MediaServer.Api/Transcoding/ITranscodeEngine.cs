@@ -9,7 +9,7 @@ public sealed record TranscodeJobRequest(
     string? InputMountLabel,
     string InputRelativePath,
     string? OutputMountLabel,
-    string OutputRelativePath,
+    string? OutputRelativePath,
     string VideoCodec,
     string HardwareAcceleration,
     string? QualityLevel,
@@ -20,7 +20,29 @@ public sealed record TranscodeJobRequest(
     int? DefaultSubtitleStreamIndex = null,
     IReadOnlyList<EngineAdditionalInput>? AdditionalInputs = null,
     IReadOnlyList<EngineMetadataOverride>? MetadataOverrides = null,
-    IReadOnlyList<EngineAudioTarget>? AudioTargets = null);
+    IReadOnlyList<EngineAudioTarget>? AudioTargets = null,
+    IReadOnlyList<EngineExtractionOutput>? Outputs = null);
+
+/// <summary>
+/// One stream of the input written out as its own file — the inverse of an
+/// <see cref="EngineAdditionalInput"/>. Naming any makes the job an <b>extraction</b>: it composes no output
+/// at all, so <see cref="TranscodeJobRequest.OutputRelativePath"/> is null and every field describing a
+/// composed output must be left unset.
+/// <para>
+/// <see cref="StreamIndex"/> is a single absolute index in the input, and the language and title travel here
+/// rather than as an <see cref="EngineMetadataOverride"/>: an override names a stream's position inside a
+/// composed output, and an extracted track is always the only stream of its own file. <see cref="Codec"/>
+/// defaults to a stream copy; the only other values are the text subtitle targets, for a codec with no file
+/// form of its own.
+/// </para>
+/// </summary>
+public sealed record EngineExtractionOutput(
+    string? MountLabel,
+    string RelativePath,
+    int StreamIndex,
+    string? Codec = null,
+    string? Language = null,
+    string? Title = null);
 
 /// <summary>
 /// Re-encodes one mapped audio track instead of copying it. <see cref="Input"/> is the ordinal of the file
@@ -48,13 +70,16 @@ public sealed record EngineAdditionalInput(
     IReadOnlyList<int>? AudioStreamIndexes = null,
     IReadOnlyList<int>? SubtitleStreamIndexes = null);
 
-/// <summary>What is known about a job right after it is created.</summary>
+/// <summary>What is known about a job right after it is created. <see cref="OutputPath"/> is the composed
+/// output and is null for an extraction; <see cref="OutputPaths"/> lists every file the job will produce and
+/// is the field to read when either shape is possible.</summary>
 public sealed record JobDescriptor(
     string JobId,
     string InputPath,
-    string OutputPath,
+    string? OutputPath,
     double? DurationSeconds,
-    long? InputSizeBytes);
+    long? InputSizeBytes,
+    IReadOnlyList<string>? OutputPaths = null);
 
 /// <summary>A live, in-memory progress snapshot (never persisted).</summary>
 public sealed record JobSnapshot(

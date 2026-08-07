@@ -329,7 +329,10 @@ design.
 
 - Embedded subtitles reach the viewer by **Direct Play**: the client (Infuse)
   reads them from the container. This surface neither extracts nor converts them
-  — the `api` image ships without ffmpeg.
+  — the `api` image ships without ffmpeg. (An operator can write a track out as a
+  file deliberately, which is [track extraction](../track-extraction/feature.md)
+  and runs in the transcode engine; nothing on the delivery path does it per
+  request.)
 - External sidecar `.srt` / `.vtt` files alongside the media are surfaced as
   external subtitle streams, but no delivery URL is emitted yet, so a client is
   told the stream exists and given no way to fetch it. Closing that gap is

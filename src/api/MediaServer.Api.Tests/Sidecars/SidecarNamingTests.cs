@@ -1,4 +1,4 @@
-using MediaServer.Api.Data;
+using MediaServer.Api.Media;
 using MediaServer.Api.Sidecars;
 
 namespace MediaServer.Api.Tests.Sidecars;
@@ -12,13 +12,19 @@ public sealed class SidecarNamingTests
 {
     private const string Video = "The Rock (1996).mkv";
 
-    private static SourceFile File(string relativePath) =>
-        new() { Id = Guid.NewGuid(), RelativePath = relativePath };
+    private static SidecarCandidate Candidate(string path, string? language, string? title) =>
+        new(Guid.NewGuid(), Path.GetExtension(path), MediaFormats.IsCompanionAudio(path), language, title);
 
     private static IReadOnlyList<string> Names(
         params (string Path, string? Language, string? Title)[] companions) =>
+        NamesBeside(null, companions);
+
+    /// <summary>Names companions arriving next to sidecars that are already there.</summary>
+    private static IReadOnlyList<string> NamesBeside(
+        IReadOnlyList<PlacedSidecar>? placed,
+        params (string Path, string? Language, string? Title)[] companions) =>
         [.. SidecarNaming
-            .For(Video, [.. companions.Select(entry => (File(entry.Path), entry.Language, entry.Title))])
+            .For(Video, [.. companions.Select(entry => Candidate(entry.Path, entry.Language, entry.Title))], placed)
             .Select(named => named.FileName)];
 
     [Fact]
@@ -177,5 +183,55 @@ public sealed class SidecarNamingTests
         var names = Names((".incoming/x/other.mkv", null, null));
 
         Assert.NotEqual(Video, Assert.Single(names));
+    }
+
+    [Fact]
+    public void A_track_arriving_beside_one_of_its_own_cohort_is_told_apart_by_its_title()
+    {
+        // The collision is with a file already on disk, which the batch cannot see. Without counting it the
+        // plain name would be taken, Unique would fall back to ".2", and the track's own group name — the
+        // thing that actually tells a listener which dub this is — would go unused.
+        var names = NamesBeside(
+            [new PlacedSidecar("The Rock (1996).rus.mka", IsAudio: true, "rus")],
+            (".incoming/x/b.mka", "rus", "Диктор CDV"));
+
+        Assert.Equal(["The Rock (1996).rus.Диктор CDV.mka"], names);
+    }
+
+    [Fact]
+    public void A_name_already_taken_on_disk_is_never_handed_out_again()
+    {
+        // Even with no title to slug with, the newcomer must not be given a name that would overwrite the
+        // file already there.
+        var names = NamesBeside(
+            [new PlacedSidecar("The Rock (1996).rus.mka", IsAudio: true, "rus")],
+            (".incoming/x/b.mka", "rus", null));
+
+        Assert.NotEqual("The Rock (1996).rus.mka", Assert.Single(names));
+    }
+
+    [Fact]
+    public void An_existing_sidecar_of_another_cohort_does_not_crowd()
+    {
+        // A Russian subtitle already beside the video is not a collision for a Russian dub, so the dub keeps
+        // the plain form clients match on.
+        var names = NamesBeside(
+            [new PlacedSidecar("The Rock (1996).rus.srt", IsAudio: false, "rus")],
+            (".incoming/x/dub.mka", "rus", "Дубляж"));
+
+        Assert.Equal(["The Rock (1996).rus.mka"], names);
+    }
+
+    [Fact]
+    public void An_existing_sidecar_crowds_every_newcomer_in_its_cohort()
+    {
+        var names = NamesBeside(
+            [new PlacedSidecar("The Rock (1996).rus.mka", IsAudio: true, "rus")],
+            (".incoming/x/b.mka", "rus", "Гаврилов"),
+            (".incoming/x/c.mka", "rus", "Володарский"));
+
+        Assert.Equal(
+            ["The Rock (1996).rus.Гаврилов.mka", "The Rock (1996).rus.Володарский.mka"],
+            names);
     }
 }

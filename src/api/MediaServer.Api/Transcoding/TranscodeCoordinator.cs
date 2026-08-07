@@ -102,7 +102,11 @@ public sealed class TranscodeCoordinator(
         }
     }
 
-    /// <summary>Imports a completed job's output as a new movie version, exactly once per job.</summary>
+    /// <summary>
+    /// Applies a completed job's side effect, exactly once per job. What that is depends on the kind: a
+    /// conversion's single output becomes a new movie version, while an extraction's files become external
+    /// streams of the source it read. Both finish into the library; neither is the other's special case.
+    /// </summary>
     private async Task PromoteAsync(IServiceScope scope, MediaServerDbContext database, TranscodeJob job, CancellationToken cancellationToken)
     {
         if (!_imported.TryAdd(job.Id, 0))
@@ -112,14 +116,19 @@ public sealed class TranscodeCoordinator(
 
         try
         {
-            var importer = scope.ServiceProvider.GetRequiredService<TranscodeOutputImporter>();
-            if (await importer.ImportAsync(job, cancellationToken))
+            var promoted = job.Kind == TranscodeJobKind.Extract
+                ? await scope.ServiceProvider.GetRequiredService<ExtractOutputImporter>().ImportAsync(job, cancellationToken)
+                : await scope.ServiceProvider.GetRequiredService<TranscodeOutputImporter>().ImportAsync(job, cancellationToken);
+
+            if (promoted)
             {
-                logger.LogInformation("Transcode job {JobId} completed → {Output}.", job.EngineJobId, job.OutputPath);
+                logger.LogInformation(
+                    "Transcode job {JobId} completed → {Output}.", job.EngineJobId, job.OutputPath ?? job.InputPath);
             }
             else
             {
-                // The engine reported completion but the output is gone — surface it as a failure.
+                // The engine reported completion but something it should have produced is gone — surface it
+                // as a failure. An importer that knows more (which files were missing) has already said so.
                 job.State = TranscodeJobState.Failed;
                 job.Error ??= "Transcode completed but the output file was missing.";
                 await database.SaveChangesAsync(cancellationToken);

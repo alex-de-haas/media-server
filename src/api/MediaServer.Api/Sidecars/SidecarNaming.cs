@@ -4,10 +4,31 @@ using MediaServer.Api.Media;
 
 namespace MediaServer.Api.Sidecars;
 
+/// <summary>
+/// One companion waiting to be named, reduced to what the rule actually argues over.
+/// <para>
+/// <paramref name="Id"/> is opaque here — a caller's own handle, given back on the matching
+/// <see cref="SidecarName"/>. It is a <see cref="SourceFile"/> id when ingest places a file a release
+/// shipped, and a <see cref="MediaStream"/> id when a track is extracted out of the container; the naming
+/// rule has no reason to know which, and one implementation has to serve both or the two drift on the slug.
+/// </para>
+/// </summary>
+/// <param name="Id">The caller's handle for this companion.</param>
+/// <param name="Extension">The file extension it will carry, leading dot included.</param>
+/// <param name="IsAudio">Audio or subtitle — the two do not crowd each other.</param>
+public sealed record SidecarCandidate(Guid Id, string Extension, bool IsAudio, string? Language, string? Title);
+
+/// <summary>
+/// A companion that is <b>already</b> beside the video. It is not being renamed — files on disk stay as
+/// they are — but it takes part in both questions the rule asks: its name is taken, and it counts towards
+/// the cohort that decides whether a new companion needs a slug to be told apart from it.
+/// </summary>
+public sealed record PlacedSidecar(string FileName, bool IsAudio, string? Language);
+
 /// <summary>One companion file as it should land beside its video.</summary>
-/// <param name="Source">The file being placed.</param>
+/// <param name="Id">The <see cref="SidecarCandidate.Id"/> this name belongs to.</param>
 /// <param name="FileName">Its canonical name, next to the video.</param>
-public sealed record SidecarName(SourceFile Source, string FileName);
+public sealed record SidecarName(Guid Id, string FileName);
 
 /// <summary>
 /// Names the companion files that land beside a library file.
@@ -28,42 +49,58 @@ public static class SidecarNaming
     /// <summary>
     /// Names every companion of one video. <paramref name="videoFileName"/> is the organized file's name;
     /// each companion keeps its own extension.
+    /// <para>
+    /// <paramref name="placed"/> is what already sits beside the video — sidecars a release shipped, or
+    /// tracks extracted earlier. Passing them is what keeps a second Russian dub from being handed
+    /// <c>&lt;video&gt;.rus.2.mka</c> while its own group name goes unused: the name is taken, so
+    /// <see cref="Unique"/> would fall back to a numeric suffix, and the cohort test would not have seen the
+    /// collision that the slug rule exists to answer. Nothing already on disk is renamed, so an existing lone
+    /// track keeps the plain form and only the newcomer carries a slug — asymmetric, and the only option that
+    /// does not rewrite files a client may already be reading.
+    /// </para>
     /// </summary>
     public static IReadOnlyList<SidecarName> For(
         string videoFileName,
-        IReadOnlyList<(SourceFile File, string? Language, string? Title)> companions)
+        IReadOnlyList<SidecarCandidate> companions,
+        IReadOnlyList<PlacedSidecar>? placed = null)
     {
         var baseName = Path.GetFileNameWithoutExtension(videoFileName);
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { videoFileName };
+        foreach (var sidecar in placed ?? [])
+        {
+            used.Add(sidecar.FileName);
+        }
+
         var named = new List<SidecarName>(companions.Count);
 
-        // A slug only earns its place when something else would collide with it: same kind, same language.
-        var crowded = companions
-            .GroupBy(companion => (Kind: KindOf(companion.File.RelativePath), companion.Language),
-                StringTupleComparer.Instance)
-            .Where(group => group.Count() > 1)
-            .SelectMany(group => group.Select(companion => companion.File.Id))
-            .ToHashSet();
+        // A slug only earns its place when something else would collide with it: same kind, same language —
+        // counting what is already beside the video as well as what is being named now.
+        var cohorts = new Dictionary<(string Kind, string? Language), int>(StringTupleComparer.Instance);
+        foreach (var key in companions.Select(companion => (KindOf(companion.IsAudio), companion.Language))
+            .Concat((placed ?? []).Select(sidecar => (KindOf(sidecar.IsAudio), sidecar.Language))))
+        {
+            cohorts[key] = cohorts.GetValueOrDefault(key) + 1;
+        }
 
         var ordinal = 0;
-        foreach (var (file, language, title) in companions)
+        foreach (var companion in companions)
         {
             ordinal++;
-            var extension = Path.GetExtension(file.RelativePath).ToLowerInvariant();
+            var extension = companion.Extension.ToLowerInvariant();
             var parts = new List<string> { baseName };
-            if (language is { Length: > 0 })
+            if (companion.Language is { Length: > 0 } language)
             {
                 parts.Add(language);
             }
 
-            if (crowded.Contains(file.Id))
+            if (cohorts[(KindOf(companion.IsAudio), companion.Language)] > 1)
             {
                 // Something has to tell these apart. The label is preferred; an untitled track falls back to
                 // its position, which is stable because the caller orders companions deterministically.
-                parts.Add(Slug(title) ?? ordinal.ToString());
+                parts.Add(Slug(companion.Title) ?? ordinal.ToString());
             }
 
-            named.Add(new SidecarName(file, Unique(string.Join('.', parts), extension, used)));
+            named.Add(new SidecarName(companion.Id, Unique(string.Join('.', parts), extension, used)));
         }
 
         return named;
@@ -71,8 +108,7 @@ public static class SidecarNaming
 
     /// <summary>Audio and subtitle companions are named the same way but must not crowd each other: a lone
     /// Russian dub and a lone Russian subtitle are not a collision.</summary>
-    private static string KindOf(string relativePath) =>
-        MediaFormats.IsCompanionAudio(relativePath) ? "audio" : "subtitle";
+    private static string KindOf(bool isAudio) => isAudio ? "audio" : "subtitle";
 
     /// <summary>
     /// Characters a name must not contain, whatever this process happens to be running on.

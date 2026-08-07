@@ -719,22 +719,26 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
     onError: (error) => toast.error("Couldn’t dismiss", { description: errorMessage(error) }),
   });
 
-  const title = job.name ?? job.outputPath;
+  const extraction = job.kind === "Extract";
+  const title = job.name ?? job.outputPath ?? job.inputPath;
   // The card's meta line, matching the "catalog · added 2m ago" line on an ingest card: what this run
   // produces, and how long the job has existed. `createdAt` is when the job was queued, not when encoding
   // began (a queued job hasn't started at all), so the line says "added" like the ingest card rather than
   // claiming a start time the API doesn't report.
   const age = formatTimeAgo(job.createdAt);
   // A finished job has to explain where its size went: the picture setting alone does not, once audio can
-  // be the larger half of what changed.
-  const meta = [
-    job.videoCodec === "copy" ? "Remux" : job.videoCodec.toUpperCase(),
-    job.qualityLevel && job.qualityLevel !== "high" ? job.qualityLevel : null,
-    job.reEncodedAudioTracks > 0
-      ? `${job.reEncodedAudioTracks} audio re-encoded`
-      : null,
-    age && `added ${age}`,
-  ]
+  // be the larger half of what changed. An extraction encodes nothing, so none of that applies — what it
+  // produces is a count of files, and the codec/quality columns would only ever read "Remux".
+  const meta = (
+    extraction
+      ? [`Extract · ${job.outputPaths.length} ${job.outputPaths.length === 1 ? "file" : "files"}`, age && `added ${age}`]
+      : [
+          job.videoCodec === "copy" ? "Remux" : job.videoCodec.toUpperCase(),
+          job.qualityLevel && job.qualityLevel !== "high" ? job.qualityLevel : null,
+          job.reEncodedAudioTracks > 0 ? `${job.reEncodedAudioTracks} audio re-encoded` : null,
+          age && `added ${age}`,
+        ]
+  )
     .filter(Boolean)
     .join(" · ");
 

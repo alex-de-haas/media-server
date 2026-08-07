@@ -150,7 +150,9 @@ else
 
 builder.Services.AddHostedService<TranscodeCoordinator>();
 builder.Services.AddScoped<TranscodeService>();
+builder.Services.AddScoped<TrackExtractionService>();
 builder.Services.AddScoped<TranscodeOutputImporter>();
+builder.Services.AddScoped<ExtractOutputImporter>();
 
 // Identify / probe / enrich building blocks.
 builder.Services.AddSingleton<INameParser, NameParser>();
