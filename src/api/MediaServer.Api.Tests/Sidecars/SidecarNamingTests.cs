@@ -223,6 +223,38 @@ public sealed class SidecarNamingTests
     }
 
     [Fact]
+    public void A_reserved_name_is_never_handed_out()
+    {
+        // A file in the folder with no row of its own — after dropping a sidecar's entry but keeping its
+        // file, or a manual copy. Its name is taken even though nothing is known about it.
+        IReadOnlyList<string> names = [.. SidecarNaming
+            .For(
+                Video,
+                [Candidate(".incoming/x/subs.srt", "rus", null)],
+                placed: null,
+                reserved: ["The Rock (1996).rus.srt"])
+            .Select(named => named.FileName)];
+
+        Assert.NotEqual("The Rock (1996).rus.srt", Assert.Single(names));
+    }
+
+    [Fact]
+    public void A_reserved_name_says_nothing_about_crowding()
+    {
+        // Unlike a placed sidecar, an unknown file has no language to compare — so it cannot make a lone
+        // track pay for a slug it may not need. It only takes its own name out of circulation.
+        IReadOnlyList<string> names = [.. SidecarNaming
+            .For(
+                Video,
+                [Candidate(".incoming/x/dub.mka", "rus", "Дубляж")],
+                placed: null,
+                reserved: ["The Rock (1996).eng.srt"])
+            .Select(named => named.FileName)];
+
+        Assert.Equal(["The Rock (1996).rus.mka"], names);
+    }
+
+    [Fact]
     public void An_existing_sidecar_crowds_every_newcomer_in_its_cohort()
     {
         var names = NamesBeside(

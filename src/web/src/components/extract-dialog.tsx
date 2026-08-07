@@ -36,9 +36,18 @@ const BITMAP_SUBTITLE_CODECS = new Set([
 // What file a track becomes. Audio is always Matroska — a `.mka` carries its own language and title, so the
 // file name never has to be the only record of them. Subtitles keep their own text format, which is what
 // clients read off disk.
-function extensionFor(stream: MediaStream): string {
+//
+// A subtitle codec this does not recognise returns null rather than guessing `.srt`: the server refuses one,
+// so naming a file it will never write would promise an outcome that cannot happen. The row still says what
+// the track is, and stays selectable — the server owns the rule.
+function extensionFor(stream: MediaStream): string | null {
   if (stream.type === "Audio") return ".mka";
   switch (stream.codec?.trim().toLowerCase()) {
+    case "subrip":
+    case "srt":
+    case "mov_text":
+    case "tx3g":
+      return ".srt";
     case "ass":
     case "ssa":
       return ".ass";
@@ -46,7 +55,7 @@ function extensionFor(stream: MediaStream): string {
     case "vtt":
       return ".vtt";
     default:
-      return ".srt";
+      return null;
   }
 }
 
@@ -209,7 +218,7 @@ function TrackGroup({
                   ) : null}
                 </span>
                 <span className="text-muted-foreground block truncate font-mono text-xs">
-                  {refusal ?? extensionFor(stream)}
+                  {refusal ?? extensionFor(stream) ?? "codec not recognised"}
                 </span>
               </span>
             </li>

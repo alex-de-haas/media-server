@@ -22,6 +22,17 @@ public sealed class TranscodeCoordinator(
     // event and the reconcile tick never import twice. The importer is also idempotent DB-side.
     private readonly ConcurrentDictionary<Guid, byte> _imported = new();
 
+    // Promotions run one at a time. That dictionary keeps a single job from being promoted twice, but says
+    // nothing about two *different* jobs — and an extraction picks its external stream indexes by reading
+    // the rows already on the source. Two completions racing on the same source would both read the same
+    // rows, both allocate the same index, and leave two external tracks a client cannot tell apart. There is
+    // no unique constraint on (MediaSourceId, Index) to catch it, so the allocation is serialized instead.
+    //
+    // Global rather than keyed on the source: a promotion is a probe and a handful of inserts, it happens
+    // only when a job finishes, and a lock per source would need its own lifetime management to earn a
+    // concurrency nobody is waiting on.
+    private readonly SemaphoreSlim _promotionGate = new(1, 1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         engine.JobStarted += OnJobEvent;
@@ -114,6 +125,7 @@ public sealed class TranscodeCoordinator(
             return;
         }
 
+        await _promotionGate.WaitAsync(cancellationToken);
         try
         {
             var promoted = job.Kind == TranscodeJobKind.Extract
@@ -140,6 +152,17 @@ public sealed class TranscodeCoordinator(
             _imported.TryRemove(job.Id, out _);
             logger.LogError(exception, "Failed to import transcode output for job {JobId}.", job.Id);
         }
+        finally
+        {
+            _promotionGate.Release();
+        }
+    }
+
+    public override void Dispose()
+    {
+        _promotionGate.Dispose();
+        base.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     private static void Apply(TranscodeJob job, JobSnapshot? snapshot)

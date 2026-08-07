@@ -41,20 +41,27 @@ container stays what it already is — a conversion composed in the
 So a track exists in **two places** afterwards, which is designed for rather than
 discovered:
 
-- **Re-extracting is refused, not duplicated.** A completed extraction records the
-  file each track became; the track is still out while that file is still an
-  external stream of the source. Removing the sidecar makes the track extractable
-  again — an operator who deleted it is asking for exactly that, so the job history
-  alone must not refuse them.
+- **Re-extracting is refused, not duplicated.** An extracted row records the track
+  it came out of (`MediaStream.SourceStreamIndex`), so "already out" is a property
+  of the row. Removing the sidecar makes the track extractable again — an operator
+  who deleted it is asking for exactly that.
+
+  **The job history cannot answer this**, which is why the field exists. Dismissing
+  a terminal job is an ordinary action and cascades its output rows away; a job
+  whose import only partly succeeded ends up `Failed` with the sidecars it did
+  produce still on disk. Either would let the guard forget a track was out and
+  write a second copy under a different name — the naming rule avoids the
+  collision, so nothing else would notice.
 - **Merging an extracted sidecar back into its own version is left alone.** It
   would produce a container carrying that track twice, and nothing guards against
   it, because the Convert dialog already holds the controls to avoid it: the
   embedded track can be dropped in the same job that folds the sidecar in. A guard
   would refuse a combination the operator can already compose correctly.
-- **A sidecar does not record that it came from this container.** The row says what
-  the track is and which file it lives in, exactly as a sidecar a release shipped
-  does. Provenance would be a distinction the sidecar model makes nowhere else,
-  carried on every row, to annotate a case the operator created moments earlier.
+- **Nothing in the UI says a sidecar was extracted.** The Media tab makes no
+  distinction between one this app produced and one a release shipped — that would
+  be a difference the sidecar model draws nowhere else, on every row, to annotate a
+  case the operator created moments earlier. `SourceStreamIndex` exists only to
+  refuse a second extraction and is never displayed.
 
 ## Formats
 
@@ -116,6 +123,15 @@ written to prevent. Nothing already on disk is renamed, so an existing lone trac
 keeps the plain form and only the newcomer carries a slug — asymmetric, and the only
 option that does not rewrite files a client may already be reading.
 
+**Names already taken on disk are reserved too**, not just the ones with rows. A
+sidecar's entry can be dropped while its file is kept, and an operator can copy a
+subtitle in by hand; either leaves a file the database knows nothing about. The
+engine writes with ffmpeg's `-y`, which is right for a conversion (the operator
+named that exact path) and wrong here, where the name is generated — it would
+silently replace a retained or hand-edited subtitle. A reserved name says nothing
+about crowding, because an unknown file has no language to compare: it only takes
+its own name out of circulation.
+
 Tracks are ordered by their position in the container, not by the order a client
 listed them, so the naming rule's position fallback is stable.
 
@@ -144,6 +160,16 @@ reads like any other track. Importing is idempotent on `(source, path)`, because
 completion is observed twice — the engine event and the reconcile tick, or across a
 restart.
 
+**Promotions run one at a time.** The per-job dedup above keeps one job from being
+promoted twice but says nothing about two *different* jobs, and an extraction picks
+its external indexes by reading the rows already on the source. Two completions
+racing on one source would both read the same rows, both allocate the same index,
+and leave two external tracks a client cannot tell apart — there is no unique
+constraint on `(MediaSourceId, Index)` to catch it. A single gate in the
+coordinator serializes them; a promotion is a probe and a few inserts, so a lock
+per source would need its own lifetime management to buy a concurrency nobody is
+waiting on.
+
 **A completed job missing an output fails while importing the rest**, naming what is
 missing. Leaving a produced file with no row pointing at it is the one outcome the
 sidecar model exists to prevent.
@@ -164,7 +190,8 @@ back as a 409 through the same `LibraryMoveGuard` a conversion uses.
 The client-side bitmap check names only codecs known to be pictures; an unrecognised
 one stays selectable on purpose. The server owns the rule, and a client stricter than
 the API blocks a submit the API would have accepted — the one direction such a check
-must never be wrong in.
+must never be wrong in. A codec the dialog does not recognise says so instead of
+naming a file: guessing `.srt` would promise an outcome the server refuses.
 
 An extraction appears in the same conversion list as a conversion, reading
 `Extract · N files` where a conversion states its codec and quality: it encodes
@@ -188,14 +215,16 @@ the folder directly (SMB/NFS) do get it. This feature does not narrow that gap.
   title as a slug while a lone one keeps the plain form; the job stored as an
   extraction that composes nothing and sends no picture settings; a second job for a
   file one is already writing refused; a track already out refused while its file is
-  recorded, and extractable again once removed; a produced file becoming an external
+  recorded — including after its job is dismissed and after a partly-failed import —
+  and extractable again once removed; a file on disk with no row never written over,
+  and the video itself never taken as a name; a produced file becoming an external
   row with the specs from its probe, the label from the job, and an index past 1000
   and past the ones already there; a double import recording it once; and a missing
   output failing the job while the rest is still recorded.
 - `SidecarNamingTests` — the widened cohort: a track arriving beside one of its own
-  cohort told apart by its title, a name already taken on disk never handed out
-  again, an existing sidecar of another cohort not crowding, and one crowding every
-  newcomer in its own.
+  cohort told apart by its title, a name already taken never handed out again, an
+  existing sidecar of another cohort not crowding, one crowding every newcomer in its
+  own, and a reserved name taken out of circulation without affecting crowding.
 - `RemoteTranscodeEngineWireTests` — the outputs travelling under the names the
   engine binds (`path`, not `relativePath`), an extraction sending a null
   `outputPath`, a text conversion naming its codec, and an ordinary job sending no

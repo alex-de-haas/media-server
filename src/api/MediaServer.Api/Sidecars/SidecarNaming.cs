@@ -62,13 +62,23 @@ public static class SidecarNaming
     public static IReadOnlyList<SidecarName> For(
         string videoFileName,
         IReadOnlyList<SidecarCandidate> companions,
-        IReadOnlyList<PlacedSidecar>? placed = null)
+        IReadOnlyList<PlacedSidecar>? placed = null,
+        IReadOnlyList<string>? reserved = null)
     {
         var baseName = Path.GetFileNameWithoutExtension(videoFileName);
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { videoFileName };
         foreach (var sidecar in placed ?? [])
         {
             used.Add(sidecar.FileName);
+        }
+
+        // Names that are taken but say nothing about cohorts — a file sitting in the folder with no row of
+        // its own. It happens through supported routes: dropping a sidecar's entry while keeping its file,
+        // or an operator copying one in by hand. Its language is unknown, so it cannot be counted towards the
+        // crowding test, but handing its name out again would have the writer overwrite it.
+        foreach (var name in reserved ?? [])
+        {
+            used.Add(name);
         }
 
         var named = new List<SidecarName>(companions.Count);

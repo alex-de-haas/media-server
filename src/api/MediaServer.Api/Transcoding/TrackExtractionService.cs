@@ -64,7 +64,7 @@ public sealed class TrackExtractionService(
             ?? throw new TranscodeRequestException(
                 "The catalog root is not bound as a media mount; extracting needs the same host path bound into the transcode-engine.");
 
-        var planned = PlanOutputs(source, targets);
+        var planned = PlanOutputs(source, targets, NamesBesideTheVideo(catalog, source));
         await GuardAgainstDuplicatesAsync(source, item, planned, cancellationToken);
 
         var outputs = new List<EngineExtractionOutput>(planned.Count);
@@ -173,7 +173,8 @@ public sealed class TrackExtractionService(
     /// could be handed a name that is already taken.
     /// </para>
     /// </summary>
-    private static IReadOnlyList<PlannedOutput> PlanOutputs(MediaSource source, IReadOnlyList<ExtractionTarget> targets)
+    private static IReadOnlyList<PlannedOutput> PlanOutputs(
+        MediaSource source, IReadOnlyList<ExtractionTarget> targets, IReadOnlyList<string> reserved)
     {
         var placed = source.Streams
             .Where(stream => stream.IsExternal && stream.ExternalPath is { Length: > 0 })
@@ -195,7 +196,7 @@ public sealed class TrackExtractionService(
         var folder = lastSlash >= 0 ? slashed[..lastSlash] : string.Empty;
 
         var planned = new List<PlannedOutput>(targets.Count);
-        foreach (var named in SidecarNaming.For(Path.GetFileName(source.Path), candidates, placed))
+        foreach (var named in SidecarNaming.For(Path.GetFileName(source.Path), candidates, placed, reserved))
         {
             var target = targets.First(entry => entry.Stream.Id == named.Id);
             planned.Add(new PlannedOutput(
@@ -218,28 +219,22 @@ public sealed class TrackExtractionService(
     private async Task GuardAgainstDuplicatesAsync(
         MediaSource source, MediaItem item, IReadOnlyList<PlannedOutput> planned, CancellationToken cancellationToken)
     {
-        // A completed extraction recorded which file each track became. The track is still out when that file
-        // is still an external stream of the source — and if the operator has since removed it, extracting
-        // again is exactly what they are asking for, so the job history alone must not refuse them.
-        var extracted = await database.TranscodeJobOutputs
-            .Where(output => output.TranscodeJob!.MediaSourceId == source.Id &&
-                output.TranscodeJob.State == TranscodeJobState.Completed)
-            .Select(output => new { output.SourceStreamIndex, output.RelativePath })
-            .ToListAsync(cancellationToken);
-
-        var live = source.Streams
-            .Where(stream => stream.IsExternal && stream.ExternalPath is { Length: > 0 })
-            .Select(stream => stream.ExternalPath!)
-            .ToHashSet(StringComparer.Ordinal);
-
+        // An extracted row records the track it came out of, so "already out" is a property of the row and
+        // not of the job that wrote it. Reading the job history instead would forget a track whose job was
+        // dismissed (which cascades its outputs away) or whose import only partly succeeded (which leaves
+        // the job Failed with its sidecars still on disk) — and a forgotten track is a second copy of it
+        // under a different name.
+        //
+        // Removing the sidecar makes the track extractable again, which is the point: an operator who
+        // deleted it is asking for exactly that.
         foreach (var output in planned)
         {
-            var previous = extracted.FirstOrDefault(entry =>
-                entry.SourceStreamIndex == output.SourceStreamIndex && live.Contains(entry.RelativePath));
+            var previous = source.Streams.FirstOrDefault(stream =>
+                stream.IsExternal && stream.SourceStreamIndex == output.SourceStreamIndex);
             if (previous is not null)
             {
                 throw new TranscodeRequestException(
-                    $"That track is already a file beside this version ('{Path.GetFileName(previous.RelativePath)}'). Remove that file first to extract it again.");
+                    $"That track is already a file beside this version ('{Path.GetFileName(previous.ExternalPath) ?? "unnamed"}'). Remove that file first to extract it again.");
             }
         }
 
@@ -254,6 +249,42 @@ public sealed class TrackExtractionService(
         if (contested.FirstOrDefault(paths.Contains) is { } clash)
         {
             throw new TranscodeRequestException($"An extraction is already producing '{Path.GetFileName(clash)}'.");
+        }
+    }
+
+    /// <summary>
+    /// Every file already sitting in the video's folder, so the naming rule cannot hand one of those names
+    /// out again.
+    /// <para>
+    /// The rows are not enough. A sidecar's entry can be dropped while its file is kept — a supported choice
+    /// on the removal control — and an operator can copy a subtitle in by hand; either leaves a file the
+    /// database knows nothing about. The engine writes its outputs with ffmpeg's <c>-y</c>, which is right
+    /// for a conversion (the operator named that exact path) and wrong here, where the name is generated:
+    /// it would silently replace a retained or hand-edited subtitle.
+    /// </para>
+    /// <para>
+    /// A folder this cannot read yields nothing, which is the pre-existing behaviour rather than a refusal —
+    /// the same folder is about to be written into, so a real problem surfaces there with a better message.
+    /// </para>
+    /// </summary>
+    private IReadOnlyList<string> NamesBesideTheVideo(Catalog catalog, MediaSource source)
+    {
+        try
+        {
+            if (!sandbox.TryResolve(catalog, source.Path, out var absolute))
+            {
+                return [];
+            }
+
+            var folder = Path.GetDirectoryName(absolute);
+            return folder is not null && Directory.Exists(folder)
+                ? Directory.EnumerateFiles(folder).Select(Path.GetFileName).OfType<string>().ToList()
+                : [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(exception, "Could not list the folder beside {Path}; extracted names may collide.", source.Path);
+            return [];
         }
     }
 

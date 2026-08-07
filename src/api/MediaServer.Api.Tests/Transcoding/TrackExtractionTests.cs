@@ -280,6 +280,35 @@ public sealed class TrackExtractionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_file_on_disk_with_no_row_is_never_written_over()
+    {
+        // Dropping a sidecar's entry while keeping its file is a supported choice, and an operator can copy
+        // a subtitle in by hand. Either leaves a file the database knows nothing about — and the engine
+        // writes its outputs with ffmpeg's -y, so handing out that name would replace it silently.
+        File.WriteAllText(
+            Path.Combine(_root, "The Rock (1996)", "The Rock (1996).rus.srt"), "an edited subtitle");
+        var subtitle = AddStream(StreamType.Subtitle, 2, "subrip", "rus");
+
+        var job = await ExtractAsync(subtitle);
+
+        Assert.NotEqual("The Rock (1996)/The Rock (1996).rus.srt", Assert.Single(job.OutputPaths));
+        Assert.Equal(
+            "an edited subtitle",
+            File.ReadAllText(Path.Combine(_root, "The Rock (1996)", "The Rock (1996).rus.srt")));
+    }
+
+    [Fact]
+    public async Task The_video_itself_is_never_a_candidate_name()
+    {
+        // It sits in the same folder, so it arrives through the same reservation.
+        var dub = AddStream(StreamType.Audio, 1, "ac3", null);
+
+        var job = await ExtractAsync(dub);
+
+        Assert.NotEqual(VideoRelative, Assert.Single(job.OutputPaths));
+    }
+
+    [Fact]
     public async Task A_lone_track_keeps_the_plain_name_clients_match_on()
     {
         var subtitle = AddStream(StreamType.Subtitle, 2, "subrip", "rus", "Полные");
@@ -359,6 +388,45 @@ public sealed class TrackExtractionTests : IDisposable
         var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ExtractAsync(dub));
 
         Assert.Contains("already a file beside this version", error.Message);
+    }
+
+    [Fact]
+    public async Task A_track_already_out_stays_refused_after_its_job_is_dismissed()
+    {
+        // Dismissing a terminal job is an ordinary action, and it cascades the job's output rows away. Reading
+        // provenance from job history would forget the track and write a second copy under another name.
+        var dub = AddStream(StreamType.Audio, 1, "ac3", "rus");
+        await ExtractAsync(dub);
+        await CompleteAsync();
+        await Importer().ImportAsync(await _context.TranscodeJobs.SingleAsync(), CancellationToken.None);
+        _context.TranscodeJobs.RemoveRange(await _context.TranscodeJobs.ToListAsync());
+        await _context.SaveChangesAsync();
+        Assert.Empty(await _context.TranscodeJobOutputs.ToListAsync());
+
+        var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ExtractAsync(dub));
+
+        Assert.Contains("already a file beside this version", error.Message);
+    }
+
+    [Fact]
+    public async Task A_track_imported_by_a_partly_failed_job_stays_refused()
+    {
+        // The job ends Failed because one output was missing, but the sidecar it did produce is on disk and
+        // recorded. Keying the guard on completed jobs alone would let that one be extracted twice.
+        var dub = AddStream(StreamType.Audio, 1, "ac3", "rus");
+        var subtitle = AddStream(StreamType.Subtitle, 2, "subrip", "eng");
+        await ExtractAsync(dub, subtitle);
+        await CompleteAsync(only: "The Rock (1996)/The Rock (1996).rus.mka");
+        var job = await _context.TranscodeJobs.SingleAsync();
+        Assert.False(await Importer().ImportAsync(job, CancellationToken.None));
+        job.State = TranscodeJobState.Failed;
+        await _context.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ExtractAsync(dub));
+
+        Assert.Contains("already a file beside this version", error.Message);
+        // The one that never landed is still extractable — nothing of it exists.
+        Assert.Single((await ExtractAsync(subtitle)).OutputPaths);
     }
 
     [Fact]

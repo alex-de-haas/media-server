@@ -92,6 +92,11 @@ public sealed class ExtractOutputImporter(
                 Bitrate = track?.Bitrate,
                 IsExternal = true,
                 ExternalPath = output.RelativePath,
+                // Which track of the container this file is a copy of. Recorded on the row rather than left
+                // to the job's own outputs, because those are not durable: dismissing a terminal job
+                // cascades them away, and a partly-imported job ends up Failed with its sidecars still on
+                // disk. Either would let the same track be extracted a second time.
+                SourceStreamIndex = output.SourceStreamIndex,
             });
             imported++;
         }
