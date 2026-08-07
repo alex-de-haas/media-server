@@ -1,7 +1,7 @@
 # Convert Dialog
 
 Created: 2026-07-29
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 The one place a new version of a movie is composed. It submits a single job to the
 transcode engine, and everything that job can carry is decided here: what happens
