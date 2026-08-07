@@ -3,6 +3,7 @@ using System;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    partial class MediaServerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260807083321_AddTrackExtraction")]
+    partial class AddTrackExtraction
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -720,9 +723,6 @@ namespace MediaServer.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("SampleRate")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("SourceStreamIndex")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("StreamType")

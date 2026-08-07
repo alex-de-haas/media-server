@@ -98,19 +98,28 @@ public sealed class SidecarPlacementService(
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        // External indexes start past the container's own numbering and continue past whatever this source
-        // already carries: a re-drive, or a later release adding more tracks, must not reuse an index that
-        // a client already uses to pick a stream.
-        const int FirstExternalIndex = 1000;
-        var nextExternalIndex = existing.Count == 0
-            ? FirstExternalIndex
-            : Math.Max(FirstExternalIndex, existing.Max(stream => stream.Index) + 1);
+        var nextExternalIndex = ExternalStreamIndex.NextFor(existing);
 
         var placed = 0;
         // Naming argues only over the tags, so it is handed only those — the technical facts alongside them
-        // have no say in what a file is called.
-        var forNaming = labelled.Select(entry => (entry.File, entry.Language, entry.Title)).ToList();
-        foreach (var named in SidecarNaming.For(Path.GetFileName(video.RelativePath), forNaming))
+        // have no say in what a file is called. The sidecars already beside this video come along so a track
+        // landing next to one of the same kind and language is told apart by its label rather than by a
+        // numeric suffix.
+        var forNaming = labelled
+            .Select(entry => new SidecarCandidate(
+                entry.File.Id,
+                Path.GetExtension(entry.File.RelativePath),
+                MediaFormats.IsCompanionAudio(entry.File.RelativePath),
+                entry.Language,
+                entry.Title))
+            .ToList();
+        var alreadyPlaced = existing
+            .Where(stream => stream.ExternalPath is { Length: > 0 })
+            .Select(stream => new PlacedSidecar(
+                Path.GetFileName(stream.ExternalPath!), stream.StreamType == StreamType.Audio, stream.Language))
+            .ToList();
+
+        foreach (var named in SidecarNaming.For(Path.GetFileName(video.RelativePath), forNaming, alreadyPlaced))
         {
             var target = folder.Length == 0 ? named.FileName : $"{folder}/{named.FileName}";
             if (existing.Any(stream => string.Equals(stream.ExternalPath, target, StringComparison.Ordinal)))
@@ -118,12 +127,11 @@ public sealed class SidecarPlacementService(
                 continue; // Already placed by an earlier drive.
             }
 
-            if (!TryMove(catalog, named.Source, target))
+            var (file, language, title, track) = labelled.First(entry => entry.File.Id == named.Id);
+            if (!TryMove(catalog, file, target))
             {
                 continue;
             }
-
-            var (_, language, title, track) = labelled.First(entry => entry.File.Id == named.Source.Id);
             database.MediaStreams.Add(new MediaStream
             {
                 Id = Guid.NewGuid(),
@@ -145,9 +153,9 @@ public sealed class SidecarPlacementService(
                 ExternalPath = target,
             });
 
-            named.Source.RelativePath = target;
-            named.Source.AssignmentStatus = SourceFileAssignmentStatus.Sidecar;
-            named.Source.UpdatedAt = DateTimeOffset.UtcNow;
+            file.RelativePath = target;
+            file.AssignmentStatus = SourceFileAssignmentStatus.Sidecar;
+            file.UpdatedAt = DateTimeOffset.UtcNow;
             placed++;
         }
 

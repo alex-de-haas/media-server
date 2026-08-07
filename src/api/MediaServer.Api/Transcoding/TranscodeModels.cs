@@ -37,6 +37,18 @@ public sealed record CreateTranscodeRequest(
     IReadOnlyList<AudioTargetEdit>? AudioTargets = null);
 
 /// <summary>
+/// Request to write chosen tracks of a movie source out as files beside it — the inverse of merging.
+/// <para>
+/// <see cref="StreamIds"/> names embedded audio and subtitle streams of this source. Each becomes a file of
+/// its own under the sidecar naming convention, recorded as an external <c>MediaStream</c> of the same
+/// source. <b>The container is not touched</b>: extraction copies out and never rewrites the video, so a
+/// track exists in both places afterwards. Dropping one from the container is a conversion, composed in the
+/// convert dialog.
+/// </para>
+/// </summary>
+public sealed record CreateExtractionRequest(Guid SourceId, IReadOnlyList<Guid> StreamIds);
+
+/// <summary>
 /// Re-encodes one of the source's audio tracks instead of copying it. Named by <see cref="StreamId"/>, the
 /// same way a metadata edit names its track, so callers never deal in engine stream indexes.
 /// <para>
@@ -60,15 +72,19 @@ public sealed record AudioTargetEdit(Guid StreamId, string Codec, int? Bitrate =
 /// </summary>
 public sealed record StreamMetadataEdit(Guid StreamId, string? Language = null, string? Title = null);
 
-/// <summary>A transcode job with its persisted facts plus the live engine snapshot (when running).</summary>
+/// <summary>A transcode job with its persisted facts plus the live engine snapshot (when running).
+/// <see cref="Kind"/> is <c>Convert</c> or <c>Extract</c>; an extraction has no single
+/// <see cref="OutputPath"/> and lists its files in <see cref="OutputPaths"/> instead.</summary>
 public sealed record TranscodeJobResponse(
     Guid Id,
     string EngineJobId,
     Guid MediaSourceId,
     Guid MediaItemId,
+    string Kind,
     string? Name,
     string InputPath,
-    string OutputPath,
+    string? OutputPath,
+    IReadOnlyList<string> OutputPaths,
     string VideoCodec,
     string HardwareAcceleration,
     string? QualityLevel,
@@ -92,9 +108,15 @@ public sealed record TranscodeJobResponse(
             job.EngineJobId,
             job.MediaSourceId,
             job.MediaItemId,
+            job.Kind.ToString(),
             job.Name,
             job.InputPath,
             job.OutputPath,
+            // One entry either way, so a client that only wants "what did this produce" never has to know
+            // which kind it is looking at.
+            job.Outputs.Count > 0
+                ? job.Outputs.OrderBy(output => output.SourceStreamIndex).Select(output => output.RelativePath).ToList()
+                : job.OutputPath is { Length: > 0 } path ? [path] : [],
             job.VideoCodec,
             job.HardwareAcceleration,
             job.QualityLevel,

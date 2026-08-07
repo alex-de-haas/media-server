@@ -47,6 +47,27 @@ public static class TranscodeEndpoints
             }
         });
 
+        // Writing a version's own tracks out as files beside it — the inverse of the merge the endpoint above
+        // composes. Its own route rather than a mode of that one: it shares no field with a conversion, and
+        // folding two disjoint request shapes into one body would make every field on both conditionally
+        // valid.
+        group.MapPost("/extract", async (CreateExtractionRequest request, TrackExtractionService service, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var job = await service.CreateAsync(request, cancellationToken);
+                return Results.Created($"/api/transcode/{job.Id}", job);
+            }
+            catch (TranscodeConflictException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status409Conflict);
+            }
+            catch (TranscodeRequestException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status400BadRequest);
+            }
+        });
+
         group.MapPost("/{id:guid}/cancel", async (Guid id, TranscodeService service, CancellationToken cancellationToken) =>
             await service.CancelAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound());
 

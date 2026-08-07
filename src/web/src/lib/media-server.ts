@@ -842,9 +842,17 @@ export interface TranscodeJob {
   engineJobId: string;
   mediaSourceId: string;
   mediaItemId: string;
+  /**
+   * "Convert" composes one output file that becomes a new version; "Extract" writes chosen tracks out as
+   * files beside the source, which become sidecars of it. Both share this queue and report progress alike.
+   */
+  kind: string;
   name: string | null;
   inputPath: string;
-  outputPath: string;
+  /** The composed output; null for an extraction, which produces no single file. */
+  outputPath: string | null;
+  /** Every file the job produces — one entry for a conversion, one per track for an extraction. */
+  outputPaths: string[];
   videoCodec: string;
   hardwareAcceleration: string;
   /** "highest" | "high" | "balanced" | "small"; null when the video was copied. */
@@ -902,6 +910,18 @@ export interface CreateTranscodeInput {
   audioTargets?: { streamId: string; codec: string; bitrate?: number | null }[];
 }
 
+/**
+ * Writes chosen tracks of a version out as files beside it — the inverse of a merge.
+ *
+ * `streamIds` names the container's **own** audio and subtitle streams. Each becomes a file under the sidecar
+ * naming convention and is recorded as an external stream of the same version. The container is not touched,
+ * so a track exists in both places afterwards; dropping one from the container is a conversion.
+ */
+export interface ExtractTracksInput {
+  sourceId: string;
+  streamIds: string[];
+}
+
 export const mediaServer = {
   listCatalogs: () => apiJson<Catalog[]>(`${BASE}/catalogs`),
   listCatalogMounts: () => apiJson<CatalogMount[]>(`${BASE}/catalogs/mounts`),
@@ -950,6 +970,14 @@ export const mediaServer = {
   listTranscodeJobs: () => apiJson<TranscodeJob[]>(`${BASE}/transcode`),
   createTranscodeJob: (input: CreateTranscodeInput) =>
     apiJson<TranscodeJob>(`${BASE}/transcode`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  // Writes a version's own tracks out as files beside it — the inverse of the merge createTranscodeJob
+  // composes. The container is not touched.
+  extractTracks: (input: ExtractTracksInput) =>
+    apiJson<TranscodeJob>(`${BASE}/transcode/extract`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),

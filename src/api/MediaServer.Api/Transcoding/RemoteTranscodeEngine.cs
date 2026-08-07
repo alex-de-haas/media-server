@@ -103,6 +103,10 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
                 .ToList(),
             request.AudioTargets?
                 .Select(entry => new WireAudioTarget(entry.Input, entry.StreamIndex, entry.Codec, entry.BitrateKbps))
+                .ToList(),
+            request.Outputs?
+                .Select(entry => new WireOutput(
+                    entry.MountLabel, entry.RelativePath, entry.StreamIndex, entry.Codec, entry.Language, entry.Title))
                 .ToList());
 
         using var cts = ControlCts(cancellationToken);
@@ -174,7 +178,11 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
 
     private void SeedInitial(JobDescriptor descriptor) =>
         _snapshots.TryAdd(descriptor.JobId, new JobSnapshot(
-            descriptor.JobId, System.IO.Path.GetFileName(descriptor.OutputPath), "Queued", Complete: false, 0, 0, 0, 0, EtaSeconds: null));
+            descriptor.JobId,
+            // An extraction has no single output to be named after, so — like the engine's own snapshot — it
+            // is named for what it reads.
+            System.IO.Path.GetFileName(descriptor.OutputPath ?? descriptor.InputPath),
+            "Queued", Complete: false, 0, 0, 0, 0, EtaSeconds: null));
 
     // Links the caller's token with a per-request deadline for control (non-streaming) calls.
     private static CancellationTokenSource ControlCts(CancellationToken cancellationToken)
@@ -294,12 +302,18 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
     // positional record parameter the engine cannot bind simply stays null — so clarity belongs in a comment
     // here, and the names that carry units live on the domain types these are mapped from.
     private sealed record WireCreateJobRequest(
-        string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, string? QualityLevel,
+        string? InputMountLabel, string InputPath, string? OutputMountLabel, string? OutputPath, string VideoCodec, string HardwareAcceleration, string? QualityLevel,
         int? MaxHeight = null, IReadOnlyList<int>? AudioStreamIndexes = null, IReadOnlyList<int>? SubtitleStreamIndexes = null,
         int? DefaultAudioStreamIndex = null, int? DefaultSubtitleStreamIndex = null,
         IReadOnlyList<WireAdditionalInput>? AdditionalInputs = null,
         IReadOnlyList<WireMetadataOverride>? MetadataOverrides = null,
-        IReadOnlyList<WireAudioTarget>? AudioTargets = null);
+        IReadOnlyList<WireAudioTarget>? AudioTargets = null,
+        IReadOnlyList<WireOutput>? Outputs = null);
+
+    /// <summary>The engine's <c>outputs</c> entry — one stream written to its own file. <c>Codec</c> is left
+    /// null for a stream copy, which is what every extraction but a text-subtitle conversion asks for.</summary>
+    private sealed record WireOutput(
+        string? MountLabel, string Path, int StreamIndex, string? Codec, string? Language, string? Title);
 
     private sealed record WireMetadataOverride(int Input, int StreamIndex, string? Language, string? Title);
 

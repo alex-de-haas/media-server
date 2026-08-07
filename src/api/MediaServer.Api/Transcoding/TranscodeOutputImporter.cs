@@ -31,9 +31,17 @@ public sealed class TranscodeOutputImporter(
             return false;
         }
 
-        if (!sandbox.TryResolve(catalog, job.OutputPath, out var absolute) || !File.Exists(absolute))
+        // Only a conversion composes a single output; the coordinator routes an extraction elsewhere, and a
+        // job that reached here with nothing to import is a bug rather than a missing file.
+        if (job.OutputPath is not { Length: > 0 } outputPath)
         {
-            logger.LogWarning("Transcode job {JobId}: output '{Output}' is missing on disk.", job.Id, job.OutputPath);
+            logger.LogWarning("Transcode job {JobId} has no composed output to import.", job.Id);
+            return false;
+        }
+
+        if (!sandbox.TryResolve(catalog, outputPath, out var absolute) || !File.Exists(absolute))
+        {
+            logger.LogWarning("Transcode job {JobId}: output '{Output}' is missing on disk.", job.Id, outputPath);
             return false;
         }
 
