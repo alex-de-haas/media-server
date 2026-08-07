@@ -1,7 +1,7 @@
 # Convert Dialog
 
 Created: 2026-07-29
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 The one place a new version of a movie is composed. It submits a single job to the
 transcode engine, and everything that job can carry is decided here: what happens
@@ -94,6 +94,22 @@ compare like for like. Two things it is careful about:
   and leads with the result, which is still exact. It does not fall back on a share
   of the file's overall rate.
 
+## An object-based track says so before it is touched
+
+A track carrying **Atmos** or **DTS:X** is marked on its row, and a re-encode of one
+leads with what it costs — `drops Atmos · 2.3 GB → E-AC-3, …`.
+
+It earns the marker because nothing else on the row carries it. The codec reads
+`truehd` whether or not there are objects, so the summary beside it — `eng TrueHD
+7.1` — is identical either way; the fact lives only in the probe's codec profile.
+And it is the one audio fact that settles what may be done to a track: ffmpeg encodes
+neither JOC nor DTS:X, so there is no bitrate at which a re-encode keeps them.
+Copying is the only way.
+
+The marker is absent, not negative, on a source probed from container headers alone —
+a header carries no codec profile, so nobody looked. See
+[media-probe-providers](../media-probe-providers/feature.md).
+
 Re-encoding audio says nothing about the picture, so the cheapest useful conversion —
 shrink the dubs, copy every frame of video — is one job with the video left on
 "keep original".
@@ -111,6 +127,39 @@ a frame of picture.
 Only tracks that state a bitrate are counted. Leaving the silent ones out can only
 understate the audio side, which is the safe direction: the line claims audio is the
 larger half, and it must never make that claim on a total it filled in itself.
+
+## What the Dolby Vision warning does and does not mean
+
+The warning above the video controls says a re-encode drops the Dolby Vision layer.
+It does **not** mean the result is broken. What survives is the base layer, and on the
+sources this library actually holds — disc remuxes, which are profile 7 — that base
+layer is ordinary HEVC Main 10 PQ. The picture stays a valid HDR10 one, its
+mastering-display and MaxCLL metadata come through the encode, and what is lost is the
+per-frame dynamic metadata, nothing else.
+
+That reassurance is not universal, because "Dolby Vision" covers several base layers:
+profile 7 and 8.1 are HDR10-based, 8.4 is HLG-based, 8.2 is SDR-based, and profile 5
+has no viewable base layer at all. The library records only a generic `Dolby Vision`,
+so the dialog cannot say which of these a given source is — the profile table lives in
+[transcode-engine / compression controls](https://github.com/alex-de-haas/transcode-engine/blob/main/docs/features/compression-controls/feature.md#dolby-vision-does-not-survive-a-re-encode).
+
+So on a Dolby Vision source the choice is not "shrink it or keep it watchable", it is
+"keep the dynamic layer or spend a day of CPU". Preserving Dolby Vision through a
+re-encode is possible but the engine does not do it, and deliberately: it would force
+the software encoder, which measured **equivalent to hardware in quality per byte** —
+the same output size for 30–70× the time, buying only the metadata. Dropping a
+profile 7 source's enhancement layer losslessly was measured too and comes to 1.6% of
+the file. Both findings live in
+[transcode-engine / compression controls](https://github.com/alex-de-haas/transcode-engine/blob/main/docs/features/compression-controls/feature.md#dolby-vision-does-not-survive-a-re-encode).
+
+The order that actually pays on such a file is the one this dialog already leads
+with: audio first — 87.5 GB of that 141.7 GB remux — then the picture if it is still
+too large.
+
+**Profile 5 is where the warning must be obeyed rather than weighed**: re-encoding one
+produces wrong colours, not merely flatter ones. Since the dialog cannot tell it
+apart, the safe rule is the source's provenance — profile 5 arrives from streaming
+rips, not from the disc remuxes this library is built on.
 
 ## Every size comes from a recorded bitrate, or is absent
 
