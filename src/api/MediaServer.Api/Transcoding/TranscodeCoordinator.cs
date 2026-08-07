@@ -22,6 +22,17 @@ public sealed class TranscodeCoordinator(
     // event and the reconcile tick never import twice. The importer is also idempotent DB-side.
     private readonly ConcurrentDictionary<Guid, byte> _imported = new();
 
+    // Promotions run one at a time. That dictionary keeps a single job from being promoted twice, but says
+    // nothing about two *different* jobs — and an extraction picks its external stream indexes by reading
+    // the rows already on the source. Two completions racing on the same source would both read the same
+    // rows, both allocate the same index, and leave two external tracks a client cannot tell apart. There is
+    // no unique constraint on (MediaSourceId, Index) to catch it, so the allocation is serialized instead.
+    //
+    // Global rather than keyed on the source: a promotion is a probe and a handful of inserts, it happens
+    // only when a job finishes, and a lock per source would need its own lifetime management to earn a
+    // concurrency nobody is waiting on.
+    private readonly SemaphoreSlim _promotionGate = new(1, 1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         engine.JobStarted += OnJobEvent;
@@ -102,7 +113,11 @@ public sealed class TranscodeCoordinator(
         }
     }
 
-    /// <summary>Imports a completed job's output as a new movie version, exactly once per job.</summary>
+    /// <summary>
+    /// Applies a completed job's side effect, exactly once per job. What that is depends on the kind: a
+    /// conversion's single output becomes a new movie version, while an extraction's files become external
+    /// streams of the source it read. Both finish into the library; neither is the other's special case.
+    /// </summary>
     private async Task PromoteAsync(IServiceScope scope, MediaServerDbContext database, TranscodeJob job, CancellationToken cancellationToken)
     {
         if (!_imported.TryAdd(job.Id, 0))
@@ -110,16 +125,22 @@ public sealed class TranscodeCoordinator(
             return;
         }
 
+        await _promotionGate.WaitAsync(cancellationToken);
         try
         {
-            var importer = scope.ServiceProvider.GetRequiredService<TranscodeOutputImporter>();
-            if (await importer.ImportAsync(job, cancellationToken))
+            var promoted = job.Kind == TranscodeJobKind.Extract
+                ? await scope.ServiceProvider.GetRequiredService<ExtractOutputImporter>().ImportAsync(job, cancellationToken)
+                : await scope.ServiceProvider.GetRequiredService<TranscodeOutputImporter>().ImportAsync(job, cancellationToken);
+
+            if (promoted)
             {
-                logger.LogInformation("Transcode job {JobId} completed → {Output}.", job.EngineJobId, job.OutputPath);
+                logger.LogInformation(
+                    "Transcode job {JobId} completed → {Output}.", job.EngineJobId, job.OutputPath ?? job.InputPath);
             }
             else
             {
-                // The engine reported completion but the output is gone — surface it as a failure.
+                // The engine reported completion but something it should have produced is gone — surface it
+                // as a failure. An importer that knows more (which files were missing) has already said so.
                 job.State = TranscodeJobState.Failed;
                 job.Error ??= "Transcode completed but the output file was missing.";
                 await database.SaveChangesAsync(cancellationToken);
@@ -131,6 +152,17 @@ public sealed class TranscodeCoordinator(
             _imported.TryRemove(job.Id, out _);
             logger.LogError(exception, "Failed to import transcode output for job {JobId}.", job.Id);
         }
+        finally
+        {
+            _promotionGate.Release();
+        }
+    }
+
+    public override void Dispose()
+    {
+        _promotionGate.Dispose();
+        base.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     private static void Apply(TranscodeJob job, JobSnapshot? snapshot)

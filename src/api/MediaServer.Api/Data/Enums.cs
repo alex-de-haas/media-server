@@ -48,6 +48,22 @@ public enum TranscodeJobState
     Cancelled = 4,
 }
 
+/// <summary>
+/// What a transcode job produces, and therefore what happens when it completes. Both run on the same engine
+/// queue and report progress the same way, but they finish into different things: a
+/// <see cref="Convert"/> becomes a new <c>MediaSource</c> version of the movie, while an
+/// <see cref="Extract"/> becomes external <c>MediaStream</c> rows on the source it read.
+/// </summary>
+public enum TranscodeJobKind
+{
+    /// <summary>Composes one output file — a re-encode, a remux, or a merge. The historical default, which
+    /// is why it is 0: every row that predates extraction is one of these.</summary>
+    Convert = 0,
+
+    /// <summary>Writes chosen tracks of the source out as files beside it, leaving the source untouched.</summary>
+    Extract = 1,
+}
+
 /// <summary>The v1 processing (PROC) pipeline stages, persisted as <c>IngestItem.Stage</c>.</summary>
 public enum IngestStage
 {

@@ -167,6 +167,9 @@ public sealed class TranscodeService(
     {
         var jobs = await database.TranscodeJobs
             .AsNoTracking()
+            // An extraction's files are the only record of what it produces — it has no single OutputPath —
+            // so without them a listed extraction would report having made nothing.
+            .Include(job => job.Outputs)
             .OrderByDescending(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
 

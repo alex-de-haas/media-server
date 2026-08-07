@@ -165,6 +165,11 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/transcode" && method === "POST") {
       return route.fulfill({ status: 201, json: { id: "job-1" } });
     }
+    // Extraction is its own route: it shares no field with a conversion, so the two request shapes never
+    // meet on the wire either.
+    if (path === "/transcode/extract" && method === "POST") {
+      return route.fulfill({ status: 201, json: { id: "job-2" } });
+    }
     if (path === "/library/backfill-media" && method === "POST") {
       return route.fulfill({
         json: mock.mediaBackfill ?? { itemsRefreshed: 0, remaining: 0, sidecarsFilled: 0 },

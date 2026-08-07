@@ -17,6 +17,8 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<MediaItemPerson> MediaItemPersons => Set<MediaItemPerson>();
     public DbSet<Download> Downloads => Set<Download>();
     public DbSet<TranscodeJob> TranscodeJobs => Set<TranscodeJob>();
+
+    public DbSet<TranscodeJobOutput> TranscodeJobOutputs => Set<TranscodeJobOutput>();
     public DbSet<SourceFile> SourceFiles => Set<SourceFile>();
     public DbSet<IngestItem> IngestItems => Set<IngestItem>();
     public DbSet<Job> Jobs => Set<Job>();
@@ -417,12 +419,23 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         job.HasKey(entity => entity.Id);
         job.Property(entity => entity.EngineJobId).IsRequired();
         job.Property(entity => entity.InputPath).IsRequired();
-        job.Property(entity => entity.OutputPath).IsRequired();
         job.Property(entity => entity.VideoCodec).IsRequired();
         job.Property(entity => entity.HardwareAcceleration).IsRequired();
         job.Property(entity => entity.State).HasConversion<int>();
+        job.Property(entity => entity.Kind).HasConversion<int>();
         job.HasIndex(entity => entity.EngineJobId).IsUnique();
         job.HasIndex(entity => entity.State);
+
+        // Cascade: an extraction's outputs describe that job and nothing else, so they go with it.
+        job.HasMany(entity => entity.Outputs)
+            .WithOne(output => output.TranscodeJob)
+            .HasForeignKey(output => output.TranscodeJobId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var output = modelBuilder.Entity<TranscodeJobOutput>();
+        output.HasKey(entity => entity.Id);
+        output.Property(entity => entity.RelativePath).IsRequired();
+        output.Property(entity => entity.StreamType).HasConversion<int>();
 
         // Cascade from the source: removing the original source (e.g. after a verified replace) drops its
         // job history too. The movie/catalog links are denormalized for listing.

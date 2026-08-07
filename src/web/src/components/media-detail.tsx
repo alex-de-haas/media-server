@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, AudioLines, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileQuestion, Film, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileOutput, FileQuestion, Film, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -20,6 +20,7 @@ import {
   type Studio,
   type TranscodeJob,
 } from "@/lib/media-server";
+import { ExtractDialog } from "@/components/extract-dialog";
 import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
@@ -945,6 +946,7 @@ function SourceCard({
   });
   const canConvert = canManage && (transcode?.available ?? false);
   const [convertOpen, setConvertOpen] = useState(false);
+  const [extractOpen, setExtractOpen] = useState(false);
   // Sidecars the Convert dialog opens with already checked — set when it is reached through Merge below.
   const [preselectedSidecars, setPreselectedSidecars] = useState<string[]>([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1013,6 +1015,16 @@ function SourceCard({
                 <Shrink />
               </Button>
             )}
+            {canConvert && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Extract tracks to files"
+                onClick={() => setExtractOpen(true)}
+              >
+                <FileOutput />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -1063,6 +1075,9 @@ function SourceCard({
           }}
           preselectedSidecars={preselectedSidecars}
         />
+      )}
+      {canManage && canConvert && (
+        <ExtractDialog source={source} itemId={itemId} open={extractOpen} onOpenChange={setExtractOpen} />
       )}
       {canManage && <DeleteVersionDialog source={source} itemId={itemId} open={deleteOpen} onOpenChange={setDeleteOpen} />}
     </div>

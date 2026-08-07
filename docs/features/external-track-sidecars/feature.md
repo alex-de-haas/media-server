@@ -1,12 +1,21 @@
 # External Track Sidecars
 
 Created: 2026-07-27
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 A release's separate audio tracks and subtitles are kept as files beside the
 library file they belong to, and recorded as external streams of its media
 source. Ingest never merges them in; merging is a separate operation, run later
 and only when asked.
+
+**Sidecars now have a second origin.** A version's own embedded tracks can be
+written out beside it too — see [track-extraction](../track-extraction/feature.md)
+— and what comes out is deliberately indistinguishable from a sidecar a release
+shipped: same naming rule, same external rows, same indexes. Everything below
+applies to both without distinguishing them, which is why extraction needed almost
+nothing written for it. The two shared rules are shared in code as well:
+`SidecarNaming` is keyed on an opaque id rather than a `SourceFile`, and the
+external-index rule lives in `ExternalStreamIndex`.
 
 Before this, ingest muxed those tracks into the video during staging. Every other
 outcome was lossy: a failed mux, an absent transcode engine, or a batch whose
