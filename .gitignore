@@ -26,11 +26,20 @@ playwright-report/
 test-results/
 
 # --- App runtime data (never commit) ---
+# A standalone local run (HOSTY_APP_DATA_DIR unset) resolves the data directory to
+# <contentRoot>/data, which on a case-insensitive filesystem is the *tracked*
+# src/api/MediaServer.Api/Data source folder. Every runtime artifact the API writes
+# under the data directory therefore needs a rule here.
 .hosty-dev/
 .hosty-dev-smoke/
 **/data/*.db
 **/data/*.db-wal
 **/data/*.db-shm
+**/data/*.db.snapshot
+**/data/*.db.snapshot.tmp
+**/data/native-url-signing.key
+**/data/images/
+**/data/torrents/
 
 # --- Environment / secrets ---
 .env

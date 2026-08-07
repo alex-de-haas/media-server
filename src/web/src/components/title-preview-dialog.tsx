@@ -97,7 +97,7 @@ export function TitlePreviewDialog({
             </div>
 
             <DialogHeader className="min-w-0 flex-1 gap-1.5 text-left">
-              <DialogTitle className="font-serif text-2xl leading-tight font-medium">{title}</DialogTitle>
+              <DialogTitle className="text-2xl leading-tight font-semibold tracking-tight">{title}</DialogTitle>
               {/* The description renders a <p>, so the pending placeholder stays outside it — a div in a
                   paragraph is invalid HTML and React rejects the hydration. */}
               {preview.isPending ? (

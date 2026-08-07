@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { EyeOff, Plus, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Check, EyeOff, Plus, Sparkles } from "lucide-react";
 import type { Recommendation } from "@/lib/media-server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +36,7 @@ export function RecommendationCard({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={item.posterUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
       ) : (
-        <span className="text-muted-foreground flex h-full w-full items-center justify-center text-xs">
+        <span className="text-muted-foreground flex h-full w-full items-center justify-center p-2 text-center text-xs">
           No poster
         </span>
       )}
@@ -71,18 +70,23 @@ export function RecommendationCard({
         </button>
       )}
 
-      <div className="flex flex-col gap-0.5">
-        <span className="truncate text-sm font-medium" title={item.title}>
+      {/* Same two lines as an ordinary poster card — 13px name over a 12px muted caption — so a
+          recommendation sitting next to a library tile on Home reads at the same weight. */}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-[13px] font-medium" title={item.title}>
           {item.title}
         </span>
-        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          {item.year ?? "—"}
-          <span
-            data-testid="rec-availability"
-            className={cn(item.inLibrary ? "text-brand" : "text-muted-foreground")}
-          >
-            {item.inLibrary ? "In library" : "Not in library"}
+        {/* The same `kind · year` caption an ordinary poster card carries. Availability is the amber check
+            the tracked drawer and the calendar already use for "you have this" — only held titles are
+            marked, since saying "not in library" on almost every card spends the line to say nothing. */}
+        <span className="text-muted-foreground flex items-center gap-1 text-xs">
+          <span className="truncate">
+            {item.kind}
+            {item.year ? ` · ${item.year}` : ""}
           </span>
+          {item.inLibrary && (
+            <Check data-testid="rec-availability" className="text-brand size-3.5 shrink-0" aria-label="In library" />
+          )}
         </span>
       </div>
 

@@ -55,8 +55,9 @@ public sealed class RemoteMediaProbeTests
           "container": "mkv", "durationSeconds": 7506.291, "bitrate": 7699019, "sizeBytes": 7223885097,
           "streams": [
             { "index": 0, "kind": "Video", "codec": "hevc", "profile": "Main 10", "language": "eng",
-              "title": null, "isDefault": true, "isForced": false, "width": 1920, "height": 1080,
-              "frameRate": 23.976023, "bitDepth": 10, "hdr": "Hdr10", "channels": null, "sampleRate": null }
+              "title": null, "isDefault": true, "isForced": false, "bitrate": 7500000,
+              "width": 1920, "height": 1080, "frameRate": 23.976023, "bitDepth": 10, "hdr": "Hdr10",
+              "channels": null, "sampleRate": null }
           ]
         }
         """;
@@ -94,6 +95,25 @@ public sealed class RemoteMediaProbeTests
         Assert.Equal("Main 10", video.Profile);
         Assert.Equal(10, video.BitDepth);
         Assert.Equal(23.976, video.FrameRate);
+        Assert.Equal(7_500_000, video.Bitrate);
+    }
+
+    [Fact]
+    public async Task A_stream_the_engine_states_no_bitrate_for_keeps_none()
+    {
+        // The engine answers null for a container that records no per-track rate and carries no BPS tag.
+        // Splitting the file's overall bitrate across its streams would fill the gap with a number nothing
+        // measured, and a caller cannot tell that apart from a real one.
+        const string Json = """
+            {"container":"mkv","durationSeconds":100,"bitrate":8000000,"sizeBytes":1,"streams":[
+              {"index":0,"kind":"Audio","codec":"dts","isDefault":true,"isForced":false}]}
+            """;
+        var (probe, _) = Probe(HttpStatusCode.OK, Json);
+
+        var result = (await probe.TryProbeAsync($"{Root}/movie.mkv", CancellationToken.None))!;
+
+        Assert.Null(Assert.Single(result.Streams).Bitrate);
+        Assert.Equal(8_000_000, result.Bitrate);
     }
 
     [Theory]

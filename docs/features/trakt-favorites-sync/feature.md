@@ -1,7 +1,7 @@
 # Trakt Favorites Sync
 
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-08-05
 
 The local favorite flag is portable through Trakt: a movie or series favorited
 here reaches the user's Trakt favorites, and favorites kept there arrive here.
@@ -95,7 +95,13 @@ the latter.
   retries; an unrecognised title ends the event.
 - `FavoritesSyncTests` — each of the four reconciliation directions, inbound
   favorites landing on a tombstone, remote favorites absent from the library
-  reported as skipped, and the cap reported in the plan.
+  reported as skipped, and the 100-favorite cap surfacing in the sync result.
 
-Live contract verification against a real Trakt account has not been run yet;
-it is tracked as the one open deliverable in [plan.md](plan.md).
+Live contract verification against a real Trakt account was never run, and is
+not expected to be: Trakt development was wound down on 2026-08-05 because
+registering the OAuth application a self-hosted deployment needs now requires
+Trakt VIP. The plan holding that deliverable was retired rather than parked —
+see the wind-down note in [watched-history
+providers](../watch-history-providers/feature.md), which records the evidence.
+The code stays in the repository and applies unchanged for an operator who does
+hold VIP.

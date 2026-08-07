@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { RealtimeBridge } from "@/components/realtime-bridge";
 import { SessionRecovery } from "@/components/session-recovery";
 import type { SessionFailureStatus } from "@/lib/host-auth";
-import { readRecoveryParams } from "@hosty-sdk/app";
+import { readRecoveryParams, SHELL_DUPLICATED_CHROME_CLASS } from "@hosty-sdk/app";
 
 export interface Session {
   userId: string;
@@ -123,7 +123,9 @@ function TabBar({ isAdmin }: { isAdmin: boolean }) {
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   return (
-    <header className="bg-background/80 sticky top-0 z-10 border-b backdrop-blur">
+    // Wordmark plus the manifest `ui.navigation` pages — both drawn by a surrounding shell, so
+    // the whole header is marked as duplicated chrome and hidden there by globals.css.
+    <header className={cn("bg-background/80 sticky top-0 z-10 border-b backdrop-blur", SHELL_DUPLICATED_CHROME_CLASS)}>
       <nav className="mx-auto flex w-full max-w-5xl items-center gap-5 overflow-x-auto px-4">
         <span className="border-b-2 border-transparent py-3 pr-1 font-semibold tracking-tight">Media Server</span>
         {PRIMARY_TABS.map((tab) => (

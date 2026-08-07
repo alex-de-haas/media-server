@@ -512,7 +512,7 @@ function Hero({ item }: { item: LibraryDetail }) {
                   <h1 className="sr-only">{item.title}</h1>
                 </>
               ) : (
-                <h1 className="font-serif text-3xl leading-tight font-medium sm:text-4xl">{item.title}</h1>
+                <h1 className="text-3xl leading-tight font-semibold tracking-tight sm:text-4xl">{item.title}</h1>
               )}
               {meta && <p className="text-muted-foreground text-sm">{meta}</p>}
               <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
@@ -810,7 +810,11 @@ function groupStreams(streams: MediaStream[]): StreamGroup[] {
 }
 
 // Secondary technical specs shown muted after a track: video → profile · bit depth · frame rate; audio →
-// sample rate. Only what the probe captured; "" when nothing to add. Numbers are trimmed of trailing zeros.
+// profile · sample rate. Only what the probe captured; "" when nothing to add. Numbers are trimmed of
+// trailing zeros.
+//
+// Audio carries its profile for one fact in particular: Atmos and DTS:X live there and nowhere else — the
+// codec reads `truehd` either way — and they are what decides whether a track may be re-encoded at all.
 function streamSpecs(stream: MediaStream): string {
   const parts: string[] = [];
   if (stream.type === "Video") {
@@ -818,6 +822,7 @@ function streamSpecs(stream: MediaStream): string {
     if (stream.bitDepth) parts.push(`${stream.bitDepth}-bit`);
     if (stream.frameRate) parts.push(`${Number(stream.frameRate.toFixed(3))} fps`);
   } else if (stream.type === "Audio") {
+    if (stream.profile) parts.push(stream.profile);
     if (stream.sampleRate) parts.push(`${Number((stream.sampleRate / 1000).toFixed(1))} kHz`);
   }
   return parts.join(" · ");

@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-02
-Updated: 2026-08-03
+Updated: 2026-08-05
 
 > **Umbrella epic.** This document owns the decisions, the platform split, and the
 > playback spike that everything else depends on. The features it spans keep their
@@ -92,14 +92,20 @@ not a transcoding one, and a stream copy solves it.
 - The engine is not publicly exposed, so `api` proxies the byte-range requests.
   Authorization stays where it already is: item id → catalog sandbox → user access.
 
-**HLS is deliberately not used.** The spike started from HLS and found it bought
-nothing here and cost a great deal: dynamic range has to be negotiated in a master
-playlist, and every master playlist tvOS was offered failed to open, while the
-identical media played fine when the playlist was skipped. A progressive MP4 has
-no playlist to get wrong — the dynamic-range signalling rides in the `moov` — and
-it is what finally produced Dolby Vision on the television. HLS earns its
-complexity when there are bitrate ladders to switch between; there are none here,
-because nothing is being re-encoded.
+**HLS is not used — but not for the reason first recorded here.** This section
+originally said that every master playlist tvOS was offered failed to open and that
+dynamic range was therefore unreachable over HLS. A second pass on 2026-08-05
+disproved both halves: a hand-written master does open, and Apple's own published
+stream plays in Dolby Vision on this same television. See [the second HLS
+pass](#second-hls-pass-2026-08-05).
+
+What survives is the narrower engineering argument. A progressive MP4 reaches Dolby
+Vision with no playlist to get wrong, no segmenting, and no session lifecycle — the
+dynamic-range signalling rides in the `moov`. HLS earns its complexity when there
+are bitrate ladders to switch between, and there are none here because nothing is
+re-encoded. And HLS does not reach the goal for this content anyway: five
+configurations were measured and **none delivered this library's profile 8.1 as
+Dolby Vision** — HDR10 is all HLS gives here.
 
 **Confirmed end to end on an Apple TV 4K.** 4K HEVC at 26.5 Mbit/s plays with no
 stalls, the display switches, and the picture is Dolby Vision. See [the
@@ -377,27 +383,27 @@ the media** — and the switch happens on parsing the declaration, before playba
 succeeds or fails. (Progressive fMP4, further down, has no playlist and reaches the
 same result from the `moov`.)
 
-Which matters, because the master playlist is exactly what does not work:
+Which matters, because the master playlist appeared to be exactly what does not
+work. **The findings below were measured by a harness that ran every case in one
+launch and reported "plays" for cases that showed a badge and no picture; its hold
+phase was never logged.** The first two were disproven on 2026-08-05 — see [the
+second HLS pass](#second-hls-pass-2026-08-05) — and are kept struck through, because
+the way they were reached is the lesson. The third survived re-measurement.
 
-- **Any master playlist yields `Cannot open` on tvOS.** Proven by an A/B in a
-  single run over identical files in one directory: reached through a master →
-  fails; the same variant fetched directly → plays, 3840×2160, zero stalls.
-- It is not the codec string. It fails with GPAC's own `CODECS="dvh1.08.06"`, with
-  a corrected `hvc1.2.4.H150.B0` computed from the `hvcC` record, and with no
-  `CODECS` attribute at all. It is not `SUPPLEMENTAL-CODECS` either — removing it
-  changes the badge from DV to HDR10 and nothing else.
-- macOS AVFoundation plays the same master-mediated package without complaint, so
-  this is a tvOS-specific strictness.
+- ~~**Any master playlist yields `Cannot open` on tvOS.**~~ A master at
+  `#EXT-X-VERSION:10` plays, and Apple's own published `v6` master plays in Dolby
+  Vision on this television.
+- ~~It is not `SUPPLEMENTAL-CODECS` — removing it changes the badge and nothing
+  else.~~ Removing it is the difference between failing and playing.
+- macOS AVFoundation plays the same master-mediated package without complaint. This
+  one still holds, and it did point at the truth: the strictness is tvOS-specific.
 
-**So HDR was unreachable over HLS.** Within that design the two halves worked
-separately and never together: HDR needed the master playlist, and the master
-playlist did not open. That dead end is what sent the spike to progressive MP4
-below, where both halves hold at once.
+**So HDR appeared unreachable over HLS**, and that apparent dead end is what sent
+the spike to progressive MP4 below. The destination was right; the reasoning was
+not.
 
-Not yet tried, in the order worth trying: `#EXT-X-PLAYLIST-TYPE:VOD` and
-`#EXT-X-MEDIA-SEQUENCE:0` on the variant (GPAC emits neither, and the ffmpeg
-package that plays has both), and Apple's `mediastreamvalidator`, which exists
-precisely to answer this and was not run.
+Untried at the time, and since done: `#EXT-X-PLAYLIST-TYPE:VOD` and
+`#EXT-X-MEDIA-SEQUENCE:0` on the variant, and Apple's `mediastreamvalidator`.
 
 ##### The answer: drop HLS
 
@@ -406,13 +412,16 @@ the spike tried the obvious alternative and it worked immediately:
 
 | What was served | Opens on tvOS | Television reports |
 | --- | --- | --- |
-| HLS via master playlist | **no** | (switched, then failed) |
+| ~~HLS via master playlist~~ **retracted** | ~~no~~ — see [the second pass](#second-hls-pass-2026-08-05) | ~~(switched, then failed)~~ HDR10 |
 | HLS variant fetched directly | yes | SDR |
 | **Progressive fMP4, `hvc1` + `dvvC`, byte ranges** | **yes** | **HDR10**, bright |
 | **Progressive fMP4, forced `dvh1` sample entry** | **yes** | **Dolby Vision** |
 
-Both progressive files play 4K HEVC at 26.5 Mbit/s with zero stalls. The last row
-is the whole goal of decision 2, reached with no playlist of any kind.
+Only the first row is retracted — a master playlist does open, and drives the
+television to HDR10. The comparison that decided the outcome is untouched: both
+progressive files play 4K HEVC at 26.5 Mbit/s with zero stalls, and the last row is
+the whole goal of decision 2, reached with no playlist of any kind and by nothing
+else tried since.
 
 The final missing piece was one field. `hvc1` + `dvvC` is the *cross-compatible*
 form, and a player is entitled to read it as HDR10 — which is exactly what
@@ -444,6 +453,71 @@ pre-generated, and what seeking costs when it is.
   defaults to 25 fps, silently, which on this 24 fps source drifts the audio by
   1.09 s per 30 s — nearly five minutes across the film. `:fps=` is mandatory, and
   the wider lesson is that the elementary-stream detour is a liability.
+
+#### Second HLS pass (2026-08-05)
+
+The first pass rejected HLS on a false premise, so the question was reopened and
+measured properly: **one case per cold launch**, verdict read from
+`AVPlayerItemAccessLog` and `AVPlayerItemErrorLog` rather than from a badge, with
+each case in its own directory because AVFoundation caches playlists by URL.
+
+All rows below serve the same 30 s 2160p HEVC slice (Dolby Vision profile 8.1,
+`bl_compat` 1, AC-3) unless stated otherwise.
+
+| Case | Master | Media | Result |
+| --- | --- | --- | --- |
+| A | none — variant fetched directly | GPAC | plays, 3840×2160, **SDR** |
+| D | `v6`, `CODECS` + `SUPPLEMENTAL-CODECS` + `VIDEO-RANGE` | GPAC | fails |
+| E | `v6`, no `CODECS` | GPAC | fails |
+| L | `v10`, `CODECS` + `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"` | GPAC (`bl_compat` 6) | fails |
+| **N** | `v10`, `CODECS="hvc1…"` only | GPAC (`bl_compat` 6) | **plays, 3840×2160, 0 stalls, HDR10** |
+| P | `v10`, `CODECS` + `SUPPLEMENTAL-CODECS`, honest peak `BANDWIDTH` | GPAC `dvp=f8.hdr10` (`bl_compat` 1) | fails |
+| R | `v10`, `CODECS="hvc1…"` only | GPAC `dvp=f8.hdr10` (`bl_compat` 1) | fails |
+| V | `v10`, `CODECS="dvh1.08.06"`, sample entry patched to `dvh1` | GPAC | fails (`-16044`) |
+| — | Apple's published `v6` master, from Apple's CDN | Apple profile-5 4K | **plays, Dolby Vision, picture** |
+
+**A master playlist opens.** Case N settles it: a hand-written master, served from
+the dev Mac, over locally packaged media, plays 4K HEVC with zero stalls and drives
+the television to HDR10. The first pass's central claim was wrong.
+
+**This Apple TV does Dolby Vision over HLS.** Apple's unchanged reference stream
+produces both a moving 3840×2160 picture and the Dolby Vision badge. The hardware
+chain and tvOS path are not the limit.
+
+**Nothing delivers *this library's* profile 8.1 as Dolby Vision over HLS.** Five
+configurations were tried — cross-compatible `hvc1` with and without
+`SUPPLEMENTAL-CODECS`, over both `bl_compat` 6 and `bl_compat` 1 media, and a
+`dvh1`-declared variant with the sample entry patched to match. All fail. The only
+thing that plays is HDR10.
+
+Two structural facts explain why this is not merely an authoring slip:
+
+- **Apple's own stream is profile 5**, declared directly as `CODECS="dvh1.05.06"`
+  with no `SUPPLEMENTAL-CODECS` anywhere in the manifest. Profile 5 is not reachable
+  from 8.1 by repackaging — it has a different, non-backward-compatible base layer —
+  so the working reference is in a form this library cannot be converted into
+  without re-encoding.
+- **`SUPPLEMENTAL-CODECS` is the mechanism designed for cross-compatible 8.1**, and
+  it has never opened here in any configuration.
+
+One negative result is *not* evidence and is recorded so it is not re-used: a
+locally served master referencing Apple's remote media fails (`-16044`) under both
+mixed and uniform schemes, with matching MIME types. That is a cross-origin artifact
+of the test rig, which production never reproduces — master and media share an
+origin there, exactly as in case N.
+
+`mediastreamvalidator` 1.26.143 was run against the failing cases. It reports no
+Dolby Vision or `SUPPLEMENTAL-CODECS` error — only generic authoring findings (a
+frame-rate change at one segment, missing `CLOSED-CAPTIONS=NONE`, a deprecated
+playlist MIME type from the test server) that do not distinguish the failing cases
+from the playing one.
+
+**Consequence for decision 2.** The destination is unchanged — progressive MP4 is
+what delivers Dolby Vision, and it is still simpler. What changes is the reason and
+the fallback: HLS is a **working HDR10 path**, not a broken one, so if streaming
+ever becomes preferable to byte ranges, it costs dynamic range rather than being
+impossible. Should Dolby Vision over HLS ever be needed, the only known route is a
+profile-5 rendition, which means re-encoding and is out of scope.
 
 ### Phase 0.1 — foundations
 

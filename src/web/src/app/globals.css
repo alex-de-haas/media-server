@@ -8,7 +8,6 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-inter);
-  --font-serif: var(--font-fraunces);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -135,4 +134,11 @@
   html {
     @apply font-sans;
   }
+}
+/* Chrome a shell already renders. The selector is positive because an absent attribute means
+   standalone, where the app is the only thing rendering its own header; unlayered so it outranks
+   the display utilities on the elements it hides. */
+html[data-hosty-launch="embedded"] .hosty-shell-chrome,
+html[data-hosty-launch="native"] .hosty-shell-chrome {
+  display: none;
 }

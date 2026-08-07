@@ -2,10 +2,10 @@
 
 import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Trash2, X } from "lucide-react";
+import { AlertTriangle, Info, Trash2, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
-import { formatBytes, formatEta, formatPercent, formatTimeAgo } from "@/lib/format";
+import { formatBytes, formatEta, formatPercent, formatTimeAgo, objectAudioFormat } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { ActivityCard, ActivityCardHeader, ActivityProgress, ActivityQueued, ActivityStats, IconAction } from "@/components/activity-card";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,66 @@ const HARDWARE = [
   { value: "vaapi", label: "VAAPI — GPU" },
   { value: "none", label: "Software — CPU" },
 ];
+
+// Not CRF numbers: the engine maps a level onto whichever encoder the host reaches, so the same level means
+// the same picture whether it lands on libx265 or a GPU.
+const QUALITY = [
+  { value: "highest", label: "Highest — near-transparent" },
+  { value: "high", label: "High — recommended" },
+  { value: "balanced", label: "Balanced — noticeably smaller" },
+  { value: "small", label: "Small — size first" },
+];
+
+// What each level came out at on the file the engine's mapping was measured against — a 67.2 Mbps 4K HDR
+// remux, where high landed at 19.85 Mbps (the table is in the engine's compression-controls doc). Applied
+// as a share of this source's own video bitrate rather than quoted as one absolute figure, so the estimate
+// tracks the file in front of the operator. It is an anchor, not a prediction: a level asks for a picture,
+// and a source that is already an efficient encode has far less left to give up.
+const QUALITY_SHARE: Record<string, number> = {
+  highest: 0.44,
+  high: 0.3,
+  balanced: 0.18,
+  small: 0.1,
+};
+
+/** E-AC-3 bitrate for a track, by channel count. Sent explicitly so the row can state the resulting size;
+ * left to the encoder these would be 448/192/96, which is thriftier than a library wants for 5.1. */
+function audioBitrateFor(channels: number | null): number {
+  if ((channels ?? 2) > 2) return 640;
+  return channels === 1 ? 128 : 256;
+}
+
+/** What one track weighs, at the bitrate the probe recorded for it. Null when the file stated none — the
+ * caller then says nothing rather than carving up the source's overall rate, which measures the file and
+ * not this track. */
+function streamBytes(stream: MediaStream, durationSeconds: number): number | null {
+  return stream.bitrate ? (durationSeconds * stream.bitrate) / 8 : null;
+}
+
+/** What re-encoding this track buys and what it costs. Both sides are bitrate times duration, so they
+ * compare like for like; a source that recorded no bitrate for the track simply has no "before" to show and
+ * the row leads with the result. The downmix note is not a footnote: E-AC-3 stops at 5.1, and losing the
+ * height channels is a real loss that is invisible in the output. */
+function audioReEncodeHint(stream: MediaStream, durationSeconds: number): string {
+  const kbps = audioBitrateFor(stream.channels);
+  const size = formatBytes((durationSeconds * kbps * 1000) / 8);
+  const channels = stream.channels ?? 2;
+  const layout = channels > 6 ? `${channels} channels → 5.1` : `${channels} channels`;
+  const before = streamBytes(stream, durationSeconds);
+  // Losing the object layer outweighs every other number on this line, so it leads. ffmpeg encodes neither
+  // JOC nor DTS:X, so there is no bitrate at which this track keeps them — the only way to keep them is to
+  // copy the track.
+  // The separator only earns its place when a "before" size follows it to be separated from; with no
+  // recorded bitrate the arrow reads straight off the loss note — "drops Atmos → E-AC-3, …" — rather than
+  // leaving a dangling "· →".
+  const objects = objectAudioFormat(stream.profile);
+  const loss = objects ? `drops ${objects} ${before ? "· " : ""}` : "";
+  return `${loss}${before ? `${formatBytes(before)} ` : ""}→ E-AC-3, ${layout}, ${kbps} kbps · about ${size}`;
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
 
 const RESOLUTIONS = [
   { value: "source", label: "Keep original" },
@@ -71,6 +131,23 @@ export function TranscodeDialog({
   // The files beside the video. They are not tracks of this container — each is an input of its own — so
   // they carry ids rather than indexes and are selected separately from the two lists above.
   const sidecars = source.streams.filter((stream) => stream.isExternal);
+  // 100-ns ticks. Every size on this dialog is a bitrate times this, so they are all comparable with each
+  // other — and all absent together on a source whose tracks never recorded one.
+  const durationSeconds = source.durationTicks / 10_000_000;
+  // The picture, not the poster: a container with embedded cover art carries that as a video stream too, so
+  // the costliest one is the one an encode is actually about.
+  const videoBytes = source.streams
+    .filter((stream) => stream.type === "Video" && !stream.isExternal)
+    .reduce<number | null>((largest, stream) => {
+      const bytes = streamBytes(stream, durationSeconds);
+      return bytes !== null && (largest === null || bytes > largest) ? bytes : largest;
+    }, null);
+  // Only the tracks that state a bitrate. Leaving the silent ones out can only understate this side, which
+  // is the safe direction: the split below claims audio is the larger half, and it must never make that
+  // claim on a total it filled in itself.
+  const sizedAudio = audioStreams.filter((stream) => stream.bitrate);
+  const audioBytes = sizedAudio.reduce((total, stream) => total + (streamBytes(stream, durationSeconds) ?? 0), 0);
+  const audioOutweighsVideo = videoBytes !== null && audioBytes > videoBytes;
   const sourceDefaultAudio = audioStreams.find((stream) => stream.isDefault)?.index ?? audioStreams[0]?.index ?? null;
   const sourceDefaultSubtitle = subtitleStreams.find((stream) => stream.isDefault)?.index ?? null;
   const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat ?? null;
@@ -83,7 +160,7 @@ export function TranscodeDialog({
   const codecId = useId();
   const hardwareId = useId();
   const resolutionId = useId();
-  const crfId = useId();
+  const qualityId = useId();
 
   // Opening from Merge means the operator already said "fold these in", and folding in is a copy unless
   // they ask for more — so the dialog opens on "keep the video" rather than silently proposing a re-encode
@@ -93,7 +170,10 @@ export function TranscodeDialog({
   const [codec, setCodec] = useState("hevc");
   const [hardware, setHardware] = useState("auto");
   const [resolution, setResolution] = useState("source");
-  const [crf, setCrf] = useState("");
+  const [quality, setQuality] = useState("high");
+  // Which kept audio tracks are re-encoded instead of copied, keyed by stream id. Empty is the old
+  // behaviour — every track copied byte for byte.
+  const [audioReEncoded, setAudioReEncoded] = useState<Set<string>>(() => new Set());
   // Names and languages the operator corrected, keyed by stream id. Only what actually changed is sent: an
   // untouched field keeps whatever the source stream carries, so correcting one track never freezes the
   // others' metadata.
@@ -114,7 +194,8 @@ export function TranscodeDialog({
       setCodec("hevc");
       setHardware("auto");
       setResolution("source");
-      setCrf("");
+      setQuality("high");
+      setAudioReEncoded(new Set());
       setTitles({});
       setLanguages({});
       setAudioKept(new Set(audioStreams.map((stream) => stream.index)));
@@ -256,8 +337,8 @@ export function TranscodeDialog({
         sourceId: source.id,
         videoCodec: isCopy ? "copy" : codec,
         hardwareAcceleration: isCopy ? undefined : hardware,
-        // CRF only applies to software encoding; the backend ignores it otherwise.
-        crf: !isCopy && hardware === "none" && crf.trim() ? Number(crf) : null,
+        // A level is meaningless without an encode, and the API refuses it alongside a copied video.
+        qualityLevel: isCopy ? null : quality,
         maxHeight: !isCopy && resolution !== "source" ? Number(resolution) : null,
         audioStreamIndexes: audioChanged ? keptAudio : undefined,
         subtitleStreamIndexes: subtitlesChanged ? keptSubtitles : undefined,
@@ -265,6 +346,10 @@ export function TranscodeDialog({
         defaultSubtitleStreamIndex: subtitleDefaultChanged ? defaultSubtitle : undefined,
         mergeStreamIds: merging ? mergeStreamIds : undefined,
         metadataEdits,
+        // Only tracks that survive: re-encoding one the job drops is contradictory, and the API refuses it.
+        audioTargets: audioStreams
+          .filter((stream) => audioReEncoded.has(stream.id) && audioKept.has(stream.index))
+          .map((stream) => ({ streamId: stream.id, codec: "eac3", bitrate: audioBitrateFor(stream.channels) })),
       };
       return mediaServer.createTranscodeJob(input);
     },
@@ -303,6 +388,20 @@ export function TranscodeDialog({
             Source: <span className="font-mono">{source.container}</span> · {formatBytes(source.sizeBytes)}
             {source.versionName ? ` · ${source.versionName}` : ""}
           </p>
+
+          {/* Before the video controls on purpose. Re-encoding the picture is the expensive, lossy, day-long
+              option and it is the one this dialog opens on; when the dubs are the larger half, the operator
+              should learn that before scrolling past it. */}
+          {audioOutweighsVideo ? (
+            <div className="text-muted-foreground flex items-start gap-2 rounded-md border p-2 text-xs">
+              <Info className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                Audio is the larger half of this file: {formatBytes(audioBytes)} across{" "}
+                {plural(sizedAudio.length, "track")}, against {formatBytes(videoBytes ?? 0)} of video. Dropping
+                tracks and re-encoding the ones you keep is the bigger win, and it leaves the picture untouched.
+              </span>
+            </div>
+          ) : null}
 
           <Field>
             <FieldLabel htmlFor={modeId}>Video</FieldLabel>
@@ -378,19 +477,36 @@ export function TranscodeDialog({
                 </Select>
               </Field>
 
-              {hardware === "none" && (
-                <Field>
-                  <FieldLabel htmlFor={crfId}>Quality (CRF, optional)</FieldLabel>
-                  <Input
-                    id={crfId}
-                    inputMode="numeric"
-                    placeholder="e.g. 23 — lower is better quality"
-                    value={crf}
-                    onChange={(e) => setCrf(e.target.value.replace(/[^0-9]/g, ""))}
-                  />
-                  <p className="text-muted-foreground text-xs">0–51. Leave blank for the encoder default.</p>
-                </Field>
-              )}
+              <Field>
+                <FieldLabel htmlFor={qualityId}>Quality</FieldLabel>
+                <Select value={quality} onValueChange={(value) => setQuality((value as string | null) ?? "high")} items={QUALITY}>
+                  <SelectTrigger id={qualityId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {QUALITY.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* "Level 3" means nothing to someone deciding whether to spend a day of CPU on a file;
+                    what it costs does. Absent — rather than guessed at — when the source never recorded a
+                    video bitrate, which is the only figure this can honestly come from. */}
+                {videoBytes !== null ? (
+                  <p className="text-xs">
+                    About {formatBytes(videoBytes * QUALITY_SHARE[quality])} of video
+                    {resolution !== "source" ? ` or less at ${resolution}p` : ""}, from {formatBytes(videoBytes)}.
+                  </p>
+                ) : null}
+                <p className="text-muted-foreground text-xs">
+                  The same level on every encoder — the engine translates it for whichever one runs the job.
+                  {videoBytes !== null
+                    ? " The size is an anchor rather than a promise: a level asks for a picture, and what that costs follows the content."
+                    : ""}
+                </p>
+              </Field>
             </>
           )}
 
@@ -406,6 +522,16 @@ export function TranscodeDialog({
             languages={languages}
             onLanguage={setLanguages}
             isBadLanguage={isBadLanguage}
+            isReEncoded={(stream) => audioReEncoded.has(stream.id)}
+            onReEncode={(stream, checked) =>
+              setAudioReEncoded((current) => {
+                const next = new Set(current);
+                if (checked) next.add(stream.id);
+                else next.delete(stream.id);
+                return next;
+              })
+            }
+            reEncodeHint={(stream) => audioReEncodeHint(stream, durationSeconds)}
           />
           <TrackList
             title="Subtitles"
@@ -465,6 +591,9 @@ function TrackList({
   languages,
   onLanguage,
   isBadLanguage,
+  isReEncoded,
+  onReEncode,
+  reEncodeHint,
 }: {
   title: string;
   description?: string;
@@ -481,6 +610,11 @@ function TrackList({
   onLanguage: (update: (current: Record<string, string>) => Record<string, string>) => void;
   /** The submit gate's own rule, passed down so a row cannot flag by a different one than it blocks by. */
   isBadLanguage: (value: string) => boolean;
+  /** Audio only: re-encode this track instead of copying it. Absent for the lists where it has no meaning. */
+  isReEncoded?: (stream: MediaStream) => boolean;
+  onReEncode?: (stream: MediaStream, checked: boolean) => void;
+  /** What the operator gets for it — the resulting codec, layout and size. */
+  reEncodeHint?: (stream: MediaStream) => string;
 }) {
   if (!streams.length) {
     return null;
@@ -499,13 +633,36 @@ function TrackList({
           // Only while the track is kept: a dropped track carries no edit, so flagging its field would point
           // at something that is not blocking anything.
           const badLanguage = checked && isBadLanguage(language);
+          const objects = objectAudioFormat(stream.profile);
           return (
             <li key={stream.id} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <Checkbox checked={checked} onCheckedChange={(value) => onToggle(stream, value === true)} aria-label={`Copy ${label}`} />
-                <span className="min-w-0 flex-1 truncate leading-6">{label}</span>
+                <span className="min-w-0 truncate leading-6">{label}</span>
+                {/* Atmos and DTS:X are invisible in the summary beside it — the codec reads TrueHD either
+                    way — and they are the one reason to leave a track alone. Flagged here rather than only
+                    in the re-encode hint, which is not shown until the track is already being re-encoded. */}
+                {objects ? (
+                  <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 text-[11px] leading-5">
+                    {objects}
+                  </span>
+                ) : null}
+                <span className="flex-1" />
                 {stream.fileName ? (
                   <span className="text-muted-foreground hidden shrink-0 font-mono text-xs sm:inline">{stream.fileName}</span>
+                ) : null}
+                {onReEncode ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isReEncoded?.(stream) ? "secondary" : "ghost"}
+                    className="h-6 shrink-0 px-2 text-xs"
+                    disabled={!checked}
+                    aria-pressed={isReEncoded?.(stream) ?? false}
+                    onClick={() => onReEncode(stream, !(isReEncoded?.(stream) ?? false))}
+                  >
+                    Re-encode
+                  </Button>
                 ) : null}
                 {onDefault ? (
                   <Button
@@ -521,6 +678,11 @@ function TrackList({
                   </Button>
                 ) : null}
               </div>
+              {/* Stated on the row rather than once for the dialog, because the downmix is a real loss and
+                  it is this track that takes it. */}
+              {checked && isReEncoded?.(stream) && reEncodeHint ? (
+                <p className="text-muted-foreground pl-6 text-xs">{reEncodeHint(stream)}</p>
+              ) : null}
               {/* The name and language written into the output. Editing is offered here because a job is
                   being submitted anyway — changing metadata alone would still rewrite the whole file.
                   Indented under the checkbox with padding rather than a margin: a w-full input plus a margin
@@ -581,7 +743,16 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
   // began (a queued job hasn't started at all), so the line says "added" like the ingest card rather than
   // claiming a start time the API doesn't report.
   const age = formatTimeAgo(job.createdAt);
-  const meta = [job.videoCodec === "copy" ? "Remux" : job.videoCodec.toUpperCase(), age && `added ${age}`]
+  // A finished job has to explain where its size went: the picture setting alone does not, once audio can
+  // be the larger half of what changed.
+  const meta = [
+    job.videoCodec === "copy" ? "Remux" : job.videoCodec.toUpperCase(),
+    job.qualityLevel && job.qualityLevel !== "high" ? job.qualityLevel : null,
+    job.reEncodedAudioTracks > 0
+      ? `${job.reEncodedAudioTracks} audio re-encoded`
+      : null,
+    age && `added ${age}`,
+  ]
     .filter(Boolean)
     .join(" · ");
 

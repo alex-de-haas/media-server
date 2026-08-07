@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { episodeLabel } from "@/lib/format";
+import { episodeLabel, objectAudioFormat } from "@/lib/format";
+
+describe("objectAudioFormat", () => {
+  it("reads the object layer out of the codec profile", () => {
+    // ffprobe reports `truehd` as the codec either way; the profile is the only place this appears.
+    expect(objectAudioFormat("Dolby TrueHD + Dolby Atmos")).toBe("Atmos");
+    expect(objectAudioFormat("Dolby Digital Plus + Dolby Atmos")).toBe("Atmos");
+    expect(objectAudioFormat("DTS-HD MA + DTS:X")).toBe("DTS:X");
+  });
+
+  it("says nothing for a profile that carries no object layer", () => {
+    expect(objectAudioFormat("DTS-HD MA")).toBeNull();
+    expect(objectAudioFormat("Dolby TrueHD")).toBeNull();
+    expect(objectAudioFormat("DTS")).toBeNull();
+  });
+
+  it("treats a missing profile as unknown rather than as absence", () => {
+    // A file probed from container headers carries no profile at all — that is "nobody looked", and the
+    // caller shows nothing rather than implying the track has no Atmos.
+    expect(objectAudioFormat(null)).toBeNull();
+    expect(objectAudioFormat(undefined)).toBeNull();
+    expect(objectAudioFormat("")).toBeNull();
+  });
+});
 
 describe("episodeLabel", () => {
   it("zero-pads a single episode", () => {

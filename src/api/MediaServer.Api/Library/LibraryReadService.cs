@@ -610,6 +610,7 @@ public sealed class LibraryReadService(
         stream.FrameRate,
         stream.BitDepth,
         stream.SampleRate,
+        stream.Bitrate,
         stream.IsDefault,
         stream.IsForced,
         stream.IsExternal,

@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-07-28
+Updated: 2026-08-06
 
 ## Description
 
@@ -17,13 +17,22 @@ iframe-safe.
 Navigation is a **top tab bar**: primary tabs available to all users, with
 admin-only surfaces behind a right-aligned admin menu. Detail pages are push
 routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
-`implementation-plan.md`.)
+`implementation-plan.md`.) The tab bar renders only in `standalone` launches;
+under a shell it is hidden as duplicated chrome — the shell renders the manifest
+`ui.navigation` pages instead (see the hosty-runtime-app feature's Launch Mode
+section).
 
 - **Home** (`/`) — overview rails built from playback state: Continue Watching
   (resume), Next Up, and Recently Added, plus an admin-only ops strip (active
   downloads, items needing review, catalog warnings).
 - **Movies / Series** (`/movies`, `/series`) — poster grids with an optional
-  catalog selector when more than one applicable catalog exists. The selection
+  catalog selector when more than one applicable catalog exists. Every poster
+  card — here, in the Home rails, on Collections, and on a person's credits —
+  names its title under the art, over one muted caption line the surface fills
+  in: `Movie · 2019` in these grids and the Recently Added rail, the member
+  count on Collections, the year and the role in a person's credits, nothing at
+  all where the caller has nothing to add. A card without artwork says "No
+  poster" in place of the image. The selection
   is stored in `?catalog=<id>`, applied by the backend, and preserved through
   detail navigation and refresh. Movies offers `Movie` catalogs; Series offers
   `Series` and `Anime` catalogs. Offline catalogs remain selectable and are

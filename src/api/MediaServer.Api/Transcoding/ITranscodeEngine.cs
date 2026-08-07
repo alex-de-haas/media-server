@@ -12,14 +12,23 @@ public sealed record TranscodeJobRequest(
     string OutputRelativePath,
     string VideoCodec,
     string HardwareAcceleration,
-    int? Crf,
+    string? QualityLevel,
     int? MaxHeight = null,
     IReadOnlyList<int>? AudioStreamIndexes = null,
     IReadOnlyList<int>? SubtitleStreamIndexes = null,
     int? DefaultAudioStreamIndex = null,
     int? DefaultSubtitleStreamIndex = null,
     IReadOnlyList<EngineAdditionalInput>? AdditionalInputs = null,
-    IReadOnlyList<EngineMetadataOverride>? MetadataOverrides = null);
+    IReadOnlyList<EngineMetadataOverride>? MetadataOverrides = null,
+    IReadOnlyList<EngineAudioTarget>? AudioTargets = null);
+
+/// <summary>
+/// Re-encodes one mapped audio track instead of copying it. <see cref="Input"/> is the ordinal of the file
+/// the stream comes from — 0 is the primary input — and <see cref="StreamIndex"/> its absolute index there.
+/// <see cref="BitrateKbps"/> may be left null, in which case the engine lets ffmpeg scale a default to the
+/// channel count.
+/// </summary>
+public sealed record EngineAudioTarget(int Input, int StreamIndex, string Codec, int? BitrateKbps = null);
 
 /// <summary>
 /// Rewrites one output stream's language and/or title. <see cref="Input"/> is the ordinal of the file the

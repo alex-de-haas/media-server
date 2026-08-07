@@ -150,6 +150,103 @@ test("an empty month offers a jump to the last watched one", async ({ page }) =>
   await expect(page).toHaveURL(/month=2026-03/, { timeout: 15_000 });
 });
 
+const undatedMarks = {
+  entries: [
+    {
+      entryId: "u1",
+      mediaItemId: "movie-2",
+      publicId: "movie-2",
+      kind: "Movie",
+      title: "Solaris",
+      posterUrl: null,
+      seriesTitle: null,
+      seasonNumber: null,
+      episodeNumber: null,
+      origin: "Manual",
+    },
+  ],
+  total: 1,
+};
+
+test("a play is deleted from the day detail, once confirmed", async ({ page }) => {
+  const events = [...watchedHistory.events];
+  const deleted: string[] = [];
+
+  await setupApp(page, {
+    // A function, not the object: the delete is only proven by the refetch coming back without the row.
+    watchHistoryCalendar: () => ({ ...watchedHistory, events }),
+    deleteWatchHistoryEntry: (entryId) => {
+      deleted.push(entryId);
+      events.splice(
+        events.findIndex((event) => event.entryId === entryId),
+        1,
+      );
+    },
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  await page.getByTestId("calendar-grid").getByRole("button", { name: /Severance/ }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: /^Delete this play: Severance · S2E1/ }).click();
+
+  // Nothing has gone yet: the confirmation names the one play it is about.
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm.getByText(/S2E1 · Episode 1/)).toBeVisible();
+  expect(deleted).toEqual([]);
+
+  await confirm.getByRole("button", { name: "Delete", exact: true }).click();
+
+  await expect(dialog.getByText("S2E1 · Episode 1")).toHaveCount(0);
+  await expect(dialog.getByText("S2E2 · Episode 2")).toBeVisible();
+  expect(deleted).toEqual(["p1"]);
+  // The grid followed the diary: the binge card is down to one episode.
+  await expect(page.getByTestId("calendar-grid").getByText("1 episode")).toBeVisible();
+});
+
+test("cancelling the confirmation deletes nothing", async ({ page }) => {
+  const deleted: string[] = [];
+  await setupApp(page, {
+    watchHistoryCalendar: watchedHistory,
+    deleteWatchHistoryEntry: (entryId) => deleted.push(entryId),
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  await page.getByTestId("calendar-grid").getByRole("button", { name: /Severance/ }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: /^Delete this play: Severance · S2E1/ }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+
+  expect(deleted).toEqual([]);
+  await expect(dialog.getByText("S2E1 · Episode 1")).toBeVisible();
+});
+
+test("an undated mark can be deleted from its own list", async ({ page }) => {
+  const entries = [...undatedMarks.entries];
+  const deleted: string[] = [];
+
+  await setupApp(page, {
+    watchHistoryCalendar: { ...watchedHistory, undated: { movies: 1, episodes: 0 } },
+    watchHistoryUndated: () => ({ entries, total: entries.length }),
+    deleteWatchHistoryEntry: (entryId) => {
+      deleted.push(entryId);
+      entries.splice(
+        entries.findIndex((entry) => entry.entryId === entryId),
+        1,
+      );
+    },
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  await page.getByRole("button", { name: "Undated 1" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Delete this undated mark: Solaris" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }).click();
+
+  expect(deleted).toEqual(["u1"]);
+  // The control that opened this dialog is gone, so the dialog has to explain itself.
+  await expect(dialog.getByText("Nothing is left without a date.")).toBeVisible();
+});
+
 test("a phone gets a date-grouped agenda instead of seven columns", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await setupApp(page, { watchHistoryCalendar: watchedHistory });

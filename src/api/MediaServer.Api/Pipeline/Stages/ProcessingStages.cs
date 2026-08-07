@@ -258,6 +258,7 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
                     HdrFormat = stream.HdrFormat,
                     Channels = stream.Channels,
                     SampleRate = stream.SampleRate,
+                    Bitrate = stream.Bitrate,
                     IsDefault = stream.IsDefault,
                     IsForced = stream.IsForced,
                 });

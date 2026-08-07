@@ -1,7 +1,7 @@
 # Recommendation Providers
 
 Created: 2026-07-25
-Updated: 2026-07-30
+Updated: 2026-08-06
 
 ## Description
 
@@ -133,6 +133,10 @@ to all available rather than silently emptying the feed.
   (`Everything | In library | Not in library`). The source control appears only
   once a second source exists; turning the last one off is treated as "all"
   rather than leaving an unexplained empty feed.
+- A card carries the same two lines as a library poster tile: the title under
+  the art, then a `Movie · 2010` caption. A title already held is marked with
+  an amber check beside that caption — the same mark the tracked drawer and the
+  calendar use — and a discovery carries no mark at all.
 - A held title links to its detail page. A discovery's poster opens the
   [title preview](../title-preview/feature.md), and the card offers **Track**,
   handing off to the existing watchlist flow — this page never pretends playback

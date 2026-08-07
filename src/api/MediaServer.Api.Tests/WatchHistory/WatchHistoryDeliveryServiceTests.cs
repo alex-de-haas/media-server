@@ -386,6 +386,34 @@ public sealed class WatchHistoryDeliveryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ADeletedEntrysRemovalReachesTheProvider()
+    {
+        // A forgotten switch arm would settle as Terminal rather than fail to compile — and a Terminal
+        // event blocks the user's explicit sync until they resolve it by hand.
+        _provider.History.Add(new WatchHistoryPlay(Identity(), _time.GetUtcNow(), "111"));
+        _provider.History.Add(new WatchHistoryPlay(Identity(), _time.GetUtcNow(), "222"));
+        var queued = Queue(WatchHistoryOutboxOperation.RemoveOwnedEntries, remoteIds: ["111"]);
+
+        await Service().DeliverAsync(CancellationToken.None);
+
+        Assert.Equal(WatchHistoryOutboxStatus.Completed, (await Reload(queued)).Status);
+        Assert.Equal(["111"], _provider.Removed);
+        Assert.Equal("222", _provider.History.Single().RemoteId);
+    }
+
+    [Fact]
+    public async Task ADeletedEntrysRemovalIsNotBroadenedByAProviderThatCannotDoIt()
+    {
+        _provider.Overrides = _provider.Overrides with { IndividualEntryRemoval = false };
+        var queued = Queue(WatchHistoryOutboxOperation.RemoveOwnedEntries, remoteIds: ["111"]);
+
+        await Service().DeliverAsync(CancellationToken.None);
+
+        Assert.Equal(WatchHistoryOutboxStatus.Terminal, (await Reload(queued)).Status);
+        Assert.Empty(_provider.Removed);
+    }
+
+    [Fact]
     public async Task ARetryDoesNotRepostAnExactPlayThatAlreadyLanded()
     {
         // The provider may have accepted the first attempt before the process died. Providers do not

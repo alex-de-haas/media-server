@@ -1,11 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSameMonth, startOfMonth } from "date-fns";
+import { Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
+import { errorMessage } from "@/lib/ui";
 import { formatDateKey, toDateKey, type CalendarMode } from "@/lib/calendar";
-import { mediaServer, type WatchHistoryCalendarEvent } from "@/lib/media-server";
+import {
+  mediaServer,
+  type WatchHistoryCalendarEvent,
+  type WatchHistoryUndatedEntry,
+} from "@/lib/media-server";
 import {
   episodeLabel,
   filterEvents,
@@ -19,6 +26,16 @@ import {
   type WatchedKindFilter,
 } from "@/lib/watch-history-calendar";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -40,8 +57,29 @@ const FILTERS: Array<{ value: WatchedKindFilter; label: string }> = [
 ];
 
 /**
- * The Watched mode: a screening diary over the per-play history. Read-only by design — this answers
- * "what did I finish on this date", and correcting history is a separate concern.
+ * Everything a deleted play can move: the diary itself, and the per-item watched state and play count
+ * projected from it. Invalidating an inactive query only marks it stale, so listing the library keys
+ * costs nothing here — it stops a stale watched badge appearing on the way back.
+ */
+const AFFECTED_BY_DELETE = [
+  ["watch-history-calendar"],
+  ["watch-history-undated"],
+  ["library"],
+  ["library-detail"],
+  ["episodes"],
+  ["nextup"],
+  ["resume"],
+  ["recent"],
+  ["removed-titles"],
+] as const;
+
+/** The one play a confirmation is currently asking about. */
+type DeleteTarget = { entryId: string; heading: string; detail: string | null };
+
+/**
+ * The Watched mode: a screening diary over the per-play history. It answers "what did I finish on
+ * this date"; the only edit it offers is deleting a single play that should not be there, from the
+ * day detail or the undated list.
  */
 export function WatchedCalendar({
   month,
@@ -55,11 +93,27 @@ export function WatchedCalendar({
   const [filter, setFilter] = useState<WatchedKindFilter>("all");
   const [dayDetail, setDayDetail] = useState<string | null>(null);
   const [undatedOpen, setUndatedOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const queryClient = useQueryClient();
 
   const range = monthGridInstants(month);
   const history = useQuery({
     queryKey: ["watch-history-calendar", range.from, range.toExclusive],
     queryFn: () => mediaServer.watchHistoryCalendar(range.from, range.toExclusive),
+  });
+
+  const remove = useMutation({
+    mutationFn: (entryId: string) => mediaServer.deleteWatchHistoryEntry(entryId),
+    onSuccess: () => {
+      setDeleteTarget(null);
+      for (const queryKey of AFFECTED_BY_DELETE) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+      toast.success("Play deleted");
+    },
+    // The confirmation stays open on failure: closing it would leave the row still there with only a
+    // toast to explain why, which reads as the delete having silently done nothing.
+    onError: (error) => toast.error("Couldn’t delete this play", { description: errorMessage(error) }),
   });
 
   const byDay = useMemo(
@@ -186,13 +240,41 @@ export function WatchedCalendar({
         dayKey={dayDetail}
         groups={detailGroups}
         onClose={() => setDayDetail(null)}
+        onDelete={setDeleteTarget}
       />
 
       <UndatedDialog
         open={undatedOpen}
         filter={filter}
         onClose={() => setUndatedOpen(false)}
+        onDelete={setDeleteTarget}
       />
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this play?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Removes one recorded play of{" "}
+              <span className="text-foreground font-medium">{deleteTarget?.heading}</span>
+              {deleteTarget?.detail && <> ({deleteTarget.detail})</>} from your history. The play
+              count follows, and a connected service is asked to drop the entry when this app is the
+              one that put it there. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              size="sm"
+              disabled={remove.isPending}
+              onClick={() => deleteTarget && remove.mutate(deleteTarget.entryId)}
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 
@@ -244,10 +326,12 @@ function DayDetailDialog({
   dayKey,
   groups,
   onClose,
+  onDelete,
 }: {
   dayKey: string | null;
   groups: WatchedGroup[];
   onClose: () => void;
+  onDelete: (target: DeleteTarget) => void;
 }) {
   const plays = groups.flatMap((group) => group.plays).sort((a, b) => a.watchedAt.localeCompare(b.watchedAt));
 
@@ -259,8 +343,13 @@ function DayDetailDialog({
           <DialogDescription>Watched on this day.</DialogDescription>
         </DialogHeader>
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+          {/* Reachable by deleting the day's last play: the dialog stays put rather than vanishing
+              under the user mid-interaction. */}
+          {plays.length === 0 && (
+            <p className="text-muted-foreground px-1.5 text-sm">Nothing is left on this day.</p>
+          )}
           {plays.map((event) => (
-            <PlayRow key={event.entryId} event={event} />
+            <PlayRow key={event.entryId} event={event} onDelete={onDelete} />
           ))}
         </div>
       </DialogContent>
@@ -268,13 +357,19 @@ function DayDetailDialog({
   );
 }
 
-function PlayRow({ event }: { event: WatchHistoryCalendarEvent }) {
+function PlayRow({
+  event,
+  onDelete,
+}: {
+  event: WatchHistoryCalendarEvent;
+  onDelete: (target: DeleteTarget) => void;
+}) {
   const code = episodeLabel(event);
   const heading = event.kind === "Episode" ? (event.seriesTitle ?? event.title) : event.title;
   const secondary = event.kind === "Episode" ? [code, event.title].filter(Boolean).join(" · ") : null;
 
   return (
-    <div className="flex items-center gap-3 rounded-md p-1.5">
+    <div className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5">
       <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
         {event.posterUrl && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -282,7 +377,7 @@ function PlayRow({ event }: { event: WatchHistoryCalendarEvent }) {
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-serif text-sm font-medium">{heading}</p>
+        <p className="truncate text-sm font-medium">{heading}</p>
         {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
         {event.origin === "ProviderSync" && (
           <p className="text-muted-foreground text-[11px]">Imported</p>
@@ -293,7 +388,38 @@ function PlayRow({ event }: { event: WatchHistoryCalendarEvent }) {
         <span className="bg-brand h-3 w-0.5 rounded-full" aria-hidden />
         <span className="font-mono text-xs tabular-nums">{formatTime(event.watchedAt)}</span>
       </span>
+      <DeleteEntryButton
+        // Named down to the timestamp: a day can hold two plays of one movie, and two controls with
+        // the same accessible name leave a screen reader unable to say which one it is on.
+        label={`Delete this play: ${[heading, secondary, formatTime(event.watchedAt)].filter(Boolean).join(" · ")}`}
+        onClick={() =>
+          onDelete({
+            entryId: event.entryId,
+            heading,
+            detail: [secondary, formatTime(event.watchedAt)].filter(Boolean).join(" · "),
+          })
+        }
+      />
     </div>
+  );
+}
+
+/**
+ * The one edit this view offers. Always rendered rather than revealed on hover: a touch device has no
+ * hover, and a control that only exists on a pointer would be unreachable on the phone agenda.
+ */
+function DeleteEntryButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={label}
+      title={label}
+      className="text-muted-foreground hover:text-destructive size-7 shrink-0"
+      onClick={onClick}
+    >
+      <Trash2 className="size-3.5" />
+    </Button>
   );
 }
 
@@ -305,10 +431,12 @@ function UndatedDialog({
   open,
   filter,
   onClose,
+  onDelete,
 }: {
   open: boolean;
   filter: WatchedKindFilter;
   onClose: () => void;
+  onDelete: (target: DeleteTarget) => void;
 }) {
   const kind = filter === "movies" ? "Movie" : filter === "episodes" ? "Episode" : undefined;
   const undated = useQuery({
@@ -333,41 +461,62 @@ function UndatedDialog({
         </DialogHeader>
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {undated.isPending && <Skeleton className="h-14 w-full" />}
+          {/* Reachable by deleting the last mark: the `Undated N` control that opened this is already
+              gone, so the dialog has to say what happened rather than sit empty. */}
+          {undated.isSuccess && entries.length === 0 && (
+            <p className="text-muted-foreground px-1.5 text-sm">Nothing is left without a date.</p>
+          )}
           {truncated && (
             <p className="text-muted-foreground px-1.5 text-xs">
               Showing the most recent {entries.length} of {total}.
             </p>
           )}
           {entries.map((entry) => (
-            <div key={entry.entryId} className="flex items-center gap-3 rounded-md p-1.5">
-              <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
-                {entry.posterUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={entry.posterUrl} alt="" className="h-full w-full object-cover" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-serif text-sm font-medium">
-                  {entry.kind === "Episode" ? (entry.seriesTitle ?? entry.title) : entry.title}
-                </p>
-                {entry.kind === "Episode" && (
-                  <p className="text-muted-foreground truncate text-xs">
-                    {[
-                      entry.seasonNumber != null && entry.episodeNumber != null
-                        ? `S${entry.seasonNumber}E${entry.episodeNumber}`
-                        : null,
-                      entry.title,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                )}
-              </div>
-            </div>
+            <UndatedRow key={entry.entryId} entry={entry} onDelete={onDelete} />
           ))}
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function UndatedRow({
+  entry,
+  onDelete,
+}: {
+  entry: WatchHistoryUndatedEntry;
+  onDelete: (target: DeleteTarget) => void;
+}) {
+  const heading = entry.kind === "Episode" ? (entry.seriesTitle ?? entry.title) : entry.title;
+  const secondary =
+    entry.kind === "Episode"
+      ? [
+          entry.seasonNumber != null && entry.episodeNumber != null
+            ? `S${entry.seasonNumber}E${entry.episodeNumber}`
+            : null,
+          entry.title,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
+
+  return (
+    <div className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5">
+      <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
+        {entry.posterUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={entry.posterUrl} alt="" className="h-full w-full object-cover" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{heading}</p>
+        {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
+      </div>
+      <DeleteEntryButton
+        label={`Delete this undated mark: ${[heading, secondary].filter(Boolean).join(" · ")}`}
+        onClick={() => onDelete({ entryId: entry.entryId, heading, detail: secondary })}
+      />
+    </div>
   );
 }
 

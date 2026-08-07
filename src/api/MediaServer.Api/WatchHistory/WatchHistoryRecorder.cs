@@ -61,7 +61,8 @@ public sealed class WatchHistoryRecorder(
         database.PlaybackHistoryEntries.Add(entry);
 
         await StageOutboxAsync(
-            appUserId, item, row, entry, WatchHistoryOutboxOperation.AddExactWatch, identity, watchedAt, playSessionId, cancellationToken);
+            appUserId, item, row, entry, WatchHistoryOutboxOperation.AddExactWatch, identity, watchedAt,
+            discriminator: playSessionId, cancellationToken);
 
         return entry;
     }
@@ -120,7 +121,7 @@ public sealed class WatchHistoryRecorder(
         // with no local owner — and ownership is the only thing that permits removing it later.
         await StageOutboxAsync(
             appUserId, item, row, timeless, WatchHistoryOutboxOperation.EnsureTimelessWatched,
-            identity, occurredAt: null, sessionKey: null, cancellationToken);
+            identity, occurredAt: null, discriminator: null, cancellationToken);
     }
 
     /// <summary>
@@ -159,19 +160,129 @@ public sealed class WatchHistoryRecorder(
         var identity = await identities.MapAsync(item, cancellationToken);
         await StageOutboxAsync(
             appUserId, item, row, entry: null, WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries,
-            identity, occurredAt: null, sessionKey: null, cancellationToken,
+            identity, occurredAt: null, discriminator: null, cancellationToken,
             remoteIdSnapshot: remoteIds.Count > 0 ? JsonSerializer.Serialize(remoteIds) : null);
+    }
+
+    /// <summary>
+    /// Deletes one recorded play, reprojects the item's aggregates from what survives, and asks the
+    /// provider to remove the remote entry when — and only when — this app owns it.
+    /// </summary>
+    /// <remarks>
+    /// This is the one path that treats a play as a mistake rather than as history. Unwatching says
+    /// "not watched now" and deliberately keeps the count; deleting says "this play did not happen",
+    /// so the count has to follow. The caller is responsible for having loaded <paramref name="entry"/>
+    /// scoped to <paramref name="appUserId"/> — nothing below re-checks ownership of the row.
+    /// </remarks>
+    public async Task StageEntryDeletionAsync(
+        int appUserId, MediaItem item, UserItemData? row, PlaybackHistoryEntry entry, CancellationToken cancellationToken)
+    {
+        // Captured before the row goes, for the same reason unwatch captures its ids: afterwards there
+        // is nowhere left to read it from, and without it the remote entry would outlive the local one
+        // forever. An Unresolved link is excluded — the add committed but its id was never pinned
+        // down, and deleting on a guess destroys history this app did not create.
+        var remoteId = entry is { ProviderEntryOwned: true, ProviderHistoryId: { } id }
+            && entry.LinkStatus != PlaybackHistoryLinkStatus.Unresolved
+                ? id
+                : null;
+
+        database.PlaybackHistoryEntries.Remove(entry);
+
+        // The session gate outlives the entry — sessions are kept for 24 hours — and it decides
+        // whether a crossing counts by asking whether this session already completed. Left pointing at
+        // a play that no longer exists, it would answer "already counted" for the rest of the day: the
+        // same client session crossing the threshold again would mark the item played, count nothing,
+        // and record no entry at all. Deleting the play has to reopen the session that produced it.
+        var completions = await database.PlaybackSessions
+            .Where(session => session.AppUserId == appUserId && session.HistoryEntryId == entry.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var session in completions)
+        {
+            session.CompletedAt = null;
+            session.HistoryEntryId = null;
+            // ObservedBelowThreshold is left alone: that the session once played below the threshold
+            // is an observation about the session, and deleting a play does not unmake it.
+        }
+
+        var remaining = await database.PlaybackHistoryEntries
+            .Where(other => other.AppUserId == appUserId
+                && other.MediaItemId == item.Id
+                && other.Id != entry.Id)
+            .Select(other => other.WatchedAt)
+            .ToListAsync(cancellationToken);
+
+        if (row is not null)
+        {
+            Reproject(row, remaining);
+        }
+
+        if (remoteId is null)
+        {
+            // Nothing the provider can be asked to remove, so nothing is queued. Staging an empty
+            // event would complete as a no-op — but until the worker got to it, it would count as
+            // undelivered work and block an explicit sync for the user. Note this is the common case
+            // today: only timeless marks ever have their remote id resolved, so a deleted exact play
+            // survives at the provider and an explicit sync can re-import it.
+            return;
+        }
+
+        var identity = await identities.MapAsync(item, cancellationToken);
+        await StageOutboxAsync(
+            appUserId, item, row, entry: null, WatchHistoryOutboxOperation.RemoveOwnedEntries,
+            identity, occurredAt: null,
+            // Keyed on the entry, not on the row's watched-state transition: deleting two plays of the
+            // same item changes no state at all, so any row-derived discriminator would collide and
+            // the second removal would be swallowed as a duplicate.
+            discriminator: entry.Id.ToString("N"),
+            cancellationToken,
+            remoteIdSnapshot: JsonSerializer.Serialize(new[] { remoteId }));
+    }
+
+    /// <summary>Recomputes one item's aggregates after a play was deleted from it.</summary>
+    /// <remarks>
+    /// Two invariants, because the count is not a strict projection of the entry table — a mark,
+    /// unwatch and re-mark legitimately leaves one entry and a count of two, and a remap merges
+    /// history onto a row without recomputing it:
+    /// <list type="number">
+    /// <item>a deletion never <b>increases</b> the count, however far the two have drifted;</item>
+    /// <item>deleting the last entry leaves a clean slate rather than a count with nothing behind it.</item>
+    /// </list>
+    /// Between those, one deleted play is one fewer play, floored at what is actually left.
+    /// </remarks>
+    private void Reproject(UserItemData row, IReadOnlyList<DateTimeOffset?> remaining)
+    {
+        row.PlayCount = remaining.Count == 0
+            ? 0
+            : Math.Min(row.PlayCount, Math.Max(remaining.Count, row.PlayCount - 1));
+        row.LastWatchedAt = remaining.Count == 0 ? null : remaining.Max();
+
+        // Cleared only when nothing is left to say it was watched. Never set: deleting a play cannot
+        // make something watched, and an item deliberately unwatched must not flip back because one of
+        // its surviving plays was tidied away.
+        //
+        // The timestamp bump is load-bearing rather than cosmetic: it is the idempotency discriminator
+        // for manual marks, so without it a mark-watched after this deletion would hash to the key of
+        // the one before it and be swallowed as a duplicate.
+        if (remaining.Count == 0 && row.Played)
+        {
+            row.Played = false;
+            row.WatchedStateChangedAt = time.GetUtcNow();
+        }
+
+        // PlaybackPositionTicks, LastPlayedDate and IsFavorite are untouched: a resume point is still
+        // genuinely useful, and neither ordering nor favorites is a claim about this play.
     }
 
     private async Task StageOutboxAsync(
         int appUserId,
         MediaItem item,
-        UserItemData row,
+        UserItemData? row,
         PlaybackHistoryEntry? entry,
         WatchHistoryOutboxOperation operation,
         WatchHistoryIdentityResult identity,
         DateTimeOffset? occurredAt,
-        string? sessionKey,
+        string? discriminator,
         CancellationToken cancellationToken,
         string? remoteIdSnapshot = null)
     {
@@ -185,7 +296,11 @@ public sealed class WatchHistoryRecorder(
             return;
         }
 
-        if (!identity.Resolved)
+        // A removal is addressed by the remote ids captured on the event and never reads the identity,
+        // so gating it on one would drop the removal for an item that has since been re-identified or
+        // lost its metadata — leaving the remote entry behind for the next sync to re-import, which is
+        // exactly the play the user just deleted.
+        if (!identity.Resolved && operation is not WatchHistoryOutboxOperation.RemoveOwnedEntries)
         {
             // Queueing work that can never be addressed would retry forever. The local change already
             // succeeded; the user sees the gap as a sync issue rather than a failed action.
@@ -196,14 +311,16 @@ public sealed class WatchHistoryRecorder(
 
         // What makes two enqueues "the same change" differs by operation:
         //  - a completion is identified by the playback session that produced it;
+        //  - a deletion is identified by the entry it removed;
         //  - a manual mark or unwatch is identified by the watched-state transition it followed.
         // StateRevision deliberately is not used: it advances on any row touch, including re-marking
         // an already-watched item, which would queue a fresh event — and a second viewing on the
         // user's profile — for a click that changed nothing.
-        // Taken from the caller's row rather than re-queried: on a first mark the row is staged and
-        // unsaved, so a query would see nothing and produce a different key than the repeat does.
-        var discriminator = sessionKey
-            ?? row.WatchedStateChangedAt?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
+        // The fallback is taken from the caller's row rather than re-queried: on a first mark the row
+        // is staged and unsaved, so a query would see nothing and produce a different key than the
+        // repeat does.
+        var key = discriminator
+            ?? row?.WatchedStateChangedAt?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
             ?? string.Empty;
 
         // The discriminator is hashed rather than embedded: a session key may be up to 200 characters,
@@ -215,7 +332,7 @@ public sealed class WatchHistoryRecorder(
             connection.Id.ToString("N"),
             item.Id.ToString("N"),
             operation.ToString(),
-            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(discriminator))));
+            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key))));
 
         if (await database.WatchHistoryOutboxEvents.AnyAsync(
                 existing => existing.IdempotencyKey == idempotencyKey, cancellationToken))

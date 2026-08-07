@@ -28,12 +28,12 @@ public sealed class IngestSidecarTests
     /// empty title, both of which must yield to the path-inferred fallbacks.</summary>
     private static ProbeResult UntaggedAudioProbe() =>
         new("mka", TimeSpan.FromMinutes(24).Ticks, 320_000, 50_000_000,
-            [new ProbedStream(StreamType.Audio, 0, "ac3", null, "und", null, null, null, null, null, 6, 48000, true, false, "")]);
+            [new ProbedStream(StreamType.Audio, 0, "ac3", null, "und", null, null, null, null, null, 6, 48000, null, true, false, "")]);
 
     /// <summary>An audio file that states its own language and dub group, as a real <c>.mka</c> does.</summary>
     private static ProbeResult TaggedAudioProbe(string language, string title) =>
         new("mka", TimeSpan.FromMinutes(24).Ticks, 320_000, 50_000_000,
-            [new ProbedStream(StreamType.Audio, 0, "ac3", null, language, null, null, null, null, null, 6, 48000, true, false, title)]);
+            [new ProbedStream(StreamType.Audio, 0, "ac3", null, language, null, null, null, null, null, 6, 48000, 640_000, true, false, title)]);
 
     private static void ProbeCompanionsAs(PipelineTestHarness harness, Func<string, ProbeResult> companionProbe)
     {
@@ -186,6 +186,7 @@ public sealed class IngestSidecarTests
         Assert.Equal("ac3", external.Codec);
         Assert.Equal(6, external.Channels);
         Assert.Equal(48000, external.SampleRate);
+        Assert.Equal(640_000, external.Bitrate);
     }
 
     [Fact]

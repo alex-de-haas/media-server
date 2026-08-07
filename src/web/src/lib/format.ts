@@ -86,3 +86,21 @@ export function formatEta(seconds: number | null | undefined): string {
   }
   return `${secs}s`;
 }
+
+/** The object-based audio format a track carries, from the probe's codec profile — "Atmos" or "DTS:X", null
+ * for everything else. Worth singling out because it is the one audio fact that decides what may be done to
+ * a track: neither format survives a re-encode (ffmpeg encodes no JOC and no DTS:X), so an Atmos track is
+ * one to copy, and nothing else on the row says so — "TrueHD 7.1" looks identical either way.
+ *
+ * Reads the profile rather than the codec: ffprobe reports `truehd` for both, and puts "Dolby TrueHD +
+ * Dolby Atmos" in the profile. A file probed from container headers alone carries no profile at all, so
+ * this answers null there — absent, not "no Atmos". */
+export function objectAudioFormat(profile: string | null | undefined): string | null {
+  if (!profile) {
+    return null;
+  }
+  if (/atmos/i.test(profile)) {
+    return "Atmos";
+  }
+  return /dts:?x/i.test(profile) ? "DTS:X" : null;
+}

@@ -88,7 +88,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
             request.OutputRelativePath,
             request.VideoCodec,
             request.HardwareAcceleration,
-            request.Crf,
+            request.QualityLevel,
             request.MaxHeight,
             request.AudioStreamIndexes,
             request.SubtitleStreamIndexes,
@@ -100,6 +100,9 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
                 .ToList(),
             request.MetadataOverrides?
                 .Select(entry => new WireMetadataOverride(entry.Input, entry.StreamIndex, entry.Language, entry.Title))
+                .ToList(),
+            request.AudioTargets?
+                .Select(entry => new WireAudioTarget(entry.Input, entry.StreamIndex, entry.Codec, entry.BitrateKbps))
                 .ToList());
 
         using var cts = ControlCts(cancellationToken);
@@ -285,14 +288,25 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         _http.Dispose(); // Owned: created per-instance in Program.cs.
     }
 
+    // The Wire* records below are the engine's JSON schema, not this app's vocabulary: every member name is
+    // serialized verbatim (camelCased by JsonSerializerDefaults.Web) and has to keep matching the engine's
+    // own contract types. Renaming one for readability silently drops the field rather than failing — a
+    // positional record parameter the engine cannot bind simply stays null — so clarity belongs in a comment
+    // here, and the names that carry units live on the domain types these are mapped from.
     private sealed record WireCreateJobRequest(
-        string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, int? Crf,
+        string? InputMountLabel, string InputPath, string? OutputMountLabel, string OutputPath, string VideoCodec, string HardwareAcceleration, string? QualityLevel,
         int? MaxHeight = null, IReadOnlyList<int>? AudioStreamIndexes = null, IReadOnlyList<int>? SubtitleStreamIndexes = null,
         int? DefaultAudioStreamIndex = null, int? DefaultSubtitleStreamIndex = null,
         IReadOnlyList<WireAdditionalInput>? AdditionalInputs = null,
-        IReadOnlyList<WireMetadataOverride>? MetadataOverrides = null);
+        IReadOnlyList<WireMetadataOverride>? MetadataOverrides = null,
+        IReadOnlyList<WireAudioTarget>? AudioTargets = null);
 
     private sealed record WireMetadataOverride(int Input, int StreamIndex, string? Language, string? Title);
+
+    /// <summary><c>Bitrate</c> is in <b>kbps</b>, which is the unit the engine's <c>bitrate</c> field takes —
+    /// unlike <c>MediaStream.Bitrate</c>, which is bits per second. It is mapped from
+    /// <see cref="EngineAudioTarget.BitrateKbps"/>, where the unit is stated in the name.</summary>
+    private sealed record WireAudioTarget(int Input, int StreamIndex, string Codec, int? Bitrate);
 
     private sealed record WireAdditionalInput(
         string? MountLabel, string Path, IReadOnlyList<int>? AudioStreamIndexes, IReadOnlyList<int>? SubtitleStreamIndexes);

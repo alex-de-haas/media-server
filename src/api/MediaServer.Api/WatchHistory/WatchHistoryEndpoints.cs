@@ -60,8 +60,8 @@ public sealed record WatchHistorySyncPreviewResponse(
     bool AggregateCountsMayCollapse);
 
 /// <summary>
-/// Internal UI endpoints (Hosty identity) for a signed-in user to manage their own watched-history
-/// provider connections.
+/// Internal UI endpoints (Hosty identity) for a signed-in user to read their own watched history and
+/// manage their own provider connections.
 /// </summary>
 /// <remarks>
 /// Every route acts on the caller. None accepts an app-user id, so an administrator who configures
@@ -220,6 +220,26 @@ public static class WatchHistoryEndpoints
             return user is null
                 ? Results.Unauthorized()
                 : Results.Ok(await calendar.LoadUndatedAsync(user.Id, kind, cancellationToken));
+        });
+
+        group.MapDelete("/entries/{entryId:guid}", async (
+            Guid entryId,
+            ClaimsPrincipal principal,
+            WatchHistoryEntryService entries,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            // Not idempotent, unlike disconnecting: "delete this play" names a specific row, and
+            // answering 204 for an id the caller does not own would confirm that it exists.
+            return await entries.DeleteAsync(user.Id, entryId, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
         });
 
         group.MapGet("/connections/{providerKey}", async (

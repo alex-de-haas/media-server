@@ -140,6 +140,7 @@ public sealed class SidecarPlacementService(
                 Codec = track.Codec,
                 Channels = track.Channels,
                 SampleRate = track.SampleRate,
+                Bitrate = track.Bitrate,
                 IsExternal = true,
                 ExternalPath = target,
             });
@@ -267,7 +268,7 @@ public sealed class SidecarPlacementService(
 
     /// <summary>
     /// What a companion's own file says about the single track it holds: the tags the naming rules argue
-    /// over, and the technical facts they do not — codec, channel count, sample rate.
+    /// over, and the technical facts they do not — codec, channel count, sample rate, bitrate.
     /// <para>
     /// The two travel together because one probe answers both, and a sidecar is otherwise the only kind of
     /// track in the library with nothing to show but a name. Every field is null when the file could not be
@@ -275,13 +276,15 @@ public sealed class SidecarPlacementService(
     /// a container header parser has nothing to parse in a raw <c>.ac3</c>.
     /// </para>
     /// </summary>
-    private sealed record CompanionTrack(string? Language, string? Title, string? Codec, int? Channels, int? SampleRate)
+    private sealed record CompanionTrack(
+        string? Language, string? Title, string? Codec, int? Channels, int? SampleRate, int? Bitrate)
     {
-        public static readonly CompanionTrack Unknown = new(null, null, null, null, null);
+        public static readonly CompanionTrack Unknown = new(null, null, null, null, null, null);
 
         public static CompanionTrack From(ProbedStream? stream) => stream is null
             ? Unknown
-            : new(TaggedLanguage(stream.Language), Tagged(stream.Title), stream.Codec, stream.Channels, stream.SampleRate);
+            : new(TaggedLanguage(stream.Language), Tagged(stream.Title), stream.Codec, stream.Channels,
+                stream.SampleRate, stream.Bitrate);
     }
 
     /// <summary>A tag that is actually usable: a probe reports an absent one as null, but some containers
