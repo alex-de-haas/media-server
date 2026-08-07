@@ -4,10 +4,10 @@ Status: Draft
 Created: 2026-08-07
 Updated: 2026-08-07
 
-> Trakt development is wound down: registering the OAuth application a
-> self-hosted deployment needs requires Trakt VIP, so for any operator without
-> it the provider can never reach `Connected` and the feed has exactly one
-> source. The code stays — see [watched-history
+> Trakt development is wound down: a self-hosted deployment needs its operator to
+> register an OAuth application, and doing that now requires Trakt VIP, so for
+> any operator without it the provider can never reach `Connected` and the feed
+> has exactly one source. The code stays — see [watched-history
 > providers](../watch-history-providers/feature.md) — so this plan makes the
 > built-in engine carry the feature alone **without** breaking the VIP operator
 > for whom Trakt still works.
@@ -53,14 +53,30 @@ Today `IRecommendationProvider` means both "an engine that produces candidates"
 and "a thing the user can toggle in the source control". Splitting them is what
 lets the engine grow without turning the UI into a panel of knobs:
 
-- A **source** is an external account the user connected. Trakt is one, and stays
-  one — the control, the stored preference and the **Both** badge keep their
-  current meaning for the operator who has VIP.
-- A **generator** is an internal strategy. Generators are not user-facing
-  toggles; a user cannot meaningfully choose between "seeds" and "discover".
+- A **source** is an entry in the source control, with a stable key and a stored
+  preference. There are two: the built-in engine, which **keeps the `library`
+  key it has today**, and Trakt.
+- A **generator** is an internal strategy *inside* the built-in source. Generators
+  are not user-facing toggles; a user cannot meaningfully choose between "seeds"
+  and "discover", and their output is one scored list carrying one key.
 
-So the source control still appears only once a second source exists, exactly as
-now, and for the common single-source instance the feed simply gets better.
+The built-in engine staying a source is load-bearing, not cosmetic. Reserving
+`IRecommendationProvider` for external accounts alone would break three things at
+once:
+
+- `SelectedSourcesAsync` filters the stored preference against the available
+  keys and falls back to "everything" when nothing survives. A user who had
+  narrowed the feed to `library` would have their preference read as *vanished*
+  and Trakt switched **on** — the opposite of what they chose.
+- The source control appears only once a second source exists. With Trakt as the
+  only source there is never a second, so a VIP operator could never turn it off
+  again.
+- Fusion needs two ranked lists to have anything to fuse, and the **Both** badge
+  needs two source keys to report agreement between.
+
+So the control still appears only once Trakt is connected, exactly as now, the
+stored `library` preference keeps meaning what it meant, and for the common
+single-source instance the feed simply gets better.
 
 ### The engine becomes three stages
 
@@ -95,8 +111,21 @@ people, decade, original language.
 - Each family is normalized separately, so a title with forty keywords cannot
   outvote one with four.
 
-The profile is cached per user and invalidated by a play, a favorite or a hide —
-the same events that would change it.
+The profile is cached per user and invalidated by **every input it is built
+from**, which is more than the per-user signals:
+
+- per-user events — a play, a favorite, a hide, and a **watchlist add or
+  remove**, since `WatchlistEntry` / `TrackedTitle` feed the profile as explicit
+  intent;
+- **library and metadata changes** — an item added, removed or re-enriched moves
+  the IDF denominator the whole profile is damped against, and a re-identified
+  title changes the facets of a seed already counted.
+
+Library-wide changes invalidate every user's profile, so they are folded into a
+cheap **library facet generation** counter rather than fanned out per user: the
+profile records the generation it was built against and is rebuilt when it no
+longer matches. Without this the cache goes stale indefinitely — nothing else in
+the design would ever notice a catalog refresh.
 
 ### Scoring
 
@@ -139,14 +168,26 @@ costs nothing and is the difference between a list and an explanation.
 
 ### Candidate generators
 
-| Key | Source | TMDb cost | Reaches |
+All of these live inside the `library` source; the keys below name generators,
+not source-control entries.
+
+| Key | Endpoint or origin | TMDb cost | Reaches |
 | --- | --- | --- | --- |
 | `seeds` | `/{type}/{id}/recommendations` (unchanged) | 20 per user, cold, shared cache | behavioural neighbours |
-| `similar` | `/{type}/{id}/similar` for the top seeds | +8, same cache table | content neighbours — a different signal from `/recommendations`, not a synonym |
+| `similar` | `/{type}/{id}/similar` for the top seeds | +8, same table once keyed apart | content neighbours — a different signal from `/recommendations`, not a synonym |
 | `discover` | `/discover/{movie,tv}` from the profile's top facets | 4–8, cached by facet signature | the long tail nothing links to |
 | `people` | `/person/{id}/{movie,tv}_credits` | ~5, cached 30 days | "more from this director" |
 | `collections` | local `MovieCollection` + `TrackedTitle` | **none** | the next film in a franchise already watched |
-| `library` | local unwatched items scored against the profile | **none** | the Jellyfin shelf |
+| `held` | local unwatched items scored against the profile | **none** | the Jellyfin shelf |
+
+**The seed cache needs a discriminator before `similar` can exist.**
+`TmdbRecommendationCacheEntry` is unique on `(Kind, TmdbId)` and
+`TmdbRecommendationSource` reads by exactly those two, so a `/similar` payload
+and a `/recommendations` payload for the same seed cannot coexist: whichever was
+written first would answer both generators, and the second signal would silently
+become a copy of the first. The key gains the generator, with a migration — and
+the existing rows are `seeds` rows, so they migrate in place rather than being
+discarded.
 
 ### The Jellyfin shelf becomes library-first
 
@@ -198,6 +239,9 @@ Implemented on one branch as one PR, per AGENTS.md.
 - [ ] **Widen the cached candidate shape** to carry `genre_ids`, `vote_average`,
       `vote_count`, `popularity` and `original_language`, with a payload version
       so existing cache rows are treated as a miss rather than misread.
+- [ ] **Add the generator discriminator to the seed cache** — key, unique index
+      and migration — so `/similar` and `/recommendations` for one seed stop
+      colliding on `(Kind, TmdbId)`. Existing rows migrate in place as `seeds`.
 - [ ] **Replace the lexicographic sort** with `Score · (1 + ln(Seeds))`.
 - [ ] **Quality smoothing and popularity de-bias**, with the `γ` control
       persisted per user beside the existing source preference.
@@ -207,7 +251,9 @@ Implemented on one branch as one PR, per AGENTS.md.
 - [ ] **Taste profile builder** over genres, keywords, people (role- and
       billing-weighted), decade and original language, with IDF damping and
       per-family normalization.
-- [ ] **Profile cache** keyed per user, invalidated by play, favorite and hide.
+- [ ] **Profile cache** keyed per user, invalidated by play, favorite, hide and
+      watchlist mutation, plus a library facet generation so an added, removed or
+      re-enriched item rebuilds the profiles damped against it.
 - [ ] **Negative signals** — abandonment and hidden-title facets.
 - [ ] **Positive signals currently ignored** — `WatchlistEntry` / `TrackedTitle`
       as explicit intent feeding the profile (never as output: a tracked title is
@@ -215,11 +261,13 @@ Implemented on one branch as one PR, per AGENTS.md.
 
 ### Phase 3 — generators and scoring
 
-- [ ] **Split sources from generators**, leaving `IRecommendationProvider` as the
-      external-account seam and introducing an internal generator seam.
+- [ ] **Split sources from generators** by adding an internal generator seam
+      *behind* the built-in provider, which keeps its `library` source key so
+      stored preferences, the source control's second-source condition and the
+      agreement badge all keep their current meaning.
 - [ ] **Three-stage pipeline** — generate, score, re-rank.
 - [ ] **New generators**: `similar`, `discover`, `people`, `collections`,
-      `library`.
+      `held`.
 - [ ] **Unified scorer** implementing the formula above, including the
       featureless-candidate path.
 - [ ] **MMR re-rank plus franchise, director and genre caps.**
@@ -241,6 +289,9 @@ Implemented on one branch as one PR, per AGENTS.md.
       **Both** badge, the source control and poster backfill all exercised
       against a stubbed connected source, so the wind-down does not become a
       silent regression for a VIP operator.
+- [ ] **A stored `library`-only preference survives the refactor** — with Trakt
+      connected it must keep Trakt off, not be read as a vanished source and fall
+      back to enabling everything.
 - [ ] **Offline evaluation harness** — hold out each user's most recent plays,
       rebuild the profile from the remainder, and report recall@20 and nDCG@20.
       `PlaybackHistoryEntries` is a genuine time-ordered evaluation set, and
@@ -285,4 +336,7 @@ Implemented on one branch as one PR, per AGENTS.md.
    than an empty feed, and that the response says which rung answered.
 6. With a stubbed connected source, confirm the feed still fuses, badges
    agreement, and backfills posters — the VIP path, which no local instance can
-   exercise for real.
+   exercise for real — and that a preference stored as `library` still means
+   "built-in only" rather than falling back to every source.
+7. Refresh a catalog and confirm the cached profiles rebuild rather than serving
+   facets damped against the previous library.
