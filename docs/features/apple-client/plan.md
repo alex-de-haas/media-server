@@ -121,20 +121,23 @@ not a transcoding one, and a stream copy solves it.
 - Either way `api` serves the bytes, since the engine is not publicly exposed.
   Authorization stays where it already is: item id → catalog sandbox → user access.
 
-**HLS is not used — but not for the reason first recorded here.** This section
-originally said that every master playlist tvOS was offered failed to open and that
-dynamic range was therefore unreachable over HLS. A second pass on 2026-08-05
-disproved both halves: a hand-written master does open, and Apple's own published
-stream plays in Dolby Vision on this same television. See [the second HLS
-pass](#second-hls-pass-2026-08-05).
+**HLS is used as well, as the second transport.** This section originally said HLS
+was not used at all, on the grounds that every master playlist tvOS was offered
+failed to open. A second pass on 2026-08-05 disproved that: a hand-written master
+does open, and Apple's own published stream plays in Dolby Vision on this same
+television. See [the second HLS pass](#second-hls-pass-2026-08-05).
 
-What survives is the narrower engineering argument. A plain MP4 reaches Dolby
-Vision with no playlist to get wrong, no segmenting, and no session lifecycle — the
-dynamic-range signalling rides in the `moov`. HLS earns its complexity when there
-are bitrate ladders to switch between, and there are none here because nothing is
-re-encoded. And HLS does not reach the goal for this content anyway: five
-configurations were measured and **none delivered this library's profile 8.1 as
-Dolby Vision** — HDR10 is all HLS gives here.
+So both transports are built over one index, and they differ in what they can carry:
+
+| Transport | Dolby Vision | Needs the index |
+| --- | --- | --- |
+| HLS | no — five configurations were measured and none delivered this library's profile 8.1 as DV; HDR10 is what it gives | no |
+| MP4 over byte ranges | **yes**, with a forced `dvh1` sample entry | yes |
+
+HLS ships first, because it needs nothing that is still being built and unblocks the
+rest of the client; Dolby Vision arrives with the index. Which one a given playback
+uses is chosen from the client's declared capabilities, with a manual override. See
+[remux-streaming](../remux-streaming/plan.md) for the shape and the sequencing risk.
 
 **Confirmed end to end on an Apple TV 4K.** 4K HEVC at 26.5 Mbit/s plays with no
 stalls, the display switches, and the picture is Dolby Vision. See [the
@@ -247,8 +250,8 @@ throwaway spike, on real hardware and real files, before any surface is designed
 - [x] **Playback on an Apple TV 4K** — both packages played on the device
       (tvOS 26.5) with zero stalls and zero dropped frames, including 4K HEVC at
       26.5 Mbit/s. See the device pass below. Seeking went unmeasured on an MP4
-      until 2026-08-07, when a fragmented file seeked forward and back in under
-      2.5 s with the Dolby Vision badge held throughout.
+      until 2026-08-07, when a fragmented file was seeked forward and back in
+      under 2.5 s, holding the Dolby Vision badge throughout.
 - [x] **HDR and Dolby Vision on the device** — reached by dropping HLS for a plain
       MP4 over byte ranges: `hvc1` + `dvvC` gives HDR10, and forcing the `dvh1`
       sample entry gives Dolby Vision, both bright and correct on the television.
@@ -568,6 +571,19 @@ profile-5 rendition, which means re-encoding and is out of scope.
 - [ ] **Constituent plans** — `native-client-api` and `remux-streaming` written
       and approved before either is built; the client-side plans follow once the
       API shape is settled.
+- [ ] **Build the capability profile from the device.** `NativeCapabilityProfile`
+      already travels with every resolve request and the resolver already answers
+      against it — what does not exist is the client side that fills it in from
+      what the hardware can actually do. Swiftfin's version reads
+      `VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC)` and
+      `AVPlayer.eligibleForHDRPlayback` at runtime, which is the only honest way to
+      tell an Apple TV 4K from an older one without Dolby Vision. Guessing from a
+      device model ages badly, and the platform split above guarantees more than one
+      device class.
+- [ ] **Per-device escape hatches** — a setting that forces a transport or a
+      dynamic range, so "the picture is dark" is a switch rather than a bug report.
+      Swiftfin carries `forceDVTranscode` / `forceHDRTranscode` and a compatibility
+      mode of `auto / mostCompatible / directPlay / custom`.
 
 ### Closing the plan
 
@@ -603,20 +619,6 @@ and can be reordered by appetite.
   never produced ahead, but the sample table has to exist first, because
   AVFoundation walks the whole file before it plays. See
   [remux-streaming](../remux-streaming/plan.md).
-- **Should the client declare its capabilities, instead of the server assuming
-  them?** `NativePlaybackResolver` holds one fixed idea of what the client can do.
-  Swiftfin instead builds a device profile **at runtime** — from
-  `VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC)` and
-  `AVPlayer.eligibleForHDRPlayback` — and sends it with every playback request, so
-  the server decides against the device actually asking. The difference starts to
-  matter the moment this client runs on more than one device class, which the
-  platform split above guarantees it will: an Apple TV 4K, an older Apple TV without
-  Dolby Vision, and an iPhone are three different answers to the same question. Two
-  cheap parts of the idea are worth taking regardless of the rest — the runtime
-  capability check, and per-device escape hatches (Swiftfin has
-  `forceDVTranscode` / `forceHDRTranscode`, plus a compatibility mode of
-  `auto / mostCompatible / directPlay / custom`), which turn "the picture is dark"
-  from a bug report into a setting.
 - **Trickplay images while scrubbing.** Swiftfin shows preview frames on the
   scrubber, falling back to chapter images when none are generated. Chapters are
   already planned in

@@ -223,9 +223,11 @@ breaking change later.
 
 ### Where this leaves the engine
 
-Neither transport needs ffmpeg on the serving path — both are container parsing and
-byte assembly. `api` already parses container headers, and has deliberately shipped
-without ffmpeg since [external track
+Neither transport needs ffmpeg on the serving path. Audio and video are container
+parsing and byte assembly; **subtitles are the exception** — they must be rewritten
+into the transport's own format, which is text processing rather than encoding, but
+it is not byte assembly and the claim should not be overstated. `api` already parses
+container headers, and has deliberately shipped without ffmpeg since [external track
 sidecars](../external-track-sidecars/feature.md). The engine's own stated reasons for
 existing are hardware-encoding isolation and long-running CPU work, and neither
 applies here. So the assumption that packaging belongs to `transcode-engine` is
@@ -287,6 +289,16 @@ this has an answer.**
       requests. Measure both against the index and pick.
 - [ ] **Track selection** so the output carries what the viewer chose, including
       sidecars folded in as tracks.
+- [ ] **Subtitle conversion**, which is the one thing that cannot be referenced the
+      way audio and video can. A SubRip or ASS sample is not a valid MP4 subtitle
+      sample and not a valid HLS one either: MP4 carries `tx3g` or `wvtt`, HLS
+      carries WebVTT or IMSC1. So text has to be **rewritten**, per transport, and
+      ASS styling is lost in the process. This applies to the container's own
+      subtitle tracks and to
+      [sidecar files](../external-track-sidecars/feature.md) equally.
+- [ ] **Unit tests for the conversion** — timing preserved across the rewrite, a
+      cue spanning a segment boundary, and an ASS source degrading to plain text
+      rather than failing.
 - [ ] **An HLS renderer over the same index** — a media playlist cut at keyframe
       boundaries and segments rendered from the same sample table, so the second
       transport is a second output rather than a second pipeline.
@@ -334,11 +346,11 @@ this has an answer.**
 
 - ~~**Does the byte-identity assumption hold?**~~ Answered 2026-08-07: for video yes,
   for audio only after de-lacing, which is now a deliverable rather than a risk.
-- **Where the capability profile is built.** `NativeCapabilityProfile` already lets
-  the client declare what it can open, but nothing yet fills it from the device.
-  Swiftfin builds one at runtime from
-  `VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC)` and
-  `AVPlayer.eligibleForHDRPlayback`. That is client work; see
+- **Which transport a given playback gets.** The negotiation exists already —
+  `NativeCapabilityProfile` travels with every resolve request and the resolver
+  answers against it — so the question is only the policy: which declared
+  capabilities select MP4 over HLS, and how a manual override interacts with it.
+  Filling the profile from the device is client work and is a deliverable on
   [apple-client](../apple-client/plan.md).
 - **Does this still belong to `transcode-engine`?** Neither transport's serving path
   needs ffmpeg. If the indexer and renderers live in `api`, the cross-app hop and the
