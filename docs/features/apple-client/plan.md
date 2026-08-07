@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-02
-Updated: 2026-08-05
+Updated: 2026-08-07
 
 > **Umbrella epic.** This document owns the decisions, the platform split, and the
 > playback spike that everything else depends on. The features it spans keep their
@@ -67,6 +67,22 @@ What it costs, accepted deliberately:
   sidecars this library actually has, and the spike found every subtitle track in
   both sampled files to be SubRip.
 
+**What the reference implementation does instead.**
+[Swiftfin](https://github.com/jellyfin/Swiftfin), Jellyfin's own Apple client, does
+not make this decision — it ships **both**, `native` (AVPlayer) and `swiftfin`
+(VLC), and lets the viewer switch. Its native profile's direct-play containers are
+`mp4`, `m4v`, `mov`, `mpegts`, `3gp` and `avi`; **Matroska is absent**, so MKV either
+goes to the server for an HLS transcode or is played by VLC.
+
+That is worth recording plainly, because every one of the three costs accepted above
+is a cost VLC does not pay, and because the packaging problem this epic then has to
+solve exists *only* for a client with no second player. The decision is not reversed
+here — DTS/TrueHD are rare in this library, VLC on an Apple TV gives neither Dolby
+Vision nor the hardware path's efficiency, and a second decoder stack is a large
+piece of work. But it is now a decision with a known alternative rather than an
+assumption, and it is listed as an option in
+[remux-streaming](../remux-streaming/plan.md).
+
 ### 2. The container gap is closed by remux, not by a second decoder
 
 Most of this library is MKV holding H.264/HEVC plus AC-3/E-AC-3/AAC — codecs
@@ -75,37 +91,53 @@ not a transcoding one, and a stream copy solves it.
 
 - Files already in `.mp4` / `.m4v` / `.mov` with supported codecs keep the current
   path: byte-range direct play from the existing stream endpoint. No packaging.
-- Everything else is remuxed by stream copy into a **progressive MP4, served over
-  byte ranges** — the same shape the existing stream endpoint already serves, not
-  a second delivery mechanism.
+- Everything else is remuxed by stream copy into an **MP4 served over byte
+  ranges** — the same shape the existing stream endpoint already serves, not a
+  second delivery mechanism. Both forms were measured on the Apple TV 4K and
+  **both deliver Dolby Vision** with a forced `dvh1` sample entry; which one is
+  synthesised is a measurement left to
+  [remux-streaming](../remux-streaming/plan.md).
 
-  "Progressive" here means precisely what the spike tested: a **non-fragmented**
-  MP4 whose `moov` sits before the media data, so a player can seek by range
-  without reading the file end to end. Fragmented MP4 is a different artifact with
-  a different index, and nothing here has tested it; the two must not be used as
-  synonyms when the packaging feature is written.
-- Packaging runs in the **`transcode-engine` app**, not in `api`: `api` has
-  deliberately shipped without ffmpeg since [external track
-  sidecars](../external-track-sidecars/feature.md), and the engine already has the
-  tooling, the shared-mount contract, a job/SSE API, and cross-app discovery via
-  `HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL`.
-- The engine is not publicly exposed, so `api` proxies the byte-range requests.
+  **It cannot be produced on the fly.** AVFoundation builds its own index across
+  the *entire* file before it shows a frame — measured at 3309 requests reaching
+  99.99 % of a 22 GB fragmented file, in 16 s under a 25 MB/s cap, so it walks box
+  headers rather than reading the media. Writing a `sidx` does not prevent it. To
+  answer a request at byte 24,000,000,000 the server must already know what lies
+  there, which means the sample table has to exist **before** playback starts.
+
+  What that costs is smaller than it sounds: the player needed ~3300 header reads,
+  not gigabytes, so what must exist in advance is an **index** of megabytes rather
+  than a copy of the film. Building it in the background and computing the
+  container from it satisfies all three constraints — no duplicate, no wait, and
+  the one pass happens where nobody is watching.
+- **Where packaging runs is reopened.** This section assumed the
+  **`transcode-engine` app**, because `api` has deliberately shipped without ffmpeg
+  since [external track sidecars](../external-track-sidecars/feature.md) and the
+  engine already has the tooling, the shared-mount contract, a job/SSE API and
+  cross-app discovery. That reasoning predates the index design, whose serving path
+  is container parsing and byte assembly with **no ffmpeg at all** — and `api`
+  already parses container headers. See the open question in
+  [remux-streaming](../remux-streaming/plan.md).
+- Either way `api` serves the bytes, since the engine is not publicly exposed.
   Authorization stays where it already is: item id → catalog sandbox → user access.
 
-**HLS is not used — but not for the reason first recorded here.** This section
-originally said that every master playlist tvOS was offered failed to open and that
-dynamic range was therefore unreachable over HLS. A second pass on 2026-08-05
-disproved both halves: a hand-written master does open, and Apple's own published
-stream plays in Dolby Vision on this same television. See [the second HLS
-pass](#second-hls-pass-2026-08-05).
+**HLS is used as well, as the second transport.** This section originally said HLS
+was not used at all, on the grounds that every master playlist tvOS was offered
+failed to open. A second pass on 2026-08-05 disproved that: a hand-written master
+does open, and Apple's own published stream plays in Dolby Vision on this same
+television. See [the second HLS pass](#second-hls-pass-2026-08-05).
 
-What survives is the narrower engineering argument. A progressive MP4 reaches Dolby
-Vision with no playlist to get wrong, no segmenting, and no session lifecycle — the
-dynamic-range signalling rides in the `moov`. HLS earns its complexity when there
-are bitrate ladders to switch between, and there are none here because nothing is
-re-encoded. And HLS does not reach the goal for this content anyway: five
-configurations were measured and **none delivered this library's profile 8.1 as
-Dolby Vision** — HDR10 is all HLS gives here.
+So both transports are built over one index, and they differ in what they can carry:
+
+| Transport | Dolby Vision | Needs the index |
+| --- | --- | --- |
+| HLS | no — five configurations were measured and none delivered this library's profile 8.1 as DV; HDR10 is what it gives | no |
+| MP4 over byte ranges | **yes**, with a forced `dvh1` sample entry | yes |
+
+HLS ships first, because it needs nothing that is still being built and unblocks the
+rest of the client; Dolby Vision arrives with the index. Which one a given playback
+uses is chosen from the client's declared capabilities, with a manual override. See
+[remux-streaming](../remux-streaming/plan.md) for the shape and the sequencing risk.
 
 **Confirmed end to end on an Apple TV 4K.** 4K HEVC at 26.5 Mbit/s plays with no
 stalls, the display switches, and the picture is Dolby Vision. See [the
@@ -217,13 +249,13 @@ throwaway spike, on real hardware and real files, before any surface is designed
       H.264 is the case least at risk.
 - [x] **Playback on an Apple TV 4K** — both packages played on the device
       (tvOS 26.5) with zero stalls and zero dropped frames, including 4K HEVC at
-      26.5 Mbit/s. See the device pass below. Seeking was verified only on the HLS
-      packages; the seek test was dropped when the harness was rebuilt, so **no
-      seek was ever measured on a progressive MP4** — it is part of the gate below.
-- [x] **HDR and Dolby Vision on the device** — reached by dropping HLS for a
-      progressive MP4 over byte ranges: `hvc1` + `dvvC` gives HDR10, and forcing
-      the `dvh1` sample entry gives Dolby Vision, both bright and correct on the
-      television.
+      26.5 Mbit/s. See the device pass below. Seeking went unmeasured on an MP4
+      until 2026-08-07, when a fragmented file was seeked forward and back in
+      under 2.5 s, holding the Dolby Vision badge throughout.
+- [x] **HDR and Dolby Vision on the device** — reached by dropping HLS for a plain
+      MP4 over byte ranges: `hvc1` + `dvvC` gives HDR10, and forcing the `dvh1`
+      sample entry gives Dolby Vision, both bright and correct on the television.
+      Confirmed for fragmented and non-fragmented alike.
 - [ ] **Playback presentation belongs to `AVPlayerViewController`** — record it
       wherever the client's playback surface is specified. The spike proved one
       concrete failure, not a universal law: a SwiftUI `VideoPlayer` inside a
@@ -233,17 +265,19 @@ throwaway spike, on real hardware and real files, before any surface is designed
       owns the presentation, and custom UI is added only through its supported
       overlay APIs** (`contentOverlayView`, `customOverlayViewController`), never
       by compositing a player into an app-drawn view hierarchy.
-- [ ] **Decide how the progressive file is produced** — the question that replaces
-      segment boundaries. A progressive MP4 needs its `moov` up front, so either
-      it is generated on demand (and the whole index must be known before the first
-      byte is served) or pre-generated beside the source at the cost of disk.
-      **This is an acceptance gate, not a note**: the answer is only credible when
-      measured on a whole film rather than a 30-second slice, covering time to
-      first frame from cold, seeking into a part not yet produced, 60–80 Mbit/s,
-      several concurrent clients, cancel/restart/cleanup, multi-audio and sidecar
-      audio and subtitles, DV profiles 5 and 8, E-AC-3/Atmos, and the same tooling
-      running inside the Linux `transcode-engine` container rather than on macOS.
-      One requirement is easy to miss: **Dolby Vision must be reproduced without
+- [x] **Decide how the file is produced** — the question that replaces segment
+      boundaries, answered on 2026-08-07: **not on the fly**. AVFoundation walks the
+      whole file's box headers before showing a frame, so the sample table must exist
+      before playback and a `sidx` does not change that. What that requires is an
+      index of megabytes, built in the background, from which the container is
+      computed at play time — no duplicate copy and no wait. The load this must
+      survive —
+      a whole film, cold start, 60–80 Mbit/s, concurrent clients,
+      cancel/restart/cleanup, multi-audio and sidecars, DV profiles 5 and 8,
+      E-AC-3/Atmos, and the same tooling inside the Linux `transcode-engine`
+      container — is an acceptance gate on
+      [remux-streaming](../remux-streaming/plan.md), which owns the build. One
+      requirement there is easy to miss: **Dolby Vision must be reproduced without
       the elementary-stream detour**. The spike got DV only by extracting a raw
       `.hevc` and re-importing it with a hand-set frame rate — the very path it
       then recorded as a liability — so a result obtained that way does not
@@ -276,13 +310,14 @@ throwaway spike, on real hardware and real files, before any surface is designed
       round trip through a raw `.hevc`, which silently loses frame timing. Find
       whether `MP4Box` can take the MKV directly and still write `dvvC`, or make the
       detour safe by always passing the source's exact frame rate.
-- [ ] **Multi-track packaging** — the local pass packaged one audio track. A
-      progressive file carries the rest as ordinary tracks, which is simpler than
+- [ ] **Multi-track packaging** — the local pass packaged one audio track. An MP4
+      carries the rest as ordinary tracks, which is simpler than
       the HLS renditions this deliverable first assumed, but it is still unproven,
       as is SubRip → WebVTT (or leaving subtitles as tracks in the file).
-- [x] **Written outcome** in this document: remux by stream copy into a progressive
-      fMP4 served over byte ranges, `dvh1` for Dolby Vision clients. No fallback
-      was needed — HLS was the thing dropped, not the approach.
+- [x] **Written outcome** in this document: remux by stream copy into an **MP4
+      served over byte ranges**, computed from a pre-built index, `dvh1` for Dolby
+      Vision clients. No fallback was needed — HLS was the thing dropped, not the
+      approach.
 
 #### Results of the local pass (2026-08-03)
 
@@ -436,9 +471,12 @@ precondition, and the existing stream endpoint already does it.
 Consequences worth carrying into the design: there is no master playlist, no
 segmenting, no keyframe index for segment boundaries, and no HLS session lifecycle
 to manage — several of the deliverables this phase opened simply stop existing.
-What replaces them is narrower: a progressive file needs its `moov` up front (the
-spike's did), so the open question is whether that is produced on demand or
-pre-generated, and what seeking costs when it is.
+What replaces them is narrower: an MP4 needs its sample table before playback, so
+the open question was whether that is produced on demand or pre-generated, and what
+seeking costs when it is. Answered on 2026-08-07 by
+[remux-streaming](../remux-streaming/plan.md): fragmenting does not avoid it — the
+player walks every box header first — so the table is built once in the background as
+a compact index, and the container is computed from it per request.
 
 ##### What GPAC settled about Dolby Vision
 
@@ -512,8 +550,8 @@ frame-rate change at one segment, missing `CLOSED-CAPTIONS=NONE`, a deprecated
 playlist MIME type from the test server) that do not distinguish the failing cases
 from the playing one.
 
-**Consequence for decision 2.** The destination is unchanged — progressive MP4 is
-what delivers Dolby Vision, and it is still simpler. What changes is the reason and
+**Consequence for decision 2.** The destination is unchanged — a plain MP4 is what
+delivers Dolby Vision, and it is still simpler. What changes is the reason and
 the fallback: HLS is a **working HDR10 path**, not a broken one, so if streaming
 ever becomes preferable to byte ranges, it costs dynamic range rather than being
 impossible. Should Dolby Vision over HLS ever be needed, the only known route is a
@@ -533,6 +571,19 @@ profile-5 rendition, which means re-encoding and is out of scope.
 - [ ] **Constituent plans** — `native-client-api` and `remux-streaming` written
       and approved before either is built; the client-side plans follow once the
       API shape is settled.
+- [ ] **Build the capability profile from the device.** `NativeCapabilityProfile`
+      already travels with every resolve request and the resolver already answers
+      against it — what does not exist is the client side that fills it in from
+      what the hardware can actually do. Swiftfin's version reads
+      `VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC)` and
+      `AVPlayer.eligibleForHDRPlayback` at runtime, which is the only honest way to
+      tell an Apple TV 4K from an older one without Dolby Vision. Guessing from a
+      device model ages badly, and the platform split above guarantees more than one
+      device class.
+- [ ] **Per-device escape hatches** — a setting that forces a transport or a
+      dynamic range, so "the picture is dark" is a switch rather than a bug report.
+      Swiftfin carries `forceDVTranscode` / `forceHDRTranscode` and a compatibility
+      mode of `auto / mostCompatible / directPlay / custom`.
 
 ### Closing the plan
 
@@ -563,16 +614,21 @@ and can be reordered by appetite.
 
 - **Does the packaging path hold for a 60–80 Mbit 4K remux over Wi-Fi?** Phase 0
   answered it only at 26.5 Mbit/s over the wire, where there was ample headroom.
-- **Is the progressive file produced on demand or pre-generated?** A progressive
-  fMP4 needs its `moov` up front, which is the one real constraint the approach
-  carries. Producing it per playback means reading the source's index first;
-  pre-generating means a second copy on disk. This replaces the keyframe-index
-  question the HLS design had.
+- ~~**Is the file produced on demand or pre-generated?**~~ Settled on 2026-08-07:
+  neither. It is **computed from a pre-built index** — the media is never copied and
+  never produced ahead, but the sample table has to exist first, because
+  AVFoundation walks the whole file before it plays. See
+  [remux-streaming](../remux-streaming/plan.md).
+- **Trickplay images while scrubbing.** Swiftfin shows preview frames on the
+  scrubber, falling back to chapter images when none are generated. Chapters are
+  already planned in
+  [media-probe-providers](../media-probe-providers/plan.md); preview frames are the
+  neighbouring idea and would need a generator server-side.
 - **Do sidecar audio tracks survive packaging?** They are separate files and can
   be taken as extra inputs in the same copy pass, which would make "watch with the
   Russian dub, no merge" work on Apple TV — the single most valuable thing Infuse
-  cannot do. With a progressive file they become ordinary tracks in the output
-  rather than alternate renditions, which is simpler, but it is still unverified.
+  cannot do. In an MP4 they become ordinary tracks in the output rather than
+  alternate renditions, which is simpler, but it is still unverified.
 - ~~**Pairing UX on tvOS.**~~ Settled: Core already ships a device authorization
   flow with approval in Shell, and the app-identity exchange composes on top of
   it, so this app writes no authentication code. See
