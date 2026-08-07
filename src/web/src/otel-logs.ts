@@ -35,7 +35,10 @@ export function setupOtlpLogs(): void {
 
   const provider = new LoggerProvider({
     resource: detectResources({ detectors: [envDetector] }),
-    processors: [new BatchLogRecordProcessor(exporter)],
+    // sdk-logs 0.220 moved the exporter into the options bag and dropped the default
+    // scheduledDelayMillis from 5000 to 1000. Pin it so the batch window stays a deliberate choice
+    // here rather than whatever upstream's default happens to be.
+    processors: [new BatchLogRecordProcessor({ exporter, scheduledDelayMillis: 5000 })],
   });
   logs.setGlobalLoggerProvider(provider);
 
