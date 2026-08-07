@@ -316,6 +316,27 @@ public sealed class TrackExtractionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_listed_extraction_still_reports_the_files_it_produces()
+    {
+        // Its outputs are the only record of what it makes — there is no single OutputPath to fall back on —
+        // so a list that does not load them reports a job that produced nothing.
+        var dub = AddStream(StreamType.Audio, 1, "ac3", "rus");
+        var subtitle = AddStream(StreamType.Subtitle, 2, "subrip", "eng");
+        await ExtractAsync(dub, subtitle);
+
+        var listed = Assert.Single(await new TranscodeService(
+                _context, _engine, new CatalogPathSandbox(), Settings,
+                new LibraryMoveGuard(_context, new LibraryMoveQueue()),
+                NullLogger<TranscodeService>.Instance)
+            .ListAsync(CancellationToken.None));
+
+        Assert.Equal("Extract", listed.Kind);
+        Assert.Equal(
+            ["The Rock (1996)/The Rock (1996).rus.mka", "The Rock (1996)/The Rock (1996).eng.srt"],
+            listed.OutputPaths);
+    }
+
+    [Fact]
     public async Task A_second_job_for_a_file_one_is_already_writing_is_refused()
     {
         var dub = AddStream(StreamType.Audio, 1, "ac3", "rus");
