@@ -128,6 +128,33 @@ Only tracks that state a bitrate are counted. Leaving the silent ones out can on
 understate the audio side, which is the safe direction: the line claims audio is the
 larger half, and it must never make that claim on a total it filled in itself.
 
+## What the Dolby Vision warning does and does not mean
+
+The warning above the video controls says a re-encode drops the Dolby Vision layer.
+It does **not** mean the result is broken. On profiles 7 and 8 the base layer is
+ordinary HEVC Main 10 PQ — a valid HDR10 picture — and its mastering-display and
+MaxCLL metadata come through the encode. What is lost is the per-frame dynamic
+metadata, nothing else.
+
+So on a Dolby Vision source the choice is not "shrink it or keep it watchable", it is
+"keep the dynamic layer or spend a day of CPU". Preserving Dolby Vision through a
+re-encode is possible but the engine does not do it, and deliberately: it would force
+the software encoder, which measured **equivalent to hardware in quality per byte** —
+the same output size for 30–70× the time, buying only the metadata. Dropping a
+profile 7 source's enhancement layer losslessly was measured too and comes to 1.6% of
+the file. Both findings live in
+[transcode-engine / compression controls](https://github.com/alex-de-haas/transcode-engine/blob/main/docs/features/compression-controls/feature.md#dolby-vision-does-not-survive-a-re-encode).
+
+The order that actually pays on such a file is the one this dialog already leads
+with: audio first — 87.5 GB of that 141.7 GB remux — then the picture if it is still
+too large.
+
+One case where the warning must be obeyed rather than weighed: a **profile 5** source
+has no HDR10-compatible base layer, so re-encoding it produces wrong colours, not
+merely flatter ones. The library does not record the Dolby Vision profile yet, so the
+dialog cannot tell profile 5 apart — profile 5 arrives from streaming rips rather than
+disc remuxes.
+
 ## Every size comes from a recorded bitrate, or is absent
 
 The estimate beside the quality level, the audio/video split, and a re-encoded row's
