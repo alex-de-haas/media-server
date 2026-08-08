@@ -250,9 +250,11 @@ design rests on an assumption no measurement has tested yet.
 
 ### Phase 0 — the prototype gate
 
-A throwaway spike, in a scratchpad rather than in either repository, because the
-design can still be killed by its own foundation. **No production code starts until
-this has an answer.**
+A throwaway spike — not the feature — because the design can still be killed by its
+own foundation. **No production code starts until this has an answer.** It was
+written outside either repository and kept afterwards, in
+[`scripts/remux-prototype/`](../../../scripts/remux-prototype/README.md), only
+because a nightly `/tmp` cleanup had already destroyed it once.
 
 - [x] **Byte identity** — answered 2026-08-07: **video holds, audio needs de-lacing,
       and the design survives.** See

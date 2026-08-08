@@ -187,7 +187,9 @@ def build(ix, want_tracks, sample_entry="dvh1", mdat_header=16):
             # durations are read from the file rather than assumed.
             dts = sorted(pts)
             deltas = [dts[i + 1] - dts[i] for i in range(n - 1)]
-            deltas.append(t.default_duration or (deltas[-1] if deltas else 0))
+            # Repeat the last observed delta rather than DefaultDuration, which is the
+            # very quantity that drifts; DefaultDuration is only a last resort.
+            deltas.append(deltas[-1] if deltas else (t.default_duration or 0))
             cts = [p - d for p, d in zip(pts, dts)]
             # No reordering means no composition offsets are needed at all.
             if all(c == 0 for c in cts):

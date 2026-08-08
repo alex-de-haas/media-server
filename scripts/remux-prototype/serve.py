@@ -16,9 +16,21 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import mkvindex
 import mp4synth
 
-SOURCE = sys.argv[1]
-PORT = int(sys.argv[2])
-ENTRY = "hvc1" if "--entry" in sys.argv and sys.argv[sys.argv.index("--entry") + 1] == "hvc1" else "dvh1"
+USAGE = "usage: ./serve.py <source.mkv> <port> [--entry dvh1|hvc1]"
+
+args = sys.argv[1:]
+ENTRY = "dvh1"
+if "--entry" in args:
+    i = args.index("--entry")
+    if i + 1 >= len(args) or args[i + 1] not in ("dvh1", "hvc1"):
+        sys.exit(USAGE)
+    ENTRY = args[i + 1]
+    del args[i:i + 2]
+if len(args) != 2 or not args[1].isdigit():
+    sys.exit(USAGE)
+SOURCE, PORT = args[0], int(args[1])
+if not os.path.isfile(SOURCE):
+    sys.exit(f"no such file: {SOURCE}")
 
 t0 = time.time()
 INDEX = mkvindex.index(SOURCE)
@@ -77,12 +89,23 @@ class Handler(BaseHTTPRequestHandler):
             start, end = 0, TOTAL - 1
             code = 200
         else:
-            m = re.match(r"bytes=(\d*)-(\d*)", rng)
+            # A malformed or multi-range header must not take the handler down; it is
+            # answered as if no range had been asked for.
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng.strip())
+            if m is None or not (m.group(1) or m.group(2)):
+                self.send_error(416, "unsupported range")
+                return
             start = int(m.group(1)) if m.group(1) else 0
+            if start >= TOTAL:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{TOTAL}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if m.group(2):
                 # An explicit end is honoured in full. Truncating it is read as a
                 # failed request, not as a smaller answer.
-                end = min(int(m.group(2)), TOTAL - 1)
+                end = max(start, min(int(m.group(2)), TOTAL - 1))
             else:
                 # An open-ended range is a request for the rest of a 26 GB file, so
                 # hand over a window and let the client come back.

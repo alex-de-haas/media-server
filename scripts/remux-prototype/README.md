@@ -46,7 +46,9 @@ swiftc -O avcheck.swift -o avcheck && ./avcheck http://127.0.0.1:8975/movie.mp4
 ```
 
 `serve.py` binds `0.0.0.0`, so the same URL works from an Apple TV on the LAN. The
-tvOS harness carries its own instructions.
+tvOS harness carries its own instructions; it takes the signing team as
+`TVSPIKE_TEAM=<your-team-id>` on the `xcodebuild` command line and the URL to play
+from `SPIKE_BASE` / `SPIKE_PATH` at launch, so neither is edited into the source.
 
 Nothing here writes to disk.
 

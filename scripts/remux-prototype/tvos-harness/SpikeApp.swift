@@ -12,7 +12,7 @@
 //
 //   xcodebuild -project TVSpike.xcodeproj -scheme TVSpike -configuration Debug \
 //     -destination 'platform=tvOS,id=<device-udid>' -derivedDataPath dd \
-//     -allowProvisioningUpdates build
+//     -allowProvisioningUpdates TVSPIKE_TEAM=<your-team-id> build
 //   xcrun devicectl device install app --device <device-udid> \
 //     dd/Build/Products/Debug-appletvos/TVSpike.app
 //   xcrun devicectl device process launch --device <device-udid> --console \
@@ -24,8 +24,15 @@ import AVFoundation
 import AVKit
 import UIKit
 
-let base = "http://192.168.178.184:8975"   // the machine running serve.py
-let sequence = ["movie.mp4"]               // one case per launch, deliberately
+// Where serve.py is running, and what to play. Both are overridable at launch, so the
+// harness does not have to be edited for every run:
+//
+//   xcrun devicectl device process launch --device <udid> --console --terminate-existing \
+//     --environment-variables '{"SPIKE_BASE":"http://10.0.0.2:8975","SPIKE_PATH":"movie.mp4"}' \
+//     com.haas.mediaserver.tvspike
+let env = ProcessInfo.processInfo.environment
+let base = env["SPIKE_BASE"] ?? "http://127.0.0.1:8975"
+let sequence = [env["SPIKE_PATH"] ?? "movie.mp4"]   // one case per launch, deliberately
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
