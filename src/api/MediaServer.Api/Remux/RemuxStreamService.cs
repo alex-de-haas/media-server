@@ -64,7 +64,11 @@ public sealed class RemuxStreamService(
 
         try
         {
-            var built = Mp4Synthesizer.Build(index, chosen, signalling, source);
+            // One input for now: the source itself. The layout takes several, which is what a sidecar
+            // dub will need — see the plan.
+            var inputs = new[] { new Mp4Synthesizer.Input(index, source) };
+            var built = Mp4Synthesizer.Build(
+                inputs, [.. chosen.Select(number => new Mp4Synthesizer.TrackRef(0, number))], signalling);
             if (built is null)
             {
                 await source.DisposeAsync();
@@ -80,7 +84,7 @@ public sealed class RemuxStreamService(
 
             return (
                 new RemuxStream(
-                    new SynthesizedMp4Stream(built.Header, source),
+                    new SynthesizedMp4Stream(built.Header, [source]),
                     "video/mp4",
                     etag,
                     file.LastWriteTimeUtc),

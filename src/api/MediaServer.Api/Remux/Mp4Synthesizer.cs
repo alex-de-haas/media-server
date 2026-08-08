@@ -35,37 +35,52 @@ internal static class Mp4Synthesizer
     /// <summary>A 64-bit <c>mdat</c>: <c>size=1</c>, the type, then the real length.</summary>
     private const int MdatHeaderLength = 16;
 
+    /// <summary>
+    /// One file whose samples may appear in the output. There is more than one when a sidecar is carried:
+    /// an external dub is a second file, and its samples join the video's in the same container.
+    /// </summary>
+    internal sealed record Input(MatroskaIndex Index, Stream Content);
+
+    /// <summary>Which track of which input, in the order the output should carry them.</summary>
+    internal readonly record struct TrackRef(int Input, ulong Number);
+
     internal sealed record Result(byte[] Header, long TotalLength, IReadOnlyList<string> SampleEntries)
     {
         public long HeaderLength => Header.Length;
     }
 
     /// <summary>
-    /// Builds the header for the given tracks, in the order given — the first video track and the first
-    /// audio track are what a player picks by default, so the caller's order is the viewer's choice.
-    /// <paramref name="source"/> is read only for the few bytes an AC-3 descriptor needs.
+    /// Builds the header for the given tracks, in the order given — a player takes the first track of each
+    /// kind as its default, so the caller's order is the viewer's choice. The inputs are read only for the
+    /// few bytes an AC-3 descriptor needs and for subtitle text.
     /// </summary>
     internal static Result? Build(
-        MatroskaIndex index,
-        IReadOnlyList<ulong> trackNumbers,
-        VideoSignalling signalling,
-        Stream source)
+        IReadOnlyList<Input> inputs,
+        IReadOnlyList<TrackRef> tracks,
+        VideoSignalling signalling)
     {
         var prepared = new List<Prepared>();
         // Timed text is rewritten, so it needs somewhere to live; it is small enough to ride in the header.
         var subtitles = new MemoryStream();
-        foreach (var number in trackNumbers)
+        foreach (var reference in tracks)
         {
-            if (index.Track(number) is not { } track || track.Samples.Count == 0)
+            if (reference.Input < 0 || reference.Input >= inputs.Count)
+            {
+                continue;
+            }
+
+            var input = inputs[reference.Input];
+            if (input.Index.Track(reference.Number) is not { } track || track.Samples.Count == 0)
             {
                 continue;
             }
 
             var one = track.Kind switch
             {
-                IndexedTrackKind.Video => PrepareVideo(track, index.TimestampScale, signalling),
-                IndexedTrackKind.Audio => PrepareAudio(track, source),
-                IndexedTrackKind.Subtitle => PrepareSubtitle(track, index.TimestampScale, source, subtitles),
+                IndexedTrackKind.Video => PrepareVideo(track, input.Index.TimestampScale, signalling, reference.Input),
+                IndexedTrackKind.Audio => PrepareAudio(track, input.Content, reference.Input),
+                IndexedTrackKind.Subtitle => PrepareSubtitle(
+                    track, input.Index.TimestampScale, input.Content, subtitles),
                 _ => null,
             };
 
@@ -84,37 +99,51 @@ internal static class Mp4Synthesizer
         var ftyp = Box("ftyp", "isom"u8.ToArray(), U32(0x200),
             "isomiso2mp41hvc1dby1"u8.ToArray());
 
-        // [ftyp][moov][text mdat, when there is timed text][media mdat header][the source, verbatim]
+        // [ftyp][moov][text mdat, when there is timed text][mdat + input 0][mdat + input 1]...
         var text = subtitles.ToArray();
         var textBox = text.Length > 0 ? Box("mdat", text) : [];
         var textPayloadAt = 0L;
-        var mediaBase = 0L;
+        var bases = new long[inputs.Count];
 
         // Offsets depend on the header's own length, so it is built once to measure and once for real.
         // Every offset field is fixed width, which is what makes the two agree.
         for (var pass = 0; pass < 2; pass++)
         {
-            var moovLength = Assemble(prepared, movieDuration, textPayloadAt, mediaBase).Length;
+            var moovLength = Assemble(prepared, movieDuration, textPayloadAt, bases).Length;
             textPayloadAt = ftyp.Length + moovLength + 8;
-            mediaBase = ftyp.Length + moovLength + textBox.Length + MdatHeaderLength;
+            var at = (long)ftyp.Length + moovLength + textBox.Length;
+            for (var i = 0; i < inputs.Count; i++)
+            {
+                at += MdatHeaderLength;
+                bases[i] = at;
+                at += inputs[i].Index.SourceLength;
+            }
         }
 
-        var moov = Assemble(prepared, movieDuration, textPayloadAt, mediaBase);
-        if (ftyp.Length + moov.Length + textBox.Length + MdatHeaderLength != mediaBase)
+        var moov = Assemble(prepared, movieDuration, textPayloadAt, bases);
+        if (ftyp.Length + moov.Length + textBox.Length + MdatHeaderLength != bases[0])
         {
             // A header that lies about where the samples are is worse than no header at all.
             return null;
         }
 
-        var mdat = new byte[MdatHeaderLength];
-        U32(1).CopyTo(mdat, 0);
-        "mdat"u8.CopyTo(mdat.AsSpan(4));
-        U64((ulong)(MdatHeaderLength + index.SourceLength)).CopyTo(mdat, 8);
+        var wrappers = new List<byte[]>();
+        foreach (var input in inputs)
+        {
+            var mdat = new byte[MdatHeaderLength];
+            U32(1).CopyTo(mdat, 0);
+            "mdat"u8.CopyTo(mdat.AsSpan(4));
+            U64((ulong)(MdatHeaderLength + input.Index.SourceLength)).CopyTo(mdat, 8);
+            wrappers.Add(mdat);
+        }
 
-        byte[] header = [.. ftyp, .. moov, .. textBox, .. mdat];
+        // Only the first wrapper can sit in the header; the rest have to be interleaved with the files
+        // they wrap, which the stream does when it stitches the parts together.
+        byte[] header = [.. ftyp, .. moov, .. textBox, .. wrappers[0]];
         return new Result(
             header,
-            header.Length + index.SourceLength,
+            header.Length + inputs.Sum(input => input.Index.SourceLength)
+                + ((inputs.Count - 1) * MdatHeaderLength),
             prepared.Select(track => track.SampleEntry).ToList());
     }
 
@@ -132,9 +161,11 @@ internal static class Mp4Synthesizer
         IReadOnlyList<int>? SyncSamples,
         long Duration,
         IReadOnlyList<(long Offset, int Size)> Placements,
-        bool InHeader);
+        bool InHeader,
+        int Input);
 
-    private static Prepared? PrepareVideo(IndexedTrack track, long timestampScale, VideoSignalling signalling)
+    private static Prepared? PrepareVideo(
+        IndexedTrack track, long timestampScale, VideoSignalling signalling, int input)
     {
         if (VideoCodec(track.CodecId) is not { } codec || track.CodecPrivate is null)
         {
@@ -192,10 +223,11 @@ internal static class Mp4Synthesizer
             sync.Count == count ? null : sync,
             deltas.Sum(),
             [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
-            InHeader: false);
+            InHeader: false,
+            input);
     }
 
-    private static Prepared? PrepareAudio(IndexedTrack track, Stream source)
+    private static Prepared? PrepareAudio(IndexedTrack track, Stream source, int input)
     {
         if (track.CodecId is not ("A_AC3" or "A_EAC3"))
         {
@@ -220,7 +252,8 @@ internal static class Mp4Synthesizer
         return new Prepared(
             track, "ac-3", AudioEntry(ac3), deltas, null, null, duration * count,
             [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
-            InHeader: false);
+            InHeader: false,
+            input);
     }
 
     /// <summary>
@@ -289,7 +322,8 @@ internal static class Mp4Synthesizer
         }
 
         return new Prepared(
-            track, "tx3g", TextEntry(), deltas, null, null, deltas.Sum(), placements, InHeader: true);
+            track, "tx3g", TextEntry(), deltas, null, null, deltas.Sum(), placements,
+            InHeader: true, Input: 0);
     }
 
     /// <summary>Appends one timed-text sample — a 16-bit length then the text — and reports where it went.</summary>
@@ -372,12 +406,14 @@ internal static class Mp4Synthesizer
     }
 
     private static byte[] Assemble(
-        IReadOnlyList<Prepared> tracks, long movieDuration, long textBase, long mediaBase)
+        IReadOnlyList<Prepared> tracks, long movieDuration, long textBase, IReadOnlyList<long> bases)
     {
         var traks = new List<byte[]>();
         for (var i = 0; i < tracks.Count; i++)
         {
-            traks.Add(Trak(tracks[i], i + 1, movieDuration, tracks[i].InHeader ? textBase : mediaBase));
+            // Rewritten text lives in the header; everything else lives in the file it came from.
+            var at = tracks[i].InHeader ? textBase : bases[tracks[i].Input];
+            traks.Add(Trak(tracks[i], i + 1, movieDuration, at));
         }
 
         var mvhd = Full("mvhd", 1, 0,

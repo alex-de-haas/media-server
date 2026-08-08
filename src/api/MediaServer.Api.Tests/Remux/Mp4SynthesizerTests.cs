@@ -32,7 +32,10 @@ public sealed class Mp4SynthesizerTests
             .Select(track => track.Number)
             .ToList();
 
-        var result = Mp4Synthesizer.Build(index, numbers, signalling, stream);
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(index, stream)],
+            [.. numbers.Select(number => new Mp4Synthesizer.TrackRef(0, number))],
+            signalling);
         Assert.NotNull(result);
         return new Built(result, new Mp4BoxReader(result.Header), index);
     }
@@ -270,7 +273,10 @@ public sealed class Mp4SynthesizerTests
         var stream = new MemoryStream(file);
         var index = MatroskaIndexer.Build(stream);
 
-        Assert.Null(Mp4Synthesizer.Build(index, [9], VideoSignalling.DolbyVision, stream));
+        Assert.Null(Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(index, stream)],
+            [new Mp4Synthesizer.TrackRef(0, 9)],
+            VideoSignalling.DolbyVision));
     }
 
     [Fact]
