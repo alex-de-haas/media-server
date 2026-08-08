@@ -378,9 +378,11 @@ rewriting rather than encoding tooling, so they do not change the answer.
       by its stream row, and the endpoint names tracks by stream id rather than by
       position — a sidecar has no position in the container. Verified on a real dub
       file: video from one file, audio from another, in one MP4.
-- [ ] **A sidecar subtitle folded in.** A `.srt` is not Matroska and has no index; it
-      is small enough to parse per request into the header's text `mdat`, but the
-      synthesiser only takes cues from an indexed track today.
+- [x] **A sidecar subtitle folded in.** `.srt`, `.ass`, `.ssa` and `.vtt` are parsed
+      per request into cues — no index, because a film's dialogue is a hundred
+      kilobytes — and join the embedded path at the point where both are simply a list
+      of cues. Verified on a real file: parsed, rewritten as `tx3g`, and extracted back
+      with its timings intact to the millisecond.
 - [x] **Subtitle conversion** — the one thing that cannot be referenced the way audio
       and video can. A SubRip or ASS sample is not a valid MP4 subtitle sample: MP4
       wants `tx3g`, which is a length-prefixed string, and the gaps between cues need

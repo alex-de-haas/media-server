@@ -476,4 +476,51 @@ public sealed class Mp4SynthesizerTests
         Assert.All(dubOffsets, offset =>
             Assert.InRange(offset, (ulong)(result.HeaderLength + main.Length), (ulong)result.TotalLength));
     }
+
+    [Fact]
+    public void A_subtitle_from_a_file_beside_the_video_becomes_a_track_of_its_own()
+    {
+        var file = VideoAndAudio();
+        var stream = new MemoryStream(file);
+        var index = MatroskaIndexer.Build(stream);
+
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(index, stream)],
+            [new Mp4Synthesizer.TrackRef(0, 1), new Mp4Synthesizer.TrackRef(0, 2)],
+            VideoSignalling.CrossCompatible,
+            [([new TextCue(40, 60, "From a sidecar")], "rus")]);
+
+        Assert.NotNull(result);
+        Assert.Equal(["hvc1", "ac-3", "tx3g"], result.SampleEntries);
+
+        var reader = new Mp4BoxReader(result.Header);
+
+        // Its samples ride in the header, like every other rewritten cue.
+        var offsets = reader.ChunkOffsets(reader.Find("moov/trak/mdia/minf/stbl/co64").Skip(2).First());
+        Assert.All(offsets, offset => Assert.InRange(offset, 0ul, (ulong)result.HeaderLength));
+
+        // Cues from a file count in milliseconds.
+        var mdhd = reader.Find("moov/trak/mdia/mdhd").Skip(2).First();
+        Assert.Equal(1000u, reader.U32At(mdhd.Start + 20));
+
+        Assert.Contains("From a sidecar", System.Text.Encoding.UTF8.GetString(result.Header),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_empty_sidecar_adds_no_track()
+    {
+        var file = VideoAndAudio();
+        var stream = new MemoryStream(file);
+        var index = MatroskaIndexer.Build(stream);
+
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(index, stream)],
+            [new Mp4Synthesizer.TrackRef(0, 1)],
+            VideoSignalling.CrossCompatible,
+            [([], "rus")]);
+
+        Assert.NotNull(result);
+        Assert.Equal(["hvc1"], result.SampleEntries);
+    }
 }

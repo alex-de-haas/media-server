@@ -37,7 +37,8 @@ public sealed class RemuxStreamService(
     RemuxIndexStore store)
 {
     private sealed record StreamRow(
-        Guid Id, StreamType Type, int Index, bool IsExternal, string? ExternalPath, string? Codec);
+        Guid Id, StreamType Type, int Index, bool IsExternal, string? ExternalPath, string? Codec,
+        string? Language);
 
     internal async Task<(RemuxStream? Stream, RemuxRefusal Refusal)> OpenAsync(
         Guid mediaSourceId,
@@ -61,7 +62,8 @@ public sealed class RemuxStreamService(
         var streams = await database.MediaStreams.AsNoTracking()
             .Where(stream => stream.MediaSourceId == mediaSourceId)
             .Select(stream => new StreamRow(
-                stream.Id, stream.StreamType, stream.Index, stream.IsExternal, stream.ExternalPath, stream.Codec))
+                stream.Id, stream.StreamType, stream.Index, stream.IsExternal, stream.ExternalPath,
+                stream.Codec, stream.Language))
             .ToListAsync(cancellationToken);
 
         // A chosen dub that lives in its own file is the reason the layout takes more than one input.
@@ -140,7 +142,23 @@ public sealed class RemuxStreamService(
                 }
             }
 
-            var built = Mp4Synthesizer.Build(inputs, tracks, signalling);
+            // A subtitle beside the video has no index and needs none: a film's dialogue is a hundred
+            // kilobytes, so it is read here rather than walked in the background.
+            var externalText = new List<(IReadOnlyList<TextCue>, string?)>();
+            var textSidecar = streams.FirstOrDefault(stream =>
+                stream.Id == subtitleStreamId && stream.IsExternal && stream.Type == StreamType.Subtitle);
+            if (textSidecar is not null
+                && sandbox.TryResolve(catalog, textSidecar.ExternalPath!, out var textPath)
+                && SubtitleFile.IsConvertible(textPath))
+            {
+                var cues = SubtitleFile.Read(textPath);
+                if (cues.Count > 0)
+                {
+                    externalText.Add((cues, textSidecar.Language));
+                }
+            }
+
+            var built = Mp4Synthesizer.Build(inputs, tracks, signalling, externalText);
             if (built is null)
             {
                 await DisposeAllAsync(opened);

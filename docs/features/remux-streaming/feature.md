@@ -108,6 +108,11 @@ length-prefixed string, and the gaps between cues need empty samples that exist 
 in Matroska. So the text is converted and carried in a **second `mdat` inside the
 header** — a film's dialogue is a hundred kilobytes against a source of gigabytes.
 
+A subtitle **beside** the video joins the same path. It has no index and needs none —
+a film's dialogue is a hundred kilobytes, so a `.srt`, `.ass` or `.vtt` is parsed per
+request into cues, which is exactly what an embedded track becomes before the timeline
+is laid out. Timestamps are read whether they use a comma, a dot, or ASS's hundredths.
+
 SubRip gives up its markup; an ASS row gives up its fields and override codes, and a
 comma inside the line is not mistaken for a separator. Styling is lost, which
 [the epic](../apple-client/plan.md) accepted for text subtitles. A cue with no stated
@@ -175,6 +180,9 @@ why this lives in `api`: nothing on the serving path invokes ffmpeg.
 - **A second input**: that it gets a wrapper of its own, that the wrapper sits between
   the files, and that its samples are addressed past the first file rather than from
   the same base.
+- **Subtitle files**: SubRip with and without cue numbers, WebVTT's dotted timestamps,
+  ASS dialogue counted in hundredths, cues returned in start order however the file
+  lists them, and one with no duration or no words dropped rather than carried.
 
 New codec support — `ec-3`, `mp4a`, a second video codec — must extend
 `RemuxCodecs` and the synthesiser together, and a test must assert that a source

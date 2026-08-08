@@ -66,7 +66,8 @@ internal static class Mp4Synthesizer
     internal static Result? Build(
         IReadOnlyList<Input> inputs,
         IReadOnlyList<TrackRef> tracks,
-        VideoSignalling signalling)
+        VideoSignalling signalling,
+        IReadOnlyList<(IReadOnlyList<TextCue> Cues, string? Language)>? externalText = null)
     {
         var prepared = new List<Prepared>();
         // Timed text is rewritten, so it needs somewhere to live; it is small enough to ride in the header.
@@ -94,6 +95,14 @@ internal static class Mp4Synthesizer
             };
 
             if (one is not null)
+            {
+                prepared.Add(one);
+            }
+        }
+
+        foreach (var (cues, language) in externalText ?? [])
+        {
+            if (PrepareExternalSubtitle(cues, language, subtitles) is { } one)
             {
                 prepared.Add(one);
             }
@@ -300,34 +309,14 @@ internal static class Mp4Synthesizer
             return null;
         }
 
-        var timescale = TicksPerSecond(timestampScale);
-        var placements = new List<(long Offset, int Size)>();
-        var deltas = new List<long>();
-        var cursor = 0L;                            // where the timeline has been filled to, in ticks
         var buffer = new byte[4096];
-
+        var cues = new List<TextCue>(track.Samples.Count);
         for (var i = 0; i < track.Samples.Count; i++)
         {
             var sample = track.Samples[i];
-            var start = sample.Timestamp;
-            var duration = durations[i];
-            if (duration <= 0)
+            if (durations[i] <= 0)
             {
                 continue;
-            }
-
-            if (start > cursor)
-            {
-                // Nothing is on screen between cues, and timed text says so with an empty sample rather
-                // than with a gap, which MP4 has no way to express.
-                placements.Add((Place(text, []), 2));
-                deltas.Add(start - cursor);
-            }
-            else if (start < cursor)
-            {
-                // Overlapping cues cannot both be shown by a single-sample-at-a-time track; the later one
-                // starts where the earlier ended rather than being dropped.
-                start = cursor;
             }
 
             if (buffer.Length < sample.Size)
@@ -337,20 +326,73 @@ internal static class Mp4Synthesizer
 
             source.Position = sample.Offset;
             source.ReadExactly(buffer, 0, sample.Size);
-            var content = SubtitleText.Convert(buffer.AsSpan(0, sample.Size), track.CodecId);
-            var encoded = System.Text.Encoding.UTF8.GetBytes(content);
-
-            placements.Add((Place(text, encoded), 2 + encoded.Length));
-            deltas.Add(duration);
-            cursor = start + duration;
+            cues.Add(new TextCue(
+                sample.Timestamp,
+                durations[i],
+                SubtitleText.Convert(buffer.AsSpan(0, sample.Size), track.CodecId)));
         }
 
-        if (placements.Count == 0)
+        return PrepareText(track, cues, TicksPerSecond(timestampScale), text);
+    }
+
+    /// <summary>
+    /// The same track, from a file beside the video rather than from inside it. A sidecar subtitle has no
+    /// index and needs none — it is parsed per request — so it joins the embedded path here, once both are
+    /// simply a list of cues.
+    /// </summary>
+    private static Prepared? PrepareExternalSubtitle(
+        IReadOnlyList<TextCue> cues, string? language, MemoryStream text)
+    {
+        var track = new IndexedTrack
         {
-            return null;
+            Number = 0,
+            Kind = IndexedTrackKind.Subtitle,
+            CodecId = "S_TEXT/UTF8",
+            Language = language,
+        };
+
+        // Cues from a file are in milliseconds, which is a timescale of a thousand.
+        return PrepareText(track, cues, 1000, text);
+    }
+
+    /// <summary>
+    /// Lays cues onto a timeline: an empty sample wherever nothing is on screen, because timed text has no
+    /// way to express a gap other than by saying nothing in it.
+    /// </summary>
+    private static Prepared? PrepareText(
+        IndexedTrack track, IReadOnlyList<TextCue> cues, int timescale, MemoryStream text)
+    {
+        var placements = new List<(long Offset, int Size)>();
+        var deltas = new List<long>();
+        var cursor = 0L;
+
+        foreach (var cue in cues.OrderBy(cue => cue.Start))
+        {
+            if (cue.Duration <= 0)
+            {
+                continue;
+            }
+
+            var start = cue.Start;
+            if (start > cursor)
+            {
+                placements.Add((Place(text, []), 2));
+                deltas.Add(start - cursor);
+            }
+            else if (start < cursor)
+            {
+                // Overlapping cues cannot both be shown by a track that carries one sample at a time; the
+                // later one starts where the earlier ended rather than being dropped.
+                start = cursor;
+            }
+
+            var encoded = System.Text.Encoding.UTF8.GetBytes(cue.Text);
+            placements.Add((Place(text, encoded), 2 + encoded.Length));
+            deltas.Add(cue.Duration);
+            cursor = start + cue.Duration;
         }
 
-        if (!Representable(deltas))
+        if (placements.Count == 0 || !Representable(deltas))
         {
             return null;
         }
