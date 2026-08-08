@@ -244,10 +244,9 @@ internal static class Mp4Synthesizer
 
     private static Prepared? PrepareAudio(IndexedTrack track, Stream source, int input)
     {
-        // AC-3 only. E-AC-3 is a different thing in MP4 — an `ec-3` entry with a `dec3` descriptor that
-        // enumerates its substreams — and describing one as the other would produce a header that
-        // misstates the stream. Leaving it out is the honest answer until `ec-3` is written.
-        if (track.CodecId is not "A_AC3")
+        // What can be described lives in one place, so the resolver cannot offer a remux the synthesiser
+        // then declines — which produced a file with no sound.
+        if (!RemuxCodecs.CanPackageAudio(track))
         {
             return null;
         }

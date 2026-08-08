@@ -465,15 +465,20 @@ Two operational facts worth keeping, both of which cost time to find:
       enumerating its substreams. Describing one as AC-3 would misstate the stream,
       so an E-AC-3 track is left out until that is written — which matters here,
       because Atmos rides on E-AC-3.
+- [ ] **AAC**, which needs `mp4a` with an `esds` carrying the audio specific config.
+      Nothing in this library uses it, but a client that declares AAC support would
+      otherwise be offered a remux with no sound — which is why a source whose only
+      audio cannot be packaged is refused outright until each of these lands.
 - [ ] **Confirm the measurements above on tvOS.** Everything in "What AVFoundation
       demands" was measured on macOS, which has already proven the more permissive of
       the two in this project.
 
 ### Closing the plan
 
-- [ ] **`feature.md`**, and an update to
-      [native-playback](../native-playback/feature.md) where it says packaging does
-      not exist yet.
+- [x] **`feature.md`** — created with the first shipped behaviour, describing what is
+      there now rather than what is intended.
+- [ ] **Update [native-playback](../native-playback/feature.md)** where it says
+      packaging does not exist yet.
 - [ ] **Index** — `node scripts/docs-index.mjs --fix`.
 - [ ] **Version bump** — new functionality, so a minor; read `manifest.json` when
       the work lands.

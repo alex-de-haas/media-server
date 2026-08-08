@@ -56,6 +56,12 @@ public static class NativePlaybackReasons
 
     /// <summary>Packaging works, but this source has not been indexed yet. Retrying later succeeds.</summary>
     public const string PackagingPending = "packaging_pending";
+
+    /// <summary>
+    /// The client could decode this audio, but packaging cannot describe it in an MP4 — so a remux would
+    /// play without sound. Distinct from <see cref="UnsupportedAudioCodec"/>, which is about the client.
+    /// </summary>
+    public const string PackagingUnsupportedAudio = "packaging_unsupported_audio";
     public const string NoFile = "no_file";
 }
 

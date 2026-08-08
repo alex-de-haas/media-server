@@ -132,6 +132,14 @@ public sealed class NativePlaybackResolver(
                 : NativePlaybackReasons.PackagingUnavailable);
         }
 
+        // The client's audio support is not the question here: we have to write the sample entry, and a
+        // remux whose only audio track we cannot describe would play as a silent film.
+        if (!streams.Any(stream =>
+                stream.StreamType == StreamType.Audio && RemuxCodecs.CanPackageAudio(stream.Codec)))
+        {
+            return Unsupported(NativePlaybackReasons.PackagingUnsupportedAudio);
+        }
+
         var signalling = SignallingFor(video?.HdrFormat, profile);
         return new NativePlaybackResolution(
             sourceId,

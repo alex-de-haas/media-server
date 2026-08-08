@@ -132,7 +132,7 @@ public sealed class NativePlaybackResolverTests : IDisposable
         // The ordering constraint the spike produced: dvh1 engages DV on a device that supports it and
         // breaks one that does not, so the answer depends on what the client said. An mkv, because the
         // choice only exists where we build the container.
-        AddSource("mkv", "hevc", "Dolby Vision", ("eac3", 6));
+        AddSource("mkv", "hevc", "Dolby Vision", ("ac3", 6));
 
         // Remux is where the choice exists, because that is where we write the container.
         var withDv = await ResolveOneAsync(AppleTv(dolbyVision: true), packaging: true);
@@ -188,9 +188,45 @@ public sealed class NativePlaybackResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task A_source_whose_audio_cannot_be_packaged_is_refused_rather_than_played_silently()
+    {
+        // The client decodes AAC perfectly well. We cannot write a sample entry for it, so offering a
+        // remux would hand over a playable-looking file with no sound.
+        AddSource("mkv", "hevc", "HDR10", ("aac", 6));
+
+        var resolution = await ResolveOneAsync(AppleTv(), packaging: true);
+
+        Assert.Equal(NativePlaybackDecision.Unsupported, resolution.Decision);
+        Assert.Equal(NativePlaybackReasons.PackagingUnsupportedAudio, resolution.Reason);
+    }
+
+    [Fact]
+    public async Task An_eac3_only_source_is_refused_because_packaging_cannot_describe_it()
+    {
+        // E-AC-3 needs an `ec-3` entry with a `dec3` descriptor. Until that is written, offering a remux
+        // would be offering silence — and this matters, because Atmos rides on E-AC-3.
+        AddSource("mkv", "hevc", "HDR10", ("eac3", 6));
+
+        var resolution = await ResolveOneAsync(AppleTv(), packaging: true);
+
+        Assert.Equal(NativePlaybackDecision.Unsupported, resolution.Decision);
+        Assert.Equal(NativePlaybackReasons.PackagingUnsupportedAudio, resolution.Reason);
+    }
+
+    [Fact]
+    public async Task One_packageable_audio_track_among_several_is_enough_to_remux()
+    {
+        AddSource("mkv", "hevc", "HDR10", ("dts", 8), ("ac3", 6));
+
+        Assert.Equal(
+            NativePlaybackDecision.Remux,
+            (await ResolveOneAsync(AppleTv(), packaging: true)).Decision);
+    }
+
+    [Fact]
     public async Task A_source_the_walk_has_not_reached_says_so_rather_than_saying_no()
     {
-        AddSource("mkv", "hevc", "HDR10", ("eac3", 6));
+        AddSource("mkv", "hevc", "HDR10", ("ac3", 6));
 
         var response = await Resolver(RemuxReadinessState.Pending)
             .ResolveAsync(_itemId, UserId, AppleTv(), CancellationToken.None);
@@ -205,7 +241,7 @@ public sealed class NativePlaybackResolverTests : IDisposable
     [Fact]
     public async Task A_remux_url_carries_the_transport_and_the_signalling_it_promises()
     {
-        AddSource("mkv", "hevc", "Dolby Vision", ("eac3", 6));
+        AddSource("mkv", "hevc", "Dolby Vision", ("ac3", 6));
 
         var resolution = await ResolveOneAsync(AppleTv(dolbyVision: true), packaging: true);
 
@@ -220,7 +256,7 @@ public sealed class NativePlaybackResolverTests : IDisposable
     [Fact]
     public async Task An_mkv_is_a_packaging_problem_and_says_which_kind()
     {
-        AddSource("mkv", "hevc", "HDR10", ("eac3", 6));
+        AddSource("mkv", "hevc", "HDR10", ("ac3", 6));
 
         // Codecs are fine; only the container is not. Until packaging exists the honest answer is that
         // it is unavailable, not a URL that would fail to open.
