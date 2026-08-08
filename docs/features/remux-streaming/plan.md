@@ -2,7 +2,7 @@
 
 Status: Draft
 Created: 2026-08-05
-Updated: 2026-08-07
+Updated: 2026-08-08
 
 > Part of the [Apple client](../apple-client/plan.md) epic, and the last server
 > piece before a client can play the library.
@@ -223,15 +223,15 @@ breaking change later.
 
 ### Where this leaves the engine
 
-Neither transport needs ffmpeg on the serving path. Audio and video are container
-parsing and byte assembly; **subtitles are the exception** — they must be rewritten
-into the transport's own format, which is text processing rather than encoding, but
-it is not byte assembly and the claim should not be overstated. `api` already parses
-container headers, and has deliberately shipped without ffmpeg since [external track
-sidecars](../external-track-sidecars/feature.md). The engine's own stated reasons for
+**In `api`, on the evidence of the prototype**, which served a 26 GB source without
+invoking ffmpeg or any other external tool: the work is container parsing and byte
+arithmetic. `api` already parses container headers and has deliberately shipped
+without ffmpeg since [external track
+sidecars](../external-track-sidecars/feature.md). The engine's stated reasons for
 existing are hardware-encoding isolation and long-running CPU work, and neither
-applies here. So the assumption that packaging belongs to `transcode-engine` is
-recorded as an open question rather than settled.
+applies. **Subtitles are the exception** — they must be rewritten into the
+transport's own format — but that is text processing rather than encoding, so it does
+not move the answer.
 
 ## Deliverables
 
@@ -247,17 +247,60 @@ this has an answer.**
 - [x] **Byte identity** — answered 2026-08-07: **video holds, audio needs de-lacing,
       and the design survives.** See
       [Byte identity](#byte-identity-measured-2026-08-07).
-- [ ] **Synthesise an MP4 from an index** and have AVFoundation accept it. The
-      simplification worth trying first: an `mdat` is an opaque blob, so it can wrap
-      the **entire source MKV verbatim** and the sample table can point at payload
-      positions inside it. Output offset then equals header size plus source offset,
-      answering a range becomes reading the same range from the MKV, and the only
-      waste is the Matroska framing bytes nobody reads.
-- [ ] **Dolby Vision on the Apple TV** from that synthesised file.
-- [ ] **Seeking** across it.
-- [ ] **The index walk on the slow disk** — how long, and how large the result.
-- [ ] **Written outcome** in this document, including whether the serving path turns
-      out to need ffmpeg at all, which decides `api` versus `transcode-engine`.
+- [x] **Synthesise an MP4 from an index** — done 2026-08-08, and the `mdat`-wraps-the-
+      source simplification holds.
+- [x] **Dolby Vision on the Apple TV** from that synthesised file — confirmed on the
+      television.
+- [x] **Seeking** across it — 0.35 s, 0.35 s and 2.51 s over a 2 h 12 m film.
+- [ ] **The index walk on the slow disk** — how long, and how large the result. The
+      only item this hardware cannot answer: the dev machine is an SSD.
+- [x] **Written outcome**, below.
+
+#### Outcome of the prototype (2026-08-08)
+
+A throwaway prototype — an MKV indexer, an MP4 synthesiser and a range server, in
+Python — served the untouched 26.4 GB source as a `dvh1` MP4 and played it on the
+Apple TV 4K **in Dolby Vision**, with seeking, having produced and stored nothing.
+
+| | 2 h 12 m, 26.4 GB source |
+| --- | --- |
+| Index walk | 27 s cold, 2.3 s warm (SSD) |
+| Synthesised header | **7.8 MB — 0.0296 % of the source** |
+| Written to disk | nothing |
+| Time to `readyToPlay` | 0.43 s |
+| Reported duration | 7951.10 s, exactly the source's |
+| Seeks (1:00:00 / 10:00 / 2:11:40) | 0.35 s, 0.35 s, 2.51 s |
+| Stalls | 0 |
+
+**Non-fragmented wins, decisively.** This settles the shape question by measurement:
+a real sample table costs **7 requests** to start playing, because the player reads
+`moov` once and then addresses the media directly. The fragmented file measured on
+2026-08-07 needed **3309**, because it had to walk every `moof` first.
+
+**Everything Dolby Vision needs is carried, not derived.** `hvcC` comes from the
+track's `CodecPrivate`, and the DV configuration from its `BlockAdditionMapping`,
+whose `BlockAddIDType` is literally `dvcC` — 24 bytes decoding to profile 8, level 6,
+RPU present, `bl_signal_compatibility_id` 1, matching the source exactly. `colr` is
+built from the Matroska `Colour` element and yields the same `tv / bt2020nc /
+smpte2084 / bt2020` the proven reference file reports.
+
+Three traps, each found by a failure and each cheap to fall into again:
+
+- **A uniform sample duration drifts.** Taking `DefaultDuration` as the frame
+  duration diverged from the real timestamps by 33 s over this film — invisible on a
+  30 s test slice. Sample durations must come from the timestamps in the file. The
+  decode timeline is the presentation timestamps in sorted order.
+- **Truncating an *explicit* byte range is read as a failed request.** A client that
+  asks for `bytes=0-67832060` and receives eight megabytes gives up. Only an
+  open-ended range may be answered with a window.
+- **An open-ended range must be streamed, not assembled.** The first server built the
+  response in memory, which for a 26 GB source is exactly as bad as it sounds.
+
+**Where it belongs: `api`.** Nothing on the serving path invoked ffmpeg, or any
+external tool — the prototype is container parsing and byte arithmetic. The engine's
+stated reasons for existing are hardware-encoding isolation and long-running CPU
+work, and neither applies. Subtitles remain the exception, and they need text
+rewriting rather than encoding tooling, so they do not change the answer.
 
 ### Phase 1 — the index
 
@@ -283,10 +326,8 @@ this has an answer.**
 - [ ] **Answer an arbitrary byte range** by resolving it to samples and reading those
       from the source, with the total length declared, since AVFoundation refuses an
       undeclared one.
-- [ ] **Decide fragmented or not, by measurement.** The walk measured above is the
-      fragmented pattern — 3309 small requests. A non-fragmented file should instead
-      pull one contiguous header and then seek directly, which would be far fewer
-      requests. Measure both against the index and pick.
+- [x] **Decide fragmented or not, by measurement** — answered by the prototype:
+      **non-fragmented**, 7 requests against the fragmented file's 3309.
 - [ ] **Track selection** so the output carries what the viewer chose, including
       sidecars folded in as tracks.
 - [ ] **Subtitle conversion**, which is the one thing that cannot be referenced the
@@ -352,11 +393,10 @@ this has an answer.**
   capabilities select MP4 over HLS, and how a manual override interacts with it.
   Filling the profile from the device is client work and is a deliverable on
   [apple-client](../apple-client/plan.md).
-- **Does this still belong to `transcode-engine`?** Neither transport's serving path
-  needs ffmpeg. If the indexer and renderers live in `api`, the cross-app hop and the
-  proxying disappear — but `api`'s deliberate ffmpeg-free posture was about
-  *encoding*, and folding sidecars in may still need the engine. Phase 0 reports
-  whether ffmpeg appears anywhere on the serving path.
+- ~~**Does this still belong to `transcode-engine`?**~~ Answered by the prototype:
+  no ffmpeg appears on the serving path, so it belongs in `api`. What remains open is
+  narrower — whether *folding a sidecar in* can be done the same way, or whether that
+  one operation still wants the engine.
 - **What the index costs on the slow disk.** Walking block headers is far cheaper
   than reading payloads, but it is still a pass over a 40 GB file and it has never
   been measured on this hardware. Phase 1 answers it, and the answer decides whether

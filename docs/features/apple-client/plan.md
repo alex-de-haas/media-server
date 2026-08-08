@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-02
-Updated: 2026-08-07
+Updated: 2026-08-08
 
 > **Umbrella epic.** This document owns the decisions, the platform split, and the
 > playback spike that everything else depends on. The features it spans keep their
@@ -110,13 +110,11 @@ not a transcoding one, and a stream copy solves it.
   than a copy of the film. Building it in the background and computing the
   container from it satisfies all three constraints — no duplicate, no wait, and
   the one pass happens where nobody is watching.
-- **Where packaging runs is reopened.** This section assumed the
-  **`transcode-engine` app**, because `api` has deliberately shipped without ffmpeg
-  since [external track sidecars](../external-track-sidecars/feature.md) and the
-  engine already has the tooling, the shared-mount contract, a job/SSE API and
-  cross-app discovery. That reasoning predates the index design, whose serving path
-  is container parsing and byte assembly with **no ffmpeg at all** — and `api`
-  already parses container headers. See the open question in
+- **Packaging runs in `api`, not in `transcode-engine`.** This section originally
+  assumed the engine, because it holds the ffmpeg tooling. A prototype then served a
+  26 GB source as a Dolby Vision MP4 without invoking ffmpeg at all — the work is
+  container parsing and byte arithmetic — so the engine's reasons for existing
+  (hardware-encoding isolation, long-running CPU work) do not apply. See
   [remux-streaming](../remux-streaming/plan.md).
 - Either way `api` serves the bytes, since the engine is not publicly exposed.
   Authorization stays where it already is: item id → catalog sandbox → user access.
