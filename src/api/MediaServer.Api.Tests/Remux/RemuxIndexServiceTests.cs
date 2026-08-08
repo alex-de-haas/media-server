@@ -101,7 +101,7 @@ public sealed class RemuxIndexServiceTests : IDisposable
 
         var pending = await Service().PendingAsync(10, CancellationToken.None);
 
-        Assert.Equal(id, Assert.Single(pending).MediaSourceId);
+        Assert.Equal(id, Assert.Single(pending).Key);
     }
 
     [Fact]

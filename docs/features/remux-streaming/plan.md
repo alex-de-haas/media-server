@@ -372,13 +372,15 @@ rewriting rather than encoding tooling, so they do not change the answer.
       arrives as stream indexes, which are positions in the file rather than Matroska
       track numbers, so the index carries both. A stale choice falls back to the
       first track of its kind rather than playing nothing.
-- [ ] **Sidecars folded in as tracks.** The layout now makes room: the output takes
-      several inputs, one `mdat` per wrapped file, and a sample offset may point into
-      any of them — `[ftyp][moov][text][mdat + source][mdat + sidecar]`. What is left
-      is the wiring: a sidecar `.mka` needs an index of its own built in the
-      background, and the track choice needs a way to say "the dub from that file"
-      rather than "track N of this one". A subtitle sidecar is easier — a `.srt` is
-      small enough to parse per request into the header's text `mdat`.
+- [x] **A sidecar dub folded in as a track.** The output takes several inputs, one
+      `mdat` per wrapped file, and a sample offset may point into any of them. An
+      external `.mka` is indexed in the background like any other Matroska file, keyed
+      by its stream row, and the endpoint names tracks by stream id rather than by
+      position — a sidecar has no position in the container. Verified on a real dub
+      file: video from one file, audio from another, in one MP4.
+- [ ] **A sidecar subtitle folded in.** A `.srt` is not Matroska and has no index; it
+      is small enough to parse per request into the header's text `mdat`, but the
+      synthesiser only takes cues from an indexed track today.
 - [x] **Subtitle conversion** — the one thing that cannot be referenced the way audio
       and video can. A SubRip or ASS sample is not a valid MP4 subtitle sample: MP4
       wants `tx3g`, which is a length-prefixed string, and the gaps between cues need

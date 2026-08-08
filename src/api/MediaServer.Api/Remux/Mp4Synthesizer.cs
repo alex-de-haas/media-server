@@ -44,7 +44,16 @@ internal static class Mp4Synthesizer
     /// <summary>Which track of which input, in the order the output should carry them.</summary>
     internal readonly record struct TrackRef(int Input, ulong Number);
 
-    internal sealed record Result(byte[] Header, long TotalLength, IReadOnlyList<string> SampleEntries)
+    /// <param name="Header">Everything before the first wrapped file, including that file's own
+    /// <c>mdat</c> header.</param>
+    /// <param name="Wrappers">The <c>mdat</c> header of every input after the first. These sit
+    /// <em>between</em> the files, so whoever stitches the output has to put them there — the offsets in
+    /// the sample tables already count on it.</param>
+    internal sealed record Result(
+        byte[] Header,
+        IReadOnlyList<byte[]> Wrappers,
+        long TotalLength,
+        IReadOnlyList<string> SampleEntries)
     {
         public long HeaderLength => Header.Length;
     }
@@ -144,6 +153,7 @@ internal static class Mp4Synthesizer
         byte[] header = [.. ftyp, .. moov, .. textBox, .. wrappers[0]];
         return new Result(
             header,
+            wrappers.Skip(1).ToList(),
             header.Length + inputs.Sum(input => input.Index.SourceLength)
                 + ((inputs.Count - 1) * MdatHeaderLength),
             prepared.Select(track => track.SampleEntry).ToList());

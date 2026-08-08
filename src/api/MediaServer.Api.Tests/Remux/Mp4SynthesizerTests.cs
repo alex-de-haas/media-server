@@ -75,6 +75,7 @@ public sealed class Mp4SynthesizerTests
 
         Assert.Equal(["ftyp", "moov", "mdat"], built.Reader.Top.Select(box => box.Type));
         Assert.Equal(built.Result.HeaderLength + file.Length, built.Result.TotalLength);
+        Assert.Empty(built.Result.Wrappers);   // one input needs no wrapper between files
 
         // The mdat declares itself as covering its own header plus the whole source.
         var mdat = built.Reader.Top.Single(box => box.Type == "mdat");
@@ -436,5 +437,43 @@ public sealed class Mp4SynthesizerTests
         var stts = built.Reader.Find("moov/trak/mdia/minf/stbl/stts").Skip(1).First();
         // 1536 samples a frame, which is exact at any rate — unlike 32 ms, which is not at 44.1 kHz.
         Assert.Equal(1536u, built.Reader.Runs(stts)[0].Value);
+    }
+
+    [Fact]
+    public void A_second_input_gets_its_own_wrapper_and_its_own_base()
+    {
+        var main = VideoAndAudio();
+        var dub = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B, TrackEntry(1, 2, "A_AC3", channels: 6)),
+            Cluster(0, SimpleBlock(1, 0, true, Ac3Frame(300))));
+
+        var mainStream = new MemoryStream(main);
+        var dubStream = new MemoryStream(dub);
+        var mainIndex = MatroskaIndexer.Build(mainStream);
+        var dubIndex = MatroskaIndexer.Build(dubStream);
+
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(mainIndex, mainStream), new Mp4Synthesizer.Input(dubIndex, dubStream)],
+            [new Mp4Synthesizer.TrackRef(0, 1), new Mp4Synthesizer.TrackRef(1, 1)],
+            VideoSignalling.CrossCompatible);
+
+        Assert.NotNull(result);
+        Assert.Equal(["hvc1", "ac-3"], result.SampleEntries);
+
+        // One wrapper for the second file, which sits between the two of them.
+        var wrapper = Assert.Single(result.Wrappers);
+        Assert.Equal(16, wrapper.Length);
+        Assert.Equal("mdat", System.Text.Encoding.ASCII.GetString(wrapper, 4, 4));
+
+        Assert.Equal(
+            result.HeaderLength + main.Length + wrapper.Length + dub.Length,
+            result.TotalLength);
+
+        // The dub's samples are addressed past the video's file, not from the same base.
+        var reader = new Mp4BoxReader(result.Header);
+        var dubOffsets = reader.ChunkOffsets(reader.Find("moov/trak/mdia/minf/stbl/co64").Skip(1).First());
+        Assert.All(dubOffsets, offset =>
+            Assert.InRange(offset, (ulong)(result.HeaderLength + main.Length), (ulong)result.TotalLength));
     }
 }

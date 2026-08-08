@@ -18,8 +18,10 @@ offset, and answering a byte range is reading the same range from the source. No
 of media is moved, copied or stored; the Matroska framing bytes inside `mdat` are never
 referenced by any sample.
 
-The layout takes several inputs — one `mdat` per wrapped file — though only the source
-itself is carried today. See [plan.md](plan.md) for what that room is for.
+The layout takes several inputs, one `mdat` per wrapped file, which is what lets a
+**sidecar dub** be carried: an external audio track is a second file, and its samples
+join the video's in the same container. The wrappers after the first sit *between* the
+files, where the sample offsets expect them.
 
 ## The index
 
@@ -71,6 +73,10 @@ exist and the store knows which have an index, so the outstanding work is a quer
 restart resumes without remembering anything. Orphaned indexes are pruned once per
 process, since nothing else deletes a file when its title goes.
 
+Sidecar dubs are indexed too, keyed by their stream row rather than by a media source —
+the store does not care which owns an index, so an external `.mka` is walked exactly as
+its video is, and both keep theirs alive against pruning.
+
 Only Matroska is indexed. An MP4 source is already playable and has nothing to gain.
 
 ## What the container carries
@@ -111,7 +117,9 @@ bitmap subtitles are left out for the same honesty.
 ## What is offered, and what is refused
 
 `/native/v1/media/{mediaSourceId}/remux` serves the computed MP4 under the same signed
-URL token, catalog sandbox and visibility rules as direct play. The header and the
+URL token, catalog sandbox and visibility rules as direct play. Tracks are named by
+**stream id**, not by position: a sidecar lives in its own file and has no position in
+the container at all. The header and the
 untouched source are presented as one seekable stream, so byte ranges are handled by the
 framework's own file result — which matters, because AVFoundation refuses a server that
 will not declare a total length, and reads a truncated answer to an explicit range as a
@@ -164,6 +172,9 @@ why this lives in `api`: nothing on the serving path invokes ffmpeg.
   a seek before the beginning refused rather than silently allowed.
 - **The service**, over a seeded library: what is pending, what is not, what a changed
   file does, and that orphans are pruned while live indexes are kept.
+- **A second input**: that it gets a wrapper of its own, that the wrapper sits between
+  the files, and that its samples are addressed past the first file rather than from
+  the same base.
 
 New codec support — `ec-3`, `mp4a`, a second video codec — must extend
 `RemuxCodecs` and the synthesiser together, and a test must assert that a source

@@ -44,8 +44,8 @@ public static class NativeMediaEndpoints
         group.MapMethods("/media/{mediaSourceId:guid}/remux", ["GET", "HEAD"], async (
             Guid mediaSourceId,
             string? token,
-            int? audioStreamIndex,
-            int? subtitleStreamIndex,
+            Guid? audioStreamId,
+            Guid? subtitleStreamId,
             string? signalling,
             HttpRequest request,
             NativeUrlTokenService tokens,
@@ -61,8 +61,10 @@ public static class NativeMediaEndpoints
                 ? VideoSignalling.DolbyVision
                 : VideoSignalling.CrossCompatible;
 
+            // Streams are named by id, not by position: a sidecar dub lives in its own file and has no
+            // position in the container at all.
             var (stream, refusal) = await remux.OpenAsync(
-                mediaSourceId, audioStreamIndex, subtitleStreamIndex, wanted, cancellationToken);
+                mediaSourceId, audioStreamId, subtitleStreamId, wanted, cancellationToken);
 
             if (stream is null)
             {
