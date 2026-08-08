@@ -407,10 +407,17 @@ internal static class MatroskaIndexer
         switch (lacing)
         {
             case 2:                             // fixed: equal parts, no size table
-                var each = (payloadLength - consumed) / count;
+                var body = payloadLength - consumed;
+                if (count == 0 || body % count != 0)
+                {
+                    // "Equal parts" that do not divide evenly are not equal parts. Slicing anyway would
+                    // truncate every frame and quietly lose the remainder.
+                    return [(payloadStart, payloadLength)];
+                }
+
                 for (var i = 0; i < count; i++)
                 {
-                    sizes.Add(each);
+                    sizes.Add(body / count);
                 }
 
                 break;

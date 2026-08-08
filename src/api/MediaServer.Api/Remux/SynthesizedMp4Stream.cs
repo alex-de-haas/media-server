@@ -135,7 +135,7 @@ internal sealed class SynthesizedMp4Stream : Stream
 
     public override long Seek(long offset, SeekOrigin origin)
     {
-        _position = origin switch
+        var wanted = origin switch
         {
             SeekOrigin.Begin => offset,
             SeekOrigin.Current => _position + offset,
@@ -143,6 +143,14 @@ internal sealed class SynthesizedMp4Stream : Stream
             _ => throw new ArgumentOutOfRangeException(nameof(origin)),
         };
 
+        // The Position setter refuses a negative; seeking must not be a way around it, or a read would
+        // index the header from before its start.
+        if (wanted < 0)
+        {
+            throw new IOException("Cannot seek before the beginning of the stream.");
+        }
+
+        _position = wanted;
         return _position;
     }
 

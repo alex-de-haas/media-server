@@ -95,7 +95,9 @@ internal static class Mp4Synthesizer
             return null;
         }
 
-        var movieDuration = prepared.Max(track => track.Duration);
+        // The movie header counts in milliseconds; each track counts in its own units, so the longest is
+        // found after converting rather than before.
+        var movieDuration = prepared.Max(track => track.Duration * 1000 / Math.Max(1, track.Timescale));
         var ftyp = Box("ftyp", "isom"u8.ToArray(), U32(0x200),
             "isomiso2mp41hvc1dby1"u8.ToArray());
 
@@ -162,7 +164,8 @@ internal static class Mp4Synthesizer
         long Duration,
         IReadOnlyList<(long Offset, int Size)> Placements,
         bool InHeader,
-        int Input);
+        int Input,
+        int Timescale);
 
     private static Prepared? PrepareVideo(
         IndexedTrack track, long timestampScale, VideoSignalling signalling, int input)
@@ -182,7 +185,11 @@ internal static class Mp4Synthesizer
         }
 
         var count = track.Samples.Count;
-        var presentation = track.Samples.Select(sample => sample.Timestamp * timestampScale).ToArray();
+        // Time is kept in the source's own ticks. Nanoseconds would be exact too, but a 32-bit sample
+        // delta then tops out at 4.29 s — shorter than the gaps a subtitle track routinely has — and an
+        // overflow there is a timing table that lies rather than one that fails.
+        var timescale = TicksPerSecond(timestampScale);
+        var presentation = track.Samples.Select(sample => sample.Timestamp).ToArray();
 
         // The decode timeline is the presentation timestamps in sorted order. Taking DefaultDuration as a
         // constant instead drifts — on a two-hour film it parted company with the real timestamps by half a
@@ -194,7 +201,9 @@ internal static class Mp4Synthesizer
             deltas[i] = decode[i + 1] - decode[i];
         }
 
-        deltas[count - 1] = count > 1 ? deltas[count - 2] : track.DefaultDuration;
+        deltas[count - 1] = count > 1
+            ? deltas[count - 2]
+            : track.DefaultDuration / Math.Max(1, timestampScale);
 
         var composition = new long[count];
         var reordered = false;
@@ -213,6 +222,11 @@ internal static class Mp4Synthesizer
             }
         }
 
+        if (!Representable(deltas) || (reordered && !Representable(composition)))
+        {
+            return null;
+        }
+
         return new Prepared(
             track,
             entryName,
@@ -224,12 +238,16 @@ internal static class Mp4Synthesizer
             deltas.Sum(),
             [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
             InHeader: false,
-            input);
+            input,
+            timescale);
     }
 
     private static Prepared? PrepareAudio(IndexedTrack track, Stream source, int input)
     {
-        if (track.CodecId is not ("A_AC3" or "A_EAC3"))
+        // AC-3 only. E-AC-3 is a different thing in MP4 — an `ec-3` entry with a `dec3` descriptor that
+        // enumerates its substreams — and describing one as the other would produce a header that
+        // misstates the stream. Leaving it out is the honest answer until `ec-3` is written.
+        if (track.CodecId is not "A_AC3")
         {
             return null;
         }
@@ -243,17 +261,18 @@ internal static class Mp4Synthesizer
             return null;
         }
 
-        // AC-3 is 1536 samples a frame, always, so the timing is exact — and it does not depend on the
-        // per-frame timestamps a laced block cannot give.
-        var duration = 1536L * Timescale / ac3.SampleRate;
+        // AC-3 is 1536 samples a frame, always. Counting in the stream's own sample rate makes that
+        // exact at any rate, and does not depend on the per-frame timestamps a laced block cannot give.
+        const long FrameSamples = 1536;
         var count = track.Samples.Count;
-        var deltas = Enumerable.Repeat(duration, count).ToArray();
+        var deltas = Enumerable.Repeat(FrameSamples, count).ToArray();
 
         return new Prepared(
-            track, "ac-3", AudioEntry(ac3), deltas, null, null, duration * count,
+            track, "ac-3", AudioEntry(ac3), deltas, null, null, FrameSamples * count,
             [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
             InHeader: false,
-            input);
+            input,
+            ac3.SampleRate);
     }
 
     /// <summary>
@@ -272,16 +291,17 @@ internal static class Mp4Synthesizer
             return null;
         }
 
+        var timescale = TicksPerSecond(timestampScale);
         var placements = new List<(long Offset, int Size)>();
         var deltas = new List<long>();
-        var cursor = 0L;                            // where the timeline has been filled to, in nanoseconds
+        var cursor = 0L;                            // where the timeline has been filled to, in ticks
         var buffer = new byte[4096];
 
         for (var i = 0; i < track.Samples.Count; i++)
         {
             var sample = track.Samples[i];
-            var start = sample.Timestamp * timestampScale;
-            var duration = durations[i] * timestampScale;
+            var start = sample.Timestamp;
+            var duration = durations[i];
             if (duration <= 0)
             {
                 continue;
@@ -321,9 +341,14 @@ internal static class Mp4Synthesizer
             return null;
         }
 
+        if (!Representable(deltas))
+        {
+            return null;
+        }
+
         return new Prepared(
             track, "tx3g", TextEntry(), deltas, null, null, deltas.Sum(), placements,
-            InHeader: true, Input: 0);
+            InHeader: true, Input: 0, Timescale: timescale);
     }
 
     /// <summary>Appends one timed-text sample — a 16-bit length then the text — and reports where it went.</summary>
@@ -352,6 +377,21 @@ internal static class Mp4Synthesizer
         var ftab = Box("ftab", U16(1), U16(1), [5], "Serif"u8.ToArray());
         return Box("tx3g", body, ftab);
     }
+
+    /// <summary>
+    /// The source's ticks per second. Matroska states nanoseconds per tick, and one millisecond is the
+    /// usual answer, which makes this 1000.
+    /// </summary>
+    private static int TicksPerSecond(long timestampScale) =>
+        timestampScale > 0 ? (int)Math.Max(1, 1_000_000_000L / timestampScale) : 1000;
+
+    /// <summary>
+    /// Whether every value fits the fixed-width field it is about to be written into. A table that
+    /// overflows is a table that lies about time, and a track left out is easier to notice than one that
+    /// plays at the wrong speed.
+    /// </summary>
+    private static bool Representable(IReadOnlyList<long> values) =>
+        values.All(value => value is >= int.MinValue and <= uint.MaxValue);
 
     private static byte[] VideoEntry(IndexedTrack track, string entryName, string configurationBox)
     {
@@ -417,7 +457,7 @@ internal static class Mp4Synthesizer
         }
 
         var mvhd = Full("mvhd", 1, 0,
-            U64(0), U64(0), U32(1000), U64((ulong)(movieDuration / 1_000_000)),
+            U64(0), U64(0), U32(1000), U64((ulong)movieDuration),
             U32(0x00010000), U16(0x0100), new byte[10],
             UnityMatrix(), new byte[24], U32((uint)tracks.Count + 1));
 
@@ -432,14 +472,14 @@ internal static class Mp4Synthesizer
 
         var tkhd = Full("tkhd", 1, 3,
             U64(0), U64(0), U32((uint)id), new byte[4],
-            U64((ulong)(movieDuration / 1_000_000)), new byte[8],
+            U64((ulong)movieDuration), new byte[8],
             U16(0), U16(0), U16(0), new byte[2],
             UnityMatrix(),
             U32(isVideo ? (uint)(track.DisplayWidth > 0 ? track.DisplayWidth : track.Width) << 16 : 0),
             U32(isVideo ? (uint)(track.DisplayHeight > 0 ? track.DisplayHeight : track.Height) << 16 : 0));
 
         var mdhd = Full("mdhd", 1, 0,
-            U64(0), U64(0), U32(Timescale), U64((ulong)prepared.Duration),
+            U64(0), U64(0), U32((uint)prepared.Timescale), U64((ulong)prepared.Duration),
             U16(0x55C4), U16(0));                               // 'und'
 
         var handler = isVideo ? "vide"u8.ToArray() : isText ? "text"u8.ToArray() : "soun"u8.ToArray();

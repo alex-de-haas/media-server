@@ -170,7 +170,9 @@ public sealed class Mp4SynthesizerTests
         var runs = built.Reader.Runs(stts);
         var run = Assert.Single(runs);
         Assert.Equal(4u, run.Count);
-        Assert.Equal(40_000_000u, run.Value);       // 40 ms, in nanoseconds
+        // Counted in the source's own ticks, which are milliseconds here. Nanoseconds would be exact
+        // too, but a 32-bit delta would then top out at 4.29 s.
+        Assert.Equal(40u, run.Value);
     }
 
     [Fact]
@@ -379,5 +381,60 @@ public sealed class Mp4SynthesizerTests
         var built = Build(WithSubtitles(codec: "S_HDMV/PGS"), tracks: [1, 3]);
 
         Assert.Equal(["hvc1"], built.Result.SampleEntries);
+    }
+
+    [Fact]
+    public void A_long_gap_between_cues_does_not_overflow_the_timing_table()
+    {
+        var cue = System.Text.Encoding.UTF8.GetBytes("Much later");
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(700_000),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(3, 17, "S_TEXT/UTF8")),
+            Cluster(0, SimpleBlock(1, 0, true, Frame(10, 0x01))),
+            // Ten minutes of nothing, then a cue. In nanoseconds that gap is 600,000,000,000 — a
+            // hundred and forty times what a 32-bit field holds. A block's own timecode is a signed
+            // 16-bit offset from its cluster, so a gap this size is expressed by the cluster.
+            Cluster(600_000, BlockGroup(3, 0, false, 3000, cue)));
+
+        var built = Build(file, tracks: [1, 3]);
+
+        var stts = built.Reader.Find("moov/trak/mdia/minf/stbl/stts").Skip(1).First();
+        var runs = built.Reader.Runs(stts);
+        Assert.Equal(600_000u, runs[0].Value);      // the gap, in milliseconds, intact
+        Assert.Equal(3000u, runs[1].Value);         // and the cue's own three seconds
+    }
+
+    [Fact]
+    public void An_eac3_track_is_left_out_rather_than_described_as_ac3()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_EAC3", channels: 6)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(10, 0x01)),
+                SimpleBlock(2, 0, true, Ac3Frame(200))));
+
+        // E-AC-3 is an `ec-3` entry with a `dec3` descriptor in MP4; calling it `ac-3` would misstate
+        // the stream, and a missing track is easier to notice than a mislabelled one.
+        Assert.Equal(["hvc1"], Build(file).Result.SampleEntries);
+    }
+
+    [Fact]
+    public void An_audio_track_counts_in_its_own_sample_rate()
+    {
+        var built = Build(VideoAndAudio());
+
+        var mdhd = built.Reader.Find("moov/trak/mdia/mdhd").Skip(1).First();
+        Assert.Equal(48000u, built.Reader.U32At(mdhd.Start + 20));
+
+        var stts = built.Reader.Find("moov/trak/mdia/minf/stbl/stts").Skip(1).First();
+        // 1536 samples a frame, which is exact at any rate — unlike 32 ms, which is not at 44.1 kHz.
+        Assert.Equal(1536u, built.Reader.Runs(stts)[0].Value);
     }
 }

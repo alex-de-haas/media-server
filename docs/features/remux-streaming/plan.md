@@ -460,7 +460,11 @@ Two operational facts worth keeping, both of which cost time to find:
 - [ ] **60–80 Mbit/s**, the bitrate class never yet exercised.
 - [ ] **Several concurrent clients.**
 - [ ] **Multi-audio, sidecar audio, and subtitles** folded into the output.
-- [ ] **DV profiles 5 and 8**, and E-AC-3/Atmos passthrough.
+- [ ] **DV profiles 5 and 8.**
+- [ ] **E-AC-3**, which needs an `ec-3` sample entry and a `dec3` descriptor
+      enumerating its substreams. Describing one as AC-3 would misstate the stream,
+      so an E-AC-3 track is left out until that is written — which matters here,
+      because Atmos rides on E-AC-3.
 - [ ] **Confirm the measurements above on tvOS.** Everything in "What AVFoundation
       demands" was measured on macOS, which has already proven the more permissive of
       the two in this project.

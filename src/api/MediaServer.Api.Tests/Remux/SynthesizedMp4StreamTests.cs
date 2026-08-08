@@ -111,4 +111,16 @@ public sealed class SynthesizedMp4StreamTests
         Assert.Throws<ObjectDisposedException>(() => first.ReadByte());
         Assert.Throws<ObjectDisposedException>(() => second.ReadByte());
     }
+
+    [Fact]
+    public void Seeking_before_the_beginning_is_refused_rather_than_silently_allowed()
+    {
+        using var stream = Stream(Fill(4, 0x01), Fill(4, 0x02));
+
+        // The Position setter refuses a negative; Seek must not be a way around it, or the next read
+        // would index the header from before its start.
+        Assert.Throws<IOException>(() => stream.Seek(-1, SeekOrigin.Begin));
+        Assert.Throws<IOException>(() => stream.Seek(-stream.Length - 1, SeekOrigin.End));
+        Assert.Equal(0, stream.Position);
+    }
 }

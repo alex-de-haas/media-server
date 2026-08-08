@@ -196,4 +196,23 @@ public sealed class MatroskaIndexerTests
             Assert.InRange(sample.Offset + sample.Size, 0, index.SourceLength);
         }
     }
+
+    [Fact]
+    public void Fixed_lacing_that_does_not_divide_evenly_leaves_the_block_whole()
+    {
+        // Three "equal" frames over a payload that is not a multiple of three. Slicing anyway would
+        // truncate every frame and quietly lose the remainder.
+        var index = Index(File(
+            Tracks(TrackEntry(2, 2, "A_AC3", channels: 2)),
+            Cluster(0, LacedSimpleBlock(2, 0, Lacing.Fixed,
+                Frame(10, 0x01), Frame(10, 0x02), Frame(11, 0x03)))));
+
+        var track = Assert.Single(index.Tracks);
+        var sample = Assert.Single(track.Samples);
+        // The whole payload, lacing header byte and all: on corrupt input the sample is unusable either
+        // way, and what matters is that the offsets stay inside the block rather than run past it.
+        Assert.Equal(32, sample.Size);
+        Assert.Equal(0, track.LacedBlocks);
+        Assert.InRange(sample.Offset + sample.Size, 0, index.SourceLength);
+    }
 }
