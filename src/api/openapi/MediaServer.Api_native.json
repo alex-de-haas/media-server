@@ -107,6 +107,138 @@
         }
       }
     },
+    "/native/v1/media/{mediaSourceId}/remux": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "mediaSourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "audioStreamIndex",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "subtitleStreamIndex",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "signalling",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "parameters": [
+          {
+            "name": "mediaSourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "audioStreamIndex",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "subtitleStreamIndex",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "signalling",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/native/v1/media/{mediaSourceId}/tracks/{streamId}": {
       "get": {
         "tags": [
@@ -1620,6 +1752,7 @@
           "mediaSourceId",
           "versionName",
           "decision",
+          "transport",
           "url",
           "signalling",
           "sourceDynamicRange",
@@ -1639,6 +1772,16 @@
           },
           "decision": {
             "$ref": "#/components/schemas/NativePlaybackDecision"
+          },
+          "transport": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NativePlaybackTransport"
+              }
+            ]
           },
           "url": {
             "type": [
@@ -1700,6 +1843,13 @@
             "$ref": "#/components/schemas/NativeCapabilityProfile"
           }
         }
+      },
+      "NativePlaybackTransport": {
+        "enum": [
+          "ByteRange",
+          "Hls",
+          null
+        ]
       },
       "NativePreferenceDto": {
         "required": [
