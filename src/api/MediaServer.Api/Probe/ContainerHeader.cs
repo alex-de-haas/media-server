@@ -57,8 +57,8 @@ internal static class ContainerHeader
             return null;
         }
 
-        if (FindElement(stream, 0, stream.Length, IdSegment, stopAt: null) is not { } segment ||
-            FindElement(stream, segment.Start, segment.End, IdInfo, stopAt: IdCluster) is not { } info)
+        if (Ebml.Find(stream, 0, stream.Length, IdSegment, stopAt: null) is not { } segment ||
+            Ebml.Find(stream, segment.Start, segment.End, IdInfo, stopAt: IdCluster) is not { } info)
         {
             return null;
         }
@@ -68,13 +68,13 @@ internal static class ContainerHeader
         var position = info.Start;
         while (position < info.End)
         {
-            if (ReadElement(stream, position, info.End) is not { } element)
+            if (Ebml.Read(stream, position, info.End) is not { } element)
             {
                 break;
             }
 
-            if (element.Id == IdWritingApp) { writing = ReadString(stream, element.Start, element.End); }
-            if (element.Id == IdMuxingApp) { muxing = ReadString(stream, element.Start, element.End); }
+            if (element.Id == IdWritingApp) { writing = Ebml.ReadString(stream, element.Start, element.End); }
+            if (element.Id == IdMuxingApp) { muxing = Ebml.ReadString(stream, element.Start, element.End); }
             position = element.End;
         }
 
@@ -252,7 +252,7 @@ internal static class ContainerHeader
 
         if (FindBox(stream, from, to, "udta") is { } udta && FindBox(stream, udta.Start, udta.End, "name") is { } name)
         {
-            title = ReadString(stream, name.Start, name.End);
+            title = Ebml.ReadString(stream, name.Start, name.End);
         }
 
         return new HeaderTrack(
@@ -270,7 +270,7 @@ internal static class ContainerHeader
     {
         if (FindBox(stream, mdia.Start, mdia.End, "elng") is { } elng && elng.Start + 4 < elng.End)
         {
-            return ReadString(stream, elng.Start + 4, elng.End);
+            return Ebml.ReadString(stream, elng.Start + 4, elng.End);
         }
 
         if (FindBox(stream, mdia.Start, mdia.End, "mdhd") is not { } mdhd)
@@ -396,8 +396,8 @@ internal static class ContainerHeader
 
     private static TimeSpan? MatroskaDuration(Stream stream)
     {
-        if (FindElement(stream, 0, stream.Length, IdSegment, stopAt: null) is not { } segment ||
-            FindElement(stream, segment.Start, segment.End, IdInfo, stopAt: IdCluster) is not { } info)
+        if (Ebml.Find(stream, 0, stream.Length, IdSegment, stopAt: null) is not { } segment ||
+            Ebml.Find(stream, segment.Start, segment.End, IdInfo, stopAt: IdCluster) is not { } info)
         {
             return null;
         }
@@ -407,13 +407,13 @@ internal static class ContainerHeader
         var position = info.Start;
         while (position < info.End)
         {
-            if (ReadElement(stream, position, info.End) is not { } element)
+            if (Ebml.Read(stream, position, info.End) is not { } element)
             {
                 break;
             }
 
-            if (element.Id == IdTimestampScale) { scale = ReadUInt(stream, element.Start, element.End); }
-            if (element.Id == IdDuration) { duration = ReadFloat(stream, element.Start, element.End); }
+            if (element.Id == IdTimestampScale) { scale = Ebml.ReadUInt(stream, element.Start, element.End); }
+            if (element.Id == IdDuration) { duration = Ebml.ReadFloat(stream, element.Start, element.End); }
             position = element.End;
         }
 
@@ -423,8 +423,8 @@ internal static class ContainerHeader
     private static List<HeaderTrack> MatroskaTracks(Stream stream)
     {
         var tracks = new List<HeaderTrack>();
-        if (FindElement(stream, 0, stream.Length, IdSegment, stopAt: null) is not { } segment ||
-            FindElement(stream, segment.Start, segment.End, IdTracks, stopAt: IdCluster) is not { } list)
+        if (Ebml.Find(stream, 0, stream.Length, IdSegment, stopAt: null) is not { } segment ||
+            Ebml.Find(stream, segment.Start, segment.End, IdTracks, stopAt: IdCluster) is not { } list)
         {
             return tracks;
         }
@@ -433,7 +433,7 @@ internal static class ContainerHeader
         var index = 0;
         while (position < list.End)
         {
-            if (ReadElement(stream, position, list.End) is not { } entry)
+            if (Ebml.Read(stream, position, list.End) is not { } entry)
             {
                 break;
             }
@@ -467,35 +467,35 @@ internal static class ContainerHeader
         var position = from;
         while (position < to)
         {
-            if (ReadElement(stream, position, to) is not { } element)
+            if (Ebml.Read(stream, position, to) is not { } element)
             {
                 break;
             }
 
             switch (element.Id)
             {
-                case IdTrackType: type = ReadUInt(stream, element.Start, element.End); break;
-                case IdCodecId: codec = ReadString(stream, element.Start, element.End) ?? "?"; break;
-                case IdLanguage or IdLanguageBcp47: language = ReadString(stream, element.Start, element.End) ?? language; break;
-                case IdName: title = ReadString(stream, element.Start, element.End); break;
-                case IdFlagDefault: flagDefault = ReadUInt(stream, element.Start, element.End); break;
-                case IdFlagForced: flagForced = ReadUInt(stream, element.Start, element.End); break;
+                case IdTrackType: type = Ebml.ReadUInt(stream, element.Start, element.End); break;
+                case IdCodecId: codec = Ebml.ReadString(stream, element.Start, element.End) ?? "?"; break;
+                case IdLanguage or IdLanguageBcp47: language = Ebml.ReadString(stream, element.Start, element.End) ?? language; break;
+                case IdName: title = Ebml.ReadString(stream, element.Start, element.End); break;
+                case IdFlagDefault: flagDefault = Ebml.ReadUInt(stream, element.Start, element.End); break;
+                case IdFlagForced: flagForced = Ebml.ReadUInt(stream, element.Start, element.End); break;
                 case IdVideo:
                     var video = element;
                     var videoPosition = video.Start;
                     while (videoPosition < video.End)
                     {
-                        if (ReadElement(stream, videoPosition, video.End) is not { } child) { break; }
-                        if (child.Id == IdPixelWidth) { width = (long)ReadUInt(stream, child.Start, child.End); }
-                        if (child.Id == IdPixelHeight) { height = (long)ReadUInt(stream, child.Start, child.End); }
+                        if (Ebml.Read(stream, videoPosition, video.End) is not { } child) { break; }
+                        if (child.Id == IdPixelWidth) { width = (long)Ebml.ReadUInt(stream, child.Start, child.End); }
+                        if (child.Id == IdPixelHeight) { height = (long)Ebml.ReadUInt(stream, child.Start, child.End); }
                         if (child.Id == IdColour)
                         {
                             var colourPosition = child.Start;
                             while (colourPosition < child.End)
                             {
-                                if (ReadElement(stream, colourPosition, child.End) is not { } colour) { break; }
-                                if (colour.Id == IdTransferCharacteristics) { transfer = (int)ReadUInt(stream, colour.Start, colour.End); }
-                                if (colour.Id == IdBitsPerChannel) { bitDepth = (int)ReadUInt(stream, colour.Start, colour.End); }
+                                if (Ebml.Read(stream, colourPosition, child.End) is not { } colour) { break; }
+                                if (colour.Id == IdTransferCharacteristics) { transfer = (int)Ebml.ReadUInt(stream, colour.Start, colour.End); }
+                                if (colour.Id == IdBitsPerChannel) { bitDepth = (int)Ebml.ReadUInt(stream, colour.Start, colour.End); }
                                 colourPosition = colour.End;
                             }
                         }
@@ -509,14 +509,14 @@ internal static class ContainerHeader
                     var audioPosition = audio.Start;
                     while (audioPosition < audio.End)
                     {
-                        if (ReadElement(stream, audioPosition, audio.End) is not { } child) { break; }
-                        if (child.Id == IdChannels) { channels = ReadUInt(stream, child.Start, child.End); }
-                        if (child.Id == IdSamplingFrequency) { sampleRate = (int)(ReadFloat(stream, child.Start, child.End) ?? 0); }
+                        if (Ebml.Read(stream, audioPosition, audio.End) is not { } child) { break; }
+                        if (child.Id == IdChannels) { channels = Ebml.ReadUInt(stream, child.Start, child.End); }
+                        if (child.Id == IdSamplingFrequency) { sampleRate = (int)(Ebml.ReadFloat(stream, child.Start, child.End) ?? 0); }
                         audioPosition = child.End;
                     }
 
                     break;
-                case IdDefaultDuration: defaultDuration = ReadUInt(stream, element.Start, element.End); break;
+                case IdDefaultDuration: defaultDuration = Ebml.ReadUInt(stream, element.Start, element.End); break;
             }
 
             position = element.End;
@@ -538,94 +538,6 @@ internal static class ContainerHeader
             HdrFrom(transfer, dolbyVision: false),
             channels > 0 ? (int)channels : null,
             sampleRate > 0 ? sampleRate : null);
-    }
-
-    private static (long Start, long End)? FindElement(Stream stream, long from, long to, ulong id, ulong? stopAt)
-    {
-        var position = from;
-        while (position < to)
-        {
-            if (ReadElement(stream, position, to) is not { } element || (stopAt is { } stop && element.Id == stop))
-            {
-                return null;
-            }
-
-            if (element.Id == id)
-            {
-                return (element.Start, element.End);
-            }
-
-            position = element.End;
-        }
-
-        return null;
-    }
-
-    private static (ulong Id, long Start, long End)? ReadElement(Stream stream, long position, long limit)
-    {
-        if (position >= limit)
-        {
-            return null;
-        }
-
-        stream.Position = position;
-        var id = ReadVint(stream, keepMarker: true, out var idLength);
-        if (idLength == 0)
-        {
-            return null;
-        }
-
-        var size = ReadVint(stream, keepMarker: false, out var sizeLength);
-        if (sizeLength == 0)
-        {
-            return null;
-        }
-
-        var start = position + idLength + sizeLength;
-        // An "unknown size" VINT (every data bit set) means the element runs to the end of its parent —
-        // live-muxed Segments do this, and treating it as a huge size would run past the file.
-        var unknown = size == (ulong.MaxValue >> (64 - (7 * sizeLength)));
-        var end = unknown ? limit : Math.Min(limit, start + (long)size);
-        return end < start ? null : (id, start, end);
-    }
-
-    private static ulong ReadVint(Stream stream, bool keepMarker, out int length)
-    {
-        var first = stream.ReadByte();
-        if (first < 0)
-        {
-            length = 0;
-            return 0;
-        }
-
-        length = 1;
-        var mask = 0x80;
-        while (length <= 8 && (first & mask) == 0)
-        {
-            mask >>= 1;
-            length++;
-        }
-
-        if (length > 8)
-        {
-            length = 0;
-            return 0;
-        }
-
-        var value = keepMarker ? (ulong)first : (ulong)(first & (mask - 1));
-        for (var i = 1; i < length; i++)
-        {
-            var next = stream.ReadByte();
-            if (next < 0)
-            {
-                length = 0;
-                return 0;
-            }
-
-            value = (value << 8) | (byte)next;
-        }
-
-        return value;
     }
 
     // ---- AVI ----
@@ -733,55 +645,6 @@ internal static class ContainerHeader
     /// <summary>"und" is the container saying it has no language, not a language.</summary>
     private static string? NormalizeLanguage(string? raw) =>
         raw is { Length: > 0 } value && !value.Equals("und", StringComparison.OrdinalIgnoreCase) ? value : null;
-
-    private static ulong ReadUInt(Stream stream, long start, long end)
-    {
-        stream.Position = start;
-        ulong value = 0;
-        for (var i = start; i < end && i < start + 8; i++)
-        {
-            var next = stream.ReadByte();
-            if (next < 0)
-            {
-                break;
-            }
-
-            value = (value << 8) | (byte)next;
-        }
-
-        return value;
-    }
-
-    private static double? ReadFloat(Stream stream, long start, long end)
-    {
-        var length = (int)(end - start);
-        if (length is not (4 or 8))
-        {
-            return null;
-        }
-
-        Span<byte> buffer = stackalloc byte[8];
-        stream.Position = start;
-        stream.ReadExactly(buffer[..length]);
-        return length == 4
-            ? BinaryPrimitives.ReadSingleBigEndian(buffer[..4])
-            : BinaryPrimitives.ReadDoubleBigEndian(buffer[..8]);
-    }
-
-    private static string? ReadString(Stream stream, long start, long end)
-    {
-        var length = end - start;
-        if (length <= 0 || length > 4096)
-        {
-            return null;
-        }
-
-        var buffer = new byte[length];
-        stream.Position = start;
-        stream.ReadExactly(buffer);
-        var text = Encoding.UTF8.GetString(buffer).TrimEnd('\0');
-        return text.Length == 0 ? null : text;
-    }
 
     private static string ReadAscii(Stream stream, long start, long end)
     {

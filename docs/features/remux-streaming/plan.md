@@ -1,6 +1,6 @@
 # Remux Streaming — plan
 
-Status: Draft
+Status: In Progress
 Created: 2026-08-05
 Updated: 2026-08-08
 
@@ -11,15 +11,9 @@ Updated: 2026-08-08
 > only when packaging is available, which today it never is. This makes it
 > available.
 
-**Why this is still `Draft` although Phase 0 is done.** Phase 0 is a *gate*, not
-implementation: a throwaway prototype whose only job was to find out whether the
-design is possible before anything is committed to. Gates run before `Ready` by
-construction — that is what they are for — and nothing in Phases 1–4 has been built.
-
-Three things still stand between this and `Ready`: the transport-selection policy,
-the cost of the index walk on the slow disk (unmeasurable on the dev machine), and
-whether folding a sidecar in can avoid the engine. `Ready` also needs explicit
-approval in chat, which has not been given.
+Phase 0 was a *gate* — a throwaway prototype whose only job was to find out whether
+the design is possible — and it closed on 2026-08-08. The remaining open questions
+were settled in discussion the same day, and implementation started with the index.
 
 ## Goal
 
@@ -124,28 +118,27 @@ Settled in discussion on 2026-08-07. **Both** delivery transports are built, ove
 exists, rendering HLS segments from it is nearly the same code as rendering MP4 byte
 ranges. This is not two paths at twice the cost; it is one engine with two outputs.
 
-| Transport | Dolby Vision | Needs the index | Ships |
-| --- | --- | --- | --- |
-| **HLS** | no — HDR10 only | **no** | first |
-| **MP4 over byte ranges** | **yes** | yes | with the index |
+| Transport | Dolby Vision | Ships |
+| --- | --- | --- |
+| **MP4 over byte ranges** | **yes** | first, with the index |
+| **HLS** | no — HDR10 only | second, over the same index |
 
-### Why HLS first
+### Why the index and MP4 come first
 
-Not because it is better — it is not. Its familiar advantages (adaptive bitrate,
-segment caching, per-segment retry) all come from a **bitrate ladder**, and a ladder
-comes from re-encoding. With a stream copy and one variant there is nothing to adapt
-between. What HLS genuinely gives here is narrower and enough: it needs no declared
-total length, no pre-built index, and it seeks by time rather than by byte.
+An earlier revision had HLS first, on the reasoning that it needs no pre-built index
+and could therefore ship while the indexer was still being written. **The prototype
+retired that argument.** The index stopped being the long, risky part the moment it
+was measured: it walks a 26 GB film in 27 s, and the whole thing is a few hundred
+lines. Ordering the work around avoiding it no longer buys anything.
 
-That is exactly the set of things the index has to solve for MP4 — so HLS can ship
-**before** the indexer exists, and unblock every other part of the client (navigation,
-authentication, watch history, resume) while the index is still being written. Dolby
-Vision arrives with the index, not before it.
+What HLS would have bought — an earlier unblocking of the client — is worth less than
+what it costs, which is that Dolby Vision does not arrive with it. DV is the entire
+reason this feature is expensive, and the earlier ordering carried an explicit risk
+that it might quietly never be built at all. Doing the index first retires that risk
+instead of managing it.
 
-**The risk in that ordering, stated so it stays a decision rather than a drift:**
-once HLS works and nobody is complaining, the index path can quietly never get built
-and Dolby Vision never arrives. If that becomes the outcome it should be chosen out
-loud, not discovered later.
+HLS keeps its place as the second transport, rendered from the same sample table, for
+clients and situations where HDR10 is the answer.
 
 ### The index, and what it feeds
 
@@ -201,11 +194,13 @@ model is needed** — which retires an open question an earlier revision carried
 
 ### Choosing between them
 
-By capability, with an override. The client already declares what it can open
-through `NativeCapabilityProfile`, so the server picks: a client that reports Dolby
-Vision support, playing a source that carries it, is served MP4 over byte ranges;
-everything else is served HLS. A manual setting overrides the choice, which turns
-"the picture is not what I expected" from a bug report into a switch — the pattern
+**By capability, with a manual override.** Settled in discussion on 2026-08-08.
+
+The client already declares what it can open through `NativeCapabilityProfile`, so
+the server picks: a client that reports Dolby Vision support, playing a source that
+carries it, is served MP4 over byte ranges; everything else is served HLS. A setting
+overrides the choice, which turns "the picture is not what I expected" from a bug
+report into a switch — the pattern
 [Swiftfin](https://github.com/jellyfin/Swiftfin) uses with `forceDVTranscode` and its
 `auto / mostCompatible / directPlay / custom` compatibility mode.
 
@@ -323,19 +318,25 @@ rewriting rather than encoding tooling, so they do not change the answer.
 
 ### Phase 1 — the index
 
-- [ ] **An MKV indexer** producing, per track, the sample table: timestamp, duration,
-      size, offset in the source, keyframe flag. Built by walking cluster and block
-      headers rather than reading payloads.
-- [ ] **De-lacing** — fixed, EBML and Xiph, so a laced audio block becomes one index
-      entry per frame. Measured as present on AC-3, E-AC-3 and DTS tracks across this
-      library.
+- [x] **An MKV indexer** producing, per track, the sample table: timestamp, size,
+      offset in the source, keyframe flag. Built by walking cluster and block headers
+      rather than reading payloads. The EBML primitives were lifted out of
+      `ContainerHeader` into a shared `Ebml` reader first, so the two walkers cannot
+      drift apart.
+- [x] **De-lacing** — fixed, EBML and Xiph, so a laced audio block becomes one index
+      entry per frame. A lacing header that does not add up leaves the block whole
+      rather than slicing it into samples that point outside it.
 - [ ] **Storage** — where the index lives, its format, and how it is invalidated when
       the source changes.
 - [ ] **Built in the background**, at scan or ingest, so no viewer waits for it.
 - [ ] **Measured on a real film from the slow disk**: how long the walk takes, how
       large the index is, and how much of the file the walk has to touch.
-- [ ] **Unit tests** over a small crafted MKV, including a source whose cover art is
-      not flagged `attached_pic`.
+- [x] **Unit tests** over crafted Matroska written by hand — all three lacing forms,
+      block groups whose keyframe answer is the absence of a `ReferenceBlock` rather
+      than a flag, and a lacing header that does not add up. ffmpeg cannot produce a
+      laced test file, so the builder writes one directly.
+- [ ] **Unit tests for the awkward sources** — a cover-art track not flagged
+      `attached_pic`, and a source whose timestamps are not monotonic in file order.
 
 ### Phase 2 — the synthesiser
 
@@ -404,26 +405,17 @@ rewriting rather than encoding tooling, so they do not change the answer.
 
 ## Open questions
 
-- ~~**Does the byte-identity assumption hold?**~~ Answered 2026-08-07: for video yes,
-  for audio only after de-lacing, which is now a deliverable rather than a risk.
-- **Which transport a given playback gets.** The negotiation exists already —
-  `NativeCapabilityProfile` travels with every resolve request and the resolver
-  answers against it — so the question is only the policy: which declared
-  capabilities select MP4 over HLS, and how a manual override interacts with it.
-  Filling the profile from the device is client work and is a deliverable on
-  [apple-client](../apple-client/plan.md).
-- ~~**Does this still belong to `transcode-engine`?**~~ Answered by the prototype:
-  no ffmpeg appears on the serving path, so it belongs in `api`. What remains open is
-  narrower — whether *folding a sidecar in* can be done the same way, or whether that
-  one operation still wants the engine.
-- **What the index costs on the slow disk.** Walking block headers is far cheaper
-  than reading payloads, but it is still a pass over a 40 GB file and it has never
-  been measured on this hardware. Phase 1 answers it, and the answer decides whether
-  indexing at scan time is acceptable or has to be deferred to first play.
+- **Whether folding a sidecar in can avoid the engine.** Everything else on the
+  serving path is container parsing and byte arithmetic, but a sidecar is a second
+  file whose samples have to join the output, and a subtitle sidecar needs rewriting
+  as well. Phase 2 answers it by building the plain case first and seeing what the
+  sidecar case actually needs; if it needs the engine, that one operation routes
+  there and the rest does not.
 - **Whether the source's own signalling should be recorded too.** Nothing captures
   what a file says about itself today, so direct play serves Dolby Vision blind (see
-  [media-probe-providers](../media-probe-providers/plan.md)). The index walk touches
-  the same headers, so the two may be cheaper built together.
+  [media-probe-providers](../media-probe-providers/plan.md)). It does not block this
+  feature — here we author the container — but the index walk touches the same
+  headers, so the two may be cheaper built together.
 
 ## Verification steps
 
