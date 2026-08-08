@@ -50,3 +50,7 @@ test-results/
 .DS_Store
 Thumbs.db
 *.log
+
+# Python bytecode (scripts/remux-prototype)
+__pycache__/
+*.pyc
