@@ -280,9 +280,16 @@ a real sample table costs **7 requests** to start playing, because the player re
 **Everything Dolby Vision needs is carried, not derived.** `hvcC` comes from the
 track's `CodecPrivate`, and the DV configuration from its `BlockAdditionMapping`,
 whose `BlockAddIDType` is literally `dvcC` — 24 bytes decoding to profile 8, level 6,
-RPU present, `bl_signal_compatibility_id` 1, matching the source exactly. `colr` is
-built from the Matroska `Colour` element and yields the same `tv / bt2020nc /
-smpte2084 / bt2020` the proven reference file reports.
+RPU present, `bl_signal_compatibility_id` 1, matching the source exactly.
+
+**Colour is the exception, and it is not always in the container.** The library's
+originals carry no Matroska `Colour` element at all; the information is in the HEVC
+SPS, which is where `ffprobe` reads it from. A slice remuxed by ffmpeg gains one,
+which is how the difference surfaced — a test file can be more complete than the
+source it came from. The Dolby Vision run above wrote **no `colr` box** and engaged DV
+anyway, because the decoder reads the VUI. The implementation should still parse the
+SPS when the container is silent: `colr` costs nothing to write, and HDR10 content
+carries no DV configuration to fall back on.
 
 Three traps, each found by a failure and each cheap to fall into again:
 
