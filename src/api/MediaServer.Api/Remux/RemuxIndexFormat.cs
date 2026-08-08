@@ -21,7 +21,7 @@ internal static class RemuxIndexFormat
 
     /// <summary>Bumping this invalidates every stored index, which is the point: a format change must not
     /// be readable as the old one.</summary>
-    internal const ushort Version = 1;
+    internal const ushort Version = 2;
 
     internal sealed record Stamp(long SourceLength, DateTimeOffset SourceModified)
     {
@@ -47,6 +47,7 @@ internal static class RemuxIndexFormat
         foreach (var track in index.Tracks)
         {
             writer.Write(track.Number);
+            writer.Write(track.Ordinal);
             writer.Write((int)track.Kind);
             writer.Write(track.CodecId);
             WriteNullable(writer, track.Language);
@@ -78,6 +79,17 @@ internal static class RemuxIndexFormat
                 WriteUnsigned(writer, ((ulong)sample.Size << 1) | (sample.IsKeyframe ? 1UL : 0UL));
                 previousTimestamp = sample.Timestamp;
                 previousOffset = sample.Offset;
+            }
+
+            // Only subtitles state how long a sample is shown, so the list is written as present-or-not
+            // rather than as a zero for every frame of a film.
+            writer.Write(track.SampleDurations is not null);
+            if (track.SampleDurations is { } durations)
+            {
+                foreach (var duration in durations)
+                {
+                    WriteUnsigned(writer, (ulong)duration);
+                }
             }
         }
     }
@@ -127,6 +139,7 @@ internal static class RemuxIndexFormat
             for (var i = 0; i < trackCount; i++)
             {
                 var track = new IndexedTrack { Number = reader.ReadUInt64() };
+                track.Ordinal = reader.ReadInt32();
                 track.Kind = (IndexedTrackKind)reader.ReadInt32();
                 track.CodecId = reader.ReadString();
                 track.Language = ReadNullable(reader);
@@ -156,6 +169,17 @@ internal static class RemuxIndexFormat
                     var packed = ReadUnsigned(reader);
                     track.Samples.Add(new IndexedSample(
                         timestamp, offset, (int)(packed >> 1), (packed & 1) == 1));
+                }
+
+                if (reader.ReadBoolean())
+                {
+                    var durations = new List<long>(sampleCount);
+                    for (var s = 0; s < sampleCount; s++)
+                    {
+                        durations.Add((long)ReadUnsigned(reader));
+                    }
+
+                    track.SampleDurations = durations;
                 }
 
                 index.Tracks.Add(track);

@@ -92,9 +92,23 @@ internal static class RemuxContainerBuilders
     /// A block inside a group. Keyframe-ness here is the absence of a <c>ReferenceBlock</c>, not a flag,
     /// which is the distinction the indexer has to get right for the sync table to mean anything.
     /// </summary>
-    public static byte[] BlockGroup(ulong track, short relative, bool references, params byte[][] frames)
+    public static byte[] BlockGroup(
+        ulong track, short relative, bool references, params byte[][] frames) =>
+        BlockGroup(track, relative, references, 0, frames);
+
+    /// <summary>
+    /// A block inside a group, optionally stating how long it is shown. Subtitles are the tracks that do:
+    /// a cue ends when it says it does, not when the next one starts.
+    /// </summary>
+    public static byte[] BlockGroup(
+        ulong track, short relative, bool references, ulong duration, params byte[][] frames)
     {
         var children = new List<byte[]> { Ebml(0xA1, BlockBody(track, relative, 0x00, Lacing.None, frames)) };
+        if (duration > 0)
+        {
+            children.Add(Ebml(0x9B, Uint(duration)));
+        }
+
         if (references)
         {
             children.Add(Ebml(0xFB, [0x01]));

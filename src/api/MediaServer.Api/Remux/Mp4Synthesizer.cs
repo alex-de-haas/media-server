@@ -52,6 +52,8 @@ internal static class Mp4Synthesizer
         Stream source)
     {
         var prepared = new List<Prepared>();
+        // Timed text is rewritten, so it needs somewhere to live; it is small enough to ride in the header.
+        var subtitles = new MemoryStream();
         foreach (var number in trackNumbers)
         {
             if (index.Track(number) is not { } track || track.Samples.Count == 0)
@@ -63,6 +65,7 @@ internal static class Mp4Synthesizer
             {
                 IndexedTrackKind.Video => PrepareVideo(track, index.TimestampScale, signalling),
                 IndexedTrackKind.Audio => PrepareAudio(track, source),
+                IndexedTrackKind.Subtitle => PrepareSubtitle(track, index.TimestampScale, source, subtitles),
                 _ => null,
             };
 
@@ -81,13 +84,25 @@ internal static class Mp4Synthesizer
         var ftyp = Box("ftyp", "isom"u8.ToArray(), U32(0x200),
             "isomiso2mp41hvc1dby1"u8.ToArray());
 
-        var provisional = Assemble(prepared, movieDuration, 0);
-        var headerLength = ftyp.Length + provisional.Length + MdatHeaderLength;
-        var moov = Assemble(prepared, movieDuration, headerLength);
-        if (moov.Length != provisional.Length)
+        // [ftyp][moov][text mdat, when there is timed text][media mdat header][the source, verbatim]
+        var text = subtitles.ToArray();
+        var textBox = text.Length > 0 ? Box("mdat", text) : [];
+        var textPayloadAt = 0L;
+        var mediaBase = 0L;
+
+        // Offsets depend on the header's own length, so it is built once to measure and once for real.
+        // Every offset field is fixed width, which is what makes the two agree.
+        for (var pass = 0; pass < 2; pass++)
         {
-            // Fixed-width offsets are what makes the two passes agree; if they ever do not, a header that
-            // lies about where the samples are is worse than no header.
+            var moovLength = Assemble(prepared, movieDuration, textPayloadAt, mediaBase).Length;
+            textPayloadAt = ftyp.Length + moovLength + 8;
+            mediaBase = ftyp.Length + moovLength + textBox.Length + MdatHeaderLength;
+        }
+
+        var moov = Assemble(prepared, movieDuration, textPayloadAt, mediaBase);
+        if (ftyp.Length + moov.Length + textBox.Length + MdatHeaderLength != mediaBase)
+        {
+            // A header that lies about where the samples are is worse than no header at all.
             return null;
         }
 
@@ -96,13 +111,18 @@ internal static class Mp4Synthesizer
         "mdat"u8.CopyTo(mdat.AsSpan(4));
         U64((ulong)(MdatHeaderLength + index.SourceLength)).CopyTo(mdat, 8);
 
-        byte[] header = [.. ftyp, .. moov, .. mdat];
+        byte[] header = [.. ftyp, .. moov, .. textBox, .. mdat];
         return new Result(
             header,
             header.Length + index.SourceLength,
             prepared.Select(track => track.SampleEntry).ToList());
     }
 
+    /// <summary>
+    /// One output track. <see cref="Placements"/> is where its samples are: for video and audio they are
+    /// offsets into the source, for subtitles offsets into the small <c>mdat</c> the header carries,
+    /// because a timed-text sample is rewritten rather than pointed at.
+    /// </summary>
     private sealed record Prepared(
         IndexedTrack Track,
         string SampleEntry,
@@ -110,7 +130,9 @@ internal static class Mp4Synthesizer
         IReadOnlyList<long> Deltas,
         IReadOnlyList<long>? CompositionOffsets,
         IReadOnlyList<int>? SyncSamples,
-        long Duration);
+        long Duration,
+        IReadOnlyList<(long Offset, int Size)> Placements,
+        bool InHeader);
 
     private static Prepared? PrepareVideo(IndexedTrack track, long timestampScale, VideoSignalling signalling)
     {
@@ -168,7 +190,9 @@ internal static class Mp4Synthesizer
             reordered ? composition : null,
             // A sync table listing every sample says nothing; its absence already means "all of them".
             sync.Count == count ? null : sync,
-            deltas.Sum());
+            deltas.Sum(),
+            [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
+            InHeader: false);
     }
 
     private static Prepared? PrepareAudio(IndexedTrack track, Stream source)
@@ -194,7 +218,105 @@ internal static class Mp4Synthesizer
         var deltas = Enumerable.Repeat(duration, count).ToArray();
 
         return new Prepared(
-            track, "ac-3", AudioEntry(ac3), deltas, null, null, duration * count);
+            track, "ac-3", AudioEntry(ac3), deltas, null, null, duration * count,
+            [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
+            InHeader: false);
+    }
+
+    /// <summary>
+    /// Rewrites a text subtitle track as <c>tx3g</c>. Unlike video and audio, none of this can be pointed
+    /// at: a timed-text sample is a length-prefixed string, the markup has to come off, and the gaps
+    /// between cues need empty samples that exist nowhere in the source. So the bytes are produced here
+    /// and carried in the header's own <c>mdat</c> — a film's worth of dialogue is a hundred kilobytes or
+    /// so, against a source of gigabytes.
+    /// </summary>
+    private static Prepared? PrepareSubtitle(
+        IndexedTrack track, long timestampScale, Stream source, MemoryStream text)
+    {
+        if (!SubtitleText.IsConvertible(track.CodecId) || track.SampleDurations is not { } durations)
+        {
+            // Without a duration a cue has no end, and MP4 has no way to say "until the next one".
+            return null;
+        }
+
+        var placements = new List<(long Offset, int Size)>();
+        var deltas = new List<long>();
+        var cursor = 0L;                            // where the timeline has been filled to, in nanoseconds
+        var buffer = new byte[4096];
+
+        for (var i = 0; i < track.Samples.Count; i++)
+        {
+            var sample = track.Samples[i];
+            var start = sample.Timestamp * timestampScale;
+            var duration = durations[i] * timestampScale;
+            if (duration <= 0)
+            {
+                continue;
+            }
+
+            if (start > cursor)
+            {
+                // Nothing is on screen between cues, and timed text says so with an empty sample rather
+                // than with a gap, which MP4 has no way to express.
+                placements.Add((Place(text, []), 2));
+                deltas.Add(start - cursor);
+            }
+            else if (start < cursor)
+            {
+                // Overlapping cues cannot both be shown by a single-sample-at-a-time track; the later one
+                // starts where the earlier ended rather than being dropped.
+                start = cursor;
+            }
+
+            if (buffer.Length < sample.Size)
+            {
+                buffer = new byte[sample.Size];
+            }
+
+            source.Position = sample.Offset;
+            source.ReadExactly(buffer, 0, sample.Size);
+            var content = SubtitleText.Convert(buffer.AsSpan(0, sample.Size), track.CodecId);
+            var encoded = System.Text.Encoding.UTF8.GetBytes(content);
+
+            placements.Add((Place(text, encoded), 2 + encoded.Length));
+            deltas.Add(duration);
+            cursor = start + duration;
+        }
+
+        if (placements.Count == 0)
+        {
+            return null;
+        }
+
+        return new Prepared(
+            track, "tx3g", TextEntry(), deltas, null, null, deltas.Sum(), placements, InHeader: true);
+    }
+
+    /// <summary>Appends one timed-text sample — a 16-bit length then the text — and reports where it went.</summary>
+    private static long Place(MemoryStream text, byte[] encoded)
+    {
+        var at = text.Position;
+        text.Write(U16((ushort)encoded.Length));
+        text.Write(encoded);
+        return at;
+    }
+
+    private static byte[] TextEntry()
+    {
+        byte[] body =
+        [
+            .. new byte[6], .. U16(1),                          // reserved, data reference index
+            .. U32(0),                                          // display flags
+            0x01, 0xFF,                                         // horizontal centred, vertical bottom
+            0x00, 0x00, 0x00, 0x00,                             // transparent background
+            .. new byte[8],                                     // box record: the whole frame
+            .. new byte[8],                                     // style record: defaults
+            .. U32(0x00FFFFFF), 0xFF,                           // white text
+        ];
+
+        // A font table is required even when it says only "use something ordinary".
+        var ftab = Box("ftab", U16(1), U16(1), [5], "Serif"u8.ToArray());
+        return Box("tx3g", body, ftab);
     }
 
     private static byte[] VideoEntry(IndexedTrack track, string entryName, string configurationBox)
@@ -249,12 +371,13 @@ internal static class Mp4Synthesizer
         return Box("ac-3", body, Box("dac3", ac3.Dac3));
     }
 
-    private static byte[] Assemble(IReadOnlyList<Prepared> tracks, long movieDuration, long mediaBase)
+    private static byte[] Assemble(
+        IReadOnlyList<Prepared> tracks, long movieDuration, long textBase, long mediaBase)
     {
         var traks = new List<byte[]>();
         for (var i = 0; i < tracks.Count; i++)
         {
-            traks.Add(Trak(tracks[i], i + 1, movieDuration, mediaBase));
+            traks.Add(Trak(tracks[i], i + 1, movieDuration, tracks[i].InHeader ? textBase : mediaBase));
         }
 
         var mvhd = Full("mvhd", 1, 0,
@@ -265,10 +388,11 @@ internal static class Mp4Synthesizer
         return Box("moov", [mvhd, .. traks]);
     }
 
-    private static byte[] Trak(Prepared prepared, int id, long movieDuration, long mediaBase)
+    private static byte[] Trak(Prepared prepared, int id, long movieDuration, long sampleBase)
     {
         var track = prepared.Track;
         var isVideo = track.Kind == IndexedTrackKind.Video;
+        var isText = track.Kind == IndexedTrackKind.Subtitle;
 
         var tkhd = Full("tkhd", 1, 3,
             U64(0), U64(0), U32((uint)id), new byte[4],
@@ -282,25 +406,24 @@ internal static class Mp4Synthesizer
             U64(0), U64(0), U32(Timescale), U64((ulong)prepared.Duration),
             U16(0x55C4), U16(0));                               // 'und'
 
-        var hdlr = Full("hdlr", 0, 0,
-            new byte[4],
-            isVideo ? "vide"u8.ToArray() : "soun"u8.ToArray(),
-            new byte[12],
-            [.. "MediaServer"u8, 0]);
+        var handler = isVideo ? "vide"u8.ToArray() : isText ? "text"u8.ToArray() : "soun"u8.ToArray();
+        var hdlr = Full("hdlr", 0, 0, new byte[4], handler, new byte[12], [.. "MediaServer"u8, 0]);
 
         var mediaHeader = isVideo
             ? Box("vmhd", [0x00, 0x00, 0x00, 0x01], new byte[8])
-            : Box("smhd", new byte[8]);
+            : isText
+                ? Box("nmhd", new byte[4])
+                : Box("smhd", new byte[8]);
 
         var dinf = Box("dinf", Full("dref", 0, 0, U32(1), Full("url ", 0, 1)));
-        var minf = Box("minf", mediaHeader, dinf, Stbl(prepared, mediaBase));
+        var minf = Box("minf", mediaHeader, dinf, Stbl(prepared, sampleBase));
 
         return Box("trak", tkhd, Box("mdia", mdhd, hdlr, minf));
     }
 
-    private static byte[] Stbl(Prepared prepared, long mediaBase)
+    private static byte[] Stbl(Prepared prepared, long sampleBase)
     {
-        var samples = prepared.Track.Samples;
+        var samples = prepared.Placements;
         var parts = new List<byte[]>
         {
             Full("stsd", 0, 0, U32(1), prepared.Entry),
@@ -326,7 +449,7 @@ internal static class Mp4Synthesizer
         parts.Add(Full("stsz", 0, 0, U32(0), U32((uint)samples.Count),
             [.. samples.SelectMany(sample => U32((uint)sample.Size))]));
         parts.Add(Full("co64", 0, 0, U32((uint)samples.Count),
-            [.. samples.SelectMany(sample => U64((ulong)(sample.Offset + mediaBase)))]));
+            [.. samples.SelectMany(sample => U64((ulong)(sample.Offset + sampleBase)))]));
 
         return Box("stbl", [.. parts]);
     }

@@ -18,7 +18,7 @@ internal static class MatroskaIndexer
     private const ulong IdSegment = 0x18538067, IdInfo = 0x1549A966, IdTracks = 0x1654AE6B;
     private const ulong IdCluster = 0x1F43B675, IdTimestampScale = 0x2AD7B1, IdDuration = 0x4489;
     private const ulong IdClusterTimestamp = 0xE7, IdSimpleBlock = 0xA3, IdBlockGroup = 0xA0;
-    private const ulong IdBlock = 0xA1, IdReferenceBlock = 0xFB;
+    private const ulong IdBlock = 0xA1, IdReferenceBlock = 0xFB, IdBlockDuration = 0x9B;
     private const ulong IdTrackEntry = 0xAE, IdTrackNumber = 0xD7, IdTrackType = 0x83, IdCodecId = 0x86;
     private const ulong IdCodecPrivate = 0x63A2, IdDefaultDuration = 0x23E383;
     private const ulong IdLanguage = 0x22B59C, IdName = 0x536E;
@@ -71,6 +71,7 @@ internal static class MatroskaIndexer
             return;
         }
 
+        var ordinal = 0;
         for (var position = tracks.Start; Ebml.Read(stream, position, tracks.End) is { } entry; position = entry.End)
         {
             if (entry.Id != IdTrackEntry)
@@ -86,7 +87,7 @@ internal static class MatroskaIndexer
                 continue;
             }
 
-            var track = new IndexedTrack { Number = number };
+            var track = new IndexedTrack { Number = number, Ordinal = ordinal++ };
             DescribeTrack(stream, track, entry.Start, entry.End);
             index.Tracks.Add(track);
         }
@@ -279,6 +280,7 @@ internal static class MatroskaIndexer
         Stream stream, Dictionary<ulong, IndexedTrack> tracks, Ebml.Element group, long clusterTimestamp)
     {
         var references = false;
+        long duration = 0;
         Ebml.Element? block = null;
 
         for (var position = group.Start;
@@ -289,6 +291,10 @@ internal static class MatroskaIndexer
             {
                 references = true;
             }
+            else if (element.Id == IdBlockDuration)
+            {
+                duration = (long)Ebml.ReadUInt(stream, element.Start, element.End);
+            }
             else if (element.Id == IdBlock)
             {
                 block = element;
@@ -297,7 +303,9 @@ internal static class MatroskaIndexer
 
         if (block is { } found)
         {
-            ReadBlock(stream, tracks, found, clusterTimestamp, keyframeFromFlags: false, isKeyframe: !references);
+            ReadBlock(
+                stream, tracks, found, clusterTimestamp,
+                keyframeFromFlags: false, isKeyframe: !references, duration: duration);
         }
     }
 
@@ -307,7 +315,8 @@ internal static class MatroskaIndexer
         Ebml.Element block,
         long clusterTimestamp,
         bool keyframeFromFlags,
-        bool isKeyframe = false)
+        bool isKeyframe = false,
+        long duration = 0)
     {
         stream.Position = block.Start;
         var number = Ebml.ReadVint(stream, keepMarker: false, out var numberLength);
@@ -354,6 +363,16 @@ internal static class MatroskaIndexer
         foreach (var (offset, size) in frames)
         {
             track.Samples.Add(new IndexedSample(timestamp, offset, size, key));
+            if (duration > 0)
+            {
+                // Only a track that states durations grows the list, and then every sample gets an entry
+                // so the two stay index-aligned.
+                (track.SampleDurations ??= [.. Enumerable.Repeat(0L, track.Samples.Count - 1)]).Add(duration);
+            }
+            else
+            {
+                track.SampleDurations?.Add(0);
+            }
         }
     }
 

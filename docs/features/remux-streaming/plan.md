@@ -367,18 +367,29 @@ rewriting rather than encoding tooling, so they do not change the answer.
       undeclared one.
 - [x] **Decide fragmented or not, by measurement** — answered by the prototype:
       **non-fragmented**, 7 requests against the fragmented file's 3309.
-- [ ] **Track selection** so the output carries what the viewer chose, including
-      sidecars folded in as tracks.
-- [ ] **Subtitle conversion**, which is the one thing that cannot be referenced the
-      way audio and video can. A SubRip or ASS sample is not a valid MP4 subtitle
-      sample and not a valid HLS one either: MP4 carries `tx3g` or `wvtt`, HLS
-      carries WebVTT or IMSC1. So text has to be **rewritten**, per transport, and
-      ASS styling is lost in the process. This applies to the container's own
-      subtitle tracks and to
-      [sidecar files](../external-track-sidecars/feature.md) equally.
-- [ ] **Unit tests for the conversion** — timing preserved across the rewrite, a
-      cue spanning a segment boundary, and an ASS source degrading to plain text
-      rather than failing.
+- [x] **Track selection** so the output carries what the viewer chose — video first,
+      then the chosen dub, then subtitles only when they were asked for. The choice
+      arrives as stream indexes, which are positions in the file rather than Matroska
+      track numbers, so the index carries both. A stale choice falls back to the
+      first track of its kind rather than playing nothing.
+- [ ] **Sidecars folded in as tracks** — an external dub or subtitle is a second file
+      whose samples have to join the output, which the wrap-the-source layout has no
+      room for as it stands.
+- [x] **Subtitle conversion** — the one thing that cannot be referenced the way audio
+      and video can. A SubRip or ASS sample is not a valid MP4 subtitle sample: MP4
+      wants `tx3g`, which is a length-prefixed string, and the gaps between cues need
+      empty samples that exist nowhere in Matroska. So the text is rewritten and
+      carried in a **second `mdat` inside the header** — a film's dialogue is a
+      hundred kilobytes against a source of gigabytes — while the media `mdat` still
+      wraps the source untouched. ASS rows give up their fields and override codes;
+      styling is lost, which the epic already accepted. A cue with no stated duration
+      is dropped rather than guessed at, because MP4 has no "until the next one".
+- [x] **Unit tests for the conversion** — markup stripped, ASS fields and overrides
+      removed, a comma inside the text not mistaken for a separator, gaps becoming
+      empty samples, and a real film's subtitle track rewritten and read back with
+      its timings intact.
+- [ ] **Subtitle conversion for HLS**, which wants WebVTT or IMSC1 rather than
+      `tx3g`, and segmented to match.
 - [ ] **An HLS renderer over the same index** — a media playlist cut at keyframe
       boundaries and segments rendered from the same sample table, so the second
       transport is a second output rather than a second pipeline.

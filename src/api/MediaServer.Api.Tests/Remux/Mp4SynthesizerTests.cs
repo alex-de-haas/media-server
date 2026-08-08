@@ -280,4 +280,98 @@ public sealed class Mp4SynthesizerTests
 
         Assert.Equal(["ac-3", "hvc1"], built.Result.SampleEntries);
     }
+
+    private static byte[] WithSubtitles(bool durations = true, string codec = "S_TEXT/UTF8")
+    {
+        var tracks = ContainerBuilders.Ebml(0x1654AE6B,
+            TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                defaultDuration: 40_000_000),
+            TrackEntry(3, 17, codec));
+
+        var cue = System.Text.Encoding.UTF8.GetBytes("<i>Hello</i>");
+        var later = System.Text.Encoding.UTF8.GetBytes("Later");
+
+        return ContainerBuilders.Matroska(
+            ContainerBuilders.Info(400),
+            tracks,
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(10, 0x01)),
+                SimpleBlock(1, 40, false, Frame(10, 0x02)),
+                // A cue at 40 ms for 60 ms, then a gap, then one at 200 ms for 50 ms.
+                durations ? BlockGroup(3, 40, false, 60, cue) : BlockGroup(3, 40, false, cue),
+                durations ? BlockGroup(3, 200, false, 50, later) : BlockGroup(3, 200, false, later)));
+    }
+
+    [Fact]
+    public void A_text_subtitle_track_becomes_timed_text()
+    {
+        var built = Build(WithSubtitles(), tracks: [1, 3]);
+
+        Assert.Equal(["hvc1", "tx3g"], built.Result.SampleEntries);
+    }
+
+    [Fact]
+    public void Timed_text_samples_are_carried_in_the_header_rather_than_pointed_at()
+    {
+        var file = WithSubtitles();
+        var built = Build(file, tracks: [1, 3]);
+
+        var co64 = built.Reader.Find("moov/trak/mdia/minf/stbl/co64").Skip(1).First();
+        var offsets = built.Reader.ChunkOffsets(co64);
+
+        // Every subtitle sample lives inside the header — nothing in the source could serve one, because a
+        // length prefix and the empty samples between cues exist nowhere in Matroska.
+        Assert.All(offsets, offset => Assert.InRange(offset, 0ul, (ulong)built.Result.HeaderLength));
+    }
+
+    [Fact]
+    public void The_header_carries_a_second_mdat_for_the_rewritten_text()
+    {
+        var withText = Build(WithSubtitles(), tracks: [1, 3]);
+        var withoutText = Build(WithSubtitles(), tracks: [1]);
+
+        Assert.Equal(2, withText.Reader.Top.Count(box => box.Type == "mdat"));
+        Assert.Equal(1, withoutText.Reader.Top.Count(box => box.Type == "mdat"));
+    }
+
+    [Fact]
+    public void A_gap_between_cues_becomes_an_empty_sample()
+    {
+        var built = Build(WithSubtitles(), tracks: [1, 3]);
+
+        var stsz = built.Reader.Find("moov/trak/mdia/minf/stbl/stsz").Skip(1).First();
+
+        // Four samples: nothing on screen until 40 ms, the first cue, nothing from 100 ms to 200 ms, then
+        // the second. A timed-text track has no way to express a gap other than by saying nothing in it.
+        Assert.Equal(4u, built.Reader.U32At(stsz.Start + 8));
+        Assert.Equal(2u, built.Reader.U32At(stsz.Start + 12));       // leading filler: a bare length of zero
+        Assert.Equal(2u, built.Reader.U32At(stsz.Start + 12 + 8));   // and the one between the cues
+    }
+
+    [Fact]
+    public void The_markup_is_gone_from_what_is_written()
+    {
+        var built = Build(WithSubtitles(), tracks: [1, 3]);
+
+        var text = System.Text.Encoding.UTF8.GetString(built.Result.Header);
+        Assert.Contains("Hello", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<i>", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_subtitle_track_that_states_no_durations_is_left_out()
+    {
+        var built = Build(WithSubtitles(durations: false), tracks: [1, 3]);
+
+        // A cue with no end cannot be expressed: MP4 has no "until the next one".
+        Assert.Equal(["hvc1"], built.Result.SampleEntries);
+    }
+
+    [Fact]
+    public void A_bitmap_subtitle_track_is_left_out()
+    {
+        var built = Build(WithSubtitles(codec: "S_HDMV/PGS"), tracks: [1, 3]);
+
+        Assert.Equal(["hvc1"], built.Result.SampleEntries);
+    }
 }

@@ -23,7 +23,15 @@ internal enum IndexedTrackKind
 /// </summary>
 internal sealed class IndexedTrack
 {
+    /// <summary>The Matroska track number, which is what a block refers to.</summary>
     public required ulong Number { get; init; }
+
+    /// <summary>
+    /// Position among the file's track entries, zero-based. This is what a probe calls the stream index
+    /// and what the database stores, and it is not the same thing as <see cref="Number"/> — a file may
+    /// number its tracks however it likes.
+    /// </summary>
+    public int Ordinal { get; set; }
     public IndexedTrackKind Kind { get; set; }
     public string CodecId { get; set; } = string.Empty;
     public byte[]? CodecPrivate { get; set; }
@@ -51,6 +59,13 @@ internal sealed class IndexedTrack
     public int Channels { get; set; }
 
     public List<IndexedSample> Samples { get; } = [];
+
+    /// <summary>
+    /// How long each sample is shown, in timestamp ticks. Only subtitles have one: their cues have a
+    /// duration of their own rather than lasting until the next sample, and a track that never stated one
+    /// leaves this null rather than carrying a list of zeroes for every frame of a film.
+    /// </summary>
+    public List<long>? SampleDurations { get; set; }
 
     /// <summary>How many blocks held more than one frame. Diagnostic: lacing is invisible in test material
     /// produced by ffmpeg, so a zero here on a real file is worth a second look rather than relief.</summary>
