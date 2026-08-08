@@ -427,7 +427,10 @@ rewriting rather than encoding tooling, so they do not change the answer.
       has not reached will. A client that knows the difference shows "preparing" and
       retries instead of showing "unavailable" forever. The URL itself answers 503
       for the same case.
-- [ ] **`GET /native/v1/server` reports the packaging capability.**
+- [x] **`GET /native/v1/server` reports the packaging capability.** It is a property
+      of the build rather than of the deployment — packaging needs no engine and no
+      configuration — so it is simply true. Whether a *particular* source is ready is a
+      different question, and `resolve` answers that per source.
 - [ ] **Unit tests**: a remux URL is refused without a valid token, an unpublished
       item is unreachable, and a client that cannot open the container still gets
       `remux` rather than `directPlay`.
@@ -482,7 +485,7 @@ Two operational facts worth keeping, both of which cost time to find:
 
 - [x] **`feature.md`** — created with the first shipped behaviour, describing what is
       there now rather than what is intended.
-- [ ] **Update [native-playback](../native-playback/feature.md)** where it says
+- [x] **Update [native-playback](../native-playback/feature.md)** where it said
       packaging does not exist yet.
 - [ ] **Index** — `node scripts/docs-index.mjs --fix`.
 - [ ] **Version bump** — new functionality, so a minor; read `manifest.json` when

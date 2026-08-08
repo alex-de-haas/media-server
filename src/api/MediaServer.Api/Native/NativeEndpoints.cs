@@ -48,9 +48,11 @@ public static class NativeEndpoints
                     // The engine is an optional cross-app dependency: an injected URL is what decides
                     // whether it exists at all, exactly as the composition root reads it.
                     TranscodeEngine: !string.IsNullOrWhiteSpace(settings.TranscodeEngineUrl),
-                    // Packaging is `remux-streaming`; until it ships the honest answer is false, and a
-                    // client that keys off this simply never asks for a remux.
-                    Packaging: false,
+                    // Packaging ships. It needs no engine and no configuration — an index is built in
+                    // the background for every Matroska source — so this is a property of the build
+                    // rather than of the deployment. Whether a *particular* source is ready is a
+                    // different question, and `resolve` answers it per source.
+                    Packaging: true,
                     Recommendations: !string.IsNullOrWhiteSpace(settings.TmdbApiKey),
                     Trakt: settings.IsTraktConfigured))))
             .RequireAuthorization()
