@@ -81,10 +81,17 @@ Only Matroska is indexed. An MP4 source is already playable and has nothing to g
 
 ## What the container carries
 
-`Mp4Synthesizer` writes descriptors rather than deriving them. Only `dac3` is parsed,
-because an AC-3 track in Matroska has no `CodecPrivate` at all — every frame restates
-its own parameters — so the channel count and sample rate are read out of a sync frame
-rather than believed from the container.
+`Mp4Synthesizer` writes descriptors rather than deriving them. Audio is the exception:
+neither AC-3 nor E-AC-3 has any `CodecPrivate` in Matroska — every frame restates its
+own parameters — so `dac3` and `dec3` are read out of a sync frame rather than believed
+from the container.
+
+E-AC-3 is not AC-3 with a different name. Its access unit may hold several substreams,
+one independent and then any dependent ones carrying extra channels, which are walked by
+their stated sizes so `dec3` can say how many there are. And a frame is **not** always
+1536 samples: it carries one, two, three or six blocks of 256, so the duration is read
+rather than assumed. Atmos rides on E-AC-3 and survives untouched, because the samples
+are the same bytes.
 
 - **Dolby Vision** is offered as a `dvh1` sample entry, and only for HEVC that came with
   a configuration, and only when the client asked. The cross-compatible `hvc1` form
@@ -145,8 +152,8 @@ A remux is refused, with the reason said plainly, when:
 That last one is why what packaging can describe lives in **one** place, in both
 vocabularies that ask: the resolver reasons in the probe's names and the synthesiser in
 Matroska's, and when they drifted the result was a source advertised as remuxable whose
-only audio track was then quietly declined. Audio is AC-3 only today; E-AC-3 needs an
-`ec-3` entry with a `dec3` descriptor, and AAC an `mp4a` with an `esds`.
+only audio track was then quietly declined. Audio is AC-3 and E-AC-3; AAC would need an
+`mp4a` entry with an `esds`, and DTS and TrueHD are out of scope for this client.
 
 ## Verified
 

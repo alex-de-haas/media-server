@@ -465,10 +465,11 @@ Two operational facts worth keeping, both of which cost time to find:
 - [ ] **Several concurrent clients.**
 - [ ] **Multi-audio, sidecar audio, and subtitles** folded into the output.
 - [ ] **DV profiles 5 and 8.**
-- [ ] **E-AC-3**, which needs an `ec-3` sample entry and a `dec3` descriptor
-      enumerating its substreams. Describing one as AC-3 would misstate the stream,
-      so an E-AC-3 track is left out until that is written — which matters here,
-      because Atmos rides on E-AC-3.
+- [x] **E-AC-3** as an `ec-3` entry with a `dec3` descriptor: the access unit's
+      substreams are walked so the descriptor can count the dependent ones, and the
+      frame duration is read from the blocks it carries rather than assumed to be
+      1536. Verified on an Atmos track — repackaged, still reported as Dolby Digital
+      Plus with Atmos, and decoding.
 - [ ] **AAC**, which needs `mp4a` with an `esds` carrying the audio specific config.
       Nothing in this library uses it, but a client that declares AAC support would
       otherwise be offered a remux with no sound — which is why a source whose only

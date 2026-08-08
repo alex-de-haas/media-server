@@ -271,26 +271,54 @@ internal static class Mp4Synthesizer
         }
 
         var first = track.Samples[0];
-        var probe = new byte[Math.Min(16, first.Size)];
+        // Enough of the first access unit to read it: AC-3 needs a sync frame header, E-AC-3 needs to walk
+        // its substreams, and both are small next to the frame itself.
+        var probe = new byte[Math.Min(first.Size, 4096)];
         source.Position = first.Offset;
         source.ReadExactly(probe);
-        if (DescribeAc3(probe) is not { } ac3)
+
+        string entryName;
+        byte[] entry;
+        int sampleRate;
+        long frameSamples;
+
+        if (track.CodecId == "A_EAC3")
         {
-            return null;
+            if (DescribeEac3(probe) is not { } eac3)
+            {
+                return null;
+            }
+
+            entryName = "ec-3";
+            entry = AudioEntry("ec-3", "dec3", eac3.Dec3, eac3.SampleRate, eac3.Channels);
+            sampleRate = eac3.SampleRate;
+            // Not always 1536: an E-AC-3 frame carries one, two, three or six blocks of 256 samples.
+            frameSamples = eac3.SamplesPerFrame;
+        }
+        else
+        {
+            if (DescribeAc3(probe) is not { } ac3)
+            {
+                return null;
+            }
+
+            entryName = "ac-3";
+            entry = AudioEntry("ac-3", "dac3", ac3.Dac3, ac3.SampleRate, ac3.Channels);
+            sampleRate = ac3.SampleRate;
+            // AC-3 is 1536 samples a frame, always. Counting in the stream's own sample rate makes that
+            // exact at any rate, and does not depend on the per-frame timestamps a laced block cannot give.
+            frameSamples = 1536;
         }
 
-        // AC-3 is 1536 samples a frame, always. Counting in the stream's own sample rate makes that
-        // exact at any rate, and does not depend on the per-frame timestamps a laced block cannot give.
-        const long FrameSamples = 1536;
         var count = track.Samples.Count;
-        var deltas = Enumerable.Repeat(FrameSamples, count).ToArray();
+        var deltas = Enumerable.Repeat(frameSamples, count).ToArray();
 
         return new Prepared(
-            track, "ac-3", AudioEntry(ac3), deltas, null, null, FrameSamples * count,
+            track, entryName, entry, deltas, null, null, frameSamples * count,
             [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
             InHeader: false,
             input,
-            ac3.SampleRate);
+            sampleRate);
     }
 
     /// <summary>
@@ -482,18 +510,19 @@ internal static class Mp4Synthesizer
         return Box(entryName, [body, .. extras]);
     }
 
-    private static byte[] AudioEntry(Ac3Description ac3)
+    private static byte[] AudioEntry(
+        string entryName, string descriptorName, byte[] descriptor, int sampleRate, int channels)
     {
         byte[] body =
         [
             .. new byte[6], .. U16(1),
             .. new byte[8],
-            .. U16((ushort)ac3.Channels), .. U16(16),
+            .. U16((ushort)channels), .. U16(16),
             .. new byte[4],
-            .. U32((uint)ac3.SampleRate << 16),
+            .. U32((uint)sampleRate << 16),
         ];
 
-        return Box("ac-3", body, Box("dac3", ac3.Dac3));
+        return Box(entryName, body, Box(descriptorName, descriptor));
     }
 
     private static byte[] Assemble(

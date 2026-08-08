@@ -18,6 +18,24 @@ public sealed class Mp4SynthesizerTests
     private static byte[] Ac3Frame(int size) =>
         [0x0B, 0x77, 0x00, 0x00, 0x14, 0x40, 0xEB, .. new byte[Math.Max(0, size - 7)]];
 
+    /// <summary>
+    /// An E-AC-3 sync frame: stream type 0, six blocks, 3/2 with LFE at 48 kHz, bitstream id 16. The frame
+    /// size is stated in the header as words less one, so it has to match what is handed over.
+    /// </summary>
+    private static byte[] Eac3Frame(int size, int streamType = 0)
+    {
+        var words = (size / 2) - 1;
+        return
+        [
+            0x0B, 0x77,
+            (byte)((streamType << 6) | ((words >> 8) & 0x07)),
+            (byte)(words & 0xFF),
+            0x3F,                                   // fscod 0, numblkscod 3, acmod 7, lfeon 1
+            0x80,                                   // bsid 16
+            .. new byte[Math.Max(0, size - 6)],
+        ];
+    }
+
     private sealed record Built(Mp4Synthesizer.Result Result, Mp4BoxReader Reader, MatroskaIndex Index);
 
     private static Built Build(
@@ -522,5 +540,68 @@ public sealed class Mp4SynthesizerTests
 
         Assert.NotNull(result);
         Assert.Equal(["hvc1"], result.SampleEntries);
+    }
+
+    [Fact]
+    public void Eac3_gets_its_own_entry_and_descriptor()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_EAC3", channels: 6)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(10, 0x01)),
+                SimpleBlock(2, 0, true, Eac3Frame(640))));
+
+        var built = Build(file);
+
+        Assert.Equal(["hvc1", "ec-3"], built.Result.SampleEntries);
+
+        var stsd = built.Reader.Find("moov/trak/mdia/minf/stbl/stsd").Skip(1).First();
+        var entry = built.Reader.SampleEntry(stsd);
+        Assert.Equal("ec-3", entry.Type);
+        Assert.Equal(6, built.Result.Header[entry.Start + 17]);
+        Assert.Equal(48000u, built.Reader.U32At(entry.Start + 24) >> 16);
+
+        var dec3 = built.Reader.Children(entry.Start + 28, entry.End).Single(box => box.Type == "dec3");
+        // One independent substream, 48 kHz, bitstream id 16, 3/2 with LFE, nothing dependent.
+        Assert.Equal(0, built.Result.Header[dec3.Start + 1] & 0x07);
+        Assert.Equal(0x20, built.Result.Header[dec3.Start + 2]);
+        Assert.Equal(0x0F, built.Result.Header[dec3.Start + 3]);
+    }
+
+    [Fact]
+    public void An_eac3_frame_is_timed_by_the_blocks_it_actually_carries()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B, TrackEntry(2, 2, "A_EAC3", channels: 6)),
+            Cluster(0, SimpleBlock(2, 0, true, Eac3Frame(640))));
+
+        var built = Build(file, tracks: [2]);
+
+        // Six blocks of 256 samples. AC-3 is always 1536; E-AC-3 is not, and assuming so would drift.
+        var stts = built.Reader.Find("moov/trak/mdia/minf/stbl/stts").First();
+        Assert.Equal(1536u, built.Reader.Runs(stts)[0].Value);
+    }
+
+    [Fact]
+    public void A_unit_that_opens_with_a_dependent_substream_is_left_out()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_EAC3", channels: 6)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(10, 0x01)),
+                // Stream type 1 is a dependent substream; without its independent one there is nothing
+                // to describe the stream against.
+                SimpleBlock(2, 0, true, Eac3Frame(640, streamType: 1))));
+
+        Assert.Equal(["hvc1"], Build(file).Result.SampleEntries);
     }
 }
