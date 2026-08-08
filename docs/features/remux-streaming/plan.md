@@ -426,7 +426,32 @@ rewriting rather than encoding tooling, so they do not change the answer.
 
 ### Phase 4 — the load it will actually see
 
-- [ ] **A whole film end to end on an Apple TV**, including seeking across it.
+#### First end-to-end pass through the running server (2026-08-08)
+
+Everything above had been verified in pieces. This was the first time the whole chain
+ran as it will ship: the app under Hosty Core, the background worker, the index store,
+the synthesiser and the endpoint, with an Apple TV 4K as the client.
+
+The worker started with the app and built **seven indexes on its own**, before any
+request. A 26.37 GB Matroska source then played at **3840×2160 in Dolby Vision**,
+seeking across a two-hour film in 0.58 s, 2.13 s and 2.76 s, with **0 stalls** — while
+the source lay untouched, no file was produced, and nothing was stored beyond the
+index.
+
+`transcode-engine` was stopped throughout, which settles the last of the
+`api`-versus-engine question by demonstration rather than by argument.
+
+Two operational facts worth keeping, both of which cost time to find:
+
+- **In dev the app binds loopback only** — Core is what faces the network — so a
+  device on the LAN needs a forwarder to reach it directly. Ports are Core-assigned
+  and live in `HOSTY_PORT_*`; they are not stable and must not be assumed.
+- **Port 7000 on macOS is the AirPlay receiver.** Probing it returns a confident
+  `403` from `Server: AirTunes`, which reads exactly like the app refusing a request.
+
+- [x] **A whole film end to end on an Apple TV**, including seeking across it —
+      played and seeked across; an unattended watch of the whole thing is still
+      untried.
 - [ ] **Time to first frame from cold**, on a source on the slow disk.
 - [ ] **60–80 Mbit/s**, the bitrate class never yet exercised.
 - [ ] **Several concurrent clients.**
