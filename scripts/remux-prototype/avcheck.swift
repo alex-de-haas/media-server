@@ -11,7 +11,8 @@ player.isMuted = true
 
 let started = Date()
 var done = false
-let deadline = Date().addingTimeInterval(400)
+let timeout: TimeInterval = 25
+let deadline = Date().addingTimeInterval(timeout)
 
 // Actually start playback: HLS resolves its variant lazily, so an item that is
 // merely instantiated proves nothing.
@@ -64,6 +65,6 @@ while !done && Date() < deadline {
 }
 
 if !done {
-    print("RESULT:      TIMED OUT (still .unknown after 25s)")
+    print("RESULT:      TIMED OUT (still .unknown after \(Int(timeout))s)")
     exit(2)
 }

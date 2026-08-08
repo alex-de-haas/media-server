@@ -11,6 +11,16 @@ Updated: 2026-08-08
 > only when packaging is available, which today it never is. This makes it
 > available.
 
+**Why this is still `Draft` although Phase 0 is done.** Phase 0 is a *gate*, not
+implementation: a throwaway prototype whose only job was to find out whether the
+design is possible before anything is committed to. Gates run before `Ready` by
+construction — that is what they are for — and nothing in Phases 1–4 has been built.
+
+Three things still stand between this and `Ready`: the transport-selection policy,
+the cost of the index walk on the slow disk (unmeasurable on the dev machine), and
+whether folding a sidecar in can avoid the engine. `Ready` also needs explicit
+approval in chat, which has not been given.
+
 ## Goal
 
 Serve a file a client cannot open, by **repackaging it and nothing else** — without

@@ -117,9 +117,21 @@ def _stbl(entry, samples, deltas, cts, sync):
 
 # ----------------------------------------------------------------------------- entries
 
+# Matroska CodecID -> (configuration box, default sample entry). The configuration
+# record is carried verbatim in both cases: Matroska stores exactly the bytes the MP4
+# box wants.
+VIDEO_CODECS = {
+    "V_MPEGH/ISO/HEVC": (b"hvcC", "hvc1"),
+    "V_MPEG4/ISO/AVC": (b"avcC", "avc1"),
+}
+
+
 def video_entry(track, sample_entry):
-    hvcc = box(b"hvcC", track.codec_private)
-    extras = [hvcc]
+    config_box, default_entry = VIDEO_CODECS.get(track.codec, (b"hvcC", "hvc1"))
+    # A Dolby Vision entry only makes sense over HEVC; anything else keeps its own.
+    if config_box != b"hvcC":
+        sample_entry = default_entry
+    extras = [box(config_box, track.codec_private)]
     if track.transfer or track.primaries:
         # AVFoundation reads the container's colr; without it the format description
         # reports no transfer function at all, which is how HDR gets lost.
@@ -256,7 +268,10 @@ def build(ix, want_tracks, sample_entry="dvh1", mdat_header=16):
         "header_bytes": len(header),
         "total_size": len(header) + ix["file_size"],
         "tracks": [(p["t"].number, p["kind"], len(p["t"].samples)) for p in prepared],
-        "sample_entry": sample_entry,
+        "sample_entry": next(
+            (VIDEO_CODECS.get(p["t"].codec, (b"hvcC", sample_entry))[1]
+             if VIDEO_CODECS.get(p["t"].codec, (b"hvcC", None))[0] != b"hvcC" else sample_entry)
+            for p in prepared if p["kind"] == "video"),
         "dv": bool(any(p["kind"] == "video" and p["t"].dv_config for p in prepared)),
     }
     return header, len(header) + ix["file_size"], report
