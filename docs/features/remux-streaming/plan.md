@@ -355,9 +355,13 @@ rewriting rather than encoding tooling, so they do not change the answer.
 
 ### Phase 2 — the synthesiser
 
-- [ ] **Compute the container from the index**: `ftyp`, `moov`, and the chosen body
-      shape, with `hvc1` tagging, explicit video mapping, and the requested sample
-      entry — `dvh1` when the client asked for Dolby Vision.
+- [x] **Compute the container from the index**: `ftyp`, `moov` and an `mdat` that
+      wraps the source verbatim, so an output offset is the header's length plus the
+      source offset. `hvcC` and `avcC` are carried from `CodecPrivate`, `dvvC` from
+      the Dolby Vision mapping, `colr` from the `Colour` element when the container
+      states one and left out rather than guessed when it does not. `dvh1` is offered
+      only for HEVC that came with a configuration, and only when asked for. Verified
+      through AVFoundation and by decoding both streams.
 - [ ] **Answer an arbitrary byte range** by resolving it to samples and reading those
       from the source, with the total length declared, since AVFoundation refuses an
       undeclared one.
