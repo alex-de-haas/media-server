@@ -326,8 +326,16 @@ rewriting rather than encoding tooling, so they do not change the answer.
 - [x] **De-lacing** — fixed, EBML and Xiph, so a laced audio block becomes one index
       entry per frame. A lacing header that does not add up leaves the block whole
       rather than slicing it into samples that point outside it.
-- [ ] **Storage** — where the index lives, its format, and how it is invalidated when
-      the source changes.
+- [x] **Storage** — one file per media source under the app data directory, beside
+      the torrents rather than in the database: an index is derived, large next to a
+      row, rebuildable, and of no interest to a backup. Timestamps and offsets climb
+      in small steps, so the file stores the steps as variable-length integers rather
+      than the values as fixed-width ones — **5.6 bytes a sample**, which is 9.33 MB
+      for a 26.37 GB film and 3.32 MB for an 8.32 GB one, both around 0.04 % of the
+      source. Loading one costs 0.1 s. Invalidation needs no schema: the header
+      carries the source's length and last-write time, so a file that was replaced
+      invalidates its own index. Written aside and moved into place, so an
+      interrupted build leaves nothing to mistake for an index.
 - [ ] **Built in the background**, at scan or ingest, so no viewer waits for it.
 - [ ] **Measured on a real film from the slow disk**: how long the walk takes, how
       large the index is, and how much of the file the walk has to touch.
