@@ -431,9 +431,12 @@ rewriting rather than encoding tooling, so they do not change the answer.
       of the build rather than of the deployment — packaging needs no engine and no
       configuration — so it is simply true. Whether a *particular* source is ready is a
       different question, and `resolve` answers that per source.
-- [ ] **Unit tests**: a remux URL is refused without a valid token, an unpublished
-      item is unreachable, and a client that cannot open the container still gets
-      `remux` rather than `directPlay`.
+- [x] **Unit tests** over what the served bytes are subject to: an unpublished or
+      tombstoned item is unreachable, a missing file is, an index built against an
+      older version of the file is not used, a source the walk has not reached says so
+      rather than saying no, the tag changes when the chosen tracks do, and a chosen
+      sidecar is carried once it has been walked. Token refusal is covered where the
+      token lives.
 
 ### Phase 4 — the load it will actually see
 
