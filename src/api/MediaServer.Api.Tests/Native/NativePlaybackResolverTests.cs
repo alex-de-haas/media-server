@@ -1,6 +1,7 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Native;
 using MediaServer.Api.Native.Playback;
+using MediaServer.Api.Remux;
 using MediaServer.Api.Tests.Jellyfin;
 
 namespace MediaServer.Api.Tests.Native;
@@ -50,10 +51,25 @@ public sealed class NativePlaybackResolverTests : IDisposable
         public override DateTimeOffset GetUtcNow() => new(2026, 8, 4, 12, 0, 0, TimeSpan.Zero);
     }
 
+    /// <summary>
+    /// Stands in for the background walk: whether a source has an index yet is the only thing that
+    /// decides between "remux" and "not yet", and these tests set it rather than build one.
+    /// </summary>
+    private sealed class Readiness(RemuxReadinessState state) : IRemuxReadiness
+    {
+        public Task<IReadOnlyDictionary<Guid, RemuxReadinessState>> ReadyAsync(
+            IReadOnlyList<Guid> mediaSourceIds, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, RemuxReadinessState>>(
+                mediaSourceIds.ToDictionary(id => id, _ => state));
+    }
+
     private NativePlaybackResolver Resolver(bool packaging = false) =>
+        Resolver(packaging ? RemuxReadinessState.Ready : RemuxReadinessState.Unsupported);
+
+    private NativePlaybackResolver Resolver(RemuxReadinessState readiness) =>
         new(_context,
             new NativeUrlTokenService(new NativeUrlSigningKey(new byte[32]), new FixedTime()),
-            new NativePackagingAvailability { IsAvailable = packaging });
+            new Readiness(readiness));
 
     private void AddSource(string container, string videoCodec, string? hdr, params (string Codec, int Channels)[] audio)
     {
@@ -169,6 +185,36 @@ public sealed class NativePlaybackResolverTests : IDisposable
         AddSource("mp4", "hevc", "HDR10", ("dts", 8), ("ac3", 6));
 
         Assert.Equal(NativePlaybackDecision.DirectPlay, (await ResolveOneAsync(AppleTv())).Decision);
+    }
+
+    [Fact]
+    public async Task A_source_the_walk_has_not_reached_says_so_rather_than_saying_no()
+    {
+        AddSource("mkv", "hevc", "HDR10", ("eac3", 6));
+
+        var response = await Resolver(RemuxReadinessState.Pending)
+            .ResolveAsync(_itemId, UserId, AppleTv(), CancellationToken.None);
+        var resolution = Assert.Single(response!.Sources);
+
+        // Waiting helps here, and a client that knows the difference shows "preparing" instead of
+        // "unavailable" — and retries.
+        Assert.Equal(NativePlaybackDecision.Unsupported, resolution.Decision);
+        Assert.Equal(NativePlaybackReasons.PackagingPending, resolution.Reason);
+    }
+
+    [Fact]
+    public async Task A_remux_url_carries_the_transport_and_the_signalling_it_promises()
+    {
+        AddSource("mkv", "hevc", "Dolby Vision", ("eac3", 6));
+
+        var resolution = await ResolveOneAsync(AppleTv(dolbyVision: true), packaging: true);
+
+        Assert.Equal(NativePlaybackDecision.Remux, resolution.Decision);
+        Assert.Equal(NativePlaybackTransport.ByteRange, resolution.Transport);
+        Assert.NotNull(resolution.Url);
+        Assert.Contains("/remux?token=", resolution.Url);
+        // What the URL asks for and what the response promises must be the same thing.
+        Assert.Contains($"signalling={resolution.Signalling}", resolution.Url);
     }
 
     [Fact]

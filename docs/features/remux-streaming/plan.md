@@ -399,15 +399,27 @@ rewriting rather than encoding tooling, so they do not change the answer.
 
 ### Phase 3 — serving it
 
-- [ ] **A `Transport` axis on the contract** — `byteRange | hls` beside `Decision`,
-      chosen from the client's declared capabilities and overridable by a setting.
-- [ ] **`api` serves the synthesised bytes** by byte range and as HLS, under the
-      existing signed URL tokens, with the same sandbox and access rules as the
-      direct path.
-- [ ] **`NativePackagingAvailability` reflects reality**, so `resolve` starts
-      answering `remux` and `GET /native/v1/server` reports `packaging: true`.
-- [ ] **A source with no index yet** — what `resolve` answers, and what the client
-      shows, when the background walk has not run.
+- [x] **A `Transport` axis on the contract** — `byteRange | hls` beside `Decision`,
+      because HLS is another way to deliver a repackaging rather than a fourth kind
+      of decision. Only `byteRange` exists so far.
+- [x] **`api` serves the synthesised bytes** by byte range at
+      `/native/v1/media/{id}/remux`, under the same signed URL token, sandbox and
+      visibility rules as the direct path. The header and the untouched source are
+      presented as one seekable stream, so ranges are handled by the framework's own
+      file result rather than by hand — which matters, since AVFoundation refuses a
+      server that will not declare a total length and reads a truncated answer to an
+      explicit range as a failure.
+- [ ] **`api` serves HLS**, once there is an HLS renderer to serve.
+- [x] **Availability reflects reality**, so `resolve` answers `remux` with a URL. The
+      placeholder flag is gone: readiness is now asked per source, in one query for
+      all the editions of a title rather than one round trip each.
+- [x] **A source with no index yet** answers `unsupported` with `packaging_pending`,
+      which is a different thing from `packaging_unavailable` and deliberately so: a
+      container nothing can index will never become playable, while a file the walk
+      has not reached will. A client that knows the difference shows "preparing" and
+      retries instead of showing "unavailable" forever. The URL itself answers 503
+      for the same case.
+- [ ] **`GET /native/v1/server` reports the packaging capability.**
 - [ ] **Unit tests**: a remux URL is refused without a valid token, an unpublished
       item is unreachable, and a client that cannot open the container still gets
       `remux` rather than `directPlay`.

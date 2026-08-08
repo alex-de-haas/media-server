@@ -16,6 +16,20 @@ public sealed record NativeCapabilityProfile(
     IReadOnlyList<string> HdrFormats,
     int? MaxAudioChannels = null);
 
+/// <summary>
+/// How the bytes arrive, which is a separate question from what was done to them. HLS is not a fourth kind
+/// of <see cref="NativePlaybackDecision"/>: it is another way to deliver the same repackaging, and
+/// conflating the two ages badly. See <c>docs/features/remux-streaming/plan.md</c>.
+/// </summary>
+public enum NativePlaybackTransport
+{
+    /// <summary>One resource, addressed by byte range. Carries Dolby Vision.</summary>
+    ByteRange,
+
+    /// <summary>A playlist and segments, addressed by time. HDR10 only for this library's content.</summary>
+    Hls,
+}
+
 public enum NativePlaybackDecision
 {
     /// <summary>The original file, served by byte range.</summary>
@@ -39,6 +53,9 @@ public static class NativePlaybackReasons
     public const string UnsupportedDynamicRange = "unsupported_dynamic_range";
     public const string NoAudioTrack = "no_audio_track";
     public const string PackagingUnavailable = "packaging_unavailable";
+
+    /// <summary>Packaging works, but this source has not been indexed yet. Retrying later succeeds.</summary>
+    public const string PackagingPending = "packaging_pending";
     public const string NoFile = "no_file";
 }
 
@@ -60,6 +77,8 @@ public sealed record NativePlaybackResolution(
     Guid MediaSourceId,
     string? VersionName,
     NativePlaybackDecision Decision,
+    /// <summary>How the bytes arrive. Meaningless without a <see cref="Url"/>, and null when there is none.</summary>
+    NativePlaybackTransport? Transport,
     string? Url,
     /// <summary>
     /// Which sample entry the output will carry — <b>only</b> on <c>remux</c>, where we write the

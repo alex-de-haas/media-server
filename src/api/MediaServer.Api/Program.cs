@@ -74,9 +74,6 @@ builder.Services.AddOpenApi(NativeSurface.OpenApiDocumentName, options =>
     options.ShouldInclude = description =>
         description.RelativePath?.StartsWith("native/v1", StringComparison.OrdinalIgnoreCase) == true);
 builder.Services.AddScoped<NativeMediaResolver>();
-// Packaging is `remux-streaming`; until it ships the resolver answers "not available" rather than
-// offering a URL that would not open.
-builder.Services.AddSingleton(new NativePackagingAvailability { IsAvailable = false });
 builder.Services.AddScoped<NativePlaybackResolver>();
 builder.Services.AddScoped<NativePreferenceService>();
 builder.Services.AddScoped<NativeSessionService>();
@@ -258,6 +255,8 @@ builder.Services.AddHostedService<ReconcilerWorker>();
 builder.Services.AddSingleton(serviceProvider => new RemuxIndexStore(
     hosty.AppDataDir, serviceProvider.GetRequiredService<ILogger<RemuxIndexStore>>()));
 builder.Services.AddScoped<RemuxIndexService>();
+builder.Services.AddScoped<RemuxStreamService>();
+builder.Services.AddScoped<IRemuxReadiness, RemuxReadiness>();
 builder.Services.AddHostedService<RemuxIndexWorker>();
 
 // EF Core + SQLite live under the app data directory so Hosty backup/restore covers them.

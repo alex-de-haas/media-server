@@ -25,6 +25,9 @@ public sealed class RemuxIndexService(
     private static readonly HashSet<string> Indexable =
         new(StringComparer.OrdinalIgnoreCase) { "mkv", "webm" };
 
+    /// <summary>Whether a container is one this can walk at all, which decides "not yet" from "never".</summary>
+    internal static bool IsIndexable(string? container) => container is not null && Indexable.Contains(container);
+
     internal sealed record Candidate(Guid MediaSourceId, string AbsolutePath);
 
     /// <summary>

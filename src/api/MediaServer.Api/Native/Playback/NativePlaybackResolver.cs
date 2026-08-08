@@ -1,4 +1,5 @@
 using MediaServer.Api.Data;
+using MediaServer.Api.Remux;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Native.Playback;
@@ -12,7 +13,7 @@ namespace MediaServer.Api.Native.Playback;
 public sealed class NativePlaybackResolver(
     MediaServerDbContext database,
     NativeUrlTokenService tokens,
-    NativePackagingAvailability packaging)
+    IRemuxReadiness readiness)
 {
     private const string DolbyVision = "Dolby Vision";
 
@@ -45,9 +46,14 @@ public sealed class NativePlaybackResolver(
             })
             .ToListAsync(cancellationToken);
 
+        // Asked once for all of them rather than per source: a title with six editions should not mean
+        // six round trips to find out which of them have been walked.
+        var ready = await readiness.ReadyAsync([.. sources.Select(source => source.Id)], cancellationToken);
+
         var resolutions = sources
             .Select(source => Resolve(
-                source.Id, source.VersionName, source.Container, source.Path, source.Streams, appUserId, profile))
+                source.Id, source.VersionName, source.Container, source.Path, source.Streams, appUserId,
+                profile, ready.GetValueOrDefault(source.Id, RemuxReadinessState.Unsupported)))
             .ToList();
 
         return new NativePlaybackResolutionResponse(itemId, resolutions);
@@ -60,10 +66,11 @@ public sealed class NativePlaybackResolver(
         string? path,
         IReadOnlyList<StreamFacts> streams,
         int appUserId,
-        NativeCapabilityProfile profile)
+        NativeCapabilityProfile profile,
+        RemuxReadinessState readiness)
     {
         NativePlaybackResolution Unsupported(string reason) =>
-            new(sourceId, versionName, NativePlaybackDecision.Unsupported, null, null, null, reason);
+            new(sourceId, versionName, NativePlaybackDecision.Unsupported, null, null, null, null, reason);
 
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -103,6 +110,7 @@ public sealed class NativePlaybackResolver(
                 sourceId,
                 versionName,
                 NativePlaybackDecision.DirectPlay,
+                Transport: NativePlaybackTransport.ByteRange,
                 Url: $"{NativeEndpoints.RoutePrefix}/media/{sourceId:D}?token=" +
                      tokens.Mint(appUserId, sourceId, NativeUrlTokenMethods.Read),
                 // Deliberately null. Direct play serves the file byte for byte, so its sample entry is
@@ -115,17 +123,28 @@ public sealed class NativePlaybackResolver(
 
         // The codecs are fine and only the container is not, which is a packaging problem. Saying so
         // honestly beats offering a URL that will not open.
-        return packaging.IsAvailable
-            ? new NativePlaybackResolution(
-                sourceId,
-                versionName,
-                NativePlaybackDecision.Remux,
-                Url: null,
-                // Here the signalling is ours to choose, because we are the ones writing the container.
-                Signalling: SignallingFor(video?.HdrFormat, profile),
-                SourceDynamicRange: video?.HdrFormat,
-                Reason: null)
-            : Unsupported(NativePlaybackReasons.PackagingUnavailable);
+        if (readiness != RemuxReadinessState.Ready)
+        {
+            // Two different answers, and the difference matters to a client: a container nothing can
+            // index will never become playable, while a file the walk has not reached yet will.
+            return Unsupported(readiness == RemuxReadinessState.Pending
+                ? NativePlaybackReasons.PackagingPending
+                : NativePlaybackReasons.PackagingUnavailable);
+        }
+
+        var signalling = SignallingFor(video?.HdrFormat, profile);
+        return new NativePlaybackResolution(
+            sourceId,
+            versionName,
+            NativePlaybackDecision.Remux,
+            Transport: NativePlaybackTransport.ByteRange,
+            Url: $"{NativeEndpoints.RoutePrefix}/media/{sourceId:D}/remux?token=" +
+                 tokens.Mint(appUserId, sourceId, NativeUrlTokenMethods.Read) +
+                 $"&signalling={signalling}",
+            // Here the signalling is ours to choose, because we are the ones writing the container.
+            Signalling: signalling,
+            SourceDynamicRange: video?.HdrFormat,
+            Reason: null);
     }
 
     /// <summary>
@@ -187,7 +206,4 @@ public sealed class NativePlaybackResolver(
 /// <c>remux-streaming</c> once it exists; until then the honest answer is no, and a client is told
 /// so rather than handed a URL that will not open.
 /// </summary>
-public sealed class NativePackagingAvailability
-{
-    public bool IsAvailable { get; init; }
-}
+

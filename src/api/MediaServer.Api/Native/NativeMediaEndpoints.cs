@@ -1,4 +1,6 @@
 using MediaServer.Api.Jellyfin.Streaming;
+using MediaServer.Api.Native.Playback;
+using MediaServer.Api.Remux;
 
 namespace MediaServer.Api.Native;
 
@@ -35,6 +37,52 @@ public static class NativeMediaEndpoints
         }).AllowAnonymous()
           .Produces(StatusCodes.Status200OK, contentType: "application/octet-stream")
           .Produces(StatusCodes.Status404NotFound);
+
+        // The same source repackaged as an MP4 computed over the untouched file. Nothing is produced
+        // and nothing is stored: the index was built in the background, and the header is computed per
+        // request. See docs/features/remux-streaming/plan.md.
+        group.MapMethods("/media/{mediaSourceId:guid}/remux", ["GET", "HEAD"], async (
+            Guid mediaSourceId,
+            string? token,
+            int? audioStreamIndex,
+            int? subtitleStreamIndex,
+            string? signalling,
+            HttpRequest request,
+            NativeUrlTokenService tokens,
+            RemuxStreamService remux,
+            CancellationToken cancellationToken) =>
+        {
+            if (!tokens.Validate(token, mediaSourceId, request.Method).IsValid)
+            {
+                return Results.NotFound();
+            }
+
+            var wanted = string.Equals(signalling, NativeSignalling.DolbyVision, StringComparison.OrdinalIgnoreCase)
+                ? VideoSignalling.DolbyVision
+                : VideoSignalling.CrossCompatible;
+
+            var (stream, refusal) = await remux.OpenAsync(
+                mediaSourceId, audioStreamIndex, subtitleStreamIndex, wanted, cancellationToken);
+
+            if (stream is null)
+            {
+                // "Not indexed yet" is a different thing from "no such source", and a client that knows
+                // the difference can say "preparing" instead of "unavailable".
+                return refusal == RemuxRefusal.NotIndexed
+                    ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable)
+                    : Results.NotFound();
+            }
+
+            return Results.File(
+                stream.Content,
+                contentType: stream.ContentType,
+                lastModified: stream.LastModified,
+                entityTag: stream.ETag,
+                enableRangeProcessing: true);
+        }).AllowAnonymous()
+          .Produces(StatusCodes.Status200OK, contentType: "video/mp4")
+          .Produces(StatusCodes.Status404NotFound)
+          .Produces(StatusCodes.Status503ServiceUnavailable);
 
         // A sidecar track: an external audio dub or subtitle living beside the video. No existing
         // client can play external audio at all, which is the point of serving it here.
