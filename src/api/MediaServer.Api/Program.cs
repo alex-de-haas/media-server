@@ -20,6 +20,7 @@ using MediaServer.Api.Sidecars;
 using MediaServer.Api.Organizer;
 using MediaServer.Api.People;
 using MediaServer.Api.Pipeline;
+using MediaServer.Api.Remux;
 using MediaServer.Api.Pipeline.Stages;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Realtime;
@@ -250,6 +251,14 @@ builder.Services.AddSingleton<IngestOrchestrator>();
 builder.Services.AddScoped<IngestService>();
 builder.Services.AddHostedService<PipelineWorker>();
 builder.Services.AddHostedService<ReconcilerWorker>();
+
+// Remux indexes: derived, large next to a row and rebuildable, so they live as files beside the database
+// rather than in it. The worker builds them ahead of any viewer, because a walk costs half a minute on a
+// feature film and nothing should press play into that.
+builder.Services.AddSingleton(serviceProvider => new RemuxIndexStore(
+    hosty.AppDataDir, serviceProvider.GetRequiredService<ILogger<RemuxIndexStore>>()));
+builder.Services.AddScoped<RemuxIndexService>();
+builder.Services.AddHostedService<RemuxIndexWorker>();
 
 // EF Core + SQLite live under the app data directory so Hosty backup/restore covers them.
 Directory.CreateDirectory(hosty.AppDataDir);

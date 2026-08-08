@@ -336,9 +336,16 @@ rewriting rather than encoding tooling, so they do not change the answer.
       carries the source's length and last-write time, so a file that was replaced
       invalidates its own index. Written aside and moved into place, so an
       interrupted build leaves nothing to mistake for an index.
-- [ ] **Built in the background**, at scan or ingest, so no viewer waits for it.
-- [ ] **Measured on a real film from the slow disk**: how long the walk takes, how
-      large the index is, and how much of the file the walk has to touch.
+- [x] **Built in the background**, so no viewer waits for it. A worker walks one
+      source at a time — several at once would be slower in total on a spinning disk
+      and would make everything else on it worse — and there is no queue to keep in
+      sync: the database knows which sources exist and the store knows which have an
+      index, so the outstanding work is a query and a restart resumes without
+      remembering anything. Orphaned indexes are pruned once per process, since
+      nothing else removes a file when its title is deleted.
+- [ ] **Measured on a real film from the slow disk**: how long the walk takes and
+      how much of the file it has to touch. On the dev SSD a 26.37 GB film costs
+      32.6 s and a 8.32 GB one 14.4 s; the spinning disk is still unmeasured.
 - [x] **Unit tests** over crafted Matroska written by hand — all three lacing forms,
       block groups whose keyframe answer is the absence of a `ReferenceBlock` rather
       than a flag, and a lacing header that does not add up. ffmpeg cannot produce a
