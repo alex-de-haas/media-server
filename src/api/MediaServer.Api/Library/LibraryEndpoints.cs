@@ -85,6 +85,29 @@ public static class LibraryEndpoints
             SetPlayedAsync(id, played: true, principal, userData, database, diagnostics, cancellationToken));
         group.MapDelete("/{id:guid}/played", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, PlaybackDiagnostics diagnostics, CancellationToken cancellationToken) =>
             SetPlayedAsync(id, played: false, principal, userData, database, diagnostics, cancellationToken));
+        // Records a viewing the server never saw, at the instant the user names — the toggle above
+        // cannot, because it claims no time and lands outside the calendar by design.
+        group.MapPost("/{id:guid}/watches", async (
+            Guid id,
+            LogWatchRequest request,
+            ClaimsPrincipal principal,
+            UserDataService userData,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
+            {
+                return Results.Unauthorized();
+            }
+
+            if (request.WatchedAt is not { } watchedAt)
+            {
+                return Results.BadRequest(new { error = "'watchedAt' is required." });
+            }
+
+            return ToResult(await userData.LogWatchAsync(userId, id, watchedAt, cancellationToken));
+        });
+
         group.MapPost("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
             SetFavoriteAsync(id, favorite: true, principal, userData, database, cancellationToken));
         group.MapDelete("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
@@ -291,6 +314,18 @@ public static class LibraryEndpoints
             .RequireAuthorization(AppRoles.AdminPolicy);
     }
 
+    /// <summary>
+    /// What logging a watch answers. A folder is a 400 rather than a 404: the item exists, and telling
+    /// the caller it does not would send them looking for the wrong bug.
+    /// </summary>
+    internal static IResult ToResult(LogWatchResult result) => result.Status switch
+    {
+        LogWatchStatus.Recorded => Results.Ok(result.Data),
+        LogWatchStatus.ItemNotFound => Results.NotFound(),
+        LogWatchStatus.NotPlayable => Results.BadRequest(new { error = "Only a playable item can have a watch logged against it." }),
+        _ => Results.BadRequest(new { error = "'watchedAt' cannot be in the future." }),
+    };
+
     private static MediaKind? ParseKind(string? kind) =>
         Enum.TryParse<MediaKind>(kind, ignoreCase: true, out var parsed) ? parsed : null;
 
@@ -338,3 +373,6 @@ public static class LibraryEndpoints
         return data is null ? Results.NotFound() : Results.Ok(data);
     }
 }
+
+/// <summary>The instant a viewing happened, as the user states it. Required — a log without a time is the toggle.</summary>
+public sealed record LogWatchRequest(DateTimeOffset? WatchedAt);

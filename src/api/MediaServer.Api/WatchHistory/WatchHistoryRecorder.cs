@@ -68,6 +68,48 @@ public sealed class WatchHistoryRecorder(
     }
 
     /// <summary>
+    /// Records a play the user states by hand, at an instant they choose: one dated entry, every time.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to <see cref="StageManualWatchedAsync"/>, and deliberately not the same thing.
+    /// The toggle is a statement about current state, so it is idempotent and timeless; this is a
+    /// statement about a specific viewing, so every call is another play — that is what a rewatch is,
+    /// and it is what makes a viewing the server never observed appear on the calendar at all.
+    /// </remarks>
+    /// <returns>The staged entry, so the caller can name it.</returns>
+    public async Task<PlaybackHistoryEntry> StageLoggedWatchAsync(
+        int appUserId, MediaItem item, UserItemData row, DateTimeOffset watchedAt, CancellationToken cancellationToken)
+    {
+        var identity = await identities.MapAsync(item, cancellationToken);
+        var entry = new PlaybackHistoryEntry
+        {
+            Id = Guid.NewGuid(),
+            AppUserId = appUserId,
+            MediaItemId = item.Id,
+            CreatedAt = time.GetUtcNow(),
+            WatchedAt = watchedAt,
+            Origin = PlaybackHistoryOrigin.Manual,
+            // No session: nothing was observed. The uniqueness rule that guards observed playback does
+            // not apply here — two logs at the same instant are two viewings the user claims, and only
+            // they can say otherwise.
+            PlaySessionId = null,
+            IdentitySnapshot = Snapshot(identity),
+            LinkStatus = PlaybackHistoryLinkStatus.None,
+        };
+        database.PlaybackHistoryEntries.Add(entry);
+
+        await StageOutboxAsync(
+            appUserId, item, row, entry, WatchHistoryOutboxOperation.AddExactWatch, identity, watchedAt,
+            // Keyed on the entry, like a deletion is: logging a second play changes no state on the row,
+            // so the row-derived fallback would hash to the first log's key and the second event would
+            // be swallowed as a duplicate.
+            discriminator: entry.Id.ToString("N"),
+            cancellationToken);
+
+        return entry;
+    }
+
+    /// <summary>
     /// Records an explicit "I watched this": at most one timeless entry, and only when there is no
     /// history at all.
     /// </summary>

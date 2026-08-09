@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSameMonth, startOfMonth } from "date-fns";
-import { Trash2 } from "lucide-react";
+import { Clock, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/ui";
@@ -21,6 +21,7 @@ import {
   groupSubtitle,
   groupWatchedByDay,
   monthGridInstants,
+  QUERIES_AFFECTED_BY_HISTORY_CHANGE,
   undatedFor,
   type WatchedGroup,
   type WatchedKindFilter,
@@ -46,6 +47,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/states";
 import { CalendarShell } from "@/components/calendar-shell";
+import { WatchTimeDialog } from "@/components/watch-time-dialog";
 
 /** How many cards fit a day cell before the rest collapse into "+N". */
 const MAX_CARDS = 3;
@@ -56,25 +58,11 @@ const FILTERS: Array<{ value: WatchedKindFilter; label: string }> = [
   { value: "episodes", label: "Episodes" },
 ];
 
-/**
- * Everything a deleted play can move: the diary itself, and the per-item watched state and play count
- * projected from it. Invalidating an inactive query only marks it stale, so listing the library keys
- * costs nothing here — it stops a stale watched badge appearing on the way back.
- */
-const AFFECTED_BY_DELETE = [
-  ["watch-history-calendar"],
-  ["watch-history-undated"],
-  ["library"],
-  ["library-detail"],
-  ["episodes"],
-  ["nextup"],
-  ["resume"],
-  ["recent"],
-  ["removed-titles"],
-] as const;
-
 /** The one play a confirmation is currently asking about. */
 type DeleteTarget = { entryId: string; heading: string; detail: string | null };
+
+/** The one undated mark the time dialog is currently asking about. */
+type DateTarget = { entryId: string; title: string };
 
 /**
  * The Watched mode: a screening diary over the per-play history. It answers "what did I finish on
@@ -94,6 +82,7 @@ export function WatchedCalendar({
   const [dayDetail, setDayDetail] = useState<string | null>(null);
   const [undatedOpen, setUndatedOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [dateTarget, setDateTarget] = useState<DateTarget | null>(null);
   const queryClient = useQueryClient();
 
   const range = monthGridInstants(month);
@@ -106,7 +95,7 @@ export function WatchedCalendar({
     mutationFn: (entryId: string) => mediaServer.deleteWatchHistoryEntry(entryId),
     onSuccess: () => {
       setDeleteTarget(null);
-      for (const queryKey of AFFECTED_BY_DELETE) {
+      for (const queryKey of QUERIES_AFFECTED_BY_HISTORY_CHANGE) {
         void queryClient.invalidateQueries({ queryKey });
       }
       toast.success("Play deleted");
@@ -114,6 +103,22 @@ export function WatchedCalendar({
     // The confirmation stays open on failure: closing it would leave the row still there with only a
     // toast to explain why, which reads as the delete having silently done nothing.
     onError: (error) => toast.error("Couldn’t delete this play", { description: errorMessage(error) }),
+  });
+
+  // The other half of the undated list: a play that really happened but reached this app without a
+  // time — a client that only marked it played, or a server restarted mid-playback. Nothing new is
+  // recorded; the mark it already has is stamped, so the count stays where it is.
+  const setTime = useMutation({
+    mutationFn: ({ entryId, watchedAt }: { entryId: string; watchedAt: string }) =>
+      mediaServer.setWatchHistoryEntryTime(entryId, watchedAt),
+    onSuccess: () => {
+      setDateTarget(null);
+      for (const queryKey of QUERIES_AFFECTED_BY_HISTORY_CHANGE) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+      toast.success("Time set");
+    },
+    onError: (error) => toast.error("Couldn’t set the time", { description: errorMessage(error) }),
   });
 
   const byDay = useMemo(
@@ -248,6 +253,23 @@ export function WatchedCalendar({
         filter={filter}
         onClose={() => setUndatedOpen(false)}
         onDelete={setDeleteTarget}
+        onDate={setDateTarget}
+      />
+
+      <WatchTimeDialog
+        open={dateTarget !== null}
+        onOpenChange={(open) => !open && setDateTarget(null)}
+        heading="When did you watch it?"
+        description={
+          <>
+            Gives <span className="text-foreground font-medium">{dateTarget?.title}</span> the time this
+            play was missing, and moves it out of this list onto that day. Your play count does not
+            change — the viewing was always recorded.
+          </>
+        }
+        confirmLabel="Set time"
+        pending={setTime.isPending}
+        onSubmit={(watchedAt) => dateTarget && setTime.mutate({ entryId: dateTarget.entryId, watchedAt })}
       />
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
@@ -432,11 +454,13 @@ function UndatedDialog({
   filter,
   onClose,
   onDelete,
+  onDate,
 }: {
   open: boolean;
   filter: WatchedKindFilter;
   onClose: () => void;
   onDelete: (target: DeleteTarget) => void;
+  onDate: (target: DateTarget) => void;
 }) {
   const kind = filter === "movies" ? "Movie" : filter === "episodes" ? "Episode" : undefined;
   const undated = useQuery({
@@ -461,6 +485,8 @@ function UndatedDialog({
         </DialogHeader>
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {undated.isPending && <Skeleton className="h-14 w-full" />}
+          {/* Fixable rather than merely listed: a mark lands here when the play was real but its time
+              never reached the server, and only the viewer knows what that time was. */}
           {/* Reachable by deleting the last mark: the `Undated N` control that opened this is already
               gone, so the dialog has to say what happened rather than sit empty. */}
           {undated.isSuccess && entries.length === 0 && (
@@ -472,7 +498,7 @@ function UndatedDialog({
             </p>
           )}
           {entries.map((entry) => (
-            <UndatedRow key={entry.entryId} entry={entry} onDelete={onDelete} />
+            <UndatedRow key={entry.entryId} entry={entry} onDelete={onDelete} onDate={onDate} />
           ))}
         </div>
       </DialogContent>
@@ -483,9 +509,11 @@ function UndatedDialog({
 function UndatedRow({
   entry,
   onDelete,
+  onDate,
 }: {
   entry: WatchHistoryUndatedEntry;
   onDelete: (target: DeleteTarget) => void;
+  onDate: (target: DateTarget) => void;
 }) {
   const heading = entry.kind === "Episode" ? (entry.seriesTitle ?? entry.title) : entry.title;
   const secondary =
@@ -512,6 +540,19 @@ function UndatedRow({
         <p className="truncate text-sm font-medium">{heading}</p>
         {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
       </div>
+      {/* Named down to the title, like the delete control beside it: a list of marks with two identical
+          accessible names leaves a screen reader unable to say which row it is on. */}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Set the time of this undated mark: ${[heading, secondary].filter(Boolean).join(" · ")}`}
+        className="text-muted-foreground hover:text-foreground size-7 shrink-0"
+        onClick={() =>
+          onDate({ entryId: entry.entryId, title: [heading, secondary].filter(Boolean).join(" · ") })
+        }
+      >
+        <Clock className="size-3.5" />
+      </Button>
       <DeleteEntryButton
         label={`Delete this undated mark: ${[heading, secondary].filter(Boolean).join(" · ")}`}
         onClick={() => onDelete({ entryId: entry.entryId, heading, detail: secondary })}

@@ -352,6 +352,122 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         Assert.Contains(queued, item => item.RemoteIdSnapshot!.Contains("222"));
     }
 
+    // ---- Dating an undated mark ----
+
+    [Fact]
+    public async Task AnUndatedMarkTakesTheInstantItIsGiven()
+    {
+        // The fix for a real viewing that arrived without a time: the play was always there, only its
+        // time was missing, so it is stamped rather than re-recorded.
+        var mark = AddTimelessPlay();
+        AddRow(playCount: 1, played: true, lastWatchedAt: null);
+        var watchedAt = DateTimeOffset.Parse("2026-08-04T21:15:00Z");
+
+        var status = await Service().SetWatchedAtAsync(_userId, mark.Id, watchedAt, CancellationToken.None);
+
+        Assert.Equal(SetWatchedAtStatus.Updated, status);
+        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(watchedAt, entry.WatchedAt);
+        Assert.Equal(PlaybackHistoryOrigin.Manual, entry.Origin);
+    }
+
+    [Fact]
+    public async Task DatingAMarkDoesNotChangeThePlayCount()
+    {
+        // Nothing was watched twice: a play that always existed simply became locatable in time.
+        var mark = AddTimelessPlay();
+        AddRow(playCount: 1, played: true, lastWatchedAt: null);
+
+        await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync();
+        Assert.Equal(1, row.PlayCount);
+        Assert.True(row.Played);
+    }
+
+    [Fact]
+    public async Task DatingAMarkTeachesTheRowWhenItWasWatched()
+    {
+        var mark = AddTimelessPlay();
+        AddRow(playCount: 1, played: true, lastWatchedAt: null);
+        var watchedAt = DateTimeOffset.Parse("2026-08-04T21:15:00Z");
+
+        await Service().SetWatchedAtAsync(_userId, mark.Id, watchedAt, CancellationToken.None);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync();
+        Assert.Equal(watchedAt, row.LastWatchedAt);
+    }
+
+    [Fact]
+    public async Task DatingAnOlderMarkLeavesTheLatestWatchAlone()
+    {
+        // Backfilling a viewing from years ago does not make it the most recent one.
+        var mark = AddTimelessPlay();
+        var latest = DateTimeOffset.Parse("2026-08-01T20:00:00Z");
+        AddRow(playCount: 2, played: true, lastWatchedAt: latest);
+
+        await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2019-01-05T20:00:00Z"), CancellationToken.None);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync();
+        Assert.Equal(latest, row.LastWatchedAt);
+    }
+
+    [Fact]
+    public async Task AnEntryThatAlreadyHasATimeIsRefused()
+    {
+        // "The recorded time is wrong" is a different claim from "this play was never timed", and
+        // re-dating a play stays out of scope.
+        var play = AddPlay("2026-08-01T20:00:00Z");
+
+        var status = await Service().SetWatchedAtAsync(
+            _userId, play.Id, DateTimeOffset.Parse("2026-08-02T20:00:00Z"), CancellationToken.None);
+
+        Assert.Equal(SetWatchedAtStatus.AlreadyDated, status);
+        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(DateTimeOffset.Parse("2026-08-01T20:00:00Z"), entry.WatchedAt);
+    }
+
+    [Fact]
+    public async Task AnUnknownOrForeignMarkIsNotFoundAndUnchanged()
+    {
+        var theirs = AddTimelessPlay(appUserId: _otherUserId);
+        var watchedAt = DateTimeOffset.Parse("2026-08-04T21:15:00Z");
+
+        Assert.Equal(
+            SetWatchedAtStatus.NotFound,
+            await Service().SetWatchedAtAsync(_userId, Guid.NewGuid(), watchedAt, CancellationToken.None));
+        Assert.Equal(
+            SetWatchedAtStatus.NotFound,
+            await Service().SetWatchedAtAsync(_userId, theirs.Id, watchedAt, CancellationToken.None));
+        Assert.Null((await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync()).WatchedAt);
+    }
+
+    [Fact]
+    public async Task AFutureInstantIsRefused()
+    {
+        var mark = AddTimelessPlay();
+
+        var status = await Service().SetWatchedAtAsync(
+            _userId, mark.Id, _time.GetUtcNow().AddHours(2), CancellationToken.None);
+
+        Assert.Equal(SetWatchedAtStatus.FutureInstant, status);
+        Assert.Null((await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync()).WatchedAt);
+    }
+
+    [Fact]
+    public async Task DatingAMarkQueuesNothingForTheProvider()
+    {
+        // EnsureTimelessWatched was delivered when the mark was made. Re-posting it as an exact play
+        // would leave the account holding the same viewing twice.
+        Connect();
+        var mark = AddTimelessPlay();
+        AddRow(playCount: 1, played: true, lastWatchedAt: null);
+
+        await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
+
+        Assert.Empty(_database.WatchHistoryOutboxEvents);
+    }
+
     // ---- Helpers ----
 
     private WatchHistoryEntryService Service() => new(
@@ -360,7 +476,8 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
             _database,
             new WatchHistoryIdentityMapper(_database),
             _time,
-            NullLogger<WatchHistoryRecorder>.Instance));
+            NullLogger<WatchHistoryRecorder>.Instance),
+        _time);
 
     private AppUser NewUser(string hostUserId, string email) => new()
     {
@@ -445,19 +562,21 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         return entry;
     }
 
-    private void AddTimelessPlay()
+    private PlaybackHistoryEntry AddTimelessPlay(int? appUserId = null)
     {
-        _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+        var entry = new PlaybackHistoryEntry
         {
             Id = Guid.NewGuid(),
-            AppUserId = _userId,
+            AppUserId = appUserId ?? _userId,
             MediaItemId = _movie.Id,
             CreatedAt = _time.GetUtcNow(),
             WatchedAt = null,
             Origin = PlaybackHistoryOrigin.Manual,
             LinkStatus = PlaybackHistoryLinkStatus.None,
-        });
+        };
+        _database.PlaybackHistoryEntries.Add(entry);
         _database.SaveChanges();
+        return entry;
     }
 
     private void AddRow(int playCount, bool played, DateTimeOffset? lastWatchedAt)

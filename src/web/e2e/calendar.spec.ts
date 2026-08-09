@@ -261,3 +261,56 @@ test("a phone gets a date-grouped agenda instead of seven columns", async ({ pag
   await expect(agenda.getByText("2 plays")).toBeVisible();
   await expect(agenda.getByText("1 play")).toBeVisible();
 });
+
+test("an undated mark is given its time and leaves the list", async ({ page }) => {
+  // The case this exists for: a real viewing that reached the server without a time — a client that
+  // only marked it played, or a restart mid-playback — so only the viewer can supply it.
+  const entries = [...undatedMarks.entries];
+  const dated: Array<{ entryId: string; watchedAt: string }> = [];
+
+  await setupApp(page, {
+    watchHistoryCalendar: { ...watchedHistory, undated: { movies: 1, episodes: 0 } },
+    watchHistoryUndated: () => ({ entries, total: entries.length }),
+    setWatchHistoryEntryTime: (entryId, watchedAt) => {
+      dated.push({ entryId, watchedAt });
+      entries.splice(
+        entries.findIndex((entry) => entry.entryId === entryId),
+        1,
+      );
+    },
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  await page.getByRole("button", { name: "Undated 1" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Set the time of this undated mark: Solaris" }).click();
+
+  const timeDialog = page.getByRole("dialog").filter({ hasText: "When did you watch it?" });
+  await timeDialog.getByLabel("Watched at").fill("2026-07-04T21:15");
+  await timeDialog.getByRole("button", { name: "Set time" }).click();
+
+  expect(dated).toHaveLength(1);
+  expect(dated[0].entryId).toBe("u1");
+  // Sent as an instant, not as the wall-clock text that was typed.
+  expect(dated[0].watchedAt).toMatch(/Z$/);
+  await expect(page.getByRole("dialog").getByText("Nothing is left without a date.")).toBeVisible();
+});
+
+test("a time in the future is refused before the request is sent", async ({ page }) => {
+  const dated: string[] = [];
+  await setupApp(page, {
+    watchHistoryCalendar: { ...watchedHistory, undated: { movies: 1, episodes: 0 } },
+    watchHistoryUndated: undatedMarks,
+    setWatchHistoryEntryTime: (entryId) => dated.push(entryId),
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  await page.getByRole("button", { name: "Undated 1" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Set the time of this undated mark: Solaris" }).click();
+
+  const timeDialog = page.getByRole("dialog").filter({ hasText: "When did you watch it?" });
+  await timeDialog.getByLabel("Watched at").fill("2099-01-01T12:00");
+
+  await expect(timeDialog.getByText("That is in the future.")).toBeVisible();
+  await expect(timeDialog.getByRole("button", { name: "Set time" })).toBeDisabled();
+  expect(dated).toEqual([]);
+});

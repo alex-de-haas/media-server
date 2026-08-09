@@ -1,7 +1,7 @@
 # Watched-History Providers: Trakt
 
 Created: 2026-08-05
-Updated: 2026-08-05
+Updated: 2026-08-09
 
 > **Development is wound down**, and the integration is inert for any operator
 > without Trakt VIP. Nothing further is being built; the remaining plans were
@@ -47,7 +47,12 @@ counters are projected from it.
   for a timeless "watched, time unknown" mark — all a manual toggle or a
   pre-migration aggregate row can honestly claim.
 - `Origin` records where it came from: `LocalPlayback`, `Manual`,
-  `ProviderSync`, or `Legacy`.
+  `ProviderSync`, or `Legacy`. `Manual` means "the user said so", not "timeless":
+  the toggle's entry has no time, while one the user logged by hand carries the
+  instant they named
+  ([watch-history-manual-entries](../watch-history-manual-entries/feature.md)).
+  Nothing keys on the origin alone — the queries that read it pair it with a null
+  `WatchedAt`, so a logged play is invisible to the toggle's bookkeeping.
 - `IdentitySnapshot` freezes the provider-neutral identity as it was when the
   play happened, so outbound delivery can still describe an item that has since
   been rescanned, re-identified, or deleted.
@@ -70,7 +75,10 @@ An entry is removed on the user's say-so by
 [watch-history-deletion](../watch-history-deletion/feature.md), which reprojects
 the aggregates and queues the remote removal under the ownership rule below. The
 unwatch toggle is a different statement and drops only the timeless marks this app
-created.
+created — a play the user logged by hand survives it exactly as an observed play
+does. An entry is added on the user's say-so by
+[watch-history-manual-entries](../watch-history-manual-entries/feature.md), which
+posts it as an exact watch keyed on the entry rather than on the row.
 
 ## Provider boundary
 
