@@ -539,17 +539,22 @@ Two operational facts worth keeping, both of which cost time to find:
       layout. Nothing in this library uses them.
 - [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
       single-byte-encoded file comes out with its accents wrong.
-- [ ] **AAC**, which needs `mp4a` with an `esds` carrying the audio specific config.
-      **This is no longer hypothetical.** The production index run of 2026-08-09 shows a
-      complete anime series — 64 episodes plus its extras — walking *one track out of
-      five*, every audio track on it being AAC or FLAC. Those titles are indexed and
-      still refused with `packaging_unsupported_audio`, so they cannot be played by the
-      native client at all. Whatever the ordering of the remaining work, this is the item
-      with a library behind it.
-
-      FLAC would need `fLaC` with a `dfLa`, and appears on the same files; whether it is
-      worth having depends on whether any episode carries only FLAC, which the log does
-      not say.
+- [x] **AAC**, shipped 2026-08-09 with `mp4a` and an `esds`. The config is carried from
+      `CodecPrivate` verbatim and only read for the rate, the channels and the frame
+      length; explicit SBR and PS, a zero channel configuration and everything that is
+      not plain AAC are refused rather than guessed at. Priming is trimmed by an edit
+      list. Verified by decoding a synthesised file and its source to PCM and comparing:
+      byte-identical. This unblocks the 64 anime episodes.
+- [ ] **FLAC**, which needs `fLaC` with a `dfLa`. The 14 extras beside those episodes
+      carry nothing else — `1/2 tracks; skipped A_FLAC x1` — so AAC does not reach them.
+      The awkward part is not the descriptor: FLAC permits a variable block size, and the
+      index records no per-sample duration for audio, so a variable-block file cannot be
+      given a timing table without one.
+- [ ] **The AC-3 head offset.** A round trip on 2026-08-09 measured AC-3 landing 256
+      samples — 5.3 ms — later than the same source decoded from its Matroska. Below the
+      threshold at which a lagging soundtrack is perceptible, and the container states no
+      delay to act on, so it is recorded rather than guessed at. Closing it means finding
+      where the 256 comes from, not hard-coding it.
 - [ ] **Confirm the measurements above on tvOS.** Everything in "What AVFoundation
       demands" was measured on macOS, which has already proven the more permissive of
       the two in this project.

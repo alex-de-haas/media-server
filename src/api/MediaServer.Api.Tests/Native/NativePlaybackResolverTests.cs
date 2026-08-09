@@ -190,14 +190,28 @@ public sealed class NativePlaybackResolverTests : IDisposable
     [Fact]
     public async Task A_source_whose_audio_cannot_be_packaged_is_refused_rather_than_played_silently()
     {
-        // The client decodes AAC perfectly well. We cannot write a sample entry for it, so offering a
-        // remux would hand over a playable-looking file with no sound.
-        AddSource("mkv", "hevc", "HDR10", ("aac", 6));
+        // FLAC is the live case now that AAC is described: the anime extras in this library carry nothing
+        // else. A client that decodes it gets past its own check, and packaging still cannot write the
+        // sample entry — so offering a remux would hand over a playable-looking file with no sound.
+        AddSource("mkv", "hevc", "HDR10", ("flac", 2));
 
-        var resolution = await ResolveOneAsync(AppleTv(), packaging: true);
+        var resolution = await ResolveOneAsync(
+            AppleTv() with { AudioCodecs = ["ac3", "eac3", "aac", "flac"] }, packaging: true);
 
         Assert.Equal(NativePlaybackDecision.Unsupported, resolution.Decision);
         Assert.Equal(NativePlaybackReasons.PackagingUnsupportedAudio, resolution.Reason);
+    }
+
+    [Fact]
+    public async Task An_aac_only_source_is_offered_now_that_it_can_be_described()
+    {
+        // 64 episodes of this library carry AAC and nothing else a client could take. Before this they
+        // were indexed and still refused.
+        AddSource("mkv", "hevc", "SDR", ("aac", 2));
+
+        Assert.Equal(
+            NativePlaybackDecision.Remux,
+            (await ResolveOneAsync(AppleTv(), packaging: true)).Decision);
     }
 
     [Fact]

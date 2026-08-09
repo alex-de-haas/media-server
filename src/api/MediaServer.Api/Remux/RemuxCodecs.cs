@@ -14,18 +14,33 @@ internal static class RemuxCodecs
     /// <summary>
     /// Audio a sample entry can be written for, named as the probe names it.
     ///
-    /// AC-3 and E-AC-3, which is what this library actually holds — and E-AC-3 is what Atmos rides on.
-    /// AAC would need <c>mp4a</c> with an <c>esds</c>; DTS and TrueHD are out of scope for this client
-    /// entirely. Each absence is deliberate rather than an oversight — see the plan.
+    /// AC-3 and E-AC-3, which is what most of this library holds — and E-AC-3 is what Atmos rides on —
+    /// plus AAC, which the anime half of it holds and nothing else could play. DTS, TrueHD and FLAC are
+    /// out of scope for this client. Each absence is deliberate rather than an oversight — see the plan.
     /// </summary>
     internal static bool CanPackageAudio(string? probeCodec) =>
         probeCodec is not null
         && (probeCodec.Equals("ac3", StringComparison.OrdinalIgnoreCase)
-            || probeCodec.Equals("eac3", StringComparison.OrdinalIgnoreCase));
+            || probeCodec.Equals("eac3", StringComparison.OrdinalIgnoreCase)
+            || probeCodec.Equals("aac", StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The same answer, for a Matroska <c>CodecID</c>.</summary>
-    internal static bool CanPackageAudio(IndexedTrack track) =>
-        track.CodecId is "A_AC3" or "A_EAC3";
+    /// <summary>
+    /// The same answer, for a Matroska <c>CodecID</c> — and stricter for AAC, which is described from
+    /// <c>CodecPrivate</c> rather than from a frame.
+    ///
+    /// The config is not merely required to be present, it is <em>parsed</em>, by the same routine that
+    /// would later build the descriptor. Asking a cheaper question — "is there a config at all" — would
+    /// answer yes for an explicitly signalled SBR stream that
+    /// <see cref="Mp4Writer.DescribeAac"/> then declines, and the track would be walked, chosen, and
+    /// finally dropped: a film with a picture and no sound. That is the one failure this type exists to
+    /// prevent, so the two ask the identical question.
+    /// </summary>
+    internal static bool CanPackageAudio(IndexedTrack track) => track.CodecId switch
+    {
+        "A_AC3" or "A_EAC3" => true,
+        "A_AAC" => track.CodecPrivate is { } config && Mp4Writer.DescribeAac(config) is not null,
+        _ => false,
+    };
 
     /// <summary>
     /// Video a sample entry can be written for, named as the probe names it.
