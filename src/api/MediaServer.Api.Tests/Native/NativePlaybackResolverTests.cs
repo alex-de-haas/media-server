@@ -201,6 +201,36 @@ public sealed class NativePlaybackResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task A_source_whose_picture_cannot_be_packaged_is_refused_rather_than_promised()
+    {
+        // A recent Apple TV decodes AV1, so the client-side check passes and nothing else here would stop
+        // it. Packaging has no sample entry for AV1, so the URL would have been handed over and then
+        // failed on the request that used it.
+        AddSource("mkv", "av1", "HDR10", ("ac3", 6));
+
+        var resolution = await ResolveOneAsync(
+            AppleTv() with { VideoCodecs = ["hevc", "h264", "av1"] }, packaging: true);
+
+        Assert.Equal(NativePlaybackDecision.Unsupported, resolution.Decision);
+        Assert.Equal(NativePlaybackReasons.PackagingUnsupportedVideo, resolution.Reason);
+    }
+
+    [Fact]
+    public async Task A_permanent_packaging_refusal_beats_saying_the_walk_has_not_got_there_yet()
+    {
+        // The index for this source has not been built. Reporting "not yet" would be true and useless:
+        // when the walk does reach it, the picture will be exactly as undescribable as it is now.
+        AddSource("mkv", "av1", "HDR10", ("ac3", 6));
+
+        var response = await Resolver(RemuxReadinessState.Pending).ResolveAsync(
+            _itemId, UserId, AppleTv() with { VideoCodecs = ["hevc", "h264", "av1"] },
+            CancellationToken.None);
+
+        Assert.Equal(
+            NativePlaybackReasons.PackagingUnsupportedVideo, Assert.Single(response!.Sources).Reason);
+    }
+
+    [Fact]
     public async Task An_eac3_only_source_is_offered_now_that_it_can_be_described()
     {
         // Atmos rides on E-AC-3, so a source carrying only it is exactly the case worth having.

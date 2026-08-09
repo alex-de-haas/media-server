@@ -27,7 +27,22 @@ internal static class RemuxCodecs
     internal static bool CanPackageAudio(IndexedTrack track) =>
         track.CodecId is "A_AC3" or "A_EAC3";
 
-    /// <summary>Video a sample entry can be written for.</summary>
+    /// <summary>
+    /// Video a sample entry can be written for, named as the probe names it.
+    ///
+    /// HEVC and H.264, which is what <see cref="Mp4Writer.VideoCodec"/> has entries for. AV1 is the
+    /// absence that matters: a recent Apple TV decodes it, so nothing on the client's side of the question
+    /// rules it out, and it would otherwise be advertised as remuxable right up to the request that fails.
+    /// </summary>
+    internal static bool CanPackageVideo(string? probeCodec) =>
+        probeCodec is not null
+        && (probeCodec.Equals("hevc", StringComparison.OrdinalIgnoreCase)
+            || probeCodec.Equals("h264", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The same answer, for a Matroska track — and stricter, because by then the configuration record is
+    /// either there or it is not, and a codec we can name without one is still nothing we can describe.
+    /// </summary>
     internal static bool CanPackageVideo(IndexedTrack track) =>
         Mp4Writer.VideoCodec(track.CodecId) is not null && track.CodecPrivate is not null;
 

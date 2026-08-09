@@ -191,18 +191,26 @@ A remux is refused, with the reason said plainly, when:
 | `packaging_pending` | Indexable, but the walk has not reached it. Retrying later succeeds; the URL answers `503` meanwhile. |
 | `packaging_unavailable` | Nothing here can index this container, and nothing later will. |
 | `packaging_unsupported_audio` | The client could decode this audio, but no sample entry can be written for it — so a remux would play silently. |
+| `packaging_unsupported_video` | The same for the picture — so a remux would be the soundtrack alone. |
 
-That last one is why what packaging can describe lives in **one** place, in both
+The two `unsupported_*` answers are given **before** `packaging_pending`, because they are
+permanent: a picture nothing here can describe will not become describable when the walk
+reaches the file, and "not yet" about a source that will never work is the more misleading
+of the two.
+
+The audio one is why what packaging can describe lives in **one** place, in both
 vocabularies that ask: the resolver reasons in the probe's names and the synthesiser in
 Matroska's, and when they drifted the result was a source advertised as remuxable whose
 only audio track was then quietly declined. Audio is AC-3 and E-AC-3; AAC would need an
 `mp4a` entry with an `esds`, and DTS and TrueHD are out of scope for this client.
 
-The same gap exists on the video axis and is closed the same way. The resolver asks
-whether the *client* can decode the picture; packaging asks whether it can *write* the
-sample entry. AV1 is where the two part company — a recent Apple TV decodes it and
-`Mp4Writer` has no entry for it — so a source with a picture that cannot be described is
-refused outright rather than served as the soundtrack that is left. A source that never
+The same gap exists on the video axis and is closed the same way, in both places: the
+resolver refuses to advertise a URL it knows will fail, and the stream service refuses to
+serve one that was asked for anyway. AV1 is where the two questions part company — a
+recent Apple TV decodes it and `Mp4Writer` has no entry for it — so a source with a
+picture that cannot be described is refused outright rather than served as the soundtrack
+that is left. The serving-side guard is the stricter of the two, because by then it can
+also see whether the configuration record arrived at all. A source that never
 had a picture is untouched by that rule.
 
 Within a source the same reasoning picks the default audio: **the first track that can be
@@ -265,7 +273,8 @@ What the same run did surface was the index size that led to the codec filter ab
   in the file, and a stored preference pointing at a lossless track falls back the same
   way a stale one does — a film that leads with TrueHD must not play as a silent one. A
   picture that cannot be described is refused rather than served as audio alone, while a
-  source that has no picture at all still is.
+  source that has no picture at all still is — and the resolver refuses to advertise it in
+  the first place, including when the walk has not yet reached the file.
 - **The stream**: reads that stop at every boundary, seeks that land inside a part, and
   a seek before the beginning refused rather than silently allowed.
 - **The service**, over a seeded library: what is pending, what is not, what a changed

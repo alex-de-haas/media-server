@@ -62,6 +62,12 @@ public static class NativePlaybackReasons
     /// play without sound. Distinct from <see cref="UnsupportedAudioCodec"/>, which is about the client.
     /// </summary>
     public const string PackagingUnsupportedAudio = "packaging_unsupported_audio";
+
+    /// <summary>
+    /// The same, for the picture. A client that decodes AV1 passes <see cref="UnsupportedVideoCodec"/>
+    /// and would then be handed a container packaging cannot put a picture in.
+    /// </summary>
+    public const string PackagingUnsupportedVideo = "packaging_unsupported_video";
     public const string NoFile = "no_file";
 }
 
