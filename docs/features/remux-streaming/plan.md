@@ -350,8 +350,14 @@ rewriting rather than encoding tooling, so they do not change the answer.
       block groups whose keyframe answer is the absence of a `ReferenceBlock` rather
       than a flag, and a lacing header that does not add up. ffmpeg cannot produce a
       laced test file, so the builder writes one directly.
-- [ ] **Unit tests for the awkward sources** — a cover-art track not flagged
-      `attached_pic`, and a source whose timestamps are not monotonic in file order.
+- [x] **Unit tests for the awkward sources.** Timestamps that are not monotonic in
+      file order are covered where the composition table is built. Cover art turned
+      out to be a different shape than the trap described: in this library it is a
+      Matroska *attachment*, which the indexer never sees because it reads only
+      `Tracks` — `ffprobe` surfaces attachments as streams, which is where the
+      original warning came from. A guard is in anyway, because a muxer may write a
+      still image as a real video track: the picture is the first video track that a
+      sample entry can be written for, not simply the first.
 
 ### Phase 2 — the synthesiser
 
@@ -372,13 +378,17 @@ rewriting rather than encoding tooling, so they do not change the answer.
       arrives as stream indexes, which are positions in the file rather than Matroska
       track numbers, so the index carries both. A stale choice falls back to the
       first track of its kind rather than playing nothing.
-- [ ] **Sidecars folded in as tracks.** The layout now makes room: the output takes
-      several inputs, one `mdat` per wrapped file, and a sample offset may point into
-      any of them — `[ftyp][moov][text][mdat + source][mdat + sidecar]`. What is left
-      is the wiring: a sidecar `.mka` needs an index of its own built in the
-      background, and the track choice needs a way to say "the dub from that file"
-      rather than "track N of this one". A subtitle sidecar is easier — a `.srt` is
-      small enough to parse per request into the header's text `mdat`.
+- [x] **A sidecar dub folded in as a track.** The output takes several inputs, one
+      `mdat` per wrapped file, and a sample offset may point into any of them. An
+      external `.mka` is indexed in the background like any other Matroska file, keyed
+      by its stream row, and the endpoint names tracks by stream id rather than by
+      position — a sidecar has no position in the container. Verified on a real dub
+      file: video from one file, audio from another, in one MP4.
+- [x] **A sidecar subtitle folded in.** `.srt`, `.ass`, `.ssa` and `.vtt` are parsed
+      per request into cues — no index, because a film's dialogue is a hundred
+      kilobytes — and join the embedded path at the point where both are simply a list
+      of cues. Verified on a real file: parsed, rewritten as `tx3g`, and extracted back
+      with its timings intact to the millisecond.
 - [x] **Subtitle conversion** — the one thing that cannot be referenced the way audio
       and video can. A SubRip or ASS sample is not a valid MP4 subtitle sample: MP4
       wants `tx3g`, which is a length-prefixed string, and the gaps between cues need
@@ -423,10 +433,16 @@ rewriting rather than encoding tooling, so they do not change the answer.
       has not reached will. A client that knows the difference shows "preparing" and
       retries instead of showing "unavailable" forever. The URL itself answers 503
       for the same case.
-- [ ] **`GET /native/v1/server` reports the packaging capability.**
-- [ ] **Unit tests**: a remux URL is refused without a valid token, an unpublished
-      item is unreachable, and a client that cannot open the container still gets
-      `remux` rather than `directPlay`.
+- [x] **`GET /native/v1/server` reports the packaging capability.** It is a property
+      of the build rather than of the deployment — packaging needs no engine and no
+      configuration — so it is simply true. Whether a *particular* source is ready is a
+      different question, and `resolve` answers that per source.
+- [x] **Unit tests** over what the served bytes are subject to: an unpublished or
+      tombstoned item is unreachable, a missing file is, an index built against an
+      older version of the file is not used, a source the walk has not reached says so
+      rather than saying no, the tag changes when the chosen tracks do, and a chosen
+      sidecar is carried once it has been walked. Token refusal is covered where the
+      token lives.
 
 ### Phase 4 — the load it will actually see
 
@@ -461,10 +477,17 @@ Two operational facts worth keeping, both of which cost time to find:
 - [ ] **Several concurrent clients.**
 - [ ] **Multi-audio, sidecar audio, and subtitles** folded into the output.
 - [ ] **DV profiles 5 and 8.**
-- [ ] **E-AC-3**, which needs an `ec-3` sample entry and a `dec3` descriptor
-      enumerating its substreams. Describing one as AC-3 would misstate the stream,
-      so an E-AC-3 track is left out until that is written — which matters here,
-      because Atmos rides on E-AC-3.
+- [x] **E-AC-3** as an `ec-3` entry with a `dec3` descriptor: the access unit's
+      substreams are walked so the descriptor can count the dependent ones, and the
+      frame duration is read from the blocks it carries rather than assumed to be
+      1536. Verified on an Atmos track — repackaged, still reported as Dolby Digital
+      Plus with Atmos, and decoding.
+- [ ] **E-AC-3 with dependent substreams.** A unit carrying extra channels in dependent
+      substreams needs their `chanmap` read, the channel count adjusted and `chan_loc`
+      written; until then such a track is left out rather than advertised as its base
+      layout. Nothing in this library uses them.
+- [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
+      single-byte-encoded file comes out with its accents wrong.
 - [ ] **AAC**, which needs `mp4a` with an `esds` carrying the audio specific config.
       Nothing in this library uses it, but a client that declares AAC support would
       otherwise be offered a remux with no sound — which is why a source whose only
@@ -477,7 +500,7 @@ Two operational facts worth keeping, both of which cost time to find:
 
 - [x] **`feature.md`** — created with the first shipped behaviour, describing what is
       there now rather than what is intended.
-- [ ] **Update [native-playback](../native-playback/feature.md)** where it says
+- [x] **Update [native-playback](../native-playback/feature.md)** where it said
       packaging does not exist yet.
 - [ ] **Index** — `node scripts/docs-index.mjs --fix`.
 - [ ] **Version bump** — new functionality, so a minor; read `manifest.json` when

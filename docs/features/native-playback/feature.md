@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-08-04
+Updated: 2026-08-08
 
 ## Description
 
@@ -26,7 +26,8 @@ optional channel ceiling — and answers per edition with one of:
 
 Reasons are strings rather than an enum on the wire, so an unknown one cannot break
 an older client: `unsupported_video_codec`, `unsupported_audio_codec`,
-`unsupported_dynamic_range`, `no_audio_track`, `packaging_unavailable`, `no_file`.
+`unsupported_dynamic_range`, `no_audio_track`, `packaging_unavailable`,
+`packaging_pending`, `packaging_unsupported_audio`, `no_file`.
 
 This replaces the Jellyfin surface's `EnableDirectPlay`/`EnableDirectStream` flags,
 which that surface parses and then ignores because it has only one answer to give.
@@ -65,10 +66,18 @@ without DV may fail to open one tagged `dvh1`. Recording it belongs with the oth
 
 ### Packaging
 
-Until [`remux-streaming`] exists, a source whose codecs are fine and whose
-container is not answers `packaging_unavailable` rather than a `remux` URL that
-would not open. When packaging arrives the same code returns `remux` and the
-contract does not change.
+A source whose codecs are fine and whose container is not answers `remux` with a
+URL, served by [`remux-streaming`](../remux-streaming/feature.md). The contract did
+not change to accommodate it, which is what it was shaped for.
+
+Three refusals sit under it, and the differences are deliberate: `packaging_pending`
+means the background walk has not reached this file and retrying later works;
+`packaging_unavailable` means nothing here can index that container and retrying
+never will; `packaging_unsupported_audio` means the client could decode the audio but
+no sample entry can be written for it, so a remux would play silently.
+
+A `transport` accompanies the URL — `byteRange` today — because delivering the same
+repackaging over HLS would be another transport rather than another decision.
 
 ## Track preferences
 

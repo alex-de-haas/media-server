@@ -23,12 +23,17 @@ public sealed class RemuxIndexService(
     /// walker.
     /// </summary>
     private static readonly HashSet<string> Indexable =
-        new(StringComparer.OrdinalIgnoreCase) { "mkv", "webm" };
+        new(StringComparer.OrdinalIgnoreCase) { "mkv", "webm", "mka" };
 
     /// <summary>Whether a container is one this can walk at all, which decides "not yet" from "never".</summary>
     internal static bool IsIndexable(string? container) => container is not null && Indexable.Contains(container);
 
-    internal sealed record Candidate(Guid MediaSourceId, string AbsolutePath);
+    /// <summary>
+    /// Something that wants an index, keyed by whatever owns it: a media source, or the stream row of a
+    /// sidecar file. Both are Guids and the store does not care which, so an external dub is indexed the
+    /// same way its video is.
+    /// </summary>
+    internal sealed record Candidate(Guid Key, string AbsolutePath);
 
     /// <summary>
     /// Sources that ought to have an index and do not — visible, present on disk, and either never built
@@ -39,7 +44,7 @@ public sealed class RemuxIndexService(
         var pending = new List<Candidate>();
         foreach (var candidate in await IndexableAsync(cancellationToken))
         {
-            if (store.IsCurrent(candidate.MediaSourceId, candidate.AbsolutePath))
+            if (store.IsCurrent(candidate.Key, candidate.AbsolutePath))
             {
                 continue;
             }
@@ -74,7 +79,7 @@ public sealed class RemuxIndexService(
                 return false;
             }
 
-            store.Save(candidate.MediaSourceId, candidate.AbsolutePath, index);
+            store.Save(candidate.Key, candidate.AbsolutePath, index);
             logger.LogInformation(
                 "Indexed {Path} in {Elapsed:F1}s: {Tracks} tracks, {Samples} samples.",
                 candidate.AbsolutePath,
@@ -102,9 +107,17 @@ public sealed class RemuxIndexService(
     /// </summary>
     internal async Task<int> PruneAsync(CancellationToken cancellationToken)
     {
+        // Both a source and a sidecar stream can own an index, so both keep theirs alive.
         var live = await database.MediaSources.AsNoTracking()
             .Select(source => source.Id)
             .ToHashSetAsync(cancellationToken);
+        foreach (var streamId in await database.MediaStreams.AsNoTracking()
+                     .Where(stream => stream.IsExternal)
+                     .Select(stream => stream.Id)
+                     .ToListAsync(cancellationToken))
+        {
+            live.Add(streamId);
+        }
 
         var removed = 0;
         foreach (var stored in store.Stored())
@@ -128,6 +141,10 @@ public sealed class RemuxIndexService(
 
     private async Task<List<Candidate>> IndexableAsync(CancellationToken cancellationToken)
     {
+        var candidates = new List<Candidate>();
+        var catalogs = await database.Catalogs.AsNoTracking()
+            .ToDictionaryAsync(catalog => catalog.Id, cancellationToken);
+
         // Unpublished and tombstoned items are invisible everywhere else on the native surface, and an
         // index for one would be work nobody can reach.
         var rows = await database.MediaSources.AsNoTracking()
@@ -144,11 +161,10 @@ public sealed class RemuxIndexService(
             .Where(row => row.PublicId != null && row.RemovedAt == null && row.CatalogId != null)
             .ToListAsync(cancellationToken);
 
-        var catalogs = await database.Catalogs.AsNoTracking().ToDictionaryAsync(catalog => catalog.Id, cancellationToken);
-        var candidates = new List<Candidate>();
-
+        var visible = new HashSet<Guid>();
         foreach (var row in rows)
         {
+            visible.Add(row.Id);
             if (!Indexable.Contains(row.Container) ||
                 !catalogs.TryGetValue(row.CatalogId!.Value, out var catalog) ||
                 !sandbox.TryResolve(catalog, row.Path, out var absolute) ||
@@ -158,6 +174,35 @@ public sealed class RemuxIndexService(
             }
 
             candidates.Add(new Candidate(row.Id, absolute));
+        }
+
+        // Sidecar dubs. An external audio track is a second Matroska file, and playing one means
+        // referencing its samples beside the video's — which needs an index of its own, built here rather
+        // than on the request that wants it.
+        var catalogById = rows
+            .Where(row => row.CatalogId is not null)
+            .ToDictionary(row => row.Id, row => row.CatalogId!.Value);
+
+        var sidecars = await database.MediaStreams.AsNoTracking()
+            .Where(stream => stream.IsExternal
+                && stream.StreamType == StreamType.Audio
+                && stream.ExternalPath != null)
+            .Select(stream => new { stream.Id, stream.MediaSourceId, stream.ExternalPath })
+            .ToListAsync(cancellationToken);
+
+        foreach (var sidecar in sidecars)
+        {
+            if (!visible.Contains(sidecar.MediaSourceId)
+                || !catalogById.TryGetValue(sidecar.MediaSourceId, out var catalogId)
+                || !catalogs.TryGetValue(catalogId, out var catalog)
+                || !IsIndexable(Path.GetExtension(sidecar.ExternalPath).TrimStart('.'))
+                || !sandbox.TryResolve(catalog, sidecar.ExternalPath!, out var absolute)
+                || !File.Exists(absolute))
+            {
+                continue;
+            }
+
+            candidates.Add(new Candidate(sidecar.Id, absolute));
         }
 
         return candidates;

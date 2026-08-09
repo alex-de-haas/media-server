@@ -19,7 +19,7 @@ internal static class RemuxTrackChoice
     {
         var chosen = new List<ulong>();
 
-        if (First(index, IndexedTrackKind.Video, null) is { } video)
+        if (Video(index) is { } video)
         {
             chosen.Add(video.Number);
         }
@@ -40,6 +40,15 @@ internal static class RemuxTrackChoice
 
         return chosen;
     }
+
+    /// <summary>
+    /// The first video track a sample entry can be written for, which is not always the first video track.
+    /// A file may carry a still image as a real video track — cover art that its muxer did not flag — and
+    /// taking that one would produce an output with no picture at all.
+    /// </summary>
+    internal static IndexedTrack? Video(MatroskaIndex index) =>
+        index.Tracks.FirstOrDefault(track =>
+            track.Kind == IndexedTrackKind.Video && RemuxCodecs.CanPackageVideo(track));
 
     /// <summary>
     /// The track at that stream index if it is of the right kind, and otherwise the first of the kind —

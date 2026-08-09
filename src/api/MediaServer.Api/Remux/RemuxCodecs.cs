@@ -14,16 +14,18 @@ internal static class RemuxCodecs
     /// <summary>
     /// Audio a sample entry can be written for, named as the probe names it.
     ///
-    /// AC-3 alone for now. E-AC-3 needs an <c>ec-3</c> entry with a <c>dec3</c> descriptor enumerating its
-    /// substreams; AAC needs <c>mp4a</c> with an <c>esds</c>; DTS and TrueHD are out of scope for this
-    /// client entirely. Each is a deliberate absence rather than an oversight — see the plan.
+    /// AC-3 and E-AC-3, which is what this library actually holds — and E-AC-3 is what Atmos rides on.
+    /// AAC would need <c>mp4a</c> with an <c>esds</c>; DTS and TrueHD are out of scope for this client
+    /// entirely. Each absence is deliberate rather than an oversight — see the plan.
     /// </summary>
     internal static bool CanPackageAudio(string? probeCodec) =>
-        string.Equals(probeCodec, "ac3", StringComparison.OrdinalIgnoreCase);
+        probeCodec is not null
+        && (probeCodec.Equals("ac3", StringComparison.OrdinalIgnoreCase)
+            || probeCodec.Equals("eac3", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The same answer, for a Matroska <c>CodecID</c>.</summary>
     internal static bool CanPackageAudio(IndexedTrack track) =>
-        track.CodecId is "A_AC3";
+        track.CodecId is "A_AC3" or "A_EAC3";
 
     /// <summary>Video a sample entry can be written for.</summary>
     internal static bool CanPackageVideo(IndexedTrack track) =>

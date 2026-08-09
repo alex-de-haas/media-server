@@ -18,8 +18,10 @@ offset, and answering a byte range is reading the same range from the source. No
 of media is moved, copied or stored; the Matroska framing bytes inside `mdat` are never
 referenced by any sample.
 
-The layout takes several inputs — one `mdat` per wrapped file — though only the source
-itself is carried today. See [plan.md](plan.md) for what that room is for.
+The layout takes several inputs, one `mdat` per wrapped file, which is what lets a
+**sidecar dub** be carried: an external audio track is a second file, and its samples
+join the video's in the same container. The wrappers after the first sit *between* the
+files, where the sample offsets expect them.
 
 ## The index
 
@@ -71,19 +73,39 @@ exist and the store knows which have an index, so the outstanding work is a quer
 restart resumes without remembering anything. Orphaned indexes are pruned once per
 process, since nothing else deletes a file when its title goes.
 
+Sidecar dubs are indexed too, keyed by their stream row rather than by a media source —
+the store does not care which owns an index, so an external `.mka` is walked exactly as
+its video is, and both keep theirs alive against pruning.
+
 Only Matroska is indexed. An MP4 source is already playable and has nothing to gain.
 
 ## What the container carries
 
-`Mp4Synthesizer` writes descriptors rather than deriving them. Only `dac3` is parsed,
-because an AC-3 track in Matroska has no `CodecPrivate` at all — every frame restates
-its own parameters — so the channel count and sample rate are read out of a sync frame
-rather than believed from the container.
+`Mp4Synthesizer` writes descriptors rather than deriving them. Audio is the exception:
+neither AC-3 nor E-AC-3 has any `CodecPrivate` in Matroska — every frame restates its
+own parameters — so `dac3` and `dec3` are read out of a sync frame rather than believed
+from the container.
+
+E-AC-3 is not AC-3 with a different name. Its access unit may hold several substreams,
+one independent and then any dependent ones carrying extra channels; they are walked by
+their stated sizes, and a unit that has dependents is **left out** rather than described
+as its base layout, because saying "5.1" about a 7.1 stream is a claim a player is
+entitled to believe. A frame is also **not** always 1536 samples: it carries one, two,
+three or six blocks of 256. The count is read from the frame, and read again over a
+spread of the track — a stream that varies it is refused rather than given a timeline
+built on its first frame, which would drift for the whole of its length.
+
+Atmos rides on E-AC-3 and survives untouched, because the samples are the same bytes.
 
 - **Dolby Vision** is offered as a `dvh1` sample entry, and only for HEVC that came with
   a configuration, and only when the client asked. The cross-compatible `hvc1` form
   still carries `dvvC`, which is what makes a client without Dolby Vision see HDR10.
 - **H.264** keeps `avc1` whatever is asked for.
+- **The picture is the first video track a sample entry can be written for**, not
+  simply the first. A muxer may write cover art as a real video track, and taking that
+  because it comes first would produce an output with no picture. (In this library
+  cover art is a Matroska attachment instead, which the indexer never sees at all —
+  `ffprobe` surfaces attachments as streams, which is where the warning came from.)
 - **`colr`** is written from the `Colour` element and left out when the container is
   silent, which this library's own files are — they keep it in the HEVC SPS instead, and
   Dolby Vision engages from the bitstream regardless.
@@ -102,6 +124,11 @@ length-prefixed string, and the gaps between cues need empty samples that exist 
 in Matroska. So the text is converted and carried in a **second `mdat` inside the
 header** — a film's dialogue is a hundred kilobytes against a source of gigabytes.
 
+A subtitle **beside** the video joins the same path. It has no index and needs none —
+a film's dialogue is a hundred kilobytes, so a `.srt`, `.ass` or `.vtt` is parsed per
+request into cues, which is exactly what an embedded track becomes before the timeline
+is laid out. Timestamps are read whether they use a comma, a dot, or ASS's hundredths.
+
 SubRip gives up its markup; an ASS row gives up its fields and override codes, and a
 comma inside the line is not mistaken for a separator. Styling is lost, which
 [the epic](../apple-client/plan.md) accepted for text subtitles. A cue with no stated
@@ -111,11 +138,18 @@ bitmap subtitles are left out for the same honesty.
 ## What is offered, and what is refused
 
 `/native/v1/media/{mediaSourceId}/remux` serves the computed MP4 under the same signed
-URL token, catalog sandbox and visibility rules as direct play. The header and the
+URL token, catalog sandbox and visibility rules as direct play. Tracks are named by
+**stream id**, not by position: a sidecar lives in its own file and has no position in
+the container at all. The header and the
 untouched source are presented as one seekable stream, so byte ranges are handled by the
 framework's own file result — which matters, because AVFoundation refuses a server that
 will not declare a total length, and reads a truncated answer to an explicit range as a
 failed request rather than a smaller one.
+
+The `ETag` covers everything the answer is made of — the source, the tracks chosen, the
+signalling asked for, and every sidecar carried with it — and `Last-Modified` is the
+freshest of them. A subtitle file edited in place changes the body without changing
+anything about the source, and a conditional request must not be told otherwise.
 
 `POST /native/v1/playback/resolve` decides. Beside the existing `Decision` it now carries
 a **`Transport`** — `byteRange` today — because HLS would be another way to deliver a
@@ -132,8 +166,8 @@ A remux is refused, with the reason said plainly, when:
 That last one is why what packaging can describe lives in **one** place, in both
 vocabularies that ask: the resolver reasons in the probe's names and the synthesiser in
 Matroska's, and when they drifted the result was a source advertised as remuxable whose
-only audio track was then quietly declined. Audio is AC-3 only today; E-AC-3 needs an
-`ec-3` entry with a `dec3` descriptor, and AAC an `mp4a` with an `esds`.
+only audio track was then quietly declined. Audio is AC-3 and E-AC-3; AAC would need an
+`mp4a` entry with an `esds`, and DTS and TrueHD are out of scope for this client.
 
 ## Verified
 
@@ -164,6 +198,12 @@ why this lives in `api`: nothing on the serving path invokes ffmpeg.
   a seek before the beginning refused rather than silently allowed.
 - **The service**, over a seeded library: what is pending, what is not, what a changed
   file does, and that orphans are pruned while live indexes are kept.
+- **A second input**: that it gets a wrapper of its own, that the wrapper sits between
+  the files, and that its samples are addressed past the first file rather than from
+  the same base.
+- **Subtitle files**: SubRip with and without cue numbers, WebVTT's dotted timestamps,
+  ASS dialogue counted in hundredths, cues returned in start order however the file
+  lists them, and one with no duration or no words dropped rather than carried.
 
 New codec support — `ec-3`, `mp4a`, a second video codec — must extend
 `RemuxCodecs` and the synthesiser together, and a test must assert that a source

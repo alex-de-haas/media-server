@@ -44,7 +44,16 @@ internal static class Mp4Synthesizer
     /// <summary>Which track of which input, in the order the output should carry them.</summary>
     internal readonly record struct TrackRef(int Input, ulong Number);
 
-    internal sealed record Result(byte[] Header, long TotalLength, IReadOnlyList<string> SampleEntries)
+    /// <param name="Header">Everything before the first wrapped file, including that file's own
+    /// <c>mdat</c> header.</param>
+    /// <param name="Wrappers">The <c>mdat</c> header of every input after the first. These sit
+    /// <em>between</em> the files, so whoever stitches the output has to put them there — the offsets in
+    /// the sample tables already count on it.</param>
+    internal sealed record Result(
+        byte[] Header,
+        IReadOnlyList<byte[]> Wrappers,
+        long TotalLength,
+        IReadOnlyList<string> SampleEntries)
     {
         public long HeaderLength => Header.Length;
     }
@@ -57,7 +66,8 @@ internal static class Mp4Synthesizer
     internal static Result? Build(
         IReadOnlyList<Input> inputs,
         IReadOnlyList<TrackRef> tracks,
-        VideoSignalling signalling)
+        VideoSignalling signalling,
+        IReadOnlyList<(IReadOnlyList<TextCue> Cues, string? Language)>? externalText = null)
     {
         var prepared = new List<Prepared>();
         // Timed text is rewritten, so it needs somewhere to live; it is small enough to ride in the header.
@@ -85,6 +95,14 @@ internal static class Mp4Synthesizer
             };
 
             if (one is not null)
+            {
+                prepared.Add(one);
+            }
+        }
+
+        foreach (var (cues, language) in externalText ?? [])
+        {
+            if (PrepareExternalSubtitle(cues, language, subtitles) is { } one)
             {
                 prepared.Add(one);
             }
@@ -144,6 +162,7 @@ internal static class Mp4Synthesizer
         byte[] header = [.. ftyp, .. moov, .. textBox, .. wrappers[0]];
         return new Result(
             header,
+            wrappers.Skip(1).ToList(),
             header.Length + inputs.Sum(input => input.Index.SourceLength)
                 + ((inputs.Count - 1) * MdatHeaderLength),
             prepared.Select(track => track.SampleEntry).ToList());
@@ -252,26 +271,63 @@ internal static class Mp4Synthesizer
         }
 
         var first = track.Samples[0];
-        var probe = new byte[Math.Min(16, first.Size)];
+        // Enough of the first access unit to read it: AC-3 needs a sync frame header, E-AC-3 needs to walk
+        // its substreams, and both are small next to the frame itself.
+        var probe = new byte[Math.Min(first.Size, 4096)];
         source.Position = first.Offset;
         source.ReadExactly(probe);
-        if (DescribeAc3(probe) is not { } ac3)
+
+        string entryName;
+        byte[] entry;
+        int sampleRate;
+        long frameSamples;
+
+        if (track.CodecId == "A_EAC3")
         {
-            return null;
+            if (DescribeEac3(probe) is not { } eac3)
+            {
+                return null;
+            }
+
+            entryName = "ec-3";
+            entry = AudioEntry("ec-3", "dec3", eac3.Dec3, eac3.SampleRate, eac3.Channels);
+            sampleRate = eac3.SampleRate;
+            // Not always 1536: an E-AC-3 frame carries one, two, three or six blocks of 256 samples, and
+            // nothing forbids a stream from varying it. Every frame is not read — that would be a seek per
+            // sample on every request — but enough of them are read to know the answer is the same
+            // throughout. A stream that varies is refused rather than given a timeline built on the
+            // first frame, which would drift for the whole of its length.
+            if (!SameThroughout(track, source, eac3.SamplesPerFrame))
+            {
+                return null;
+            }
+
+            frameSamples = eac3.SamplesPerFrame;
+        }
+        else
+        {
+            if (DescribeAc3(probe) is not { } ac3)
+            {
+                return null;
+            }
+
+            entryName = "ac-3";
+            entry = AudioEntry("ac-3", "dac3", ac3.Dac3, ac3.SampleRate, ac3.Channels);
+            sampleRate = ac3.SampleRate;
+            // AC-3 is 1536 samples a frame, always. Counting in the stream's own sample rate makes that
+            // exact at any rate, and does not depend on the per-frame timestamps a laced block cannot give.
+            frameSamples = 1536;
         }
 
-        // AC-3 is 1536 samples a frame, always. Counting in the stream's own sample rate makes that
-        // exact at any rate, and does not depend on the per-frame timestamps a laced block cannot give.
-        const long FrameSamples = 1536;
         var count = track.Samples.Count;
-        var deltas = Enumerable.Repeat(FrameSamples, count).ToArray();
+        var deltas = Enumerable.Repeat(frameSamples, count).ToArray();
 
         return new Prepared(
-            track, "ac-3", AudioEntry(ac3), deltas, null, null, FrameSamples * count,
+            track, entryName, entry, deltas, null, null, frameSamples * count,
             [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
             InHeader: false,
             input,
-            ac3.SampleRate);
+            sampleRate);
     }
 
     /// <summary>
@@ -290,34 +346,14 @@ internal static class Mp4Synthesizer
             return null;
         }
 
-        var timescale = TicksPerSecond(timestampScale);
-        var placements = new List<(long Offset, int Size)>();
-        var deltas = new List<long>();
-        var cursor = 0L;                            // where the timeline has been filled to, in ticks
         var buffer = new byte[4096];
-
+        var cues = new List<TextCue>(track.Samples.Count);
         for (var i = 0; i < track.Samples.Count; i++)
         {
             var sample = track.Samples[i];
-            var start = sample.Timestamp;
-            var duration = durations[i];
-            if (duration <= 0)
+            if (durations[i] <= 0)
             {
                 continue;
-            }
-
-            if (start > cursor)
-            {
-                // Nothing is on screen between cues, and timed text says so with an empty sample rather
-                // than with a gap, which MP4 has no way to express.
-                placements.Add((Place(text, []), 2));
-                deltas.Add(start - cursor);
-            }
-            else if (start < cursor)
-            {
-                // Overlapping cues cannot both be shown by a single-sample-at-a-time track; the later one
-                // starts where the earlier ended rather than being dropped.
-                start = cursor;
             }
 
             if (buffer.Length < sample.Size)
@@ -327,20 +363,73 @@ internal static class Mp4Synthesizer
 
             source.Position = sample.Offset;
             source.ReadExactly(buffer, 0, sample.Size);
-            var content = SubtitleText.Convert(buffer.AsSpan(0, sample.Size), track.CodecId);
-            var encoded = System.Text.Encoding.UTF8.GetBytes(content);
-
-            placements.Add((Place(text, encoded), 2 + encoded.Length));
-            deltas.Add(duration);
-            cursor = start + duration;
+            cues.Add(new TextCue(
+                sample.Timestamp,
+                durations[i],
+                SubtitleText.Convert(buffer.AsSpan(0, sample.Size), track.CodecId)));
         }
 
-        if (placements.Count == 0)
+        return PrepareText(track, cues, TicksPerSecond(timestampScale), text);
+    }
+
+    /// <summary>
+    /// The same track, from a file beside the video rather than from inside it. A sidecar subtitle has no
+    /// index and needs none — it is parsed per request — so it joins the embedded path here, once both are
+    /// simply a list of cues.
+    /// </summary>
+    private static Prepared? PrepareExternalSubtitle(
+        IReadOnlyList<TextCue> cues, string? language, MemoryStream text)
+    {
+        var track = new IndexedTrack
         {
-            return null;
+            Number = 0,
+            Kind = IndexedTrackKind.Subtitle,
+            CodecId = "S_TEXT/UTF8",
+            Language = language,
+        };
+
+        // Cues from a file are in milliseconds, which is a timescale of a thousand.
+        return PrepareText(track, cues, 1000, text);
+    }
+
+    /// <summary>
+    /// Lays cues onto a timeline: an empty sample wherever nothing is on screen, because timed text has no
+    /// way to express a gap other than by saying nothing in it.
+    /// </summary>
+    private static Prepared? PrepareText(
+        IndexedTrack track, IReadOnlyList<TextCue> cues, int timescale, MemoryStream text)
+    {
+        var placements = new List<(long Offset, int Size)>();
+        var deltas = new List<long>();
+        var cursor = 0L;
+
+        foreach (var cue in cues.OrderBy(cue => cue.Start))
+        {
+            if (cue.Duration <= 0)
+            {
+                continue;
+            }
+
+            var start = cue.Start;
+            if (start > cursor)
+            {
+                placements.Add((Place(text, []), 2));
+                deltas.Add(start - cursor);
+            }
+            else if (start < cursor)
+            {
+                // Overlapping cues cannot both be shown by a track that carries one sample at a time; the
+                // later one starts where the earlier ended rather than being dropped.
+                start = cursor;
+            }
+
+            var encoded = System.Text.Encoding.UTF8.GetBytes(cue.Text);
+            placements.Add((Place(text, encoded), 2 + encoded.Length));
+            deltas.Add(cue.Duration);
+            cursor = start + cue.Duration;
         }
 
-        if (!Representable(deltas))
+        if (placements.Count == 0 || !Representable(deltas))
         {
             return null;
         }
@@ -392,6 +481,33 @@ internal static class Mp4Synthesizer
     private static bool Representable(IReadOnlyList<long> values) =>
         values.All(value => value is >= int.MinValue and <= uint.MaxValue);
 
+    /// <summary>
+    /// Whether every E-AC-3 frame carries as many blocks as the first, checked over a spread of the track
+    /// rather than over all of it: a constant answer is what every real stream gives, and a seek per
+    /// sample on every playback request is not worth paying to confirm it.
+    /// </summary>
+    private static bool SameThroughout(IndexedTrack track, Stream source, int expected)
+    {
+        const int Probes = 64;
+        var step = Math.Max(1, track.Samples.Count / Probes);
+        var buffer = new byte[64];
+
+        for (var i = 0; i < track.Samples.Count; i += step)
+        {
+            var sample = track.Samples[i];
+            var length = Math.Min(buffer.Length, sample.Size);
+            source.Position = sample.Offset;
+            source.ReadExactly(buffer, 0, length);
+
+            if (DescribeEac3(buffer.AsSpan(0, length)) is not { } frame || frame.SamplesPerFrame != expected)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static byte[] VideoEntry(IndexedTrack track, string entryName, string configurationBox)
     {
         var extras = new List<byte[]> { Box(configurationBox, track.CodecPrivate!) };
@@ -430,18 +546,19 @@ internal static class Mp4Synthesizer
         return Box(entryName, [body, .. extras]);
     }
 
-    private static byte[] AudioEntry(Ac3Description ac3)
+    private static byte[] AudioEntry(
+        string entryName, string descriptorName, byte[] descriptor, int sampleRate, int channels)
     {
         byte[] body =
         [
             .. new byte[6], .. U16(1),
             .. new byte[8],
-            .. U16((ushort)ac3.Channels), .. U16(16),
+            .. U16((ushort)channels), .. U16(16),
             .. new byte[4],
-            .. U32((uint)ac3.SampleRate << 16),
+            .. U32((uint)sampleRate << 16),
         ];
 
-        return Box("ac-3", body, Box("dac3", ac3.Dac3));
+        return Box(entryName, body, Box(descriptorName, descriptor));
     }
 
     private static byte[] Assemble(

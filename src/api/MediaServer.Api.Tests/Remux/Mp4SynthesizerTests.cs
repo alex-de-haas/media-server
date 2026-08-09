@@ -18,6 +18,24 @@ public sealed class Mp4SynthesizerTests
     private static byte[] Ac3Frame(int size) =>
         [0x0B, 0x77, 0x00, 0x00, 0x14, 0x40, 0xEB, .. new byte[Math.Max(0, size - 7)]];
 
+    /// <summary>
+    /// An E-AC-3 sync frame: stream type 0, six blocks, 3/2 with LFE at 48 kHz, bitstream id 16. The frame
+    /// size is stated in the header as words less one, so it has to match what is handed over.
+    /// </summary>
+    private static byte[] Eac3Frame(int size, int streamType = 0)
+    {
+        var words = (size / 2) - 1;
+        return
+        [
+            0x0B, 0x77,
+            (byte)((streamType << 6) | ((words >> 8) & 0x07)),
+            (byte)(words & 0xFF),
+            0x3F,                                   // fscod 0, numblkscod 3, acmod 7, lfeon 1
+            0x80,                                   // bsid 16
+            .. new byte[Math.Max(0, size - 6)],
+        ];
+    }
+
     private sealed record Built(Mp4Synthesizer.Result Result, Mp4BoxReader Reader, MatroskaIndex Index);
 
     private static Built Build(
@@ -75,6 +93,7 @@ public sealed class Mp4SynthesizerTests
 
         Assert.Equal(["ftyp", "moov", "mdat"], built.Reader.Top.Select(box => box.Type));
         Assert.Equal(built.Result.HeaderLength + file.Length, built.Result.TotalLength);
+        Assert.Empty(built.Result.Wrappers);   // one input needs no wrapper between files
 
         // The mdat declares itself as covering its own header plus the whole source.
         var mdat = built.Reader.Top.Single(box => box.Type == "mdat");
@@ -436,5 +455,153 @@ public sealed class Mp4SynthesizerTests
         var stts = built.Reader.Find("moov/trak/mdia/minf/stbl/stts").Skip(1).First();
         // 1536 samples a frame, which is exact at any rate — unlike 32 ms, which is not at 44.1 kHz.
         Assert.Equal(1536u, built.Reader.Runs(stts)[0].Value);
+    }
+
+    [Fact]
+    public void A_second_input_gets_its_own_wrapper_and_its_own_base()
+    {
+        var main = VideoAndAudio();
+        var dub = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B, TrackEntry(1, 2, "A_AC3", channels: 6)),
+            Cluster(0, SimpleBlock(1, 0, true, Ac3Frame(300))));
+
+        var mainStream = new MemoryStream(main);
+        var dubStream = new MemoryStream(dub);
+        var mainIndex = MatroskaIndexer.Build(mainStream);
+        var dubIndex = MatroskaIndexer.Build(dubStream);
+
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(mainIndex, mainStream), new Mp4Synthesizer.Input(dubIndex, dubStream)],
+            [new Mp4Synthesizer.TrackRef(0, 1), new Mp4Synthesizer.TrackRef(1, 1)],
+            VideoSignalling.CrossCompatible);
+
+        Assert.NotNull(result);
+        Assert.Equal(["hvc1", "ac-3"], result.SampleEntries);
+
+        // One wrapper for the second file, which sits between the two of them.
+        var wrapper = Assert.Single(result.Wrappers);
+        Assert.Equal(16, wrapper.Length);
+        Assert.Equal("mdat", System.Text.Encoding.ASCII.GetString(wrapper, 4, 4));
+
+        Assert.Equal(
+            result.HeaderLength + main.Length + wrapper.Length + dub.Length,
+            result.TotalLength);
+
+        // The dub's samples are addressed past the video's file, not from the same base.
+        var reader = new Mp4BoxReader(result.Header);
+        var dubOffsets = reader.ChunkOffsets(reader.Find("moov/trak/mdia/minf/stbl/co64").Skip(1).First());
+        Assert.All(dubOffsets, offset =>
+            Assert.InRange(offset, (ulong)(result.HeaderLength + main.Length), (ulong)result.TotalLength));
+    }
+
+    [Fact]
+    public void A_subtitle_from_a_file_beside_the_video_becomes_a_track_of_its_own()
+    {
+        var file = VideoAndAudio();
+        var stream = new MemoryStream(file);
+        var index = MatroskaIndexer.Build(stream);
+
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(index, stream)],
+            [new Mp4Synthesizer.TrackRef(0, 1), new Mp4Synthesizer.TrackRef(0, 2)],
+            VideoSignalling.CrossCompatible,
+            [([new TextCue(40, 60, "From a sidecar")], "rus")]);
+
+        Assert.NotNull(result);
+        Assert.Equal(["hvc1", "ac-3", "tx3g"], result.SampleEntries);
+
+        var reader = new Mp4BoxReader(result.Header);
+
+        // Its samples ride in the header, like every other rewritten cue.
+        var offsets = reader.ChunkOffsets(reader.Find("moov/trak/mdia/minf/stbl/co64").Skip(2).First());
+        Assert.All(offsets, offset => Assert.InRange(offset, 0ul, (ulong)result.HeaderLength));
+
+        // Cues from a file count in milliseconds.
+        var mdhd = reader.Find("moov/trak/mdia/mdhd").Skip(2).First();
+        Assert.Equal(1000u, reader.U32At(mdhd.Start + 20));
+
+        Assert.Contains("From a sidecar", System.Text.Encoding.UTF8.GetString(result.Header),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_empty_sidecar_adds_no_track()
+    {
+        var file = VideoAndAudio();
+        var stream = new MemoryStream(file);
+        var index = MatroskaIndexer.Build(stream);
+
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(index, stream)],
+            [new Mp4Synthesizer.TrackRef(0, 1)],
+            VideoSignalling.CrossCompatible,
+            [([], "rus")]);
+
+        Assert.NotNull(result);
+        Assert.Equal(["hvc1"], result.SampleEntries);
+    }
+
+    [Fact]
+    public void Eac3_gets_its_own_entry_and_descriptor()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_EAC3", channels: 6)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(10, 0x01)),
+                SimpleBlock(2, 0, true, Eac3Frame(640))));
+
+        var built = Build(file);
+
+        Assert.Equal(["hvc1", "ec-3"], built.Result.SampleEntries);
+
+        var stsd = built.Reader.Find("moov/trak/mdia/minf/stbl/stsd").Skip(1).First();
+        var entry = built.Reader.SampleEntry(stsd);
+        Assert.Equal("ec-3", entry.Type);
+        Assert.Equal(6, built.Result.Header[entry.Start + 17]);
+        Assert.Equal(48000u, built.Reader.U32At(entry.Start + 24) >> 16);
+
+        var dec3 = built.Reader.Children(entry.Start + 28, entry.End).Single(box => box.Type == "dec3");
+        // One independent substream, 48 kHz, bitstream id 16, 3/2 with LFE, nothing dependent.
+        Assert.Equal(0, built.Result.Header[dec3.Start + 1] & 0x07);
+        Assert.Equal(0x20, built.Result.Header[dec3.Start + 2]);
+        Assert.Equal(0x0F, built.Result.Header[dec3.Start + 3]);
+    }
+
+    [Fact]
+    public void An_eac3_frame_is_timed_by_the_blocks_it_actually_carries()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B, TrackEntry(2, 2, "A_EAC3", channels: 6)),
+            Cluster(0, SimpleBlock(2, 0, true, Eac3Frame(640))));
+
+        var built = Build(file, tracks: [2]);
+
+        // Six blocks of 256 samples. AC-3 is always 1536; E-AC-3 is not, and assuming so would drift.
+        var stts = built.Reader.Find("moov/trak/mdia/minf/stbl/stts").First();
+        Assert.Equal(1536u, built.Reader.Runs(stts)[0].Value);
+    }
+
+    [Fact]
+    public void A_unit_that_opens_with_a_dependent_substream_is_left_out()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_EAC3", channels: 6)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(10, 0x01)),
+                // Stream type 1 is a dependent substream; without its independent one there is nothing
+                // to describe the stream against.
+                SimpleBlock(2, 0, true, Eac3Frame(640, streamType: 1))));
+
+        Assert.Equal(["hvc1"], Build(file).Result.SampleEntries);
     }
 }

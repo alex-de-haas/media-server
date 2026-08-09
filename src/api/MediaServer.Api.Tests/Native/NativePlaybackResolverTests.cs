@@ -201,16 +201,26 @@ public sealed class NativePlaybackResolverTests : IDisposable
     }
 
     [Fact]
-    public async Task An_eac3_only_source_is_refused_because_packaging_cannot_describe_it()
+    public async Task An_eac3_only_source_is_offered_now_that_it_can_be_described()
     {
-        // E-AC-3 needs an `ec-3` entry with a `dec3` descriptor. Until that is written, offering a remux
-        // would be offering silence — and this matters, because Atmos rides on E-AC-3.
+        // Atmos rides on E-AC-3, so a source carrying only it is exactly the case worth having.
         AddSource("mkv", "hevc", "HDR10", ("eac3", 6));
+
+        Assert.Equal(
+            NativePlaybackDecision.Remux,
+            (await ResolveOneAsync(AppleTv(), packaging: true)).Decision);
+    }
+
+    [Fact]
+    public async Task A_dts_only_source_is_still_refused_rather_than_played_silently()
+    {
+        AddSource("mkv", "hevc", "HDR10", ("dts", 8));
 
         var resolution = await ResolveOneAsync(AppleTv(), packaging: true);
 
         Assert.Equal(NativePlaybackDecision.Unsupported, resolution.Decision);
-        Assert.Equal(NativePlaybackReasons.PackagingUnsupportedAudio, resolution.Reason);
+        // DTS is out of scope for this client, and the client says so first.
+        Assert.Equal(NativePlaybackReasons.UnsupportedAudioCodec, resolution.Reason);
     }
 
     [Fact]

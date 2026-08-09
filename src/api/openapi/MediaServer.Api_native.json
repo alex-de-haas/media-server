@@ -130,27 +130,19 @@
             }
           },
           {
-            "name": "audioStreamIndex",
+            "name": "audioStreamId",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
-            "name": "subtitleStreamIndex",
+            "name": "subtitleStreamId",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -195,27 +187,19 @@
             }
           },
           {
-            "name": "audioStreamIndex",
+            "name": "audioStreamId",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
-            "name": "subtitleStreamIndex",
+            "name": "subtitleStreamId",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
