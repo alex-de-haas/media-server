@@ -115,7 +115,8 @@ internal static class Mp4Synthesizer
 
         // The movie header counts in milliseconds; each track counts in its own units, so the longest is
         // found after converting rather than before.
-        var movieDuration = prepared.Max(track => track.Duration * 1000 / Math.Max(1, track.Timescale));
+        var movieDuration = prepared.Max(track =>
+            (track.Duration - track.MediaTime) * 1000 / Math.Max(1, track.Timescale));
         var ftyp = Box("ftyp", "isom"u8.ToArray(), U32(0x200),
             "isomiso2mp41hvc1dby1"u8.ToArray());
 
@@ -184,7 +185,9 @@ internal static class Mp4Synthesizer
         IReadOnlyList<(long Offset, int Size)> Placements,
         bool InHeader,
         int Input,
-        int Timescale);
+        int Timescale,
+        /// <summary>Encoder priming to trim, in this track's own units. Zero for everything but AAC.</summary>
+        long MediaTime = 0);
 
     private static Prepared? PrepareVideo(
         IndexedTrack track, long timestampScale, VideoSignalling signalling, int input)
@@ -270,17 +273,49 @@ internal static class Mp4Synthesizer
             return null;
         }
 
+        string entryName;
+        byte[] entry;
+        int sampleRate;
+        long frameSamples;
+
+        // AAC is the one that needs nothing from the bitstream: Matroska carries the AudioSpecificConfig
+        // in CodecPrivate, and that is the payload the esds wants. So it is described before the source is
+        // touched at all.
+        if (track.CodecId == "A_AAC")
+        {
+            if (track.CodecPrivate is not { } config || DescribeAac(config) is not { } aac)
+            {
+                return null;
+            }
+
+            // Matroska states the priming in nanoseconds and expects the demuxer to drop it. MP4 has no
+            // such convention, so it becomes an edit list: without one the soundtrack starts a whole frame
+            // late, which measured as 1024 samples — 21 ms — against the picture.
+            //
+            // Rounded, not truncated. A whole frame of priming at 48 kHz is 21333333.33 ns and the
+            // container can only store whole nanoseconds, so truncating the conversion back gives 1023
+            // samples and leaves the track one sample late — which is exactly what the round trip showed.
+            const long Nanosecond = 1_000_000_000;
+            var priming =
+                ((Math.Max(0, track.CodecDelay) * aac.SampleRate) + (Nanosecond / 2)) / Nanosecond;
+
+            return new Prepared(
+                track, "mp4a", AudioEntry("mp4a", aac.Esds, aac.SampleRate, aac.Channels),
+                Enumerable.Repeat((long)aac.SamplesPerFrame, track.Samples.Count).ToArray(),
+                null, null, (long)aac.SamplesPerFrame * track.Samples.Count,
+                [.. track.Samples.Select(sample => (sample.Offset, sample.Size))],
+                InHeader: false,
+                input,
+                aac.SampleRate,
+                MediaTime: priming);
+        }
+
         var first = track.Samples[0];
         // Enough of the first access unit to read it: AC-3 needs a sync frame header, E-AC-3 needs to walk
         // its substreams, and both are small next to the frame itself.
         var probe = new byte[Math.Min(first.Size, 4096)];
         source.Position = first.Offset;
         source.ReadExactly(probe);
-
-        string entryName;
-        byte[] entry;
-        int sampleRate;
-        long frameSamples;
 
         if (track.CodecId == "A_EAC3")
         {
@@ -290,7 +325,7 @@ internal static class Mp4Synthesizer
             }
 
             entryName = "ec-3";
-            entry = AudioEntry("ec-3", "dec3", eac3.Dec3, eac3.SampleRate, eac3.Channels);
+            entry = AudioEntry("ec-3", Box("dec3", eac3.Dec3), eac3.SampleRate, eac3.Channels);
             sampleRate = eac3.SampleRate;
             // Not always 1536: an E-AC-3 frame carries one, two, three or six blocks of 256 samples, and
             // nothing forbids a stream from varying it. Every frame is not read — that would be a seek per
@@ -312,7 +347,7 @@ internal static class Mp4Synthesizer
             }
 
             entryName = "ac-3";
-            entry = AudioEntry("ac-3", "dac3", ac3.Dac3, ac3.SampleRate, ac3.Channels);
+            entry = AudioEntry("ac-3", Box("dac3", ac3.Dac3), ac3.SampleRate, ac3.Channels);
             sampleRate = ac3.SampleRate;
             // AC-3 is 1536 samples a frame, always. Counting in the stream's own sample rate makes that
             // exact at any rate, and does not depend on the per-frame timestamps a laced block cannot give.
@@ -546,8 +581,10 @@ internal static class Mp4Synthesizer
         return Box(entryName, [body, .. extras]);
     }
 
-    private static byte[] AudioEntry(
-        string entryName, string descriptorName, byte[] descriptor, int sampleRate, int channels)
+    /// <param name="descriptor">The codec's own box, already assembled — <c>dac3</c>, <c>dec3</c> or
+    /// <c>esds</c>. The last is a full box while the others are plain, which is why it arrives built
+    /// rather than as a name and a payload.</param>
+    private static byte[] AudioEntry(string entryName, byte[] descriptor, int sampleRate, int channels)
     {
         byte[] body =
         [
@@ -558,7 +595,7 @@ internal static class Mp4Synthesizer
             .. U32((uint)sampleRate << 16),
         ];
 
-        return Box(entryName, body, Box(descriptorName, descriptor));
+        return Box(entryName, body, descriptor);
     }
 
     private static byte[] Assemble(
@@ -610,7 +647,18 @@ internal static class Mp4Synthesizer
         var dinf = Box("dinf", Full("dref", 0, 0, U32(1), Full("url ", 0, 1)));
         var minf = Box("minf", mediaHeader, dinf, Stbl(prepared, sampleBase));
 
-        return Box("trak", tkhd, Box("mdia", mdhd, hdlr, minf));
+        // An edit list only appears where something has to be skipped, which is the AAC priming and
+        // nothing else. Writing one that starts at zero would say the same as writing none at all.
+        byte[] edts = prepared.MediaTime > 0
+            ? Box("edts", Full("elst", 0, 0,
+                U32(1),
+                U32((uint)Math.Max(0,
+                    (prepared.Duration - prepared.MediaTime) * 1000 / Math.Max(1, prepared.Timescale))),
+                I32((int)prepared.MediaTime),
+                U32(0x00010000)))                   // rate 1.0
+            : [];
+
+        return Box("trak", tkhd, edts, Box("mdia", mdhd, hdlr, minf));
     }
 
     private static byte[] Stbl(Prepared prepared, long sampleBase)

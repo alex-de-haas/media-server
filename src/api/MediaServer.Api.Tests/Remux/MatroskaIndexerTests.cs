@@ -157,6 +157,23 @@ public sealed class MatroskaIndexerTests
     }
 
     [Fact]
+    public void An_aac_track_is_walked_only_when_it_brought_its_configuration()
+    {
+        // A_AAC is described from CodecPrivate — it *is* the AudioSpecificConfig — so a track without one
+        // could never be pointed at, and walking its frames would be bytes for nothing.
+        var index = Index(File(
+            Tracks(
+                TrackEntry(2, 2, "A_AAC", codecPrivate: [0x11, 0x90], channels: 2),
+                TrackEntry(3, 2, "A_AAC", channels: 2)),
+            Cluster(0,
+                SimpleBlock(2, 0, true, Frame(300, 0x01)),
+                SimpleBlock(3, 0, true, Frame(300, 0x02)))));
+
+        Assert.Single(index.Track(2)!.Samples);
+        Assert.Empty(index.Track(3)!.Samples);
+    }
+
+    [Fact]
     public void A_video_track_without_its_configuration_is_not_walked()
     {
         // The codec is one a sample entry could be written for, but the track came without the record that

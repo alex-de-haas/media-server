@@ -26,7 +26,7 @@ internal static class RemuxIndexFormat
 
     /// <summary>Bumping this invalidates every stored index, which is the point: a format change must not
     /// be readable as the old one.</summary>
-    internal const ushort Version = 3;
+    internal const ushort Version = 4;
 
     internal sealed record Stamp(long SourceLength, DateTimeOffset SourceModified)
     {
@@ -60,6 +60,7 @@ internal static class RemuxIndexFormat
             WriteBytes(writer, track.CodecPrivate);
             WriteBytes(writer, track.DolbyVisionConfiguration);
             writer.Write(track.DefaultDuration);
+            writer.Write(track.CodecDelay);
             writer.Write(track.Width);
             writer.Write(track.Height);
             writer.Write(track.DisplayWidth);
@@ -152,6 +153,7 @@ internal static class RemuxIndexFormat
                 track.CodecPrivate = ReadBytes(reader);
                 track.DolbyVisionConfiguration = ReadBytes(reader);
                 track.DefaultDuration = reader.ReadInt64();
+                track.CodecDelay = reader.ReadInt64();
                 track.Width = reader.ReadInt32();
                 track.Height = reader.ReadInt32();
                 track.DisplayWidth = reader.ReadInt32();

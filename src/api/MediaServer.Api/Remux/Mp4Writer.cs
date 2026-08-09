@@ -255,6 +255,163 @@ internal static class Mp4Writer
             : new Eac3Sync(streamType, frameSize, fscod, fscod2, numBlocksCode, acmod, lfeon, bsid);
     }
 
+    /// <summary>
+    /// What an AAC track says about itself, read out of the AudioSpecificConfig rather than out of the
+    /// bitstream — which is what makes AAC the easy one of the three.
+    /// </summary>
+    internal readonly record struct AacDescription(
+        byte[] Esds, int SampleRate, int Channels, int SamplesPerFrame);
+
+    private static readonly int[] AacSampleRates =
+        [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+
+    /// <summary>Channels per <c>channelConfiguration</c>; index 0 means "read the program config" and 7 is 7.1.</summary>
+    private static readonly int[] AacChannels = [0, 1, 2, 3, 4, 5, 6, 8];
+
+    /// <summary>
+    /// Builds the <c>esds</c> an <c>mp4a</c> track needs, from Matroska's <c>CodecPrivate</c>.
+    ///
+    /// Unlike AC-3 and E-AC-3, nothing has to be read out of a frame: Matroska stores the
+    /// AudioSpecificConfig verbatim, and that is exactly the payload MP4 wants inside its
+    /// <c>DecoderSpecificInfo</c>. The config is carried through untouched — only *read* here, to learn
+    /// the rate, the channel count and how many samples a frame is worth.
+    ///
+    /// What is refused, and why each is refused rather than guessed at:
+    /// <list type="bullet">
+    /// <item>Explicitly signalled <b>SBR or PS</b> (object types 5 and 29). These declare a second, higher
+    /// sampling frequency, and the two conventions for which one belongs in the sample entry disagree.
+    /// Getting it wrong plays the track at half or double speed — silently. Implicit SBR is untouched by
+    /// this and works: the core frame is still 1024 samples at the core rate, and the wall-clock duration
+    /// comes out the same however the decoder chooses to expand it.</item>
+    /// <item><b>A channel configuration of zero</b>, which defers to a program config element inside the
+    /// first frame. That is a bitstream read this deliberately does not do.</item>
+    /// <item>Anything that is not plain AAC — LD, ELD, scalable, and the rest. Their frame lengths differ
+    /// and none of them appears in this library.</item>
+    /// </list>
+    /// </summary>
+    internal static AacDescription? DescribeAac(ReadOnlySpan<byte> config)
+    {
+        if (config.Length < 2)
+        {
+            return null;
+        }
+
+        var bits = new BitReader(config);
+        var objectType = ReadAacObjectType(ref bits);
+
+        // Main, LC, SSR, LTP and the error-resilient flavour of LC. All of them are 1024 samples a frame
+        // unless the config says otherwise below, and all take a GASpecificConfig.
+        if (objectType is not (1 or 2 or 3 or 4 or 17))
+        {
+            return null;
+        }
+
+        if (bits.Remaining < 8)
+        {
+            return null;
+        }
+
+        var frequencyIndex = bits.Read(4);
+        int sampleRate;
+        if (frequencyIndex == 15)
+        {
+            if (bits.Remaining < 24 + 4)
+            {
+                return null;
+            }
+
+            sampleRate = bits.Read(24);
+        }
+        else if (frequencyIndex < AacSampleRates.Length)
+        {
+            sampleRate = AacSampleRates[frequencyIndex];
+        }
+        else
+        {
+            return null;                            // 13 and 14 are reserved
+        }
+
+        var channelConfiguration = bits.Read(4);
+        if (channelConfiguration <= 0 || channelConfiguration >= AacChannels.Length)
+        {
+            return null;
+        }
+
+        if (sampleRate <= 0 || bits.Remaining < 1)
+        {
+            return null;
+        }
+
+        // GASpecificConfig opens with frameLengthFlag: a frame is 960 samples rather than 1024 when set.
+        var samplesPerFrame = bits.Read(1) == 1 ? 960 : 1024;
+
+        return new AacDescription(
+            AacEsds(config),
+            sampleRate,
+            AacChannels[channelConfiguration],
+            samplesPerFrame);
+    }
+
+    /// <summary>Five bits, or the escape value followed by six more offset by 32.</summary>
+    private static int ReadAacObjectType(ref BitReader bits)
+    {
+        var objectType = bits.Read(5);
+        return objectType == 31 && bits.Remaining >= 6 ? 32 + bits.Read(6) : objectType;
+    }
+
+    /// <summary>
+    /// The descriptor chain MP4 wraps an elementary stream in:
+    /// <c>ES_Descriptor → DecoderConfigDescriptor → DecoderSpecificInfo</c>, with an
+    /// <c>SLConfigDescriptor</c> saying "MP4 rules apply". Only the innermost one carries anything real —
+    /// the rest is the envelope the format requires.
+    /// </summary>
+    private static byte[] AacEsds(ReadOnlySpan<byte> config)
+    {
+        var decoderSpecific = Descriptor(0x05, config.ToArray());
+        var decoderConfig = Descriptor(0x04,
+            [0x40],                                 // object type indication: MPEG-4 Audio
+            [(0x05 << 2) | 0x01],                   // stream type audio, not upstream, reserved bit set
+            [0x00, 0x00, 0x00],                     // decoding buffer size, unstated
+            U32(0), U32(0),                         // maximum and average bitrate, unstated
+            decoderSpecific);
+
+        var elementaryStream = Descriptor(0x03,
+            U16(0),                                 // ES_ID; the track header already identifies the track
+            [0x00],                                 // no dependency, no URL, no OCR
+            decoderConfig,
+            Descriptor(0x06, [0x02]));              // SLConfigDescriptor: predefined for MP4
+
+        return Full("esds", 0, 0, elementaryStream);
+    }
+
+    private static byte[] Descriptor(byte tag, params byte[][] parts)
+    {
+        var payload = parts.SelectMany(part => part).ToArray();
+        return [tag, .. ExpandableLength(payload.Length), .. payload];
+    }
+
+    /// <summary>
+    /// MPEG-4's own length encoding: seven bits a byte, the top bit set on every byte but the last. Some
+    /// muxers always spend four bytes on it; the shortest form is equally legal and is what is written.
+    /// </summary>
+    private static byte[] ExpandableLength(int length)
+    {
+        var bytes = new List<byte>();
+        do
+        {
+            bytes.Insert(0, (byte)(length & 0x7F));
+            length >>= 7;
+        }
+        while (length > 0);
+
+        for (var i = 0; i < bytes.Count - 1; i++)
+        {
+            bytes[i] |= 0x80;
+        }
+
+        return [.. bytes];
+    }
+
     /// <summary>Bit-packing for the one descriptor that is not byte-aligned.</summary>
     private ref struct BitWriter
     {
@@ -295,6 +452,8 @@ internal static class Mp4Writer
     {
         private readonly ReadOnlySpan<byte> _data = data;
         private int _position;
+
+        public readonly int Remaining => (_data.Length * 8) - _position;
 
         public int Read(int count)
         {

@@ -20,7 +20,7 @@ internal static class MatroskaIndexer
     private const ulong IdClusterTimestamp = 0xE7, IdSimpleBlock = 0xA3, IdBlockGroup = 0xA0;
     private const ulong IdBlock = 0xA1, IdReferenceBlock = 0xFB, IdBlockDuration = 0x9B;
     private const ulong IdTrackEntry = 0xAE, IdTrackNumber = 0xD7, IdTrackType = 0x83, IdCodecId = 0x86;
-    private const ulong IdCodecPrivate = 0x63A2, IdDefaultDuration = 0x23E383;
+    private const ulong IdCodecPrivate = 0x63A2, IdDefaultDuration = 0x23E383, IdCodecDelay = 0x56AA;
     private const ulong IdLanguage = 0x22B59C, IdName = 0x536E;
     private const ulong IdVideo = 0xE0, IdPixelWidth = 0xB0, IdPixelHeight = 0xBA;
     private const ulong IdDisplayWidth = 0x54B0, IdDisplayHeight = 0x54BA;
@@ -117,6 +117,9 @@ internal static class MatroskaIndexer
                     break;
                 case IdDefaultDuration:
                     track.DefaultDuration = (long)Ebml.ReadUInt(stream, element.Start, element.End);
+                    break;
+                case IdCodecDelay:
+                    track.CodecDelay = (long)Ebml.ReadUInt(stream, element.Start, element.End);
                     break;
                 case IdLanguage:
                     track.Language = Ebml.ReadString(stream, element.Start, element.End);
