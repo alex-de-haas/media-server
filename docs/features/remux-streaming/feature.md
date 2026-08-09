@@ -151,9 +151,11 @@ signalling asked for, and every sidecar carried with it — and `Last-Modified` 
 freshest of them. A subtitle file edited in place changes the body without changing
 anything about the source, and a conditional request must not be told otherwise.
 
-`POST /native/v1/playback/resolve` decides. Beside the existing `Decision` it now carries
-a **`Transport`** — `byteRange` today — because HLS would be another way to deliver a
-repackaging rather than a fourth kind of decision.
+`POST /native/v1/playback/resolve` decides. Beside the existing `Decision` it carries a
+**`Transport`**, which is `byteRange` and only that: HLS is a second transport the
+design makes room for and which has been deliberately deferred, because the one that
+ships carries Dolby Vision and nothing has yet asked for one that does not. The axis
+exists because adding it later would have been a breaking change.
 
 A remux is refused, with the reason said plainly, when:
 

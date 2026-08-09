@@ -120,8 +120,8 @@ ranges. This is not two paths at twice the cost; it is one engine with two outpu
 
 | Transport | Dolby Vision | Ships |
 | --- | --- | --- |
-| **MP4 over byte ranges** | **yes** | first, with the index |
-| **HLS** | no — HDR10 only | second, over the same index |
+| **MP4 over byte ranges** | **yes** | shipped |
+| **HLS** | no — HDR10 only | **deferred, deliberately** — see below |
 
 ### Why the index and MP4 come first
 
@@ -139,6 +139,24 @@ instead of managing it.
 
 HLS keeps its place as the second transport, rendered from the same sample table, for
 clients and situations where HDR10 is the answer.
+
+### HLS is deferred, and this is the decision the plan asked for
+
+Decided on 2026-08-09. The MP4 transport works, carries Dolby Vision, and has been
+verified end to end on the hardware it is for. **HLS may turn out never to be needed**,
+and building a second transport for a client that does not exist yet would be building
+against a guess.
+
+An earlier revision of this plan wrote down the opposite risk — that once HLS shipped
+and nobody complained, the index path might quietly never be built and Dolby Vision
+never arrive — and asked that the outcome be *chosen out loud rather than discovered
+later*. This is that choice, in the other direction: what shipped is the transport with
+Dolby Vision, and the one without it is deferred until something actually asks for it.
+
+What would ask for it: a client that cannot open a plain MP4 over byte ranges, or a
+delivery situation where addressing by time beats addressing by byte. Neither exists
+today. The deliverables below stay unchecked rather than being deleted, because the
+work is real if that changes — and the index they would render from is already built.
 
 ### The index, and what it feeds
 
@@ -343,9 +361,19 @@ rewriting rather than encoding tooling, so they do not change the answer.
       index, so the outstanding work is a query and a restart resumes without
       remembering anything. Orphaned indexes are pruned once per process, since
       nothing else removes a file when its title is deleted.
-- [ ] **Measured on a real film from the slow disk**: how long the walk takes and
-      how much of the file it has to touch. On the dev SSD a 26.37 GB film costs
-      32.6 s and a 8.32 GB one 14.4 s; the spinning disk is still unmeasured.
+- [ ] **Measured on a real film from the slow disk** — deliberately an *observation on
+      production* rather than a test, decided on 2026-08-09. The only spinning disk is
+      there, and the worker already logs what is wanted: `Indexed {Path} in {Elapsed}s:
+      {Tracks} tracks, {Samples} samples`, once per file. The number appears after the
+      first scan; nothing has to be run.
+
+      What is known: 27 s cold for a 26.37 GB film on the dev SSD, which is about a
+      gigabyte a second and therefore I/O-bound rather than header-bound — the walk is
+      reading a large part of the file, not skipping to the headers. That makes a
+      spinning disk roughly size over throughput: minutes per film, not hours. If the
+      production number contradicts that, the walk has degenerated into a seek per
+      block, and the fix is to read the file sequentially with a large buffer instead
+      of seeking past every payload.
 - [x] **Unit tests** over crafted Matroska written by hand — all three lacing forms,
       block groups whose keyframe answer is the absence of a `ReferenceBlock` rather
       than a flag, and a lacing header that does not add up. ffmpeg cannot produce a
