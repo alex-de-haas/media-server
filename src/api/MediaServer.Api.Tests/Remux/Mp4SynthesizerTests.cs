@@ -264,6 +264,226 @@ public sealed class Mp4SynthesizerTests
         Assert.Contains("dac3", built.Reader.Children(entry.Start + 28, entry.End).Select(box => box.Type));
     }
 
+    /// <summary>
+    /// An AudioSpecificConfig packed from its fields, so a test reads as the thing it is describing rather
+    /// than as two hex bytes whose meaning has to be taken on trust.
+    /// </summary>
+    private static byte[] Asc(
+        int objectType, int frequencyIndex, int channelConfiguration,
+        int frameLengthFlag = 0, int? explicitRate = null)
+    {
+        var bits = new List<int>();
+        void Write(int value, int count)
+        {
+            for (var i = count - 1; i >= 0; i--)
+            {
+                bits.Add((value >> i) & 1);
+            }
+        }
+
+        Write(objectType, 5);
+        Write(frequencyIndex, 4);
+        if (frequencyIndex == 15)
+        {
+            Write(explicitRate ?? 0, 24);
+        }
+
+        Write(channelConfiguration, 4);
+        Write(frameLengthFlag, 1);
+        Write(0, 2);                                // dependsOnCoreCoder, extensionFlag
+
+        var bytes = new byte[(bits.Count + 7) / 8];
+        for (var i = 0; i < bits.Count; i++)
+        {
+            bytes[i / 8] |= (byte)(bits[i] << (7 - (i % 8)));
+        }
+
+        return bytes;
+    }
+
+    [Fact]
+    public void Aac_priming_is_trimmed_by_an_edit_list_rather_than_left_to_be_heard()
+    {
+        // A whole frame of encoder priming, as every AAC encoder produces and Matroska states in
+        // nanoseconds. Without an edit list the soundtrack starts 1024 samples — 21 ms — after the
+        // picture, which a round trip through ffmpeg showed and no unit test would have.
+        var built = Build(AacFile(
+            Asc(objectType: 2, frequencyIndex: 3, channelConfiguration: 2),
+            codecDelay: 21_333_333));
+
+        var elst = Assert.Single(built.Reader.Find("moov/trak/edts/elst"));
+        Assert.Equal(1u, built.Reader.U32At(elst.Start + 4));
+
+        // Rounded, not truncated: 21333333 ns × 48000 ÷ 1e9 truncates to 1023 and leaves the track one
+        // sample late, which is exactly what the round trip caught.
+        Assert.Equal(1024, (int)built.Reader.U32At(elst.Start + 12));
+    }
+
+    [Fact]
+    public void A_track_with_no_priming_gets_no_edit_list_at_all()
+    {
+        // AC-3 has no encoder delay and states none, and an edit list starting at zero would say the same
+        // as no edit list while giving a player one more thing to disagree about.
+        Assert.Empty(Build(VideoAndAudio()).Reader.Find("moov/trak/edts/elst"));
+        Assert.Empty(
+            Build(AacFile(Asc(objectType: 2, frequencyIndex: 3, channelConfiguration: 2)))
+                .Reader.Find("moov/trak/edts/elst"));
+    }
+
+    private static byte[] AacFile(byte[] config, int frames = 3, ulong codecDelay = 0) =>
+        ContainerBuilders.Matroska(
+            ContainerBuilders.Info(80),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AAC", codecPrivate: config, codecDelay: codecDelay, channels: 2)),
+            Cluster(0, [
+                SimpleBlock(1, 0, true, Frame(10, 0x01)),
+                .. Enumerable.Range(0, frames)
+                    .Select(i => SimpleBlock(2, (short)(i * 21), true, Frame(300, (byte)(0x40 + i))))]));
+
+    [Fact]
+    public void Aac_is_described_from_its_codec_private_rather_than_from_a_frame()
+    {
+        // AAC-LC, 48 kHz, stereo — the canonical 0x11 0x90. Matroska stores this verbatim and it is
+        // exactly the payload the esds wants, so nothing is read out of the bitstream.
+        var config = Asc(objectType: 2, frequencyIndex: 3, channelConfiguration: 2);
+        Assert.Equal([0x11, 0x90], config);
+
+        var built = Build(AacFile(config));
+
+        Assert.Equal(["hvc1", "mp4a"], built.Result.SampleEntries);
+
+        var stsd = built.Reader.Find("moov/trak/mdia/minf/stbl/stsd").Skip(1).First();
+        var entry = built.Reader.SampleEntry(stsd);
+        Assert.Equal("mp4a", entry.Type);
+        Assert.Equal(2, built.Result.Header[entry.Start + 17]);
+        Assert.Equal(48000u, built.Reader.U32At(entry.Start + 24) >> 16);
+
+        var esds = Assert.Single(
+            built.Reader.Children(entry.Start + 28, entry.End), box => box.Type == "esds");
+
+        // The config comes back out byte for byte, which is the whole point of carrying it rather than
+        // deriving it.
+        Assert.Contains(
+            config,
+            Enumerable.Range(esds.Start, esds.Length - config.Length)
+                .Select(at => built.Result.Header[at..(at + config.Length)]));
+    }
+
+    [Fact]
+    public void The_esds_carries_the_descriptor_chain_mp4_requires()
+    {
+        var built = Build(AacFile(Asc(objectType: 2, frequencyIndex: 3, channelConfiguration: 2)));
+        var stsd = built.Reader.Find("moov/trak/mdia/minf/stbl/stsd").Skip(1).First();
+        var entry = built.Reader.SampleEntry(stsd);
+        var esds = Assert.Single(
+            built.Reader.Children(entry.Start + 28, entry.End), box => box.Type == "esds");
+
+        // version and flags, then ES_Descriptor (0x03) with its length, ES_ID and flags byte.
+        var body = built.Result.Header[esds.Start..esds.End];
+        Assert.Equal(0x03, body[4]);
+
+        // Every tag in the chain, in order: ES, DecoderConfig, DecoderSpecificInfo, SLConfig.
+        Assert.Equal([0x03, 0x04, 0x05, 0x06], Tags(body));
+    }
+
+    /// <summary>Walks the descriptor chain the way a demuxer would, following the expandable lengths.</summary>
+    private static List<byte> Tags(byte[] esdsBody)
+    {
+        var tags = new List<byte>();
+        var at = 4;                                 // past version and flags
+        while (at < esdsBody.Length)
+        {
+            tags.Add(esdsBody[at++]);
+            var length = 0;
+            while (at < esdsBody.Length)
+            {
+                var next = esdsBody[at++];
+                length = (length << 7) | (next & 0x7F);
+                if ((next & 0x80) == 0)
+                {
+                    break;
+                }
+            }
+
+            // ES and DecoderConfig hold their successors inside them, so their fixed fields are stepped
+            // over rather than their whole payload.
+            at += tags[^1] switch { 0x03 => 3, 0x04 => 13, _ => length };
+        }
+
+        return tags;
+    }
+
+    [Theory]
+    [InlineData(2, 3, 2, 0, 1024)]                  // LC, the ordinary case
+    [InlineData(2, 3, 2, 1, 960)]                   // frameLengthFlag: 960 rather than 1024
+    [InlineData(1, 4, 6, 0, 1024)]                  // Main at 44.1 kHz, 5.1
+    public void The_frame_length_is_read_from_the_config_rather_than_assumed(
+        int objectType, int frequencyIndex, int channels, int frameLengthFlag, int expected)
+    {
+        var built = Build(AacFile(Asc(objectType, frequencyIndex, channels, frameLengthFlag)));
+
+        // One run of three frames, each the stated length. A wrong constant here plays the track at the
+        // wrong speed rather than failing, which is why it is read.
+        var stts = built.Reader.Find("moov/trak/mdia/minf/stbl/stts").Skip(1).First();
+        Assert.Equal(1u, built.Reader.U32At(stts.Start + 4));
+        Assert.Equal(3u, built.Reader.U32At(stts.Start + 8));
+        Assert.Equal((uint)expected, built.Reader.U32At(stts.Start + 12));
+    }
+
+    [Fact]
+    public void An_escaped_sampling_frequency_is_read_rather_than_refused()
+    {
+        var built = Build(AacFile(
+            Asc(objectType: 2, frequencyIndex: 15, channelConfiguration: 2, explicitRate: 44100)));
+
+        var stsd = built.Reader.Find("moov/trak/mdia/minf/stbl/stsd").Skip(1).First();
+        var entry = built.Reader.SampleEntry(stsd);
+        Assert.Equal(44100u, built.Reader.U32At(entry.Start + 24) >> 16);
+    }
+
+    [Theory]
+    // Explicitly signalled SBR and PS. Both declare a second sampling frequency, and the conventions for
+    // which one belongs in the sample entry disagree — a wrong choice plays at half or double speed.
+    [InlineData(5, 3, 2)]
+    [InlineData(29, 3, 2)]
+    // A channel configuration of zero defers to a program config element inside the first frame, which is
+    // a bitstream read this deliberately does not do.
+    [InlineData(2, 3, 0)]
+    // Reserved sampling frequency indexes.
+    [InlineData(2, 13, 2)]
+    [InlineData(2, 14, 2)]
+    // Object types that are not plain AAC: SSR-era scalable, ER AAC LD, and an escaped type.
+    [InlineData(6, 3, 2)]
+    [InlineData(23, 3, 2)]
+    [InlineData(31, 3, 2)]
+    public void A_config_this_cannot_be_sure_of_is_refused_rather_than_guessed_at(
+        int objectType, int frequencyIndex, int channelConfiguration)
+    {
+        var built = Build(AacFile(Asc(objectType, frequencyIndex, channelConfiguration)));
+
+        Assert.Equal(["hvc1"], built.Result.SampleEntries);
+    }
+
+    [Fact]
+    public void An_aac_track_with_no_config_at_all_is_left_out()
+    {
+        // Matroska requires CodecPrivate for A_AAC — it *is* the config — so this is a malformed file
+        // rather than an old one. It must still not become a track with no descriptor.
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(80),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AAC", channels: 2)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(10, 0x01)),
+                SimpleBlock(2, 0, true, Frame(300, 0x40))));
+
+        Assert.Equal(["hvc1"], Build(file).Result.SampleEntries);
+    }
+
     [Fact]
     public void A_track_the_synthesiser_cannot_describe_is_left_out()
     {

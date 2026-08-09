@@ -134,6 +134,17 @@ public sealed class RemuxStreamService(
             }
             else
             {
+                // No dub beside the file, so the soundtrack has to come from inside it. A source that has
+                // audio but none we can describe would otherwise be served as a silent film — the mirror
+                // of the picture rule above, and the answer the resolver already gives for it.
+                if (index.Tracks.Any(track => track.Kind == IndexedTrackKind.Audio)
+                    && !index.Tracks.Any(track =>
+                        track.Kind == IndexedTrackKind.Audio && RemuxCodecs.CanPackageAudio(track)))
+                {
+                    await DisposeAllAsync(opened);
+                    return (null, RemuxRefusal.NotPackageable);
+                }
+
                 var embedded = streams.FirstOrDefault(stream => stream.Id == audioStreamId && !stream.IsExternal);
                 foreach (var number in RemuxTrackChoice.Resolve(
                              index, embedded?.Index, SubtitleOrdinal(streams, subtitleStreamId)))

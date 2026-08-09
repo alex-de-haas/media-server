@@ -43,6 +43,13 @@ internal sealed class IndexedTrack
     /// see <see cref="MatroskaIndexer"/>.</summary>
     public long DefaultDuration { get; set; }
 
+    /// <summary>
+    /// Nanoseconds of encoder priming at the head of the stream, which the decoder produces but nobody
+    /// should hear. AAC always has it — a whole frame of it, typically — and AC-3 never does. In Matroska
+    /// the demuxer is expected to drop it; in MP4 an edit list says so instead.
+    /// </summary>
+    public long CodecDelay { get; set; }
+
     public int Width { get; set; }
     public int Height { get; set; }
     public int DisplayWidth { get; set; }

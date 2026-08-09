@@ -35,10 +35,10 @@ already the payload of `hvcC` or `avcC`, and the Dolby Vision configuration is a
 the payload of `dvvC`, in a `BlockAdditionMapping` whose type is literally `dvcC`.
 
 **Only tracks a sample entry can be written for are walked** — the video codecs
-`Mp4Writer` knows, AC-3 and E-AC-3, and text subtitles. Every other track is still listed,
-because its ordinal is what keeps a viewer's stored stream indexes lined up with the file
-and the resolver has to see it to explain why it cannot be used, but its frames are never
-delaced, measured or recorded. `RemuxCodecs.WantsSamples` is the single place that answers
+`Mp4Writer` knows, AC-3, E-AC-3 and AAC, and text subtitles. Every other track is still
+listed, because its ordinal is what keeps a viewer's stored stream indexes lined up with
+the file and the resolver has to see it to explain why it cannot be used, but its frames
+are never delaced, measured or recorded. `RemuxCodecs.WantsSamples` is the single place that answers
 this, so the walk and the synthesiser cannot disagree.
 
 That filter exists because of a measurement rather than a hunch. Before it, 147 indexes
@@ -108,10 +108,44 @@ Only Matroska is indexed. An MP4 source is already playable and has nothing to g
 
 ## What the container carries
 
-`Mp4Synthesizer` writes descriptors rather than deriving them. Audio is the exception:
+`Mp4Synthesizer` writes descriptors rather than deriving them. Audio splits three ways:
 neither AC-3 nor E-AC-3 has any `CodecPrivate` in Matroska — every frame restates its
 own parameters — so `dac3` and `dec3` are read out of a sync frame rather than believed
-from the container.
+from the container. **AAC is the opposite and the easy one**: Matroska stores the
+AudioSpecificConfig verbatim, and that is exactly the payload MP4 wants inside its
+`esds`, so it is carried through untouched and only *read* to learn the rate, the
+channel count and the frame length.
+
+What AAC refuses, and why each is refused rather than guessed at:
+
+- **Explicitly signalled SBR or PS.** These declare a second, higher sampling frequency,
+  and the two conventions for which one belongs in the sample entry disagree. Getting it
+  wrong plays the track at half or double speed, silently. Implicit SBR is untouched and
+  works: the core frame is still 1024 samples at the core rate, so the wall-clock
+  duration is the same however the decoder expands it.
+- **A channel configuration of zero**, which defers to a program config element inside
+  the first frame — a bitstream read this deliberately does not do.
+- **Anything that is not plain AAC** — LD, ELD, scalable. Their frame lengths differ and
+  none of them is in this library.
+
+The frame length is read rather than assumed: 1024 samples, or 960 when the config's
+`frameLengthFlag` says so. That is the same trap E-AC-3 set with its block count, and it
+is read for the same reason — a wrong constant plays at the wrong speed rather than
+failing.
+
+### Priming is trimmed, not heard
+
+An AAC encoder emits about a frame of priming before the first real audio. Matroska
+states it in `CodecDelay` and expects the demuxer to drop it; MP4 has no such convention,
+so it becomes an **edit list**. Without one the soundtrack starts 1024 samples — 21 ms —
+after the picture.
+
+The conversion is rounded rather than truncated. A frame of priming at 48 kHz is
+21333333.33 ns, the container stores whole nanoseconds, and truncating the way back gives
+1023 samples and leaves the track one sample late.
+
+Both of these were found by remuxing a real file and decoding both sides, not by reading
+the specification — see [Measured](#measured).
 
 E-AC-3 is not AC-3 with a different name. Its access unit may hold several substreams,
 one independent and then any dependent ones carrying extra channels; they are walked by
@@ -201,8 +235,21 @@ of the two.
 The audio one is why what packaging can describe lives in **one** place, in both
 vocabularies that ask: the resolver reasons in the probe's names and the synthesiser in
 Matroska's, and when they drifted the result was a source advertised as remuxable whose
-only audio track was then quietly declined. Audio is AC-3 and E-AC-3; AAC would need an
-`mp4a` entry with an `esds`, and DTS and TrueHD are out of scope for this client.
+only audio track was then quietly declined. Audio is AC-3, E-AC-3 and AAC; DTS, TrueHD
+and FLAC are out of scope for this client.
+
+The Matroska side is the stricter of the two for AAC, and strict in a particular way: it
+does not ask whether a config is *present*, it **parses** it, with the same routine that
+would build the descriptor. Asking the cheaper question would answer yes for an
+explicitly signalled SBR stream that the descriptor then declines, and the track would be
+walked, chosen and finally dropped — the exact failure this shared vocabulary exists to
+prevent.
+
+One asymmetry remains, and it is stated rather than hidden: the resolver reasons about
+`aac` as a name and cannot see the config, so a source whose only AAC track is explicitly
+signalled SBR is still advertised and then refused at the request. The client meets a
+refusal instead of a silent film, which is the important half; the wasted round trip is
+the residual cost, and no such source is in this library.
 
 The same gap exists on the video axis and is closed the same way, in both places: the
 resolver refuses to advertise a URL it knows will fail, and the stream service refuses to
@@ -227,6 +274,29 @@ produced or stored beyond the index. `transcode-engine` was stopped throughout, 
 why this lives in `api`: nothing on the serving path invokes ffmpeg.
 
 ## Measured
+
+### The output, against the source it was made from
+
+A real HEVC + AAC Matroska was synthesised into an MP4, and both were decoded to raw PCM
+and compared sample for sample. The result: **byte-identical**. ffmpeg's own remux of the
+same source lands 16 samples away from it.
+
+Two defects surfaced there that no unit test would have caught, because both are about
+agreement with a decoder rather than about the bytes written:
+
+| Found | Effect | Fix |
+| --- | --- | --- |
+| No edit list | Soundtrack 1024 samples (21 ms) late | Trim `CodecDelay` via `elst` |
+| Truncated ns→samples conversion | One sample late | Round instead |
+
+The same round trip over an AC-3 source shows the audio **256 samples — 5.3 ms — late**
+against the source's own decode. That is not new, is unchanged by the AAC work, and is
+left alone deliberately: the container states no delay for AC-3, so acting on it would
+mean hard-coding one encoder's behaviour, and 5.3 ms is far below the threshold at which
+a lagging soundtrack is perceptible. It is recorded here with the number so nobody has to
+measure it twice, and carried as an open deliverable in the plan.
+
+### The walk
 
 The number the log reports is the source's length divided by the elapsed time. That is a
 **traversal rate over the file's logical span, not measured device throughput** — the walk
@@ -297,6 +367,11 @@ that was measured.
   video track that arrived without its configuration. The synthesiser's own refusal is
   covered separately, through a hand-built index, so the guard does not go stale now that
   the walk rarely reaches it.
+- **AAC**, at the level a wrong answer would be silent rather than loud: the frame length
+  read from the config rather than assumed, an escaped sampling frequency, the descriptor
+  chain's tags walked the way a demuxer walks them, the config carried through byte for
+  byte, an edit list written only where there is priming to trim and rounded rather than
+  truncated, and every config the reader cannot be sure of refused.
 - **Track choice**: the default audio is the first that can be *described*, not the first
   in the file, and a stored preference pointing at a lossless track falls back the same
   way a stale one does — a film that leads with TrueHD must not play as a silent one. A
