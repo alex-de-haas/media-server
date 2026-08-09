@@ -455,12 +455,60 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DatingAMarkQueuesNothingForTheProvider()
+    public async Task DatingAnOwnedMarkRetiresItRemotelyAndRestatesItAsAnExactPlay()
     {
-        // EnsureTimelessWatched was delivered when the mark was made. Re-posting it as an exact play
-        // would leave the account holding the same viewing twice.
+        // The provider holds this play as timeless. Adding the exact one without removing that mark
+        // would leave the account with the same viewing twice — and the next sync would import the
+        // timeless one straight back into the undated list the user just emptied.
         Connect();
-        var mark = AddTimelessPlay();
+        var mark = AddTimelessPlay(remoteId: "111", owned: true);
+        AddRow(playCount: 1, played: true, lastWatchedAt: null);
+        var watchedAt = DateTimeOffset.Parse("2026-08-04T21:15:00Z");
+
+        await Service().SetWatchedAtAsync(_userId, mark.Id, watchedAt, CancellationToken.None);
+
+        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync();
+        Assert.Equal(2, queued.Count);
+        var removal = Assert.Single(queued, item => item.Operation == WatchHistoryOutboxOperation.RemoveOwnedEntries);
+        Assert.Contains("111", removal.RemoteIdSnapshot);
+        var add = Assert.Single(queued, item => item.Operation == WatchHistoryOutboxOperation.AddExactWatch);
+        Assert.Equal(watchedAt, add.OccurredAt);
+    }
+
+    [Fact]
+    public async Task DatingAnOwnedMarkDropsTheLinkItNoLongerHas()
+    {
+        // The remote entry is being removed, so the local one must stop naming it: left in place, a
+        // later deletion of this play would ask the provider to remove an id that is already gone.
+        Connect();
+        var mark = AddTimelessPlay(remoteId: "111", owned: true);
+
+        await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
+
+        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
+        Assert.False(entry.ProviderEntryOwned);
+        Assert.Null(entry.ProviderHistoryId);
+        Assert.Equal(PlaybackHistoryLinkStatus.None, entry.LinkStatus);
+    }
+
+    [Fact]
+    public async Task DatingAnUnownedMarkRemovesNothingRemotely()
+    {
+        // Nothing here is this app's to delete — an unresolved add, or a mark another client made — so
+        // the exact play is stated and the remote mark is left alone.
+        Connect();
+        var mark = AddTimelessPlay(remoteId: "111", owned: true, link: PlaybackHistoryLinkStatus.Unresolved);
+
+        await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
+
+        var queued = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
+        Assert.Equal(WatchHistoryOutboxOperation.AddExactWatch, queued.Operation);
+    }
+
+    [Fact]
+    public async Task WithoutAConnectionDatingAMarkQueuesNothing()
+    {
+        var mark = AddTimelessPlay(remoteId: "111", owned: true);
         AddRow(playCount: 1, played: true, lastWatchedAt: null);
 
         await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
@@ -562,7 +610,11 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         return entry;
     }
 
-    private PlaybackHistoryEntry AddTimelessPlay(int? appUserId = null)
+    private PlaybackHistoryEntry AddTimelessPlay(
+        int? appUserId = null,
+        string? remoteId = null,
+        bool owned = false,
+        PlaybackHistoryLinkStatus link = PlaybackHistoryLinkStatus.Resolved)
     {
         var entry = new PlaybackHistoryEntry
         {
@@ -572,7 +624,10 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
             CreatedAt = _time.GetUtcNow(),
             WatchedAt = null,
             Origin = PlaybackHistoryOrigin.Manual,
-            LinkStatus = PlaybackHistoryLinkStatus.None,
+            ProviderKey = remoteId is null ? null : "trakt",
+            ProviderHistoryId = remoteId,
+            ProviderEntryOwned = owned,
+            LinkStatus = remoteId is null ? PlaybackHistoryLinkStatus.None : link,
         };
         _database.PlaybackHistoryEntries.Add(entry);
         _database.SaveChanges();

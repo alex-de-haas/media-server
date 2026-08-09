@@ -58,9 +58,16 @@ public sealed class WatchHistoryEntryService(MediaServerDbContext database, Watc
             row.LastWatchedAt = watchedAt;
         }
 
-        // Nothing is queued for the provider. EnsureTimelessWatched was delivered for this mark when it
-        // was made; re-posting it as an exact play would leave the account holding the same viewing
-        // twice, and the timeless mark this app owns is the one it would then no longer be able to name.
+        // The provider is told, when there is one: it holds this play as timeless, and leaving it that
+        // way would have the next explicit sync import the undated mark straight back. Staged before the
+        // save so the stamped entry and the outbound intent commit together.
+        var item = await database.MediaItems.FirstOrDefaultAsync(
+            media => media.Id == entry.MediaItemId, cancellationToken);
+        if (item is not null)
+        {
+            await recorder.StageMarkDatedAsync(appUserId, item, row, entry, watchedAt, cancellationToken);
+        }
+
         await database.SaveChangesAsync(cancellationToken);
         return SetWatchedAtStatus.Updated;
     }

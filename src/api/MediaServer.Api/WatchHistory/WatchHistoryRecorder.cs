@@ -167,6 +167,57 @@ public sealed class WatchHistoryRecorder(
     }
 
     /// <summary>
+    /// Records that an undated mark now has a time: the remote timeless mark this app owns is retired
+    /// and the play is re-stated as an exact one.
+    /// </summary>
+    /// <remarks>
+    /// Two events rather than one, because "watched, time unknown" and "watched at T" are different
+    /// claims and the provider holds the first. Adding without removing would leave the account with
+    /// the same viewing twice — and the next explicit sync would import that timeless mark straight
+    /// back into the undated list the user just emptied. They are independent (a removal is addressed
+    /// by remote id, an add by identity and instant), so their delivery order does not matter.
+    ///
+    /// The caller has already stamped <paramref name="entry"/>; this clears the link it carried,
+    /// because after the removal there is no remote entry left for it to name.
+    /// </remarks>
+    public async Task StageMarkDatedAsync(
+        int appUserId, MediaItem item, UserItemData? row, PlaybackHistoryEntry entry, DateTimeOffset watchedAt,
+        CancellationToken cancellationToken)
+    {
+        // An Unresolved link is excluded for the reason it always is: the add committed but its id was
+        // never pinned down, and removing on a guess destroys history this app did not create. The
+        // remote timeless mark then survives, and a later sync can re-import it.
+        var remoteId = entry is { ProviderEntryOwned: true, ProviderHistoryId: { } id }
+            && entry.LinkStatus != PlaybackHistoryLinkStatus.Unresolved
+                ? id
+                : null;
+
+        var identity = await identities.MapAsync(item, cancellationToken);
+
+        if (remoteId is not null)
+        {
+            entry.ProviderKey = null;
+            entry.ProviderHistoryId = null;
+            entry.ProviderEntryOwned = false;
+            entry.LinkStatus = PlaybackHistoryLinkStatus.None;
+
+            await StageOutboxAsync(
+                appUserId, item, row, entry: null, WatchHistoryOutboxOperation.RemoveOwnedEntries,
+                identity, occurredAt: null,
+                // Distinct from the add below by operation, and from a later deletion of this same entry
+                // by nothing — but that deletion now finds no owned id to remove and queues nothing at
+                // all, so the two cannot collide.
+                discriminator: entry.Id.ToString("N"),
+                cancellationToken,
+                remoteIdSnapshot: JsonSerializer.Serialize(new[] { remoteId }));
+        }
+
+        await StageOutboxAsync(
+            appUserId, item, row, entry, WatchHistoryOutboxOperation.AddExactWatch, identity, watchedAt,
+            discriminator: entry.Id.ToString("N"), cancellationToken);
+    }
+
+    /// <summary>
     /// Records an explicit unwatch: drops the timeless entries this app created, keeps everything
     /// else, and asks the provider to remove only the entries it owns.
     /// </summary>

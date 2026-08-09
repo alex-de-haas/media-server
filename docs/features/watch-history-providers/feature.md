@@ -78,7 +78,9 @@ unwatch toggle is a different statement and drops only the timeless marks this a
 created — a play the user logged by hand survives it exactly as an observed play
 does. An entry is added on the user's say-so by
 [watch-history-manual-entries](../watch-history-manual-entries/feature.md), which
-posts it as an exact watch keyed on the entry rather than on the row.
+posts it as an exact watch keyed on the entry rather than on the row; giving an
+undated mark a time retires the owned timeless mark and re-states it as that exact
+play, so a later sync cannot import the undated one back.
 
 ## Provider boundary
 

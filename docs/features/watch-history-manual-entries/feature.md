@@ -117,10 +117,21 @@ uses — keyed on the **entry id**. A row-derived key would collide, because a
 second log changes no state on the row and the second event would be swallowed as
 a duplicate.
 
-Dating an existing mark queues **nothing**. `EnsureTimelessWatched` was already
-delivered for it; re-posting it as an exact play would leave the remote account
-holding the same viewing twice, and the timeless mark this app owns is the one it
-would then no longer be able to name.
+Dating an existing mark queues **two** events: `RemoveOwnedEntries` for the remote
+timeless mark, and `AddExactWatch` for the play it has become. "Watched, time
+unknown" and "watched at T" are different claims, and the provider holds the
+first — adding without removing would leave the account with the same viewing
+twice, and the next explicit sync would import that timeless mark straight back
+into the undated list the user just emptied. The two are independent (a removal is
+addressed by remote id, an add by identity and instant), so their delivery order
+does not matter. The local entry's link is cleared with them: after the removal
+there is no remote entry left for it to name.
+
+Only a mark this app **owns** is retired. An `Unresolved` link is left alone, as
+everywhere else — the add committed but its id was never pinned down, and removing
+on a guess destroys history this app did not create. The remote timeless mark then
+survives and a later sync can re-import it, which is the standing `Unresolved`
+limitation rather than a new one.
 
 As with every exact play, ownership of the remote entry is not resolved, so
 deleting a logged play later does not remove it remotely — the limitation
@@ -170,7 +181,9 @@ and any bulk backfill.
 - `WatchHistoryEntryServiceTests` covers dating: an undated mark taking its
   instant with the play count unmoved; the row learning the time, forwards only;
   an already-dated, unknown, or another user's entry refused and unchanged; a
-  future instant refused; and nothing queued for the provider.
+  future instant refused; an owned mark retired remotely and re-stated as an exact
+  play with its local link cleared; an `Unresolved` one only re-stated; and
+  nothing queued at all without a connection.
 - `WatchHistoryEndpointMappingTests` covers both routes' status mapping,
   including that an unknown and a foreign entry are indistinguishable.
 - `watch-time.test.ts` covers the conversion: a local ⇄ UTC round trip on both
