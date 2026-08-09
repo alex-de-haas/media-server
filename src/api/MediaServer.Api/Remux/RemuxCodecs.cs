@@ -25,14 +25,20 @@ internal static class RemuxCodecs
             || probeCodec.Equals("aac", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// The same answer, for a Matroska <c>CodecID</c> — and stricter for AAC, whose descriptor is built
-    /// from <c>CodecPrivate</c> rather than from a frame. A track that arrived without one cannot be
-    /// described at all, so it must not be walked or chosen either.
+    /// The same answer, for a Matroska <c>CodecID</c> — and stricter for AAC, which is described from
+    /// <c>CodecPrivate</c> rather than from a frame.
+    ///
+    /// The config is not merely required to be present, it is <em>parsed</em>, by the same routine that
+    /// would later build the descriptor. Asking a cheaper question — "is there a config at all" — would
+    /// answer yes for an explicitly signalled SBR stream that
+    /// <see cref="Mp4Writer.DescribeAac"/> then declines, and the track would be walked, chosen, and
+    /// finally dropped: a film with a picture and no sound. That is the one failure this type exists to
+    /// prevent, so the two ask the identical question.
     /// </summary>
     internal static bool CanPackageAudio(IndexedTrack track) => track.CodecId switch
     {
         "A_AC3" or "A_EAC3" => true,
-        "A_AAC" => track.CodecPrivate is not null,
+        "A_AAC" => track.CodecPrivate is { } config && Mp4Writer.DescribeAac(config) is not null,
         _ => false,
     };
 

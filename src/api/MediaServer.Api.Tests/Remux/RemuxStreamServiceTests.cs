@@ -445,6 +445,29 @@ public sealed class RemuxStreamServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task An_aac_config_the_descriptor_would_decline_is_refused_before_anything_is_served()
+    {
+        // Explicitly signalled SBR: a config is present, so a check for mere presence would pass it, and
+        // the track would be walked, chosen, and then dropped by the synthesiser — a picture and no
+        // sound. The packageability question and the descriptor ask the same thing, so it is refused
+        // here instead.
+        var id = Seed(content: ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AAC", codecPrivate: [0x29, 0x90], channels: 2)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(20, 0x11)),
+                SimpleBlock(2, 0, true, Frame(300, 0x22)))));
+
+        var (stream, refusal) = await OpenAsync(id);
+
+        Assert.Null(stream);
+        Assert.Equal(RemuxRefusal.NotPackageable, refusal);
+    }
+
+    [Fact]
     public async Task A_source_with_no_picture_at_all_is_not_caught_by_that_rule()
     {
         // An audio-only Matroska has nothing to describe wrongly. The refusal above is for a source that

@@ -236,9 +236,20 @@ The audio one is why what packaging can describe lives in **one** place, in both
 vocabularies that ask: the resolver reasons in the probe's names and the synthesiser in
 Matroska's, and when they drifted the result was a source advertised as remuxable whose
 only audio track was then quietly declined. Audio is AC-3, E-AC-3 and AAC; DTS, TrueHD
-and FLAC are out of scope for this client. The Matroska side is the stricter of the two
-for AAC, which is described from its `CodecPrivate` — a track without one cannot be
-described, so it is neither walked nor chosen.
+and FLAC are out of scope for this client.
+
+The Matroska side is the stricter of the two for AAC, and strict in a particular way: it
+does not ask whether a config is *present*, it **parses** it, with the same routine that
+would build the descriptor. Asking the cheaper question would answer yes for an
+explicitly signalled SBR stream that the descriptor then declines, and the track would be
+walked, chosen and finally dropped — the exact failure this shared vocabulary exists to
+prevent.
+
+One asymmetry remains, and it is stated rather than hidden: the resolver reasons about
+`aac` as a name and cannot see the config, so a source whose only AAC track is explicitly
+signalled SBR is still advertised and then refused at the request. The client meets a
+refusal instead of a silent film, which is the important half; the wasted round trip is
+the residual cost, and no such source is in this library.
 
 The same gap exists on the video axis and is closed the same way, in both places: the
 resolver refuses to advertise a URL it knows will fail, and the stream service refuses to

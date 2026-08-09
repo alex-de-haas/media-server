@@ -157,20 +157,25 @@ public sealed class MatroskaIndexerTests
     }
 
     [Fact]
-    public void An_aac_track_is_walked_only_when_it_brought_its_configuration()
+    public void An_aac_track_is_walked_only_when_its_configuration_can_be_described()
     {
-        // A_AAC is described from CodecPrivate — it *is* the AudioSpecificConfig — so a track without one
-        // could never be pointed at, and walking its frames would be bytes for nothing.
+        // A_AAC is described from CodecPrivate — it *is* the AudioSpecificConfig — so the walk asks the
+        // same question the synthesiser will: not "is there a config" but "can this config be written".
+        // Track 2 is LC at 48 kHz stereo; track 3 has none at all; track 4 declares explicit SBR, which
+        // is refused. Walking either of the last two would be bytes nothing could ever point at.
         var index = Index(File(
             Tracks(
                 TrackEntry(2, 2, "A_AAC", codecPrivate: [0x11, 0x90], channels: 2),
-                TrackEntry(3, 2, "A_AAC", channels: 2)),
+                TrackEntry(3, 2, "A_AAC", channels: 2),
+                TrackEntry(4, 2, "A_AAC", codecPrivate: [0x29, 0x90], channels: 2)),
             Cluster(0,
                 SimpleBlock(2, 0, true, Frame(300, 0x01)),
-                SimpleBlock(3, 0, true, Frame(300, 0x02)))));
+                SimpleBlock(3, 0, true, Frame(300, 0x02)),
+                SimpleBlock(4, 0, true, Frame(300, 0x03)))));
 
         Assert.Single(index.Track(2)!.Samples);
         Assert.Empty(index.Track(3)!.Samples);
+        Assert.Empty(index.Track(4)!.Samples);
     }
 
     [Fact]
