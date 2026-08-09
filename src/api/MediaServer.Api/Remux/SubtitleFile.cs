@@ -34,8 +34,9 @@ internal static partial class SubtitleFile
                 return [];
             }
 
-            // Subtitle files are routinely written with a byte-order mark and occasionally in a legacy
-            // encoding; detection covers the first and gets the common cases of the second.
+            // UTF-8, with a byte-order mark honoured if one is there. A file in a legacy single-byte
+            // encoding is read as UTF-8 and its accented characters come out wrong; that is a real gap
+            // and not something this pretends to handle.
             var text = File.ReadAllText(path, Encoding.UTF8);
             var extension = Path.GetExtension(path).ToLowerInvariant();
             var cues = extension is ".ass" or ".ssa" ? ReadAss(text) : ReadSubRip(text);

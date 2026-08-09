@@ -71,6 +71,11 @@ public sealed class RemuxStreamService(
             stream.Id == audioStreamId && stream.IsExternal && stream.Type == StreamType.Audio);
 
         var opened = new List<Stream>();
+        // Every file the answer is made of, so a cache validator can cover all of them and not just the
+        // video: a dub replaced by one of the same length, or a subtitle file edited in place, changes
+        // what is served without changing anything about the source.
+        var carried = new List<(Guid Id, FileInfo File)>();
+
         try
         {
             var inputs = new List<Mp4Synthesizer.Input>();
@@ -85,7 +90,6 @@ public sealed class RemuxStreamService(
                 tracks.Add(new Mp4Synthesizer.TrackRef(0, video.Number));
             }
 
-            var sidecarLength = 0L;
             if (sidecar is not null)
             {
                 // The sidecar's own index is keyed by its stream row, and is built by the same worker.
@@ -116,7 +120,7 @@ public sealed class RemuxStreamService(
                 opened.Add(sidecarStream);
                 inputs.Add(new Mp4Synthesizer.Input(sidecarIndex, sidecarStream));
                 tracks.Add(new Mp4Synthesizer.TrackRef(1, dub.Number));
-                sidecarLength = sidecarIndex.SourceLength;
+                carried.Add((sidecar.Id, new FileInfo(sidecarPath)));
             }
             else
             {
@@ -155,6 +159,7 @@ public sealed class RemuxStreamService(
                 if (cues.Count > 0)
                 {
                     externalText.Add((cues, textSidecar.Language));
+                    carried.Add((textSidecar.Id, new FileInfo(textPath)));
                 }
             }
 
@@ -166,13 +171,32 @@ public sealed class RemuxStreamService(
             }
 
             var file = new FileInfo(absolute);
-            // The tag covers everything the answer depends on — the file, the tracks, the signalling, and
-            // the sidecar if one is carried. A viewer switching dub gets a different body, so it must get
-            // a different tag.
-            var etag = new EntityTagHeaderValue(
-                $"\"{mediaSourceId:N}-{file.Length:x}-{file.LastWriteTimeUtc.Ticks:x}"
-                + $"-{string.Join('.', tracks.Select(track => $"{track.Input}:{track.Number}"))}"
-                + $"-{sidecarLength:x}-{signalling}\"");
+            // The tag covers everything the answer is made of: the source, the tracks chosen, the
+            // signalling asked for, and every sidecar carried with it. A viewer switching dub gets a
+            // different body, and so does one whose subtitle file was edited — both must get a different
+            // tag, or a conditional request is answered 304 with the old audio or the old words.
+            var validator = new System.Text.StringBuilder()
+                .Append(mediaSourceId.ToString("N"))
+                .Append('-').Append(file.Length.ToString("x"))
+                .Append('-').Append(file.LastWriteTimeUtc.Ticks.ToString("x"))
+                .Append('-').Append(string.Join('.', tracks.Select(track => $"{track.Input}:{track.Number}")))
+                .Append('-').Append(signalling);
+
+            var lastModified = file.LastWriteTimeUtc;
+            foreach (var (id, info) in carried)
+            {
+                validator.Append('-').Append(id.ToString("N"))
+                    .Append(':').Append(info.Length.ToString("x"))
+                    .Append(':').Append(info.LastWriteTimeUtc.Ticks.ToString("x"));
+
+                // The freshest of everything served, not merely of the video.
+                if (info.LastWriteTimeUtc > lastModified)
+                {
+                    lastModified = info.LastWriteTimeUtc;
+                }
+            }
+
+            var etag = new EntityTagHeaderValue($"\"{validator}\"");
 
             // The wrapper of every input after the first sits between the files, which is where the
             // sample offsets expect it. Nothing else knows to put it there.
@@ -188,7 +212,7 @@ public sealed class RemuxStreamService(
                     new SynthesizedMp4Stream(built.Header, parts),
                     "video/mp4",
                     etag,
-                    file.LastWriteTimeUtc),
+                    lastModified),
                 RemuxRefusal.Unknown);
         }
         catch

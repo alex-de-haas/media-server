@@ -282,4 +282,100 @@ public sealed class RemuxStreamServiceTests : IDisposable
         _connection.Dispose();
         Directory.Delete(_root, recursive: true);
     }
+
+    [Fact]
+    public async Task The_tag_changes_when_a_subtitle_beside_the_video_is_edited()
+    {
+        var id = Seed();
+        var subtitle = Guid.NewGuid();
+        var path = Path_("film.eng.srt");
+        File.WriteAllText(path, "1\n00:00:01,000 --> 00:00:02,000\nBefore\n");
+        _database.MediaStreams.Add(new MediaStream
+        {
+            Id = subtitle,
+            MediaSourceId = id,
+            StreamType = StreamType.Subtitle,
+            Index = 98,
+            Codec = "subrip",
+            IsExternal = true,
+            ExternalPath = "film.eng.srt",
+        });
+        _database.SaveChanges();
+
+        var (first, _) = await OpenAsync(id, subtitle: subtitle);
+        Assert.NotNull(first);
+        using (first.Content)
+        {
+        }
+
+        // Same length, different words, and a later timestamp: the body changes and a conditional
+        // request must not be told nothing did.
+        File.WriteAllText(path, "1\n00:00:01,000 --> 00:00:02,000\nAfterx\n");
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddHours(1));
+
+        var (second, _) = await OpenAsync(id, subtitle: subtitle);
+        Assert.NotNull(second);
+        using (second.Content)
+        {
+        }
+
+        Assert.NotEqual(first.ETag.Tag.Value, second.ETag.Tag.Value);
+        // And the answer is as fresh as the freshest thing in it, not merely as the video.
+        Assert.True(second.LastModified > first.LastModified);
+    }
+
+    [Fact]
+    public async Task The_tag_changes_when_a_dub_is_replaced_by_one_of_the_same_length()
+    {
+        var id = Seed();
+        var dub = Guid.NewGuid();
+        var dubPath = Path_("film.rus.mka");
+        var dubFile = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B, TrackEntry(1, 2, "A_AC3", channels: 6)),
+            Cluster(0, SimpleBlock(1, 0, true, Ac3Frame(300))));
+
+        void WriteDub()
+        {
+            File.WriteAllBytes(dubPath, dubFile);
+            using var stream = File.OpenRead(dubPath);
+            _store.Save(dub, dubPath, MatroskaIndexer.Build(stream));
+        }
+
+        WriteDub();
+        _database.MediaStreams.Add(new MediaStream
+        {
+            Id = dub,
+            MediaSourceId = id,
+            StreamType = StreamType.Audio,
+            Index = 99,
+            Codec = "ac3",
+            IsExternal = true,
+            ExternalPath = "film.rus.mka",
+        });
+        _database.SaveChanges();
+
+        var (first, _) = await OpenAsync(id, audio: dub);
+        Assert.NotNull(first);
+        using (first.Content)
+        {
+        }
+
+        // A different dub that happens to be the same size — nothing about the source changed, and the
+        // length alone would not tell the two apart.
+        WriteDub();
+        File.SetLastWriteTimeUtc(dubPath, DateTime.UtcNow.AddHours(1));
+        using (var stream = File.OpenRead(dubPath))
+        {
+            _store.Save(dub, dubPath, MatroskaIndexer.Build(stream));
+        }
+
+        var (second, _) = await OpenAsync(id, audio: dub);
+        Assert.NotNull(second);
+        using (second.Content)
+        {
+        }
+
+        Assert.NotEqual(first.ETag.Tag.Value, second.ETag.Tag.Value);
+    }
 }

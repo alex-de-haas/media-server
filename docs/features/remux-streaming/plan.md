@@ -482,6 +482,12 @@ Two operational facts worth keeping, both of which cost time to find:
       frame duration is read from the blocks it carries rather than assumed to be
       1536. Verified on an Atmos track — repackaged, still reported as Dolby Digital
       Plus with Atmos, and decoding.
+- [ ] **E-AC-3 with dependent substreams.** A unit carrying extra channels in dependent
+      substreams needs their `chanmap` read, the channel count adjusted and `chan_loc`
+      written; until then such a track is left out rather than advertised as its base
+      layout. Nothing in this library uses them.
+- [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
+      single-byte-encoded file comes out with its accents wrong.
 - [ ] **AAC**, which needs `mp4a` with an `esds` carrying the audio specific config.
       Nothing in this library uses it, but a client that declares AAC support would
       otherwise be offered a remux with no sound — which is why a source whose only

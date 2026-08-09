@@ -173,15 +173,29 @@ internal static class Mp4Writer
             at += next.FrameBytes;
         }
 
-        var sampleRate = first.Fscod < 3
-            ? Ac3SampleRates[first.Fscod]
-            : Eac3HalfRates[Math.Min(first.Fscod2, 2)];
+        if (first.Fscod == 3 && first.Fscod2 > 2)
+        {
+            // fscod2 has three defined values; the fourth is reserved. Reading it as the lowest rate
+            // would describe the stream at a rate it does not have.
+            return null;
+        }
+
+        var sampleRate = first.Fscod < 3 ? Ac3SampleRates[first.Fscod] : Eac3HalfRates[first.Fscod2];
         var samplesPerFrame = Eac3Blocks[first.NumBlocksCode] * 256;
         var dataRate = (int)(first.FrameBytes * 8L * sampleRate / samplesPerFrame / 1000);
 
+        if (dependents > 0)
+        {
+            // A dependent substream carries extra channels, and describing them means reading its
+            // chanmap and adding them to the count. Until that is written, saying "5.1" about a 7.1
+            // stream — or writing a chan_loc of zero beside a nonzero num_dep_sub — would be a
+            // description a player is entitled to believe. Better to carry no such track at all.
+            return null;
+        }
+
         // dec3: data_rate (13) num_ind_sub (3), then per independent substream fscod (2) bsid (5)
         // reserved (1) asvc (1) bsmod (3) acmod (3) lfeon (1) reserved (3) num_dep_sub (4), and a
-        // reserved bit when there are no dependents.
+        // reserved bit when there are none.
         var writer = new BitWriter();
         writer.Write(Math.Min(dataRate, 0x1FFF), 13);
         writer.Write(0, 3);                         // one independent substream, stored as N-1
@@ -193,15 +207,8 @@ internal static class Mp4Writer
         writer.Write(first.Acmod, 3);
         writer.Write(first.Lfeon, 1);
         writer.Write(0, 3);                         // reserved
-        writer.Write(dependents, 4);
-        if (dependents == 0)
-        {
-            writer.Write(0, 1);                     // reserved
-        }
-        else
-        {
-            writer.Write(0, 9);                     // chan_loc: the dependent channels are not described
-        }
+        writer.Write(0, 4);                         // num_dep_sub: none, or the track was refused above
+        writer.Write(0, 1);                         // reserved
 
         return new Eac3Description(
             writer.ToArray(),
@@ -241,7 +248,8 @@ internal static class Mp4Writer
         var lfeon = bits.Read(1);
         var bsid = bits.Read(5);
 
-        // E-AC-3 is bitstream id 16; anything else read this way is not one.
+        // Annex E defines bitstream ids 11 through 16 for E-AC-3, and 16 is what everything writes;
+        // anything outside that range read this way is not an E-AC-3 frame at all.
         return bsid is < 11 or > 16 || frameSize <= 0
             ? null
             : new Eac3Sync(streamType, frameSize, fscod, fscod2, numBlocksCode, acmod, lfeon, bsid);

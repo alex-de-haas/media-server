@@ -87,11 +87,15 @@ own parameters — so `dac3` and `dec3` are read out of a sync frame rather than
 from the container.
 
 E-AC-3 is not AC-3 with a different name. Its access unit may hold several substreams,
-one independent and then any dependent ones carrying extra channels, which are walked by
-their stated sizes so `dec3` can say how many there are. And a frame is **not** always
-1536 samples: it carries one, two, three or six blocks of 256, so the duration is read
-rather than assumed. Atmos rides on E-AC-3 and survives untouched, because the samples
-are the same bytes.
+one independent and then any dependent ones carrying extra channels; they are walked by
+their stated sizes, and a unit that has dependents is **left out** rather than described
+as its base layout, because saying "5.1" about a 7.1 stream is a claim a player is
+entitled to believe. A frame is also **not** always 1536 samples: it carries one, two,
+three or six blocks of 256. The count is read from the frame, and read again over a
+spread of the track — a stream that varies it is refused rather than given a timeline
+built on its first frame, which would drift for the whole of its length.
+
+Atmos rides on E-AC-3 and survives untouched, because the samples are the same bytes.
 
 - **Dolby Vision** is offered as a `dvh1` sample entry, and only for HEVC that came with
   a configuration, and only when the client asked. The cross-compatible `hvc1` form
@@ -141,6 +145,11 @@ untouched source are presented as one seekable stream, so byte ranges are handle
 framework's own file result — which matters, because AVFoundation refuses a server that
 will not declare a total length, and reads a truncated answer to an explicit range as a
 failed request rather than a smaller one.
+
+The `ETag` covers everything the answer is made of — the source, the tracks chosen, the
+signalling asked for, and every sidecar carried with it — and `Last-Modified` is the
+freshest of them. A subtitle file edited in place changes the body without changing
+anything about the source, and a conditional request must not be told otherwise.
 
 `POST /native/v1/playback/resolve` decides. Beside the existing `Decision` it now carries
 a **`Transport`** — `byteRange` today — because HLS would be another way to deliver a

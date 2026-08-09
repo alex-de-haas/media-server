@@ -292,7 +292,16 @@ internal static class Mp4Synthesizer
             entryName = "ec-3";
             entry = AudioEntry("ec-3", "dec3", eac3.Dec3, eac3.SampleRate, eac3.Channels);
             sampleRate = eac3.SampleRate;
-            // Not always 1536: an E-AC-3 frame carries one, two, three or six blocks of 256 samples.
+            // Not always 1536: an E-AC-3 frame carries one, two, three or six blocks of 256 samples, and
+            // nothing forbids a stream from varying it. Every frame is not read — that would be a seek per
+            // sample on every request — but enough of them are read to know the answer is the same
+            // throughout. A stream that varies is refused rather than given a timeline built on the
+            // first frame, which would drift for the whole of its length.
+            if (!SameThroughout(track, source, eac3.SamplesPerFrame))
+            {
+                return null;
+            }
+
             frameSamples = eac3.SamplesPerFrame;
         }
         else
@@ -471,6 +480,33 @@ internal static class Mp4Synthesizer
     /// </summary>
     private static bool Representable(IReadOnlyList<long> values) =>
         values.All(value => value is >= int.MinValue and <= uint.MaxValue);
+
+    /// <summary>
+    /// Whether every E-AC-3 frame carries as many blocks as the first, checked over a spread of the track
+    /// rather than over all of it: a constant answer is what every real stream gives, and a seek per
+    /// sample on every playback request is not worth paying to confirm it.
+    /// </summary>
+    private static bool SameThroughout(IndexedTrack track, Stream source, int expected)
+    {
+        const int Probes = 64;
+        var step = Math.Max(1, track.Samples.Count / Probes);
+        var buffer = new byte[64];
+
+        for (var i = 0; i < track.Samples.Count; i += step)
+        {
+            var sample = track.Samples[i];
+            var length = Math.Min(buffer.Length, sample.Size);
+            source.Position = sample.Offset;
+            source.ReadExactly(buffer, 0, length);
+
+            if (DescribeEac3(buffer.AsSpan(0, length)) is not { } frame || frame.SamplesPerFrame != expected)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static byte[] VideoEntry(IndexedTrack track, string entryName, string configurationBox)
     {
