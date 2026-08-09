@@ -35,8 +35,12 @@ public sealed class LibraryReadService(
             query = query.Where(item => item.Kind == requested);
         }
 
-        var items = await query.OrderBy(item => item.Title).ToListAsync(cancellationToken);
-        return await ProjectItemsAsync(items, appUserId, cancellationToken);
+        // Ordered after projection, not in SQL: the card renders the localized metadata title, while
+        // MediaItem.Title is whatever language the item was matched in at ingest. Sorting the raw column
+        // would leave the list in an order the rendered names do not explain.
+        var items = await query.ToListAsync(cancellationToken);
+        var cards = await ProjectItemsAsync(items, appUserId, cancellationToken);
+        return cards.OrderBy(card => card.Title, MetadataLanguage.TitleOrder(settings.PreferredLanguage)).ToList();
     }
 
     /// <summary>Most recently published top-level items (movies/series), newest first — the Recently Added rail.</summary>
@@ -501,14 +505,8 @@ public sealed class LibraryReadService(
         return records.Count == 0 ? null : PickLanguage(records);
     }
 
-    private MetadataRecord PickLanguage(List<MetadataRecord> records)
-    {
-        var preferred = settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
-        var prefix = preferred.Length >= 2 ? preferred[..2] : preferred;
-        return records.FirstOrDefault(record => string.Equals(record.Language, preferred, StringComparison.OrdinalIgnoreCase))
-            ?? records.FirstOrDefault(record => record.Language.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            ?? records[0];
-    }
+    private MetadataRecord PickLanguage(List<MetadataRecord> records) =>
+        MetadataLanguage.Pick(records, settings.PreferredLanguage, record => record.Language);
 
     /// <summary>The item's TMDb id (for episodes/seasons this is the series id, which is how they're identified).</summary>
     private static string? TmdbId(MediaItem item) =>
@@ -535,7 +533,7 @@ public sealed class LibraryReadService(
             return null;
         }
 
-        var preferred = settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
+        var preferred = settings.PreferredLanguage;
         var prefix = preferred.Length >= 2 ? preferred[..2] : preferred;
 
         string? Pick(string? language) => logos
