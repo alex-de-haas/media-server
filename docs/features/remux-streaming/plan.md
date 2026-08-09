@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-05
-Updated: 2026-08-08
+Updated: 2026-08-09
 
 > Part of the [Apple client](../apple-client/plan.md) epic, and the last server
 > piece before a client can play the library.
@@ -120,8 +120,8 @@ ranges. This is not two paths at twice the cost; it is one engine with two outpu
 
 | Transport | Dolby Vision | Ships |
 | --- | --- | --- |
-| **MP4 over byte ranges** | **yes** | first, with the index |
-| **HLS** | no — HDR10 only | second, over the same index |
+| **MP4 over byte ranges** | **yes** | shipped |
+| **HLS** | no — HDR10 only | **deferred, deliberately** — see below |
 
 ### Why the index and MP4 come first
 
@@ -139,6 +139,24 @@ instead of managing it.
 
 HLS keeps its place as the second transport, rendered from the same sample table, for
 clients and situations where HDR10 is the answer.
+
+### HLS is deferred, and this is the decision the plan asked for
+
+Decided on 2026-08-09. The MP4 transport works, carries Dolby Vision, and has been
+verified end to end on the hardware it is for. **HLS may turn out never to be needed**,
+and building a second transport for a client that does not exist yet would be building
+against a guess.
+
+An earlier revision of this plan wrote down the opposite risk — that once HLS shipped
+and nobody complained, the index path might quietly never be built and Dolby Vision
+never arrive — and asked that the outcome be *chosen out loud rather than discovered
+later*. This is that choice, in the other direction: what shipped is the transport with
+Dolby Vision, and the one without it is deferred until something actually asks for it.
+
+What would ask for it: a client that cannot open a plain MP4 over byte ranges, or a
+delivery situation where addressing by time beats addressing by byte. Neither exists
+today. The deliverables below stay unchecked rather than being deleted, because the
+work is real if that changes — and the index they would render from is already built.
 
 ### The index, and what it feeds
 
@@ -343,9 +361,32 @@ rewriting rather than encoding tooling, so they do not change the answer.
       index, so the outstanding work is a query and a restart resumes without
       remembering anything. Orphaned indexes are pruned once per process, since
       nothing else removes a file when its title is deleted.
-- [ ] **Measured on a real film from the slow disk**: how long the walk takes and
-      how much of the file it has to touch. On the dev SSD a 26.37 GB film costs
-      32.6 s and a 8.32 GB one 14.4 s; the spinning disk is still unmeasured.
+- [x] **Measured on a real film from the slow disk** — taken as an *observation on
+      production* rather than as a test, decided on 2026-08-09, and answered by the
+      first production run the same day. 26 films in 57 minutes back to back: a median
+      of 97 s each, a mean of 131 s.
+
+      **The walk is not disk-bound**, which is the opposite of what this deliverable
+      predicted. Two files of near-identical sample count — 2.81 M on an SSD, 2.82 M on
+      the spinning disk — took 204.5 s and 162.3 s, the HDD *faster*; normalised, the
+      two HDD files sit at 17.4 k and 20.0 k samples a second against an SSD median of
+      19.7 k. The remedy held in reserve here, a sequential read with a large buffer
+      instead of seeking past every payload, would have addressed a bottleneck that is
+      not there, and is dropped rather than kept waiting.
+
+      Two caveats, stated rather than buried: only two files in that sample were on the
+      HDD, and the log line did not yet carry file sizes, so the comparison is by sample
+      count and not by bytes. It carries them now, along with the codecs it passed over,
+      which is what will settle it properly on the next run.
+
+      What the run did surface was the index footprint — 1.2 GB over 147 files, 43 % of
+      it in four — which is the deliverable below.
+- [x] **Only describable tracks are walked.** Added 2026-08-09, out of the measurement
+      above. A sample table for a track no sample entry can be written for is bytes
+      nobody can ever point at: one film's TrueHD track was 96 % of its own index. The
+      track stays listed so ordinals and refusal reasons still line up; its frames are
+      not recorded. `RemuxCodecs.WantsSamples` answers this once for the walk and the
+      synthesiser both, and the index format goes to v3 so every stored index rebuilds.
 - [x] **Unit tests** over crafted Matroska written by hand — all three lacing forms,
       block groups whose keyframe answer is the absence of a `ReferenceBlock` rather
       than a flag, and a lacing header that does not add up. ffmpeg cannot produce a

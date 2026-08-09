@@ -280,8 +280,40 @@ public sealed class Mp4SynthesizerTests
         var built = Build(file);
 
         // DTS is not something an MP4 track can be written for here, so it is dropped rather than
-        // described wrongly.
+        // described wrongly. End to end the walk now also declines to record its frames, which is why the
+        // next test reaches this guard the only way left — with an index built by hand.
         Assert.Equal(["hvc1"], built.Result.SampleEntries);
+    }
+
+    [Fact]
+    public void An_undescribable_track_that_reached_the_synthesiser_anyway_is_still_refused()
+    {
+        // The walk no longer records frames for a codec no sample entry covers, so this index could not
+        // come out of it. The guard is kept for the paths that do not go through the walk — a hand-built
+        // index, or a codec added to one vocabulary and forgotten in the other, which is exactly the drift
+        // that once produced a container with a picture and no sound.
+        var index = new MatroskaIndex { SourceLength = 4096, TimestampScale = 1_000_000 };
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video,
+            CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = Hvcc, Width = 8, Height = 8,
+            DefaultDuration = 40_000_000,
+        });
+        index.Track(1)!.Samples.Add(new IndexedSample(0, 0, 10, true));
+
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Audio, CodecId = "A_DTS", Channels = 6,
+        });
+        index.Track(2)!.Samples.Add(new IndexedSample(0, 16, 40, true));
+
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(index, new MemoryStream(new byte[4096]))],
+            [new Mp4Synthesizer.TrackRef(0, 1), new Mp4Synthesizer.TrackRef(0, 2)],
+            VideoSignalling.CrossCompatible);
+
+        Assert.NotNull(result);
+        Assert.Equal(["hvc1"], result.SampleEntries);
     }
 
     [Fact]

@@ -12,8 +12,14 @@ public sealed class RemuxTrackChoiceTests
             Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video,
             CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = [0x01],
         });
-        index.Tracks.Add(new IndexedTrack { Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Audio });
-        index.Tracks.Add(new IndexedTrack { Number = 3, Ordinal = 2, Kind = IndexedTrackKind.Audio });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Audio, CodecId = "A_AC3",
+        });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 3, Ordinal = 2, Kind = IndexedTrackKind.Audio, CodecId = "A_EAC3",
+        });
         index.Tracks.Add(new IndexedTrack
         {
             Number = 9, Ordinal = 3, Kind = IndexedTrackKind.Subtitle, CodecId = "S_TEXT/UTF8",
@@ -90,9 +96,76 @@ public sealed class RemuxTrackChoiceTests
             Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Video,
             CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = [0x01],
         });
-        index.Tracks.Add(new IndexedTrack { Number = 3, Ordinal = 2, Kind = IndexedTrackKind.Audio });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 3, Ordinal = 2, Kind = IndexedTrackKind.Audio, CodecId = "A_AC3",
+        });
 
         Assert.Equal([2ul, 3ul], RemuxTrackChoice.Resolve(index, null, null));
+    }
+
+    [Fact]
+    public void An_audio_track_nothing_can_describe_is_not_taken_as_the_default()
+    {
+        var index = new MatroskaIndex { SourceLength = 1 };
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video,
+            CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = [0x01],
+        });
+        // A film that leads with its lossless track and keeps AC-3 behind it, which is the ordinary layout
+        // for anything remuxed from a disc. The resolver offers a remux because *an* audio track can be
+        // packaged; taking the first one regardless would deliver a picture and no sound.
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Audio, CodecId = "A_TRUEHD",
+        });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 3, Ordinal = 2, Kind = IndexedTrackKind.Audio, CodecId = "A_AC3",
+        });
+
+        Assert.Equal([1ul, 3ul], RemuxTrackChoice.Resolve(index, null, null));
+    }
+
+    [Fact]
+    public void Choosing_an_audio_track_nothing_can_describe_falls_back_to_one_that_plays()
+    {
+        var index = new MatroskaIndex { SourceLength = 1 };
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video,
+            CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = [0x01],
+        });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Audio, CodecId = "A_DTS",
+        });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 3, Ordinal = 2, Kind = IndexedTrackKind.Audio, CodecId = "A_AC3",
+        });
+
+        // The preference is real and current — it simply points at something no sample entry covers, which
+        // is the same situation as a preference that points nowhere.
+        Assert.Equal([1ul, 3ul], RemuxTrackChoice.Resolve(index, audioStreamIndex: 1, null));
+    }
+
+    [Fact]
+    public void A_source_whose_every_audio_track_is_undescribable_still_gives_its_video()
+    {
+        var index = new MatroskaIndex { SourceLength = 1 };
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video,
+            CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = [0x01],
+        });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Audio, CodecId = "A_TRUEHD",
+        });
+
+        Assert.Equal([1ul], RemuxTrackChoice.Resolve(index, null, null));
     }
 
     [Fact]

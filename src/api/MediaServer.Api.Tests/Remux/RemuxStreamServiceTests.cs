@@ -67,12 +67,14 @@ public sealed class RemuxStreamServiceTests : IDisposable
 
     private string Path_(string relative) => System.IO.Path.Combine(_root, "library", relative);
 
-    private Guid Seed(bool published = true, bool removed = false, bool onDisk = true, bool indexed = true)
+    private Guid Seed(
+        bool published = true, bool removed = false, bool onDisk = true, bool indexed = true,
+        byte[]? content = null)
     {
         const string relative = "film.mkv";
         if (onDisk)
         {
-            File.WriteAllBytes(Path_(relative), Film());
+            File.WriteAllBytes(Path_(relative), content ?? Film());
         }
 
         var itemId = Guid.NewGuid();
@@ -377,5 +379,43 @@ public sealed class RemuxStreamServiceTests : IDisposable
         }
 
         Assert.NotEqual(first.ETag.Tag.Value, second.ETag.Tag.Value);
+    }
+
+    [Fact]
+    public async Task A_picture_that_cannot_be_described_is_refused_rather_than_served_without_it()
+    {
+        // AV1 with AC-3 beside it. The resolver asks whether the *client* can decode the picture, and a
+        // recent Apple TV can; this asks whether we can *write* its sample entry, and we cannot. Serving
+        // what is left would hand back a film that is nothing but its soundtrack.
+        var id = Seed(content: ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_AV1", codecPrivate: [0x81, 0x00], width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AC3", channels: 6)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(20, 0x11)),
+                SimpleBlock(2, 0, true, Ac3Frame(200)))));
+
+        var (stream, refusal) = await OpenAsync(id);
+
+        Assert.Null(stream);
+        Assert.Equal(RemuxRefusal.NotPackageable, refusal);
+    }
+
+    [Fact]
+    public async Task A_source_with_no_picture_at_all_is_not_caught_by_that_rule()
+    {
+        // An audio-only Matroska has nothing to describe wrongly. The refusal above is for a source that
+        // has a picture we cannot write, not for one that never had a picture.
+        var id = Seed(content: ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B, TrackEntry(2, 2, "A_AC3", channels: 6)),
+            Cluster(0, SimpleBlock(2, 0, true, Ac3Frame(200)))));
+
+        var (stream, _) = await OpenAsync(id);
+
+        Assert.NotNull(stream);
+        await stream.Content.DisposeAsync();
     }
 }

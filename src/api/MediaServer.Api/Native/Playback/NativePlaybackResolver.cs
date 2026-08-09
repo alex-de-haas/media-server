@@ -121,6 +121,25 @@ public sealed class NativePlaybackResolver(
                 Reason: null);
         }
 
+        // The client's support is not the question from here on: we have to write the sample entries, and
+        // what we can describe is a shorter list than what a client can decode. These come before the
+        // readiness check because they are permanent answers — a picture or a soundtrack nothing here can
+        // describe will not become describable when the walk reaches the file, and reporting "not yet"
+        // about a source that will never work is the more misleading of the two.
+        if (video is not null && !RemuxCodecs.CanPackageVideo(video.Codec))
+        {
+            // A remux with no picture is not a remux. AV1 is the case that reaches here: a recent Apple TV
+            // decodes it, so nothing on the client's side of the question ruled it out.
+            return Unsupported(NativePlaybackReasons.PackagingUnsupportedVideo);
+        }
+
+        // And one whose only audio track we cannot describe would play as a silent film.
+        if (!streams.Any(stream =>
+                stream.StreamType == StreamType.Audio && RemuxCodecs.CanPackageAudio(stream.Codec)))
+        {
+            return Unsupported(NativePlaybackReasons.PackagingUnsupportedAudio);
+        }
+
         // The codecs are fine and only the container is not, which is a packaging problem. Saying so
         // honestly beats offering a URL that will not open.
         if (readiness != RemuxReadinessState.Ready)
@@ -130,14 +149,6 @@ public sealed class NativePlaybackResolver(
             return Unsupported(readiness == RemuxReadinessState.Pending
                 ? NativePlaybackReasons.PackagingPending
                 : NativePlaybackReasons.PackagingUnavailable);
-        }
-
-        // The client's audio support is not the question here: we have to write the sample entry, and a
-        // remux whose only audio track we cannot describe would play as a silent film.
-        if (!streams.Any(stream =>
-                stream.StreamType == StreamType.Audio && RemuxCodecs.CanPackageAudio(stream.Codec)))
-        {
-            return Unsupported(NativePlaybackReasons.PackagingUnsupportedAudio);
         }
 
         var signalling = SignallingFor(video?.HdrFormat, profile);

@@ -7,7 +7,8 @@ namespace MediaServer.Api.Remux;
 /// <summary>
 /// Decides which sources want an index, builds them, and clears away the ones nothing points at any more.
 ///
-/// The walk costs half a minute on a feature film, which is why nothing here runs on a playback request:
+/// The walk costs a minute or two on a feature film — measured on production, not on a laptop — which is
+/// why nothing here runs on a playback request:
 /// <see cref="RemuxIndexWorker"/> drives it in the background, and a viewer who presses play either finds an
 /// index waiting or is told the source is not ready yet.
 /// </summary>
@@ -80,12 +81,24 @@ public sealed class RemuxIndexService(
             }
 
             store.Save(candidate.Key, candidate.AbsolutePath, index);
+
+            // Everything needed to answer the two questions this log exists for: whether the walk is bound
+            // by the disk it reads (bytes and rate, which the elapsed time alone could not say), and which
+            // codecs are being passed over (named, so the next reader does not have to infer them from a
+            // sample count the way the first one had to).
+            var elapsed = TimeProvider.System.GetElapsedTime(started);
+            var walked = index.Tracks.Where(RemuxCodecs.WantsSamples).ToList();
             logger.LogInformation(
-                "Indexed {Path} in {Elapsed:F1}s: {Tracks} tracks, {Samples} samples.",
+                "Indexed {Path} in {Elapsed:F1}s: {Bytes} bytes at {Rate:F0} MB/s, "
+                + "{Walked}/{Tracks} tracks, {Samples} samples; skipped {Skipped}.",
                 candidate.AbsolutePath,
-                TimeProvider.System.GetElapsedTime(started).TotalSeconds,
+                elapsed.TotalSeconds,
+                index.SourceLength,
+                index.SourceLength / Math.Max(0.001, elapsed.TotalSeconds) / (1024 * 1024),
+                walked.Count,
                 index.Tracks.Count,
-                index.Tracks.Sum(track => track.Samples.Count));
+                walked.Sum(track => track.Samples.Count),
+                Skipped(index));
             return true;
         }
         catch (OperationCanceledException)
@@ -99,6 +112,23 @@ public sealed class RemuxIndexService(
             logger.LogDebug(exception, "Could not index {Path}.", candidate.AbsolutePath);
             return false;
         }
+    }
+
+    /// <summary>
+    /// The codecs whose samples were passed over, counted by codec — <c>A_TRUEHD x1, A_DTS x3</c>. This is
+    /// the difference between knowing a file has fifty tracks and knowing what they are.
+    /// </summary>
+    private static string Skipped(MatroskaIndex index)
+    {
+        var groups = index.Tracks
+            .Where(track => !RemuxCodecs.WantsSamples(track))
+            .GroupBy(track => string.IsNullOrEmpty(track.CodecId) ? "unnamed" : track.CodecId)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => $"{group.Key} x{group.Count()}")
+            .ToList();
+
+        return groups.Count > 0 ? string.Join(", ", groups) : "nothing";
     }
 
     /// <summary>

@@ -52,7 +52,7 @@ public sealed class MatroskaIndexerTests
     public void Records_where_each_sample_lives_and_when_it_is_shown()
     {
         var file = File(
-            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", width: 8, height: 8)),
+            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01], width: 8, height: 8)),
             Cluster(1000,
                 SimpleBlock(1, 0, keyframe: true, Frame(40, 0xAA)),
                 SimpleBlock(1, 42, keyframe: false, Frame(17, 0xBB))));
@@ -80,7 +80,7 @@ public sealed class MatroskaIndexerTests
     {
         var frame = Frame(24, 0x5A);
         var file = File(
-            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", width: 8, height: 8)),
+            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01], width: 8, height: 8)),
             Cluster(0, SimpleBlock(1, 0, keyframe: true, frame)));
 
         var sample = Assert.Single(Assert.Single(Index(file).Tracks).Samples);
@@ -121,7 +121,7 @@ public sealed class MatroskaIndexerTests
     public void Ebml_lacing_becomes_one_sample_per_frame()
     {
         var index = Index(File(
-            Tracks(TrackEntry(3, 2, "A_DTS", channels: 6)),
+            Tracks(TrackEntry(3, 2, "A_EAC3", channels: 6)),
             Cluster(0, LacedSimpleBlock(3, 0, Lacing.Ebml,
                 Frame(120, 0x01), Frame(90, 0x02), Frame(45, 0x03)))));
 
@@ -131,10 +131,63 @@ public sealed class MatroskaIndexerTests
     }
 
     [Fact]
+    public void A_track_nothing_can_describe_is_listed_but_its_frames_are_not()
+    {
+        var index = Index(File(
+            Tracks(
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01], width: 8, height: 8),
+                TrackEntry(2, 2, "A_TRUEHD", channels: 8),
+                TrackEntry(3, 2, "A_AC3", channels: 6)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(20, 0x01)),
+                SimpleBlock(2, 0, true, Frame(4000, 0x02)),
+                SimpleBlock(3, 0, true, Frame(5, 0x03)))));
+
+        // The track stays: its ordinal is what keeps the viewer's stored stream indexes lined up with the
+        // file, and the resolver has to see it to explain why it cannot be used.
+        Assert.Equal(3, index.Tracks.Count);
+        Assert.Equal("A_TRUEHD", index.Track(2)!.CodecId);
+        Assert.Equal(1, index.Track(2)!.Ordinal);
+        Assert.Equal(8, index.Track(2)!.Channels);
+
+        // Its frames do not. On production one such track was 96 % of its film's index.
+        Assert.Empty(index.Track(2)!.Samples);
+        Assert.Single(index.Track(1)!.Samples);
+        Assert.Single(index.Track(3)!.Samples);
+    }
+
+    [Fact]
+    public void A_video_track_without_its_configuration_is_not_walked()
+    {
+        // The codec is one a sample entry could be written for, but the track came without the record that
+        // describes it — so nothing could ever point at these frames.
+        var index = Index(File(
+            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", width: 8, height: 8)),
+            Cluster(0, SimpleBlock(1, 0, true, Frame(20, 0x01)))));
+
+        Assert.Empty(Assert.Single(index.Tracks).Samples);
+    }
+
+    [Fact]
+    public void A_bitmap_subtitle_is_listed_but_not_walked()
+    {
+        var index = Index(File(
+            Tracks(
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01], width: 8, height: 8),
+                TrackEntry(4, 17, "S_HDMV/PGS")),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(20, 0x01)),
+                SimpleBlock(4, 0, true, Frame(600, 0x02)))));
+
+        Assert.Equal(2, index.Tracks.Count);
+        Assert.Empty(index.Track(4)!.Samples);
+    }
+
+    [Fact]
     public void An_unlaced_block_is_not_counted_as_laced()
     {
         var index = Index(File(
-            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", width: 8, height: 8)),
+            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01], width: 8, height: 8)),
             Cluster(0, SimpleBlock(1, 0, keyframe: true, Frame(12, 0xEE)))));
 
         Assert.Equal(0, Assert.Single(index.Tracks).LacedBlocks);
@@ -144,7 +197,7 @@ public sealed class MatroskaIndexerTests
     public void A_block_group_is_a_keyframe_exactly_when_it_references_nothing()
     {
         var index = Index(File(
-            Tracks(TrackEntry(1, 1, "V_MPEG4/ISO/AVC", width: 8, height: 8)),
+            Tracks(TrackEntry(1, 1, "V_MPEG4/ISO/AVC", codecPrivate: [0x01], width: 8, height: 8)),
             Cluster(0,
                 BlockGroup(1, 0, references: false, Frame(30, 0x01)),
                 BlockGroup(1, 40, references: true, Frame(11, 0x02)))));
@@ -159,7 +212,7 @@ public sealed class MatroskaIndexerTests
     {
         var index = Index(File(
             Tracks(
-                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", width: 8, height: 8),
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01], width: 8, height: 8),
                 TrackEntry(2, 2, "A_AC3", channels: 6)),
             Cluster(0, SimpleBlock(1, 0, true, Frame(20, 0x01)), SimpleBlock(2, 0, true, Frame(5, 0x02))),
             Cluster(1000, SimpleBlock(1, 0, true, Frame(21, 0x03)), SimpleBlock(2, 0, true, Frame(6, 0x04)))));
@@ -175,7 +228,7 @@ public sealed class MatroskaIndexerTests
     {
         var file = ContainerBuilders.Matroska(
             ContainerBuilders.Info(1000, timestampScale: 100_000),
-            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", width: 8, height: 8)));
+            Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01], width: 8, height: 8)));
 
         Assert.Equal(100_000, Index(file).TimestampScale);
     }
