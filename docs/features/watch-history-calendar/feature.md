@@ -1,7 +1,7 @@
 # Watch-History Calendar
 
 Created: 2026-07-24
-Updated: 2026-08-05
+Updated: 2026-08-09
 
 ## Description
 
@@ -9,9 +9,11 @@ Updated: 2026-08-05
 **Releases** is unchanged: tracked release dates, reminders, and the Add-title
 and Tracked/Reminders actions. **Watched** is a screening diary over the per-play
 history in `PlaybackHistoryEntries` — what the signed-in user finished, and when.
-It is a read view with one exception: a single play that should not be there can
+It is a read view with two exceptions: a single play that should not be there can
 be deleted from it (see
-[watch-history-deletion](../watch-history-deletion/feature.md)).
+[watch-history-deletion](../watch-history-deletion/feature.md)), and an undated
+mark can be given the time it was missing (see
+[watch-history-manual-entries](../watch-history-manual-entries/feature.md)).
 
 Both modes share a shell that owns the heading, the mode switch, month
 navigation, and the Monday-first grid frame. Each mode supplies its own toolbar
@@ -75,8 +77,14 @@ pre-migration history — never receive a fabricated date; they are counted per
 kind and listed in **Watched without a date**, reachable from the `Undated N`
 control, whose count follows the active filter. The counts must come from the
 server per kind: those rows are absent from `events` by design, so a single
-total could not be re-filtered in the browser. Marks in that list are deletable
-too; emptying it says so in place, because the control that opened the dialog is
+total could not be re-filtered in the browser.
+
+Marks in that list carry two controls. One deletes. The other, `Set time…`, gives
+a mark the time it should have had — for a play that really happened but reached
+the server undated — after which it leaves the list for that day of the grid; the
+semantics live in
+[watch-history-manual-entries](../watch-history-manual-entries/feature.md).
+Emptying the list says so in place, because the control that opened the dialog is
 by then gone.
 
 An empty month says `Nothing watched this month`, and offers
@@ -136,9 +144,10 @@ opens, not with the calendar.
 
 ## Not included
 
-Deliberately out of scope: a combined releases-plus-watched overlay, editing an
-entry's timestamp or deleting a whole day's history at once, viewing-duration or
-streak analytics, and an activity heatmap.
+Deliberately out of scope: a combined releases-plus-watched overlay, re-dating a
+play that already carries a time (dating an *undated* mark is the one exception,
+above), deleting a whole day's history at once, viewing-duration or streak
+analytics, and an activity heatmap.
 
 ## Testing Expectations
 
@@ -155,6 +164,8 @@ streak analytics, and an activity heatmap.
   filters, and the filter-following undated count.
 - `calendar.test.ts` covers URL state: the default mode, fallbacks for malformed
   values, and hrefs that omit defaults.
+- `e2e/calendar.spec.ts` also covers giving an undated mark its time, per
+  [watch-history-manual-entries](../watch-history-manual-entries/feature.md).
 - `e2e/calendar.spec.ts` covers the surface: releases unchanged and default,
   mode switching preserving a non-current month, watched deep links, a binge
   rendering as one card that expands to every episode, the undated count

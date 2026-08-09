@@ -146,6 +146,26 @@ export function formatSpan(group: WatchedGroup): string {
   return start === end ? start : `${start}–${end}`;
 }
 
+/**
+ * Every query a change to the history can move: the diary itself, and the per-item watched state and
+ * play count projected from it.
+ *
+ * Shared by all three writers — deleting a play, logging one, giving an undated mark its time — because
+ * one that invalidated a smaller set would leave a stale watched badge behind it on a page the user
+ * returns to. Invalidating an inactive query only marks it stale, so listing them all costs nothing.
+ */
+export const QUERIES_AFFECTED_BY_HISTORY_CHANGE = [
+  ["watch-history-calendar"],
+  ["watch-history-undated"],
+  ["library"],
+  ["library-detail"],
+  ["episodes"],
+  ["nextup"],
+  ["resume"],
+  ["recent"],
+  ["removed-titles"],
+] as const;
+
 /** "S2E3", or null when the numbering is unknown. */
 export function episodeLabel(event: WatchHistoryCalendarEvent): string | null {
   return event.seasonNumber != null && event.episodeNumber != null

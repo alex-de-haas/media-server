@@ -296,7 +296,197 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         Assert.Null(queued.OccurredAt);
     }
 
+    // ---- Logged watches ----
+
+    [Fact]
+    public async Task ALoggedWatchRecordsOneDatedPlay()
+    {
+        // The whole point: a viewing the server never observed still lands on a day of the calendar.
+        var watchedAt = DateTimeOffset.Parse("2026-07-20T21:30:00Z");
+
+        var result = await Service().LogWatchAsync(_userId, _movieId, watchedAt, CancellationToken.None);
+
+        Assert.Equal(LogWatchStatus.Recorded, result.Status);
+        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(PlaybackHistoryOrigin.Manual, entry.Origin);
+        Assert.Equal(watchedAt, entry.WatchedAt);
+        Assert.Null(entry.PlaySessionId);
+        Assert.Contains("27205", entry.IdentitySnapshot);
+    }
+
+    [Fact]
+    public async Task LoggingTwiceRecordsTwoPlays()
+    {
+        // Unlike the toggle, which is idempotent: this is a claim about a viewing, and two claims are
+        // two viewings — a rewatch is exactly what the second one is.
+        await Service().LogWatchAsync(_userId, _movieId, DateTimeOffset.Parse("2026-07-20T21:30:00Z"), CancellationToken.None);
+        await Service().LogWatchAsync(_userId, _movieId, DateTimeOffset.Parse("2026-07-22T18:00:00Z"), CancellationToken.None);
+
+        Assert.Equal(2, await _database.PlaybackHistoryEntries.CountAsync());
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId);
+        Assert.Equal(2, row.PlayCount);
+        Assert.True(row.Played);
+    }
+
+    [Fact]
+    public async Task EachLoggedWatchQueuesItsOwnExactWatch()
+    {
+        // Keyed on the entry: a second log changes no state on the row, so a row-derived idempotency
+        // key would collide and the second event would be swallowed as a duplicate.
+        Connect();
+        var first = DateTimeOffset.Parse("2026-07-20T21:30:00Z");
+        var second = DateTimeOffset.Parse("2026-07-22T18:00:00Z");
+
+        await Service().LogWatchAsync(_userId, _movieId, first, CancellationToken.None);
+        await Service().LogWatchAsync(_userId, _movieId, second, CancellationToken.None);
+
+        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync();
+        Assert.Equal(2, queued.Count);
+        Assert.All(queued, item => Assert.Equal(WatchHistoryOutboxOperation.AddExactWatch, item.Operation));
+        Assert.Contains(queued, item => item.OccurredAt == first);
+        Assert.Contains(queued, item => item.OccurredAt == second);
+    }
+
+    [Fact]
+    public async Task ABackdatedLogNeverMovesTheAggregatesBackwards()
+    {
+        // Logging a viewing from years ago must not rewrite "last watched" to years ago.
+        await WatchToCompletionAsync();
+        var completedAt = _time.GetUtcNow();
+
+        await Service().LogWatchAsync(_userId, _movieId, DateTimeOffset.Parse("2019-01-05T20:00:00Z"), CancellationToken.None);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId);
+        Assert.Equal(completedAt, row.LastWatchedAt);
+        Assert.Equal(completedAt, row.LastPlayedDate);
+        Assert.Equal(2, row.PlayCount);
+    }
+
+    [Fact]
+    public async Task ALaterLogAdvancesTheAggregates()
+    {
+        var watchedAt = DateTimeOffset.Parse("2026-07-22T18:00:00Z");
+
+        await Service().LogWatchAsync(_userId, _movieId, watchedAt, CancellationToken.None);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId);
+        Assert.Equal(watchedAt, row.LastWatchedAt);
+        Assert.Equal(watchedAt, row.LastPlayedDate);
+    }
+
+    [Fact]
+    public async Task TheWatchedFlagChangesOnceHoweverManyPlaysAreLogged()
+    {
+        // WatchedStateChangedAt is the idempotency discriminator for manual marks; bumping it without a
+        // transition would let a later mark-watched queue an event for a click that changed nothing.
+        await Service().LogWatchAsync(_userId, _movieId, DateTimeOffset.Parse("2026-07-20T21:30:00Z"), CancellationToken.None);
+        var changedAt = (await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId))
+            .WatchedStateChangedAt;
+        _time.Advance(TimeSpan.FromHours(1));
+
+        await Service().LogWatchAsync(_userId, _movieId, DateTimeOffset.Parse("2026-07-22T18:00:00Z"), CancellationToken.None);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId);
+        Assert.Equal(changedAt, row.WatchedStateChangedAt);
+    }
+
+    [Fact]
+    public async Task ABackdatedLogLeavesTheResumePointAlone()
+    {
+        // The user may be halfway through the film right now; recording that they also saw it in 2019
+        // is no reason to throw that position away.
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * 0.5), true, "session-1", null, CancellationToken.None);
+
+        await Service().LogWatchAsync(_userId, _movieId, DateTimeOffset.Parse("2019-01-05T20:00:00Z"), CancellationToken.None);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId);
+        Assert.Equal((long)(Runtime * 0.5), row.PlaybackPositionTicks);
+    }
+
+    [Fact]
+    public async Task ALogOfTheLatestViewingClearsTheResumePoint()
+    {
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * 0.5), true, "session-1", null, CancellationToken.None);
+
+        await Service().LogWatchAsync(_userId, _movieId, _time.GetUtcNow(), CancellationToken.None);
+
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId);
+        Assert.Equal(0, row.PlaybackPositionTicks);
+    }
+
+    [Fact]
+    public async Task AFolderCannotHaveAWatchLogged()
+    {
+        // Marking a season is a fan-out over episodes; logging one viewing against the folder itself is
+        // a different gesture and not this one.
+        var result = await Service().LogWatchAsync(_userId, _seasonId, _time.GetUtcNow(), CancellationToken.None);
+
+        Assert.Equal(LogWatchStatus.NotPlayable, result.Status);
+        Assert.Empty(_database.PlaybackHistoryEntries);
+    }
+
+    [Fact]
+    public async Task AnInstantInTheFutureIsRefused()
+    {
+        var result = await Service().LogWatchAsync(_userId, _movieId, _time.GetUtcNow().AddHours(2), CancellationToken.None);
+
+        Assert.Equal(LogWatchStatus.FutureInstant, result.Status);
+        Assert.Empty(_database.PlaybackHistoryEntries);
+    }
+
+    [Fact]
+    public async Task AClockSkewedNowIsStillAccepted()
+    {
+        // The instant is composed from the browser's clock; refusing one a minute ahead of ours would
+        // fail the most common action there is.
+        var result = await Service().LogWatchAsync(_userId, _movieId, _time.GetUtcNow().AddMinutes(1), CancellationToken.None);
+
+        Assert.Equal(LogWatchStatus.Recorded, result.Status);
+    }
+
+    [Fact]
+    public async Task AnUnknownItemIsNotFound()
+    {
+        var result = await Service().LogWatchAsync(_userId, Guid.NewGuid(), _time.GetUtcNow(), CancellationToken.None);
+
+        Assert.Equal(LogWatchStatus.ItemNotFound, result.Status);
+        Assert.Empty(_database.PlaybackHistoryEntries);
+    }
+
+    [Fact]
+    public async Task AnUnidentifiedItemStillRecordsTheLoggedPlay()
+    {
+        // Same rule as an observed completion: history is local truth, and undeliverable work is not
+        // queued rather than retried forever.
+        Connect();
+        var unidentified = NewItem(MediaKind.Movie, (await _database.Catalogs.FirstAsync()).Id, "Unknown");
+        _database.MediaItems.Add(unidentified);
+        await _database.SaveChangesAsync();
+
+        var result = await Service().LogWatchAsync(_userId, unidentified.Id, _time.GetUtcNow(), CancellationToken.None);
+
+        Assert.Equal(LogWatchStatus.Recorded, result.Status);
+        Assert.Single(_database.PlaybackHistoryEntries);
+        Assert.Empty(_database.WatchHistoryOutboxEvents);
+    }
+
     // ---- Unwatch ----
+
+    [Fact]
+    public async Task UnwatchLeavesALoggedPlayAlone()
+    {
+        // A logged play is a viewing that happened, exactly like an observed one. Unwatch is a statement
+        // about current state and drops only the timeless marks this app created.
+        await Service().LogWatchAsync(_userId, _movieId, DateTimeOffset.Parse("2026-07-20T21:30:00Z"), CancellationToken.None);
+
+        await Service().SetPlayedAsync(_userId, _moviePublicId, played: false, playedAt: null, CancellationToken.None);
+
+        var entry = Assert.Single(_database.PlaybackHistoryEntries);
+        Assert.NotNull(entry.WatchedAt);
+        var row = await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId);
+        Assert.False(row.Played);
+        Assert.Equal(1, row.PlayCount);
+    }
 
     [Fact]
     public async Task UnwatchDropsOnlyTheTimelessEntriesThisAppCreated()

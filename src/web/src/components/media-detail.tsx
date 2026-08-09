@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, AudioLines, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileOutput, FileQuestion, Film, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, AudioLines, CalendarPlus, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileOutput, FileQuestion, Film, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -27,6 +27,8 @@ import { personHref } from "@/components/poster-card";
 import { RemapDialog } from "@/components/remap-dialog";
 import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
+import { WatchTimeDialog } from "@/components/watch-time-dialog";
+import { QUERIES_AFFECTED_BY_HISTORY_CHANGE } from "@/lib/watch-history-calendar";
 import { episodeLabel, formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
 import { errorMessage, formatCount, openExternal } from "@/lib/ui";
 import {
@@ -50,7 +52,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -82,7 +84,7 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-2">
         <BackLink href={backHref} label={backLabel} />
-        <AdminControls id={item.id} title={item.title} kind={item.kind} catalogId={item.catalogId} backHref={backHref} />
+        <ItemActions id={item.id} title={item.title} kind={item.kind} catalogId={item.catalogId} backHref={backHref} />
       </div>
       <Hero item={item} />
       <DetailTabs item={item} backHref={backHref} />
@@ -222,13 +224,20 @@ function MediaDetailSkeleton() {
   );
 }
 
-function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; title: string; kind: string; catalogId: string; backHref: string }) {
+/**
+ * The page's overflow menu. It carries two kinds of action: logging a watch, which any signed-in user
+ * may do to their own history, and the admin block that used to be all of it. Both live behind one `⋮`
+ * because the button row belongs to what a viewer does on most visits — a fourth button there would
+ * compete with `Mark watched` for the same glance, and logging a past viewing is the rare gesture.
+ */
+function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; title: string; kind: string; catalogId: string; backHref: string }) {
   const { role } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [remapOpen, setRemapOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [logWatchOpen, setLogWatchOpen] = useState(false);
   // While a move is relocating this item's files, everything that mutates the item or reads its files is
   // locked (the API rejects it with a 409 anyway) — only the provider-side metadata refresh stays usable.
   const moving = useActiveMove(id) !== undefined;
@@ -265,7 +274,24 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
     onError: (error) => toast.error("Couldn’t refresh media data", { description: errorMessage(error) }),
   });
 
-  if (role !== "admin") {
+  // A viewing the server never observed — the watched toggle claims no time, so only this puts a play
+  // on a day of the calendar. Offered on movies: a season-wide fan-out at one instant is a different
+  // gesture, and an episode has its own row in the list rather than this menu.
+  const logWatch = useMutation({
+    mutationFn: (watchedAt: string) => mediaServer.logWatch(id, watchedAt),
+    onSuccess: () => {
+      setLogWatchOpen(false);
+      for (const key of QUERIES_AFFECTED_BY_HISTORY_CHANGE) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+      toast.success("Watch logged");
+    },
+    // The dialog stays open on failure, so the time the user picked is still there to retry with.
+    onError: (error) => toast.error("Couldn’t log this watch", { description: errorMessage(error) }),
+  });
+
+  const canLogWatch = kind === "Movie";
+  if (role !== "admin" && !canLogWatch) {
     return null;
   }
 
@@ -280,81 +306,115 @@ function AdminControls({ id, title, kind, catalogId, backHref }: { id: string; t
           }
         />
         <DropdownMenuContent>
-          <DropdownMenuItem disabled={refresh.isPending} onClick={() => refresh.mutate()}>
-            <RefreshCw className={cn(refresh.isPending && "animate-spin")} aria-hidden />
-            Refresh metadata
-          </DropdownMenuItem>
-          {/* Media sources live on the leaf (movie/episode), not the series row. */}
-          {kind !== "Series" && (
-            <DropdownMenuItem disabled={refreshMedia.isPending || moving} onClick={() => refreshMedia.mutate()}>
-              <Clapperboard className={cn(refreshMedia.isPending && "animate-pulse")} aria-hidden />
-              Refresh media data
+          {canLogWatch && (
+            <DropdownMenuItem onClick={() => setLogWatchOpen(true)}>
+              <CalendarPlus />
+              Log watch…
             </DropdownMenuItem>
           )}
-          {/* Series are corrected per episode (in the episode list), not at the series level. */}
-          {kind !== "Series" && (
-            <DropdownMenuItem disabled={moving} onClick={() => setRemapOpen(true)}>
-              <Wand2 />
-              Fix match…
-            </DropdownMenuItem>
+          {canLogWatch && role === "admin" && <DropdownMenuSeparator />}
+          {role === "admin" && (
+            <>
+              <DropdownMenuItem disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+                <RefreshCw className={cn(refresh.isPending && "animate-spin")} aria-hidden />
+                Refresh metadata
+              </DropdownMenuItem>
+              {/* Media sources live on the leaf (movie/episode), not the series row. */}
+              {kind !== "Series" && (
+                <DropdownMenuItem disabled={refreshMedia.isPending || moving} onClick={() => refreshMedia.mutate()}>
+                  <Clapperboard className={cn(refreshMedia.isPending && "animate-pulse")} aria-hidden />
+                  Refresh media data
+                </DropdownMenuItem>
+              )}
+              {/* Series are corrected per episode (in the episode list), not at the series level. */}
+              {kind !== "Series" && (
+                <DropdownMenuItem disabled={moving} onClick={() => setRemapOpen(true)}>
+                  <Wand2 />
+                  Fix match…
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem disabled={moving} onClick={() => setMoveOpen(true)}>
+                <FolderInput />
+                {moving ? "Moving to catalog…" : "Move to catalog…"}
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" disabled={moving} onClick={() => setConfirmOpen(true)}>
+                <Trash2 />
+                Delete…
+              </DropdownMenuItem>
+            </>
           )}
-          <DropdownMenuItem disabled={moving} onClick={() => setMoveOpen(true)}>
-            <FolderInput />
-            {moving ? "Moving to catalog…" : "Move to catalog…"}
-          </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" disabled={moving} onClick={() => setConfirmOpen(true)}>
-            <Trash2 />
-            Delete…
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <DeleteItemDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title={title}
-        onConfirm={(options) => {
-          remove.mutate(options);
-          setConfirmOpen(false);
-        }}
-      />
+      {canLogWatch && (
+        <WatchTimeDialog
+          open={logWatchOpen}
+          onOpenChange={setLogWatchOpen}
+          heading="Log a watch"
+          description={
+            <>
+              Record a viewing of <span className="text-foreground font-medium">{title}</span> the server
+              never saw — it appears in your Watched calendar on that day.
+            </>
+          }
+          confirmLabel="Log watch"
+          pending={logWatch.isPending}
+          onSubmit={(watchedAt) => logWatch.mutate(watchedAt)}
+        />
+      )}
 
-      <RemapDialog
-        itemId={id}
-        mode="movie"
-        currentTitle={title}
-        open={remapOpen}
-        onOpenChange={setRemapOpen}
-        onRemapped={(targetId) => {
-          setRemapOpen(false);
-          for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
-            queryClient.invalidateQueries({ queryKey: key });
-          }
-          // The corrected movie is a different item — navigate to its detail page.
-          if (targetId !== id) {
-            router.replace(`${backHref}/${targetId}`);
-          } else {
-            queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
-          }
-        }}
-      />
+      {/* Gated with the menu items that open them: a viewer who cannot reach the action has no use for
+          its dialog in the tree. */}
+      {role === "admin" && (
+        <>
+          <DeleteItemDialog
+            open={confirmOpen}
+            onOpenChange={setConfirmOpen}
+            title={title}
+            onConfirm={(options) => {
+              remove.mutate(options);
+              setConfirmOpen(false);
+            }}
+          />
 
-      <MoveToCatalogDialog
-        itemId={id}
-        itemKind={kind}
-        itemTitle={title}
-        currentCatalogId={catalogId}
-        open={moveOpen}
-        onOpenChange={setMoveOpen}
-        onMoveStarted={() => {
-          // The move runs in the background — stay here and watch it on the Media tab (like a conversion).
-          // The library views refresh now and again from the job's completion event; if a merge removes
-          // this item, its detail refetch after completion surfaces "not found" with the back link.
-          for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
-            queryClient.invalidateQueries({ queryKey: key });
-          }
-        }}
-      />
+          <RemapDialog
+            itemId={id}
+            mode="movie"
+            currentTitle={title}
+            open={remapOpen}
+            onOpenChange={setRemapOpen}
+            onRemapped={(targetId) => {
+              setRemapOpen(false);
+              for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
+                queryClient.invalidateQueries({ queryKey: key });
+              }
+              // The corrected movie is a different item — navigate to its detail page.
+              if (targetId !== id) {
+                router.replace(`${backHref}/${targetId}`);
+              } else {
+                queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
+              }
+            }}
+          />
+
+          <MoveToCatalogDialog
+            itemId={id}
+            itemKind={kind}
+            itemTitle={title}
+            currentCatalogId={catalogId}
+            open={moveOpen}
+            onOpenChange={setMoveOpen}
+            onMoveStarted={() => {
+              // The move runs in the background — stay here and watch it on the Media tab (like a conversion).
+              // The library views refresh now and again from the job's completion event; if a merge removes
+              // this item, its detail refetch after completion surfaces "not found" with the back link.
+              for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
+                queryClient.invalidateQueries({ queryKey: key });
+              }
+            }}
+          />
+        </>
+      )}
     </>
   );
 }

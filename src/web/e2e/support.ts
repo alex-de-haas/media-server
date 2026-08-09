@@ -59,6 +59,8 @@ export interface AppMock {
   watchHistoryCalendar?: Served<Record<string, unknown>>; // GET /watch-history/calendar (an envelope, not a list)
   watchHistoryUndated?: Served<Record<string, unknown>>; // GET /watch-history/calendar/undated ({ entries, total })
   deleteWatchHistoryEntry?: (entryId: string) => void; // DELETE /watch-history/entries/{id} — runs before the 204
+  setWatchHistoryEntryTime?: (entryId: string, watchedAt: string) => void; // PATCH /watch-history/entries/{id}
+  logWatch?: (itemId: string, watchedAt: string) => void; // POST /library/{id}/watches — runs before the 200
   recommendations?: unknown; // GET /recommendations ({ items, sources, selectedSources })
   transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
   transcodeLanguages?: string[]; // GET /transcode/languages — what the language field validates against
@@ -114,6 +116,13 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/ingest") return route.fulfill({ json: mock.ingest ?? [] });
     if (path === "/vpn") return route.fulfill({ json: mock.vpn ?? null });
     if (path.endsWith("/played")) return route.fulfill({ json: userData({ played: method === "POST" }) });
+    // A logged watch carries a body, unlike the played toggle: the instant is the whole point of it.
+    const loggedWatchItemId =
+      method === "POST" ? path.match(/^\/library\/([^/]+)\/watches$/)?.[1] : undefined;
+    if (loggedWatchItemId) {
+      mock.logWatch?.(loggedWatchItemId, (route.request().postDataJSON() as { watchedAt: string }).watchedAt);
+      return route.fulfill({ json: userData({ played: true, playCount: 1 }) });
+    }
     if (path.endsWith("/favorite")) return route.fulfill({ json: userData({ isFavorite: method === "POST" }) });
 
     if (path === "/watchlist/calendar") return route.fulfill({ json: mock.releaseCalendar ?? [] });
@@ -151,6 +160,15 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
       method === "DELETE" ? path.match(/^\/watch-history\/entries\/([^/]+)$/)?.[1] : undefined;
     if (deletedEntryId) {
       mock.deleteWatchHistoryEntry?.(deletedEntryId);
+      return route.fulfill({ status: 204, body: "" });
+    }
+    const datedEntryId =
+      method === "PATCH" ? path.match(/^\/watch-history\/entries\/([^/]+)$/)?.[1] : undefined;
+    if (datedEntryId) {
+      mock.setWatchHistoryEntryTime?.(
+        datedEntryId,
+        (route.request().postDataJSON() as { watchedAt: string }).watchedAt,
+      );
       return route.fulfill({ status: 204, body: "" });
     }
 

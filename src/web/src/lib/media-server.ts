@@ -1036,6 +1036,15 @@ export const mediaServer = {
   listNextUp: () => apiJson<LibraryRailItem[]>(`${BASE}/library/nextup`),
   setPlayed: (id: string, played: boolean) =>
     apiJson<UserItemData>(`${BASE}/library/${id}/played`, { method: played ? "POST" : "DELETE" }),
+  // Records a viewing the server never saw, at the instant the user names. Unlike setPlayed — which is
+  // an idempotent statement about current state and claims no time — every call is another play, which
+  // is what puts it on a day of the calendar. `watchedAt` is a UTC instant.
+  logWatch: (id: string, watchedAt: string) =>
+    apiJson<UserItemData>(`${BASE}/library/${id}/watches`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ watchedAt }),
+    }),
   setFavorite: (id: string, favorite: boolean) =>
     apiJson<UserItemData>(`${BASE}/library/${id}/favorite`, { method: favorite ? "POST" : "DELETE" }),
   // Without deleteUserData, an item someone favorited or watched survives as a hidden tombstone and a
@@ -1184,4 +1193,8 @@ export const mediaServer = {
   // as proof that someone else's entry exists.
   deleteWatchHistoryEntry: (entryId: string) =>
     send(`/watch-history/entries/${entryId}`, "DELETE"),
+  // Gives an undated mark the time it should have had — the play stays the one it always was, so the
+  // count doesn't move. Refused for an entry that already carries a time.
+  setWatchHistoryEntryTime: (entryId: string, watchedAt: string) =>
+    send(`/watch-history/entries/${entryId}`, "PATCH", { watchedAt }),
 };

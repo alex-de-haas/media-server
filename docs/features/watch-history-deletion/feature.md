@@ -1,7 +1,7 @@
 # Watch-History Deletion
 
 Created: 2026-08-05
-Updated: 2026-08-05
+Updated: 2026-08-09
 
 ## Description
 
@@ -127,9 +127,11 @@ recorded limitation rather than scheduled work.
 ## Not included
 
 Deliberately out of scope: deleting a whole day or an item's entire history at
-once, editing an entry's timestamp, and a history list on the item page. Deleting
-is a correction to one row; wholesale removal of an item's history is what the
-library delete and the sync already cover.
+once, re-dating an entry that already carries a timestamp, and a history list on
+the item page. Deleting is a correction to one row; wholesale removal of an
+item's history is what the library delete and the sync already cover. Recording a
+play that is *missing* — including giving an undated mark its time — is
+[watch-history-manual-entries](../watch-history-manual-entries/feature.md).
 
 ## Testing Expectations
 

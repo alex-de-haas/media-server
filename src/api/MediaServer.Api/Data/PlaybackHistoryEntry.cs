@@ -77,7 +77,12 @@ public enum PlaybackHistoryOrigin
     /// <summary>Observed playback crossing the watched threshold. The only source of an exact local time.</summary>
     LocalPlayback,
 
-    /// <summary>An explicit watched toggle, by the user. Timeless.</summary>
+    /// <summary>
+    /// The user said so. Timeless when it came from the watched toggle, which claims no time; dated
+    /// when they logged a viewing at an instant of their choosing. Nothing keys on this value alone —
+    /// the queries that read it pair it with a null <see cref="PlaybackHistoryEntry.WatchedAt"/>, so a
+    /// logged play is invisible to the toggle's own bookkeeping.
+    /// </summary>
     Manual,
 
     /// <summary>Imported from the provider during an explicit sync.</summary>

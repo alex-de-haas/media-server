@@ -28,6 +28,9 @@ public sealed class UserDataService(
     /// <summary>How long a playback session row is kept after its last report before cleanup.</summary>
     internal static readonly TimeSpan SessionRetention = TimeSpan.FromHours(24);
 
+    /// <summary>How far ahead of the server's clock a hand-logged watch may be dated before it is refused.</summary>
+    internal static readonly TimeSpan FutureWatchAllowance = TimeSpan.FromMinutes(5);
+
     private const int SessionKeyMaxLength = 200;
 
     /// <summary>
@@ -304,6 +307,53 @@ public sealed class UserDataService(
         return await LoadOneAsync(appUserId, item, cancellationToken);
     }
 
+    /// <summary>
+    /// Records a viewing the server never observed, at an instant the user chooses (UI surface).
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="SetPlayedAsync(int, Guid, bool, DateTimeOffset?, CancellationToken)"/>
+    /// in the one way that matters: the toggle is an idempotent statement about current state, while
+    /// this is a claim about a specific viewing, so every call is another play. It exists because a
+    /// play is only dated when playback reports observe it crossing the threshold — a client that
+    /// merely marks an item played, or a server restarted mid-playback, leaves a real viewing with no
+    /// time at all.
+    /// </remarks>
+    public async Task<LogWatchResult> LogWatchAsync(
+        int appUserId, Guid mediaItemId, DateTimeOffset watchedAt, CancellationToken cancellationToken)
+    {
+        var item = await FindItemByIdAsync(mediaItemId, cancellationToken);
+        if (item is null)
+        {
+            return new LogWatchResult(LogWatchStatus.ItemNotFound, null);
+        }
+
+        if (item.Kind is not (MediaKind.Movie or MediaKind.Episode or MediaKind.Video))
+        {
+            return new LogWatchResult(LogWatchStatus.NotPlayable, null);
+        }
+
+        var now = time.GetUtcNow();
+        // A small allowance, not zero: the instant is composed from the browser's clock, and refusing a
+        // "now" that is thirty seconds ahead of ours would fail the most common action there is.
+        if (watchedAt > now + FutureWatchAllowance)
+        {
+            return new LogWatchResult(LogWatchStatus.FutureInstant, null);
+        }
+
+        var row = await GetOrCreateRowAsync(appUserId, item.Id, cancellationToken);
+        ApplyLoggedWatch(row, watchedAt, now);
+
+        // Staged before the save, like every other history write: the aggregates, the entry and the
+        // outbound intent commit together or not at all.
+        if (watchHistory is not null)
+        {
+            await watchHistory.StageLoggedWatchAsync(appUserId, item, row, watchedAt, cancellationToken);
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
+        return new LogWatchResult(LogWatchStatus.Recorded, await LoadOneAsync(appUserId, item, cancellationToken));
+    }
+
     /// <summary>Sets or clears the favorite flag on any item (leaf or folder) by public id (Jellyfin).</summary>
     public async Task<UserItemDataDto?> SetFavoriteAsync(
         int appUserId, string itemPublicId, bool favorite, CancellationToken cancellationToken) =>
@@ -514,6 +564,44 @@ public sealed class UserDataService(
         row.Played = true;
         row.PlaybackPositionTicks = 0;
         row.LastPlayedDate = now;
+    }
+
+    // Unlike MarkWatched, which describes something happening now, this one carries an instant that may
+    // be years old — so every timestamp it touches moves forwards only. Logging a viewing from 2019 must
+    // not rewrite "last watched" to 2019.
+    private static void ApplyLoggedWatch(UserItemData row, DateTimeOffset watchedAt, DateTimeOffset now)
+    {
+        // Always: each log is a viewing the user is claiming, which is exactly what the toggle is not.
+        row.PlayCount++;
+
+        // Read before LastPlayedDate moves: a log dated earlier than the item's last activity is a
+        // backfill, and clearing a resume point on its account would throw away a position the user is
+        // in the middle of right now.
+        var isLatestActivity = row.LastPlayedDate is null || watchedAt >= row.LastPlayedDate;
+
+        if (row.LastWatchedAt is null || watchedAt > row.LastWatchedAt)
+        {
+            row.LastWatchedAt = watchedAt;
+        }
+
+        if (row.LastPlayedDate is null || watchedAt > row.LastPlayedDate)
+        {
+            row.LastPlayedDate = watchedAt;
+        }
+
+        if (!row.Played)
+        {
+            // Moves only on the transition, as everywhere else: it is the idempotency discriminator for
+            // manual marks, and a needless bump would let a later mark-watched queue a duplicate event.
+            row.WatchedStateChangedAt = now;
+        }
+
+        row.Played = true;
+
+        if (isLatestActivity)
+        {
+            row.PlaybackPositionTicks = 0;
+        }
     }
 
     private async Task<UserItemData> GetOrCreateRowAsync(int appUserId, Guid mediaItemId, CancellationToken cancellationToken)

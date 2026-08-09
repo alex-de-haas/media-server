@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediaServer.Api.Data;
+using MediaServer.Api.Library;
 using MediaServer.Api.WatchHistory;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -39,6 +40,28 @@ public sealed class WatchHistoryEndpointMappingTests
     [InlineData(WatchHistoryFailure.ContractViolation, StatusCodes.Status502BadGateway)]
     public void ProviderFailuresMapToStatusesThatTellTheUserWhatToDo(WatchHistoryFailure failure, int expected) =>
         Assert.Equal(expected, StatusOf(WatchHistoryEndpoints.ToProblem(failure, "detail")));
+
+    [Theory]
+    [InlineData(SetWatchedAtStatus.Updated, StatusCodes.Status204NoContent)]
+    // Unknown and someone else's entry arrive here as the same status, so the route cannot be used to
+    // probe for one — the boundary the deletion route already enforces.
+    [InlineData(SetWatchedAtStatus.NotFound, StatusCodes.Status404NotFound)]
+    // The state is fine; the request is not. Re-dating a timed play is refused, not silently applied.
+    [InlineData(SetWatchedAtStatus.AlreadyDated, StatusCodes.Status400BadRequest)]
+    [InlineData(SetWatchedAtStatus.FutureInstant, StatusCodes.Status400BadRequest)]
+    public void DatingAnUndatedMarkAnswersWithoutRevealingWhoseEntryItIs(SetWatchedAtStatus status, int expected) =>
+        Assert.Equal(expected, StatusOf(WatchHistoryEndpoints.ToResult(status)));
+
+    [Theory]
+    [InlineData(LogWatchStatus.Recorded, StatusCodes.Status200OK)]
+    [InlineData(LogWatchStatus.ItemNotFound, StatusCodes.Status404NotFound)]
+    // A folder exists, so 404 would send the caller looking for the wrong bug.
+    [InlineData(LogWatchStatus.NotPlayable, StatusCodes.Status400BadRequest)]
+    [InlineData(LogWatchStatus.FutureInstant, StatusCodes.Status400BadRequest)]
+    public void LoggingAWatchAnswersTheReasonItWasRefused(LogWatchStatus status, int expected) =>
+        Assert.Equal(
+            expected,
+            StatusOf(LibraryEndpoints.ToResult(new LogWatchResult(status, status == LogWatchStatus.Recorded ? new UserItemDataDto("key") : null))));
 
     [Fact]
     public void AConnectionResponseCarriesNoCredentialMaterial()

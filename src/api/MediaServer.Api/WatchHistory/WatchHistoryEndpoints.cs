@@ -47,6 +47,9 @@ public sealed record WatchHistorySyncScopeRequest(
 /// <summary>The one previewed run the caller is choosing to apply.</summary>
 public sealed record WatchHistorySyncApplyRequest(Guid RunId);
 
+/// <summary>The instant to stamp on an undated mark.</summary>
+public sealed record SetWatchedAtRequest(DateTimeOffset? WatchedAt);
+
 /// <summary>
 /// The read-only comparison the user approves before anything is written. Counts and sample carry
 /// enum keys/values that serialize as their names, so the UI reads "RemoteOnly" rather than an index.
@@ -220,6 +223,31 @@ public static class WatchHistoryEndpoints
             return user is null
                 ? Results.Unauthorized()
                 : Results.Ok(await calendar.LoadUndatedAsync(user.Id, kind, cancellationToken));
+        });
+
+        // Gives an undated mark the time it should have had. Not a general timestamp edit: an entry
+        // that already carries a time is refused, because "the recorded time is wrong" is a different
+        // claim from "this play was never timed".
+        group.MapPatch("/entries/{entryId:guid}", async (
+            Guid entryId,
+            SetWatchedAtRequest request,
+            ClaimsPrincipal principal,
+            WatchHistoryEntryService entries,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            if (request.WatchedAt is not { } watchedAt)
+            {
+                return Results.BadRequest(new { error = "'watchedAt' is required." });
+            }
+
+            return ToResult(await entries.SetWatchedAtAsync(user.Id, entryId, watchedAt, cancellationToken));
         });
 
         group.MapDelete("/entries/{entryId:guid}", async (
@@ -417,6 +445,19 @@ public static class WatchHistoryEndpoints
 
         return new ResolvedContext(user, authorization, authorization.ProviderKey, null);
     }
+
+    /// <summary>
+    /// What dating an undated mark answers. A caller's own missing entry and someone else's entry are
+    /// both 404 — the same boundary the deletion route enforces, so neither can be used to probe for the
+    /// other. The two refusals are 400 because the request itself is wrong, not the state.
+    /// </summary>
+    internal static IResult ToResult(SetWatchedAtStatus status) => status switch
+    {
+        SetWatchedAtStatus.Updated => Results.NoContent(),
+        SetWatchedAtStatus.NotFound => Results.NotFound(),
+        SetWatchedAtStatus.AlreadyDated => Results.BadRequest(new { error = "This play already has a time." }),
+        _ => Results.BadRequest(new { error = "'watchedAt' cannot be in the future." }),
+    };
 
     internal static IResult ToProblem(WatchHistoryFailure failure, string? detail) => failure switch
     {

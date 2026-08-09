@@ -19,6 +19,68 @@ test("opens a movie detail page and marks it watched", async ({ page }) => {
   await played;
 });
 
+test("logs a watch at a time the user picks, from the overflow menu", async ({ page }) => {
+  // The watched toggle claims no time and lands outside the calendar by design; this is the action
+  // that dates a viewing the server never observed.
+  const logged: Array<{ itemId: string; watchedAt: string }> = [];
+  await setupApp(page, {
+    library: [aMovie("m1", "Arrival")],
+    detail: { m1: movieDetail("m1", "Arrival") },
+    logWatch: (itemId, watchedAt) => logged.push({ itemId, watchedAt }),
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Log watch…" }).click();
+
+  const dialog = page.getByRole("dialog").filter({ hasText: "Log a watch" });
+  await dialog.getByLabel("Watched at").fill("2026-07-04T21:15");
+  await dialog.getByRole("button", { name: "Log watch" }).click();
+
+  expect(logged).toHaveLength(1);
+  expect(logged[0].itemId).toBe("m1");
+  // Local wall-clock in, UTC instant out: the calendar buckets by the browser's own day.
+  expect(logged[0].watchedAt).toMatch(/Z$/);
+});
+
+test("the time field starts fresh on every open, not where it was left", async ({ page }) => {
+  // The dialog's content is unmounted while closed, which is what makes "now" mean now on reopening
+  // rather than whatever was typed — or whatever the clock said the first time it was built.
+  await setupApp(page, {
+    library: [aMovie("m1", "Arrival")],
+    detail: { m1: movieDetail("m1", "Arrival") },
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Log watch…" }).click();
+
+  const field = page.getByRole("dialog").getByLabel("Watched at");
+  await field.fill("2019-01-05T20:00");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Log watch…" }).click();
+
+  await expect(page.getByRole("dialog").getByLabel("Watched at")).not.toHaveValue("2019-01-05T20:00");
+});
+
+test("a viewer who is not an admin still gets Log watch, and nothing else", async ({ page }) => {
+  // The menu used to be admin-only; logging a play against your own history is not an admin act.
+  await setupApp(page, {
+    role: "user",
+    library: [aMovie("m1", "Arrival")],
+    detail: { m1: movieDetail("m1", "Arrival") },
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("button", { name: "More actions" }).click();
+
+  await expect(page.getByRole("menuitem", { name: "Log watch…" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Delete…" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Move to catalog…" })).toHaveCount(0);
+});
+
 test("plays a movie through an Infuse deep link", async ({ page }) => {
   await setupApp(page, {
     library: [aMovie("m1", "Arrival")],
