@@ -366,21 +366,31 @@ rewriting rather than encoding tooling, so they do not change the answer.
       first production run the same day. 26 films in 57 minutes back to back: a median
       of 97 s each, a mean of 131 s.
 
-      **The walk is not disk-bound**, which is the opposite of what this deliverable
-      predicted. Two files of near-identical sample count — 2.81 M on an SSD, 2.82 M on
-      the spinning disk — took 204.5 s and 162.3 s, the HDD *faster*; normalised, the
-      two HDD files sit at 17.4 k and 20.0 k samples a second against an SSD median of
-      19.7 k. The remedy held in reserve here, a sequential read with a large buffer
-      instead of seeking past every payload, would have addressed a bottleneck that is
-      not there, and is dropped rather than kept waiting.
+      **The prediction written here was right: size over throughput, minutes per film.**
+      The second run, with file sizes in the log, gives a *traversal rate* — source
+      length over elapsed time, not measured device throughput, since the walk seeks
+      past payloads and the bytes it actually reads are not instrumented. Sixty-four
+      anime episodes on the spinning disk land within 103–119 MB/s of each other, nine
+      of the ten films on it sit in the same band, and the six SSD files spread over
+      125–287. A rate that barely moves across files of very different sizes is a shared
+      resource at its limit, and the disk is what the two HDD groups share and the SSD
+      files do not.
 
-      Two caveats, stated rather than buried: only two files in that sample were on the
-      HDD, and the log line did not yet carry file sizes, so the comparison is by sample
-      count and not by bytes. It carries them now, along with the codecs it passed over,
-      which is what will settle it properly on the next run.
+      A 20 GB film off the HDD is about three minutes. The remedy held in reserve — a
+      sequential read with a large buffer instead of seeking past every payload — is
+      **not** needed: degeneration into a seek per block would put the traversal rate an
+      order of magnitude lower.
 
-      What the run did surface was the index footprint — 1.2 GB over 147 files, 43 % of
-      it in four — which is the deliverable below.
+      Between the two runs this deliverable briefly recorded the opposite conclusion.
+      The first run's log had no file sizes, so throughput was estimated as samples per
+      second, and a sample count does not track file size — two files with near-identical
+      sample counts were compared and the HDD one happened to be smaller. Adding bytes to
+      the log line is what exposed it. Recorded here rather than quietly overwritten,
+      because the lesson is the measurement, not the number: normalising by the wrong
+      quantity produced a confident answer in the wrong direction.
+
+      What the first run did surface was the index footprint — 1.2 GB over 147 files,
+      43 % of it in four — which is the deliverable below.
 - [x] **Only describable tracks are walked.** Added 2026-08-09, out of the measurement
       above. A sample table for a track no sample entry can be written for is bytes
       nobody can ever point at: one film's TrueHD track was 96 % of its own index. The
@@ -530,9 +540,16 @@ Two operational facts worth keeping, both of which cost time to find:
 - [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
       single-byte-encoded file comes out with its accents wrong.
 - [ ] **AAC**, which needs `mp4a` with an `esds` carrying the audio specific config.
-      Nothing in this library uses it, but a client that declares AAC support would
-      otherwise be offered a remux with no sound — which is why a source whose only
-      audio cannot be packaged is refused outright until each of these lands.
+      **This is no longer hypothetical.** The production index run of 2026-08-09 shows a
+      complete anime series — 64 episodes plus its extras — walking *one track out of
+      five*, every audio track on it being AAC or FLAC. Those titles are indexed and
+      still refused with `packaging_unsupported_audio`, so they cannot be played by the
+      native client at all. Whatever the ordering of the remaining work, this is the item
+      with a library behind it.
+
+      FLAC would need `fLaC` with a `dfLa`, and appears on the same files; whether it is
+      worth having depends on whether any episode carries only FLAC, which the log does
+      not say.
 - [ ] **Confirm the measurements above on tvOS.** Everything in "What AVFoundation
       demands" was measured on macOS, which has already proven the more permissive of
       the two in this project.

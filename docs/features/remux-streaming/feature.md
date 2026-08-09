@@ -84,10 +84,10 @@ rebuilds; a format version bump does the same for every index at once. Each is w
 aside and moved into place, so an interrupted build leaves nothing to mistake for an
 index, and a truncated or foreign file reads as "no index" rather than as an error.
 
-`RemuxIndexWorker` builds missing ones in the background, **one at a time**. The walk
-turns out not to be bound by the disk it reads — see [Measured](#measured) — but it is
-still the least urgent thing in the process, and running several at once would take cores
-and disk from scans and playback to finish a chore nothing waits on. There is no queue:
+`RemuxIndexWorker` builds missing ones in the background, **one at a time** — the walk is
+bound by the disk it reads wherever that disk spins ([Measured](#measured)), so several at
+once would be slower in total while making everything else on that disk worse. It is also
+the least urgent thing in the process, and nothing waits on it. There is no queue:
 the database knows which sources exist and the store knows which have an index, so the
 outstanding work is a query and a restart resumes without remembering anything. Orphaned
 indexes are pruned once per process, since nothing else deletes a file when its title
@@ -228,24 +228,52 @@ why this lives in `api`: nothing on the serving path invokes ffmpeg.
 
 ## Measured
 
-The first production run indexed 26 films in 57 minutes back to back — a median of 97 s
-each and a mean of 131 s, the two-second pause between files invisible against them. At
-that rate a 300-title library is a one-off cost of about eleven hours, and nothing waits
-on it.
+The number the log reports is the source's length divided by the elapsed time. That is a
+**traversal rate over the file's logical span, not measured device throughput** — the walk
+reads element headers and seeks past every payload, and how many bytes the disk actually
+delivered is not instrumented. Read it as "how fast the walk gets through a file of this
+size", which is the figure that matters for planning, and not as a device benchmark.
 
-**The walk is not disk-bound.** This was the open question the run existed to answer, and
-it came back the other way. The cleanest pair: two files of near-identical sample count,
-2.81 M on an SSD and 2.82 M on a spinning disk, took 204.5 s and 162.3 s — the HDD
-*faster*. Normalised, the two HDD files sit at 17.4 k and 20.0 k samples a second against
-an SSD median of 19.7 k. The remedy the plan had held in reserve — sequential reads with a
-large buffer instead of seeking per block — would have addressed a bottleneck that is not
-there.
+| Where | Files | Traversal rate |
+| --- | --- | --- |
+| Anime episodes, spinning disk | 64 | **103–119 MB/s** |
+| Films, spinning disk | 10 | 95–146 MB/s, nine of them ≤ 113 |
+| Films, SSD | 6 | 125–287 MB/s |
 
-Two caveats stated rather than buried: only two files in that sample were on the HDD, and
-the log line did not yet carry file sizes, so the comparison is by sample count and not by
-bytes. It does now, which is what will settle it properly.
+Extras under 200 MB are left out: at one to five seconds, start-up dominates them and they
+scatter from 35 to 132 MB/s.
 
-What the same run did surface was the index size that led to the codec filter above.
+**The clustering is the evidence, not the absolute number.** Sixty-four anime episodes,
+differing in size, all land within 16 % of each other; nine of the ten films on the same
+disk sit in the same band, with Poseidon the one outlier at 146. On the SSD the same walk
+spreads over more than a factor of two. A rate that barely moves across wildly different
+files is the signature of a shared resource at its limit, and the disk is the resource the
+two groups share and the SSD files do not. That is what supports the conclusion — the
+`~105` on its own could not, since the denominator is bytes spanned rather than bytes read.
+
+In practice a 20 GB film off the HDD is about three minutes. The failure mode the plan
+feared — the walk degenerating into a seek per block — did not happen: that would have put
+the traversal rate an order of magnitude lower.
+
+**An earlier reading of this said the opposite, and it was wrong.** The first production
+run had no file sizes in its log, so throughput was estimated as samples per second — and
+a sample count does not track file size at all. Two files with near-identical sample counts
+were compared, the HDD one came out faster, and the conclusion drawn was that the walk is
+not disk-bound. Adding bytes to the log line is what exposed it. The prediction the plan
+had written down before any of this — *size over throughput, minutes per film* — was right
+all along.
+
+That is also why `RemuxIndexWorker` builds one index at a time: on the disk where it
+matters, several at once would compete for the one thing that is actually scarce. Worth
+naming what would settle this beyond doubt, since the traversal rate cannot: bytes actually
+read, or the disk's own utilisation while a walk runs. Neither is instrumented, and neither
+is worth instrumenting for a background chore already inside its budget.
+
+What the same run surfaced was the index size that led to the codec filter above, and one
+gap worth naming: a whole anime series walks **1 track of 5**, its every audio track being
+AAC or FLAC. Those titles are indexed and still refused, with
+`packaging_unsupported_audio`. Support for `mp4a`/`esds` stopped being theoretical the day
+that was measured.
 
 ## Testing Expectations
 
