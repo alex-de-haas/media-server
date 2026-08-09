@@ -7,7 +7,11 @@ public sealed class RemuxTrackChoiceTests
     private static MatroskaIndex Library()
     {
         var index = new MatroskaIndex { SourceLength = 1 };
-        index.Tracks.Add(new IndexedTrack { Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video,
+            CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = [0x01],
+        });
         index.Tracks.Add(new IndexedTrack { Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Audio });
         index.Tracks.Add(new IndexedTrack { Number = 3, Ordinal = 2, Kind = IndexedTrackKind.Audio });
         index.Tracks.Add(new IndexedTrack
@@ -62,8 +66,45 @@ public sealed class RemuxTrackChoiceTests
     public void A_source_with_no_audio_still_gives_its_video()
     {
         var index = new MatroskaIndex { SourceLength = 1 };
-        index.Tracks.Add(new IndexedTrack { Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video,
+            CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = [0x01],
+        });
 
         Assert.Equal([1ul], RemuxTrackChoice.Resolve(index, null, null));
+    }
+
+    [Fact]
+    public void A_still_image_carried_as_a_video_track_is_not_mistaken_for_the_picture()
+    {
+        var index = new MatroskaIndex { SourceLength = 1 };
+        // Cover art a muxer wrote as a real track rather than as an attachment, and listed first. Taking
+        // it because it comes first would produce an output with no picture at all.
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video, CodecId = "V_MJPEG",
+        });
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 2, Ordinal = 1, Kind = IndexedTrackKind.Video,
+            CodecId = "V_MPEGH/ISO/HEVC", CodecPrivate = [0x01],
+        });
+        index.Tracks.Add(new IndexedTrack { Number = 3, Ordinal = 2, Kind = IndexedTrackKind.Audio });
+
+        Assert.Equal([2ul, 3ul], RemuxTrackChoice.Resolve(index, null, null));
+    }
+
+    [Fact]
+    public void A_video_track_with_no_configuration_is_not_taken_either()
+    {
+        var index = new MatroskaIndex { SourceLength = 1 };
+        // The codec is one we can write, but the track came without the record that describes it.
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 1, Ordinal = 0, Kind = IndexedTrackKind.Video, CodecId = "V_MPEGH/ISO/HEVC",
+        });
+
+        Assert.Empty(RemuxTrackChoice.Resolve(index, null, null));
     }
 }

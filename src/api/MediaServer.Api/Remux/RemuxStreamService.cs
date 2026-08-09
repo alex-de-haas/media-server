@@ -80,7 +80,7 @@ public sealed class RemuxStreamService(
             opened.Add(source);
             inputs.Add(new Mp4Synthesizer.Input(index, source));
 
-            if (index.Tracks.FirstOrDefault(track => track.Kind == IndexedTrackKind.Video) is { } video)
+            if (RemuxTrackChoice.Video(index) is { } video)
             {
                 tracks.Add(new Mp4Synthesizer.TrackRef(0, video.Number));
             }

@@ -350,8 +350,14 @@ rewriting rather than encoding tooling, so they do not change the answer.
       block groups whose keyframe answer is the absence of a `ReferenceBlock` rather
       than a flag, and a lacing header that does not add up. ffmpeg cannot produce a
       laced test file, so the builder writes one directly.
-- [ ] **Unit tests for the awkward sources** — a cover-art track not flagged
-      `attached_pic`, and a source whose timestamps are not monotonic in file order.
+- [x] **Unit tests for the awkward sources.** Timestamps that are not monotonic in
+      file order are covered where the composition table is built. Cover art turned
+      out to be a different shape than the trap described: in this library it is a
+      Matroska *attachment*, which the indexer never sees because it reads only
+      `Tracks` — `ffprobe` surfaces attachments as streams, which is where the
+      original warning came from. A guard is in anyway, because a muxer may write a
+      still image as a real video track: the picture is the first video track that a
+      sample entry can be written for, not simply the first.
 
 ### Phase 2 — the synthesiser
 

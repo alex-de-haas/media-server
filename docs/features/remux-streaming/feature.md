@@ -97,6 +97,11 @@ are the same bytes.
   a configuration, and only when the client asked. The cross-compatible `hvc1` form
   still carries `dvvC`, which is what makes a client without Dolby Vision see HDR10.
 - **H.264** keeps `avc1` whatever is asked for.
+- **The picture is the first video track a sample entry can be written for**, not
+  simply the first. A muxer may write cover art as a real video track, and taking that
+  because it comes first would produce an output with no picture. (In this library
+  cover art is a Matroska attachment instead, which the indexer never sees at all —
+  `ffprobe` surfaces attachments as streams, which is where the warning came from.)
 - **`colr`** is written from the `Colour` element and left out when the container is
   silent, which this library's own files are — they keep it in the HEVC SPS instead, and
   Dolby Vision engages from the bitstream regardless.
