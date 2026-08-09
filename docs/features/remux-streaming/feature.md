@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-10
+Updated: 2026-08-09
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -228,21 +228,32 @@ why this lives in `api`: nothing on the serving path invokes ffmpeg.
 
 ## Measured
 
-The walk reads the file end to end at whatever speed the device will give, and on the
-spinning disk that is the binding constraint.
+The number the log reports is the source's length divided by the elapsed time. That is a
+**traversal rate over the file's logical span, not measured device throughput** — the walk
+reads element headers and seeks past every payload, and how many bytes the disk actually
+delivered is not instrumented. Read it as "how fast the walk gets through a file of this
+size", which is the figure that matters for planning, and not as a device benchmark.
 
-| Where | Throughput | Spread |
+| Where | Files | Traversal rate |
 | --- | --- | --- |
-| Spinning disk | **~105 MB/s** | 95–119 MB/s over 55 files |
-| SSD | ~170 MB/s | 125–287 MB/s |
+| Anime episodes, spinning disk | 64 | **103–119 MB/s** |
+| Films, spinning disk | 10 | 95–146 MB/s, nine of them ≤ 113 |
+| Films, SSD | 6 | 125–287 MB/s |
 
-The tightness is the evidence, not the ratio. Forty-five anime episodes of differing sizes
-all landed between 103 and 119 MB/s, and the ten films on the same disk between 95 and
-146 — a device at its sequential limit, which is what ~105 MB/s is for a spinning disk. The
-SSD spreads over more than a factor of two, so *there* the pace is set by parsing rather
-than by reading. In practice a 20 GB film off the HDD is about three minutes, and the
-failure mode the plan feared — the walk degenerating into a seek per block — did not
-happen; that would be an order of magnitude below what the disk actually delivered.
+Extras under 200 MB are left out: at one to five seconds, start-up dominates them and they
+scatter from 35 to 132 MB/s.
+
+**The clustering is the evidence, not the absolute number.** Sixty-four anime episodes,
+differing in size, all land within 16 % of each other; nine of the ten films on the same
+disk sit in the same band, with Poseidon the one outlier at 146. On the SSD the same walk
+spreads over more than a factor of two. A rate that barely moves across wildly different
+files is the signature of a shared resource at its limit, and the disk is the resource the
+two groups share and the SSD files do not. That is what supports the conclusion — the
+`~105` on its own could not, since the denominator is bytes spanned rather than bytes read.
+
+In practice a 20 GB film off the HDD is about three minutes. The failure mode the plan
+feared — the walk degenerating into a seek per block — did not happen: that would have put
+the traversal rate an order of magnitude lower.
 
 **An earlier reading of this said the opposite, and it was wrong.** The first production
 run had no file sizes in its log, so throughput was estimated as samples per second — and
@@ -253,7 +264,10 @@ had written down before any of this — *size over throughput, minutes per film*
 all along.
 
 That is also why `RemuxIndexWorker` builds one index at a time: on the disk where it
-matters, several at once would compete for the one thing that is actually scarce.
+matters, several at once would compete for the one thing that is actually scarce. Worth
+naming what would settle this beyond doubt, since the traversal rate cannot: bytes actually
+read, or the disk's own utilisation while a walk runs. Neither is instrumented, and neither
+is worth instrumenting for a background chore already inside its budget.
 
 What the same run surfaced was the index size that led to the codec filter above, and one
 gap worth naming: a whole anime series walks **1 track of 5**, its every audio track being

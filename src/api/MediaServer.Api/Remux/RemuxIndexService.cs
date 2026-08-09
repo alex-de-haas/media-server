@@ -7,9 +7,10 @@ namespace MediaServer.Api.Remux;
 /// <summary>
 /// Decides which sources want an index, builds them, and clears away the ones nothing points at any more.
 ///
-/// The walk reads the file end to end at device speed — about 105 MB/s off the spinning disk in
-/// production, so roughly three minutes for a 20 GB film — which is why nothing here runs on a playback
-/// request:
+/// The walk gets through about 105 MB of source per second off the spinning disk in production — roughly
+/// three minutes for a 20 GB film. That is a traversal rate over the file's length, not a device
+/// benchmark: payloads are seeked past, and the bytes actually read are not counted. Either way it is far
+/// too long to run on a playback request:
 /// <see cref="RemuxIndexWorker"/> drives it in the background, and a viewer who presses play either finds an
 /// index waiting or is told the source is not ready yet.
 /// </summary>

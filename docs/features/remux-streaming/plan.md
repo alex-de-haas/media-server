@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-05
-Updated: 2026-08-10
+Updated: 2026-08-09
 
 > Part of the [Apple client](../apple-client/plan.md) epic, and the last server
 > piece before a client can play the library.
@@ -367,13 +367,19 @@ rewriting rather than encoding tooling, so they do not change the answer.
       of 97 s each, a mean of 131 s.
 
       **The prediction written here was right: size over throughput, minutes per film.**
-      The second run, with file sizes in the log, measures ~105 MB/s off the spinning
-      disk (95–119 across 55 files) against ~170 on the SSD (125–287). The tight
-      clustering on the HDD is a device at its sequential limit; the SSD's two-fold
-      spread means parsing sets the pace there instead. A 20 GB film off the HDD is
-      about three minutes. The remedy held in reserve — a sequential read with a large
-      buffer instead of seeking past every payload — is **not** needed: degeneration
-      into a seek per block would sit an order of magnitude below 105 MB/s.
+      The second run, with file sizes in the log, gives a *traversal rate* — source
+      length over elapsed time, not measured device throughput, since the walk seeks
+      past payloads and the bytes it actually reads are not instrumented. Sixty-four
+      anime episodes on the spinning disk land within 103–119 MB/s of each other, nine
+      of the ten films on it sit in the same band, and the six SSD files spread over
+      125–287. A rate that barely moves across files of very different sizes is a shared
+      resource at its limit, and the disk is what the two HDD groups share and the SSD
+      files do not.
+
+      A 20 GB film off the HDD is about three minutes. The remedy held in reserve — a
+      sequential read with a large buffer instead of seeking past every payload — is
+      **not** needed: degeneration into a seek per block would put the traversal rate an
+      order of magnitude lower.
 
       Between the two runs this deliverable briefly recorded the opposite conclusion.
       The first run's log had no file sizes, so throughput was estimated as samples per
