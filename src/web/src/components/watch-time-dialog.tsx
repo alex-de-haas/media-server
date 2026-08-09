@@ -2,7 +2,7 @@
 
 import { useId, useState, type ReactNode } from "react";
 import { Clock } from "lucide-react";
-import { isFutureInstant, toLocalInputValue, toUtcInstant } from "@/lib/watch-time";
+import { FUTURE_ALLOWANCE_MS, isFutureInstant, toLocalInputValue, toUtcInstant } from "@/lib/watch-time";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -40,18 +40,43 @@ export function WatchTimeDialog({
   pending: boolean;
   onSubmit: (watchedAt: string) => void;
 }) {
-  const fieldId = useId();
-  const [value, setValue] = useState(() => toLocalInputValue(new Date()));
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{heading}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        {/* The field lives one level down so that closing the dialog unmounts it: a closed dialog's
+            content is not kept mounted, so each open starts from a fresh "now" without the component
+            having to notice the change and reset itself while rendering. */}
+        <WatchTimeFields
+          confirmLabel={confirmLabel}
+          pending={pending}
+          onCancel={() => onOpenChange(false)}
+          onSubmit={onSubmit}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-  // Re-stamped per open, not per mount: "now" has to mean now, and a dialog reopened an hour later
-  // would otherwise offer the hour-old time it was first built with.
-  const [wasOpen, setWasOpen] = useState(open);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) {
-      setValue(toLocalInputValue(new Date()));
-    }
-  }
+function WatchTimeFields({
+  confirmLabel,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  confirmLabel: string;
+  pending: boolean;
+  onCancel: () => void;
+  onSubmit: (watchedAt: string) => void;
+}) {
+  const fieldId = useId();
+  // Read once, at mount — which is the moment the dialog opened. Rendering itself never asks the clock,
+  // so two renders of the same open dialog cannot disagree about what "now" was.
+  const [openedAt] = useState(() => new Date());
+  const [value, setValue] = useState(() => toLocalInputValue(openedAt));
 
   const instant = toUtcInstant(value);
   // Checked here as well as on the server, so the refusal arrives while the field is still in front of
@@ -63,51 +88,49 @@ export function WatchTimeDialog({
       : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{heading}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-
-        <Field>
-          <FieldLabel htmlFor={fieldId}>Watched at</FieldLabel>
-          <div className="flex gap-2">
-            <Input
-              id={fieldId}
-              type="datetime-local"
-              value={value}
-              max={toLocalInputValue(new Date())}
-              onChange={(event) => setValue(event.target.value)}
-              aria-invalid={error != null}
-              aria-describedby={error ? `${fieldId}-error` : undefined}
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setValue(toLocalInputValue(new Date()))}
-              aria-label="Set to now"
-            >
-              <Clock className="size-4" aria-hidden /> Now
-            </Button>
-          </div>
-          {error && (
-            <p id={`${fieldId}-error`} className="text-destructive text-xs">
-              {error}
-            </p>
-          )}
-        </Field>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-            Cancel
+    <>
+      <Field>
+        <FieldLabel htmlFor={fieldId}>Watched at</FieldLabel>
+        <div className="flex gap-2">
+          <Input
+            id={fieldId}
+            type="datetime-local"
+            value={value}
+            // Carries the same allowance the validation does. A max pinned to the exact opening instant
+            // would let the native picker block a time both the dialog and the server would accept —
+            // including, on a browser clock running fast, the "now" the field opens with.
+            max={toLocalInputValue(new Date(openedAt.getTime() + FUTURE_ALLOWANCE_MS))}
+            onChange={(event) => setValue(event.target.value)}
+            aria-invalid={error != null}
+            aria-describedby={error ? `${fieldId}-error` : undefined}
+            className="flex-1"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            // A fresh clock read, in an event handler where one belongs: the dialog may have been open
+            // for a while before the user asked for "now".
+            onClick={() => setValue(toLocalInputValue(new Date()))}
+            aria-label="Set to now"
+          >
+            <Clock className="size-4" aria-hidden /> Now
           </Button>
-          <Button onClick={() => instant && onSubmit(instant)} disabled={pending || error != null}>
-            {pending ? "Saving…" : confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+        {error && (
+          <p id={`${fieldId}-error`} className="text-destructive text-xs">
+            {error}
+          </p>
+        )}
+      </Field>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel} disabled={pending}>
+          Cancel
+        </Button>
+        <Button onClick={() => instant && onSubmit(instant)} disabled={pending || error != null}>
+          {pending ? "Saving…" : confirmLabel}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }

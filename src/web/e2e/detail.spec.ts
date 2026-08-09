@@ -43,6 +43,28 @@ test("logs a watch at a time the user picks, from the overflow menu", async ({ p
   expect(logged[0].watchedAt).toMatch(/Z$/);
 });
 
+test("the time field starts fresh on every open, not where it was left", async ({ page }) => {
+  // The dialog's content is unmounted while closed, which is what makes "now" mean now on reopening
+  // rather than whatever was typed — or whatever the clock said the first time it was built.
+  await setupApp(page, {
+    library: [aMovie("m1", "Arrival")],
+    detail: { m1: movieDetail("m1", "Arrival") },
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Log watch…" }).click();
+
+  const field = page.getByRole("dialog").getByLabel("Watched at");
+  await field.fill("2019-01-05T20:00");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Log watch…" }).click();
+
+  await expect(page.getByRole("dialog").getByLabel("Watched at")).not.toHaveValue("2019-01-05T20:00");
+});
+
 test("a viewer who is not an admin still gets Log watch, and nothing else", async ({ page }) => {
   // The menu used to be admin-only; logging a play against your own history is not an admin act.
   await setupApp(page, {
