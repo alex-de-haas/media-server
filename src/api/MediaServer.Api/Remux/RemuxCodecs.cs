@@ -30,4 +30,24 @@ internal static class RemuxCodecs
     /// <summary>Video a sample entry can be written for.</summary>
     internal static bool CanPackageVideo(IndexedTrack track) =>
         Mp4Writer.VideoCodec(track.CodecId) is not null && track.CodecPrivate is not null;
+
+    /// <summary>
+    /// Whether a track's samples are worth recording at all — the same question as the two above, asked
+    /// once for every kind, at the point the walk decides what to write down.
+    ///
+    /// A sample table for a track no sample entry can be written for is bytes nobody can ever point at.
+    /// That was not obvious until it was measured: on production a single TrueHD track accounted for 96 %
+    /// of its film's index, and four files out of 147 held 43 % of the 1.2 GB the library had accumulated.
+    ///
+    /// The track itself stays in the index. Its ordinal keeps the viewer's stored stream indexes lined up
+    /// with the file, and the resolver still has to see it to explain why it cannot be used — only its
+    /// frames go unrecorded.
+    /// </summary>
+    internal static bool WantsSamples(IndexedTrack track) => track.Kind switch
+    {
+        IndexedTrackKind.Video => CanPackageVideo(track),
+        IndexedTrackKind.Audio => CanPackageAudio(track),
+        IndexedTrackKind.Subtitle => SubtitleText.IsConvertible(track.CodecId),
+        _ => false,
+    };
 }

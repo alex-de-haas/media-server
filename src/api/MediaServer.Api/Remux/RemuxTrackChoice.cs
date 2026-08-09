@@ -32,8 +32,7 @@ internal static class RemuxTrackChoice
         // A subtitle track is only added when one was asked for: a player that finds one enables it, and
         // nobody asked for subtitles by not choosing any.
         if (subtitleStreamIndex is not null
-            && First(index, IndexedTrackKind.Subtitle, subtitleStreamIndex) is { } subtitle
-            && SubtitleText.IsConvertible(subtitle.CodecId))
+            && First(index, IndexedTrackKind.Subtitle, subtitleStreamIndex) is { } subtitle)
         {
             chosen.Add(subtitle.Number);
         }
@@ -51,12 +50,21 @@ internal static class RemuxTrackChoice
             track.Kind == IndexedTrackKind.Video && RemuxCodecs.CanPackageVideo(track));
 
     /// <summary>
-    /// The track at that stream index if it is of the right kind, and otherwise the first of the kind —
-    /// an index that no longer matches is a stale preference, not a reason to play nothing.
+    /// The track at that stream index if it is of the right kind and can be described, and otherwise the
+    /// first that can be — an index that no longer matches is a stale preference, not a reason to play
+    /// nothing.
+    ///
+    /// Only describable tracks are considered, and that is the whole point rather than an optimisation.
+    /// The resolver offers a remux when <em>some</em> audio track can be packaged; taking the file's first
+    /// audio track regardless would hand a viewer whose film leads with TrueHD a container with a picture
+    /// and no sound. A choice that lands on such a track is treated exactly like a choice that lands on
+    /// nothing.
     /// </summary>
     private static IndexedTrack? First(MatroskaIndex index, IndexedTrackKind kind, int? streamIndex)
     {
-        var ofKind = index.Tracks.Where(track => track.Kind == kind).ToList();
+        var ofKind = index.Tracks
+            .Where(track => track.Kind == kind && RemuxCodecs.WantsSamples(track))
+            .ToList();
         if (ofKind.Count == 0)
         {
             return null;
@@ -68,6 +76,8 @@ internal static class RemuxTrackChoice
             return exact;
         }
 
+        // Subtitles are shown only when asked for by index; falling back to "some subtitle track" would
+        // turn them on for a viewer who never wanted them.
         return kind == IndexedTrackKind.Subtitle ? null : ofKind[0];
     }
 }

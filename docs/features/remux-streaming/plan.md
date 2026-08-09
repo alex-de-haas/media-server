@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-05
-Updated: 2026-08-08
+Updated: 2026-08-09
 
 > Part of the [Apple client](../apple-client/plan.md) epic, and the last server
 > piece before a client can play the library.
@@ -361,19 +361,32 @@ rewriting rather than encoding tooling, so they do not change the answer.
       index, so the outstanding work is a query and a restart resumes without
       remembering anything. Orphaned indexes are pruned once per process, since
       nothing else removes a file when its title is deleted.
-- [ ] **Measured on a real film from the slow disk** — deliberately an *observation on
-      production* rather than a test, decided on 2026-08-09. The only spinning disk is
-      there, and the worker already logs what is wanted: `Indexed {Path} in {Elapsed}s:
-      {Tracks} tracks, {Samples} samples`, once per file. The number appears after the
-      first scan; nothing has to be run.
+- [x] **Measured on a real film from the slow disk** — taken as an *observation on
+      production* rather than as a test, decided on 2026-08-09, and answered by the
+      first production run the same day. 26 films in 57 minutes back to back: a median
+      of 97 s each, a mean of 131 s.
 
-      What is known: 27 s cold for a 26.37 GB film on the dev SSD, which is about a
-      gigabyte a second and therefore I/O-bound rather than header-bound — the walk is
-      reading a large part of the file, not skipping to the headers. That makes a
-      spinning disk roughly size over throughput: minutes per film, not hours. If the
-      production number contradicts that, the walk has degenerated into a seek per
-      block, and the fix is to read the file sequentially with a large buffer instead
-      of seeking past every payload.
+      **The walk is not disk-bound**, which is the opposite of what this deliverable
+      predicted. Two files of near-identical sample count — 2.81 M on an SSD, 2.82 M on
+      the spinning disk — took 204.5 s and 162.3 s, the HDD *faster*; normalised, the
+      two HDD files sit at 17.4 k and 20.0 k samples a second against an SSD median of
+      19.7 k. The remedy held in reserve here, a sequential read with a large buffer
+      instead of seeking past every payload, would have addressed a bottleneck that is
+      not there, and is dropped rather than kept waiting.
+
+      Two caveats, stated rather than buried: only two files in that sample were on the
+      HDD, and the log line did not yet carry file sizes, so the comparison is by sample
+      count and not by bytes. It carries them now, along with the codecs it passed over,
+      which is what will settle it properly on the next run.
+
+      What the run did surface was the index footprint — 1.2 GB over 147 files, 43 % of
+      it in four — which is the deliverable below.
+- [x] **Only describable tracks are walked.** Added 2026-08-09, out of the measurement
+      above. A sample table for a track no sample entry can be written for is bytes
+      nobody can ever point at: one film's TrueHD track was 96 % of its own index. The
+      track stays listed so ordinals and refusal reasons still line up; its frames are
+      not recorded. `RemuxCodecs.WantsSamples` answers this once for the walk and the
+      synthesiser both, and the index format goes to v3 so every stored index rebuilds.
 - [x] **Unit tests** over crafted Matroska written by hand — all three lacing forms,
       block groups whose keyframe answer is the absence of a `ReferenceBlock` rather
       than a flag, and a lacing header that does not add up. ffmpeg cannot produce a

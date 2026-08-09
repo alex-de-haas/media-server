@@ -8,9 +8,14 @@ namespace MediaServer.Api.Remux;
 ///
 /// The shape of the data is what makes this worth encoding rather than serialising: within one track the
 /// timestamps and the offsets both climb, and the steps between them are small and repetitive. Storing the
-/// steps as variable-length integers instead of the values as fixed-width ones is the difference between
-/// about twenty bytes a sample and about eight, which over a feature film is megabytes rather than tens of
-/// them.
+/// steps as variable-length integers instead of the values as fixed-width ones takes a sample from about
+/// twenty bytes to between seven and thirteen.
+///
+/// It is a range rather than a number because of what an offset step actually is. Between two consecutive
+/// frames of one track lie all the other tracks' data for that stretch of the film, so the step is the
+/// interleaving stride, not the frame size — and it grows with the number of tracks in the file. Production
+/// bears this out exactly: 7.3 bytes a sample on a five-track file, 9.0 on a twenty-five-track one, 11.4 on
+/// a file with fifty.
 ///
 /// The header carries what the index was built from — the source's length and last-write time — so a file
 /// that has been replaced or re-encoded invalidates its own index without anything else having to notice.
@@ -21,7 +26,7 @@ internal static class RemuxIndexFormat
 
     /// <summary>Bumping this invalidates every stored index, which is the point: a format change must not
     /// be readable as the old one.</summary>
-    internal const ushort Version = 2;
+    internal const ushort Version = 3;
 
     internal sealed record Stamp(long SourceLength, DateTimeOffset SourceModified)
     {

@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-08
+Updated: 2026-08-09
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -26,7 +26,7 @@ files, where the sample offsets expect them.
 ## The index
 
 `MatroskaIndexer` walks a file into per-track sample tables, reading element headers and
-seeking past every payload. A 26 GB film costs about 25 s and produces about 9 MB.
+seeking past every payload. On production a feature film costs a minute or two.
 
 Each sample is an offset and a size into the source, because the design references
 samples rather than copying them. Alongside them the index carries what an MP4 sample
@@ -34,13 +34,26 @@ entry needs, all of it taken from the source rather than derived: `CodecPrivate`
 already the payload of `hvcC` or `avcC`, and the Dolby Vision configuration is already
 the payload of `dvvC`, in a `BlockAdditionMapping` whose type is literally `dvcC`.
 
+**Only tracks a sample entry can be written for are walked** — the video codecs
+`Mp4Writer` knows, AC-3 and E-AC-3, and text subtitles. Every other track is still listed,
+because its ordinal is what keeps a viewer's stored stream indexes lined up with the file
+and the resolver has to see it to explain why it cannot be used, but its frames are never
+delaced, measured or recorded. `RemuxCodecs.WantsSamples` is the single place that answers
+this, so the walk and the synthesiser cannot disagree.
+
+That filter exists because of a measurement rather than a hunch. Before it, 147 indexes
+came to 1.2 GB, and four files held 43 % of that: one 50-track remux at 273 MB, and a
+5-track film whose single TrueHD track was 96 % of its own index — all of it describing
+frames nothing could ever point at.
+
 Two things the walk has to get right:
 
 - **A block is not a sample.** Matroska laces audio — fixed lacing on AC-3 in this
   library, EBML lacing on DTS — so a block may hold many frames. They stay contiguous
   in the source, so each is still a plain offset and size; only the arithmetic differs.
   A lacing header that does not add up leaves the block whole rather than slicing it
-  into samples pointing outside it.
+  into samples pointing outside it. All three lacing forms stay handled even though DTS
+  is no longer walked: nothing says AC-3 will never arrive EBML-laced.
 - **A `BlockGroup`'s keyframe answer is the absence of a `ReferenceBlock`**, not a flag.
   Getting it wrong fills the sync table with the wrong entries and makes seeking land in
   the wrong places.
@@ -55,10 +68,15 @@ in the database. An index is derived data — large next to a row, rebuildable, 
 interest to a backup.
 
 The file stores the steps rather than the values. Within a track the timestamps and
-offsets both climb in small repetitive increments, so variable-length deltas cost
-**5.6 bytes a sample** where fixed-width fields would cost about 21: 9.33 MB for a
-26.37 GB film, around 0.04 % of the source. Loading one takes 0.1 s, so it is read per
-request rather than held in memory.
+offsets both climb in small repetitive increments, so variable-length deltas take a
+sample from about 21 bytes to **between 7 and 13**. Loading one takes a fraction of a
+second, so it is read per request rather than held in memory.
+
+It is a range rather than a number, and the reason is worth knowing: between two
+consecutive frames of one track lie all the other tracks' data for that stretch of the
+film, so an offset step is the **interleaving stride**, not the frame size — it grows
+with the number of tracks in the file. Production measures 7.3 bytes a sample on a
+five-track file, 9.0 on a twenty-five-track one and 11.4 on a fifty-track one.
 
 Invalidation needs no schema. The header carries the source's length and last-write
 time, so a file that was replaced or re-encoded invalidates its own index and the caller
@@ -66,12 +84,21 @@ rebuilds; a format version bump does the same for every index at once. Each is w
 aside and moved into place, so an interrupted build leaves nothing to mistake for an
 index, and a truncated or foreign file reads as "no index" rather than as an error.
 
-`RemuxIndexWorker` builds missing ones in the background, **one at a time** — the walk
-is bound by the disk it reads, and several at once would be slower in total while making
-everything else on that disk worse. There is no queue: the database knows which sources
-exist and the store knows which have an index, so the outstanding work is a query and a
-restart resumes without remembering anything. Orphaned indexes are pruned once per
-process, since nothing else deletes a file when its title goes.
+`RemuxIndexWorker` builds missing ones in the background, **one at a time**. The walk
+turns out not to be bound by the disk it reads — see [Measured](#measured) — but it is
+still the least urgent thing in the process, and running several at once would take cores
+and disk from scans and playback to finish a chore nothing waits on. There is no queue:
+the database knows which sources exist and the store knows which have an index, so the
+outstanding work is a query and a restart resumes without remembering anything. Orphaned
+indexes are pruned once per process, since nothing else deletes a file when its title
+goes.
+
+Each finished walk logs what it cost and what it passed over:
+
+```text
+Indexed <path> in 162.3s: 21474836480 bytes at 126 MB/s, 4/7 tracks, 812004 samples;
+skipped A_DTS x2, S_HDMV/PGS x1.
+```
 
 Sidecar dubs are indexed too, keyed by their stream row rather than by a media source —
 the store does not care which owns an index, so an external `.mka` is walked exactly as
@@ -171,6 +198,18 @@ Matroska's, and when they drifted the result was a source advertised as remuxabl
 only audio track was then quietly declined. Audio is AC-3 and E-AC-3; AAC would need an
 `mp4a` entry with an `esds`, and DTS and TrueHD are out of scope for this client.
 
+The same gap exists on the video axis and is closed the same way. The resolver asks
+whether the *client* can decode the picture; packaging asks whether it can *write* the
+sample entry. AV1 is where the two part company — a recent Apple TV decodes it and
+`Mp4Writer` has no entry for it — so a source with a picture that cannot be described is
+refused outright rather than served as the soundtrack that is left. A source that never
+had a picture is untouched by that rule.
+
+Within a source the same reasoning picks the default audio: **the first track that can be
+described, not the first in the file.** A film that leads with TrueHD and keeps AC-3
+behind it is the ordinary layout for anything remuxed from a disc, and a stored preference
+pointing at the lossless track falls back exactly as a stale one does.
+
 ## Verified
 
 On an Apple TV 4K (tvOS 26.5), against a 26.37 GB HEVC Dolby Vision profile 8.1 source:
@@ -178,6 +217,27 @@ playback at 3840×2160 **in Dolby Vision**, seeking across the two-hour film in 
 2.13 s and 2.76 s, with no stalls — while the source lay untouched and nothing was
 produced or stored beyond the index. `transcode-engine` was stopped throughout, which is
 why this lives in `api`: nothing on the serving path invokes ffmpeg.
+
+## Measured
+
+The first production run indexed 26 films in 57 minutes back to back — a median of 97 s
+each and a mean of 131 s, the two-second pause between files invisible against them. At
+that rate a 300-title library is a one-off cost of about eleven hours, and nothing waits
+on it.
+
+**The walk is not disk-bound.** This was the open question the run existed to answer, and
+it came back the other way. The cleanest pair: two files of near-identical sample count,
+2.81 M on an SSD and 2.82 M on a spinning disk, took 204.5 s and 162.3 s — the HDD
+*faster*. Normalised, the two HDD files sit at 17.4 k and 20.0 k samples a second against
+an SSD median of 19.7 k. The remedy the plan had held in reserve — sequential reads with a
+large buffer instead of seeking per block — would have addressed a bottleneck that is not
+there.
+
+Two caveats stated rather than buried: only two files in that sample were on the HDD, and
+the log line did not yet carry file sizes, so the comparison is by sample count and not by
+bytes. It does now, which is what will settle it properly.
+
+What the same run did surface was the index size that led to the codec filter above.
 
 ## Testing Expectations
 
@@ -196,6 +256,16 @@ why this lives in `api`: nothing on the serving path invokes ffmpeg.
   overflow a narrower timescale.
 - **What is refused**: a track that cannot be described is left out, and a source whose
   only audio cannot be packaged is refused rather than served silently.
+- **What is not walked**: a track no sample entry covers keeps its ordinal, codec and
+  channel count but gets no samples — checked for lossless audio, bitmap subtitles and a
+  video track that arrived without its configuration. The synthesiser's own refusal is
+  covered separately, through a hand-built index, so the guard does not go stale now that
+  the walk rarely reaches it.
+- **Track choice**: the default audio is the first that can be *described*, not the first
+  in the file, and a stored preference pointing at a lossless track falls back the same
+  way a stale one does — a film that leads with TrueHD must not play as a silent one. A
+  picture that cannot be described is refused rather than served as audio alone, while a
+  source that has no picture at all still is.
 - **The stream**: reads that stop at every boundary, seeks that land inside a part, and
   a seek before the beginning refused rather than silently allowed.
 - **The service**, over a seeded library: what is pending, what is not, what a changed

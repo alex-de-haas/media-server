@@ -47,7 +47,8 @@ public sealed class RemuxIndexServiceTests : IDisposable
     private static byte[] TinyMatroska() =>
         ContainerBuilders.Matroska(
             ContainerBuilders.Info(1000),
-            ContainerBuilders.Ebml(0x1654AE6B, TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", width: 8, height: 8)),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01], width: 8, height: 8)),
             Cluster(0, SimpleBlock(1, 0, keyframe: true, Frame(16, 0xAB))));
 
     private Guid SeedSource(

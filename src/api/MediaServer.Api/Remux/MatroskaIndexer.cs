@@ -232,7 +232,12 @@ internal static class MatroskaIndexer
     private static void ReadClusters(
         Stream stream, MatroskaIndex index, Ebml.Element segment, CancellationToken cancellationToken)
     {
-        var byNumber = index.Tracks.ToDictionary(track => track.Number);
+        // Only the tracks whose samples can end up in an output. A block belonging to any other track is
+        // then not merely skipped when the index is written — it is never delaced, never measured, and
+        // never stored, which is where both the time and the size of the walk actually go.
+        var byNumber = index.Tracks
+            .Where(RemuxCodecs.WantsSamples)
+            .ToDictionary(track => track.Number);
 
         for (var position = segment.Start;
              Ebml.Read(stream, position, segment.End) is { } element;
@@ -379,7 +384,8 @@ internal static class MatroskaIndexer
     /// <summary>
     /// Splits a block into its frames. A laced block holds several, and this library's own files lace audio
     /// — fixed lacing on AC-3 and E-AC-3, EBML lacing on DTS — while material remuxed by ffmpeg never does,
-    /// which is exactly how the need for this went unnoticed at first.
+    /// which is exactly how the need for this went unnoticed at first. DTS is no longer walked at all, but
+    /// nothing says AC-3 will never arrive EBML-laced, so all three forms stay handled.
     ///
     /// The frames stay contiguous in the source, so each is still a plain (offset, size): only the
     /// arithmetic differs, and the lacing header is skipped rather than served.

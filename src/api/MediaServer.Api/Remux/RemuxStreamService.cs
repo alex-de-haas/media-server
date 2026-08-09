@@ -59,6 +59,16 @@ public sealed class RemuxStreamService(
             return (null, RemuxRefusal.NotIndexed);
         }
 
+        // A source with a picture we cannot describe would otherwise be served as an audio-only container.
+        // The resolver gates on what the *client* can decode and this gates on what we can *write*, which
+        // are not the same question — the same drift that once produced a video with no sound, on the other
+        // axis. AV1 is the live case: a recent Apple TV decodes it and nothing here can write its entry.
+        if (index.Tracks.Any(track => track.Kind == IndexedTrackKind.Video)
+            && RemuxTrackChoice.Video(index) is null)
+        {
+            return (null, RemuxRefusal.NotPackageable);
+        }
+
         var streams = await database.MediaStreams.AsNoTracking()
             .Where(stream => stream.MediaSourceId == mediaSourceId)
             .Select(stream => new StreamRow(
