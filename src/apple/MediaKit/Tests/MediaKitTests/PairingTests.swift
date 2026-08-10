@@ -61,8 +61,11 @@ private final class StubTransport: HTTPTransport, @unchecked Sendable {
     }
 }
 
+// The committed OpenAPI, verbatim: surfaceVersion is a **string** and coreOrigin is nullable. Writing
+// this to match the model instead of the contract is exactly how a client that never worked against a
+// real server passed its own tests.
 private let bootstrapBody = """
-{"serverName":"Home","appId":"com.haas.media-server","surfaceVersion":1,"coreOrigin":"https://core.example"}
+{"serverName":"Home","appId":"com.haas.media-server","surfaceVersion":"1","coreOrigin":"https://core.example"}
 """
 
 private let grantBody = """
@@ -126,6 +129,29 @@ struct PairingClientTests {
         await #expect(throws: PairingError.notAMediaServer) {
             try await client.bootstrap(server: server)
         }
+    }
+
+    @Test("The bootstrap decodes the contract's own shape")
+    func bootstrapShape() async throws {
+        let client = PairingClient(
+            transport: StubTransport(single: ["/native/v1/server/public": (200, bootstrapBody)]))
+
+        let bootstrap = try await client.bootstrap(server: server)
+
+        // A string, because `NativeSurface.Version` is `"1"`. Decoding it as a number failed against
+        // every real server while passing a fixture written to match the model.
+        #expect(bootstrap.surfaceVersion == "1")
+        #expect(bootstrap.coreOrigin == "https://core.example")
+    }
+
+    @Test("A server that cannot say where its Core is decodes, and fails later with its own reason")
+    func nullCoreOrigin() async throws {
+        let body = #"{"serverName":"Home","appId":"x","surfaceVersion":"1","coreOrigin":null}"#
+        let client = PairingClient(
+            transport: StubTransport(single: ["/native/v1/server/public": (200, body)]))
+
+        // Nullable in the contract, so it must not read as a malformed answer.
+        #expect(try await client.bootstrap(server: server).coreOrigin == nil)
     }
 
     @Test("Something answering with the wrong shape is not a Media Server either")
@@ -339,6 +365,7 @@ struct PairingSessionTests {
             server: URL(string: "https://media.example")!,
             serverName: "Home",
             appId: "com.haas.media-server",
+            coreOrigin: URL(string: "https://core.example")!,
             coreToken: "core-token",
             identity: AppIdentity(accessToken: "app-token", expiresAt: .distantFuture))
 
@@ -356,6 +383,7 @@ struct PairingSessionTests {
             server: URL(string: "https://media.example")!,
             serverName: "Home",
             appId: "com.haas.media-server",
+            coreOrigin: URL(string: "https://core.example")!,
             coreToken: "core-token",
             identity: AppIdentity(accessToken: "old", expiresAt: .distantPast))
 
@@ -372,19 +400,21 @@ struct PairingSessionTests {
         #expect(store.load()?.identity.accessToken == "app-token")
     }
 
-    @Test("A pairing that can no longer be refreshed is forgotten rather than half-kept")
-    func refreshFailureUnpairs() async {
-        let stale = PairedServer(
+    private func stalePairing(coreToken: String = "core-token") -> PairedServer {
+        PairedServer(
             server: URL(string: "https://media.example")!,
             serverName: "Home",
             appId: "com.haas.media-server",
-            coreToken: "revoked",
+            coreOrigin: URL(string: "https://core.example")!,
+            coreToken: coreToken,
             identity: AppIdentity(accessToken: "old", expiresAt: .distantPast))
+    }
 
-        let store = InMemoryCredentialStore(stale)
+    @Test("A refused credential is the one reason to forget a pairing")
+    func refusedCredentialUnpairs() async {
+        let store = InMemoryCredentialStore(stalePairing(coreToken: "revoked"))
         let subject = session(
             StubTransport(single: [
-                "/native/v1/server/public": (200, bootstrapBody),
                 "/api/auth/apps/authorize": (401, #"{"error":"session_invalid","message":"Gone."}"#),
             ]),
             store: store)
@@ -392,9 +422,70 @@ struct PairingSessionTests {
         await subject.restore()
 
         #expect(store.load() == nil)
-        if case .failed = subject.state {} else {
-            Issue.record("Expected a failure, got \(subject.state)")
+        #expect(subject.state == .failed(.credentialRejected))
+    }
+
+    @Test("A server that was merely asleep does not cost the viewer their pairing")
+    func transientFailureKeepsPairing() async {
+        // A television that woke up before the network did must not have to be paired again over it.
+        let store = InMemoryCredentialStore(stalePairing())
+        let subject = session(
+            StubTransport(single: ["/api/auth/apps/authorize": (503, "")]), store: store)
+
+        await subject.restore()
+
+        #expect(store.load() != nil)
+        if case .paired = subject.state {} else {
+            Issue.record("Expected to stay paired, got \(subject.state)")
         }
+    }
+
+    @Test("A refresh asks the Core it was approved against, never one named just now")
+    func refreshPinsTheCore() async {
+        // The token about to be presented is the full-privilege one. An endpoint that could name its own
+        // origin could be handed a credential reaching Core and every other app on the host.
+        let transport = StubTransport([
+            "/native/v1/server/public": [(200, #"{"serverName":"Evil","appId":"x","surfaceVersion":"1","coreOrigin":"https://attacker.example"}"#)],
+            "/api/auth/apps/authorize": [(200, #"{"code":"c","redirectUri":"x","expiresAt":"2030-01-01T00:00:00Z"}"#)],
+            "/api/auth/apps/token": [(200, tokenBody)],
+        ])
+
+        let subject = session(transport, store: InMemoryCredentialStore(stalePairing()))
+        await subject.restore()
+
+        let hosts = Set(transport.requests.compactMap(\.url?.host))
+        #expect(!hosts.contains("attacker.example"))
+        #expect(hosts.contains("core.example"))
+    }
+
+    @Test("Cancelling after a successful pairing leaves it alone")
+    func cancelDoesNotUndoPairing() async {
+        // The code screen disappears *because* pairing succeeded, and its onDisappear arrives after the
+        // state has moved on. Treating that as a cancellation drops the viewer back on address entry the
+        // instant they finish.
+        let subject = session(
+            happyServer(polls: [(200, #"{"status":"approved","token":"core-token"}"#)]))
+
+        subject.start(address: "media.example")
+        await settle(subject)
+
+        subject.cancel()
+
+        if case .paired = subject.state {} else {
+            Issue.record("Expected to stay paired, got \(subject.state)")
+        }
+    }
+
+    @Test("A server with no Core origin says so rather than reading as malformed")
+    func noCoreOrigin() async {
+        let subject = session(StubTransport(single: [
+            "/native/v1/server/public": (200, #"{"serverName":"Home","appId":"x","surfaceVersion":"1","coreOrigin":null}"#),
+        ]))
+
+        subject.start(address: "media.example")
+        await settle(subject)
+
+        #expect(subject.state == .failed(.noCoreOrigin))
     }
 
     @Test("An address that is not one fails before anything is asked of the network")

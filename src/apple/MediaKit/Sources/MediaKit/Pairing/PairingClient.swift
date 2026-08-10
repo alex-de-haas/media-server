@@ -174,18 +174,28 @@ public struct PairingClient: Sendable {
     /// Core answers failures with a code and a message. The two worth naming are named; the rest are
     /// carried through rather than flattened, because a reason a viewer can read beats "failed".
     private func error(from data: Data, status: Int) -> PairingError {
-        guard let failure = try? JSONDecoder.pairing.decode(ErrorAnswer.self, from: data) else {
-            return .server(code: "http_\(status)", message: "The server answered \(status).")
-        }
+        let failure = try? JSONDecoder.pairing.decode(ErrorAnswer.self, from: data)
 
-        switch failure.error {
+        switch failure?.error {
         case "user_not_assigned", "app_access_denied":
             return .notAssigned
         case "device_code_throttled":
             return .throttled
         default:
-            return .server(code: failure.error, message: failure.message ?? "")
+            break
         }
+
+        // A refused credential has to be told apart from a server having a bad day, because only the
+        // first is a reason to forget a pairing.
+        if status == 401 || status == 403 {
+            return .credentialRejected
+        }
+
+        guard let failure else {
+            return .server(code: "http_\(status)", message: "The server answered \(status).")
+        }
+
+        return .server(code: failure.error, message: failure.message ?? "")
     }
 
     private struct DevicePollAnswer: Decodable {

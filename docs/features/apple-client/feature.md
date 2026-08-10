@@ -55,6 +55,11 @@ checked against the app's installed endpoint origins, even though nothing naviga
 authorization code comes back in the body. The address the viewer typed *is* that origin,
 so it is what gets sent.
 
+The Core a device was approved against is **pinned at pairing time**. Refreshing never re-asks
+an anonymous route where Core lives: the token about to be presented is the full-privilege
+one, and an endpoint that could name its own origin could be handed a credential reaching
+Core and every other app on the host. An origin that changes is a re-pairing, not a redirect.
+
 ### The credential worth being careful with is Core's own
 
 Core has no scopes, so its access token carries its holder's full Core role — it can reach
@@ -74,10 +79,16 @@ different sentence on screen.
 
 ### Every failure says which one it is
 
-An address that answers but is not a Media Server, a Core too old for the device routes
-(they arrived in 0.73.0), a host already holding too many pending requests, a code nobody
-approved in time, an approval declined, an account with no access. "Could not sign in" is
-the answer that helps nobody, so it is not one of them.
+An address that answers but is not a Media Server, a server that cannot say where its Core
+is, a Core too old for the device routes (they arrived in 0.73.0), a host already holding
+too many pending requests, a code nobody approved in time, an approval declined, an account
+with no access, a credential the host now refuses. "Could not sign in" is the answer that
+helps nobody, so it is not one of them.
+
+**Only a refusal forgets the pairing.** A revoked credential or an unassigned account is
+over; a server that was asleep when the television woke up is not, and treating the second
+like the first would mean re-pairing a device every time the network is slow at breakfast.
+So a transient failure keeps the credential and stays paired.
 
 ## The capability profile
 
@@ -165,6 +176,11 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
   be refreshed is forgotten rather than half-kept.
 - **What a viewer types**, which is not a URL: a bare host, an explicit scheme, a stray
   path, and nonsense that must be refused before anything reaches the network.
+- **The bootstrap against the committed contract**, not against the model: `surfaceVersion`
+  is a string and `coreOrigin` is nullable. A fixture written to match the model instead
+  passed while the client could not decode a single real server.
+- **That a refresh cannot be redirected**: a bootstrap naming a different Core must not
+  receive the stored full-privilege token.
 - **The capability profile**, every branch, through the `DeviceCapabilities` protocol rather
   than on hardware: Dolby Vision claimed only when decode *and* HDR eligibility hold, HDR10
   alone on an older box, and neither on a device reporting no HDR.

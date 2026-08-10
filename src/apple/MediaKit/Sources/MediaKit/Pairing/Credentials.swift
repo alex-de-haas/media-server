@@ -7,6 +7,14 @@ public struct PairedServer: Codable, Equatable, Sendable {
     public let serverName: String
     public let appId: String
 
+    /// The Core this device was actually approved against, pinned at pairing time.
+    ///
+    /// Refreshing must not re-ask an anonymous route where Core lives. That answer comes from the media
+    /// endpoint, and the credential it would be handed is the *full-privilege* one — a compromised or
+    /// intercepted endpoint could name its own origin and be given a token that reaches Core and every
+    /// other app on the host. An origin that changes is a re-pairing, not a redirect.
+    public let coreOrigin: URL
+
     /// Core's own credential. **This is the sensitive one.** Core has no scopes, so it carries its
     /// holder's full Core role — it can reach Core itself and every other app on the host. It is kept
     /// only because the app grant lapses long before it does, and re-minting one silently is the
@@ -18,10 +26,18 @@ public struct PairedServer: Codable, Equatable, Sendable {
     /// and useless anywhere else.
     public var identity: AppIdentity
 
-    public init(server: URL, serverName: String, appId: String, coreToken: String, identity: AppIdentity) {
+    public init(
+        server: URL,
+        serverName: String,
+        appId: String,
+        coreOrigin: URL,
+        coreToken: String,
+        identity: AppIdentity
+    ) {
         self.server = server
         self.serverName = serverName
         self.appId = appId
+        self.coreOrigin = coreOrigin
         self.coreToken = coreToken
         self.identity = identity
     }
@@ -37,7 +53,11 @@ public struct PairedServer: Codable, Equatable, Sendable {
 
 public protocol CredentialStore: Sendable {
     func load() -> PairedServer?
-    func save(_ paired: PairedServer)
+
+    /// Returns whether it stuck. A caller that cannot store a credential should not pretend it did.
+    @discardableResult
+    func save(_ paired: PairedServer) -> Bool
+
     func clear()
 }
 
@@ -78,16 +98,27 @@ public struct KeychainCredentialStore: CredentialStore {
         return try? JSONDecoder.pairing.decode(PairedServer.self, from: data)
     }
 
-    public func save(_ paired: PairedServer) {
-        guard let data = try? JSONEncoder.pairing.encode(paired) else { return }
+    /// Update in place, and only fall back to inserting when there is nothing to update.
+    ///
+    /// Deleting first and adding after would mean a failed add — a Keychain error, a missing
+    /// entitlement — silently unpaired the device, which is the worst possible outcome of *saving*
+    /// something. This way a failure leaves the previous credential where it was.
+    @discardableResult
+    public func save(_ paired: PairedServer) -> Bool {
+        guard let data = try? JSONEncoder.pairing.encode(paired) else { return false }
 
-        clear()
+        let updated = SecItemUpdate(
+            query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updated == errSecSuccess {
+            return true
+        }
+
         var insert = query
         insert[kSecValueData as String] = data
         // The device is a television that unlocks itself; anything stricter than "after first unlock"
         // would leave the app unable to read its own credential on a cold boot.
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(insert as CFDictionary, nil)
+        return SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
     }
 
     public func clear() {
@@ -108,8 +139,10 @@ public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable
         lock.withLock { stored }
     }
 
-    public func save(_ paired: PairedServer) {
+    @discardableResult
+    public func save(_ paired: PairedServer) -> Bool {
         lock.withLock { stored = paired }
+        return true
     }
 
     public func clear() {

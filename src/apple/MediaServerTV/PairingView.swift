@@ -38,6 +38,10 @@ struct PairingView: View {
 
             TextField("media.example.com", text: $address)
                 .textContentType(.URL)
+                // The on-screen keyboard capitalises and corrects by default, which turns a hostname
+                // into something that resolves nowhere and gives the viewer nothing to look at.
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
                 .frame(maxWidth: 900)
 
             Button("Continue") { session.start(address: address) }
@@ -99,6 +103,8 @@ struct PairingView: View {
     private func title(for error: PairingError) -> String {
         switch error {
         case .notAMediaServer: "That address is not a Media Server"
+        case .noCoreOrigin: "This server cannot be paired"
+        case .credentialRejected: "This device is no longer signed in"
         case .unreachable: "Could not reach that address"
         case .coreTooOld: "This host needs updating"
         case .throttled: "Too many pending requests"
@@ -113,6 +119,10 @@ struct PairingView: View {
         switch error {
         case .notAMediaServer:
             "Something answered, but not a Media Server. Check the address and the port."
+        case .noCoreOrigin:
+            "The server did not say where its Hosty host is, so there is nowhere to approve this device. Set a public origin for the host and try again."
+        case .credentialRejected:
+            "The host no longer accepts this device's credential. Pair it again."
         case .unreachable(let reason):
             reason
         case .coreTooOld:

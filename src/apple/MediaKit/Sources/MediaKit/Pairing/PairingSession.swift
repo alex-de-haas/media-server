@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Where a pairing has got to, in the terms a screen shows.
 public enum PairingState: Equatable, Sendable {
@@ -64,21 +65,31 @@ public final class PairingSession {
         }
 
         do {
-            let bootstrap = try await client.bootstrap(server: paired.server)
-            guard let core = URL(string: bootstrap.coreOrigin) else { throw PairingError.notAMediaServer }
-
+            // The Core pinned at pairing time, never one an anonymous route named just now: the token
+            // about to be presented is the full-privilege one, and an endpoint that could redirect it
+            // could steal it.
             let identity = try await client.exchange(
-                core: core, appId: paired.appId, redirectUri: paired.server, coreToken: paired.coreToken)
+                core: paired.coreOrigin,
+                appId: paired.appId,
+                redirectUri: paired.server,
+                coreToken: paired.coreToken)
 
             var refreshed = paired
             refreshed.identity = identity
             store.save(refreshed)
             state = .paired(refreshed)
         } catch {
-            // Core's token has gone too, or the user was unassigned. Either way this device is no longer
-            // paired, and holding a credential that cannot be exchanged helps nobody.
-            store.clear()
-            state = .failed(error as? PairingError ?? .unreachable("\(error)"))
+            let failure = error as? PairingError ?? .unreachable("\(error)")
+
+            // Only a refusal is a reason to forget. A television that woke up before the network did
+            // must not have to be paired again over it, so a transient failure keeps the credential and
+            // stays paired — the next request will refresh it or fail honestly.
+            if failure.isTerminal {
+                store.clear()
+                state = .failed(failure)
+            } else {
+                state = .paired(paired)
+            }
         }
     }
 
@@ -98,7 +109,13 @@ public final class PairingSession {
     }
 
     /// Stops a pairing in flight. Called when the screen goes away, which is the point.
+    ///
+    /// A pairing that already succeeded is left alone. The screen showing the code disappears *because*
+    /// it succeeded, and its `onDisappear` arrives after the state has moved on — so treating that as a
+    /// cancellation would drop the viewer back on address entry the instant they finished pairing.
     public func cancel() {
+        if case .paired = state { return }
+
         work?.cancel()
         work = nil
         state = .idle
@@ -113,7 +130,10 @@ public final class PairingSession {
     private func run(server: URL) async {
         do {
             let bootstrap = try await client.bootstrap(server: server)
-            guard let core = URL(string: bootstrap.coreOrigin) else { throw PairingError.notAMediaServer }
+            guard let origin = bootstrap.coreOrigin, let core = URL(string: origin) else {
+                // A Media Server that cannot say where its Core is leaves nowhere to be approved.
+                throw PairingError.noCoreOrigin
+            }
 
             let grant = try await client.requestDeviceCode(core: core, label: label)
             state = .awaitingApproval(grant, serverName: bootstrap.serverName)
@@ -126,6 +146,7 @@ public final class PairingSession {
                 server: server,
                 serverName: bootstrap.serverName,
                 appId: bootstrap.appId,
+                coreOrigin: core,
                 coreToken: coreToken,
                 identity: identity)
 
@@ -148,6 +169,10 @@ public final class PairingSession {
         while Date() < deadline {
             try await sleep(interval)
             try Task.checkCancellation()
+
+            // Checked again after waiting: an interval longer than the time left would otherwise ask
+            // about a code that expired while this was asleep.
+            guard Date() < deadline else { break }
 
             switch try await client.poll(core: core, deviceCode: grant.deviceCode) {
             case .approved(let token): return token

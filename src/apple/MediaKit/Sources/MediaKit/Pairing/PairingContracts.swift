@@ -8,10 +8,17 @@ import Foundation
 public struct ServerBootstrap: Codable, Equatable, Sendable {
     public let serverName: String
     public let appId: String
-    public let surfaceVersion: Int
-    public let coreOrigin: String
 
-    public init(serverName: String, appId: String, surfaceVersion: Int, coreOrigin: String) {
+    /// A **string**, not a number — `NativeSurface.Version` is `"1"` and the committed OpenAPI says so.
+    /// Decoding it as an integer failed against every real server while passing a fixture that had
+    /// quietly been written to match the model instead of the contract.
+    public let surfaceVersion: String
+
+    /// Null on a host with no public Core origin, which is a pairing that cannot proceed rather than a
+    /// malformed answer — so it is optional here and refused explicitly where it is used.
+    public let coreOrigin: String?
+
+    public init(serverName: String, appId: String, surfaceVersion: String, coreOrigin: String?) {
         self.serverName = serverName
         self.appId = appId
         self.surfaceVersion = surfaceVersion
@@ -59,6 +66,13 @@ public enum PairingError: Error, Equatable, Sendable {
     /// The address answered, but not as a Media Server.
     case notAMediaServer
 
+    /// A Media Server that cannot say where its Core is, so there is nowhere to be approved.
+    case noCoreOrigin
+
+    /// Core refused the credential outright: it has been revoked, or it expired. Terminal — unlike a
+    /// server that is merely unreachable, retrying this one will never start working.
+    case credentialRejected
+
     /// Nothing answered at all.
     case unreachable(String)
 
@@ -81,4 +95,18 @@ public enum PairingError: Error, Equatable, Sendable {
 
     /// Anything the server said that this client has no better word for.
     case server(code: String, message: String)
+
+    /// Whether this answer will still be the answer tomorrow.
+    ///
+    /// It decides whether a failed refresh forgets the pairing. A revoked token or an unassigned
+    /// account is over; a server that was asleep when the television woke up is not, and treating the
+    /// second like the first means re-pairing a device every time the network is slow at breakfast.
+    public var isTerminal: Bool {
+        switch self {
+        case .credentialRejected, .notAssigned, .denied:
+            true
+        default:
+            false
+        }
+    }
 }
