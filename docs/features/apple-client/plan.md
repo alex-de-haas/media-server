@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-02
-Updated: 2026-08-08
+Updated: 2026-08-09
 
 > **Umbrella epic.** This document owns the decisions, the platform split, and the
 > playback spike that everything else depends on. The features it spans keep their
@@ -296,22 +296,23 @@ throwaway spike, on real hardware and real files, before any surface is designed
       preserves every RPU, and can force the `dvh1` sample entry that actually
       engages DV. ffmpeg does none of it. See below for the timing trap that comes
       with GPAC.
-- [ ] **Decide which sample entry to serve, and to whom.** `dvh1` engages Dolby
-      Vision but is DV-only signalling; `hvc1` + `dvvC` is cross-compatible and
-      reads as HDR10. A client that reports DV support should get the first and
-      everything else the second, which makes this the first real consumer of the
-      capability negotiation in
-      [native-client-api](../native-client-api/plan.md#playback-resolution).
+- [x] **Decide which sample entry to serve, and to whom.** Settled and shipped:
+      `NativePlaybackResolver.SignallingFor` answers from the client's declared
+      dynamic range — `dvh1` for a client reporting Dolby Vision, `hvc1` + `dvvC`
+      for everything else — and it was the first real consumer of the capability
+      negotiation, as expected. Verified in Dolby Vision on an Apple TV 4K.
 - [ ] **Audit the library for Dolby Vision profile 5**, where a source served as
       cross-compatible would not degrade gracefully the way the 8.1 sample does.
-- [ ] **Settle the GPAC elementary-stream detour.** DV signalling currently costs a
-      round trip through a raw `.hevc`, which silently loses frame timing. Find
-      whether `MP4Box` can take the MKV directly and still write `dvvC`, or make the
-      detour safe by always passing the source's exact frame rate.
-- [ ] **Multi-track packaging** — the local pass packaged one audio track. An MP4
-      carries the rest as ordinary tracks, which is simpler than
-      the HLS renditions this deliverable first assumed, but it is still unproven,
-      as is SubRip → WebVTT (or leaving subtitles as tracks in the file).
+- [x] **Settle the GPAC elementary-stream detour.** It no longer exists. Nothing on
+      the serving path runs GPAC, ffmpeg or any external tool: `Mp4Synthesizer`
+      writes `dvvC` and the `dvh1` entry itself, from the configuration Matroska
+      already carries in its `BlockAdditionMapping`. The frame-timing trap the
+      detour brought with it went with it.
+- [x] **Multi-track packaging** — shipped. Several audio tracks, a viewer's chosen
+      dub including one in a **sidecar file** carried as a second `mdat`, and text
+      subtitles rewritten as `tx3g` tracks rather than converted to WebVTT. The
+      alternative this deliverable left open — leaving subtitles as tracks in the
+      file — is the one that was taken.
 - [x] **Written outcome** in this document: remux by stream copy into an **MP4
       served over byte ranges**, computed from a pre-built index, `dvh1` for Dolby
       Vision clients. No fallback was needed — HLS was the thing dropped, not the
@@ -557,35 +558,59 @@ profile-5 rendition, which means re-encoding and is out of scope.
 
 ### Phase 0.1 — foundations
 
-- [ ] **Repository layout** — `src/apple/` with the `MediaKit` package and the
-      Xcode project, plus a README covering signing and the TestFlight lane.
-- [ ] **CI decision** — whether the client builds in GitHub Actions (macOS
-      runners cost more than the Linux ones this repo uses today) or stays a local
-      build until it stabilises. Whatever is chosen, the existing `api`/`web`
-      workflows must not slow down.
-- [ ] **Versioning note in `AGENTS.md`** — the client versions independently of
-      `manifest.json`; the rule as written assumes everything ships through the
-      manifest.
-- [ ] **Constituent plans** — `native-client-api` and `remux-streaming` written
-      and approved before either is built; the client-side plans follow once the
-      API shape is settled.
-- [ ] **Build the capability profile from the device.** `NativeCapabilityProfile`
-      already travels with every resolve request and the resolver already answers
-      against it — what does not exist is the client side that fills it in from
-      what the hardware can actually do. Swiftfin's version reads
-      `VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC)` and
-      `AVPlayer.eligibleForHDRPlayback` at runtime, which is the only honest way to
-      tell an Apple TV 4K from an older one without Dolby Vision. Guessing from a
-      device model ages badly, and the platform split above guarantees more than one
-      device class.
-- [ ] **Per-device escape hatches** — a setting that forces a transport or a
-      dynamic range, so "the picture is dark" is a switch rather than a bug report.
-      Swiftfin carries `forceDVTranscode` / `forceHDRTranscode` and a compatibility
-      mode of `auto / mostCompatible / directPlay / custom`.
+- [x] **Repository layout** — `src/apple/` holds the `MediaKit` package and
+      `MediaServerTV` beside its Xcode project, with a README covering the build, the
+      simulator, CI, signing and versioning. The project file is written by hand and
+      kept small by synchronized file groups: XcodeGen or Tuist would be a tool
+      everyone must install before they can build, which a project this size does not
+      earn.
+- [x] **CI decision** — **local builds only**, decided on 2026-08-09. macOS runners
+      cost roughly ten times the Linux ones this repository already uses, and until
+      there is a client worth protecting they would break more often than they would
+      catch anything. `MediaKit` runs under `swift test` in a second, which is where
+      the logic worth protecting lives. The `api` and `web` workflows are untouched.
+      Revisit when the client has users other than its author.
+- [x] **Versioning note in `AGENTS.md`** — written. The clients ship through
+      TestFlight rather than through Core, so `MARKETING_VERSION` is theirs and
+      `manifest.json` is the server's, and a change touching only `src/apple/` leaves
+      the manifest alone.
+- [ ] **Constituent plans** — the server halves are done: `native-client-api` and
+      `remux-streaming` were both written, approved and built, and the API shape is
+      settled. What remains is the client side of this item: a plan for the first
+      screens — pairing with the server, browsing the library, and playing a title —
+      written before any of it is built.
+- [x] **Build the capability profile from the device.** `MediaKit.CapabilityProfile`
+      reads `VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC)` and
+      `AVPlayer.eligibleForHDRPlayback` at runtime, behind a `DeviceCapabilities`
+      protocol so the branches are testable without hardware. Dolby Vision is claimed
+      only when **both** hold: decode support with no HDR-eligible output would ask
+      for a `dvh1` entry the display cannot show, and the spike established that such
+      a track does not degrade, it breaks.
+
+      Two things are deliberately *not* claimed. Matroska, because that it cannot be
+      opened is the entire reason the server repackages. And AV1, which recent
+      hardware decodes but the server has no sample entry for — claiming it would
+      earn a refusal at the request instead of an honest `unsupported` at resolve
+      time.
+- [x] **Per-device escape hatches** — `PlaybackPreferences` narrows the detected
+      profile before it is sent, so the server's own negotiation does the work and
+      there is no second decision path to keep in step. `automatic / hdr10 / sdr`,
+      and an override can only ever narrow: a viewer choosing HDR10 on a device that
+      reports none still gets SDR.
+
+      This exists because one thing genuinely cannot be detected —
+      `VTIsHardwareDecodeSupported` reports what the *box* decodes, not what the
+      *panel* shows, and a 4K box behind a receiver that strips the signalling still
+      says yes. A transport switch is deliberately absent while there is one
+      transport: a control that does nothing is worse than an absent one, because it
+      becomes the first thing a puzzled viewer changes.
 
 ### Closing the plan
 
-- [ ] **`feature.md` for the umbrella** describing the client as a whole, created
+- [ ] **`feature.md` for the umbrella** grown to describe the client as a whole. It
+      exists as of 2026-08-10, created by the PR that first shipped behaviour as
+      `AGENTS.md` requires, and today describes the foundations and the capability
+      profile. It follows the code from here, created
       when the first client behaviour ships.
 - [ ] **Index** — `node scripts/docs-index.mjs --fix`.
 - [ ] **Version** — this document alone is documentation-only: no version bump.
