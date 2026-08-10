@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-05
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 > Part of the [Apple client](../apple-client/plan.md) epic, and the last server
 > piece before a client can play the library.
@@ -537,6 +537,13 @@ Two operational facts worth keeping, both of which cost time to find:
       substreams needs their `chanmap` read, the channel count adjusted and `chan_loc`
       written; until then such a track is left out rather than advertised as its base
       layout. Nothing in this library uses them.
+- [ ] **Choosing what goes into the index.** Every describable track is now indexed and
+      every one of them is carried into the container, which makes "what is worth
+      indexing" a question with consequences rather than a detail. A library holding six
+      dubs per film pays for six sample tables in the index and six more in every header.
+      A setting — by language, or by count, or simply "only what a viewer has ever
+      asked for" — would let that be tuned per instance instead of assumed. Raised
+      2026-08-10; not designed.
 - [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
       single-byte-encoded file comes out with its accents wrong.
 - [x] **AAC**, shipped 2026-08-09 with `mp4a` and an `esds`. The config is carried from

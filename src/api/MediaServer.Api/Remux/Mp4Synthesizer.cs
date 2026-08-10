@@ -602,11 +602,13 @@ internal static class Mp4Synthesizer
         IReadOnlyList<Prepared> tracks, long movieDuration, long textBase, IReadOnlyList<long> bases)
     {
         var traks = new List<byte[]>();
+        var seen = new HashSet<IndexedTrackKind>();
         for (var i = 0; i < tracks.Count; i++)
         {
             // Rewritten text lives in the header; everything else lives in the file it came from.
             var at = tracks[i].InHeader ? textBase : bases[tracks[i].Input];
-            traks.Add(Trak(tracks[i], i + 1, movieDuration, at));
+            // The caller's order is the viewer's choice, so the first track of each kind is the default.
+            traks.Add(Trak(tracks[i], i + 1, movieDuration, at, first: seen.Add(tracks[i].Track.Kind)));
         }
 
         var mvhd = Full("mvhd", 1, 0,
@@ -617,16 +619,32 @@ internal static class Mp4Synthesizer
         return Box("moov", [mvhd, .. traks]);
     }
 
-    private static byte[] Trak(Prepared prepared, int id, long movieDuration, long sampleBase)
+    /// <param name="first">Whether this is the first track of its kind in the caller's order, which is
+    /// the viewer's choice. It decides two things a player reads: the <c>enabled</c> flag, and — for
+    /// subtitles — whether anything appears on screen unbidden.</param>
+    private static byte[] Trak(
+        Prepared prepared, int id, long movieDuration, long sampleBase, bool first)
     {
         var track = prepared.Track;
         var isVideo = track.Kind == IndexedTrackKind.Video;
         var isText = track.Kind == IndexedTrackKind.Subtitle;
 
-        var tkhd = Full("tkhd", 1, 3,
+        // Bit 0 is "enabled", bit 1 "in movie". Every track is in the movie; only the default of its kind
+        // is enabled. A second audio track marked enabled leaves the default ambiguous, and an enabled
+        // subtitle track puts words on screen for a viewer who never asked for any — which is why
+        // subtitles used to be left out of the container altogether rather than carried unselected.
+        var flags = first ? 3u : 2u;
+
+        // Tracks of one kind are alternatives to each other, not additions. Players group by media
+        // characteristic anyway, but saying so is what makes the grouping the file's claim rather than
+        // the player's inference.
+        var alternateGroup = isVideo ? 0 : isText ? 2 : 1;
+
+        var tkhd = Full("tkhd", 1, flags,
             U64(0), U64(0), U32((uint)id), new byte[4],
             U64((ulong)movieDuration), new byte[8],
-            U16(0), U16(0), U16(0), new byte[2],
+            U16(0), U16((ushort)alternateGroup),
+            U16((ushort)(isVideo || isText ? 0 : 0x0100)), new byte[2],
             UnityMatrix(),
             U32(isVideo ? (uint)(track.DisplayWidth > 0 ? track.DisplayWidth : track.Width) << 16 : 0),
             U32(isVideo ? (uint)(track.DisplayHeight > 0 ? track.DisplayHeight : track.Height) << 16 : 0));

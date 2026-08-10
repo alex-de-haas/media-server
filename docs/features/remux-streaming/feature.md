@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -157,6 +157,30 @@ spread of the track — a stream that varies it is refused rather than given a t
 built on its first frame, which would drift for the whole of its length.
 
 Atmos rides on E-AC-3 and survives untouched, because the samples are the same bytes.
+
+### Every describable track is carried, not just the chosen one
+
+The container holds **all** the audio tracks a sample entry can be written for, and all the
+text subtitles, each kind with the viewer's choice first.
+
+That order is the whole mechanism: a player takes the first track of a kind as its default,
+so the choice arrives as *ordering* rather than as omission. Only that first track is marked
+`enabled`; the rest are in the movie but unselected, which is what keeps a subtitle track
+from putting words on screen for a viewer who never asked for any. Tracks of one kind share
+an `alternate_group`, saying in the file what a player would otherwise have to infer.
+
+The alternative was one audio track per request, which is what this used to do. It gave
+`AVPlayerViewController` nothing to choose between, so changing a dub meant asking for a
+different URL and re-seating the player at the current time — a visible re-buffer, and a
+track picker every client would have to build for itself.
+
+The cost is header. A sample table is around twelve bytes a sample once `stsz` and `co64`
+are counted, so an audio track of a feature film adds a couple of megabytes to what is
+fetched before the first frame. It is paid once, at open, by a player that already walks
+every box header of the whole file before it shows anything.
+
+A **sidecar dub** leads the list when one is chosen, and the file's own tracks follow it
+into the same menu rather than disappearing because a dub was picked.
 
 - **Dolby Vision** is offered as a `dvh1` sample entry, and only for HEVC that came with
   a configuration, and only when the client asked. The cross-compatible `hvc1` form

@@ -485,6 +485,59 @@ public sealed class Mp4SynthesizerTests
     }
 
     [Fact]
+    public void Only_the_default_of_each_kind_is_marked_enabled()
+    {
+        // Two audio tracks. The first is the viewer's choice and the player's default; a second marked
+        // enabled would leave the default ambiguous.
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AC3", channels: 6),
+                TrackEntry(3, 2, "A_AC3", channels: 2)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(100, 0x11)),
+                SimpleBlock(2, 0, true, Ac3Frame(200)),
+                SimpleBlock(3, 0, true, Ac3Frame(200))));
+
+        var built = Build(file, tracks: [1, 2, 3]);
+        var flags = built.Reader.Find("moov/trak/tkhd")
+            .Select(box => built.Reader.U32At(box.Start) & 0x00FFFFFF)
+            .ToList();
+
+        // Video enabled, first audio enabled, second in the movie but not enabled.
+        Assert.Equal([3u, 3u, 2u], flags);
+    }
+
+    [Fact]
+    public void Tracks_of_one_kind_are_declared_alternatives_to_each_other()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AC3", channels: 6),
+                TrackEntry(3, 2, "A_AC3", channels: 2)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(100, 0x11)),
+                SimpleBlock(2, 0, true, Ac3Frame(200)),
+                SimpleBlock(3, 0, true, Ac3Frame(200))));
+
+        var built = Build(file, tracks: [1, 2, 3]);
+
+        // alternate_group is a big-endian 16-bit field 46 bytes into the box body — past version and
+        // flags, the two timestamps, the id, four reserved bytes, the duration, eight more reserved and
+        // the layer — so its value is in the second of those two bytes.
+        var groups = built.Reader.Find("moov/trak/tkhd")
+            .Select(box => built.Result.Header[box.Start + 47])
+            .ToList();
+
+        Assert.Equal([0, 1, 1], groups);
+    }
+
+    [Fact]
     public void A_track_the_synthesiser_cannot_describe_is_left_out()
     {
         var file = ContainerBuilders.Matroska(

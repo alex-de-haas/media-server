@@ -32,40 +32,47 @@ public sealed class RemuxTrackChoiceTests
     }
 
     [Fact]
-    public void Nothing_chosen_gives_the_first_video_and_the_first_audio()
+    public void Every_describable_track_is_carried_so_the_player_has_a_menu()
     {
-        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), null, null));
+        // Video, both audio tracks in the file's own order, and the one subtitle that can be rewritten.
+        // The bitmap subtitle is left out because nothing could be written for it.
+        Assert.Equal([1ul, 2ul, 3ul, 9ul], RemuxTrackChoice.Resolve(Library(), null, null));
     }
 
     [Fact]
-    public void A_chosen_dub_is_the_one_carried()
+    public void A_chosen_dub_leads_rather_than_replacing_the_rest()
     {
-        Assert.Equal([1ul, 3ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 2, null));
+        // First of a kind is the player's default, so the choice moves to the front — and the others stay
+        // in the container, which is what lets the viewer change their mind without a new request.
+        Assert.Equal([1ul, 3ul, 2ul, 9ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 2, null));
     }
 
     [Fact]
-    public void A_stale_choice_falls_back_rather_than_playing_nothing()
+    public void A_chosen_subtitle_leads_the_subtitles()
     {
-        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 99, null));
+        var index = Library();
+        index.Tracks.Add(new IndexedTrack
+        {
+            Number = 11, Ordinal = 5, Kind = IndexedTrackKind.Subtitle, CodecId = "S_TEXT/ASS",
+        });
+
+        Assert.Equal([1ul, 2ul, 3ul, 11ul, 9ul], RemuxTrackChoice.Resolve(index, null, subtitleStreamIndex: 5));
     }
 
     [Fact]
-    public void Subtitles_are_carried_only_when_they_were_asked_for()
+    public void A_stale_choice_falls_back_to_the_files_own_order()
     {
-        Assert.Equal([1ul, 2ul, 9ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 3));
-        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), null, null));
+        Assert.Equal([1ul, 2ul, 3ul, 9ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 99, null));
+        Assert.Equal([1ul, 2ul, 3ul, 9ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 42));
     }
 
     [Fact]
-    public void A_bitmap_subtitle_is_not_carried_because_it_cannot_be_rewritten()
+    public void A_bitmap_subtitle_is_never_carried_because_it_cannot_be_rewritten()
     {
-        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 4));
-    }
-
-    [Fact]
-    public void A_subtitle_choice_that_no_longer_matches_adds_none()
-    {
-        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 42));
+        // Even asked for by name. A track in the menu that shows nothing when selected is worse than a
+        // track that is not offered.
+        Assert.DoesNotContain(10ul, RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 4));
+        Assert.Equal([1ul, 2ul, 3ul, 9ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 4));
     }
 
     [Fact]

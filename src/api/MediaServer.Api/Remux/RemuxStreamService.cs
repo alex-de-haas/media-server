@@ -129,8 +129,18 @@ public sealed class RemuxStreamService(
                 var sidecarStream = Open(sidecarPath);
                 opened.Add(sidecarStream);
                 inputs.Add(new Mp4Synthesizer.Input(sidecarIndex, sidecarStream));
+                // The chosen dub leads, so it is the player's default; the file's own tracks follow it
+                // into the same menu rather than disappearing because a dub was picked.
                 tracks.Add(new Mp4Synthesizer.TrackRef(1, dub.Number));
                 carried.Add((sidecar.Id, new FileInfo(sidecarPath)));
+
+                foreach (var number in RemuxTrackChoice.Resolve(index, null, null))
+                {
+                    if (index.Track(number) is { Kind: IndexedTrackKind.Audio })
+                    {
+                        tracks.Add(new Mp4Synthesizer.TrackRef(0, number));
+                    }
+                }
             }
             else
             {
@@ -156,9 +166,11 @@ public sealed class RemuxStreamService(
                 }
             }
 
-            if (sidecar is not null && SubtitleOrdinal(streams, subtitleStreamId) is { } subtitleOrdinal)
+            if (sidecar is not null)
             {
-                foreach (var number in RemuxTrackChoice.Resolve(index, null, subtitleOrdinal))
+                // Subtitles live in the video file whichever soundtrack was chosen.
+                foreach (var number in RemuxTrackChoice.Resolve(
+                             index, null, SubtitleOrdinal(streams, subtitleStreamId)))
                 {
                     if (index.Track(number) is { Kind: IndexedTrackKind.Subtitle })
                     {
