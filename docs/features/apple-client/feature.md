@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -89,6 +89,30 @@ helps nobody, so it is not one of them.
 over; a server that was asleep when the television woke up is not, and treating the second
 like the first would mean re-pairing a device every time the network is slow at breakfast.
 So a transient failure keeps the credential and stays paired.
+
+## The server's surface is generated, not transcribed
+
+Everything under `/native/v1` reaches this client through code generated from
+[the committed OpenAPI document](../../../src/api/openapi/MediaServer.Api_native.json) by
+Apple's `swift-openapi-generator`. `MediaKit`'s own `ServerBootstrap` is *built from* the
+generated type rather than decoded by hand, so a surface that changes shape stops the client
+compiling instead of failing quietly on a television.
+
+This exists because the hand-written version got it wrong in the only way that mattered:
+`surfaceVersion` was modelled as a number where the contract says string, which meant no
+real server could be decoded at all — and the test fixture that should have caught it had
+been written from the model rather than from the document. Both halves of the mistake are
+things generation removes.
+
+The Swift target holds a **symlink** to the document, not a copy, so the repository has one
+and they cannot disagree. What can go stale is the generated code, so
+`scripts/generate-apple-client.sh` records the document's hash beside it and CI compares
+that on Linux — the generator needs a Mac, which is why the check is a hash rather than a
+regeneration.
+
+**Core's API is not generated**, because Core publishes no document. The pairing chain's four
+calls are read by hand against Core's sources, which is a real difference in confidence
+between the two halves and is worth remembering when either changes.
 
 ## The capability profile
 
@@ -178,7 +202,8 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
   path, and nonsense that must be refused before anything reaches the network.
 - **The bootstrap against the committed contract**, not against the model: `surfaceVersion`
   is a string and `coreOrigin` is nullable. A fixture written to match the model instead
-  passed while the client could not decode a single real server.
+  passed while the client could not decode a single real server. It now goes through the
+  generated client, so the fixture is checked against the document's own shape.
 - **That a refresh cannot be redirected**: a bootstrap naming a different Core must not
   receive the stored full-privilege token.
 - **The capability profile**, every branch, through the `DeviceCapabilities` protocol rather

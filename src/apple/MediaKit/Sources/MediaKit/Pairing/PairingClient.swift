@@ -1,4 +1,6 @@
 import Foundation
+import MediaServerAPI
+import OpenAPIRuntime
 
 /// The HTTP the pairing chain needs, behind a protocol so the chain can be tested without a server.
 public protocol HTTPTransport: Sendable {
@@ -38,27 +40,41 @@ public struct URLSessionTransport: HTTPTransport {
 public struct PairingClient: Sendable {
     private let transport: any HTTPTransport
 
-    public init(transport: any HTTPTransport = URLSessionTransport()) {
+    /// Where the generated client sends its requests, so a test can point it somewhere that is not the
+    /// network.
+    private let surface: (any ClientTransport)?
+
+    /// Two transports, because there are two servers with two contracts. `transport` carries Core's API,
+    /// which publishes no document and is read by hand; `surface` carries our own, which is generated.
+    public init(
+        transport: any HTTPTransport = URLSessionTransport(),
+        surface: (any ClientTransport)? = nil
+    ) {
         self.transport = transport
+        self.surface = surface
     }
 
     // MARK: - 1. Who is answering
 
     /// Asks an address whether it is a Media Server, and where its Core is.
+    ///
+    /// The one call here that goes through the **generated** client, because it is the one call on our
+    /// own surface — the rest of the chain is Core's API, which publishes no document. So this route
+    /// cannot drift from `src/api/openapi/` and the others are still read by hand.
     public func bootstrap(server: URL) async throws -> ServerBootstrap {
-        let request = URLRequest(url: server.appendingPathComponent("native/v1/server/public"))
-        let (data, response) = try await send(request)
-
-        guard response.statusCode == 200 else {
-            // A 404 here is the ordinary shape of "some other web server lives at this address".
+        do {
+            let client = MediaServerAPIClient.make(server: server, token: nil, transport: surface)
+            let answer = try await client.getNativeV1ServerPublic()
+            return ServerBootstrap(try answer.ok.body.json)
+        } catch let error as PairingError {
+            throw error
+        } catch is ClientError {
+            // Anything that is not a 200 carrying the documented shape: a 404 because some other web
+            // server lives here, or a body this surface does not describe.
+            throw PairingError.notAMediaServer
+        } catch {
             throw PairingError.notAMediaServer
         }
-
-        guard let bootstrap = try? JSONDecoder.pairing.decode(ServerBootstrap.self, from: data) else {
-            throw PairingError.notAMediaServer
-        }
-
-        return bootstrap
     }
 
     // MARK: - 2. A code for a human to approve

@@ -6,8 +6,10 @@ AVFoundation will not open Matroska and this library is Matroska — see
 
 ```text
 src/apple/
-├── MediaKit/            — Swift package: everything shared, nothing that draws
-└── MediaServerTV/       — the tvOS app, alongside MediaServerTV.xcodeproj
+├── MediaKit/
+│   ├── Sources/MediaServerAPI/   — generated from the server's OpenAPI document
+│   └── Sources/MediaKit/         — everything shared, nothing that draws
+└── MediaServerTV/                — the tvOS app, alongside MediaServerTV.xcodeproj
 ```
 
 `MediaKit` is a package rather than a framework target so it builds and tests on its own.
@@ -33,6 +35,23 @@ That is deliberate: XcodeGen or Tuist would be a tool everyone has to install be
 can build, and this project is small enough not to need one.
 
 Requires Xcode 26 or later for the tvOS 26 SDK.
+
+## Regenerating the API client
+
+Everything under `/native/v1` reaches the client through code generated from the server's
+OpenAPI document. Rerun this whenever that surface changes shape:
+
+```bash
+scripts/generate-apple-client.sh
+```
+
+`Sources/MediaServerAPI/openapi.json` is a **symlink** to `src/api/openapi/`, so there is
+one document in the repository and the two cannot disagree. What can go stale is the
+generated code, so the script records the document's hash beside it and CI compares that —
+the generator needs a Mac, which is why the check is a hash rather than a regeneration.
+
+Core's API is not generated: Core publishes no document, so the pairing chain is read by
+hand against Core's sources.
 
 ## Running on the simulator
 

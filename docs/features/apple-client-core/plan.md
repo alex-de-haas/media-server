@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-10
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 > Phase 2 of the [Apple client](../apple-client/plan.md) epic, and the first
 > release worth using. Every server half it needs is built and verified:
@@ -147,16 +147,30 @@ the pairing screen again if the access token itself has gone.
       HDR-eligible output and never will, so this is checked on the Apple TV 4K —
       the same way every measurement in the epic was taken.
 
-### Phase 5 — the generated client
+### Phase 5 — the generated client *(moved ahead of Phase 3 on 2026-08-10)*
 
-- [ ] **A Swift client generated from `src/api/openapi/MediaServer.Api_native.json`**,
-      which CI already diffs on every build, so the two cannot drift. This
-      deliverable belongs here because this feature owns the package that consumes
-      it.
-- [ ] **Decide generator or hand-written.** Not obvious: the document is 3050
-      lines and generation kills drift, but a generated client is awkward to make
-      pleasant at the call site and adds a build step to a project that
-      deliberately has none. Whichever is chosen, the drift check must survive it.
+Brought forward because the hand-written half shipped a bug that generation makes
+impossible: `surfaceVersion` was modelled as a number where the contract says string,
+so no real server could be decoded — and the fixture that should have caught it had
+been written from the model rather than from the document. Building browsing first
+would have meant a dozen more models written the same way.
+
+- [x] **A Swift client generated from `src/api/openapi/MediaServer.Api_native.json`**,
+      with Apple's `swift-openapi-generator`. The Swift target holds a **symlink** to
+      that document rather than a copy, so there is one in the repository and drift
+      between them is not possible.
+- [x] **Decide generator or hand-written** — generator, and the **command** plugin
+      rather than the build plugin. This repository already generates, commits and
+      then diffs in CI, twice over; a build plugin would instead add a trust prompt
+      in Xcode and a code-generation step to every clean build.
+      `scripts/generate-apple-client.sh` regenerates and records the document's hash,
+      and CI compares it on Linux — the generator needs a Mac, so the check is the
+      hash rather than a regeneration.
+- [ ] **Operation ids on the server.** Without them the generator names operations
+      from their paths, and the idiomatic naming strategy papers over it —
+      `getNativeV1ServerPublic` reads acceptably but is derived, not declared. Adding
+      `.WithName(...)` to the native routes would name them once for every consumer
+      of the document. Raised while doing the above; not done.
 
 ### Closing the plan
 

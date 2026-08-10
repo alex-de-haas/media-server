@@ -44,6 +44,19 @@ jobs:
             exit 1
           fi
 
+      # The Swift client is generated from that document and committed. This runs on Linux and the
+      # generator needs a Mac, so the check is a recorded hash rather than a regeneration: if the
+      # document moved and nobody reran the script, the two disagree here instead of on a television.
+      - name: Generated Swift client is current
+        working-directory: .
+        run: |
+          stamp=src/apple/MediaKit/Sources/MediaServerAPI/GeneratedSources/.openapi-sha256
+          expected=$(sha256sum src/api/openapi/MediaServer.Api_native.json | cut -d' ' -f1)
+          if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$expected" ]; then
+            echo "::error::The generated Swift client is stale. Run scripts/generate-apple-client.sh on a Mac and commit the result." >&2
+            exit 1
+          fi
+
   web:
     name: web (Next.js)
     runs-on: ubuntu-latest
