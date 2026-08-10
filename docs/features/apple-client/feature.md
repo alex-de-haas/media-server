@@ -110,6 +110,11 @@ and they cannot disagree. What can go stale is the generated code, so
 that on Linux — the generator needs a Mac, which is why the check is a hash rather than a
 regeneration.
 
+A generated client wraps both "nothing answered" and "something answered wrongly" in one
+error type, and they are different sentences on screen — so the cause is unwrapped rather
+than collapsed. A `URLError` underneath is a server that is asleep; anything else is a
+surface this client does not recognise.
+
 **Core's API is not generated**, because Core publishes no document. The pairing chain's four
 calls are read by hand against Core's sources, which is a real difference in confidence
 between the two halves and is worth remembering when either changes.

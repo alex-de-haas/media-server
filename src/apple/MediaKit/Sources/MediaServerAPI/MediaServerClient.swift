@@ -26,6 +26,10 @@ public enum MediaServerAPIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
+        // Bounded, because the first call this client ever makes is against an address a viewer just
+        // typed. A host that silently drops traffic would otherwise hold the screen on "Looking for a
+        // server" for the platform default of a minute.
+        configuration.timeoutIntervalForRequest = 15
         return URLSession(configuration: configuration)
     }
 }

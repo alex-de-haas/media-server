@@ -68,9 +68,15 @@ public struct PairingClient: Sendable {
             return ServerBootstrap(try answer.ok.body.json)
         } catch let error as PairingError {
             throw error
-        } catch is ClientError {
-            // Anything that is not a 200 carrying the documented shape: a 404 because some other web
-            // server lives here, or a body this surface does not describe.
+        } catch let error as ClientError {
+            // "Nothing answered" and "something answered wrongly" are different sentences on screen, and
+            // collapsing them tells a viewer whose server is merely asleep that they typed the wrong
+            // address. The generated client wraps both, so the cause has to be unwrapped.
+            if let url = error.underlyingError as? URLError {
+                throw PairingError.unreachable(url.localizedDescription)
+            }
+
+            // Anything else: a status this surface does not document, or a body it does not describe.
             throw PairingError.notAMediaServer
         } catch {
             throw PairingError.notAMediaServer

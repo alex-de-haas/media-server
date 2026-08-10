@@ -176,6 +176,32 @@ struct PairingClientTests {
             .bootstrap(server: server).coreOrigin == nil)
     }
 
+    @Test("A server that is merely unreachable is not called the wrong kind of server")
+    func unreachableIsNotWrongShape() async {
+        // Collapsing these two tells a viewer whose server is asleep that they typed the wrong address.
+        struct Offline: ClientTransport {
+            func send(
+                _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
+            ) async throws -> (HTTPResponse, HTTPBody?) {
+                throw URLError(.cannotConnectToHost)
+            }
+        }
+
+        let client = PairingClient(transport: StubTransport(single: [:]), surface: Offline())
+
+        do {
+            _ = try await client.bootstrap(server: server)
+            Issue.record("Expected a failure")
+        } catch let error as PairingError {
+            guard case .unreachable = error else {
+                Issue.record("Expected .unreachable, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("Expected a PairingError, got \(error)")
+        }
+    }
+
     @Test("Something answering with the wrong shape is not a Media Server either")
     func wrongShape() async {
         let stub = StubTransport(single: ["/native/v1/server/public": (200, #"{"hello":"world"}"#)])
