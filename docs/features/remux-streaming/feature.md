@@ -163,11 +163,21 @@ Atmos rides on E-AC-3 and survives untouched, because the samples are the same b
 The container holds **all** the audio tracks a sample entry can be written for, and all the
 text subtitles, each kind with the viewer's choice first.
 
-That order is the whole mechanism: a player takes the first track of a kind as its default,
-so the choice arrives as *ordering* rather than as omission. Only that first track is marked
-`enabled`; the rest are in the movie but unselected, which is what keeps a subtitle track
-from putting words on screen for a viewer who never asked for any. Tracks of one kind share
-an `alternate_group`, saying in the file what a player would otherwise have to infer.
+That order is the whole mechanism for video and audio: a player takes the first track of a
+kind as its default, so the choice arrives as *ordering* rather than as omission, and only
+that track is marked `enabled`.
+
+**Subtitles are the exception, and getting it wrong is loud.** Carrying one for the menu is
+not the same as turning it on, so no subtitle is enabled unless the viewer asked for one —
+otherwise every source with embedded subtitles would put words on screen unbidden. A chosen
+*external* subtitle is the awkward case: it is prepared after the referenced tracks, so
+being chosen is not enough to make it first, and it has to overtake the embedded ones
+explicitly.
+
+Each track carries **its own language**, packed into `mdhd` as ISO-639-2 rather than left at
+`und`. Six dubs a viewer cannot tell apart in the menu would be barely better than carrying
+one of them. Tracks of one kind also share an `alternate_group`, saying in the file what a
+player would otherwise have to infer.
 
 The alternative was one audio track per request, which is what this used to do. It gave
 `AVPlayerViewController` nothing to choose between, so changing a dub meant asking for a

@@ -196,7 +196,16 @@ public sealed class RemuxStreamService(
                 }
             }
 
-            var built = Mp4Synthesizer.Build(inputs, tracks, signalling, externalText);
+            // What the viewer actually asked for, as opposed to what is carried for the menu. An
+            // external file wins when one was chosen, because it is the only choice that cannot be
+            // expressed by ordering the referenced tracks.
+            var subtitleDefault = externalText.Count > 0
+                ? SubtitleDefault.External
+                : SubtitleOrdinal(streams, subtitleStreamId) is not null
+                    ? SubtitleDefault.Embedded
+                    : SubtitleDefault.None;
+
+            var built = Mp4Synthesizer.Build(inputs, tracks, signalling, externalText, subtitleDefault);
             if (built is null)
             {
                 await DisposeAllAsync(opened);
