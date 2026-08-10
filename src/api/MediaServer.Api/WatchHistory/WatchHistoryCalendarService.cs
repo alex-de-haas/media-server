@@ -1,5 +1,6 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.WatchHistory;
@@ -267,14 +268,6 @@ public sealed class WatchHistoryCalendarService(
             .ToDictionary(row => row.Key, row => row.Title!);
     }
 
-    /// <summary>The same preference order <c>LibraryReadService</c> applies: exact locale, then the
-    /// language prefix, then whatever exists.</summary>
-    private MetadataRecord PickLanguage(List<MetadataRecord> records)
-    {
-        var preferred = settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
-        var prefix = preferred.Length >= 2 ? preferred[..2] : preferred;
-        return records.FirstOrDefault(record => string.Equals(record.Language, preferred, StringComparison.OrdinalIgnoreCase))
-            ?? records.FirstOrDefault(record => record.Language.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            ?? records[0];
-    }
+    private MetadataRecord PickLanguage(List<MetadataRecord> records) =>
+        MetadataLanguage.Pick(records, settings.PreferredLanguage, record => record.Language);
 }

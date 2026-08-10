@@ -1,6 +1,7 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Metadata;
 using MediaServer.Api.Recommendations;
 using Microsoft.EntityFrameworkCore;
 
@@ -36,7 +37,7 @@ public sealed class JellyfinLibraryService(
     UserDataService userData,
     MediaServerSettings settings)
 {
-    private string PreferredLanguage => settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
+    private string PreferredLanguage => settings.PreferredLanguage;
 
     /// <summary>Whether a public id addresses the synthetic Recommended view.</summary>
     internal static bool IsRecommendationsView(string? publicId) =>
@@ -589,12 +590,53 @@ public sealed class JellyfinLibraryService(
                 database.MetadataRecords.Any(meta => meta.MediaItemId == item.Id && meta.Title != null && EF.Functions.Like(meta.Title, term)));
         }
 
-        return await source
+        var items = await source.ToListAsync(cancellationToken);
+
+        // Ordering is finished in memory because the title a client sorts by is the localized metadata
+        // title it renders, not MediaItem.Title — that column holds whatever language the item matched in
+        // at ingest, so a Russian library would come back alphabetized by its English names. Paging still
+        // happens above this over the ordered list, so the page boundaries stay consistent.
+        var titles = await LocalizedTitlesAsync(items, cancellationToken);
+        var order = MetadataLanguage.TitleOrder(PreferredLanguage);
+        return items
             .OrderBy(item => item.ParentIndexNumber)
             .ThenBy(item => item.IndexNumber)
-            .ThenBy(item => item.Title)
-            .ToListAsync(cancellationToken);
+            .ThenBy(item => titles.GetValueOrDefault(item.Id, item.Title), order)
+            .ToList();
     }
+
+    /// <summary>
+    /// The display title of each item in the preferred language, for items that have one. Resolves the
+    /// language exactly as <see cref="JellyfinItemMapper.MapItem"/> does — same record, same
+    /// blank-title fallback — so the key a listing sorts by is the name it goes on to render. Projects two
+    /// columns rather than whole records: this covers the entire result set, while
+    /// <see cref="MapManyAsync"/> loads full metadata (including the raw payload) for one page only.
+    /// </summary>
+    private async Task<Dictionary<Guid, string>> LocalizedTitlesAsync(
+        IReadOnlyList<MediaItem> items, CancellationToken cancellationToken)
+    {
+        var titles = new Dictionary<Guid, string>();
+        // Chunked so a large library never exceeds SQLite's 999-parameter limit in the IN-list.
+        foreach (var chunk in items.Select(item => item.Id).Chunk(500))
+        {
+            var rows = await database.MetadataRecords.AsNoTracking()
+                .Where(record => chunk.Contains(record.MediaItemId))
+                .Select(record => new LocalizedTitle(record.MediaItemId, record.Language, record.Title))
+                .ToListAsync(cancellationToken);
+            foreach (var group in rows.GroupBy(row => row.MediaItemId))
+            {
+                var title = MetadataLanguage.Pick(group.ToList(), PreferredLanguage, row => row.Language).Title;
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    titles[group.Key] = title;
+                }
+            }
+        }
+
+        return titles;
+    }
+
+    private sealed record LocalizedTitle(Guid MediaItemId, string Language, string? Title);
 
     private IQueryable<MediaItem> TopLevelItems() =>
         database.MediaItems.AsNoTracking().Where(item =>
@@ -788,12 +830,6 @@ public sealed class JellyfinLibraryService(
         };
     }
 
-    private MetadataRecord PickLanguage(List<MetadataRecord> records)
-    {
-        var preferred = PreferredLanguage;
-        var prefix = preferred.Length >= 2 ? preferred[..2] : preferred;
-        return records.FirstOrDefault(record => string.Equals(record.Language, preferred, StringComparison.OrdinalIgnoreCase))
-            ?? records.FirstOrDefault(record => record.Language.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            ?? records[0];
-    }
+    private MetadataRecord PickLanguage(List<MetadataRecord> records) =>
+        MetadataLanguage.Pick(records, PreferredLanguage, record => record.Language);
 }

@@ -1,7 +1,7 @@
 # Metadata
 
 Created: 2026-06-15
-Updated: 2026-07-25
+Updated: 2026-08-09
 
 ## Description
 
@@ -77,6 +77,14 @@ fallback).
 - A catalog may override the effective default with `metadataLanguage` (e.g.
   Anime → `ja`/`en`). Per-user language selection is a later, additive change
   because the cache is already multi-language.
+- Catalog listings are ordered by the localized title they display, not by the
+  item's stored `Title` — that one keeps the language the item was matched in at
+  ingest, which need not be the display language. Ordering therefore finishes in
+  memory, after the localized title is resolved, and uses the display language's
+  collation rather than SQLite's `BINARY` one (which files every lowercase
+  initial after every uppercase one, and all Cyrillic after all Latin). Both the
+  web grid and the Jellyfin `/Items` surface share this rule; index numbers still
+  outrank the title for seasons and episodes.
 
 Efficiency:
 
@@ -179,5 +187,8 @@ coverage:
   it must not touch).
 - Multi-language fetch and `provider + language` cache keying.
 - Catalog language override and fallback ordering.
+- Listing order follows the localized title on both read surfaces, ignores case,
+  falls back to the stored title when a language has no record yet, and leaves
+  episode index order untouched.
 - Backfill on adding a language.
 - Manual match override and refresh behavior.

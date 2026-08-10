@@ -28,6 +28,12 @@ public sealed class MediaServerSettings
     public IReadOnlyList<string> SupportedLanguages { get; init; } = ["en-US"];
 
     /// <summary>
+    /// The language every read surface displays in: the first supported language. Metadata is cached for
+    /// all of them, so picking one is a display concern, not a fetch concern.
+    /// </summary>
+    public string PreferredLanguage => SupportedLanguages.Count > 0 ? SupportedLanguages[0] : "en-US";
+
+    /// <summary>
     /// Watch region for release-date tracking (manifest <c>WATCH_REGION</c>, ISO-3166-1, default <c>US</c>).
     /// Its own axis, independent of <see cref="SupportedLanguages"/> (a metadata-language axis, not a
     /// country); a per-entry <c>WatchlistEntry.RegionOverride</c> refines it. Only release-<b>date</b>
