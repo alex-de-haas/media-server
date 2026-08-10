@@ -1,6 +1,6 @@
 # Apple Client Core — plan
 
-Status: Draft
+Status: In Progress
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -74,20 +74,31 @@ the pairing screen again if the access token itself has gone.
 
 ### Phase 1 — pairing
 
-- [ ] **Server address entry**, with `GET /native/v1/server/public` as the check
-      that something is there. Bonjour discovery is deliberately out: it fails
+- [x] **Server address entry**, with `GET /native/v1/server/public` as the check
+      that something is there. What a viewer types is not a URL, so it is normalised:
+      a bare host becomes `https`, an explicit `http` is kept for a server on the local
+      network, and a path, query or fragment is dropped rather than carried in front of
+      every route. Bonjour discovery is deliberately out: it fails
       exactly where this library lives — across subnets and through the tunnel —
       and typing an address once is not the friction worth solving first.
-- [ ] **The device-code screen**: the `userCode` large enough to read across a
-      room, the `verificationUri` beside it, the poll running while it is on
-      screen and cancelled when it is not.
-- [ ] **The whole chain to an app identity token**, steps 1–6 above, with the
-      silent re-run of 5–6 when the app grant lapses.
-- [ ] **Keychain storage**, both credentials, with the Core access token marked as
-      the sensitive one. An unpaired app holds nothing.
-- [ ] **The states that are not "signed in"**: a code that expired, an approval
-      that was denied, a Core too old to have the device routes, a server that
-      answers but is not a Media Server. Each says which it is.
+- [x] **The device-code screen**: the `userCode` at 120pt monospaced, the
+      `verificationUri` beside it — or, when the host runs no Shell and Core returns
+      none, where to look instead rather than an address Core invented. The poll runs
+      while the screen is up and is cancelled on `onDisappear`.
+- [x] **The whole chain to an app identity token**, steps 1–6 above, with the
+      silent re-run of 5–6 when the app grant lapses. One constraint had to be read out
+      of Core rather than guessed: `redirectUri` is checked against the app's installed
+      endpoint origins even though nothing navigates and the code comes back in the
+      body — so the address the viewer typed is what gets sent.
+- [x] **Keychain storage**, both credentials in **one** item: a device holding a Core
+      token and no app grant, or the reverse, is a state nothing knows how to resume
+      from. `kSecAttrAccessibleAfterFirstUnlock`, because a television unlocks itself
+      and anything stricter would leave the app unable to read its own credential on a
+      cold boot.
+- [x] **The states that are not "signed in"**: a code that expired, an approval that
+      was denied, a Core too old to have the device routes, a throttled host, an
+      account not assigned to the app, and an address that answers but is not a Media
+      Server. Each says which it is, in a sentence a viewer can act on.
 
 ### Phase 2 — the local mirror
 
@@ -117,24 +128,13 @@ the pairing screen again if the access token itself has gone.
       deliverable of the epic and still the right answer: the transport bar, the
       skip gestures and the Siri remote's whole vocabulary are free and cannot be
       reimplemented to the same standard.
-- [ ] **Track selection, which the system picker cannot do here.** A remux asset
-      carries **one** audio track and at most one subtitle track —
-      `RemuxTrackChoice.Resolve` picks them, and the URL the resolver mints names
-      neither. So there is nothing for `AVPlayerViewController` to choose between,
-      and its picker will show a single track however many the title has.
-
-      Changing a track therefore means asking for a **different URL**:
-      `/native/v1/media/{id}/remux?audioStreamId=…&subtitleStreamId=…`, then
-      re-seating the player at the current time. The server side already supports
-      it — the ETag covers the chosen tracks precisely so a switch is not answered
-      `304` with the old audio. What does not exist is the client half: a picker of
-      our own, listing what the item DTO says the title has, and a re-seat that
-      costs a visible re-buffer rather than the instant switch a native picker
-      implies.
-
-      This is also what the sidecar dub and the external subtitle in the
-      verification steps below actually exercise. Without it they cannot be
-      reached at all.
+- [x] **Track selection** — done on the server instead, in #172 on 2026-08-10.
+      The container now carries every audio track a sample entry can be written for and
+      every text subtitle, each kind with the viewer's choice first and only that one
+      marked enabled, so `AVPlayerViewController`'s own picker switches dubs with no
+      second request and no re-buffer. Each track states its language, so the menu reads
+      as English and Russian rather than six lines of "Undetermined". The client-side
+      picker this deliverable described is not needed and is not being built.
 - [ ] **Every refusal reason shown as itself.** The server answers
       `packaging_pending`, `packaging_unsupported_audio`,
       `packaging_unsupported_video`, `unsupported_dynamic_range` and the rest
@@ -193,21 +193,12 @@ the pairing screen again if the access token itself has gone.
    state for a freshly added title, and on a slow disk the walk is minutes. A
    client can retry quietly, or say "preparing", or hide the title. Saying nothing
    and failing is the only clearly wrong answer.
-5. **Should the asset carry every packageable audio track instead of one?** This
-   would remove the deliverable above entirely: `AVPlayerViewController` would show
-   a real picker and switch instantly, with no second request and no re-buffer.
-   `Mp4Synthesizer` already takes a list of tracks, so the server change is small.
-
-   The cost is header size, and it is not negligible. A sample table is roughly
-   twelve bytes a sample once `stsz` and `co64` are counted, so an audio track of a
-   two-hour film adds on the order of two megabytes to a `moov` that is fetched
-   before the first frame. Five dubs would be ten. Against that: AVFoundation
-   already walks every box header of the whole file before it plays anything, which
-   is the measurement this design was built on, so one larger contiguous read may
-   cost less than it appears.
-
-   Worth measuring rather than assuming, and worth deciding before the client-side
-   picker is built — the two are alternatives, not layers.
+5. ~~**Should the asset carry every packageable audio track instead of one?**~~
+   **Answered 2026-08-10: yes**, and shipped in #172 before the client-side picker was
+   built — which was the point of deciding it early. The header cost is real (about two
+   megabytes per audio track of a feature film) and accepted: it is paid once, at open,
+   by a player that already walks every box header of the whole file before showing
+   anything.
 
 ## Verification steps
 
