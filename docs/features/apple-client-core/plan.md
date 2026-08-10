@@ -39,9 +39,14 @@ this app writes **no** authentication code of its own. The chain, verified again
 `../docker-host`:
 
 1. The viewer types the server address. `GET /native/v1/server/public` answers with
-   the server name, the app id, the surface version and **`CorePublicOrigin`** —
-   the one anonymous route, because needing a token to discover where tokens come
-   from is a loop.
+   the server name, the app id, the surface version and the Core origin — the one
+   anonymous route, because needing a token to discover where tokens come from is a
+   loop.
+
+   The field on the wire is **`coreOrigin`**, not `corePublicOrigin`: the value is
+   `HostyOptions.CorePublicOrigin`, but that is the source, not the name a decoder
+   looks for. Worth stating precisely, because a hand-written client that guesses
+   the other name gets `nil` and no error.
 2. `POST {core}/api/auth/device/code` → an 8-character `userCode` in a
    lookalike-free alphabet, and a `verificationUri`. Both go on the television.
 3. Someone approves it in Shell → Settings → **Access tokens**, from any device
@@ -110,8 +115,26 @@ the pairing screen again if the access token itself has gone.
       `MediaKit.CapabilityProfile`, narrowed by the viewer's `PlaybackPreferences`.
 - [ ] **`AVPlayerViewController`, not a custom player.** Recorded as a Phase 0
       deliverable of the epic and still the right answer: the transport bar, the
-      track picker, the skip gestures and the Siri remote's whole vocabulary are
-      free and cannot be reimplemented to the same standard.
+      skip gestures and the Siri remote's whole vocabulary are free and cannot be
+      reimplemented to the same standard.
+- [ ] **Track selection, which the system picker cannot do here.** A remux asset
+      carries **one** audio track and at most one subtitle track —
+      `RemuxTrackChoice.Resolve` picks them, and the URL the resolver mints names
+      neither. So there is nothing for `AVPlayerViewController` to choose between,
+      and its picker will show a single track however many the title has.
+
+      Changing a track therefore means asking for a **different URL**:
+      `/native/v1/media/{id}/remux?audioStreamId=…&subtitleStreamId=…`, then
+      re-seating the player at the current time. The server side already supports
+      it — the ETag covers the chosen tracks precisely so a switch is not answered
+      `304` with the old audio. What does not exist is the client half: a picker of
+      our own, listing what the item DTO says the title has, and a re-seat that
+      costs a visible re-buffer rather than the instant switch a native picker
+      implies.
+
+      This is also what the sidecar dub and the external subtitle in the
+      verification steps below actually exercise. Without it they cannot be
+      reached at all.
 - [ ] **Every refusal reason shown as itself.** The server answers
       `packaging_pending`, `packaging_unsupported_audio`,
       `packaging_unsupported_video`, `unsupported_dynamic_range` and the rest
@@ -170,6 +193,21 @@ the pairing screen again if the access token itself has gone.
    state for a freshly added title, and on a slow disk the walk is minutes. A
    client can retry quietly, or say "preparing", or hide the title. Saying nothing
    and failing is the only clearly wrong answer.
+5. **Should the asset carry every packageable audio track instead of one?** This
+   would remove the deliverable above entirely: `AVPlayerViewController` would show
+   a real picker and switch instantly, with no second request and no re-buffer.
+   `Mp4Synthesizer` already takes a list of tracks, so the server change is small.
+
+   The cost is header size, and it is not negligible. A sample table is roughly
+   twelve bytes a sample once `stsz` and `co64` are counted, so an audio track of a
+   two-hour film adds on the order of two megabytes to a `moov` that is fetched
+   before the first frame. Five dubs would be ten. Against that: AVFoundation
+   already walks every box header of the whole file before it plays anything, which
+   is the measurement this design was built on, so one larger contiguous read may
+   cost less than it appears.
+
+   Worth measuring rather than assuming, and worth deciding before the client-side
+   picker is built — the two are alternatives, not layers.
 
 ## Verification steps
 
