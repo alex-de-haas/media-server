@@ -7,7 +7,13 @@ import SwiftUI
 /// Dolby Vision — because it is the one thing that cannot be checked from a laptop, and because a
 /// foundation that renders nothing has not been shown to work.
 struct CapabilityView: View {
-    @State private var preferences = PlaybackPreferences()
+    private let store = PlaybackPreferencesStore()
+
+    @State private var preferences: PlaybackPreferences
+
+    init() {
+        _preferences = State(initialValue: PlaybackPreferencesStore().load())
+    }
 
     private var profile: CapabilityProfile { preferences.profile() }
 
@@ -29,6 +35,11 @@ struct CapabilityView: View {
                 }
             }
             .pickerStyle(.segmented)
+            // A switch that forgets is worse than no switch: a viewer who set SDR to fix a dark picture
+            // would find it dark again on the next launch, having already tried the one control offered.
+            .onChange(of: preferences) { _, updated in
+                store.save(updated)
+            }
         }
         .padding(80)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

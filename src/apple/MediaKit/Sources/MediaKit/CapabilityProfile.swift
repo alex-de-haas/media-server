@@ -54,7 +54,15 @@ public struct SystemCapabilities: DeviceCapabilities {
         #if os(tvOS) || os(iOS)
         return AVPlayer.eligibleForHDRPlayback
         #else
-        return true
+        // macOS has no `eligibleForHDRPlayback`, and the honest answer would come from the screen the
+        // window is on — `NSScreen.maximumPotentialExtendedDynamicRangeColorComponentValue` — which is
+        // main-actor state this synchronous property has no business reaching for, and which is
+        // meaningless before there is a window.
+        //
+        // So: false, until there is a macOS client to ask it properly. Under-claiming costs an SDR
+        // picture that always works; over-claiming asks the server for signalling the display cannot
+        // present, and the spike established that such a track does not degrade — it breaks.
+        return false
         #endif
     }
 }

@@ -21,7 +21,7 @@ cd src/apple/MediaKit && swift test
 ```
 
 ```bash
-xcodebuild -project src/apple/MediaServerTV.xcodeproj -scheme MediaServerTV -destination 'generic/platform=tvOS Simulator' build CODE_SIGNING_ALLOWED=NO
+xcodebuild -project src/apple/MediaServerTV.xcodeproj -scheme MediaServerTV -destination 'generic/platform=tvOS Simulator' build
 ```
 
 Or open `MediaServerTV.xcodeproj` in Xcode; the package resolves from the folder beside it,
@@ -61,10 +61,11 @@ Revisit when the app has users other than its author.
 
 ## Signing and TestFlight
 
-Nothing is signed yet. Local simulator builds pass `CODE_SIGNING_ALLOWED=NO` and need no
-account. Device builds and a TestFlight lane need an Apple Developer membership, which the
-distribution decision in the plan assumes but which has not been set up — when it is, the
-team identifier and the lane belong in this section.
+Nothing is signed yet, and simulator builds do not need it to be: they sign themselves with
+"Sign to Run Locally" and need no account or team. It is **device** builds that stop on
+"Signing requires a development team", along with a TestFlight lane — both need an Apple
+Developer membership, which the distribution decision in the plan assumes and which has not
+been set up. When it is, the team identifier and the lane belong in this section.
 
 ## Versioning
 
