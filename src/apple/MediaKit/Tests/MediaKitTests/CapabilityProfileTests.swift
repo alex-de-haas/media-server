@@ -131,3 +131,48 @@ struct PlaybackPreferencesTests {
         #expect(profile.maxAudioChannels == 2)
     }
 }
+
+@Suite("Preferences store")
+struct PlaybackPreferencesStoreTests {
+    private func store() -> (PlaybackPreferencesStore, UserDefaults) {
+        let suite = "MediaKitTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        return (PlaybackPreferencesStore(defaults: defaults), defaults)
+    }
+
+    @Test("A choice survives the relaunch it exists to survive")
+    func roundTrip() {
+        let (subject, _) = store()
+
+        subject.save(PlaybackPreferences(dynamicRange: .sdr, maxAudioChannels: 2))
+        let loaded = subject.load()
+
+        #expect(loaded.dynamicRange == .sdr)
+        #expect(loaded.maxAudioChannels == 2)
+    }
+
+    @Test("A fresh install gets the automatic answer")
+    func freshInstall() {
+        let (subject, _) = store()
+
+        #expect(subject.load() == PlaybackPreferences())
+    }
+
+    @Test("Something stored in a shape this version cannot read falls back rather than throwing")
+    func unreadable() {
+        let (subject, defaults) = store()
+        defaults.set(Data([0x00, 0x01, 0x02]), forKey: "playback.preferences")
+
+        #expect(subject.load() == PlaybackPreferences())
+    }
+
+    @Test("Clearing returns the device to automatic")
+    func clearing() {
+        let (subject, _) = store()
+        subject.save(PlaybackPreferences(dynamicRange: .hdr10))
+
+        subject.clear()
+
+        #expect(subject.load().dynamicRange == .automatic)
+    }
+}

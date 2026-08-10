@@ -607,7 +607,10 @@ profile-5 rendition, which means re-encoding and is out of scope.
 
 ### Closing the plan
 
-- [ ] **`feature.md` for the umbrella** describing the client as a whole, created
+- [ ] **`feature.md` for the umbrella** grown to describe the client as a whole. It
+      exists as of 2026-08-10, created by the PR that first shipped behaviour as
+      `AGENTS.md` requires, and today describes the foundations and the capability
+      profile. It follows the code from here, created
       when the first client behaviour ships.
 - [ ] **Index** — `node scripts/docs-index.mjs --fix`.
 - [ ] **Version** — this document alone is documentation-only: no version bump.
