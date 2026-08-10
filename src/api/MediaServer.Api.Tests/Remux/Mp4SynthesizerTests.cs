@@ -485,6 +485,59 @@ public sealed class Mp4SynthesizerTests
     }
 
     [Fact]
+    public void Only_the_default_of_each_kind_is_marked_enabled()
+    {
+        // Two audio tracks. The first is the viewer's choice and the player's default; a second marked
+        // enabled would leave the default ambiguous.
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AC3", channels: 6),
+                TrackEntry(3, 2, "A_AC3", channels: 2)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(100, 0x11)),
+                SimpleBlock(2, 0, true, Ac3Frame(200)),
+                SimpleBlock(3, 0, true, Ac3Frame(200))));
+
+        var built = Build(file, tracks: [1, 2, 3]);
+        var flags = built.Reader.Find("moov/trak/tkhd")
+            .Select(box => built.Reader.U32At(box.Start) & 0x00FFFFFF)
+            .ToList();
+
+        // Video enabled, first audio enabled, second in the movie but not enabled.
+        Assert.Equal([3u, 3u, 2u], flags);
+    }
+
+    [Fact]
+    public void Tracks_of_one_kind_are_declared_alternatives_to_each_other()
+    {
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AC3", channels: 6),
+                TrackEntry(3, 2, "A_AC3", channels: 2)),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(100, 0x11)),
+                SimpleBlock(2, 0, true, Ac3Frame(200)),
+                SimpleBlock(3, 0, true, Ac3Frame(200))));
+
+        var built = Build(file, tracks: [1, 2, 3]);
+
+        // alternate_group is a big-endian 16-bit field 46 bytes into the box body — past version and
+        // flags, the two timestamps, the id, four reserved bytes, the duration, eight more reserved and
+        // the layer — so its value is in the second of those two bytes.
+        var groups = built.Reader.Find("moov/trak/tkhd")
+            .Select(box => built.Result.Header[box.Start + 47])
+            .ToList();
+
+        Assert.Equal([0, 1, 1], groups);
+    }
+
+    [Fact]
     public void A_track_the_synthesiser_cannot_describe_is_left_out()
     {
         var file = ContainerBuilders.Matroska(
@@ -579,6 +632,99 @@ public sealed class Mp4SynthesizerTests
                 // A cue at 40 ms for 60 ms, then a gap, then one at 200 ms for 50 ms.
                 durations ? BlockGroup(3, 40, false, 60, cue) : BlockGroup(3, 40, false, cue),
                 durations ? BlockGroup(3, 200, false, 50, later) : BlockGroup(3, 200, false, later)));
+    }
+
+    private static Mp4Synthesizer.Result BuildWithSubtitleDefault(
+        byte[] file,
+        SubtitleDefault subtitleDefault,
+        IReadOnlyList<(IReadOnlyList<TextCue> Cues, string? Language)>? externalText = null)
+    {
+        var stream = new MemoryStream(file);
+        var index = MatroskaIndexer.Build(stream);
+        var result = Mp4Synthesizer.Build(
+            [new Mp4Synthesizer.Input(index, stream)],
+            [.. RemuxTrackChoice.Resolve(index, null, null)
+                .Select(number => new Mp4Synthesizer.TrackRef(0, number))],
+            VideoSignalling.CrossCompatible,
+            externalText,
+            subtitleDefault);
+
+        Assert.NotNull(result);
+        return result;
+    }
+
+    /// <summary>The `enabled` bit of every track header, in order.</summary>
+    private static List<bool> Enabled(Mp4Synthesizer.Result result)
+    {
+        var reader = new Mp4BoxReader(result.Header);
+        return [.. reader.Find("moov/trak/tkhd").Select(box => (reader.U32At(box.Start) & 1) == 1)];
+    }
+
+    [Fact]
+    public void Carrying_a_subtitle_for_the_menu_is_not_turning_it_on()
+    {
+        // The regression this guards: once every subtitle is carried, marking "the first of its kind"
+        // as default would put words on screen for a viewer who asked for none.
+        var result = BuildWithSubtitleDefault(WithSubtitles(), SubtitleDefault.None);
+
+        Assert.Equal(["hvc1", "tx3g"], result.SampleEntries);
+        Assert.Equal([true, false], Enabled(result));
+    }
+
+    [Fact]
+    public void A_chosen_embedded_subtitle_is_the_one_turned_on()
+    {
+        var result = BuildWithSubtitleDefault(WithSubtitles(), SubtitleDefault.Embedded);
+
+        Assert.Equal([true, true], Enabled(result));
+    }
+
+    [Fact]
+    public void A_chosen_external_subtitle_overtakes_the_embedded_ones()
+    {
+        // An external file is prepared after the referenced tracks, so being chosen is not enough to
+        // make it first — it has to overtake them, or the wrong subtitle plays.
+        var result = BuildWithSubtitleDefault(
+            WithSubtitles(),
+            SubtitleDefault.External,
+            [([new TextCue(0, 1000, "From a file")], "fra")]);
+
+        Assert.Equal(["hvc1", "tx3g", "tx3g"], result.SampleEntries);
+        Assert.Equal([true, true, false], Enabled(result));
+
+        // And it is the external one that leads, which its language proves.
+        var reader = new Mp4BoxReader(result.Header);
+        // mdhd version 1: version and flags, two 64-bit timestamps, the timescale and a 64-bit
+        // duration, and then the packed language.
+        var languages = reader.Find("moov/trak/mdia/mdhd")
+            .Select(box => reader.U32At(box.Start + 32) >> 16)
+            .ToList();
+        Assert.Equal(0x1A41u, languages[1]);                 // 'fra'
+    }
+
+    [Fact]
+    public void Each_track_carries_its_own_language_rather_than_undetermined()
+    {
+        // Six dubs that all read "Undetermined" are barely better than carrying one.
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(160),
+            ContainerBuilders.Ebml(0x1654AE6B,
+                TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: Hvcc, width: 8, height: 8,
+                    defaultDuration: 40_000_000),
+                TrackEntry(2, 2, "A_AC3", channels: 6, language: "eng"),
+                TrackEntry(3, 2, "A_AC3", channels: 2, language: "rus")),
+            Cluster(0,
+                SimpleBlock(1, 0, true, Frame(100, 0x11)),
+                SimpleBlock(2, 0, true, Ac3Frame(200)),
+                SimpleBlock(3, 0, true, Ac3Frame(200))));
+
+        var built = Build(file, tracks: [1, 2, 3]);
+        var languages = built.Reader.Find("moov/trak/mdia/mdhd")
+            .Select(box => built.Reader.U32At(box.Start + 32) >> 16)
+            .ToList();
+
+        // Packed as three five-bit letters offset from 0x60: und for the video, then eng and rus.
+        Assert.Equal([0x55C4u, 0x15C7u, 0x4AB3u], languages);
     }
 
     [Fact]

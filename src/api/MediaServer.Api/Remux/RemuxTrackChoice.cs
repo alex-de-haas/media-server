@@ -11,8 +11,16 @@ namespace MediaServer.Api.Remux;
 internal static class RemuxTrackChoice
 {
     /// <summary>
-    /// Video first, then audio, then subtitles: a player takes the first track of each kind as its
-    /// default, so the order here is the viewer's answer rather than the file's.
+    /// Video, then **every** audio track that can be described, then every subtitle that can — each kind
+    /// with the viewer's choice first, because a player takes the first track of a kind as its default.
+    ///
+    /// Carrying them all is what makes the player's own track menu work. An MP4 holding one audio track
+    /// gives <c>AVPlayerViewController</c> nothing to choose between, so switching a dub would mean
+    /// asking for a different URL and re-seating the player at the current time — a visible re-buffer,
+    /// and a picker the client would have to build for itself. Carrying them all costs header: a sample
+    /// table is around twelve bytes a sample once <c>stsz</c> and <c>co64</c> are counted, so an audio
+    /// track of a feature film adds a couple of megabytes to what is fetched before the first frame.
+    /// That is the trade, taken deliberately — see <c>docs/features/remux-streaming/feature.md</c>.
     /// </summary>
     internal static IReadOnlyList<ulong> Resolve(
         MatroskaIndex index, int? audioStreamIndex, int? subtitleStreamIndex)
@@ -24,18 +32,8 @@ internal static class RemuxTrackChoice
             chosen.Add(video.Number);
         }
 
-        if (First(index, IndexedTrackKind.Audio, audioStreamIndex) is { } audio)
-        {
-            chosen.Add(audio.Number);
-        }
-
-        // A subtitle track is only added when one was asked for: a player that finds one enables it, and
-        // nobody asked for subtitles by not choosing any.
-        if (subtitleStreamIndex is not null
-            && First(index, IndexedTrackKind.Subtitle, subtitleStreamIndex) is { } subtitle)
-        {
-            chosen.Add(subtitle.Number);
-        }
+        chosen.AddRange(Ordered(index, IndexedTrackKind.Audio, audioStreamIndex));
+        chosen.AddRange(Ordered(index, IndexedTrackKind.Subtitle, subtitleStreamIndex));
 
         return chosen;
     }
@@ -50,34 +48,31 @@ internal static class RemuxTrackChoice
             track.Kind == IndexedTrackKind.Video && RemuxCodecs.CanPackageVideo(track));
 
     /// <summary>
-    /// The track at that stream index if it is of the right kind and can be described, and otherwise the
-    /// first that can be — an index that no longer matches is a stale preference, not a reason to play
-    /// nothing.
+    /// Every track of the kind that a sample entry can be written for, the viewer's choice first.
     ///
-    /// Only describable tracks are considered, and that is the whole point rather than an optimisation.
-    /// The resolver offers a remux when <em>some</em> audio track can be packaged; taking the file's first
-    /// audio track regardless would hand a viewer whose film leads with TrueHD a container with a picture
-    /// and no sound. A choice that lands on such a track is treated exactly like a choice that lands on
-    /// nothing.
+    /// Only describable tracks are considered, and that is the point rather than an optimisation. The
+    /// resolver offers a remux when <em>some</em> audio track can be packaged; including the file's other
+    /// ones regardless would put tracks in the player's menu that fall silent when selected. A choice
+    /// landing on such a track is treated exactly like a choice landing on nothing: the order falls back
+    /// to the file's own, and the default becomes the first track that actually plays.
     /// </summary>
-    private static IndexedTrack? First(MatroskaIndex index, IndexedTrackKind kind, int? streamIndex)
+    private static IEnumerable<ulong> Ordered(
+        MatroskaIndex index, IndexedTrackKind kind, int? streamIndex)
     {
         var ofKind = index.Tracks
             .Where(track => track.Kind == kind && RemuxCodecs.WantsSamples(track))
             .ToList();
-        if (ofKind.Count == 0)
+
+        var preferred = streamIndex is { } wanted
+            ? ofKind.FirstOrDefault(track => track.Ordinal == wanted)
+            : null;
+
+        if (preferred is not null)
         {
-            return null;
+            ofKind.Remove(preferred);
+            ofKind.Insert(0, preferred);
         }
 
-        if (streamIndex is { } wanted
-            && ofKind.FirstOrDefault(track => track.Ordinal == wanted) is { } exact)
-        {
-            return exact;
-        }
-
-        // Subtitles are shown only when asked for by index; falling back to "some subtitle track" would
-        // turn them on for a viewer who never wanted them.
-        return kind == IndexedTrackKind.Subtitle ? null : ofKind[0];
+        return ofKind.Select(track => track.Number);
     }
 }

@@ -12,6 +12,19 @@ internal enum VideoSignalling
     DolbyVision,
 }
 
+/// <summary>Which subtitle a viewer actually asked for, as opposed to which ones are carried.</summary>
+internal enum SubtitleDefault
+{
+    /// <summary>None was chosen. Every subtitle is carried for the menu and none is turned on.</summary>
+    None,
+
+    /// <summary>One of the file's own, which <see cref="RemuxTrackChoice"/> has already put first.</summary>
+    Embedded,
+
+    /// <summary>A file beside the video, which arrives after the referenced tracks and has to overtake them.</summary>
+    External,
+}
+
 /// <summary>
 /// Computes an MP4 header whose samples live in an untouched Matroska file.
 ///
@@ -63,11 +76,15 @@ internal static class Mp4Synthesizer
     /// kind as its default, so the caller's order is the viewer's choice. The inputs are read only for the
     /// few bytes an AC-3 descriptor needs and for subtitle text.
     /// </summary>
+    /// <param name="subtitleDefault">Which subtitle, if any, the viewer actually asked for. Video and
+    /// audio take the first of their kind as the default, but subtitles must not: carrying them for the
+    /// menu is not the same as turning one on, and a viewer who chose none must see none.</param>
     internal static Result? Build(
         IReadOnlyList<Input> inputs,
         IReadOnlyList<TrackRef> tracks,
         VideoSignalling signalling,
-        IReadOnlyList<(IReadOnlyList<TextCue> Cues, string? Language)>? externalText = null)
+        IReadOnlyList<(IReadOnlyList<TextCue> Cues, string? Language)>? externalText = null,
+        SubtitleDefault subtitleDefault = SubtitleDefault.None)
     {
         var prepared = new List<Prepared>();
         // Timed text is rewritten, so it needs somewhere to live; it is small enough to ride in the header.
@@ -100,6 +117,10 @@ internal static class Mp4Synthesizer
             }
         }
 
+        // Everything after this point came from a file beside the video rather than from inside it,
+        // which is the only way to tell an external subtitle from an embedded one once both are cues.
+        var referenced = prepared.Count;
+
         foreach (var (cues, language) in externalText ?? [])
         {
             if (PrepareExternalSubtitle(cues, language, subtitles) is { } one)
@@ -112,6 +133,8 @@ internal static class Mp4Synthesizer
         {
             return null;
         }
+
+        prepared = ApplyDefaults(prepared, referenced, subtitleDefault);
 
         // The movie header counts in milliseconds; each track counts in its own units, so the longest is
         // found after converting rather than before.
@@ -186,8 +209,89 @@ internal static class Mp4Synthesizer
         bool InHeader,
         int Input,
         int Timescale,
+        /// <summary>Whether a player should start with this track. Set once the whole list is known.</summary>
+        bool IsDefault = false,
         /// <summary>Encoder priming to trim, in this track's own units. Zero for everything but AAC.</summary>
         long MediaTime = 0);
+
+    /// <summary>
+    /// Decides which track of each kind a player starts with, and puts the chosen subtitle at the head of
+    /// its group so the menu reads in the same order.
+    ///
+    /// Video and audio take the first of their kind, which is where the caller has already put the
+    /// viewer's choice. Subtitles do not: carrying one for the menu is not the same as turning it on, and
+    /// a viewer who asked for none must get none. An external subtitle is the awkward case — it is
+    /// prepared after the referenced tracks, so being chosen is not enough to make it first.
+    /// </summary>
+    private static List<Prepared> ApplyDefaults(
+        List<Prepared> prepared, int referenced, SubtitleDefault subtitleDefault)
+    {
+        var chosenSubtitle = subtitleDefault switch
+        {
+            SubtitleDefault.Embedded => prepared.FindIndex(
+                0, referenced, one => one.Track.Kind == IndexedTrackKind.Subtitle),
+            SubtitleDefault.External when referenced < prepared.Count => referenced,
+            _ => -1,
+        };
+
+        if (chosenSubtitle >= 0)
+        {
+            // Move it ahead of every other subtitle. Track order is menu order, and the one that plays
+            // should not be somewhere in the middle of the list.
+            var firstSubtitle = prepared.FindIndex(one => one.Track.Kind == IndexedTrackKind.Subtitle);
+            if (firstSubtitle >= 0 && firstSubtitle != chosenSubtitle)
+            {
+                var one = prepared[chosenSubtitle];
+                prepared.RemoveAt(chosenSubtitle);
+                prepared.Insert(firstSubtitle, one);
+                chosenSubtitle = firstSubtitle;
+            }
+        }
+
+        var seen = new HashSet<IndexedTrackKind>();
+        for (var i = 0; i < prepared.Count; i++)
+        {
+            var kind = prepared[i].Track.Kind;
+            var isDefault = kind == IndexedTrackKind.Subtitle
+                ? i == chosenSubtitle
+                : seen.Add(kind);
+
+            prepared[i] = prepared[i] with { IsDefault = isDefault };
+        }
+
+        return prepared;
+    }
+
+    /// <summary>
+    /// An ISO-639-2 code packed as MP4 wants it: three five-bit letters offset from <c>0x60</c>, in a
+    /// sixteen-bit field whose top bit is zero. Anything that is not three plain letters becomes
+    /// <c>und</c>, which is what the field said for every track before this.
+    ///
+    /// It matters more than it looks. A menu of six dubs that all read "Undetermined" is barely better
+    /// than carrying one of them.
+    /// </summary>
+    private static ushort PackedLanguage(string? language)
+    {
+        const ushort Undetermined = 0x55C4;
+        if (language is not { Length: 3 })
+        {
+            return Undetermined;
+        }
+
+        var packed = 0;
+        foreach (var letter in language)
+        {
+            var lower = char.ToLowerInvariant(letter);
+            if (lower is < 'a' or > 'z')
+            {
+                return Undetermined;
+            }
+
+            packed = (packed << 5) | (lower - 0x60);
+        }
+
+        return (ushort)packed;
+    }
 
     private static Prepared? PrepareVideo(
         IndexedTrack track, long timestampScale, VideoSignalling signalling, int input)
@@ -623,17 +727,29 @@ internal static class Mp4Synthesizer
         var isVideo = track.Kind == IndexedTrackKind.Video;
         var isText = track.Kind == IndexedTrackKind.Subtitle;
 
-        var tkhd = Full("tkhd", 1, 3,
+        // Bit 0 is "enabled", bit 1 "in movie". Every track is in the movie; only the default of its kind
+        // is enabled. A second audio track marked enabled leaves the default ambiguous, and an enabled
+        // subtitle track puts words on screen for a viewer who never asked for any — which is why
+        // subtitles used to be left out of the container altogether rather than carried unselected.
+        var flags = prepared.IsDefault ? 3u : 2u;
+
+        // Tracks of one kind are alternatives to each other, not additions. Players group by media
+        // characteristic anyway, but saying so is what makes the grouping the file's claim rather than
+        // the player's inference.
+        var alternateGroup = isVideo ? 0 : isText ? 2 : 1;
+
+        var tkhd = Full("tkhd", 1, flags,
             U64(0), U64(0), U32((uint)id), new byte[4],
             U64((ulong)movieDuration), new byte[8],
-            U16(0), U16(0), U16(0), new byte[2],
+            U16(0), U16((ushort)alternateGroup),
+            U16((ushort)(isVideo || isText ? 0 : 0x0100)), new byte[2],
             UnityMatrix(),
             U32(isVideo ? (uint)(track.DisplayWidth > 0 ? track.DisplayWidth : track.Width) << 16 : 0),
             U32(isVideo ? (uint)(track.DisplayHeight > 0 ? track.DisplayHeight : track.Height) << 16 : 0));
 
         var mdhd = Full("mdhd", 1, 0,
             U64(0), U64(0), U32((uint)prepared.Timescale), U64((ulong)prepared.Duration),
-            U16(0x55C4), U16(0));                               // 'und'
+            U16(PackedLanguage(track.Language)), U16(0));
 
         var handler = isVideo ? "vide"u8.ToArray() : isText ? "text"u8.ToArray() : "soun"u8.ToArray();
         var hdlr = Full("hdlr", 0, 0, new byte[4], handler, new byte[12], [.. "MediaServer"u8, 0]);

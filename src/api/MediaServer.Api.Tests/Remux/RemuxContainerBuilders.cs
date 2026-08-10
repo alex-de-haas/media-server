@@ -25,6 +25,7 @@ internal static class RemuxContainerBuilders
         ulong height = 0,
         ulong defaultDuration = 0,
         ulong codecDelay = 0,
+        string? language = null,
         ulong channels = 0,
         int primaries = 0,
         int transfer = 0,
@@ -51,6 +52,11 @@ internal static class RemuxContainerBuilders
         if (codecDelay > 0)
         {
             children.Add(Ebml(0x56AA, Uint(codecDelay)));
+        }
+
+        if (language is not null)
+        {
+            children.Add(Ebml(0x22B59C, ContainerBuilders.Str(language)));
         }
 
         if (type == 1)
