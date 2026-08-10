@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="HostySdk.App" Version="0.1.0" />
+    <PackageReference Include="HostySdk.App" Version="0.3.0" />
     <InternalsVisibleTo Include="MediaServer.Api.Tests" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
     <!-- Microsoft.AspNetCore.OpenApi 10.0.10 pulls Microsoft.OpenApi 2.0.0, which has GHSA-v5pm-xwqc-g5wc;
