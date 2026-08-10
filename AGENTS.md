@@ -24,6 +24,17 @@ Where the version lives:
 
 Each runtime app versions independently from Hosty Core/CLI and from the other apps.
 
+### The Apple clients are not the runtime app
+
+`manifest.json` describes the Hosty runtime app — the `api` and `web` services Core starts.
+The clients under `src/apple/` ship through TestFlight and the App Store instead, so they
+version on their own: `MARKETING_VERSION` in the Xcode project, moved when the client
+ships something, and never in step with `manifest.json`.
+
+A change touching both bumps both, and for the same reason each is bumped. A change
+touching only `src/apple/` leaves `manifest.json` alone — it is the documentation-only
+exception in a different guise, since nothing about the server moved.
+
 ## Pull Requests
 
 - **Do not squash-merge PRs.** Parallel PRs are common, and squash merges rewrite the

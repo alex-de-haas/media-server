@@ -54,3 +54,9 @@ Thumbs.db
 # Python bytecode (scripts/remux-prototype)
 __pycache__/
 *.pyc
+
+# Apple clients
+src/apple/**/.build/
+src/apple/**/xcuserdata/
+src/apple/**/*.xcworkspace/xcuserdata/
+DerivedData/
