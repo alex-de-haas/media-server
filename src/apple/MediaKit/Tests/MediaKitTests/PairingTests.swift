@@ -1,4 +1,6 @@
 import Foundation
+import HTTPTypes
+import OpenAPIRuntime
 import Testing
 
 @testable import MediaKit
@@ -8,7 +10,7 @@ import Testing
 /// Every failure in this chain is a state a viewer sees, and none of them can be produced by talking to
 /// a real Core on demand — an expired code, a denied approval, a host too old. So the transport is the
 /// seam.
-private final class StubTransport: HTTPTransport, @unchecked Sendable {
+private final class StubTransport: HTTPTransport, ClientTransport, @unchecked Sendable {
     typealias Answer = (status: Int, body: String)
 
     private let lock = NSLock()
@@ -42,6 +44,27 @@ private final class StubTransport: HTTPTransport, @unchecked Sendable {
             Data(answer.body.utf8),
             HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: nil, headerFields: nil)!
         )
+    }
+
+    /// The same table, for the generated client. Our own surface goes through it, Core's API through
+    /// `HTTPTransport`, and one set of canned answers drives both.
+    func send(
+        _ request: HTTPRequest,
+        body: HTTPBody?,
+        baseURL: URL,
+        operationID: String
+    ) async throws -> (HTTPResponse, HTTPBody?) {
+        let path = request.path ?? ""
+        let answer: Answer = lock.withLock {
+            guard var queued = answers[path], !queued.isEmpty else { return (404, "") }
+            let next = queued.count == 1 ? queued[0] : queued.removeFirst()
+            answers[path] = queued
+            return next
+        }
+
+        var response = HTTPResponse(status: .init(code: answer.status))
+        response.headerFields[.contentType] = "application/json"
+        return (response, HTTPBody(answer.body))
     }
 
     func body(forPath path: String) -> [String: Any]? {
@@ -124,7 +147,8 @@ struct PairingClientTests {
 
     @Test("An address that is not a Media Server says so rather than failing obscurely")
     func notAMediaServer() async {
-        let client = PairingClient(transport: StubTransport(single: ["/other": (200, "{}")]))
+        let stub = StubTransport(single: ["/other": (200, "{}")])
+        let client = PairingClient(transport: stub, surface: stub)
 
         await #expect(throws: PairingError.notAMediaServer) {
             try await client.bootstrap(server: server)
@@ -133,10 +157,8 @@ struct PairingClientTests {
 
     @Test("The bootstrap decodes the contract's own shape")
     func bootstrapShape() async throws {
-        let client = PairingClient(
-            transport: StubTransport(single: ["/native/v1/server/public": (200, bootstrapBody)]))
-
-        let bootstrap = try await client.bootstrap(server: server)
+        let stub = StubTransport(single: ["/native/v1/server/public": (200, bootstrapBody)])
+        let bootstrap = try await PairingClient(transport: stub, surface: stub).bootstrap(server: server)
 
         // A string, because `NativeSurface.Version` is `"1"`. Decoding it as a number failed against
         // every real server while passing a fixture written to match the model.
@@ -147,17 +169,43 @@ struct PairingClientTests {
     @Test("A server that cannot say where its Core is decodes, and fails later with its own reason")
     func nullCoreOrigin() async throws {
         let body = #"{"serverName":"Home","appId":"x","surfaceVersion":"1","coreOrigin":null}"#
-        let client = PairingClient(
-            transport: StubTransport(single: ["/native/v1/server/public": (200, body)]))
+        let stub = StubTransport(single: ["/native/v1/server/public": (200, body)])
 
         // Nullable in the contract, so it must not read as a malformed answer.
-        #expect(try await client.bootstrap(server: server).coreOrigin == nil)
+        #expect(try await PairingClient(transport: stub, surface: stub)
+            .bootstrap(server: server).coreOrigin == nil)
+    }
+
+    @Test("A server that is merely unreachable is not called the wrong kind of server")
+    func unreachableIsNotWrongShape() async {
+        // Collapsing these two tells a viewer whose server is asleep that they typed the wrong address.
+        struct Offline: ClientTransport {
+            func send(
+                _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
+            ) async throws -> (HTTPResponse, HTTPBody?) {
+                throw URLError(.cannotConnectToHost)
+            }
+        }
+
+        let client = PairingClient(transport: StubTransport(single: [:]), surface: Offline())
+
+        do {
+            _ = try await client.bootstrap(server: server)
+            Issue.record("Expected a failure")
+        } catch let error as PairingError {
+            guard case .unreachable = error else {
+                Issue.record("Expected .unreachable, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("Expected a PairingError, got \(error)")
+        }
     }
 
     @Test("Something answering with the wrong shape is not a Media Server either")
     func wrongShape() async {
-        let client = PairingClient(
-            transport: StubTransport(single: ["/native/v1/server/public": (200, #"{"hello":"world"}"#)]))
+        let stub = StubTransport(single: ["/native/v1/server/public": (200, #"{"hello":"world"}"#)])
+        let client = PairingClient(transport: stub, surface: stub)
 
         await #expect(throws: PairingError.notAMediaServer) {
             try await client.bootstrap(server: server)
@@ -267,7 +315,7 @@ struct PairingSessionTests {
     ) -> PairingSession {
         // No real waiting: the poll interval is Core's to state and this test's to skip.
         PairingSession(
-            client: PairingClient(transport: transport),
+            client: PairingClient(transport: transport, surface: transport),
             store: store,
             label: "Test",
             sleep: { _ in })

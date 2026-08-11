@@ -1,21 +1,22 @@
 import Foundation
+import MediaServerAPI
 
 /// What a server says about itself before anyone has a credential.
 ///
 /// The one anonymous route on the whole surface, and it has to be: needing a token to discover where
 /// tokens come from is a loop. The field is `coreOrigin` — its *value* is the app's `CorePublicOrigin`,
 /// but that is the source, not the name on the wire.
-public struct ServerBootstrap: Codable, Equatable, Sendable {
+public struct ServerBootstrap: Equatable, Sendable {
     public let serverName: String
     public let appId: String
 
-    /// A **string**, not a number — `NativeSurface.Version` is `"1"` and the committed OpenAPI says so.
-    /// Decoding it as an integer failed against every real server while passing a fixture that had
-    /// quietly been written to match the model instead of the contract.
+    /// A **string**, not a number — `NativeSurface.Version` is `"1"`. This was declared as an integer
+    /// once, which meant no real server could be decoded at all, and the fixture that should have caught
+    /// it had been written to match the model instead of the contract.
     public let surfaceVersion: String
 
-    /// Null on a host with no public Core origin, which is a pairing that cannot proceed rather than a
-    /// malformed answer — so it is optional here and refused explicitly where it is used.
+    /// Null on a host with no public Core origin: a pairing that cannot proceed rather than a malformed
+    /// answer, so it is optional here and refused explicitly where it is used.
     public let coreOrigin: String?
 
     public init(serverName: String, appId: String, surfaceVersion: String, coreOrigin: String?) {
@@ -23,6 +24,19 @@ public struct ServerBootstrap: Codable, Equatable, Sendable {
         self.appId = appId
         self.surfaceVersion = surfaceVersion
         self.coreOrigin = coreOrigin
+    }
+
+    /// Built from the generated type rather than decoded by hand.
+    ///
+    /// This initialiser is the whole guarantee: the field types come from
+    /// `src/api/openapi/MediaServer.Api_native.json` by way of the generator, so a surface that changes
+    /// shape stops this compiling instead of failing quietly on a television.
+    public init(_ generated: Components.Schemas.NativeServerBootstrap) {
+        self.init(
+            serverName: generated.serverName,
+            appId: generated.appId,
+            surfaceVersion: generated.surfaceVersion,
+            coreOrigin: generated.coreOrigin)
     }
 }
 

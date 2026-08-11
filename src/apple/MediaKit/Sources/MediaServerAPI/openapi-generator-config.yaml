@@ -1,0 +1,11 @@
+# Types and a client, nothing else: this package consumes the surface, it does not serve it.
+generate:
+  - types
+  - client
+
+# Without this the operations are named from their paths — `get_sol_native_sol_v1_sol_server_sol_public`
+# — because the document declares no `operationId`. The idiomatic strategy reads at a call site; the
+# proper fix is operation ids on the server, which is a change to make once and for every consumer.
+namingStrategy: idiomatic
+
+accessModifier: public
