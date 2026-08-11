@@ -3,19 +3,90 @@ using Microsoft.Extensions.Logging;
 namespace MediaServer.Api.Remux;
 
 /// <summary>
-/// Keeps built indexes on disk, one file per media source, under the app's data directory.
+/// Keeps built indexes on disk, one file per media source, under the app's cache directory.
 ///
 /// They live beside the database rather than in it. An index is <em>derived</em> data: large next to a row,
 /// rebuildable from the source at any time, and of no interest to a backup — three properties that argue
-/// against a table and for a file that can simply be deleted.
+/// against a table and for a file that can simply be deleted. The cache directory is where Hosty gives
+/// those properties a home: it survives restarts and updates but is never backed up, so a gigabyte of
+/// indexes no longer rides along in every snapshot. Under a Core that predates the cache contract the
+/// caller passes the data directory instead, which is simply the old layout.
 ///
 /// Nothing here decides when to build one; see <see cref="RemuxIndexService"/>.
 /// </summary>
-public sealed class RemuxIndexStore(string appDataDirectory, ILogger<RemuxIndexStore> logger)
+public sealed class RemuxIndexStore(string appCacheDirectory, ILogger<RemuxIndexStore> logger)
 {
-    private readonly string _directory = Path.Combine(appDataDirectory, "remux-index");
+    private readonly string _directory = Path.Combine(appCacheDirectory, "remux-index");
 
     internal string PathFor(Guid mediaSourceId) => Path.Combine(_directory, $"{mediaSourceId:N}.idx");
+
+    /// <summary>
+    /// One-time move of index files from the pre-cache location (<c>{data}/remux-index</c>) into this
+    /// store's directory, so an upgrade does not throw away hours of background walking. Idempotent:
+    /// a crash mid-way leaves files that are simply moved on the next start, a file already present at
+    /// the destination wins (the legacy copy is deleted), and once the legacy directory is empty it is
+    /// removed and every later start returns immediately. A no-op when the store still lives under the
+    /// data directory — the old-Core fallback — because the two paths are then the same directory.
+    /// </summary>
+    public void MigrateFrom(string appDataDirectory)
+    {
+        var legacy = Path.Combine(appDataDirectory, "remux-index");
+        if (string.Equals(Path.GetFullPath(legacy), Path.GetFullPath(_directory), StringComparison.Ordinal)
+            || !Directory.Exists(legacy))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(_directory);
+        var moved = 0;
+        foreach (var source in Directory.EnumerateFiles(legacy))
+        {
+            try
+            {
+                if (!source.EndsWith(".idx", StringComparison.Ordinal))
+                {
+                    // Only the store writes here, so anything else is a `.partial` some interrupted
+                    // build left behind — garbage at either location.
+                    File.Delete(source);
+                    continue;
+                }
+
+                var destination = Path.Combine(_directory, Path.GetFileName(source));
+                if (File.Exists(destination))
+                {
+                    File.Delete(source);
+                    continue;
+                }
+
+                // File.Move degrades to copy-and-delete when data and cache are separate docker binds.
+                File.Move(source, destination);
+                moved++;
+            }
+            catch (IOException exception)
+            {
+                // Skip and carry on: whatever could not move stays in the legacy directory (which then
+                // survives below) and gets another chance on the next start.
+                logger.LogWarning(exception, "Could not migrate remux index {Path}", source);
+            }
+        }
+
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(legacy).Any())
+            {
+                Directory.Delete(legacy);
+            }
+        }
+        catch (IOException exception)
+        {
+            logger.LogDebug(exception, "Could not remove legacy remux index directory {Path}", legacy);
+        }
+
+        if (moved > 0)
+        {
+            logger.LogInformation("Migrated {Count} remux index(es) from {Legacy} to {Directory}", moved, legacy, _directory);
+        }
+    }
 
     /// <summary>
     /// Loads the index for a source, or null when there is none, it does not match the file it was built

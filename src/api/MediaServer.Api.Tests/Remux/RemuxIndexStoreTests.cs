@@ -223,5 +223,63 @@ public sealed class RemuxIndexStoreTests : IDisposable
         Assert.Empty(Store().Stored());
     }
 
+    [Fact]
+    public void Migration_moves_indexes_and_removes_the_legacy_directory()
+    {
+        var dataRoot = Path.Combine(_root, "data");
+        var cacheRoot = Path.Combine(_root, "cache");
+        var source = WriteSource();
+        var id = Guid.NewGuid();
+        var legacyStore = new RemuxIndexStore(dataRoot, NullLogger<RemuxIndexStore>.Instance);
+        legacyStore.Save(id, source, SampleIndex());
+        // An interrupted build's leftover beside it: garbage at either location, deleted in passing.
+        File.WriteAllText(Path.Combine(dataRoot, "remux-index", "leftover.idx.partial"), "partial");
+
+        var store = new RemuxIndexStore(cacheRoot, NullLogger<RemuxIndexStore>.Instance);
+        store.MigrateFrom(dataRoot);
+
+        Assert.NotNull(store.Load(id, source));
+        Assert.False(Directory.Exists(Path.Combine(dataRoot, "remux-index")));
+    }
+
+    [Fact]
+    public void Migration_is_idempotent_and_the_destination_wins()
+    {
+        var dataRoot = Path.Combine(_root, "data");
+        var cacheRoot = Path.Combine(_root, "cache");
+        var source = WriteSource();
+        var id = Guid.NewGuid();
+        // The same id on both sides — a crash between move and delete on a copying filesystem —
+        // with the legacy side stale: the destination copy must survive.
+        var legacyStore = new RemuxIndexStore(dataRoot, NullLogger<RemuxIndexStore>.Instance);
+        legacyStore.Save(id, source, SampleIndex());
+        File.WriteAllText(legacyStore.PathFor(id), "stale");
+        var store = new RemuxIndexStore(cacheRoot, NullLogger<RemuxIndexStore>.Instance);
+        store.Save(id, source, SampleIndex());
+
+        store.MigrateFrom(dataRoot);
+        Assert.NotNull(store.Load(id, source));
+        Assert.False(Directory.Exists(Path.Combine(dataRoot, "remux-index")));
+
+        // A second run — every start after the legacy directory is gone — changes nothing.
+        store.MigrateFrom(dataRoot);
+        Assert.NotNull(store.Load(id, source));
+    }
+
+    [Fact]
+    public void Migration_is_a_noop_when_cache_and_data_share_a_root()
+    {
+        // The old-Core fallback: no HOSTY_APP_CACHE_DIR, so the store already sits under data and
+        // "legacy" and "current" are the same directory. Nothing may move or be deleted.
+        var source = WriteSource();
+        var id = Guid.NewGuid();
+        var store = Store();
+        store.Save(id, source, SampleIndex());
+
+        store.MigrateFrom(_root);
+
+        Assert.NotNull(store.Load(id, source));
+    }
+
     public void Dispose() => Directory.Delete(_root, recursive: true);
 }

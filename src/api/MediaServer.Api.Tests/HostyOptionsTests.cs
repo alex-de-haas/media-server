@@ -76,6 +76,22 @@ public sealed class HostyOptionsTests
     }
 
     [Fact]
+    public void Cache_dir_prefers_injected_path_and_falls_back_to_data()
+    {
+        var withCache = Build(new Dictionary<string, string?>
+        {
+            ["HOSTY_APP_DATA_DIR"] = "/data/app",
+            ["HOSTY_APP_CACHE_DIR"] = "/cache/app",
+        });
+        Assert.Equal("/cache/app", withCache.AppCacheDir);
+
+        // A Core predating the cache contract injects no cache path: the data directory doubles as
+        // the cache root, which is exactly the pre-cache layout.
+        var withoutCache = Build(new Dictionary<string, string?> { ["HOSTY_APP_DATA_DIR"] = "/data/app" });
+        Assert.Equal("/data/app", withoutCache.AppCacheDir);
+    }
+
+    [Fact]
     public void Falls_back_to_defaults_when_run_standalone()
     {
         var options = Build(new Dictionary<string, string?>());

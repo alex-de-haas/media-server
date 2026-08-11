@@ -28,8 +28,19 @@ public sealed class HostyOptions
     /// </summary>
     public string? JellyfinPublicOrigin { get; init; }
 
-    /// <summary>Primary app data directory; the SQLite DB and caches live under it.</summary>
+    /// <summary>Primary app data directory; the SQLite DB lives under it and Hosty backs it up.</summary>
     public required string AppDataDir { get; init; }
+
+    /// <summary>
+    /// App cache directory for derived, rebuildable data — remux indexes — which Hosty never backs
+    /// up. Equals the data directory when Core injected no cache path (a Core predating the cache
+    /// contract, or a standalone run), which keeps the pre-cache layout: everything under data,
+    /// everything backed up.
+    /// </summary>
+    public string AppCacheDir => AppCacheDirOverride ?? AppDataDir;
+
+    /// <summary>Raw <c>HOSTY_APP_CACHE_DIR</c> value; see <see cref="AppCacheDir"/>.</summary>
+    public string? AppCacheDirOverride { get; init; }
 
     /// <summary>Loopback port Core assigned to the internal management surface (dev profile).</summary>
     public int? InternalPort { get; init; }
@@ -90,6 +101,7 @@ public sealed class HostyOptions
             CorePublicOrigin = Read("HOSTY_CORE_PUBLIC_ORIGIN"),
             JellyfinPublicOrigin = Read("HOSTY_PUBLIC_ORIGIN_JELLYFIN"),
             AppDataDir = Read("HOSTY_APP_DATA_DIR") ?? Path.Combine(contentRoot, "data"),
+            AppCacheDirOverride = Read("HOSTY_APP_CACHE_DIR"),
             InternalPort = ReadPort("HOSTY_PORT_INTERNAL"),
             JellyfinPort = ReadPort("HOSTY_PORT_JELLYFIN"),
             RunningInContainer = string.Equals(Read("DOTNET_RUNNING_IN_CONTAINER"), "true", StringComparison.OrdinalIgnoreCase),
