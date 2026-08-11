@@ -58,11 +58,16 @@ public sealed class RemuxIndexStore(string appCacheDirectory, ILogger<RemuxIndex
                     continue;
                 }
 
-                // File.Move degrades to copy-and-delete when data and cache are separate docker binds.
-                File.Move(source, destination);
+                // File.Move degrades to copy-and-delete when data and cache are separate docker binds,
+                // and a kill mid-copy would leave a truncated destination for the next start's
+                // destination-wins check to keep over the intact source. Staged through a sibling
+                // temp name, a file only ever appears at its final name via a same-volume rename.
+                var temporary = destination + ".partial";
+                File.Move(source, temporary, overwrite: true);
+                File.Move(temporary, destination, overwrite: true);
                 moved++;
             }
-            catch (IOException exception)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 // Skip and carry on: whatever could not move stays in the legacy directory (which then
                 // survives below) and gets another chance on the next start.

@@ -468,8 +468,32 @@ using (var scope = app.Services.CreateScope())
     // Move remux indexes from data/ into the cache directory once, before the worker or a viewer goes
     // looking for them at the new location — hours of background walking must survive the layout change.
     // Synchronous like the schema migration above: cheap on one filesystem (a rename per file), a
-    // one-time copy across the two docker binds.
-    services.GetRequiredService<RemuxIndexStore>().MigrateFrom(hosty.AppDataDir);
+    // one-time copy across the two docker binds. Best-effort, unlike the schema migration: everything
+    // being moved is rebuildable, so no filesystem surprise here (permissions, a read-only bind) may
+    // keep the app from starting.
+    try
+    {
+        services.GetRequiredService<RemuxIndexStore>().MigrateFrom(hosty.AppDataDir);
+    }
+    catch (Exception exception)
+    {
+        services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup.RemuxIndexes")
+            .LogError(exception, "Migrating remux indexes into the cache directory failed; affected indexes will be rebuilt.");
+    }
+
+    // Cached artwork moves the same way — same derived-data argument — plus a repointing of the
+    // ImageAsset rows that pin absolute paths into the old location, so nothing is refetched.
+    // Equally best-effort: artwork refetches on demand.
+    try
+    {
+        JellyfinImageService.MigrateCache(
+            hosty, database, services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup.ImageCache"));
+    }
+    catch (Exception exception)
+    {
+        services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup.ImageCache")
+            .LogError(exception, "Migrating the artwork cache into the cache directory failed; artwork will be refetched on demand.");
+    }
 }
 
 // Diagnostic: append every incoming request (incl. 404s) to a dedicated file next to the Hosty logs,

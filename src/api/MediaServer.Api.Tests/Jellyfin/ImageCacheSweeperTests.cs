@@ -12,6 +12,7 @@ public sealed class ImageCacheSweeperTests : IDisposable
     private readonly SqliteConnection _connection;
     private readonly MediaServerDbContext _database;
     private readonly string _appData = Path.Combine(Path.GetTempPath(), "ms-imgsweep-" + Guid.NewGuid().ToString("N"));
+    private readonly string _appCache;
     private readonly string _images;
 
     public ImageCacheSweeperTests()
@@ -20,13 +21,22 @@ public sealed class ImageCacheSweeperTests : IDisposable
         _connection.Open();
         _database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
         _database.Database.Migrate();
-        _images = Path.Combine(_appData, "images");
+        // The cache root is deliberately distinct from data: the sweep must follow the Hosty cache
+        // override, not the pre-cache layout under the data directory.
+        _appCache = _appData + "-cache";
+        _images = Path.Combine(_appCache, "images");
         Directory.CreateDirectory(_images);
     }
 
     private ImageCacheSweeper Sweeper() => new(
         _database,
-        new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = _appData },
+        new HostyOptions
+        {
+            AppId = "com.haas.media-server",
+            CoreOrigin = "http://localhost:3001",
+            AppDataDir = _appData,
+            AppCacheDirOverride = _appCache,
+        },
         NullLogger<ImageCacheSweeper>.Instance);
 
     [Fact]
@@ -300,9 +310,12 @@ public sealed class ImageCacheSweeperTests : IDisposable
     {
         _database.Dispose();
         _connection.Dispose();
-        if (Directory.Exists(_appData))
+        foreach (var root in new[] { _appData, _appCache })
         {
-            Directory.Delete(_appData, recursive: true);
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
         }
     }
 }
