@@ -249,11 +249,12 @@ builder.Services.AddScoped<IngestService>();
 builder.Services.AddHostedService<PipelineWorker>();
 builder.Services.AddHostedService<ReconcilerWorker>();
 
-// Remux indexes: derived, large next to a row and rebuildable, so they live as files beside the database
-// rather than in it. The worker builds them ahead of any viewer, because a walk costs half a minute on a
-// feature film and nothing should press play into that.
+// Remux indexes: derived, large next to a row and rebuildable, so they live as files in the Hosty cache
+// directory — persistent but never backed up (falling back to the data directory under an older Core).
+// The worker builds them ahead of any viewer, because a walk costs half a minute on a feature film and
+// nothing should press play into that.
 builder.Services.AddSingleton(serviceProvider => new RemuxIndexStore(
-    hosty.AppDataDir, serviceProvider.GetRequiredService<ILogger<RemuxIndexStore>>()));
+    hosty.AppCacheDir, serviceProvider.GetRequiredService<ILogger<RemuxIndexStore>>()));
 builder.Services.AddScoped<RemuxIndexService>();
 builder.Services.AddScoped<RemuxStreamService>();
 builder.Services.AddScoped<IRemuxReadiness, RemuxReadiness>();
@@ -463,6 +464,12 @@ using (var scope = app.Services.CreateScope())
         services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup.Catalogs")
             .LogError(exception, "Resolving catalog roots for this runtime failed; catalog roots are left as stored.");
     }
+
+    // Move remux indexes from data/ into the cache directory once, before the worker or a viewer goes
+    // looking for them at the new location — hours of background walking must survive the layout change.
+    // Synchronous like the schema migration above: cheap on one filesystem (a rename per file), a
+    // one-time copy across the two docker binds.
+    services.GetRequiredService<RemuxIndexStore>().MigrateFrom(hosty.AppDataDir);
 }
 
 // Diagnostic: append every incoming request (incl. 404s) to a dedicated file next to the Hosty logs,

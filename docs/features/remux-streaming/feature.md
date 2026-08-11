@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -63,9 +63,14 @@ rather than duplicated: two walkers over one format would drift.
 
 ## Where indexes live
 
-One file per media source under the app data directory, beside the torrents rather than
-in the database. An index is derived data — large next to a row, rebuildable, and of no
-interest to a backup.
+One file per media source under the Hosty cache directory
+([cache-storage](../cache-storage/feature.md)), as files rather than database rows. An
+index is derived data — large next to a row, rebuildable, and of no interest to a
+backup — and the cache directory is precisely that contract: it survives restarts and
+updates but is never backed up, so the indexes stopped riding along in every snapshot.
+Under a Core that predates the contract the store falls back to the app data
+directory, which is the old layout; a one-time startup migration moves files from
+`data/remux-index/` into the cache when the two differ.
 
 The file stores the steps rather than the values. Within a track the timestamps and
 offsets both climb in small repetitive increments, so variable-length deltas take a
