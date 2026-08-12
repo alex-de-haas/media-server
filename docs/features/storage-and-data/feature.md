@@ -1,7 +1,7 @@
 # Storage and Data
 
 Created: 2026-06-15
-Updated: 2026-08-05
+Updated: 2026-08-11
 
 ## Description
 
@@ -72,8 +72,12 @@ SQLite is single-writer, so the app minimizes and serializes writes:
 Everything Hosty should back up lives under `HOSTY_APP_DATA_DIR`:
 
 - `media-server.db` (plus `-wal` / `-shm`).
-- Metadata image cache (`images/`, see below).
 - Background job and pipeline state.
+
+Derived, rebuildable data — remux indexes and the metadata image cache (`images/`,
+see below) — lives under the Hosty cache directory instead
+([cache-storage](../cache-storage/feature.md)): persistent across restarts and
+updates, never backed up.
 
 (Torrent resume/fast-resume state is **not** here — it lives in the external
 `torrent-engine` app's own data directory and is backed up with that app.)
@@ -81,8 +85,8 @@ Everything Hosty should back up lives under `HOSTY_APP_DATA_DIR`:
 ### Image Cache
 
 Artwork is a provider URL until it is first requested; the Jellyfin image surface
-then downloads the binary and caches it under `images/`, keyed by what the file
-holds rather than by who points at it:
+then downloads the binary and caches it under `images/` in the cache directory,
+keyed by what the file holds rather than by who points at it:
 
 - Item artwork is stored as `{tag}{extension}`, where the tag is the provider's
   image hash. Two items sharing artwork therefore share one file.
@@ -129,8 +133,8 @@ If Hosty later adds an app-facing pre-backup lifecycle hook, the app can use it 
 checkpoint on demand; until then the app cannot assume one exists.
 
 The image cache is regenerable and self-bounding (the sweep above keeps it to what
-the library still references); if backup size matters it can be excluded from
-backup, but the default is to keep all app data in one backed-up directory.
+the library still references), so it lives in the Hosty cache directory and stays
+out of backups by construction ([cache-storage](../cache-storage/feature.md)).
 
 ## Catalog Roots
 

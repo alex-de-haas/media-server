@@ -9,8 +9,8 @@ public sealed record ImageCacheSweepReport(int FilesScanned, int FilesDeleted, l
 
 /// <summary>
 /// Reclaims artwork binaries the cache no longer has a use for. <see cref="JellyfinImageService"/> writes every
-/// image under <c>{AppDataDir}/images</c>, but no delete path erased them: library delete, catalog delete, remap
-/// and move-merge all drop the <see cref="ImageAsset"/> rows and leave the files behind, so the app data
+/// image under <c>{AppCacheDir}/images</c>, but no delete path erased them: library delete, catalog delete, remap
+/// and move-merge all drop the <see cref="ImageAsset"/> rows and leave the files behind, so the cache
 /// directory only ever grew.
 ///
 /// This runs as a periodic pass over the directory rather than inline in each of those paths, because:

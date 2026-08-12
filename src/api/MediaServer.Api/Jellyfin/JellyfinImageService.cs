@@ -8,8 +8,8 @@ public sealed record ImagePayload(byte[] Content, string ContentType, string Tag
 
 /// <summary>
 /// Serves item artwork for the Jellyfin surface. Images are provider URLs (e.g. TMDb); the first request
-/// fetches and caches the binary under the app data directory, subsequent requests serve the cached copy.
-/// The client addresses images by item id + image type, never by path.
+/// fetches and caches the binary under the Hosty cache directory, subsequent requests serve the cached
+/// copy. The client addresses images by item id + image type, never by path.
 /// </summary>
 public sealed class JellyfinImageService(
     MediaServerDbContext database,
@@ -21,8 +21,106 @@ public sealed class JellyfinImageService(
 {
     public const string HttpClientName = "jellyfin-images";
 
-    /// <summary>The cache directory holding every artwork binary, item and collection alike.</summary>
-    public static string CacheDirectory(HostyOptions hosty) => Path.Combine(hosty.AppDataDir, "images");
+    /// <summary>
+    /// The cache directory holding every artwork binary, item and collection alike. Artwork is derived,
+    /// re-downloadable data, so it lives under the Hosty cache directory — persistent but never backed
+    /// up — which resolves to the data directory under a Core predating the cache contract.
+    /// </summary>
+    public static string CacheDirectory(HostyOptions hosty) => Path.Combine(hosty.AppCacheDir, "images");
+
+    /// <summary>
+    /// One-time move of cached artwork from the pre-cache location (<c>{data}/images</c>) into
+    /// <see cref="CacheDirectory"/>, mirroring <see cref="Remux.RemuxIndexStore.MigrateFrom"/>:
+    /// idempotent, a file already present at the destination wins (the legacy copy is deleted), stray
+    /// <c>.tmp</c> leftovers from failed writes are garbage at either location and deleted rather than
+    /// moved, and the legacy directory is removed once empty. Unlike remux indexes, item artwork is also
+    /// pinned by <see cref="ImageAsset.LocalPath"/> — an absolute path into the legacy directory — so
+    /// those rows are repointed in the same pass; without that every migrated file would read as a cache
+    /// miss and be fetched again. A no-op when cache and data resolve to the same root (the old-Core
+    /// fallback), because the two paths are then the same directory.
+    /// </summary>
+    public static void MigrateCache(HostyOptions hosty, MediaServerDbContext database, ILogger logger)
+    {
+        var legacy = Path.Combine(hosty.AppDataDir, "images");
+        var current = CacheDirectory(hosty);
+        if (string.Equals(Path.GetFullPath(legacy), Path.GetFullPath(current), StringComparison.Ordinal)
+            || !Directory.Exists(legacy))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(current);
+        var moved = 0;
+        foreach (var source in Directory.EnumerateFiles(legacy))
+        {
+            try
+            {
+                if (source.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(source);
+                    continue;
+                }
+
+                var destination = Path.Combine(current, Path.GetFileName(source));
+                if (File.Exists(destination))
+                {
+                    File.Delete(source);
+                    continue;
+                }
+
+                // File.Move degrades to copy-and-delete when data and cache are separate docker binds,
+                // and a kill mid-copy would leave a truncated destination for the next start's
+                // destination-wins check to keep over the intact source. Staged through a sibling temp
+                // name (reclaimed by ImageCacheSweeper if orphaned), a file only ever appears at its
+                // final name via a same-volume rename.
+                var temporary = $"{destination}.{Guid.NewGuid():N}.tmp";
+                File.Move(source, temporary);
+                File.Move(temporary, destination, overwrite: true);
+                moved++;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Skip and carry on: whatever could not move stays in the legacy directory (which then
+                // survives below) and gets another chance on the next start.
+                logger.LogWarning(exception, "Could not migrate cached artwork {Path}", source);
+            }
+        }
+
+        // Rows are repointed before the legacy directory is removed, so a crash between the two leaves
+        // the directory for the next start to finish from — never rows aiming at a deleted location.
+        var prefix = legacy + Path.DirectorySeparatorChar;
+        var pinned = database.ImageAssets
+            .Where(image => image.LocalPath != null && image.LocalPath.StartsWith(prefix))
+            .ToList();
+        foreach (var image in pinned)
+        {
+            image.LocalPath = Path.Combine(current, Path.GetFileName(image.LocalPath!));
+        }
+
+        if (pinned.Count > 0)
+        {
+            database.SaveChanges();
+        }
+
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(legacy).Any())
+            {
+                Directory.Delete(legacy);
+            }
+        }
+        catch (IOException exception)
+        {
+            logger.LogDebug(exception, "Could not remove legacy image cache directory {Path}", legacy);
+        }
+
+        if (moved > 0 || pinned.Count > 0)
+        {
+            logger.LogInformation(
+                "Migrated {Count} cached artwork file(s) and repointed {Rows} database row(s) from {Legacy} to {Directory}",
+                moved, pinned.Count, legacy, current);
+        }
+    }
 
     private const string PrimarySlot = "primary";
     private const string BackdropSlot = "backdrop";
