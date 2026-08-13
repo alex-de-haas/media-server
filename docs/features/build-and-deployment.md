@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-06-15
-Updated: 2026-07-27
+Updated: 2026-08-13
 
 ## Description
 
@@ -104,6 +104,23 @@ Example image names:
 
 - `ghcr.io/<owner>/media-server-api:<sha>`
 - `ghcr.io/<owner>/media-server-web:<sha>`
+
+### Dependency updates
+
+Dependabot covers every ecosystem in the repository (`.github/dependabot.yml`):
+minor and patch bumps arrive grouped per ecosystem, majors individually. Hosty
+App SDK bumps form their own group and auto-merge once the required checks pass
+(`.github/workflows/dependabot-auto-merge.yml`).
+
+`Microsoft.OpenApi` is held on the 2.x line, and the bound applies to hand-written
+bumps as much as to Dependabot's. Upstream aligns its major versions with
+ASP.NET Core: 2.x is the line for AspNetCore OpenAPI 10 and is supported until
+November 2028, while 3.x lists no released AspNetCore OpenAPI as supported. Under
+3.x the API does not merely go untested — it does not compile: the
+`Microsoft.AspNetCore.OpenApi` 10 source generator emits an assignment to
+`IOpenApiMediaType.Example`, which 3.x made read-only, so the generated
+`OpenApiXmlCommentSupport.generated.cs` fails with `CS0200`. The bound lifts when
+a released `Microsoft.AspNetCore.OpenApi` adopts 3.x.
 
 ## Manifest Update Discipline
 
