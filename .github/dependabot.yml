@@ -63,8 +63,10 @@ updates:
       # 10 source generator emits an assignment to IOpenApiMediaType.Example, which 3.x
       # made read-only (CS0200 — see the failing build on PR #180). Raise this bound in
       # lockstep with the target framework once an AspNetCore OpenAPI release adopts 3.x.
+      # The bound is written as a NuGet range: Dependabot parses the ecosystem's own
+      # requirement syntax first, so `[3.0.0,)` needs no cross-syntax fallback.
       - dependency-name: "Microsoft.OpenApi"
-        versions: [">= 3"]
+        versions: ["[3.0.0,)"]
 
   - package-ecosystem: docker
     directories:
