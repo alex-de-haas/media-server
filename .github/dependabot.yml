@@ -54,6 +54,17 @@ updates:
         patterns: ["*"]
         exclude-patterns: ["HostySdk.*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # Cap Microsoft.OpenApi at the 2.x line: upstream aligns its major versions with
+      # ASP.NET Core (microsoft/OpenAPI.NET CONTRIBUTING.md, "Branches and support
+      # policy"), where 2.x is the line for AspNetCore OpenAPI 10 and 3.x is listed as
+      # "not available" for any released AspNetCore OpenAPI. The API is a net10.0 app, so
+      # 3.x is not merely untested here but uncompilable: the Microsoft.AspNetCore.OpenApi
+      # 10 source generator emits an assignment to IOpenApiMediaType.Example, which 3.x
+      # made read-only (CS0200 — see the failing build on PR #180). Raise this bound in
+      # lockstep with the target framework once an AspNetCore OpenAPI release adopts 3.x.
+      - dependency-name: "Microsoft.OpenApi"
+        versions: [">= 3"]
 
   - package-ecosystem: docker
     directories:
