@@ -1,6 +1,5 @@
 import Foundation
 import MediaServerAPI
-import Observation
 
 /// Asks the server how to play a title, and tells it how the watching went.
 ///

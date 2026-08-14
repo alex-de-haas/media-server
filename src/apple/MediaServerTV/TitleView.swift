@@ -88,15 +88,19 @@ struct TitleView: View {
 
             guard case .play(let stream) = answer else { return }
 
-            // The session opens before the player, so a viewer who stops after ten seconds still leaves
-            // a record of having started.
+            // Best effort, and deliberately so. Opening it first means a viewer who stops after ten
+            // seconds still leaves a record of having started — but a server that will not open one is
+            // no reason to refuse to play a film. When this fails there is simply no session, and
+            // nothing is reported.
             session = try? await playback.start(
                 itemId: title.id,
                 mediaSourceId: stream.mediaSourceId,
                 positionSeconds: detail.resumeSeconds)
             playing = stream
         } catch {
-            plan = .refused(.unknown(String(describing: error)), source: chosenVersion ?? "")
+            // Shown on a television, so the sentence Foundation writes rather than the type's whole
+            // description — a viewer can do nothing with a decoding path.
+            plan = .refused(.unknown(error.localizedDescription), source: chosenVersion ?? "")
         }
     }
 
