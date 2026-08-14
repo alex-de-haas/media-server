@@ -99,8 +99,9 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
       queryClient.setQueryData<VpnStatus>(["vpn"], data as VpnStatus);
       break;
     case "dhtStatusChanged":
-      // Same shape of deal for DHT health (payload mirrors DhtStatus).
-      queryClient.setQueryData<DhtStatus>(["dht"], data as DhtStatus);
+      // Same shape of deal for DHT health (payload mirrors DhtStatus). Typed nullable to match the
+      // fetcher, which returns null when no engine reports a status.
+      queryClient.setQueryData<DhtStatus | null>(["dht"], data as DhtStatus);
       break;
     case "jobStarted":
     case "jobProgress":

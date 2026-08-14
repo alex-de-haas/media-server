@@ -33,6 +33,13 @@ describe("dhtKind", () => {
   it("reports Ready as working", () => {
     expect(dhtKind(status())).toBe("ready");
   });
+
+  it("hides an unrecognised state instead of claiming DHT is healthy", () => {
+    // `state` comes from an independently-versioned engine, so a value this build does not know must not
+    // fall through to a green all-clear.
+    expect(dhtKind(status({ state: "Bootstrapping" }))).toBeNull();
+    expect(dhtKind(status({ state: null }))).toBeNull();
+  });
 });
 
 describe("dhtLabel", () => {
