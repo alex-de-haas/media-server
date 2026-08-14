@@ -149,6 +149,69 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
     }
 
     [Fact]
+    public async Task A_rating_applies_to_works_and_clears_back_to_unrated()
+    {
+        var rated = await _userData.SetRatingAsync(_userId, _movieId, 4, CancellationToken.None);
+        Assert.Equal(SetRatingStatus.Applied, rated.Status);
+        Assert.Equal(4, rated.Data!.UserRating);
+
+        // A series is rated as a work; the rating sits on its own row and is never rolled up from
+        // episodes, which would invent a number the viewer never gave.
+        var series = await _userData.SetRatingAsync(_userId, _seriesId, 5, CancellationToken.None);
+        Assert.Equal(5, series.Data!.UserRating);
+        Assert.Equal(5, (await DataForAsync(_seriesId)).UserRating);
+
+        // Clearing is its own statement, not a synonym for one star.
+        var cleared = await _userData.SetRatingAsync(_userId, _movieId, null, CancellationToken.None);
+        Assert.Equal(SetRatingStatus.Applied, cleared.Status);
+        Assert.Null(cleared.Data!.UserRating);
+    }
+
+    [Fact]
+    public async Task A_rating_never_touches_the_favorite_and_the_favorite_never_touches_it()
+    {
+        await _userData.SetFavoriteAsync(_userId, _movieId, favorite: true, CancellationToken.None);
+        var rated = await _userData.SetRatingAsync(_userId, _movieId, 2, CancellationToken.None);
+
+        // Two stars on a favorite is a contradiction the user is allowed to hold: one is curation, the
+        // other a judgement, and neither system writes the other's field.
+        Assert.True(rated.Data!.IsFavorite);
+        Assert.Equal(2, rated.Data.UserRating);
+
+        var unfavorited = await _userData.SetFavoriteAsync(_userId, _movieId, favorite: false, CancellationToken.None);
+        Assert.Equal(2, unfavorited!.UserRating);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(6)]
+    [InlineData(-1)]
+    public async Task A_rating_outside_the_scale_is_refused_rather_than_clamped(int stars)
+    {
+        // Clamping would store a number the viewer did not give.
+        var result = await _userData.SetRatingAsync(_userId, _movieId, stars, CancellationToken.None);
+
+        Assert.Equal(SetRatingStatus.OutOfRange, result.Status);
+        Assert.Null(await RatingOfAsync(_movieId));
+    }
+
+    [Fact]
+    public async Task Only_works_can_be_rated()
+    {
+        // "More like episode 4" is not a question anything downstream can ask, and a season is not a
+        // work either — so these are refused rather than stored as rows nothing reads.
+        Assert.Equal(
+            SetRatingStatus.NotRatable,
+            (await _userData.SetRatingAsync(_userId, _episodeIds[0], 5, CancellationToken.None)).Status);
+        Assert.Equal(
+            SetRatingStatus.NotRatable,
+            (await _userData.SetRatingAsync(_userId, _seasonId, 5, CancellationToken.None)).Status);
+        Assert.Equal(
+            SetRatingStatus.ItemNotFound,
+            (await _userData.SetRatingAsync(_userId, Guid.NewGuid(), 5, CancellationToken.None)).Status);
+    }
+
+    [Fact]
     public async Task Season_and_series_rollups_reflect_episode_watched_state()
     {
         await _userData.SetPlayedAsync(_userId, _episodePublicIds[0], played: true, playedAt: null, CancellationToken.None);
@@ -246,6 +309,15 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         Assert.Equal(_moviePublicId, data.Key);
         Assert.False(data.Played);
         Assert.Equal(0, data.PlaybackPositionTicks);
+    }
+
+    private async Task<int?> RatingOfAsync(Guid itemId)
+    {
+        using var context = _db.Create();
+        return await context.UserItemData
+            .Where(data => data.AppUserId == _userId && data.MediaItemId == itemId)
+            .Select(data => data.Rating)
+            .FirstOrDefaultAsync();
     }
 
     private async Task<UserItemDataDto> DataForAsync(Guid itemId)

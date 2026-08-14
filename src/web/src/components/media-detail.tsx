@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, AudioLines, CalendarPlus, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileOutput, FileQuestion, Film, FolderInput, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, AudioLines, CalendarPlus, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileOutput, FileQuestion, Film, FolderInput, Heart, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -25,6 +25,7 @@ import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/component
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
 import { RemapDialog } from "@/components/remap-dialog";
+import { StarRating } from "@/components/star-rating";
 import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { WatchTimeDialog } from "@/components/watch-time-dialog";
@@ -528,9 +529,17 @@ function Hero({ item }: { item: LibraryDetail }) {
   };
   const played = useMutation({ mutationFn: (value: boolean) => mediaServer.setPlayed(item.id, value), onSuccess: invalidate });
   const favorite = useMutation({ mutationFn: (value: boolean) => mediaServer.setFavorite(item.id, value), onSuccess: invalidate });
+  const rating = useMutation({
+    mutationFn: (value: number | null) => mediaServer.setRating(item.id, value),
+    onSuccess: invalidate,
+    onError: (error) => toast.error(errorMessage(error)),
+  });
 
   const isPlayed = item.userData?.played ?? false;
   const isFavorite = item.userData?.isFavorite ?? false;
+  // Only works are ratable: the engine collapses an episode into its series, so "more like episode 4"
+  // is not a question anything downstream can ask.
+  const isRatable = item.kind === "Movie" || item.kind === "Series";
   const resume = !isPlayed && item.userData?.playedPercentage ? Math.min(item.userData.playedPercentage, 100) : null;
   const runtime = formatRuntime(item.runtimeTicks);
   const seriesCounts =
@@ -625,8 +634,17 @@ function Hero({ item }: { item: LibraryDetail }) {
                 aria-label={isFavorite ? "Remove favorite" : "Add favorite"}
                 className={cn(isFavorite && "border-brand text-brand")}
               >
-                <Star className="size-4" aria-hidden /> Favorite
+                {/* A heart, not a star: the star row beside it is the rating, and two controls sharing
+                    one mark reads as two versions of the same gesture. */}
+                <Heart className={cn("size-4", isFavorite && "fill-brand")} aria-hidden /> Favorite
               </Button>
+              {isRatable && (
+                <StarRating
+                  value={item.userData?.userRating ?? null}
+                  pending={rating.isPending}
+                  onChange={(next) => rating.mutate(next)}
+                />
+              )}
               {item.tmdbId && (item.kind === "Movie" || item.kind === "Series") && (
                 <TrackTitleControl
                   tmdbId={item.tmdbId}

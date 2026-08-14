@@ -167,6 +167,180 @@ public sealed class RecommendationSeedSelectorTests : IDisposable
         Assert.Equal(RecommendationSeedSelector.MaxSeeds, (await Select()).Count);
     }
 
+    [Theory]
+    [InlineData(5, 6.5)]
+    [InlineData(4, 4.0)]
+    [InlineData(3, 1.7)]
+    public async Task EachStarIsWorthItsPlaceOnTheCurve(int stars, double expected)
+    {
+        // The scale is not linear on purpose: the break between "no regrets" (3) and "loved it" (4) is
+        // the large one, while 5 is a stricter grade of the same statement 4 makes.
+        var movie = AddMovie("Rated", tmdbId: "1");
+        AddPlay(movie.Id, "2026-07-24T20:00:00Z");
+        Rate(movie.Id, stars);
+
+        Assert.Equal(expected, Assert.Single(await Select()).Weight, precision: 6);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ALowRatedTitleNeverSeeds(int stars)
+    {
+        // Asking TMDb what is like a film the viewer would not repeat spends one of twenty requests
+        // fetching candidates the feed then has to push back down. It is still evidence — the taste
+        // profile reads its facets as negatives — but never a seed.
+        var disliked = AddMovie("Disliked", tmdbId: "1");
+        var ordinary = AddMovie("Ordinary", tmdbId: "2");
+        AddPlay(disliked.Id, "2026-07-24T20:00:00Z");
+        AddPlay(ordinary.Id, "2026-07-24T20:00:00Z");
+        Rate(disliked.Id, stars);
+
+        Assert.Equal("2", Assert.Single(await Select()).Identity.TmdbId);
+    }
+
+    [Fact]
+    public async Task ARatingDoesNotFadeWithTime()
+    {
+        // The whole point of the scale: a rating is a standing statement about taste, so a film loved
+        // two years ago still outweighs one watched yesterday and never thought about again. Under the
+        // 90-day half-life it would have decayed to 0.02 against that 1.0.
+        var loved = AddMovie("Loved long ago", tmdbId: "1");
+        var yesterday = AddMovie("Watched yesterday", tmdbId: "2");
+        AddPlay(loved.Id, "2024-07-24T20:00:00Z");
+        AddPlay(yesterday.Id, "2026-07-24T20:00:00Z");
+        Rate(loved.Id, 5);
+
+        var seeds = await Select();
+
+        Assert.Equal(["1", "2"], seeds.Select(seed => seed.Identity.TmdbId));
+        Assert.Equal(6.5, seeds[0].Weight, precision: 6);
+    }
+
+    [Fact]
+    public async Task RecencyStillOrdersTitlesInsideOneRatingBand()
+    {
+        // Rated weights are constants, so recency does its work in the tiebreak rather than as a
+        // multiplier: it chooses between titles the viewer values equally.
+        var older = AddMovie("Older five", tmdbId: "1");
+        var newer = AddMovie("Newer five", tmdbId: "2");
+        AddPlay(older.Id, "2026-01-24T20:00:00Z");
+        AddPlay(newer.Id, "2026-07-24T20:00:00Z");
+        Rate(older.Id, 5);
+        Rate(newer.Id, 5);
+
+        var seeds = await Select();
+
+        Assert.Equal(["2", "1"], seeds.Select(seed => seed.Identity.TmdbId));
+        Assert.Equal(seeds[0].Weight, seeds[1].Weight, precision: 6);
+    }
+
+    [Fact]
+    public async Task ARatingSupersedesTheFavoriteBoostRatherThanCompoundingWithIt()
+    {
+        // Both express the same feeling; multiplying them would price one row at nearly ten ordinary
+        // viewings. The rating is the more specific statement, so it wins outright.
+        var both = AddMovie("Favorited and rated", tmdbId: "1");
+        var rated = AddMovie("Rated only", tmdbId: "2");
+        AddPlay(both.Id, "2026-07-24T20:00:00Z");
+        AddPlay(rated.Id, "2026-07-24T20:00:00Z");
+        MarkFavorite(both.Id);
+        Rate(both.Id, 4);
+        Rate(rated.Id, 4);
+
+        var seeds = await Select();
+
+        Assert.Equal(seeds[0].Weight, seeds[1].Weight, precision: 6);
+    }
+
+    [Fact]
+    public async Task AFavoriteRatedTwoStarsStopsSeedingAltogether()
+    {
+        // The shelf placement is curation, the two stars are the judgement — and the judgement wins.
+        var favorite = AddMovie("Favorited but poor", tmdbId: "1");
+        AddPlay(favorite.Id, "2026-07-24T20:00:00Z");
+        MarkFavorite(favorite.Id);
+        Rate(favorite.Id, 2);
+
+        Assert.Empty(await Select());
+    }
+
+    [Fact]
+    public async Task AnUnratedWatchIsTheUnitEveryRatingIsPricedIn()
+    {
+        // With nobody rating anything the engine must rank exactly as it did before ratings existed,
+        // or this is a silent change for every existing user.
+        var movie = AddMovie("Today", tmdbId: "1");
+        AddPlay(movie.Id, "2026-07-25T12:00:00Z");
+
+        Assert.Equal(1.0, Assert.Single(await Select()).Weight, precision: 6);
+    }
+
+    [Fact]
+    public async Task UnratedWatchesRetireFromTheWeightedSlotsOnceEnoughRatingsExist()
+    {
+        // No decay on ratings means a three-star title outranks any unrated watch permanently, so the
+        // weighted slots fill with what the viewer actually graded.
+        for (var index = 0; index < RecommendationSeedSelector.WeightedSeeds + 4; index++)
+        {
+            var rated = AddMovie($"Rated {index}", tmdbId: $"r{index}");
+            AddPlay(rated.Id, "2025-01-20T20:00:00Z");
+            Rate(rated.Id, 3);
+        }
+
+        for (var index = 0; index < 6; index++)
+        {
+            var fresh = AddMovie($"Fresh {index}", tmdbId: $"u{index}");
+            AddPlay(fresh.Id, "2026-07-24T20:00:00Z");
+        }
+
+        var seeds = await Select();
+
+        Assert.Equal(RecommendationSeedSelector.MaxSeeds, seeds.Count);
+        Assert.All(
+            seeds.Take(RecommendationSeedSelector.WeightedSeeds),
+            seed => Assert.StartsWith("r", seed.Identity.TmdbId, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AFreshUnratedWatchStillReachesTheFeedThroughTheReservedSlots()
+    {
+        // Without the reserve the feed would stop noticing what the viewer watched this week the
+        // moment their ratings filled the budget — and a feed that has not moved in a month is dead.
+        for (var index = 0; index < RecommendationSeedSelector.MaxSeeds + 5; index++)
+        {
+            var rated = AddMovie($"Rated {index}", tmdbId: $"r{index}");
+            AddPlay(rated.Id, "2025-01-20T20:00:00Z");
+            Rate(rated.Id, 5);
+        }
+
+        var fresh = AddMovie("Watched last night", tmdbId: "u1");
+        AddPlay(fresh.Id, "2026-07-24T20:00:00Z");
+
+        var seeds = await Select();
+
+        Assert.Equal(RecommendationSeedSelector.MaxSeeds, seeds.Count);
+        Assert.Contains(seeds, seed => seed.Identity.TmdbId == "u1");
+    }
+
+    [Fact]
+    public async Task ADislikedTitleCannotEnterThroughTheReservedSlots()
+    {
+        // The reserve is for titles weight left behind, not for ones the viewer ruled out.
+        for (var index = 0; index < RecommendationSeedSelector.MaxSeeds + 5; index++)
+        {
+            var rated = AddMovie($"Rated {index}", tmdbId: $"r{index}");
+            AddPlay(rated.Id, "2025-01-20T20:00:00Z");
+            Rate(rated.Id, 5);
+        }
+
+        var disliked = AddMovie("Watched last night and hated", tmdbId: "u1");
+        AddPlay(disliked.Id, "2026-07-24T20:00:00Z");
+        Rate(disliked.Id, 1);
+
+        Assert.DoesNotContain(await Select(), seed => seed.Identity.TmdbId == "u1");
+    }
+
     [Fact]
     public async Task AnotherUsersHistoryNeverSeedsThisUsersFeed()
     {
@@ -224,12 +398,21 @@ public sealed class RecommendationSeedSelectorTests : IDisposable
         return item;
     }
 
-    private void MarkFavorite(Guid itemId)
+    private void MarkFavorite(Guid itemId) => UpdateUserData(itemId, row => row.IsFavorite = true);
+
+    private void Rate(Guid itemId, int stars) => UpdateUserData(itemId, row => row.Rating = stars);
+
+    private void UpdateUserData(Guid itemId, Action<UserItemData> apply)
     {
-        _database.UserItemData.Add(new UserItemData
+        var row = _database.UserItemData.FirstOrDefault(
+            data => data.AppUserId == _userId && data.MediaItemId == itemId);
+        if (row is null)
         {
-            Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = itemId, IsFavorite = true,
-        });
+            row = new UserItemData { Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = itemId };
+            _database.UserItemData.Add(row);
+        }
+
+        apply(row);
         _database.SaveChanges();
     }
 

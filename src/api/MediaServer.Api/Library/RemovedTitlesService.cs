@@ -13,7 +13,8 @@ public sealed record RemovedTitleDto(
     DateTimeOffset RemovedAt,
     bool IsFavorite,
     int PlayCount,
-    DateTimeOffset? LastWatchedAt);
+    DateTimeOffset? LastWatchedAt,
+    int? UserRating = null);
 
 /// <summary>
 /// The window onto ghosts: the watched calendar shows only plays, and a tombstone can carry none at
@@ -71,6 +72,13 @@ public sealed class RemovedTitlesService(MediaServerDbContext database)
             : [];
         var favoriteSet = favorites.Select(id => rootByItem[id]).ToHashSet();
 
+        // Ratings need no subtree walk: only works are ratable, so the row is the root's own.
+        var ratings = appUserId is { } ratingUserId
+            ? await database.UserItemData.AsNoTracking()
+                .Where(data => data.AppUserId == ratingUserId && data.Rating != null && rootIds.Contains(data.MediaItemId))
+                .ToDictionaryAsync(data => data.MediaItemId, data => data.Rating, cancellationToken)
+            : [];
+
         var posters = new Dictionary<Guid, string>();
         var posterRows = await database.ImageAssets.AsNoTracking()
             .Where(image => rootIds.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
@@ -95,7 +103,40 @@ public sealed class RemovedTitlesService(MediaServerDbContext database)
             root.RemovedAt!.Value,
             favoriteSet.Contains(root.Id),
             playsByRoot.TryGetValue(root.Id, out var summary) ? summary.Count : 0,
-            playsByRoot.TryGetValue(root.Id, out var last) ? last.Last : null)).ToList();
+            playsByRoot.TryGetValue(root.Id, out var last) ? last.Last : null,
+            ratings.GetValueOrDefault(root.Id))).ToList();
+    }
+
+    /// <summary>
+    /// Clears the user's rating on a tombstoned title. False when there was nothing to clear.
+    /// </summary>
+    /// <remarks>
+    /// Its own action rather than part of <see cref="ClearFavoriteAsync"/>, because the two are not the
+    /// same gesture: a deleted file does not retract a verdict on a film that was watched, so a rating
+    /// survives the removal and only goes when the user says so. Unlike a favorite it needs no subtree
+    /// walk — only works are ratable, and a work is the root row.
+    /// </remarks>
+    public async Task<bool> ClearRatingAsync(int appUserId, Guid mediaItemId, CancellationToken cancellationToken)
+    {
+        var isTombstone = await database.MediaItems.AsNoTracking()
+            .AnyAsync(item => item.Id == mediaItemId && item.RemovedAt != null, cancellationToken);
+        if (!isTombstone)
+        {
+            return false;
+        }
+
+        var row = await database.UserItemData.FirstOrDefaultAsync(
+            data => data.AppUserId == appUserId && data.MediaItemId == mediaItemId && data.Rating != null,
+            cancellationToken);
+        if (row is null)
+        {
+            return false;
+        }
+
+        // Tracked update on purpose: SaveChanges bumps StateRevision for the Jellyfin delta sync.
+        row.Rating = null;
+        await database.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     /// <summary>

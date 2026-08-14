@@ -274,6 +274,9 @@ export interface UserItemData {
   playedPercentage: number | null;
   lastPlayedDate: string | null;
   unplayedItemCount: number | null;
+  // The user's own 1-5 star verdict, or null when unrated. Named apart from the community rating on
+  // the item itself, and from Jellyfin's own 0-10 `Rating` on user data.
+  userRating: number | null;
 }
 
 export interface LibraryItem {
@@ -793,6 +796,7 @@ export interface RemovedTitle {
   isFavorite: boolean;
   playCount: number;
   lastWatchedAt: string | null;
+  userRating: number | null;
 }
 
 // Result of a per-catalog import scan: orphan media files under the root are ingested from identify.
@@ -1047,6 +1051,16 @@ export const mediaServer = {
     }),
   setFavorite: (id: string, favorite: boolean) =>
     apiJson<UserItemData>(`${BASE}/library/${id}/favorite`, { method: favorite ? "POST" : "DELETE" }),
+  // The 1-5 star verdict on a watched work — a separate system from the favorite above, which is
+  // curation. `null` clears it back to unrated, which is a different statement from one star.
+  setRating: (id: string, rating: number | null) =>
+    rating === null
+      ? apiJson<UserItemData>(`${BASE}/library/${id}/rating`, { method: "DELETE" })
+      : apiJson<UserItemData>(`${BASE}/library/${id}/rating`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ rating }),
+        }),
   // Without deleteUserData, an item someone favorited or watched survives as a hidden tombstone and a
   // re-download restores it with its history; deleteUserData forces the full purge.
   deleteLibraryItem: (id: string, deleteFiles: boolean, deleteUserData: boolean) =>
@@ -1060,6 +1074,9 @@ export const mediaServer = {
   // Removed titles: tombstoned movies/series that keep watch history and favorites after deletion.
   listRemovedTitles: () => apiJson<RemovedTitle[]>(`${BASE}/library/removed`),
   clearRemovedFavorite: (id: string) => send(`/library/removed/${id}/favorite`, "DELETE"),
+  // Separate from the favorite clear above: a deleted file does not retract a verdict on a film that
+  // was watched, so a rating survives the removal until the user drops it.
+  clearRemovedRating: (id: string) => send(`/library/removed/${id}/rating`, "DELETE"),
   // Permanently purges the tombstone and every trace of its history (admin).
   purgeRemovedTitle: (id: string) => send(`/library/removed/${id}`, "DELETE"),
   // Delete one sidecar — an external track file beside a library file (admin). Without deleteFile only the

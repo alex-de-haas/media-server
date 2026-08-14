@@ -10,7 +10,8 @@ const session = (role: "admin" | "user") => ({
   role,
 });
 
-function userData(overrides: Record<string, unknown> = {}) {
+/** Per-user state for one item, as the API projects it. Exported so a spec can seed a detail with it. */
+export function aUserData(overrides: Record<string, unknown> = {}) {
   return {
     key: "k",
     playbackPositionTicks: 0,
@@ -20,6 +21,7 @@ function userData(overrides: Record<string, unknown> = {}) {
     playedPercentage: null,
     lastPlayedDate: null,
     unplayedItemCount: null,
+    userRating: null,
     ...overrides,
   };
 }
@@ -115,15 +117,20 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/torrents") return route.fulfill({ json: mock.downloads ?? [] });
     if (path === "/ingest") return route.fulfill({ json: mock.ingest ?? [] });
     if (path === "/vpn") return route.fulfill({ json: mock.vpn ?? null });
-    if (path.endsWith("/played")) return route.fulfill({ json: userData({ played: method === "POST" }) });
+    if (path.endsWith("/played")) return route.fulfill({ json: aUserData({ played: method === "POST" }) });
     // A logged watch carries a body, unlike the played toggle: the instant is the whole point of it.
     const loggedWatchItemId =
       method === "POST" ? path.match(/^\/library\/([^/]+)\/watches$/)?.[1] : undefined;
     if (loggedWatchItemId) {
       mock.logWatch?.(loggedWatchItemId, (route.request().postDataJSON() as { watchedAt: string }).watchedAt);
-      return route.fulfill({ json: userData({ played: true, playCount: 1 }) });
+      return route.fulfill({ json: aUserData({ played: true, playCount: 1 }) });
     }
-    if (path.endsWith("/favorite")) return route.fulfill({ json: userData({ isFavorite: method === "POST" }) });
+    if (path.endsWith("/favorite")) return route.fulfill({ json: aUserData({ isFavorite: method === "POST" }) });
+    if (path.endsWith("/rating")) {
+      // PUT carries the stars; DELETE clears back to unrated, which is not the same as one star.
+      const rating = method === "PUT" ? (route.request().postDataJSON() as { rating: number }).rating : null;
+      return route.fulfill({ json: aUserData({ userRating: rating }) });
+    }
 
     if (path === "/watchlist/calendar") return route.fulfill({ json: mock.releaseCalendar ?? [] });
     if (path === "/watchlist") {

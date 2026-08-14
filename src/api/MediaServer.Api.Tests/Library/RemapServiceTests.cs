@@ -165,11 +165,12 @@ public sealed class RemapServiceTests : IDisposable
         var userId = await SeedUserAsync();
         _database.UserItemData.Add(new UserItemData
         {
-            Id = Guid.NewGuid(), AppUserId = userId, MediaItemId = wrong.Id, IsFavorite = true,
+            Id = Guid.NewGuid(), AppUserId = userId, MediaItemId = wrong.Id, IsFavorite = true, Rating = 5,
         });
         _database.UserItemData.Add(new UserItemData
         {
             Id = Guid.NewGuid(), AppUserId = userId, MediaItemId = existing.Id, Played = true, PlayCount = 1,
+            Rating = 3,
         });
         await _database.SaveChangesAsync();
 
@@ -186,6 +187,8 @@ public sealed class RemapServiceTests : IDisposable
         Assert.True(data.IsFavorite);
         Assert.True(data.Played);
         Assert.Equal(1, data.PlayCount);
+        // The higher rating survives — the numeric reading of the OR the booleans get.
+        Assert.Equal(5, data.Rating);
         Assert.False(await _database.MediaItems.AnyAsync(item => item.Id == wrong.Id));
     }
 

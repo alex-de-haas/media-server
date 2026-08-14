@@ -42,6 +42,23 @@ public sealed class UserItemData
 
     public bool IsFavorite { get; set; }
 
+    /// <summary>
+    /// The user's own verdict on a watched work, 1–5 stars, or null when they have not given one.
+    /// </summary>
+    /// <remarks>
+    /// Nullable rather than zero-defaulted because <em>unrated</em> and <em>one star</em> are opposite
+    /// statements, and the recommendation engine reads them in opposite directions: an unrated watch is
+    /// the neutral unit every other weight is priced in, while one star removes the title from the seed
+    /// set and pushes its facets into the negative profile. Clearing a rating is therefore its own
+    /// action, not a synonym for rating it badly.
+    /// <para>
+    /// Distinct from <see cref="IsFavorite"/> on purpose: a favorite is curation ("keep this where I
+    /// can find it") and travels to a connected provider, a rating is a judgement and stays local.
+    /// Neither writes the other.
+    /// </para>
+    /// </remarks>
+    public int? Rating { get; set; }
+
     /// <summary>Last time the item was started, progressed, or marked played; orders resume/next-up.</summary>
     public DateTimeOffset? LastPlayedDate { get; set; }
 

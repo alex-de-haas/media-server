@@ -388,6 +388,45 @@ public sealed class UserDataService(
         return await LoadOneAsync(appUserId, item, cancellationToken);
     }
 
+    /// <summary>
+    /// Sets the user's 1–5 star rating on a work, or clears it when <paramref name="rating"/> is null.
+    /// </summary>
+    /// <remarks>
+    /// Movies and series only. An episode rating has nowhere to go — the recommendation seed selector
+    /// collapses an episode play into its series, so "more like episode 4" is not a question anything
+    /// downstream can ask — and a season is not a work either. Rejecting those is the honest answer;
+    /// storing them would create rows nothing reads.
+    /// <para>
+    /// Unlike a favorite this stages nothing outbound: a rating is a local judgement, and no connected
+    /// provider is told about it.
+    /// </para>
+    /// </remarks>
+    public async Task<SetRatingResult> SetRatingAsync(
+        int appUserId, Guid mediaItemId, int? rating, CancellationToken cancellationToken)
+    {
+        if (rating is { } value && !UserRatingScale.IsValid(value))
+        {
+            return new SetRatingResult(SetRatingStatus.OutOfRange, null);
+        }
+
+        var item = await FindItemByIdAsync(mediaItemId, cancellationToken);
+        if (item is null)
+        {
+            return new SetRatingResult(SetRatingStatus.ItemNotFound, null);
+        }
+
+        if (item.Kind is not (MediaKind.Movie or MediaKind.Series))
+        {
+            return new SetRatingResult(SetRatingStatus.NotRatable, null);
+        }
+
+        var row = await GetOrCreateRowAsync(appUserId, item.Id, cancellationToken);
+        row.Rating = rating;
+
+        await database.SaveChangesAsync(cancellationToken);
+        return new SetRatingResult(SetRatingStatus.Applied, await LoadOneAsync(appUserId, item, cancellationToken));
+    }
+
     private async Task<UserItemDataDto> LoadOneAsync(int appUserId, MediaItem item, CancellationToken cancellationToken)
     {
         var data = await LoadAsync(appUserId, [item], cancellationToken);
@@ -701,7 +740,8 @@ public sealed class UserDataService(
             IsFavorite: row.IsFavorite,
             Played: row.Played,
             PlayedPercentage: percentage,
-            LastPlayedDate: row.LastPlayedDate);
+            LastPlayedDate: row.LastPlayedDate,
+            UserRating: row.Rating);
     }
 
     private static UserItemDataDto FolderDto(
@@ -721,6 +761,9 @@ public sealed class UserDataService(
         return new UserItemDataDto(
             Key: folder.PublicId ?? folder.Id.ToString("N"),
             IsFavorite: own?.IsFavorite ?? false,
+            // A series' rating is its own row's, never rolled up from episodes: a show is rated as a
+            // work, and averaging episode rows would invent a number the viewer never gave.
+            UserRating: own?.Rating,
             Played: total > 0 && unplayed == 0,
             PlayedPercentage: total > 0 ? 100d * playedCount / total : null,
             LastPlayedDate: lastPlayed,
