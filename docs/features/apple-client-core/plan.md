@@ -145,9 +145,9 @@ the pairing screen again if the access token itself has gone.
 
 ### Phase 4 — playback
 
-- [ ] **`POST /native/v1/playback/resolve`** with the real profile from
+- [x] **`POST /native/v1/playback/resolve`** with the real profile from
       `MediaKit.CapabilityProfile`, narrowed by the viewer's `PlaybackPreferences`.
-- [ ] **`AVPlayerViewController`, not a custom player.** Recorded as a Phase 0
+- [x] **`AVPlayerViewController`, not a custom player.** Recorded as a Phase 0
       deliverable of the epic and still the right answer: the transport bar, the
       skip gestures and the Siri remote's whole vocabulary are free and cannot be
       reimplemented to the same standard.
@@ -158,13 +158,13 @@ the pairing screen again if the access token itself has gone.
       second request and no re-buffer. Each track states its language, so the menu reads
       as English and Russian rather than six lines of "Undetermined". The client-side
       picker this deliverable described is not needed and is not being built.
-- [ ] **Every refusal reason shown as itself.** The server answers
+- [x] **Every refusal reason shown as itself.** The server answers
       `packaging_pending`, `packaging_unsupported_audio`,
       `packaging_unsupported_video`, `unsupported_dynamic_range` and the rest
       precisely so a client need not say "cannot play this". `packaging_pending`
       is the interesting one: it means *not yet*, the walk is coming, and retrying
       later works — so it is a state with a retry, not an error.
-- [ ] **Sessions**: start, progress, stop, feeding the watch history the web client
+- [x] **Sessions**: start, progress, stop, feeding the watch history the web client
       already shows.
 - [ ] **Dolby Vision confirmed on hardware.** The simulator reports no
       HDR-eligible output and never will, so this is checked on the Apple TV 4K —

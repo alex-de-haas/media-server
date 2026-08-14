@@ -282,6 +282,35 @@ reference every generator reads — the wire is unchanged, only its description 
 `scripts/generate-apple-client.sh` fails on any remaining "skipping" so the next one cannot
 pass unnoticed.
 
+## Playback
+
+The server decides, and it decides **per copy**: `resolve` answers with a verdict for every
+media source a title has, because a 4K copy this device cannot open can sit beside a 1080p
+one it can, and one verdict would hide the copy that works. The client takes the first that
+plays.
+
+Presentation is `AVPlayerViewController` and not a player of our own — the transport bar,
+the skip gestures, the track picker and the Siri remote's whole vocabulary come free. Since
+the container carries every describable track, that picker is a real one: switching a dub
+costs nothing and needs no second request.
+
+Progress is reported every ten seconds, which is often enough that a resume lands where the
+viewer left and rare enough that a two-hour film is a few hundred requests. A session opens
+*before* the player, so someone who stops after ten seconds still leaves a record of having
+started, and a failure to report never interrupts what is being watched.
+
+**Every refusal is shown as itself.** The server answers with a machine-readable reason
+precisely so a client need not say "cannot play this", and a reason this build has never
+heard of is carried through rather than flattened — an older client meeting a newer server
+must not turn a specific answer into a shrug. `packaging_pending` is not a refusal at all:
+it means the walk has not reached this file, which on a spinning disk is minutes, so it is a
+state with a retry.
+
+Two things are refused on the client's side rather than passed on. A decision to play that
+carries no URL is a server contradicting itself, and handing it to AVFoundation would fail
+where the reason is lost. And HLS, which the server deliberately has not built — meeting it
+means meeting a server newer than this build.
+
 ## Building
 
 ```bash

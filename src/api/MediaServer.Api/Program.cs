@@ -74,9 +74,10 @@ builder.Services.AddOpenApi(NativeSurface.OpenApiDocumentName, options =>
 {
     options.ShouldInclude = description =>
         description.RelativePath?.StartsWith("native/v1", StringComparison.OrdinalIgnoreCase) == true;
-    // A nullable reference is described as a union with `null`, which swift-openapi-generator skips
-    // entirely rather than failing on — taking the property with it. See the transformer.
-    options.AddDocumentTransformer<NullableRefSchemaTransformer>();
+    // ASP.NET writes two shapes no code generator can read: a nullable reference as a union with
+    // `null`, and an enum with no type at all. Both are silently lost rather than failed on. See the
+    // transformer.
+    options.AddDocumentTransformer<SchemaCompatibilityTransformer>();
 });
 builder.Services.AddScoped<NativeMediaResolver>();
 builder.Services.AddScoped<NativePlaybackResolver>();
