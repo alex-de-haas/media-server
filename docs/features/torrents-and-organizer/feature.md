@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-07-27
+Updated: 2026-08-14
 
 ## Description
 
@@ -92,6 +92,37 @@ encryption, port mapping) and the VPN tunnel + killswitch live in the `torrent-e
 app and are configured there. This also sidesteps the docker bridge-NAT throughput
 collapse that plagued the old in-process engine, by tunnelling all peer connections
 through a single VPN flow. See [Torrent engine app](../../ideas/torrent-engine-app.md).
+
+### Engine health indicators
+
+Two engine-wide signals are surfaced in the Activity header, next to each other,
+because both are shared by every download rather than being per-torrent. Each is
+seeded from a `GET` on mount and then kept live by an SSE event; each is `null` when
+no engine reports it, and the UI hides the indicator entirely in that case.
+
+| Signal | Seed | Event | Null when |
+| --- | --- | --- | --- |
+| VPN tunnel | `GET /api/vpn` | `vpnStatusChanged` | downloading is disabled (`DisabledTorrentEngine`) |
+| DHT health | `GET /api/dht` | `dhtStatusChanged` | downloading is disabled, or the engine predates `torrent-engine` 0.7.0 and has no `/dht` |
+
+`DhtStatus` is `{ enabled, running, state, nodeCount }`. It exists to separate three
+situations that otherwise look identical from the outside:
+
+- **off** — `enabled: false`. Deliberate configuration, shown muted.
+- **idle** — `enabled` but not `running`. The engine is recycled while nothing is
+  downloading, so DHT is simply not up. The badge is hidden: "idle" only repeats what
+  an empty activity list already says.
+- **enabled but not working** — `running` with `state: "NotReady"`. DHT is on but
+  never found a peer, so magnet links without trackers quietly fail to resolve. This
+  is the signal the indicator exists for, shown as a warning.
+
+`state` is MonoTorrent's own value, and `Initialising` is a **healthy** start-up — the
+failure case is `NotReady` specifically. Deriving it as `state != "Ready"` would flag
+every bootstrap as broken.
+
+`RemoteTorrentEngine` does not fan out every DHT update: `nodeCount` churns as the
+routing table grows, so it is only reported when it crosses into or out of empty (an
+empty table while running being exactly what a broken DHT looks like).
 
 ## Pipeline
 
@@ -308,6 +339,8 @@ POST   /api/torrents/{id}/resume
 POST   /api/torrents/{id}/stop-seeding   # advances a parked, seeding ingest into identify
 DELETE /api/torrents/{id}
 GET    /api/torrents
+GET    /api/vpn                    # engine-wide VPN tunnel status (null when downloading is disabled)
+GET    /api/dht                    # engine-wide DHT health (null when unavailable)
 POST   /api/catalogs/{id}/scan     # import orphan media files under the catalog root
 ```
 
@@ -319,6 +352,11 @@ updates for all active torrents and ingests. Live progress, speed, ratio, and ET
 are streamed from the engine's in-memory state and are **not persisted**; only
 state transitions are written to the database (see
 [Storage and data](../storage-and-data/feature.md)).
+
+Alongside the per-torrent frames it carries the two engine-wide health events,
+`vpnStatusChanged` and `dhtStatusChanged` (see
+[Engine health indicators](#engine-health-indicators)). Neither is persisted — both
+are live indicators only.
 
 ## Testing Expectations
 
@@ -341,6 +379,10 @@ Backend tests should use xUnit. Required coverage:
 - Library removal with/without `deleteFiles` (file deleted vs left for re-scan),
   including single-episode and whole-season removal and the container pruning that
   follows.
+- DHT status fan-out: the first status is reported, `nodeCount` churn alone is not,
+  crossing into or out of an empty routing table is, and a state transition
+  (`Initialising` vs `NotReady`, the difference between "starting" and "broken") is.
+- `dhtStatusChanged` publishes camelCase JSON carrying MonoTorrent's own state value.
 - Free-space pre-check refuses oversized `.torrent` downloads and notifies for
   magnets.
 - Progress/speed/ratio are not persisted; only state transitions are written.

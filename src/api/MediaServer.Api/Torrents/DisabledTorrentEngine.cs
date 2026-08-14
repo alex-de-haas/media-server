@@ -21,6 +21,7 @@ public sealed class DisabledTorrentEngine : ITorrentEngine
     public event EventHandler<string>? DownloadCompleted;
     public event EventHandler<string>? DownloadErrored;
     public event EventHandler<VpnStatus>? VpnStatusChanged;
+    public event EventHandler<DhtStatus>? DhtStatusChanged;
 #pragma warning restore CS0067
 
     // Pure, offline parse — yields the info hash/size without needing the engine.
@@ -46,4 +47,6 @@ public sealed class DisabledTorrentEngine : ITorrentEngine
     public IReadOnlyList<TorrentFileInfo> GetFiles(string infoHash) => [];
 
     public VpnStatus? GetVpnStatus() => null;
+
+    public DhtStatus? GetDhtStatus() => null;
 }

@@ -4,9 +4,10 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type Catalog, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
+import { mediaServer, type Catalog, type DhtStatus, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatBytes, formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { transferredBytes } from "@/lib/downloads";
+import { dhtKind, dhtLabel, dhtTooltip } from "@/lib/dht";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
@@ -81,6 +82,7 @@ export function ActivitySection() {
   const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 20000 });
   // Engine-wide VPN tunnel status (null when downloading is in-process). Pushed over SSE; slow interval is a fallback.
   const vpn = useQuery({ queryKey: ["vpn"], queryFn: mediaServer.getVpnStatus, refetchInterval: 30000 });
+  const dht = useQuery({ queryKey: ["dht"], queryFn: mediaServer.getDhtStatus, refetchInterval: 30000 });
   // In-flight cross-catalog moves. Seeded here, then kept live by RealtimeBridge over SSE (progress per byte).
   // Only admins can move (and read the admin-only active list), so don't fire the request for other roles.
   const moves = useQuery({
@@ -202,6 +204,7 @@ export function ActivitySection() {
           <div className="flex flex-wrap items-center justify-end gap-2">
             <ThroughputBadge downloads={downloads.data ?? []} vpnDown={vpnDown} />
             <VpnBadge status={vpn.data ?? null} />
+            <DhtBadge status={dht.data ?? null} />
             <AddTorrentDialog />
           </div>
         </CardAction>
@@ -357,6 +360,46 @@ function vpnTooltip(status: VpnStatus): string {
     status.tunnelAddress ? `tunnel ${status.tunnelAddress}` : null,
   ].filter(Boolean);
   return parts.length > 0 ? `Traffic egresses through the VPN — ${parts.join(", ")}.` : "VPN tunnel is up.";
+}
+
+// Engine-wide DHT indicator, next to the VPN one and for the same reason: peer discovery is shared by
+// every download. What each state means — and when the badge hides itself — lives in `@/lib/dht`.
+function DhtBadge({ status }: { status: DhtStatus | null }) {
+  const kind = dhtKind(status);
+  if (!status || !kind) return null;
+
+  const tooltip = dhtTooltip(status, kind);
+  const warn = kind === "broken" || kind === "starting";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            aria-label={tooltip}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              kind === "ready" && "border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
+              warn && "border-amber-500/30 text-amber-600 dark:text-amber-500",
+              kind === "off" && "border-border text-muted-foreground",
+            )}
+          >
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                kind === "ready" && "bg-emerald-500",
+                warn && "bg-amber-500",
+                kind === "off" && "bg-muted-foreground",
+              )}
+            />
+            {dhtLabel(status, kind)}
+          </span>
+        }
+      />
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 // The Download step maps to a torrent; reflect its live transfer/pause state on that step so the stepper

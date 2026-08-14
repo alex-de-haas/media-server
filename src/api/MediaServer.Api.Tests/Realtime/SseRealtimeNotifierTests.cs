@@ -43,6 +43,26 @@ public sealed class SseRealtimeNotifierTests
     }
 
     [Fact]
+    public async Task Publishes_dht_status_with_camelCase_json()
+    {
+        var notifier = new SseRealtimeNotifier();
+        using var subscription = notifier.Subscribe();
+
+        await notifier.DhtStatusChangedAsync(new DhtStatusChanged(
+            Enabled: true, Running: true, State: "NotReady", NodeCount: 0));
+
+        var message = await ReadAsync(subscription);
+        Assert.Equal(RealtimeEvents.DhtStatusChanged, message.Event);
+
+        using var json = JsonDocument.Parse(message.Data);
+        Assert.True(json.RootElement.GetProperty("enabled").GetBoolean()); // camelCase keys
+        Assert.True(json.RootElement.GetProperty("running").GetBoolean());
+        // The state must survive as MonoTorrent's own value: the UI tells "starting" from "broken" by it.
+        Assert.Equal("NotReady", json.RootElement.GetProperty("state").GetString());
+        Assert.Equal(0, json.RootElement.GetProperty("nodeCount").GetInt32());
+    }
+
+    [Fact]
     public async Task Fans_out_to_every_subscriber()
     {
         var notifier = new SseRealtimeNotifier();

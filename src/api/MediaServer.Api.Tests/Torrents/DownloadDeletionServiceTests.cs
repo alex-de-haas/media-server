@@ -121,8 +121,11 @@ public sealed class DownloadDeletionServiceTests : IDisposable
         public event EventHandler<string>? DownloadCompleted { add { } remove { } }
         public event EventHandler<string>? DownloadErrored { add { } remove { } }
         public event EventHandler<VpnStatus>? VpnStatusChanged { add { } remove { } }
+        public event EventHandler<DhtStatus>? DhtStatusChanged { add { } remove { } }
 
         public VpnStatus? GetVpnStatus() => null;
+
+        public DhtStatus? GetDhtStatus() => null;
 
         public Task RemoveAsync(string infoHash, bool deleteFiles, CancellationToken cancellationToken)
         {

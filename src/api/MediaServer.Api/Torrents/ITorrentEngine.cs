@@ -53,6 +53,18 @@ public sealed record VpnStatus(
     string? ExitCountry,
     DateTimeOffset CheckedAt);
 
+/// <summary>Health of the engine's BitTorrent DHT (engine-wide, not per-torrent), mirroring the engine's
+/// <c>DhtStatus</c>. Its purpose is telling three look-alike situations apart: DHT switched off, DHT idle
+/// because the engine is recycled while nothing is downloading, and DHT enabled but failing to come up —
+/// the last being a real degradation that is otherwise completely silent.</summary>
+/// <param name="Enabled">The engine's DHT setting.</param>
+/// <param name="Running">Enabled <i>and</i> an engine is actually running it.</param>
+/// <param name="State"><c>NotReady</c> / <c>Initialising</c> / <c>Ready</c> while running, else <c>null</c>.
+/// <c>Initialising</c> is a healthy start-up, so failure is <c>NotReady</c> specifically — never
+/// <c>State != "Ready"</c>, which would flag every bootstrap as broken.</param>
+/// <param name="NodeCount">Routing-table size; <c>0</c> when not running.</param>
+public sealed record DhtStatus(bool Enabled, bool Running, string? State, int NodeCount);
+
 /// <summary>
 /// Abstraction over the torrent engine. The download surface is the external <c>torrent-engine</c> app
 /// (<see cref="RemoteTorrentEngine"/>); <see cref="DisabledTorrentEngine"/> stands in when none is
@@ -85,11 +97,18 @@ public interface ITorrentEngine
     /// <summary>Current VPN tunnel status, or <c>null</c> when no engine reports one (e.g. downloading disabled).</summary>
     VpnStatus? GetVpnStatus();
 
+    /// <summary>Current DHT health, or <c>null</c> when no engine reports one — downloading disabled, or a
+    /// <c>torrent-engine</c> older than 0.7.0, which has no <c>/dht</c> endpoint to read.</summary>
+    DhtStatus? GetDhtStatus();
+
     /// <summary>Raised when a magnet's file list becomes available after metadata download.</summary>
     event EventHandler<string>? MetadataReceived;
 
     /// <summary>Raised when the VPN tunnel status changes. Only the remote engine raises it.</summary>
     event EventHandler<VpnStatus>? VpnStatusChanged;
+
+    /// <summary>Raised when DHT health changes. Only the remote engine raises it.</summary>
+    event EventHandler<DhtStatus>? DhtStatusChanged;
 
     /// <summary>Raised when a torrent finishes downloading (transition to a complete/seeding state).</summary>
     event EventHandler<string>? DownloadCompleted;

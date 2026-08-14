@@ -28,6 +28,7 @@ public sealed class TorrentCoordinator(
         engine.DownloadCompleted += OnDownloadCompleted;
         engine.DownloadErrored += OnDownloadErrored;
         engine.VpnStatusChanged += OnVpnStatusChanged;
+        engine.DhtStatusChanged += OnDhtStatusChanged;
 
         await ResumeDownloadsAsync(stoppingToken);
 
@@ -49,6 +50,7 @@ public sealed class TorrentCoordinator(
             engine.DownloadCompleted -= OnDownloadCompleted;
             engine.DownloadErrored -= OnDownloadErrored;
             engine.VpnStatusChanged -= OnVpnStatusChanged;
+            engine.DhtStatusChanged -= OnDhtStatusChanged;
         }
     }
 
@@ -173,6 +175,11 @@ public sealed class TorrentCoordinator(
     private void OnVpnStatusChanged(object? sender, VpnStatus status) =>
         RunSafely(() => notifier.VpnStatusChangedAsync(new VpnStatusChanged(
             status.Connected, status.TunnelInterface, status.TunnelAddress, status.ExitIp, status.ExitCountry, status.CheckedAt)));
+
+    // DHT health is engine-wide too, and equally not persisted — it is a live indicator only.
+    private void OnDhtStatusChanged(object? sender, DhtStatus status) =>
+        RunSafely(() => notifier.DhtStatusChangedAsync(new DhtStatusChanged(
+            status.Enabled, status.Running, status.State, status.NodeCount)));
 
     private async Task HandleMetadataAsync(string infoHash)
     {

@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { openEventStream } from "@/lib/sse";
-import type { CatalogRefreshJob, Download, LibraryMoveJob, VpnStatus } from "@/lib/media-server";
+import type { CatalogRefreshJob, DhtStatus, Download, LibraryMoveJob, VpnStatus } from "@/lib/media-server";
 
 // The same-origin BFF route that proxies to the internal `api` SSE endpoint (`/api/events`).
 const STREAM_PATH = "/api/proxy/api/events";
@@ -72,7 +72,7 @@ function useRealtime() {
       // On (re)connect, reconcile anything missed while disconnected.
       onStatus: (connected) => {
         if (connected) {
-          invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"], ["catalog-refresh-jobs"], ["library-move-jobs"]);
+          invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"], ["dht"], ["catalog-refresh-jobs"], ["library-move-jobs"]);
         }
       },
     });
@@ -97,6 +97,11 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
     case "vpnStatusChanged":
       // Engine-wide status — patch the cache directly (the event payload mirrors VpnStatus).
       queryClient.setQueryData<VpnStatus>(["vpn"], data as VpnStatus);
+      break;
+    case "dhtStatusChanged":
+      // Same shape of deal for DHT health (payload mirrors DhtStatus). Typed nullable to match the
+      // fetcher, which returns null when no engine reports a status.
+      queryClient.setQueryData<DhtStatus | null>(["dht"], data as DhtStatus);
       break;
     case "jobStarted":
     case "jobProgress":

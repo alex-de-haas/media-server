@@ -31,6 +31,10 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     // Latest VPN tunnel status: seeded from GET /vpn on connect, kept live by the `vpn` SSE event.
     private volatile VpnStatus? _vpn;
 
+    // Latest DHT health, seeded and kept live the same way from /dht and the `dht` event. Stays null
+    // against a torrent-engine older than 0.7.0, which has neither — the UI then hides the indicator.
+    private volatile DhtStatus? _dht;
+
     private CancellationTokenSource? _cts;
     private Task? _streamLoop;
 
@@ -45,6 +49,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     public event EventHandler<string>? DownloadCompleted;
     public event EventHandler<string>? DownloadErrored;
     public event EventHandler<VpnStatus>? VpnStatusChanged;
+    public event EventHandler<DhtStatus>? DhtStatusChanged;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -65,6 +70,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         }
 
         await SeedVpnAsync(cancellationToken);
+        await SeedDhtAsync(cancellationToken);
 
         _cts = new CancellationTokenSource();
         _streamLoop = Task.Run(() => ConsumeEventsAsync(_cts.Token));
@@ -178,6 +184,8 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
 
     public VpnStatus? GetVpnStatus() => _vpn;
 
+    public DhtStatus? GetDhtStatus() => _dht;
+
     private async Task PostAsync(string path, CancellationToken cancellationToken)
     {
         using var cts = ControlCts(cancellationToken);
@@ -242,9 +250,10 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
                 using var response = await _http.GetAsync("/events", HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 response.EnsureSuccessStatusCode();
 
-                // The stream doesn't replay the last `vpn` event to a fresh subscriber, so re-seed it on
-                // every (re)connect to recover the current tunnel status after a drop.
+                // The stream doesn't replay the last `vpn`/`dht` event to a fresh subscriber, so re-seed
+                // both on every (re)connect to recover the current status after a drop.
                 await SeedVpnAsync(cancellationToken);
+                await SeedDhtAsync(cancellationToken);
 
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 using var reader = new StreamReader(stream);
@@ -318,6 +327,16 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
             return;
         }
 
+        if (evt.Type == "dht")
+        {
+            if (evt.Dht is not null)
+            {
+                ApplyDht(evt.Dht);
+            }
+
+            return;
+        }
+
         if (string.IsNullOrEmpty(evt.InfoHash))
         {
             return;
@@ -382,6 +401,45 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         }
     }
 
+    private async Task SeedDhtAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cts = ControlCts(cancellationToken);
+            var status = await _http.GetFromJsonAsync<DhtStatus>("/dht", Json, cts.Token);
+            if (status is not null)
+            {
+                ApplyDht(status);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // Expected against an engine older than 0.7.0: no /dht route, so the status stays null and the
+            // UI hides the indicator rather than reporting a DHT problem that is really a version gap.
+            _logger.LogDebug(exception, "Could not read DHT status from {Url}.", _settings.TorrentEngineUrl);
+        }
+    }
+
+    private void ApplyDht(DhtStatus status)
+    {
+        var previous = _dht;
+        _dht = status;
+        if (IsReportableDhtChange(previous, status))
+        {
+            DhtStatusChanged?.Invoke(this, status);
+        }
+    }
+
+    /// <summary>Whether a DHT status differs from the previous one in a way worth pushing to the UI.
+    /// <c>NodeCount</c> churns as the routing table grows, so it counts only when it crosses into or out of
+    /// empty — an empty table while running is exactly what "enabled but not working" looks like.</summary>
+    internal static bool IsReportableDhtChange(DhtStatus? previous, DhtStatus current) =>
+        previous is null
+        || previous.Enabled != current.Enabled
+        || previous.Running != current.Running
+        || previous.State != current.State
+        || (previous.NodeCount == 0) != (current.NodeCount == 0);
+
     private void ApplyVpn(VpnStatus status)
     {
         var previous = _vpn;
@@ -410,5 +468,6 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
 
     private sealed record EngineError(string? Error);
 
-    private sealed record RemoteEvent(string Type, string InfoHash, TorrentSnapshot? Snapshot, VpnStatus? Vpn);
+    private sealed record RemoteEvent(
+        string Type, string InfoHash, TorrentSnapshot? Snapshot, VpnStatus? Vpn, DhtStatus? Dht);
 }
