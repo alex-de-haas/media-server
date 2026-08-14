@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-10
-Updated: 2026-08-11
+Updated: 2026-08-14
 
 > Phase 2 of the [Apple client](../apple-client/plan.md) epic, and the first
 > release worth using. Every server half it needs is built and verified:
@@ -112,7 +112,7 @@ the pairing screen again if the access token itself has gone.
 
 ### Phase 3 — browsing
 
-- [ ] **Refresh on a refusal, not only on a clock.** Found while verifying against
+- [x] **Refresh on a refusal, not only on a clock.** Found while verifying against
       production on 2026-08-14: the exchange returns an `expiresAt` thirty days out,
       which is the grant's *absolute* cap — but the grant also lapses after seven days
       idle, and nothing in the token says so. A television left alone for a week
@@ -120,13 +120,28 @@ the pairing screen again if the access token itself has gone.
       report it paired. The first authenticated request is what discovers it, so a `401`
       has to trigger the silent re-mint that `restore()` already knows how to do.
       Untestable before there is an authenticated request to make, which is this phase.
-- [ ] **The library**, in the shape tvOS expects: a focus-driven grid, artwork from
-      the signed image URLs, and the title's own editions rather than one row per
-      file.
-- [ ] **A title**, with its versions, its audio and subtitle tracks including the
-      sidecar ones, and what the server says it can do with each.
-- [ ] **Resume and watched**, read from the mirror so the grid does not wait on the
-      network to show a progress bar.
+- [x] **The library**, in the shape tvOS expects: two tabs — Movies and Series —
+      over a focus-driven poster grid, catalogs deliberately mixed because whether a
+      film sits on the SSD or the spinning disk is an operator's concern. `catalogId`
+      travels on every title, so a filter lays over this later without touching how any
+      of it loads.
+
+      Two things had to be settled first. There is **no route that lists a library** —
+      `items/{id}` fetches one and everything else goes through `sync` — so browsing
+      drains that feed into memory. Nothing is persisted, which is the deliberate half
+      of the deferred mirror: the schema, the cursor kept between launches, the reset
+      and the tombstones are all still unbuilt. And artwork is fetched from **this
+      instance**, not from the provider's CDN that `posterUrl` names, for the reasons
+      `NativeImageEndpoints` gives — a client on the same network keeps working with no
+      internet, and browsing stops being visible to TMDb. That route is
+      bearer-authenticated, so `AsyncImage` cannot be used and there is a loader of our
+      own.
+- [x] **A title**, with its versions ordered so the default leads, its audio and
+      subtitle tracks, and a mark against the ones that live beside the file rather than
+      inside it. Fetched when the screen opens rather than carried by the feed: versions
+      and tracks for every title would be most of a database sent to browse a grid.
+- [x] **Resume and watched**, on the poster itself — a bar for a title in progress and
+      a tick for a finished one, because a bar at 100 % reads as "nearly done".
 
 ### Phase 4 — playback
 

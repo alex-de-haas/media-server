@@ -71,8 +71,13 @@ builder.Services.AddScoped<NativeSyncService>();
 // document, so it is what keeps client and server from drifting; the internal /api surface stays out
 // of it deliberately, since it is a BFF contract and not a published one.
 builder.Services.AddOpenApi(NativeSurface.OpenApiDocumentName, options =>
+{
     options.ShouldInclude = description =>
-        description.RelativePath?.StartsWith("native/v1", StringComparison.OrdinalIgnoreCase) == true);
+        description.RelativePath?.StartsWith("native/v1", StringComparison.OrdinalIgnoreCase) == true;
+    // A nullable reference is described as a union with `null`, which swift-openapi-generator skips
+    // entirely rather than failing on — taking the property with it. See the transformer.
+    options.AddDocumentTransformer<NullableRefSchemaTransformer>();
+});
 builder.Services.AddScoped<NativeMediaResolver>();
 builder.Services.AddScoped<NativePlaybackResolver>();
 builder.Services.AddScoped<NativePreferenceService>();

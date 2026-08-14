@@ -1012,7 +1012,6 @@
           "logoUrl",
           "libraryPath",
           "contentPath",
-          "userData",
           "defaultSourceId",
           "mediaSources",
           "seasons",
@@ -1180,14 +1179,7 @@
             ]
           },
           "userData": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/UserItemDataDto"
-              }
-            ]
+            "$ref": "#/components/schemas/UserItemDataDto"
           },
           "defaultSourceId": {
             "type": [
@@ -1351,8 +1343,7 @@
           "kind",
           "title",
           "year",
-          "posterUrl",
-          "userData"
+          "posterUrl"
         ],
         "type": "object",
         "properties": {
@@ -1392,14 +1383,7 @@
             ]
           },
           "userData": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/UserItemDataDto"
-              }
-            ]
+            "$ref": "#/components/schemas/UserItemDataDto"
           }
         }
       },
@@ -1736,7 +1720,6 @@
           "mediaSourceId",
           "versionName",
           "decision",
-          "transport",
           "url",
           "signalling",
           "sourceDynamicRange",
@@ -1758,14 +1741,7 @@
             "$ref": "#/components/schemas/NativePlaybackDecision"
           },
           "transport": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/NativePlaybackTransport"
-              }
-            ]
+            "$ref": "#/components/schemas/NativePlaybackTransport"
           },
           "url": {
             "type": [
@@ -2391,14 +2367,7 @@
             "format": "uuid"
           },
           "reason": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/RecommendationReason"
-              }
-            ]
+            "$ref": "#/components/schemas/RecommendationReason"
           }
         }
       },
@@ -2552,8 +2521,7 @@
           "publicId",
           "seasonNumber",
           "title",
-          "episodeCount",
-          "userData"
+          "episodeCount"
         ],
         "type": "object",
         "properties": {
@@ -2588,14 +2556,7 @@
             "format": "int32"
           },
           "userData": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/UserItemDataDto"
-              }
-            ]
+            "$ref": "#/components/schemas/UserItemDataDto"
           }
         }
       },
@@ -2942,13 +2903,10 @@
           "productionStatus",
           "inLibrary",
           "libraryItemId",
-          "monitorScope",
           "monitoredSeasons",
           "regionOverride",
           "note",
-          "nextRelease",
           "hasDates",
-          "libraryGap",
           "reminders"
         ],
         "type": "object",
@@ -3005,14 +2963,7 @@
             "format": "uuid"
           },
           "monitorScope": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/SeriesMonitorScope"
-              }
-            ]
+            "$ref": "#/components/schemas/SeriesMonitorScope"
           },
           "monitoredSeasons": {
             "type": [
@@ -3041,27 +2992,13 @@
             ]
           },
           "nextRelease": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/NextReleaseDto"
-              }
-            ]
+            "$ref": "#/components/schemas/NextReleaseDto"
           },
           "hasDates": {
             "type": "boolean"
           },
           "libraryGap": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/LibraryGapDto"
-              }
-            ]
+            "$ref": "#/components/schemas/LibraryGapDto"
           },
           "reminders": {
             "type": "array",

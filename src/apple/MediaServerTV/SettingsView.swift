@@ -1,22 +1,23 @@
 import MediaKit
 import SwiftUI
 
-/// What a paired device shows until there is a library to show.
+/// Which server this television is signed in to, what it told that server it can play, and the two
+/// controls a viewer may actually need: force the dynamic range, or sign out.
 ///
-/// It answers the two questions worth answering now: which server this television is signed in to, and
-/// what this box told that server it can play — the question the whole feature turns on, and the one no
-/// laptop can answer.
-struct PairedView: View {
+/// A tab rather than a screen of its own, because both controls are the answer to a symptom — a dark
+/// picture, or the wrong server — and something that fixes a symptom has to be findable while looking
+/// at it.
+struct SettingsView: View {
     let paired: PairedServer
-    let session: PairingSession
+    let pairing: PairingSession
 
     private let store = PlaybackPreferencesStore()
 
     @State private var preferences: PlaybackPreferences
 
-    init(paired: PairedServer, session: PairingSession) {
+    init(paired: PairedServer, pairing: PairingSession) {
         self.paired = paired
-        self.session = session
+        self.pairing = pairing
         _preferences = State(initialValue: PlaybackPreferencesStore().load())
     }
 
@@ -49,7 +50,7 @@ struct PairedView: View {
             // would find it dark again on the next launch, having already tried the one control offered.
             .onChange(of: preferences) { _, updated in store.save(updated) }
 
-            Button("Sign out", role: .destructive) { session.unpair() }
+            Button("Sign out", role: .destructive) { pairing.unpair() }
                 .padding(.top, 24)
         }
         .padding(80)
