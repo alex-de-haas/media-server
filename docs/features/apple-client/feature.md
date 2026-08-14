@@ -239,16 +239,24 @@ invisible to everything above it. Concurrent failures produce one exchange, not 
 and a request carrying a body is never retried — an `HTTPBody` is a stream consumed by the
 attempt that failed.
 
-### Two failures found this way, and neither by a test
+### Three ways ASP.NET and the generator disagree
 
-Both were invisible to the suite and both made browsing impossible. They are described
-below because the pattern is the point: the generator's defaults and what .NET emits are not
-the same, nothing in the pipeline compares them, and stubs written to match the client agree
-with the client. Sixty-one passing tests said browsing worked; the first run against the
-real server said it had never worked at all.
+All three are described below, and they were found in three different ways — which is the
+part worth remembering, because only one of them was a test.
 
-`LivePairingCheck` exists for exactly this, and is worth running *before* building on
-something rather than after.
+| Defect | Found by | What it did |
+| --- | --- | --- |
+| Nullable references dropped | the compiler, while browsing was being written | removed `userData` and seven other properties, silently |
+| Dates with seven fractional digits | `LivePairingCheck`, first run against production | **the entire sync feed failed to decode** |
+| Enums with no type | the compiler, on the first playback build | `decision` and `transport` arrived untyped |
+
+None was found by the unit suite, and the reason is the same each time: stubs written to
+match the client agree with the client. Sixty-one passing tests said browsing worked while
+it could not decode a single real response.
+
+The compiler is the cheaper of the two that did the finding, which is the argument for
+generating the client at all. `LivePairingCheck` is what catches the rest, and is worth
+running *before* building on something rather than after.
 
 ### The generated client and .NET disagree about dates, too
 
@@ -281,6 +289,37 @@ error, not a decoding failure, just a field that silently is not there.
 reference every generator reads — the wire is unchanged, only its description — and
 `scripts/generate-apple-client.sh` fails on any remaining "skipping" so the next one cannot
 pass unnoticed.
+
+## Playback
+
+A viewer who picks a version gets that one when it plays: a picker that changes what is
+listed and not what happens is worse than no picker. The server decides, and it decides
+**per copy**: `resolve` answers with a verdict for every
+media source a title has, because a 4K copy this device cannot open can sit beside a 1080p
+one it can, and one verdict would hide the copy that works. The client takes the first that
+plays.
+
+Presentation is `AVPlayerViewController` and not a player of our own — the transport bar,
+the skip gestures, the track picker and the Siri remote's whole vocabulary come free. Since
+the container carries every describable track, that picker is a real one: switching a dub
+costs nothing and needs no second request.
+
+Progress is reported every ten seconds, which is often enough that a resume lands where the
+viewer left and rare enough that a two-hour film is a few hundred requests. A session opens
+*before* the player, so someone who stops after ten seconds still leaves a record of having
+started, and a failure to report never interrupts what is being watched.
+
+**Every refusal is shown as itself.** The server answers with a machine-readable reason
+precisely so a client need not say "cannot play this", and a reason this build has never
+heard of is carried through rather than flattened — an older client meeting a newer server
+must not turn a specific answer into a shrug. `packaging_pending` is not a refusal at all:
+it means the walk has not reached this file, which on a spinning disk is minutes, so it is a
+state with a retry.
+
+Two things are refused on the client's side rather than passed on. A decision to play that
+carries no URL is a server contradicting itself, and handing it to AVFoundation would fail
+where the reason is lost. And HLS, which the server deliberately has not built — meeting it
+means meeting a server newer than this build.
 
 ## Building
 

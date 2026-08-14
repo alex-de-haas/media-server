@@ -197,7 +197,22 @@ struct LivePairingCheck {
             }
         }
 
+        // 6 — what the server would do if this were a television asking to play
+        say("→ resolve playback for \(sample.title)")
+        let playback = PlaybackService(session: session)
+        let plans = try await playback.plans(for: sample.id)
+        say("  \(plans.count) copy(ies)")
+        for plan in plans {
+            switch plan {
+            case .play(let stream):
+                say("    \(stream.decision.rawValue): signalling \(stream.signalling ?? "none"), "
+                    + "source is \(stream.sourceDynamicRange ?? "unstated")")
+            case .refused(let refusal):
+                say("    refused: \(refusal)")
+            }
+        }
+
         say("")
-        say("✅ pairing, browsing and detail all work against \(bootstrap.serverName)")
+        say("✅ pairing, browsing, detail and playback negotiation all work against \(bootstrap.serverName)")
     }
 }

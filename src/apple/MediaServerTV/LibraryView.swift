@@ -56,7 +56,9 @@ struct LibraryView: View {
             Text(empty).font(.title2).foregroundStyle(.secondary)
         case .loaded:
             NavigationStack {
-                PosterGrid(items: items, library: library, loader: session.artwork)
+                PosterGrid(
+                    items: items, library: library, loader: session.artwork,
+                    playback: PlaybackService(session: session))
             }
         }
     }
@@ -67,6 +69,7 @@ private struct PosterGrid: View {
     let items: [LibraryTitle]
     let library: LibraryStore
     let loader: ArtworkLoader
+    let playback: PlaybackService
 
     private let columns = [GridItem(.adaptive(minimum: 260, maximum: 320), spacing: 48)]
 
@@ -75,7 +78,7 @@ private struct PosterGrid: View {
             LazyVGrid(columns: columns, spacing: 64) {
                 ForEach(items) { item in
                     NavigationLink {
-                        TitleView(title: item, library: library, loader: loader)
+                        TitleView(title: item, library: library, loader: loader, playback: playback)
                     } label: {
                         PosterCell(item: item, server: library.server, loader: loader)
                     }

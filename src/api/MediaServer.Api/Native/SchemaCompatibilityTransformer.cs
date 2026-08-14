@@ -1,10 +1,11 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 
 namespace MediaServer.Api.Native;
 
 /// <summary>
-/// Rewrites a nullable reference so that a generator can see it.
+/// Rewrites the two shapes ASP.NET emits that a code generator cannot read.
 ///
 /// ASP.NET describes <c>UserItemDataDto?</c> as <c>oneOf: [{ "type": "null" }, { "$ref": … }]</c>, which
 /// is legal OpenAPI 3.1 and which <c>swift-openapi-generator</c> declines to read: a bare <c>null</c>
@@ -25,8 +26,17 @@ namespace MediaServer.Api.Native;
 /// have accepted. That is the right way round: absence is what a reader has to handle anyway, and a
 /// description slightly narrower than the wire costs far less than eight properties that are not
 /// described at all.
+///
+/// The second shape is an enum with no type. ASP.NET writes <c>{ "enum": ["DirectPlay", "Remux"] }</c>
+/// and nothing else, and a generator that cannot tell what the values *are* produces an untyped value
+/// container rather than a Swift enum — so <c>decision</c> and <c>transport</c>, the two fields that
+/// decide how a title is delivered, arrived with no type at all. A nullable enum is worse again: the
+/// <c>null</c> joins the value list, so the type has a member that is not a value.
+///
+/// Both are fixed by saying what was already true: the values are strings, and a <c>null</c> among them
+/// means the property may be absent rather than that "null" is a case.
 /// </summary>
-internal sealed class NullableRefSchemaTransformer : IOpenApiDocumentTransformer
+internal sealed class SchemaCompatibilityTransformer : IOpenApiDocumentTransformer
 {
     public Task TransformAsync(
         OpenApiDocument document,
@@ -36,9 +46,34 @@ internal sealed class NullableRefSchemaTransformer : IOpenApiDocumentTransformer
         foreach (var schema in document.Components?.Schemas?.Values ?? [])
         {
             Rewrite(schema);
+            Retype(schema);
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Gives a bare enum the type its values already have, and drops a <c>null</c> member — nullability
+    /// belongs to the property that refers to the enum, which the rewrite above has already made
+    /// optional.
+    /// </summary>
+    private static void Retype(IOpenApiSchema schema)
+    {
+        if (schema is not OpenApiSchema concrete || concrete.Enum is not { Count: > 0 } values)
+        {
+            return;
+        }
+
+        var nulls = values.Where(value => value is null || value.GetValueKind() == JsonValueKind.Null).ToList();
+        foreach (var empty in nulls)
+        {
+            values.Remove(empty);
+        }
+
+        if (concrete.Type is null && values.All(value => value.GetValueKind() == JsonValueKind.String))
+        {
+            concrete.Type = JsonSchemaType.String;
+        }
     }
 
     private static void Rewrite(IOpenApiSchema schema)

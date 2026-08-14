@@ -359,3 +359,122 @@ struct DateTranscoderTests {
         #expect(abs(try subject.decode(try subject.encode(now)).timeIntervalSince(now)) < 0.001)
     }
 }
+
+@Suite("What the server says about playing something")
+struct PlaybackPlanTests {
+    private let server = URL(string: "https://media.example")!
+
+    private func resolution(
+        decision: String, url: String? = "/native/v1/media/abc/remux?token=t",
+        transport: String? = "ByteRange", reason: String? = nil, signalling: String? = "dvh1"
+    ) -> String {
+        func field(_ name: String, _ value: String?) -> String {
+            guard let value else { return "\"\(name)\":null" }
+            return "\"\(name)\":\"\(value)\""
+        }
+
+        var parts: [String] = []
+        parts.append(field("mediaSourceId", "abc"))
+        parts.append(field("versionName", nil))
+        parts.append(field("decision", decision))
+        parts.append(field("transport", transport))
+        parts.append(field("url", url))
+        parts.append(field("signalling", signalling))
+        parts.append(field("sourceDynamicRange", "Dolby Vision"))
+        parts.append(field("reason", reason))
+        return "{" + parts.joined(separator: ",") + "}"
+    }
+
+    private func plan(_ body: String) throws -> PlaybackPlan {
+        let json = "{\"itemId\":\"i\",\"sources\":[" + body + "]}"
+        let dto = try JSONDecoder().decode(
+            Components.Schemas.NativePlaybackResolutionResponse.self, from: Data(json.utf8))
+        return PlaybackPlan.all(dto, server: server)[0]
+    }
+
+    @Test("A remux is a stream, with the signalling the server chose")
+    func remux() throws {
+        guard case .play(let stream) = try plan(resolution(decision: "Remux")) else {
+            Issue.record("expected a stream")
+            return
+        }
+
+        #expect(stream.decision == .remux)
+        #expect(stream.signalling == "dvh1")
+        #expect(stream.url.absoluteString.hasPrefix("https://media.example/native/v1/media/"))
+    }
+
+    @Test("Every refusal keeps its own name rather than becoming \"cannot play\"")
+    func refusals() throws {
+        let cases: [(String, PlaybackRefusal)] = [
+            ("packaging_pending", .packagingPending),
+            ("packaging_unsupported_audio", .packagingUnsupportedAudio),
+            ("packaging_unsupported_video", .packagingUnsupportedVideo),
+            ("unsupported_dynamic_range", .unsupportedDynamicRange),
+            ("no_audio_track", .noAudioTrack),
+            ("no_file", .noFile),
+        ]
+
+        for (wire, expected) in cases {
+            #expect(try plan(resolution(decision: "Unsupported", url: nil, reason: wire))
+                == .refused(expected, source: "abc"))
+        }
+    }
+
+    @Test("A reason this build has never heard of is carried, not flattened")
+    func unknownReason() throws {
+        // An older client meeting a newer server must not turn a specific answer into "cannot play".
+        #expect(try plan(resolution(decision: "Unsupported", url: nil, reason: "something_new"))
+            == .refused(.unknown("something_new"), source: "abc"))
+    }
+
+    @Test("Only pending means waiting is the remedy")
+    func pending() {
+        #expect(PlaybackRefusal.packagingPending.isPending)
+        #expect(!PlaybackRefusal.packagingUnsupportedAudio.isPending)
+        #expect(!PlaybackRefusal.noFile.isPending)
+    }
+
+    @Test("A decision to play with nowhere to play from is refused rather than handed to AVFoundation")
+    func playableWithoutUrl() throws {
+        // A server contradicting itself. Passing this on would fail inside AVFoundation, where the
+        // reason is lost.
+        guard case .refused = try plan(resolution(decision: "Remux", url: nil)) else {
+            Issue.record("expected a refusal")
+            return
+        }
+    }
+
+    @Test("HLS is refused, because this build has no idea what to do with it")
+    func hls() throws {
+        // Deliberately unbuilt on the server, so meeting it means meeting a newer server.
+        #expect(try plan(resolution(decision: "Remux", transport: "Hls"))
+            == .refused(.unknown("transport_hls"), source: "abc"))
+    }
+
+    @Test("A refusal says which copy it is about, so a viewer can be told why their pick will not play")
+    func refusalNamesItsCopy() throws {
+        let refused = try plan(resolution(decision: "Unsupported", url: nil, reason: "no_file"))
+
+        #expect(refused.mediaSourceId == "abc")
+        #expect(!refused.isPlayable)
+    }
+
+    @Test("The first copy that plays is the one taken, not the first copy")
+    func picksAPlayableCopy() throws {
+        // A title can hold a 4K copy this device cannot open beside a 1080p one it can, and collapsing
+        // that to one verdict would hide the copy that works.
+        let refused = resolution(decision: "Unsupported", url: nil, reason: "no_audio_track")
+        let playable = resolution(decision: "DirectPlay", url: "/native/v1/media/def?token=t")
+        let body = "{\"itemId\":\"i\",\"sources\":[" + refused + "," + playable + "]}"
+        let dto = try JSONDecoder().decode(
+            Components.Schemas.NativePlaybackResolutionResponse.self, from: Data(body.utf8))
+        let plans = PlaybackPlan.all(dto, server: server)
+
+        #expect(plans.count == 2)
+        guard case .play = plans[1] else {
+            Issue.record("expected the second copy to play")
+            return
+        }
+    }
+}

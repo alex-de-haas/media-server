@@ -1394,7 +1394,8 @@
           "Season",
           "Episode",
           "Video"
-        ]
+        ],
+        "type": "string"
       },
       "MediaSourceDto": {
         "required": [
@@ -1713,7 +1714,8 @@
           "DirectPlay",
           "Remux",
           "Unsupported"
-        ]
+        ],
+        "type": "string"
       },
       "NativePlaybackResolution": {
         "required": [
@@ -1807,9 +1809,9 @@
       "NativePlaybackTransport": {
         "enum": [
           "ByteRange",
-          "Hls",
-          null
-        ]
+          "Hls"
+        ],
+        "type": "string"
       },
       "NativePreferenceDto": {
         "required": [
@@ -2412,9 +2414,9 @@
       "RecommendationKind": {
         "enum": [
           "Movie",
-          "Series",
-          null
-        ]
+          "Series"
+        ],
+        "type": "string"
       },
       "RecommendationReason": {
         "required": [
@@ -2448,7 +2450,8 @@
           "Theatrical",
           "Digital",
           "EpisodeAir"
-        ]
+        ],
+        "type": "string"
       },
       "ReminderDto": {
         "required": [
@@ -2564,9 +2567,9 @@
         "enum": [
           "WholeShow",
           "Seasons",
-          "FutureEpisodes",
-          null
-        ]
+          "FutureEpisodes"
+        ],
+        "type": "string"
       },
       "StudioDto": {
         "required": [

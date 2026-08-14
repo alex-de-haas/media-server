@@ -834,7 +834,13 @@ public enum Components {
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaKind`.
-        public typealias MediaKind = OpenAPIRuntime.OpenAPIValueContainer
+        @frozen public enum MediaKind: String, Codable, Hashable, Sendable, CaseIterable {
+            case movie = "Movie"
+            case series = "Series"
+            case season = "Season"
+            case episode = "Episode"
+            case video = "Video"
+        }
         /// - Remark: Generated from `#/components/schemas/MediaSourceDto`.
         public struct MediaSourceDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/MediaSourceDto/id`.
@@ -1125,7 +1131,11 @@ public enum Components {
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativePlaybackDecision`.
-        public typealias NativePlaybackDecision = OpenAPIRuntime.OpenAPIValueContainer
+        @frozen public enum NativePlaybackDecision: String, Codable, Hashable, Sendable, CaseIterable {
+            case directPlay = "DirectPlay"
+            case remux = "Remux"
+            case unsupported = "Unsupported"
+        }
         /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution`.
         public struct NativePlaybackResolution: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution/mediaSourceId`.
@@ -1232,7 +1242,10 @@ public enum Components {
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativePlaybackTransport`.
-        public typealias NativePlaybackTransport = OpenAPIRuntime.OpenAPIValueContainer
+        @frozen public enum NativePlaybackTransport: String, Codable, Hashable, Sendable, CaseIterable {
+            case byteRange = "ByteRange"
+            case hls = "Hls"
+        }
         /// - Remark: Generated from `#/components/schemas/NativePreferenceDto`.
         public struct NativePreferenceDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/NativePreferenceDto/mediaItemId`.
@@ -1905,7 +1918,10 @@ public enum Components {
             }
         }
         /// - Remark: Generated from `#/components/schemas/RecommendationKind`.
-        public typealias RecommendationKind = OpenAPIRuntime.OpenAPIValueContainer
+        @frozen public enum RecommendationKind: String, Codable, Hashable, Sendable, CaseIterable {
+            case movie = "Movie"
+            case series = "Series"
+        }
         /// - Remark: Generated from `#/components/schemas/RecommendationReason`.
         public struct RecommendationReason: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/RecommendationReason/kind`.
@@ -1936,7 +1952,12 @@ public enum Components {
             }
         }
         /// - Remark: Generated from `#/components/schemas/ReleaseType`.
-        public typealias ReleaseType = OpenAPIRuntime.OpenAPIValueContainer
+        @frozen public enum ReleaseType: String, Codable, Hashable, Sendable, CaseIterable {
+            case premiere = "Premiere"
+            case theatrical = "Theatrical"
+            case digital = "Digital"
+            case episodeAir = "EpisodeAir"
+        }
         /// - Remark: Generated from `#/components/schemas/ReminderDto`.
         public struct ReminderDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ReminderDto/id`.
@@ -2062,7 +2083,11 @@ public enum Components {
             }
         }
         /// - Remark: Generated from `#/components/schemas/SeriesMonitorScope`.
-        public typealias SeriesMonitorScope = OpenAPIRuntime.OpenAPIValueContainer
+        @frozen public enum SeriesMonitorScope: String, Codable, Hashable, Sendable, CaseIterable {
+            case wholeShow = "WholeShow"
+            case seasons = "Seasons"
+            case futureEpisodes = "FutureEpisodes"
+        }
         /// - Remark: Generated from `#/components/schemas/StudioDto`.
         public struct StudioDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/StudioDto/name`.
