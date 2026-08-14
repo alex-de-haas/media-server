@@ -18,12 +18,20 @@ import OpenAPIRuntime
 public final class ServerSession {
     public private(set) var paired: PairedServer
 
+    /// Set when the server refused this device for good — a revoked Core token, or an account that lost
+    /// its assignment. The root view returns to pairing rather than leaving a viewer on a library that
+    /// will never load again.
+    ///
+    /// It has to be a signal rather than a silent `nil`: the stored grant's absolute expiry can still be
+    /// weeks away, so the next launch would restore it as paired and fail exactly the same way.
+    public private(set) var credentialLost = false
+
     private let store: any CredentialStore
     private let pairing: PairingClient
     private let transport: (any ClientTransport)?
 
     /// Serialises re-minting, so five requests failing together produce one exchange rather than five.
-    private var refreshing: Task<String?, Never>?
+    private var refreshing: Task<RefreshOutcome, Never>?
 
     /// One loader for the whole app, so the poster grid's cache survives moving between tabs. Not
     /// observed: it is a service, and nothing redraws because a cache filled.
@@ -43,11 +51,17 @@ public final class ServerSession {
 
         // Built here rather than lazily: every stored property is set, so capturing self is legal, and
         // `@Observable` has no lazy of its own.
-        artwork = ArtworkLoader(token: { [weak self] in await self?.tokenForArtwork() })
+        artwork = ArtworkLoader(
+            token: { [weak self] in await self?.tokenForArtwork() },
+            refresh: { [weak self] in await self?.refreshForArtwork() })
     }
 
     nonisolated private func tokenForArtwork() async -> String? {
         await MainActor.run { self.paired.identity.accessToken }
+    }
+
+    nonisolated private func refreshForArtwork() async -> String? {
+        await self.refreshToken()
     }
 
     /// The generated client, pointed at this server and carrying the current credential.
@@ -66,12 +80,18 @@ public final class ServerSession {
     }
 
     /// Re-mints the app grant from the Core token, once, however many callers ask at the same moment.
+    private enum RefreshOutcome: Sendable {
+        case minted(String)
+        case transient
+        case terminal
+    }
+
     private func refreshToken() async -> String? {
         if let inFlight = refreshing {
-            return await inFlight.value
+            return token(from: await inFlight.value)
         }
 
-        let task = Task<String?, Never> { [paired, pairing, store] in
+        let task = Task<RefreshOutcome, Never> { [paired, pairing, store] in
             do {
                 let identity = try await pairing.exchange(
                     core: paired.coreOrigin,
@@ -82,26 +102,37 @@ public final class ServerSession {
                 var refreshed = paired
                 refreshed.identity = identity
                 store.save(refreshed)
-                return identity.accessToken
+                return .minted(identity.accessToken)
             } catch {
-                // Core's own token has gone, or this account lost its assignment. Either way there is
-                // nothing to retry with; the caller sees the 401 it already had.
-                return nil
+                // The same distinction `PairingSession.restore()` draws: a refusal is over, a server
+                // having a bad day is not. Only the first is a reason to forget a pairing.
+                return (error as? PairingError)?.isTerminal == true ? .terminal : .transient
             }
         }
 
         refreshing = task
-        let token = await task.value
+        let outcome = await task.value
         refreshing = nil
 
-        if let token {
-            var refreshed = paired
-            refreshed.identity = AppIdentity(
-                accessToken: token, expiresAt: paired.identity.expiresAt)
-            paired = store.load() ?? refreshed
+        switch outcome {
+        case .minted:
+            if let stored = store.load() {
+                paired = stored
+            }
+        case .terminal:
+            // Forget it here rather than leaving it to be restored and fail again tomorrow.
+            store.clear()
+            credentialLost = true
+        case .transient:
+            break
         }
 
-        return token
+        return token(from: outcome)
+    }
+
+    private func token(from outcome: RefreshOutcome) -> String? {
+        if case .minted(let token) = outcome { return token }
+        return nil
     }
 }
 

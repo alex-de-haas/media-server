@@ -13,19 +13,24 @@ import Foundation
 public actor ArtworkLoader {
     private let session: URLSession
     private let token: @Sendable () async -> String?
+    private let refresh: @Sendable () async -> String?
     private var cache: [URL: Data] = [:]
     private var order: [URL] = []
     private var inFlight: [URL: Task<Data?, Never>] = [:]
 
     private static let capacity = 240
 
-    public init(token: @escaping @Sendable () async -> String?) {
+    public init(
+        token: @escaping @Sendable () async -> String?,
+        refresh: @escaping @Sendable () async -> String? = { nil }
+    ) {
         let configuration = URLSessionConfiguration.default
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.timeoutIntervalForRequest = 20
         self.session = URLSession(configuration: configuration)
         self.token = token
+        self.refresh = refresh
     }
 
     public func image(at url: URL) async -> Data? {
@@ -38,22 +43,34 @@ public actor ArtworkLoader {
             return await running.value
         }
 
-        let task = Task<Data?, Never> { [session, token] in
-            var request = URLRequest(url: url)
-            if let token = await token() {
-                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let task = Task<Data?, Never> { [session, token, refresh] in
+            func fetch(_ bearer: String?) async -> (Data, Int)? {
+                var request = URLRequest(url: url)
+                if let bearer {
+                    request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+                }
+
+                guard let (data, response) = try? await session.data(for: request),
+                      let http = response as? HTTPURLResponse
+                else {
+                    return nil
+                }
+
+                return (data, http.statusCode)
             }
 
-            guard let (data, response) = try? await session.data(for: request),
-                  let http = response as? HTTPURLResponse,
-                  http.statusCode == 200,
-                  !data.isEmpty
-            else {
-                // A 404 is ordinary: the provider had no poster for this title.
-                return nil
+            guard var answer = await fetch(await token()) else { return nil }
+
+            // A poster can easily be the first authenticated request after tvOS resumes the app, and
+            // treating its 401 as "no image" would leave a grid blank until something unrelated
+            // happened to refresh the credential. The refresh is the session's, so it is the same
+            // serialised one the API requests use rather than a second race.
+            if answer.1 == 401, let fresh = await refresh(), let retried = await fetch(fresh) {
+                answer = retried
             }
 
-            return data
+            // A 404 is ordinary: the provider had no poster for this title.
+            return answer.1 == 200 && !answer.0.isEmpty ? answer.0 : nil
         }
 
         inFlight[url] = task

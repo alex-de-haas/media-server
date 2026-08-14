@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-10
-Updated: 2026-08-11
+Updated: 2026-08-14
 
 > Phase 2 of the [Apple client](../apple-client/plan.md) epic, and the first
 > release worth using. Every server half it needs is built and verified:

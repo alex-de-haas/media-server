@@ -101,12 +101,17 @@ public final class LibraryStore {
 
             for _ in 0..<Self.pageLimit {
                 let page = try await client.getNativeV1Sync(query: .init(cursor: cursor)).ok.body.json
+
+                // A feed that claims more without moving its cursor is repeating itself. Checked before
+                // the items are taken, or the repeat joins the library before the loop stops.
+                if page.cursor == cursor, cursor != nil {
+                    break
+                }
+
                 collected.append(contentsOf: page.items.compactMap(LibraryTitle.init))
+                cursor = page.cursor
 
                 guard page.hasMore else { break }
-                // A page that says there is more but does not move the cursor would loop for ever.
-                guard page.cursor != cursor else { break }
-                cursor = page.cursor
             }
 
             items = collected.sorted {

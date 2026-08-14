@@ -142,6 +142,51 @@ struct ServerSessionTests {
         #expect(coreStub.calls <= 1)
     }
 
+    @Test("A refusal Core will not fix forgets the pairing rather than failing again tomorrow")
+    func terminalRefusalUnpairs() async throws {
+        // The stored grant's absolute expiry can still be weeks away, so a device that swallowed this
+        // would restore itself as paired on the next launch and fail in exactly the same way.
+        struct RevokedCore: HTTPTransport {
+            func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+                (
+                    Data(#"{"error":"user_not_assigned","message":"No."}"#.utf8),
+                    HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+                )
+            }
+        }
+
+        let store = InMemoryCredentialStore(pairing())
+        let surface = SurfaceStub(["/native/v1/sync": [(401, "")]])
+        let session = ServerSession(
+            paired: pairing(), store: store,
+            pairing: PairingClient(transport: RevokedCore(), surface: surface), transport: surface)
+
+        _ = try? await session.api().getNativeV1Sync(query: .init(cursor: nil))
+
+        #expect(session.credentialLost)
+        #expect(store.load() == nil)
+    }
+
+    @Test("A server having a bad day keeps the pairing")
+    func transientRefusalKeepsPairing() async throws {
+        struct SickCore: HTTPTransport {
+            func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+                (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+
+        let store = InMemoryCredentialStore(pairing())
+        let surface = SurfaceStub(["/native/v1/sync": [(401, "")]])
+        let session = ServerSession(
+            paired: pairing(), store: store,
+            pairing: PairingClient(transport: SickCore(), surface: surface), transport: surface)
+
+        _ = try? await session.api().getNativeV1Sync(query: .init(cursor: nil))
+
+        #expect(!session.credentialLost)
+        #expect(store.load() != nil)
+    }
+
     @Test("A refusal Core will not fix is passed through rather than retried for ever")
     func givesUp() async throws {
         struct DeadCore: HTTPTransport {
@@ -190,9 +235,10 @@ struct LibraryStoreTests {
         #expect(subject.series.map(\.title) == ["Gamma"])
     }
 
-    @Test("A feed that claims more without moving stops instead of paging for ever")
+    @Test("A feed that claims more without moving stops, and does not add the repeat")
     func stopsOnAStuckCursor() async {
-        // Always the same cursor and always hasMore. A client that trusted it would never return.
+        // Always the same cursor and always hasMore. A client that trusted it would never return — and
+        // one that stopped after taking the page would show the last title twice.
         let surface = SurfaceStub(["/native/v1/sync": [
             (200, page(title("1", "Movie", "Alpha"), cursor: "same", hasMore: true)),
         ]])
@@ -201,7 +247,7 @@ struct LibraryStoreTests {
         await subject.load()
 
         #expect(subject.state == .loaded)
-        #expect(subject.items.count <= 2)
+        #expect(subject.items.count == 1)
     }
 
     @Test("Kinds this client does not list are dropped rather than shown as neither")

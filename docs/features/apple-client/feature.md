@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-11
+Updated: 2026-08-14
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -203,6 +203,14 @@ used and there is a loader of our own.
 A title's own screen is fetched when it opens: versions ordered so the default leads, audio
 and subtitle tracks, and a mark against the ones beside the file rather than inside it.
 
+A started title is marked as started and **not** with a progress bar. The feed carries a
+resume position but no runtime, so there is no fraction to draw, and a full-width bar for
+something stopped after a minute would be a worse lie than saying nothing.
+
+Sign out and the dynamic-range override are a third tab. Both are answers to a symptom — the
+wrong server, or a dark picture — and something that fixes a symptom has to be findable
+while looking at it.
+
 ### The credential refreshes on a refusal, not on a clock
 
 The app grant states an `expiresAt` thirty days out — its *absolute* cap — but it also
@@ -285,8 +293,12 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
   stored, concurrent failures cause one exchange rather than several, and a refusal Core
   will not fix is passed through instead of retried.
 - **Draining the feed**: every page is read, a feed claiming more without moving its cursor
-  stops instead of looping, kinds this client does not list are dropped, and `userData`
-  arrives — the last because it is exactly what the generator used to remove.
+  stops *before* taking the repeat rather than showing it twice, kinds this client does not
+  list are dropped, and `userData` arrives — the last because it is exactly what the
+  generator used to remove.
+- **Which refusals end a pairing**: a revoked credential or a lost assignment forgets it, a
+  server having a bad day does not. The distinction has to hold in both places that refresh,
+  because the stored grant's absolute expiry outlives its idle window.
 - **The simulator cannot answer the Dolby Vision question** and never will, reporting no
   HDR-eligible output. Every claim about it is checked on an Apple TV 4K, which is how every
   measurement in the epic was taken.

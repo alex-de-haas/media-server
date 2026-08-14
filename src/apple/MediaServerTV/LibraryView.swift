@@ -8,10 +8,12 @@ import SwiftUI
 /// so a filter can be laid over this later without touching how any of it is loaded.
 struct LibraryView: View {
     let session: ServerSession
+    let pairing: PairingSession
     @State private var library: LibraryStore
 
-    init(session: ServerSession) {
+    init(session: ServerSession, pairing: PairingSession) {
         self.session = session
+        self.pairing = pairing
         _library = State(initialValue: LibraryStore(session: session))
     }
 
@@ -23,6 +25,13 @@ struct LibraryView: View {
 
             Tab("Series", systemImage: "tv") {
                 shelf(library.series, empty: "No series yet.")
+            }
+
+            // Sign out and the dynamic-range override live here. They were on the screen this replaced,
+            // and a viewer with a dark picture and no way to change server or force SDR is worse off
+            // than one who could never browse.
+            Tab("Settings", systemImage: "gearshape") {
+                SettingsView(paired: session.paired, pairing: pairing)
             }
         }
         .task { await library.load() }
@@ -83,13 +92,15 @@ private struct PosterCell: View {
     let server: URL
     let loader: ArtworkLoader
 
-    @State private var poster: Data?
+    /// Decoded once when it arrives. Decoding inside `body` would decompress the same JPEG every time
+    /// SwiftUI re-evaluated the tree, which on a grid of a hundred posters is felt.
+    @State private var poster: Image?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ZStack {
-                if let poster, let image = UIImage(data: poster) {
-                    Image(uiImage: image)
+                if let poster {
+                    poster
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                 } else {
@@ -119,7 +130,8 @@ private struct PosterCell: View {
         }
         .task {
             guard item.hasArtwork, let url = item.artworkURL(on: server) else { return }
-            poster = await loader.image(at: url)
+            guard let data = await loader.image(at: url), let decoded = UIImage(data: data) else { return }
+            poster = Image(uiImage: decoded)
         }
     }
 
@@ -134,11 +146,15 @@ private struct PosterCell: View {
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         } else if item.resumeSeconds > 0 {
-            Rectangle()
-                .fill(.white)
-                .frame(height: 6)
+            // Not a progress bar. The sync feed carries a resume position but no runtime, so there is
+            // no fraction to draw — and a full-width bar for a title stopped after one minute would be
+            // a worse lie than saying nothing. It says "started", which is all that is known here.
+            Label("Resume", systemImage: "play.circle.fill")
+                .labelStyle(.iconOnly)
+                .font(.title2)
+                .foregroundStyle(.white, .black.opacity(0.6))
+                .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.black.opacity(0.4))
         }
     }
 }

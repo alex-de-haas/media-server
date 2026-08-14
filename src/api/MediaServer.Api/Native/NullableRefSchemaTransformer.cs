@@ -16,9 +16,15 @@ namespace MediaServer.Api.Native;
 /// including <c>LibraryItemDto.userData</c>, which carries resume position and watched state, and
 /// <c>NativePlaybackResolution.transport</c>, which decides how playback is delivered.
 ///
-/// The rewrite is to the equivalent form every generator does read: the reference on its own, with the
-/// property no longer required. Nothing about the wire changes — a response that omits the field or
-/// sends null is described by both shapes. Only the description changes.
+/// The rewrite is to the form every generator does read: the reference on its own, with the property no
+/// longer required.
+///
+/// It is a trade rather than a strict equivalence, and worth being exact about. Nothing this server
+/// sends changes. But the new shape describes an <em>absent</em> field where the old one also described
+/// an explicit <c>null</c>, so a client generated from it may reject a literal null it would previously
+/// have accepted. That is the right way round: absence is what a reader has to handle anyway, and a
+/// description slightly narrower than the wire costs far less than eight properties that are not
+/// described at all.
 /// </summary>
 internal sealed class NullableRefSchemaTransformer : IOpenApiDocumentTransformer
 {
