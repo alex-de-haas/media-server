@@ -81,7 +81,9 @@ struct TitleView: View {
         defer { resolving = false }
 
         do {
-            let answer = try await playback.plan(for: title.id)
+            // The version the viewer picked, not whichever the server listed first. A picker that
+            // changes what is listed and not what happens is worse than no picker at all.
+            let answer = try await playback.plan(for: title.id, preferring: chosenVersion)
             plan = answer
 
             guard case .play(let stream) = answer else { return }
@@ -94,7 +96,7 @@ struct TitleView: View {
                 positionSeconds: detail.resumeSeconds)
             playing = stream
         } catch {
-            plan = .refused(.unknown(String(describing: error)))
+            plan = .refused(.unknown(String(describing: error)), source: chosenVersion ?? "")
         }
     }
 
@@ -170,7 +172,7 @@ struct TitleView: View {
 
             playButton(detail)
 
-            if case .refused(let refusal) = plan {
+            if case .refused(let refusal, _) = plan {
                 refusalNotice(refusal)
             }
 

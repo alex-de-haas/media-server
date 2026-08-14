@@ -417,7 +417,7 @@ struct PlaybackPlanTests {
 
         for (wire, expected) in cases {
             #expect(try plan(resolution(decision: "Unsupported", url: nil, reason: wire))
-                == .refused(expected))
+                == .refused(expected, source: "abc"))
         }
     }
 
@@ -425,7 +425,7 @@ struct PlaybackPlanTests {
     func unknownReason() throws {
         // An older client meeting a newer server must not turn a specific answer into "cannot play".
         #expect(try plan(resolution(decision: "Unsupported", url: nil, reason: "something_new"))
-            == .refused(.unknown("something_new")))
+            == .refused(.unknown("something_new"), source: "abc"))
     }
 
     @Test("Only pending means waiting is the remedy")
@@ -449,7 +449,15 @@ struct PlaybackPlanTests {
     func hls() throws {
         // Deliberately unbuilt on the server, so meeting it means meeting a newer server.
         #expect(try plan(resolution(decision: "Remux", transport: "Hls"))
-            == .refused(.unknown("transport_hls")))
+            == .refused(.unknown("transport_hls"), source: "abc"))
+    }
+
+    @Test("A refusal says which copy it is about, so a viewer can be told why their pick will not play")
+    func refusalNamesItsCopy() throws {
+        let refused = try plan(resolution(decision: "Unsupported", url: nil, reason: "no_file"))
+
+        #expect(refused.mediaSourceId == "abc")
+        #expect(!refused.isPlayable)
     }
 
     @Test("The first copy that plays is the one taken, not the first copy")

@@ -32,17 +32,29 @@ public final class PlaybackService {
         return PlaybackPlan.all(try answer.ok.body.json, server: session.paired.server)
     }
 
-    /// The copy to play: the first the server said it could deliver.
+    /// The copy to play.
     ///
-    /// When none can be, the refusal returned is the first one — the default copy's, since that is the
-    /// order the server lists them in, and it is the answer about the copy a viewer would have got.
-    public func plan(for itemId: String) async throws -> PlaybackPlan {
+    /// A viewer who picked a version gets that one when it plays — a picker that changes what is listed
+    /// and not what happens is worse than no picker. Otherwise the first copy the server said it could
+    /// deliver, because a title can hold a 4K copy this device cannot open beside a 1080p one it can.
+    ///
+    /// When nothing plays, the refusal returned is about the copy that was asked for rather than
+    /// whichever happened to be listed first.
+    public func plan(for itemId: String, preferring mediaSourceId: String? = nil) async throws -> PlaybackPlan {
         let plans = try await plans(for: itemId)
-        if let playable = plans.first(where: { if case .play = $0 { return true } else { return false } }) {
-            return playable
+        let requested = mediaSourceId.flatMap { wanted in
+            plans.first { $0.mediaSourceId == wanted }
         }
 
-        return plans.first ?? .refused(.noFile)
+        if let requested, requested.isPlayable {
+            return requested
+        }
+
+        if let anyPlayable = plans.first(where: \.isPlayable) {
+            return anyPlayable
+        }
+
+        return requested ?? plans.first ?? .refused(.noFile, source: "")
     }
 
     /// Opens a playback session. The id it returns is what progress and stop are reported against.

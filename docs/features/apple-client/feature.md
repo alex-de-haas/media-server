@@ -292,7 +292,9 @@ pass unnoticed.
 
 ## Playback
 
-The server decides, and it decides **per copy**: `resolve` answers with a verdict for every
+A viewer who picks a version gets that one when it plays: a picker that changes what is
+listed and not what happens is worse than no picker. The server decides, and it decides
+**per copy**: `resolve` answers with a verdict for every
 media source a title has, because a 4K copy this device cannot open can sit beside a 1080p
 one it can, and one verdict would hide the copy that works. The client takes the first that
 plays.

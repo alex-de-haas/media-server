@@ -70,10 +70,26 @@ public enum PlaybackRefusal: Equatable, Sendable {
     public var isPending: Bool { self == .packagingPending }
 }
 
-/// What the server answered when asked how to play something.
+/// What the server answered about **one copy** of a title.
+///
+/// A refusal carries the copy it is about, not only the reason. Without that there is no way to tell a
+/// viewer why the version they picked will not play, or to honour their pick at all — which is exactly
+/// the bug this shape was introduced to fix.
 public enum PlaybackPlan: Equatable, Sendable {
     case play(PlayableStream)
-    case refused(PlaybackRefusal)
+    case refused(PlaybackRefusal, source: String)
+
+    public var mediaSourceId: String {
+        switch self {
+        case .play(let stream): stream.mediaSourceId
+        case .refused(_, let source): source
+        }
+    }
+
+    public var isPlayable: Bool {
+        if case .play = self { return true }
+        return false
+    }
 }
 
 extension PlaybackPlan {
@@ -89,21 +105,21 @@ extension PlaybackPlan {
     /// Built from one source's resolution, and refused when it does not amount to something openable.
     init(_ dto: Components.Schemas.NativePlaybackResolution, server: URL) {
         guard dto.decision != .unsupported else {
-            self = .refused(PlaybackRefusal(dto.reason))
+            self = .refused(PlaybackRefusal(dto.reason), source: dto.mediaSourceId)
             return
         }
 
         // A decision that is not "unsupported" but carries no URL is a server contradicting itself.
         // Treating it as playable would fail inside AVFoundation, where the reason is lost.
         guard let path = dto.url, let url = URL(string: path, relativeTo: server)?.absoluteURL else {
-            self = .refused(PlaybackRefusal(dto.reason))
+            self = .refused(PlaybackRefusal(dto.reason), source: dto.mediaSourceId)
             return
         }
 
         // HLS is deliberately unbuilt on the server, so a client meeting it has met a server newer than
         // itself. Saying so beats handing AVFoundation a playlist this build cannot reason about.
         guard dto.transport != .hls else {
-            self = .refused(.unknown("transport_hls"))
+            self = .refused(.unknown("transport_hls"), source: dto.mediaSourceId)
             return
         }
 
