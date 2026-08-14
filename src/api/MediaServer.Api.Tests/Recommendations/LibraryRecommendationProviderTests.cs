@@ -1,6 +1,8 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Recommendations;
+using MediaServer.Api.Recommendations.Generation;
+using MediaServer.Api.Recommendations.Profile;
 using MediaServer.Api.Tests.Jellyfin;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -247,25 +249,31 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
     [Fact]
     public async Task WithoutATmdbKeyTheEngineIsUnavailable()
     {
-        var unconfigured = new LibraryRecommendationProvider(
-            new RecommendationSeedSelector(_database, _time),
-            _tmdb,
-            new RecommendationScorer(),
-            new RecommendationPreferenceStore(_database),
-            new MediaServerSettings(),
-            NullLogger<LibraryRecommendationProvider>.Instance);
+        var unconfigured = new LibraryRecommendationProvider(Engine(), new MediaServerSettings());
 
         Assert.False(await unconfigured.IsAvailableAsync(_userId, CancellationToken.None));
         Assert.True(await Provider().IsAvailableAsync(_userId, CancellationToken.None));
     }
 
-    private LibraryRecommendationProvider Provider() => new(
+    private LibraryRecommendationProvider Provider() =>
+        new(Engine(), new MediaServerSettings { TmdbApiKey = "key" });
+
+    /// <summary>
+    /// The engine with only the behavioural seed generator wired, which is what these tests are about:
+    /// the local generators have their own suites, and mixing them in here would make every assertion
+    /// about aggregation depend on what the fixture happens to hold.
+    /// </summary>
+    private RecommendationEngine Engine() => new(
+        _database,
         new RecommendationSeedSelector(_database, _time),
-        _tmdb,
+        [SeedListGenerator.Recommendations(_tmdb)],
+        new TitleFacetReader(_database),
+        new TasteProfileCache(),
+        new TasteProfileBuilder(_database, new TitleFacetReader(_database), new LibraryFacetIndexCache(), _time),
         new RecommendationScorer(),
+        new RecommendationReranker(),
         new RecommendationPreferenceStore(_database),
-        new MediaServerSettings { TmdbApiKey = "key" },
-        NullLogger<LibraryRecommendationProvider>.Instance);
+        NullLogger<RecommendationEngine>.Instance);
 
     private static TmdbRecommendedTitle Title(string tmdbId) => new(tmdbId, $"Title {tmdbId}", 2024, null);
 

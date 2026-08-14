@@ -223,6 +223,21 @@ builder.Services.AddScoped<MediaServer.Api.Recommendations.Profile.TasteProfileB
 builder.Services.AddSingleton<MediaServer.Api.Recommendations.Profile.LibraryFacetIndexCache>();
 builder.Services.AddSingleton<MediaServer.Api.Recommendations.Profile.TasteProfileCache>();
 builder.Services.AddScoped<ITmdbRecommendationSource, TmdbRecommendationSource>();
+builder.Services.AddScoped<RecommendationReranker>();
+builder.Services.AddScoped<RecommendationEngine>();
+// Generators are an implementation detail of the built-in source, never user-facing toggles. Order
+// matters only for which one first claims a candidate's reason, so the cheapest and most specific
+// come first and the broad behavioural lists fill in behind them.
+builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommendationGenerator,
+    MediaServer.Api.Recommendations.Generation.CollectionsGenerator>();
+builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommendationGenerator,
+    MediaServer.Api.Recommendations.Generation.HeldGenerator>();
+builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommendationGenerator>(services =>
+    MediaServer.Api.Recommendations.Generation.SeedListGenerator.Recommendations(
+        services.GetRequiredService<ITmdbRecommendationSource>()));
+builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommendationGenerator>(services =>
+    MediaServer.Api.Recommendations.Generation.SeedListGenerator.Similar(
+        services.GetRequiredService<ITmdbRecommendationSource>()));
 builder.Services.AddScoped<IRecommendationProvider, LibraryRecommendationProvider>();
 builder.Services.AddScoped<IRecommendationProvider, MediaServer.Api.Recommendations.Trakt.TraktRecommendationProvider>();
 builder.Services.AddScoped<ITmdbPosterLookup, TmdbPosterLookup>();
