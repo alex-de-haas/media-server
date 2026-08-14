@@ -95,7 +95,7 @@ public sealed class TasteProfileBuilder(
             return TasteProfile.Empty;
         }
 
-        var byItem = await facets.ReadAsync([.. signals.Keys], cancellationToken);
+        var byItem = await indexCache.FacetsForAsync([.. signals.Keys], database, facets, cancellationToken);
         if (byItem.Count == 0)
         {
             return TasteProfile.Empty;
@@ -180,6 +180,19 @@ public sealed class TasteProfileBuilder(
 
         var watchedWorkIds = plays.Select(row => row.WorkId).Distinct().ToList();
 
+        // A rated title counts even with no play behind it: rating something is saying you have seen
+        // it, and on an imported library that is the only trace there is.
+        var ratedWorkIds = await database.UserItemData.AsNoTracking()
+            .Where(row => row.AppUserId == appUserId && row.Rating != null)
+            .Join(
+                database.MediaItems.AsNoTracking(),
+                row => row.MediaItemId,
+                item => item.Id,
+                (row, item) => new { item.Id, item.Kind })
+            .Where(row => row.Kind == MediaKind.Movie || row.Kind == MediaKind.Series)
+            .Select(row => row.Id)
+            .ToListAsync(cancellationToken);
+
         var userData = await database.UserItemData.AsNoTracking()
             .Where(row => row.AppUserId == appUserId)
             .Select(row => new
@@ -189,31 +202,34 @@ public sealed class TasteProfileBuilder(
             .ToListAsync(cancellationToken);
         var userDataByItem = userData.ToDictionary(row => row.MediaItemId);
 
-        foreach (var group in plays.GroupBy(row => row.WorkId))
+        var playsByWork = plays.GroupBy(row => row.WorkId).ToDictionary(group => group.Key, group => group.ToList());
+
+        foreach (var workId in watchedWorkIds.Concat(ratedWorkIds).Distinct())
         {
-            var own = userDataByItem.GetValueOrDefault(group.Key);
+            var own = userDataByItem.GetValueOrDefault(workId);
             var rating = own?.Rating;
-            var latest = group.Max(row => row.WatchedAt);
+            var group = playsByWork.GetValueOrDefault(workId) ?? [];
+            var latest = group.Count > 0 ? group.Max(row => row.WatchedAt) : null;
             var age = latest is { } when ? now - when : RecommendationSeedSelector.RecencyHalfLife * 4;
 
             if (rating is 1 or 2)
             {
                 // Watched and rejected: the strongest negative available, and unlike a hide it needs
                 // no "enough of them exist" threshold — a verdict after watching stands on its own.
-                signals[group.Key] = new TitleSignal(-(rating == 1 ? OneStarWeight : TwoStarWeight));
+                signals[workId] = new TitleSignal(-(rating == 1 ? OneStarWeight : TwoStarWeight));
                 continue;
             }
 
             if (RecommendationSeedSelector.WeightOf(rating, own?.IsFavorite ?? false, age) is { } weight)
             {
-                signals[group.Key] = new TitleSignal(weight);
+                signals[workId] = new TitleSignal(weight);
             }
         }
 
         // Started, stopped early, never finished: the viewer's most honest negative that involves no
         // typing at all. Watched titles win the key — a film abandoned once and finished later is not
         // a rejection.
-        var watched = watchedWorkIds.ToHashSet();
+        var watched = watchedWorkIds.Concat(ratedWorkIds).ToHashSet();
         var abandonedCandidates = userData
             .Where(row => !row.Played && row.PlaybackPositionTicks > 0 &&
                 !watched.Contains(row.MediaItemId) && !signals.ContainsKey(row.MediaItemId))

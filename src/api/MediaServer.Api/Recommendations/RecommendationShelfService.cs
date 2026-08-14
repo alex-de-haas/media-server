@@ -276,8 +276,12 @@ public sealed class RecommendationShelfService(
         var copies = await CopiesAsync(stored, cancellationToken);
         var watchable = copies.Values.SelectMany(ids => ids).ToHashSet();
 
+        // A rating counts as watched here too. This is the shelf's own read-time exclusion, separate
+        // from the feed's, so it has to be told the same thing — otherwise a title rated but never
+        // played through this instance stays on the shelf, and a rebuild can put it back.
         var played = await database.UserItemData.AsNoTracking()
-            .Where(row => row.AppUserId == appUserId && row.Played && watchable.Contains(row.MediaItemId))
+            .Where(row => row.AppUserId == appUserId && (row.Played || row.Rating != null) &&
+                watchable.Contains(row.MediaItemId))
             .Select(row => row.MediaItemId)
             .ToListAsync(cancellationToken);
 

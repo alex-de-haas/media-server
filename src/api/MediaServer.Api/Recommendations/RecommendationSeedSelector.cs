@@ -84,12 +84,27 @@ public sealed class RecommendationSeedSelector(
             .Where(row => row.Kind == MediaKind.Movie || row.Kind == MediaKind.Episode)
             .ToListAsync(cancellationToken);
 
-        if (plays.Count == 0)
+        // A rating is a statement about a title the viewer has seen, and this instance is often not
+        // where they saw it: an imported library, or someone grading their back catalogue, has ratings
+        // and no playback at all. Seeding only from plays would leave the strongest signal the schema
+        // carries doing nothing.
+        var ratedWorkIds = await database.UserItemData.AsNoTracking()
+            .Where(row => row.AppUserId == appUserId && row.Rating != null)
+            .Join(
+                database.MediaItems.AsNoTracking(),
+                row => row.MediaItemId,
+                item => item.Id,
+                (row, item) => new { item.Id, item.Kind })
+            .Where(row => row.Kind == MediaKind.Movie || row.Kind == MediaKind.Series)
+            .Select(row => row.Id)
+            .ToListAsync(cancellationToken);
+
+        if (plays.Count == 0 && ratedWorkIds.Count == 0)
         {
             return [];
         }
 
-        var seedItemIds = plays.Select(row => row.SeedItemId).Distinct().ToList();
+        var seedItemIds = plays.Select(row => row.SeedItemId).Concat(ratedWorkIds).Distinct().ToList();
         var seedItems = await database.MediaItems.AsNoTracking()
             .Where(item => seedItemIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
@@ -107,24 +122,28 @@ public sealed class RecommendationSeedSelector(
         var now = time.GetUtcNow();
         var seeds = new List<(RecommendationIdentity Identity, double Weight, DateTimeOffset? Latest)>();
 
-        foreach (var group in plays.GroupBy(row => row.SeedItemId))
+        var playsByWork = plays.GroupBy(row => row.SeedItemId).ToDictionary(group => group.Key, group => group.ToList());
+
+        foreach (var workId in seedItemIds)
         {
-            if (!seedItems.TryGetValue(group.Key, out var item) || TmdbIdOf(item) is not { } tmdbId)
+            if (!seedItems.TryGetValue(workId, out var item) || TmdbIdOf(item) is not { } tmdbId)
             {
                 // Unidentified, or identified by something other than TMDb: nothing to ask TMDb about.
                 continue;
             }
+
+            var group = playsByWork.GetValueOrDefault(workId) ?? [];
 
             var kind = item.Kind == MediaKind.Movie ? RecommendationKind.Movie : RecommendationKind.Series;
 
             // Undated plays still count — a manual mark says "watched", and dropping it would make a
             // library migrated from aggregate counts look like nobody had seen anything. They simply
             // carry no recency bonus.
-            var latest = group.Max(row => row.WatchedAt);
+            var latest = group.Count > 0 ? group.Max(row => row.WatchedAt) : null;
             var age = latest is { } when ? now - when : RecencyHalfLife * 4;
 
-            if (WeightOf(rating.TryGetValue(group.Key, out var stars) ? stars : null,
-                    favorite.Contains(group.Key), age, _weights) is not { } weight)
+            if (WeightOf(rating.TryGetValue(workId, out var stars) ? stars : null,
+                    favorite.Contains(workId), age, _weights) is not { } weight)
             {
                 // One or two stars: watched, and not worth asking for more of. Still evidence — the
                 // taste profile reads these titles' facets as negatives — but never a seed.
@@ -132,7 +151,7 @@ public sealed class RecommendationSeedSelector(
             }
 
             // Distinct plays, not distinct episodes: watching a series' episodes is not rewatching.
-            var distinctPlays = item.Kind == MediaKind.Movie ? group.Count() : 1;
+            var distinctPlays = item.Kind == MediaKind.Movie ? group.Count : 1;
             if (distinctPlays > 1)
             {
                 weight *= _weights.RewatchBoost;
