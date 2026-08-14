@@ -221,6 +221,23 @@ invisible to everything above it. Concurrent failures produce one exchange, not 
 and a request carrying a body is never retried — an `HTTPBody` is a stream consumed by the
 attempt that failed.
 
+### The generated client and .NET disagree about dates, too
+
+`lastPlayedDate` is a `DateTimeOffset`, and .NET writes those with **seven** fractional
+digits — `2026-08-14T14:38:22.1234567+00:00`. The generated client's default transcoder is
+`ISO8601DateFormatter` with `.withInternetDateTime` and nothing else, which rejects any
+fractional part at all, so **the entire sync feed failed to decode** with a `dataCorrupted`
+that named no field.
+
+`LenientDateTranscoder` reads what the server actually sends. Fixed on the client rather
+than the server: what .NET emits is valid ISO-8601 and a valid `date-time`, so it is the
+reader that is too narrow — and narrowing the server to suit one client would break the
+Jellyfin surface and the web UI, which read the same dates.
+
+This is the second time the generator's defaults and .NET's output have disagreed, after
+the nullable references below, and neither showed up in a stubbed test because the stubs
+were written to match the client. Only a run against the real server found either.
+
 ### The generated client was quietly dropping fields
 
 `swift-openapi-generator` does not support a bare `null` schema, and ASP.NET describes a

@@ -17,6 +17,7 @@ public enum MediaServerAPIClient {
     ) -> Client {
         Client(
             serverURL: server,
+            configuration: Configuration(dateTranscoder: LenientDateTranscoder()),
             transport: transport ?? URLSessionTransport(configuration: .init(session: session())),
             middlewares: middlewares + (token.map { [BearerMiddleware(token: $0)] } ?? []))
     }

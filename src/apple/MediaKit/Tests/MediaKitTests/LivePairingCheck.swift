@@ -39,6 +39,7 @@ private func say(_ line: String) {
 ///
 /// The log path is worth setting: `swift test` runs the bundle through a helper that holds both streams
 /// until the run ends, which is long after the code has to be read and approved.
+@MainActor
 struct LivePairingCheck {
     @Test("The whole chain, against a real Core")
     func run() async throws {
@@ -90,7 +91,10 @@ struct LivePairingCheck {
         say("  polling every \(grant.intervalSeconds)s, expires in \(grant.expiresInSeconds)s")
 
         // 3 — waiting
-        let deadline = Date().addingTimeInterval(TimeInterval(min(grant.expiresInSeconds, 180)))
+        // Core's own lifetime, not a shorter one of my own. Approving means picking up a phone and
+        // finding a settings screen, and a cap of three minutes turned that into a race nobody was told
+        // they were running.
+        let deadline = Date().addingTimeInterval(TimeInterval(grant.expiresInSeconds))
         var coreToken: String?
 
         while Date() < deadline, coreToken == nil {
@@ -120,8 +124,9 @@ struct LivePairingCheck {
 
         // 4 — narrowing it to this app
         say("→ exchange for an app identity")
+        let identity: AppIdentity
         do {
-            let identity = try await client.exchange(
+            identity = try await client.exchange(
                 core: core, appId: bootstrap.appId, redirectUri: server, coreToken: coreToken)
             say("  app token of \(identity.accessToken.count) characters, expires \(identity.expiresAt)")
         } catch {
@@ -129,7 +134,61 @@ struct LivePairingCheck {
             return
         }
 
+        // 5 — and now the half that has only ever been exercised against stubs
+        let paired = PairedServer(
+            server: server,
+            serverName: bootstrap.serverName,
+            appId: bootstrap.appId,
+            coreOrigin: core,
+            coreToken: coreToken,
+            identity: identity)
+
+        // Deliberately not the Keychain: a diagnostic must not leave a credential behind.
+        let session = ServerSession(paired: paired, store: InMemoryCredentialStore())
+        let library = LibraryStore(session: session)
+
+        say("→ draining the sync feed")
+        await library.load()
+
+        guard case .loaded = library.state else {
+            Issue.record("library did not load: \(library.state)")
+            return
+        }
+
+        say("  \(library.items.count) titles: \(library.movies.count) films, \(library.series.count) series")
+
+        let started = library.items.filter { $0.resumeSeconds > 0 }.count
+        let finished = library.items.filter(\.played).count
+        // The field the generator used to drop. Zero for both would not prove it broken, but it is the
+        // number worth reading first.
+        say("  userData: \(started) started, \(finished) watched")
+
+        guard let sample = library.movies.first(where: { $0.resumeSeconds > 0 }) ?? library.movies.first else {
+            say("  no films to open")
+            return
+        }
+
+        say("→ detail for \(sample.title)")
+        let detail = try await library.detail(for: sample.id)
+        say("  \(detail.versions.count) version(s), runtime \(Int((detail.runtimeSeconds ?? 0) / 60)) min")
+        for version in detail.versions {
+            say("    \(version.versionName ?? version.container.uppercased()) — "
+                + "\(version.sizeDescription), \(version.audio.count) audio, \(version.subtitles.count) subtitle")
+            for track in version.audio where track.isExternal {
+                say("      beside the file: \(track.label)")
+            }
+        }
+
+        if let url = sample.artworkURL(on: server) {
+            say("→ artwork \(url.lastPathComponent)")
+            if let data = await session.artwork.image(at: url) {
+                say("  \(data.count) bytes")
+            } else {
+                Issue.record("artwork did not load from \(url)")
+            }
+        }
+
         say("")
-        say("✅ the whole chain works against \(bootstrap.serverName)")
+        say("✅ pairing, browsing and detail all work against \(bootstrap.serverName)")
     }
 }

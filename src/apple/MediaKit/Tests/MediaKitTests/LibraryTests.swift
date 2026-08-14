@@ -1,5 +1,6 @@
 import Foundation
 import HTTPTypes
+import MediaServerAPI
 import OpenAPIRuntime
 import Testing
 
@@ -314,5 +315,47 @@ struct LibraryStoreTests {
         if case .failed = subject.state {} else {
             Issue.record("Expected a failure, got \(subject.state)")
         }
+    }
+}
+
+@Suite("Dates as this server writes them")
+struct DateTranscoderTests {
+    private let subject = LenientDateTranscoder()
+
+    @Test("Seven fractional digits, which is what .NET's DateTimeOffset emits")
+    func dotNetPrecision() throws {
+        // The whole sync feed failed to decode on this, with a `dataCorrupted` that named no field.
+        let date = try subject.decode("2026-08-14T14:38:22.1234567+00:00")
+
+        #expect(abs(date.timeIntervalSince1970 - 1_786_718_302.123) < 0.001)
+    }
+
+    @Test("Three digits and none, which everything else sends")
+    func ordinaryPrecision() throws {
+        let millis = try subject.decode("2026-08-14T14:38:22.123Z")
+        let whole = try subject.decode("2026-08-14T14:38:22Z")
+
+        #expect(abs(millis.timeIntervalSince(whole) - 0.123) < 0.001)
+    }
+
+    @Test("An offset that is not UTC keeps its meaning")
+    func offset() throws {
+        let plusTwo = try subject.decode("2026-08-14T16:38:22.5000000+02:00")
+        let utc = try subject.decode("2026-08-14T14:38:22.5Z")
+
+        #expect(abs(plusTwo.timeIntervalSince(utc)) < 0.001)
+    }
+
+    @Test("Something that is not a date is refused rather than guessed at")
+    func refuses() {
+        #expect(throws: (any Error).self) { try subject.decode("not a date") }
+        #expect(throws: (any Error).self) { try subject.decode("") }
+    }
+
+    @Test("What it writes, it can read")
+    func roundTrip() throws {
+        let now = Date(timeIntervalSince1970: 1_786_718_302.25)
+
+        #expect(abs(try subject.decode(try subject.encode(now)).timeIntervalSince(now)) < 0.001)
     }
 }
