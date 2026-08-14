@@ -103,6 +103,18 @@ test("a card says why it is here, and says nothing when nothing could say", asyn
   await expect(page.getByTestId("rec-reason")).toHaveText("Because you rated Arrival 5★");
 });
 
+test("a feed built from the library alone says so instead of claiming you watched something", async ({ page }) => {
+  // The rung exists to stop a weaker answer being presented as the ordinary one.
+  await setupApp(page, { recommendations: { ...feed, rung: "library" } });
+  await page.goto("/recommendations");
+
+  await expect(page.getByText(/Built from what this library holds/)).toBeVisible();
+
+  await setupApp(page, { recommendations: { ...feed, rung: "history" } });
+  await page.goto("/recommendations");
+  await expect(page.getByText(/Built from what you have watched/)).toBeVisible();
+});
+
 test("an empty feed explains itself rather than showing a blank page", async ({ page }) => {
   await setupApp(page, { recommendations: { items: [] } });
   await page.goto("/recommendations");

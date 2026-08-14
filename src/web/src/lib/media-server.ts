@@ -732,7 +732,12 @@ export function reasonText(reason: RecommendationReason | null): string | null {
   if (!reason) return null;
   switch (reason.kind) {
     case "rated-seed":
-      return reason.detail ? `Because you rated ${reason.detail} ${reason.rating}★` : null;
+      // Without stars there is nothing a star phrasing can say, so fall back to the plain watch —
+      // "you rated this null★" is worse than saying less.
+      if (!reason.detail) return null;
+      return reason.rating == null
+        ? `Because you watched ${reason.detail}`
+        : `Because you rated ${reason.detail} ${reason.rating}★`;
     case "seed":
       return reason.detail ? `Because you watched ${reason.detail}` : null;
     case "franchise":
@@ -752,6 +757,11 @@ export interface RecommendationFeed {
   popularityBias: number;
   /** The dial's far end, so the control does not hardcode the server's range. */
   maxPopularityBias: number;
+  /**
+   * Which question the feed answered: "history" is the ordinary case, "library" means the viewer has
+   * watched nothing and the instance answered from what it holds. Null when there was nothing to say.
+   */
+  rung: "history" | "library" | null;
 }
 
 /** A watched mark with no date: shown in a list, never placed on a guessed day. */

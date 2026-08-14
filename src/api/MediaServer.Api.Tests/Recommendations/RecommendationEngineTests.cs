@@ -53,6 +53,9 @@ public sealed class RecommendationEngineTests : IDisposable
     {
         public Dictionary<string, List<TmdbRecommendedTitle>> Lists { get; } = [];
 
+        /// <summary>What `/similar` answers, when a test needs the two questions to differ.</summary>
+        public Dictionary<string, List<TmdbRecommendedTitle>> SimilarLists { get; } = [];
+
         public List<RecommendationIdentity> Asked { get; } = [];
 
         public List<TmdbRecommendationGenerator> AskedGenerators { get; } = [];
@@ -62,8 +65,9 @@ public sealed class RecommendationEngineTests : IDisposable
         {
             Asked.Add(seed);
             AskedGenerators.Add(generator);
+            var table = generator == TmdbRecommendationGenerator.Similar ? SimilarLists : Lists;
             return Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>(
-                Lists.TryGetValue(seed.TmdbId, out var list) ? list : []);
+                table.TryGetValue(seed.TmdbId, out var list) ? list : []);
         }
 
         /// <summary>Answers nothing: these tests are about the per-seed lists only.</summary>
@@ -275,6 +279,30 @@ public sealed class RecommendationEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task TwoQuestionsAboutOneSeedAreNotTwoSeedsAgreeing()
+    {
+        // `/recommendations` and `/similar` ask about the same watched title. Their contributions are
+        // already summed, so counting each answer as a separate seed would apply the breadth
+        // multiplier to evidence that was counted once — one film looking like two films agreeing.
+        //
+        // Both candidates pool the same raw contribution (2.0). "z-rival" earns it from two different
+        // watched titles and keeps the ×1.69 breadth bonus; "a-shared" earns it from one title asked
+        // twice and must not. Counting answers would tie them, and the ordinal tiebreak would then put
+        // "a-shared" first — which is exactly what this asserts against.
+        SeedWatched("s1");
+        SeedWatched("s2");
+        SeedWatched("s3");
+        _tmdb.Lists["s1"] = [Title("a-shared")];
+        _tmdb.SimilarLists["s1"] = [Title("a-shared")];
+        _tmdb.Lists["s2"] = [Title("z-rival")];
+        _tmdb.Lists["s3"] = [Title("z-rival")];
+
+        var result = (await EngineWithSimilar().RankAsync(_userId, 10, CancellationToken.None)).Candidates;
+
+        Assert.Equal("z-rival", result[0].Identity.TmdbId);
+    }
+
+    [Fact]
     public async Task TheResultIsOrderedMostRelevantFirst()
     {
         // Position is the whole output — the surface turns it into a rank, and fusion is gone.
@@ -343,6 +371,19 @@ public sealed class RecommendationEngineTests : IDisposable
     /// `held` is here because the cold-start ladder has nothing to fall to without it, and it stays
     /// quiet whenever the fixture's library is empty — which it is for every aggregation test.
     /// </summary>
+    /// <summary>The same engine with the content-based list wired too, for the one test that needs it.</summary>
+    private RecommendationEngine EngineWithSimilar() => new(
+        _database,
+        new RecommendationSeedSelector(_database, _time),
+        [SeedListGenerator.Recommendations(_tmdb), SeedListGenerator.Similar(_tmdb)],
+        new TitleFacetReader(_database),
+        new TasteProfileCache(),
+        new TasteProfileBuilder(_database, new TitleFacetReader(_database), new LibraryFacetIndexCache(), _time),
+        new RecommendationScorer(),
+        new RecommendationReranker(),
+        new RecommendationPreferenceStore(_database),
+        NullLogger<RecommendationEngine>.Instance);
+
     private RecommendationEngine Engine() => new(
         _database,
         new RecommendationSeedSelector(_database, _time),

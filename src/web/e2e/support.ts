@@ -148,6 +148,7 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
           items: [],
           popularityBias: 0,
           maxPopularityBias: 2,
+          rung: "history",
           ...(mock.recommendations ?? {}),
         },
       });

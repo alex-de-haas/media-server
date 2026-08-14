@@ -47,9 +47,16 @@ public sealed class TasteProfileCache
     internal static async Task<ProfileStamp> StampOfAsync(
         int appUserId, MediaServerDbContext database, CancellationToken cancellationToken)
     {
+        // Counts alone cannot see a swap: replacing one hidden or watchlisted title with another, or a
+        // history sync rewriting plays, leaves every total where it was while the facets underneath
+        // change completely. Pairing each count with the newest row's instant closes that, because a
+        // replacement is always a newer row than the thing it replaced.
         var plays = await database.PlaybackHistoryEntries.AsNoTracking()
             .Where(entry => entry.AppUserId == appUserId)
             .CountAsync(cancellationToken);
+        var newestPlay = await database.PlaybackHistoryEntries.AsNoTracking()
+            .Where(entry => entry.AppUserId == appUserId)
+            .MaxAsync(entry => (DateTimeOffset?)entry.CreatedAt, cancellationToken);
 
         // StateRevision is bumped on every write to a row, so its sum moves for a rating, a favorite,
         // a resume point or a played toggle without needing a column per signal.
@@ -60,19 +67,45 @@ public sealed class TasteProfileCache
         var hides = await database.RecommendationHides.AsNoTracking()
             .Where(hide => hide.AppUserId == appUserId)
             .CountAsync(cancellationToken);
+        var newestHide = await database.RecommendationHides.AsNoTracking()
+            .Where(hide => hide.AppUserId == appUserId)
+            .MaxAsync(hide => (DateTimeOffset?)hide.CreatedAt, cancellationToken);
 
         var watchlist = await database.WatchlistEntries.AsNoTracking()
             .Where(entry => entry.AppUserId == appUserId)
             .CountAsync(cancellationToken);
+        var newestWatchlist = await database.WatchlistEntries.AsNoTracking()
+            .Where(entry => entry.AppUserId == appUserId)
+            .MaxAsync(entry => (DateTimeOffset?)entry.CreatedAt, cancellationToken);
 
         var library = await LibraryFacetIndexCache.GenerationOfAsync(database, cancellationToken);
 
-        return new ProfileStamp(plays, stateRevisions, hides, watchlist, library);
+        return new ProfileStamp(
+            plays,
+            newestPlay?.UtcTicks ?? 0,
+            stateRevisions,
+            hides,
+            newestHide?.UtcTicks ?? 0,
+            watchlist,
+            newestWatchlist?.UtcTicks ?? 0,
+            library);
     }
 
     private readonly record struct Entry(ProfileStamp Stamp, TasteProfile Profile);
 }
 
 /// <summary>The inputs a cached profile was built from, compressed to something comparable.</summary>
+/// <remarks>
+/// Each per-user signal is a count <em>and</em> the newest row's instant. The count alone would miss a
+/// replacement — one hide swapped for another, a sync rewriting the same number of plays — which is a
+/// stale profile that nothing else in the design would ever notice.
+/// </remarks>
 public readonly record struct ProfileStamp(
-    int Plays, long StateRevisions, int Hides, int WatchlistEntries, LibraryGeneration Library);
+    int Plays,
+    long NewestPlayTicks,
+    long StateRevisions,
+    int Hides,
+    long NewestHideTicks,
+    int WatchlistEntries,
+    long NewestWatchlistTicks,
+    LibraryGeneration Library);

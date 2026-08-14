@@ -48,8 +48,12 @@ export function RecommendationsView() {
     <section className="flex flex-col gap-4">
       <header className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Recommended for you</h1>
+        {/* The rung exists so a weaker answer is not presented as the ordinary one; saying "built
+            from what you have watched" to someone who has watched nothing is exactly that. */}
         <p className="text-muted-foreground text-sm">
-          Built from what you have watched. Titles you already finished never appear here.
+          {feed.data?.rung === "library"
+            ? "Built from what this library holds — watch something and these will follow your own taste."
+            : "Built from what you have watched. Titles you already finished never appear here."}
         </p>
       </header>
 
@@ -196,6 +200,16 @@ function PopularityControl({ feed }: { feed: { popularityBias: number; maxPopula
 
   const shown = value ?? feed.popularityBias;
 
+  // A drag ends in three events and all three fire. Committing only a changed value keeps one
+  // interaction to one request, and makes the last write the one the user actually left it at.
+  const commit = () => {
+    if (value !== null && value !== feed.popularityBias) {
+      save.mutate(value);
+    } else {
+      setValue(null);
+    }
+  };
+
   return (
     <label className="bg-secondary/60 text-muted-foreground flex items-center gap-2 rounded-md px-2 py-1 text-xs">
       <span>Popular</span>
@@ -209,9 +223,11 @@ function PopularityControl({ feed }: { feed: { popularityBias: number; maxPopula
         aria-label="Popular to deep cuts"
         className="accent-brand w-24"
         onChange={(event) => setValue(Number(event.target.value))}
-        onPointerUp={() => value !== null && save.mutate(value)}
-        onKeyUp={() => value !== null && save.mutate(value)}
-        onBlur={() => value !== null && save.mutate(value)}
+        // A drag can end in three ways and all three fire, so commit only a value that differs from
+        // what the server already has — otherwise one interaction sends the same PUT three times.
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
       />
       <span>Deep cuts</span>
     </label>

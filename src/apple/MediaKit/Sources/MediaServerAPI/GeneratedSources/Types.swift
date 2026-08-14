@@ -1808,8 +1808,6 @@ public enum Components {
             public var inLibrary: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/RecommendationDto/mediaItemId`.
             public var mediaItemId: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/RecommendationDto/sources`.
-            public var sources: [Swift.String]
             /// Creates a new `RecommendationDto`.
             ///
             /// - Parameters:
@@ -1820,7 +1818,6 @@ public enum Components {
             ///   - posterUrl:
             ///   - inLibrary:
             ///   - mediaItemId:
-            ///   - sources:
             public init(
                 kind: Swift.String,
                 tmdbId: Swift.String,
@@ -1828,8 +1825,7 @@ public enum Components {
                 year: Swift.Int32? = nil,
                 posterUrl: Swift.String? = nil,
                 inLibrary: Swift.Bool,
-                mediaItemId: Swift.String? = nil,
-                sources: [Swift.String]
+                mediaItemId: Swift.String? = nil
             ) {
                 self.kind = kind
                 self.tmdbId = tmdbId
@@ -1838,7 +1834,6 @@ public enum Components {
                 self.posterUrl = posterUrl
                 self.inLibrary = inLibrary
                 self.mediaItemId = mediaItemId
-                self.sources = sources
             }
             public enum CodingKeys: String, CodingKey {
                 case kind
@@ -1848,61 +1843,72 @@ public enum Components {
                 case posterUrl
                 case inLibrary
                 case mediaItemId
-                case sources
             }
         }
         /// - Remark: Generated from `#/components/schemas/RecommendationFeedDto`.
         public struct RecommendationFeedDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/RecommendationFeedDto/items`.
             public var items: [Components.Schemas.RecommendationDto]
-            /// - Remark: Generated from `#/components/schemas/RecommendationFeedDto/sources`.
-            public var sources: [Components.Schemas.RecommendationProviderDescriptor]
-            /// - Remark: Generated from `#/components/schemas/RecommendationFeedDto/selectedSources`.
-            public var selectedSources: [Swift.String]
+            /// - Remark: Generated from `#/components/schemas/RecommendationFeedDto/popularityBias`.
+            public var popularityBias: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/RecommendationFeedDto/maxPopularityBias`.
+            public var maxPopularityBias: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/RecommendationFeedDto/rung`.
+            public var rung: Swift.String?
             /// Creates a new `RecommendationFeedDto`.
             ///
             /// - Parameters:
             ///   - items:
-            ///   - sources:
-            ///   - selectedSources:
+            ///   - popularityBias:
+            ///   - maxPopularityBias:
+            ///   - rung:
             public init(
                 items: [Components.Schemas.RecommendationDto],
-                sources: [Components.Schemas.RecommendationProviderDescriptor],
-                selectedSources: [Swift.String]
+                popularityBias: Swift.Double? = nil,
+                maxPopularityBias: Swift.Double? = nil,
+                rung: Swift.String? = nil
             ) {
                 self.items = items
-                self.sources = sources
-                self.selectedSources = selectedSources
+                self.popularityBias = popularityBias
+                self.maxPopularityBias = maxPopularityBias
+                self.rung = rung
             }
             public enum CodingKeys: String, CodingKey {
                 case items
-                case sources
-                case selectedSources
+                case popularityBias
+                case maxPopularityBias
+                case rung
             }
         }
         /// - Remark: Generated from `#/components/schemas/RecommendationKind`.
         public typealias RecommendationKind = OpenAPIRuntime.OpenAPIValueContainer
-        /// - Remark: Generated from `#/components/schemas/RecommendationProviderDescriptor`.
-        public struct RecommendationProviderDescriptor: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/RecommendationProviderDescriptor/key`.
-            public var key: Swift.String
-            /// - Remark: Generated from `#/components/schemas/RecommendationProviderDescriptor/displayName`.
-            public var displayName: Swift.String
-            /// Creates a new `RecommendationProviderDescriptor`.
+        /// - Remark: Generated from `#/components/schemas/RecommendationReason`.
+        public struct RecommendationReason: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/RecommendationReason/kind`.
+            public var kind: Swift.String
+            /// - Remark: Generated from `#/components/schemas/RecommendationReason/detail`.
+            public var detail: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/RecommendationReason/rating`.
+            public var rating: Swift.Int32?
+            /// Creates a new `RecommendationReason`.
             ///
             /// - Parameters:
-            ///   - key:
-            ///   - displayName:
+            ///   - kind:
+            ///   - detail:
+            ///   - rating:
             public init(
-                key: Swift.String,
-                displayName: Swift.String
+                kind: Swift.String,
+                detail: Swift.String? = nil,
+                rating: Swift.Int32? = nil
             ) {
-                self.key = key
-                self.displayName = displayName
+                self.kind = kind
+                self.detail = detail
+                self.rating = rating
             }
             public enum CodingKeys: String, CodingKey {
-                case key
-                case displayName
+                case kind
+                case detail
+                case rating
             }
         }
         /// - Remark: Generated from `#/components/schemas/ReleaseType`.
@@ -2068,6 +2074,8 @@ public enum Components {
             public var lastPlayedDate: Foundation.Date?
             /// - Remark: Generated from `#/components/schemas/UserItemDataDto/unplayedItemCount`.
             public var unplayedItemCount: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/UserItemDataDto/userRating`.
+            public var userRating: Swift.Int32?
             /// - Remark: Generated from `#/components/schemas/UserItemDataDto/itemId`.
             public var itemId: Swift.String?
             /// Creates a new `UserItemDataDto`.
@@ -2081,6 +2089,7 @@ public enum Components {
             ///   - playedPercentage:
             ///   - lastPlayedDate:
             ///   - unplayedItemCount:
+            ///   - userRating:
             ///   - itemId:
             public init(
                 key: Swift.String,
@@ -2091,6 +2100,7 @@ public enum Components {
                 playedPercentage: Swift.Double? = nil,
                 lastPlayedDate: Foundation.Date? = nil,
                 unplayedItemCount: Swift.Int32? = nil,
+                userRating: Swift.Int32? = nil,
                 itemId: Swift.String? = nil
             ) {
                 self.key = key
@@ -2101,6 +2111,7 @@ public enum Components {
                 self.playedPercentage = playedPercentage
                 self.lastPlayedDate = lastPlayedDate
                 self.unplayedItemCount = unplayedItemCount
+                self.userRating = userRating
                 self.itemId = itemId
             }
             public enum CodingKeys: String, CodingKey {
@@ -2112,6 +2123,7 @@ public enum Components {
                 case playedPercentage
                 case lastPlayedDate
                 case unplayedItemCount
+                case userRating
                 case itemId
             }
         }

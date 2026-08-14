@@ -111,6 +111,37 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AHeldTitleWithNoTmdbPosterFallsBackToItsLibraryArtwork()
+    {
+        // `held` and `collections` build candidates from library rows and carry no TMDb path, so
+        // without this the suggestions the instance already owns — the ones worth showing most —
+        // would all render as "No poster".
+        var movie = AddItem(MediaKind.Movie, "Local Title", "27205");
+        _database.ImageAssets.Add(new ImageAsset
+        {
+            Id = Guid.NewGuid(), MediaItemId = movie.Id, ImageType = ImageType.Primary,
+            Provider = "tmdb", RemotePath = "https://cdn/local.jpg", Tag = "tag-1",
+        });
+        _database.SaveChanges();
+        _tmdb.Movies.Add(new TmdbRecommendedTitle("27205", "TMDb Title", 2010, null));
+
+        Assert.Equal("https://cdn/local.jpg", Assert.Single((await Build()).Items).PosterUrl);
+    }
+
+    [Fact]
+    public async Task ATmdbPosterWinsOverTheLibraryCopyWhenTheCandidateHasOne()
+    {
+        // The path came with the list the candidate arrived in; preferring it keeps a discovery and a
+        // held title looking the same, and costs nothing.
+        AddItem(MediaKind.Movie, "Local Title", "27205");
+        _tmdb.Movies.Add(new TmdbRecommendedTitle("27205", "TMDb Title", 2010, "/tmdb.jpg"));
+
+        Assert.Equal(
+            "https://image.tmdb.org/t/p/w500/tmdb.jpg",
+            Assert.Single((await Build()).Items).PosterUrl);
+    }
+
+    [Fact]
     public async Task AWatchedMovieIsNeverRecommended()
     {
         var movie = AddItem(MediaKind.Movie, "Seen", "27205");

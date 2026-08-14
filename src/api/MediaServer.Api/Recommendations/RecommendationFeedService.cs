@@ -156,6 +156,7 @@ public sealed class RecommendationFeedService(
         var hidden = await HiddenAsync(appUserId, cancellationToken);
         var library = await LibraryByTmdbIdAsync(cancellationToken);
         var watched = await WatchedAsync(appUserId, library, cancellationToken);
+        var localArtwork = await LocalArtworkAsync(library, cancellationToken);
 
         var items = new List<RecommendationDto>(limit);
         foreach (var entry in ranked)
@@ -179,7 +180,10 @@ public sealed class RecommendationFeedService(
                 // everywhere else in this app.
                 held?.Title ?? entry.Candidate.Title.Title,
                 entry.Candidate.Title.Year,
-                PosterUrl(entry.Candidate.Title.PosterPath),
+                // A locally generated candidate carries no TMDb path — `held` and `collections`
+                // synthesize their titles — so the library's own artwork is what it has.
+                PosterUrl(entry.Candidate.Title.PosterPath)
+                    ?? (held is null ? null : localArtwork.GetValueOrDefault(held.Id)),
                 held is not null,
                 held?.Id,
                 entry.Candidate.Reason));
@@ -199,11 +203,42 @@ public sealed class RecommendationFeedService(
     /// <remarks>
     /// There used to be a TMDb lookup and a cache behind it, because a connected account returned no
     /// artwork at all and a title only it suggested would render as a grey box. Both are gone: the
-    /// widened cache shape carries <c>poster_path</c> inline on every candidate, and a local title has
-    /// library artwork.
+    /// widened cache shape carries <c>poster_path</c> inline on every TMDb candidate, and a title the
+    /// library holds is read from <see cref="LocalArtworkAsync"/> instead.
     /// </remarks>
     private static string? PosterUrl(string? posterPath) =>
         string.IsNullOrWhiteSpace(posterPath) ? null : $"https://image.tmdb.org/t/p/w500{posterPath}";
+
+    /// <summary>
+    /// The primary artwork of every held title in the pool, so a locally generated candidate has a
+    /// poster.
+    /// </summary>
+    /// <remarks>
+    /// One read for the whole feed rather than one per card. `held` and `collections` build their
+    /// candidates from library rows and have no TMDb path to carry, so without this every suggestion
+    /// the instance already owns would render as "No poster" — the titles most worth showing.
+    /// </remarks>
+    private async Task<Dictionary<Guid, string>> LocalArtworkAsync(
+        IReadOnlyDictionary<RecommendationIdentity, LibraryTitle> library, CancellationToken cancellationToken)
+    {
+        var itemIds = library.Values.Select(title => title.Representative.Id).Distinct().ToList();
+        if (itemIds.Count == 0)
+        {
+            return [];
+        }
+
+        var images = await database.ImageAssets.AsNoTracking()
+            .Where(image => itemIds.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
+            .GroupBy(image => image.MediaItemId)
+            .Select(group => new
+            {
+                MediaItemId = group.Key,
+                Url = group.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First(),
+            })
+            .ToListAsync(cancellationToken);
+
+        return images.ToDictionary(image => image.MediaItemId, image => image.Url);
+    }
 
     private async Task<HashSet<RecommendationIdentity>> HiddenAsync(
         int appUserId, CancellationToken cancellationToken)

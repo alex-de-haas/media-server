@@ -152,6 +152,33 @@ public sealed class TasteProfileCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task SwappingOneHideForAnotherRebuildsTheProfile()
+    {
+        // The count is unchanged, and the facets underneath are completely different. A stamp built
+        // from totals alone would serve the old profile until something unrelated happened to move.
+        var first = new RecommendationHide
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId,
+            Kind = MediaServer.Api.Recommendations.RecommendationKind.Movie,
+            TmdbId = "111", CreatedAt = _time.GetUtcNow(),
+        };
+        _database.RecommendationHides.Add(first);
+        _database.SaveChanges();
+        var before = await Get();
+
+        _database.RecommendationHides.Remove(first);
+        _database.RecommendationHides.Add(new RecommendationHide
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId,
+            Kind = MediaServer.Api.Recommendations.RecommendationKind.Movie,
+            TmdbId = "222", CreatedAt = _time.GetUtcNow().AddMinutes(1),
+        });
+        _database.SaveChanges();
+
+        Assert.NotSame(before, await Get());
+    }
+
+    [Fact]
     public async Task AnotherUsersActivityDoesNotRebuildThisProfile()
     {
         // Their plays are not an input to my profile, and rebuilding on them would make a busy second

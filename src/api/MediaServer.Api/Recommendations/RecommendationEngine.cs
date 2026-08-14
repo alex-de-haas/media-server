@@ -32,9 +32,8 @@ public sealed record EngineResult(IReadOnlyList<RankedCandidate> Candidates, str
 /// <remarks>
 /// One stage used to do everything — providers returned ranked lists, fusion merged positions, the
 /// feed service filtered. That shape existed because a connected source returns positions without
-/// scores, so rank was the only unit two sources had in common. It is still the right unit
-/// <em>between</em> sources, and <see cref="RecommendationFusion"/> still does that job; what changed
-/// is that it is no longer how this engine ranks within itself, where it has real numbers.
+/// scores, so rank was the only unit two sources had in common. With one engine there is nothing to
+/// fuse, and ranking happens here, in real numbers.
 /// <list type="number">
 /// <item><b>Generate</b> — several strategies contribute candidates and a reason, with no claim about
 /// global order.</item>
@@ -319,9 +318,20 @@ public sealed class RecommendationEngine(
 
         public TitleFacets Facets { get; set; } = TitleFacets.Empty;
 
-        private double Collaborative { get; set; } = candidate.Contribution;
+        /// <summary>
+        /// The distinct watched titles that argued for this candidate.
+        /// </summary>
+        /// <remarks>
+        /// A set rather than a counter, because <c>seeds</c> and <c>similar</c> ask two questions about
+        /// the <em>same</em> watched title. Counting each answer would let one film look like two films
+        /// agreeing, and the breadth multiplier would reward it as such — the contributions are already
+        /// summed, so that would be counting the same evidence twice.
+        /// </remarks>
+        private readonly HashSet<string> _seeds = candidate.SeedTmdbId is null
+            ? []
+            : [candidate.SeedTmdbId];
 
-        private int Seeds { get; set; } = candidate.SeedTmdbId is null ? 0 : 1;
+        private double Collaborative { get; set; } = candidate.Contribution;
 
         private string? TopSeed { get; set; } = candidate.SeedTmdbId;
 
@@ -332,7 +342,7 @@ public sealed class RecommendationEngine(
             Collaborative += other.Contribution;
             if (other.SeedTmdbId is not null)
             {
-                Seeds++;
+                _seeds.Add(other.SeedTmdbId);
                 if (other.Contribution > TopSeedContribution)
                 {
                     TopSeedContribution = other.Contribution;
@@ -359,6 +369,6 @@ public sealed class RecommendationEngine(
         }
 
         public ScoredCandidate ToScored() =>
-            new(Collaborative, Seeds, Title, Facets, _generators, TopSeed) { ReasonDetail = _reasonDetail };
+            new(Collaborative, _seeds.Count, Title, Facets, _generators, TopSeed) { ReasonDetail = _reasonDetail };
     }
 }

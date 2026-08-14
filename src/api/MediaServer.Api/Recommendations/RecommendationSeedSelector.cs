@@ -42,7 +42,7 @@ public sealed class RecommendationSeedSelector(
     /// last week, and a "what should I watch next" that has not moved in a month is dead. These four
     /// slots are where a film watched recently and not yet rated lives.
     /// </remarks>
-    internal int RecencySlots => MaxSeeds - _weights.WeightedSeeds;
+    internal int RecencySlots => MaxSeeds - Math.Clamp(_weights.WeightedSeeds, 0, MaxSeeds);
 
     /// <summary>An <em>unrated</em> seed watched this long ago counts half as much as one watched today.</summary>
     internal static readonly TimeSpan RecencyHalfLife = TimeSpan.FromDays(90);
@@ -151,14 +151,17 @@ public sealed class RecommendationSeedSelector(
             .ThenBy(seed => seed.Identity.TmdbId, StringComparer.Ordinal)
             .ToList();
 
-        var chosen = byWeight.Take(_weights.WeightedSeeds).ToList();
-        if (byWeight.Count > _weights.WeightedSeeds)
+        // Clamped, not trusted: the budget exists because each seed is a TMDb request, and a swept
+        // configuration asking for more must not quietly spend them.
+        var weightedSeeds = Math.Clamp(_weights.WeightedSeeds, 0, MaxSeeds);
+        var chosen = byWeight.Take(weightedSeeds).ToList();
+        if (byWeight.Count > weightedSeeds)
         {
             // The reserve: the most recently watched of what weight alone left behind. Only titles that
             // reached this list at all are eligible, so a one-star film cannot enter through the back
             // door — it was dropped above.
             chosen.AddRange(byWeight
-                .Skip(_weights.WeightedSeeds)
+                .Skip(weightedSeeds)
                 .OrderByDescending(seed => seed.Latest ?? DateTimeOffset.MinValue)
                 .ThenBy(seed => seed.Identity.TmdbId, StringComparer.Ordinal)
                 .Take(RecencySlots));
