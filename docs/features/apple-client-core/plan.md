@@ -112,6 +112,14 @@ the pairing screen again if the access token itself has gone.
 
 ### Phase 3 — browsing
 
+- [ ] **Refresh on a refusal, not only on a clock.** Found while verifying against
+      production on 2026-08-14: the exchange returns an `expiresAt` thirty days out,
+      which is the grant's *absolute* cap — but the grant also lapses after seven days
+      idle, and nothing in the token says so. A television left alone for a week
+      therefore holds a credential that looks fresh and is not, and `restore()` will
+      report it paired. The first authenticated request is what discovers it, so a `401`
+      has to trigger the silent re-mint that `restore()` already knows how to do.
+      Untestable before there is an authenticated request to make, which is this phase.
 - [ ] **The library**, in the shape tvOS expects: a focus-driven grid, artwork from
       the signed image URLs, and the title's own editions rather than one row per
       file.

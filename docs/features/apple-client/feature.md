@@ -168,6 +168,20 @@ control offered.
 There is no transport switch while there is one transport. A control that does nothing is
 worse than an absent one, because it becomes the first thing a puzzled viewer changes.
 
+## Verified
+
+The whole chain was run against production on 2026-08-14 — `media.zayats.io`, its Core at
+`core.zayats.io`, approved in Shell — and every step answered: the bootstrap, the device
+code, the poll that collected a 64-character Core token, and the exchange that narrowed it
+to a 50-character app identity.
+
+That mattered more than the usual "it works". Four of the six calls are written against
+Core's source rather than a published document, because Core publishes none, so the stubbed
+tests could only ever confirm what their author already believed. The `surfaceVersion`
+mistake — modelled as a number, delivered as the string `"1"` — passed forty of them and
+would have failed here on the first line. `LivePairingCheck` in the test target is kept for
+exactly that, gated behind an environment variable so it can never run in CI.
+
 ## Building
 
 ```bash
