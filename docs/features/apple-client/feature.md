@@ -239,16 +239,24 @@ invisible to everything above it. Concurrent failures produce one exchange, not 
 and a request carrying a body is never retried — an `HTTPBody` is a stream consumed by the
 attempt that failed.
 
-### Two failures found this way, and neither by a test
+### Three ways ASP.NET and the generator disagree
 
-Both were invisible to the suite and both made browsing impossible. They are described
-below because the pattern is the point: the generator's defaults and what .NET emits are not
-the same, nothing in the pipeline compares them, and stubs written to match the client agree
-with the client. Sixty-one passing tests said browsing worked; the first run against the
-real server said it had never worked at all.
+All three are described below, and they were found in three different ways — which is the
+part worth remembering, because only one of them was a test.
 
-`LivePairingCheck` exists for exactly this, and is worth running *before* building on
-something rather than after.
+| Defect | Found by | What it did |
+| --- | --- | --- |
+| Nullable references dropped | the compiler, while browsing was being written | removed `userData` and seven other properties, silently |
+| Dates with seven fractional digits | `LivePairingCheck`, first run against production | **the entire sync feed failed to decode** |
+| Enums with no type | the compiler, on the first playback build | `decision` and `transport` arrived untyped |
+
+None was found by the unit suite, and the reason is the same each time: stubs written to
+match the client agree with the client. Sixty-one passing tests said browsing worked while
+it could not decode a single real response.
+
+The compiler is the cheaper of the two that did the finding, which is the argument for
+generating the client at all. `LivePairingCheck` is what catches the rest, and is worth
+running *before* building on something rather than after.
 
 ### The generated client and .NET disagree about dates, too
 
