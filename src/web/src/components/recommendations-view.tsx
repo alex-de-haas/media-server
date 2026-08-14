@@ -27,7 +27,7 @@ const PLACES: Array<{ value: LibraryFilter; label: string }> = [
   { value: "discover", label: "Not in library" },
 ];
 
-/** The full recommendations page: the merged feed, its filters, and the source control. */
+/** The full recommendations page: the feed, its filters, and the Popular ↔ Deep cuts dial. */
 export function RecommendationsView() {
   const [kind, setKind] = useState<KindFilter>("all");
   const [place, setPlace] = useState<LibraryFilter>("all");
@@ -48,15 +48,19 @@ export function RecommendationsView() {
     <section className="flex flex-col gap-4">
       <header className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Recommended for you</h1>
+        {/* The rung exists so a weaker answer is not presented as the ordinary one; saying "built
+            from what you have watched" to someone who has watched nothing is exactly that. */}
         <p className="text-muted-foreground text-sm">
-          Built from what you have watched. Titles you already finished never appear here.
+          {feed.data?.rung === "library"
+            ? "Built from what this library holds — watch something and these will follow your own taste."
+            : "Built from what you have watched. Titles you already finished never appear here."}
         </p>
       </header>
 
       <div className="flex flex-wrap items-center gap-2">
         <Segmented options={KINDS} value={kind} onChange={setKind} label="Media kind" />
         <Segmented options={PLACES} value={place} onChange={setPlace} label="Availability" />
-        {feed.data && feed.data.sources.length > 1 && <SourceControl feed={feed.data} />}
+        {feed.data && <PopularityControl feed={feed.data} />}
       </div>
 
       {feed.isError ? (
@@ -73,6 +77,7 @@ export function RecommendationsView() {
         <Grid>
           {items.map((item) => (
             <RecommendationCard
+              showReason
               key={`${item.kind}:${item.tmdbId}`}
               item={item}
               onHide={hide}
@@ -116,7 +121,7 @@ export function recommendationOf(target: TitlePreviewTarget, items: Recommendati
       posterUrl: target.posterUrl ?? null,
       inLibrary: false,
       mediaItemId: null,
-      sources: [],
+      reason: null,
     }
   );
 }
@@ -169,49 +174,66 @@ function Segmented<T extends string>({
   );
 }
 
-/** Only meaningful once a second source exists, so the caller renders it conditionally. */
-function SourceControl({ feed }: { feed: { sources: Array<{ key: string; displayName: string }>; selectedSources: string[] } }) {
+/**
+ * The Popular ↔ Deep cuts dial.
+ *
+ * TMDb's recommendation lists lean popular, so without a counterweight every instance converges on
+ * the same blockbusters. How much of the mainstream a viewer wants is a taste question rather than a
+ * correctness one, which is why this is a control and not a constant — and why it starts in the
+ * middle of nothing: zero is exactly how the feed ranked before the dial existed.
+ */
+function PopularityControl({ feed }: { feed: { popularityBias: number; maxPopularityBias: number } }) {
   const queryClient = useQueryClient();
+  // Local state so dragging feels immediate; the server is told once the drag ends.
+  const [value, setValue] = useState<number | null>(null);
   const save = useMutation({
-    mutationFn: (sources: string[] | null) => mediaServer.setRecommendationSources(sources),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["recommendations"] }),
-    onError: (error) => toast.error("Couldn’t change sources", { description: errorMessage(error) }),
+    mutationFn: (bias: number) => mediaServer.setRecommendationPopularityBias(bias),
+    onSuccess: () => {
+      setValue(null);
+      queryClient.invalidateQueries({ queryKey: ["recommendations"] });
+    },
+    onError: (error) => {
+      setValue(null);
+      toast.error("Couldn’t change the mix", { description: errorMessage(error) });
+    },
   });
 
-  const toggle = (key: string) => {
-    const selected = new Set(feed.selectedSources);
-    if (selected.has(key)) {
-      selected.delete(key);
-    } else {
-      selected.add(key);
-    }
+  const shown = value ?? feed.popularityBias;
 
-    // Turning the last source off would leave an unexplained empty feed; treat it as "all" instead.
-    save.mutate(selected.size === 0 ? null : [...selected]);
+  // A drag ends in three events and all three fire. Committing only a changed value keeps one
+  // interaction to one request, and makes the last write the one the user actually left it at.
+  const commit = () => {
+    if (value !== null && value !== feed.popularityBias) {
+      save.mutate(value);
+    } else {
+      setValue(null);
+    }
   };
 
   return (
-    <div className="bg-secondary/60 flex items-center gap-0.5 rounded-md p-0.5" role="group" aria-label="Sources">
-      {feed.sources.map((source) => (
-        <button
-          key={source.key}
-          type="button"
-          aria-pressed={feed.selectedSources.includes(source.key)}
-          disabled={save.isPending}
-          className={cn(
-            "rounded px-2 py-0.5 text-xs font-medium transition-colors",
-            feed.selectedSources.includes(source.key)
-              ? "bg-background shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-          onClick={() => toggle(source.key)}
-        >
-          {source.displayName}
-        </button>
-      ))}
-    </div>
+    <label className="bg-secondary/60 text-muted-foreground flex items-center gap-2 rounded-md px-2 py-1 text-xs">
+      <span>Popular</span>
+      <input
+        type="range"
+        min={0}
+        max={feed.maxPopularityBias}
+        step={0.1}
+        value={shown}
+        disabled={save.isPending}
+        aria-label="Popular to deep cuts"
+        className="accent-brand w-24"
+        onChange={(event) => setValue(Number(event.target.value))}
+        // A drag can end in three ways and all three fire, so commit only a value that differs from
+        // what the server already has — otherwise one interaction sends the same PUT three times.
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
+      />
+      <span>Deep cuts</span>
+    </label>
   );
 }
+
 
 /**
  * Hide (with undo) and Track, shared by the page and the home row so both behave identically.

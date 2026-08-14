@@ -303,6 +303,21 @@ public sealed class LibraryDeleteServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_rated_movie_survives_deletion_as_a_tombstone()
+    {
+        // A rating is signal on its own — never favorited, never played through this instance, but the
+        // viewer stated a verdict, and a delete that discarded it would lose something unrecoverable.
+        var movieId = await AddMovieAsync(favorite: false, rating: 5);
+
+        var deleted = await Service().DeleteAsync(movieId, deleteFiles: false, deleteUserData: false, CancellationToken.None);
+
+        Assert.True(deleted);
+        await using var verify = _db.Create();
+        Assert.NotNull((await verify.MediaItems.SingleAsync(item => item.Id == movieId)).RemovedAt);
+        Assert.Equal(5, (await verify.UserItemData.SingleAsync(data => data.MediaItemId == movieId)).Rating);
+    }
+
+    [Fact]
     public async Task An_untouched_movie_is_purged_on_delete()
     {
         var movieId = await AddMovieAsync(favorite: false);
@@ -339,7 +354,9 @@ public sealed class LibraryDeleteServiceTests : IDisposable
         return extra.Id;
     }
 
-    private async Task<Guid> AddMovieAsync(bool favorite)
+    private async Task<Guid> AddMovieAsync(bool favorite) => await AddMovieAsync(favorite, rating: null);
+
+    private async Task<Guid> AddMovieAsync(bool favorite, int? rating)
     {
         var now = DateTimeOffset.UtcNow;
         await using var seed = _db.Create();
@@ -357,11 +374,12 @@ public sealed class LibraryDeleteServiceTests : IDisposable
         };
         seed.MediaItems.Add(movie);
         seed.MediaSources.Add(source);
-        if (favorite)
+        if (favorite || rating is not null)
         {
             seed.UserItemData.Add(new UserItemData
             {
-                Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = movie.Id, IsFavorite = true,
+                Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = movie.Id, IsFavorite = favorite,
+                Rating = rating,
             });
         }
 

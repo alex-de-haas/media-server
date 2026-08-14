@@ -41,7 +41,6 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<ReminderDelivery> ReminderDeliveries => Set<ReminderDelivery>();
     public DbSet<RecommendationHide> RecommendationHides => Set<RecommendationHide>();
     public DbSet<TmdbRecommendationCacheEntry> TmdbRecommendationCache => Set<TmdbRecommendationCacheEntry>();
-    public DbSet<TmdbPosterCacheEntry> TmdbPosterCache => Set<TmdbPosterCacheEntry>();
     public DbSet<RecommendationShelfItem> RecommendationShelfItems => Set<RecommendationShelfItem>();
     public DbSet<RecommendationShelfGeneration> RecommendationShelfGenerations => Set<RecommendationShelfGeneration>();
     public DbSet<TmdbTitleDetailCacheEntry> TmdbTitleDetailCache => Set<TmdbTitleDetailCacheEntry>();
@@ -724,15 +723,12 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         recommendationCache.HasKey(entity => entity.Id);
         // The engine looks a seed up by its coordinates; uniqueness keeps a refresh replacing the row
         // rather than growing a pile of generations.
-        recommendationCache.HasIndex(entity => new { entity.Kind, entity.TmdbId }).IsUnique();
+        // The generator leads the key: one seed can be asked more than one question, and each answer
+        // is its own row. Existing rows are `/recommendations` answers, which is Generator 0.
+        recommendationCache.HasIndex(entity => new { entity.Generator, entity.Kind, entity.TmdbId }).IsUnique();
+        recommendationCache.Property(entity => entity.Generator).HasConversion<int>();
         recommendationCache.Property(entity => entity.Kind).HasConversion<int>();
         recommendationCache.Property(entity => entity.TmdbId).HasMaxLength(32);
-
-        var posterCache = modelBuilder.Entity<TmdbPosterCacheEntry>();
-        posterCache.HasKey(entity => entity.Id);
-        posterCache.HasIndex(entity => new { entity.Kind, entity.TmdbId }).IsUnique();
-        posterCache.Property(entity => entity.Kind).HasConversion<int>();
-        posterCache.Property(entity => entity.TmdbId).HasMaxLength(32);
 
         var titleDetailCache = modelBuilder.Entity<TmdbTitleDetailCacheEntry>();
         titleDetailCache.HasKey(entity => entity.Id);
@@ -745,7 +741,6 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         var recommendationPreference = modelBuilder.Entity<RecommendationPreference>();
         recommendationPreference.HasKey(entity => entity.Id);
         recommendationPreference.HasIndex(entity => entity.AppUserId).IsUnique();
-        recommendationPreference.Property(entity => entity.Sources).HasMaxLength(256);
         recommendationPreference.HasOne(entity => entity.AppUser)
             .WithMany()
             .HasForeignKey(entity => entity.AppUserId)

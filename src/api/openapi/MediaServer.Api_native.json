@@ -2352,8 +2352,7 @@
           "year",
           "posterUrl",
           "inLibrary",
-          "mediaItemId",
-          "sources"
+          "mediaItemId"
         ],
         "type": "object",
         "properties": {
@@ -2391,19 +2390,21 @@
             ],
             "format": "uuid"
           },
-          "sources": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+          "reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RecommendationReason"
+              }
+            ]
           }
         }
       },
       "RecommendationFeedDto": {
         "required": [
-          "items",
-          "sources",
-          "selectedSources"
+          "items"
         ],
         "type": "object",
         "properties": {
@@ -2413,17 +2414,29 @@
               "$ref": "#/components/schemas/RecommendationDto"
             }
           },
-          "sources": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RecommendationProviderDescriptor"
-            }
+          "popularityBias": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
           },
-          "selectedSources": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+          "maxPopularityBias": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 2
+          },
+          "rung": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -2434,18 +2447,29 @@
           null
         ]
       },
-      "RecommendationProviderDescriptor": {
+      "RecommendationReason": {
         "required": [
-          "key",
-          "displayName"
+          "kind"
         ],
         "type": "object",
         "properties": {
-          "key": {
+          "kind": {
             "type": "string"
           },
-          "displayName": {
-            "type": "string"
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rating": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -2653,6 +2677,15 @@
             "format": "date-time"
           },
           "unplayedItemCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "userRating": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "null",

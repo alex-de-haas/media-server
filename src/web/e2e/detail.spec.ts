@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { anEpisode, aMovie, aSeason, aSeries, movieDetail, seriesDetail, setupApp } from "./support";
+import { anEpisode, aMovie, aSeason, aSeries, aUserData, movieDetail, seriesDetail, setupApp } from "./support";
 
 test("opens a movie detail page and marks it watched", async ({ page }) => {
   await setupApp(page, {
@@ -17,6 +17,56 @@ test("opens a movie detail page and marks it watched", async ({ page }) => {
   );
   await page.getByRole("button", { name: "Mark watched" }).click();
   await played;
+});
+
+test("rates a movie from the detail page", async ({ page }) => {
+  await setupApp(page, {
+    library: [aMovie("m1", "Arrival")],
+    detail: { m1: movieDetail("m1", "Arrival") },
+  });
+
+  await page.goto("/movies/m1");
+
+  const rated = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/library/m1/rating") && request.method() === "PUT",
+  );
+  await page.getByRole("button", { name: "Rate 4 stars" }).click();
+  expect((await rated).postDataJSON()).toEqual({ rating: 4 });
+});
+
+test("clicking the lit star clears the rating back to unrated", async ({ page }) => {
+  // Clearing has to be reachable: unrated and one star are opposite statements to the engine, so
+  // "rate it badly" is not a way back.
+  await setupApp(page, {
+    library: [aMovie("m1", "Arrival")],
+    detail: { m1: { ...movieDetail("m1", "Arrival"), userData: aUserData({ userRating: 4 }) } },
+  });
+
+  await page.goto("/movies/m1");
+
+  // The fourth star is lit, so its button offers the clear rather than setting the same value again.
+  const cleared = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/library/m1/rating") && request.method() === "DELETE",
+  );
+  await page.getByRole("button", { name: "Clear your rating" }).click();
+  await cleared;
+});
+
+test("a series is rated as a work", async ({ page }) => {
+  // A show gets one verdict; "more like episode 4" is not a question the engine can ask, and there is
+  // no episode page to ask it from — the API refuses that case directly.
+  await setupApp(page, {
+    library: [aSeries("s1", "Severance")],
+    detail: { s1: seriesDetail("s1", "Severance") },
+  });
+
+  await page.goto("/series/s1");
+
+  const rated = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/library/s1/rating") && request.method() === "PUT",
+  );
+  await page.getByRole("button", { name: "Rate 5 stars" }).click();
+  expect((await rated).postDataJSON()).toEqual({ rating: 5 });
 });
 
 test("logs a watch at a time the user picks, from the overflow menu", async ({ page }) => {

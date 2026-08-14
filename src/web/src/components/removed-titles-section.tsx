@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Heart, Trash2 } from "lucide-react";
+import { Heart, Star, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type RemovedTitle } from "@/lib/media-server";
 import { errorMessage } from "@/lib/ui";
@@ -42,6 +42,17 @@ export function RemovedTitlesSection() {
       toast.success("Favorite cleared");
     },
     onError: (error) => toast.error("Couldn’t clear favorite", { description: errorMessage(error) }),
+  });
+
+  // Its own action rather than part of the unfavorite: deleting a file does not retract a verdict on
+  // a film that was watched, so a rating survives the removal and only goes when the user says so.
+  const unrate = useMutation({
+    mutationFn: (id: string) => mediaServer.clearRemovedRating(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Rating cleared");
+    },
+    onError: (error) => toast.error("Couldn’t clear rating", { description: errorMessage(error) }),
   });
 
   const purge = useMutation({
@@ -103,6 +114,11 @@ export function RemovedTitlesSection() {
                     <Heart className="size-3 fill-current" aria-hidden /> Favorite
                   </span>
                 )}
+                {title.userRating != null && (
+                  <span className="inline-flex items-center gap-1">
+                    <Star className="size-3 fill-current" aria-hidden /> {title.userRating}/5
+                  </span>
+                )}
                 {title.playCount > 0 && (
                   <span>
                     {title.playCount} {title.playCount === 1 ? "play" : "plays"}
@@ -120,6 +136,16 @@ export function RemovedTitlesSection() {
                 onClick={() => unfavorite.mutate(title.id)}
               >
                 Unfavorite
+              </Button>
+            )}
+            {title.userRating != null && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={unrate.isPending}
+                onClick={() => unrate.mutate(title.id)}
+              >
+                Clear rating
               </Button>
             )}
             {role === "admin" && (

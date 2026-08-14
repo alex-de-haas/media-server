@@ -14,7 +14,7 @@ const feed = {
       posterUrl: null,
       inLibrary: true,
       mediaItemId: "b7f3c2d1-0000-4000-8000-000000000001",
-      sources: ["library"],
+      reason: { kind: "rated-seed", detail: "Arrival", rating: 5 },
     },
     {
       kind: "Series",
@@ -24,14 +24,9 @@ const feed = {
       posterUrl: null,
       inLibrary: false,
       mediaItemId: null,
-      sources: ["library", "trakt"],
+      reason: null,
     },
   ],
-  sources: [
-    { key: "library", displayName: "Your library" },
-    { key: "trakt", displayName: "Trakt" },
-  ],
-  selectedSources: ["library", "trakt"],
 };
 
 test("the page separates what you hold from what you would have to find", async ({ page }) => {
@@ -55,12 +50,6 @@ test("a card names its kind and year the way the library grids do", async ({ pag
   await expect(page.getByText("Series · 2022")).toBeVisible();
 });
 
-test("a title both engines agreed on says so", async ({ page }) => {
-  await setupApp(page, { recommendations: feed });
-  await page.goto("/recommendations");
-
-  await expect(page.getByText("Both")).toHaveCount(1);
-});
 
 test("the availability filter narrows the feed", async ({ page }) => {
   await setupApp(page, { recommendations: feed });
@@ -85,24 +74,56 @@ test("hiding a card offers a way back", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
 });
 
-test("the source control appears only when there is a second source", async ({ page }) => {
-  await setupApp(page, {
-    recommendations: { ...feed, sources: [{ key: "library", displayName: "Your library" }], selectedSources: ["library"] },
-  });
+
+test("the popularity dial shows where it sits and saves where it is left", async ({ page }) => {
+  // Unlike the source control this is always offered: it applies to the built-in engine, which every
+  // instance has, and there is no defensible default for how much mainstream a viewer wants.
+  await setupApp(page, { recommendations: { ...feed, popularityBias: 0.8, maxPopularityBias: 2 } });
   await page.goto("/recommendations");
 
-  await expect(page.getByRole("group", { name: "Sources" })).toHaveCount(0);
+  const dial = page.getByLabel("Popular to deep cuts");
+  await expect(dial).toHaveValue("0.8");
+
+  const saved = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/proxy/api/recommendations/popularity-bias") && request.method() === "PUT",
+  );
+  await dial.fill("1.5");
+  await dial.blur();
+  expect((await saved).postDataJSON()).toEqual({ popularityBias: 1.5 });
+});
+
+test("a card says why it is here, and says nothing when nothing could say", async ({ page }) => {
+  // The reason is a third line on the page's grid, where there is room for one. On the Home row the
+  // card keeps its deliberate two lines and the reason stays in the tooltip.
+  await setupApp(page, { recommendations: feed });
+  await page.goto("/recommendations");
+
+  await expect(page.getByTestId("rec-reason")).toHaveCount(1);
+  await expect(page.getByTestId("rec-reason")).toHaveText("Because you rated Arrival 5★");
+});
+
+test("a feed built from the library alone says so instead of claiming you watched something", async ({ page }) => {
+  // The rung exists to stop a weaker answer being presented as the ordinary one.
+  await setupApp(page, { recommendations: { ...feed, rung: "library" } });
+  await page.goto("/recommendations");
+
+  await expect(page.getByText(/Built from what this library holds/)).toBeVisible();
+
+  await setupApp(page, { recommendations: { ...feed, rung: "history" } });
+  await page.goto("/recommendations");
+  await expect(page.getByText(/Built from what you have watched/)).toBeVisible();
 });
 
 test("an empty feed explains itself rather than showing a blank page", async ({ page }) => {
-  await setupApp(page, { recommendations: { items: [], sources: [], selectedSources: [] } });
+  await setupApp(page, { recommendations: { items: [] } });
   await page.goto("/recommendations");
 
   await expect(page.getByText(/Nothing to suggest yet/)).toBeVisible();
 });
 
 test("the home row appears only when there is something to recommend", async ({ page }) => {
-  await setupApp(page, { recommendations: { items: [], sources: [], selectedSources: [] } });
+  await setupApp(page, { recommendations: { items: [] } });
   await page.goto("/");
   await expect(page.getByText("Recommended for you")).toHaveCount(0);
 

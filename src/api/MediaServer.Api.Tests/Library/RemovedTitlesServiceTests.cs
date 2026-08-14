@@ -79,6 +79,36 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Clearing_a_ghost_favorite_leaves_its_rating_alone()
+    {
+        // Deleting a file does not retract a verdict on a film that was watched, so the two clears are
+        // separate gestures. Folding them together would silently discard the judgement.
+        var service = new RemovedTitlesService(_context);
+
+        Assert.True(await service.ClearFavoriteAsync(_userId, _ghostMovieId, CancellationToken.None));
+
+        await using var verify = _db.Create();
+        Assert.Equal(4, (await new RemovedTitlesService(verify).ListAsync(_userId, CancellationToken.None))
+            .Single(title => title.Id == _ghostMovieId).UserRating);
+    }
+
+    [Fact]
+    public async Task Clear_rating_works_on_a_ghost_and_only_on_a_ghost()
+    {
+        var service = new RemovedTitlesService(_context);
+
+        Assert.True(await service.ClearRatingAsync(_userId, _ghostMovieId, CancellationToken.None));
+        Assert.False(await service.ClearRatingAsync(_userId, _ghostMovieId, CancellationToken.None)); // nothing left
+        Assert.False(await service.ClearRatingAsync(_userId, _publishedMovieId, CancellationToken.None));
+
+        await using var verify = _db.Create();
+        var title = (await new RemovedTitlesService(verify).ListAsync(_userId, CancellationToken.None))
+            .Single(entry => entry.Id == _ghostMovieId);
+        Assert.Null(title.UserRating);
+        Assert.True(title.IsFavorite); // the favorite is a separate statement and survives
+    }
+
+    [Fact]
     public async Task Purge_removes_the_ghost_subtree_and_all_its_user_data()
     {
         var deleter = new LibraryDeleteService(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
@@ -164,7 +194,7 @@ public sealed class RemovedTitlesServiceTests : IDisposable
         _userId = user.Id;
         context.UserItemData.Add(new UserItemData
         {
-            Id = Guid.NewGuid(), AppUserId = user.Id, MediaItemId = ghostMovie.Id, IsFavorite = true,
+            Id = Guid.NewGuid(), AppUserId = user.Id, MediaItemId = ghostMovie.Id, IsFavorite = true, Rating = 4,
         });
         context.UserItemData.Add(new UserItemData
         {

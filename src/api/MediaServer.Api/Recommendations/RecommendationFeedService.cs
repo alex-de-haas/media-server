@@ -11,7 +11,6 @@ namespace MediaServer.Api.Recommendations;
 /// The local item, when held — and what a detail link must use: those routes are declared
 /// <c>{id:guid}</c> and resolve by <see cref="MediaItem.Id"/>, so a public id would never match.
 /// </param>
-/// <param name="Sources">Which providers suggested it; more than one means they agreed.</param>
 public sealed record RecommendationDto(
     string Kind,
     string TmdbId,
@@ -20,66 +19,74 @@ public sealed record RecommendationDto(
     string? PosterUrl,
     bool InLibrary,
     Guid? MediaItemId,
-    IReadOnlyList<string> Sources);
+    /// <summary>Why this card is here, as data the client phrases itself.</summary>
+    RecommendationReason? Reason = null);
 
 /// <summary>The feed plus what the UI needs to render its controls honestly.</summary>
-/// <param name="Items">The merged, filtered feed.</param>
-/// <param name="Sources">Every source available to this user, whether or not it is currently selected.</param>
-/// <param name="SelectedSources">The user's narrowing, or every available source when they have none.</param>
+/// <param name="Items">The ranked, filtered feed.</param>
+/// <param name="PopularityBias">
+/// Where this user's <b>Popular ↔ Deep cuts</b> dial sits, so the control can render its own state
+/// rather than guessing at it.
+/// </param>
+/// <param name="MaxPopularityBias">The dial's far end, so the UI need not hardcode the server's range.</param>
 public sealed record RecommendationFeedDto(
     IReadOnlyList<RecommendationDto> Items,
-    IReadOnlyList<RecommendationProviderDescriptor> Sources,
-    IReadOnlyList<string> SelectedSources);
+    double PopularityBias = 0,
+    double MaxPopularityBias = RecommendationPreferenceStore.MaxPopularityBias,
+    /// <summary>
+    /// Which question the feed ended up answering, so the surface can say so rather than presenting a
+    /// weaker answer as if it were the ordinary one. Null when no source had a ladder to report.
+    /// </summary>
+    string? Rung = null);
 
 /// <summary>
-/// Builds one user's merged feed: ask the available providers, fuse, then answer the questions only
-/// the library can — is this already held, already watched, or already dismissed.
+/// Builds one user's feed: rank with the engine, then answer the questions only the library can —
+/// is this already held, already watched, or already dismissed.
 /// </summary>
 /// <remarks>
-/// Providers deliberately know nothing about the local library. Watched and hidden filtering lives
-/// here instead, so a provider stays a pure source and the same rules apply to every one of them.
+/// The engine deliberately knows nothing about the local library's <em>state</em>. Watched and hidden
+/// filtering lives here instead, so the ranking stays a statement about taste and the exclusions stay
+/// a statement about this user's history.
+/// <para>
+/// There is one source, so there is nothing to fuse. Rank fusion existed to merge a scored list with
+/// a connected account's positions-without-scores, and with that account gone it would only flatten
+/// the engine's own shaped order back into ranks and re-derive it — losing, in the process, the
+/// diversity the re-ranker had just imposed.
+/// </para>
 /// </remarks>
 public sealed class RecommendationFeedService(
     MediaServerDbContext database,
-    IRecommendationProviderRegistry registry,
-    ITmdbPosterLookup posters,
+    RecommendationEngine engine,
     ILogger<RecommendationFeedService> logger)
 {
-    /// <summary>How many each provider is asked for before fusion. Bounded so one long tail cannot drown the other's head.</summary>
-    internal const int PerProvider = 50;
+    /// <summary>How many the engine is asked for before filtering. Bounded, since each candidate costs work.</summary>
+    internal const int PerRequest = 50;
 
     /// <summary>
     /// What the shelf asks for instead — an order of magnitude more, because it then discards most of
-    /// it: only titles this instance holds survive, and that intersection is a small fraction of any
-    /// provider's list. At <see cref="PerProvider"/> the pool would be roughly a hundred titles and
-    /// the held part of it a handful.
+    /// it: only titles this instance holds survive.
     /// </summary>
     /// <remarks>
-    /// This costs no extra TMDb requests. The built-in engine fetches every seed's list either way and
-    /// only trims at the very end (<c>LibraryRecommendationProvider.GetAsync</c>), so a wider ask buys
-    /// reach for free; it merely stops throwing away candidates the library filter would have kept.
+    /// Far cheaper than it looks. The `held` generator produces local titles directly, so the shelf no
+    /// longer depends on TMDb having linked something to something else; the wide ask simply lets the
+    /// ranking choose among the whole library rather than among whatever survived a narrow cut.
     /// </remarks>
-    internal const int PerProviderForShelf = 500;
+    internal const int PerRequestForShelf = 500;
 
     public async Task<RecommendationFeedDto> BuildAsync(
         int appUserId, RecommendationKind? kind, int limit, CancellationToken cancellationToken)
     {
-        var available = await registry.AvailableForAsync(appUserId, cancellationToken);
-        var descriptors = available
-            .Select(provider => new RecommendationProviderDescriptor(provider.Key, provider.DisplayName))
-            .ToList();
-
-        var selected = await SelectedSourcesAsync(appUserId, available, cancellationToken);
-        var active = available.Where(provider => selected.Contains(provider.Key, StringComparer.OrdinalIgnoreCase)).ToList();
-
-        var lists = await AskAsync(active, appUserId, PerProvider, cancellationToken);
-
-        // Fuse generously, then filter: excluding watched and hidden titles afterwards would otherwise
+        // Rank generously, then filter: excluding watched and hidden titles afterwards would otherwise
         // eat into the limit and hand back a short feed.
-        var fused = RecommendationFusion.Fuse(lists, limit * 4);
-        var items = await ProjectAsync(appUserId, fused, kind, limit, cancellationToken);
+        var ranked = await engine.RankAsync(appUserId, Math.Max(limit * 4, PerRequest), cancellationToken);
+        var items = await ProjectAsync(appUserId, ranked.Candidates, kind, limit, cancellationToken);
 
-        return new RecommendationFeedDto(items, descriptors, [.. selected]);
+        var preference = await database.RecommendationPreferences.AsNoTracking()
+            .Where(row => row.AppUserId == appUserId)
+            .Select(row => (double?)row.PopularityBias)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new RecommendationFeedDto(items, preference ?? 0, Rung: ranked.Rung);
     }
 
     /// <summary>
@@ -105,21 +112,16 @@ public sealed class RecommendationFeedService(
     public async Task<IReadOnlyList<Guid>> BuildShelfAsync(
         int appUserId, int limit, CancellationToken cancellationToken)
     {
-        var available = await registry.AvailableForAsync(appUserId, cancellationToken);
-        var selected = await SelectedSourcesAsync(appUserId, available, cancellationToken);
-        var active = available.Where(provider => selected.Contains(provider.Key, StringComparer.OrdinalIgnoreCase)).ToList();
-
-        var lists = await AskAsync(active, appUserId, PerProviderForShelf, cancellationToken);
-        if (lists.Count == 0)
+        var ranked = await engine.RankAsync(appUserId, PerRequestForShelf, cancellationToken);
+        if (ranked.Candidates.Count == 0)
         {
             return [];
         }
 
-        var fused = RecommendationFusion.Fuse(lists, PerProviderForShelf);
         var library = await LibraryByTmdbIdAsync(cancellationToken);
 
         var ids = new List<Guid>(limit);
-        foreach (var entry in fused)
+        foreach (var entry in ranked.Candidates)
         {
             if (library.GetValueOrDefault(entry.Identity) is not { } held)
             {
@@ -133,39 +135,20 @@ public sealed class RecommendationFeedService(
             }
         }
 
+        logger.LogDebug("Shelf for user {User}: {Count} held titles from {Pool} candidates.",
+            appUserId, ids.Count, ranked.Candidates.Count);
+
         return ids;
-    }
-
-    /// <summary>Asks every active provider for its ranked list, surviving any one of them failing.</summary>
-    private async Task<List<RankedList>> AskAsync(
-        IReadOnlyList<IRecommendationProvider> active, int appUserId, int perProvider, CancellationToken cancellationToken)
-    {
-        var lists = new List<RankedList>(active.Count);
-        foreach (var provider in active)
-        {
-            try
-            {
-                var candidates = await provider.GetAsync(appUserId, perProvider, cancellationToken);
-                lists.Add(new RankedList(provider.Key, candidates));
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // One source failing outright must not cost the user the others.
-                logger.LogWarning(exception, "Recommendation provider {Key} failed; skipping it.", provider.Key);
-            }
-        }
-
-        return lists;
     }
 
     private async Task<List<RecommendationDto>> ProjectAsync(
         int appUserId,
-        IReadOnlyList<FusedRecommendation> fused,
+        IReadOnlyList<RankedCandidate> ranked,
         RecommendationKind? kind,
         int limit,
         CancellationToken cancellationToken)
     {
-        if (fused.Count == 0)
+        if (ranked.Count == 0)
         {
             return [];
         }
@@ -173,9 +156,10 @@ public sealed class RecommendationFeedService(
         var hidden = await HiddenAsync(appUserId, cancellationToken);
         var library = await LibraryByTmdbIdAsync(cancellationToken);
         var watched = await WatchedAsync(appUserId, library, cancellationToken);
+        var localArtwork = await LocalArtworkAsync(library, cancellationToken);
 
         var items = new List<RecommendationDto>(limit);
-        foreach (var entry in fused)
+        foreach (var entry in ranked)
         {
             if (kind is { } wanted && entry.Identity.Kind != wanted)
             {
@@ -194,12 +178,15 @@ public sealed class RecommendationFeedService(
                 entry.Identity.TmdbId,
                 // The library's own title wins when it holds the item: that is the name the user sees
                 // everywhere else in this app.
-                held?.Title ?? entry.Title,
-                entry.Year,
-                entry.PosterUrl,
+                held?.Title ?? entry.Candidate.Title.Title,
+                entry.Candidate.Title.Year,
+                // A locally generated candidate carries no TMDb path — `held` and `collections`
+                // synthesize their titles — so the library's own artwork is what it has.
+                PosterUrl(entry.Candidate.Title.PosterPath)
+                    ?? (held is null ? null : localArtwork.GetValueOrDefault(held.Id)),
                 held is not null,
                 held?.Id,
-                entry.Sources));
+                entry.Candidate.Reason));
 
             if (items.Count == limit)
             {
@@ -207,39 +194,50 @@ public sealed class RecommendationFeedService(
             }
         }
 
-        return await WithPostersAsync(items, cancellationToken);
+        return items;
     }
 
     /// <summary>
-    /// Fills artwork in for the cards that reached the feed without any — Trakt returns none, so a
-    /// title only it suggested would otherwise render as a grey box.
+    /// Every candidate carries its own artwork now.
     /// </summary>
     /// <remarks>
-    /// Deliberately after the limit is applied: this costs one TMDb request per uncached title, and
-    /// paying that for candidates nobody will see would be waste.
+    /// There used to be a TMDb lookup and a cache behind it, because a connected account returned no
+    /// artwork at all and a title only it suggested would render as a grey box. Both are gone: the
+    /// widened cache shape carries <c>poster_path</c> inline on every TMDb candidate, and a title the
+    /// library holds is read from <see cref="LocalArtworkAsync"/> instead.
     /// </remarks>
-    private async Task<List<RecommendationDto>> WithPostersAsync(
-        List<RecommendationDto> items, CancellationToken cancellationToken)
-    {
-        var missing = items
-            .Where(item => item.PosterUrl is null)
-            .Select(item => new RecommendationIdentity(
-                Enum.Parse<RecommendationKind>(item.Kind), item.TmdbId))
-            .ToList();
+    private static string? PosterUrl(string? posterPath) =>
+        string.IsNullOrWhiteSpace(posterPath) ? null : $"https://image.tmdb.org/t/p/w500{posterPath}";
 
-        if (missing.Count == 0)
+    /// <summary>
+    /// The primary artwork of every held title in the pool, so a locally generated candidate has a
+    /// poster.
+    /// </summary>
+    /// <remarks>
+    /// One read for the whole feed rather than one per card. `held` and `collections` build their
+    /// candidates from library rows and have no TMDb path to carry, so without this every suggestion
+    /// the instance already owns would render as "No poster" — the titles most worth showing.
+    /// </remarks>
+    private async Task<Dictionary<Guid, string>> LocalArtworkAsync(
+        IReadOnlyDictionary<RecommendationIdentity, LibraryTitle> library, CancellationToken cancellationToken)
+    {
+        var itemIds = library.Values.Select(title => title.Representative.Id).Distinct().ToList();
+        if (itemIds.Count == 0)
         {
-            return items;
+            return [];
         }
 
-        var found = await posters.ForAsync(missing, cancellationToken);
-        return [.. items.Select(item => item.PosterUrl is not null
-            ? item
-            : found.TryGetValue(
-                new RecommendationIdentity(Enum.Parse<RecommendationKind>(item.Kind), item.TmdbId),
-                out var url)
-                ? item with { PosterUrl = url }
-                : item)];
+        var images = await database.ImageAssets.AsNoTracking()
+            .Where(image => itemIds.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
+            .GroupBy(image => image.MediaItemId)
+            .Select(group => new
+            {
+                MediaItemId = group.Key,
+                Url = group.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First(),
+            })
+            .ToListAsync(cancellationToken);
+
+        return images.ToDictionary(image => image.MediaItemId, image => image.Url);
     }
 
     private async Task<HashSet<RecommendationIdentity>> HiddenAsync(
@@ -340,54 +338,6 @@ public sealed class RecommendationFeedService(
         return [.. library
             .Where(pair => pair.Value.CopyIds.Any(seen.Contains))
             .Select(pair => pair.Key)];
-    }
-
-    private async Task<HashSet<string>> SelectedSourcesAsync(
-        int appUserId, IReadOnlyList<IRecommendationProvider> available, CancellationToken cancellationToken)
-    {
-        var preference = await database.RecommendationPreferences.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.AppUserId == appUserId, cancellationToken);
-
-        var everything = available.Select(provider => provider.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (preference?.Sources is not { } stored)
-        {
-            // No preference means every available source — the default, and distinct from a stored
-            // empty string, which would mean the user turned everything off.
-            return everything;
-        }
-
-        var chosen = stored
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(everything.Contains)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        // A preference naming only sources that have since disappeared would silently empty the feed;
-        // fall back rather than show nothing with no explanation.
-        return chosen.Count > 0 ? chosen : everything;
-    }
-
-    /// <summary>Stores the user's source narrowing, or clears it back to "every available source".</summary>
-    public async Task SetSourcesAsync(
-        int appUserId, IReadOnlyList<string>? sources, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        var preference = await database.RecommendationPreferences
-            .FirstOrDefaultAsync(row => row.AppUserId == appUserId, cancellationToken);
-
-        var value = sources is null || sources.Count == 0 ? null : string.Join(',', sources);
-        if (preference is null)
-        {
-            database.RecommendationPreferences.Add(new RecommendationPreference
-            {
-                Id = Guid.NewGuid(), AppUserId = appUserId, Sources = value, UpdatedAt = now,
-            });
-        }
-        else
-        {
-            preference.Sources = value;
-            preference.UpdatedAt = now;
-        }
-
-        await database.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>Hides a title from this user's feed. Idempotent: hiding twice is the same intent.</summary>

@@ -7,8 +7,8 @@ namespace MediaServer.Api.Recommendations;
 /// <summary>The title a hide or unhide acts on.</summary>
 public sealed record RecommendationHideRequest(RecommendationKind Kind, string TmdbId);
 
-/// <summary>The user's source narrowing; an empty or absent list means "every available source".</summary>
-public sealed record RecommendationSourcesRequest(IReadOnlyList<string>? Sources);
+/// <summary>Where the user put the Popular ↔ Deep cuts dial. 0 leaves TMDb's ordering alone.</summary>
+public sealed record RecommendationPopularityBiasRequest(double PopularityBias);
 
 /// <summary>
 /// The recommendations surface, scoped to the signed-in user.
@@ -99,10 +99,12 @@ public static class RecommendationEndpoints
             return Results.NoContent();
         });
 
-        group.MapPut("/sources", async (
-            RecommendationSourcesRequest request,
+        // The Popular ↔ Deep cuts dial. Its own route rather than a field on /sources: the two are
+        // separate statements, and a client sending one must not silently reset the other.
+        group.MapPut("/popularity-bias", async (
+            RecommendationPopularityBiasRequest request,
             ClaimsPrincipal principal,
-            RecommendationFeedService feed,
+            RecommendationPreferenceStore preferences,
             MediaServerDbContext database,
             TimeProvider time,
             CancellationToken cancellationToken) =>
@@ -113,8 +115,15 @@ public static class RecommendationEndpoints
                 return Results.Unauthorized();
             }
 
-            await feed.SetSourcesAsync(user.Id, request.Sources, time.GetUtcNow(), cancellationToken);
-            return Results.NoContent();
+            var stored = await preferences.SetPopularityBiasAsync(
+                user.Id, request.PopularityBias, time.GetUtcNow(), cancellationToken);
+
+            return stored
+                ? Results.NoContent()
+                : Results.BadRequest(new
+                {
+                    error = $"'popularityBias' must be between 0 and {RecommendationPreferenceStore.MaxPopularityBias}.",
+                });
         });
     }
 }

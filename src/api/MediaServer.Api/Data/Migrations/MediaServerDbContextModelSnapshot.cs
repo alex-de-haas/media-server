@@ -1087,9 +1087,8 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<int>("AppUserId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Sources")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                    b.Property<double>("PopularityBias")
+                        .HasColumnType("REAL");
 
                     b.Property<string>("UpdatedAt")
                         .IsRequired()
@@ -1262,35 +1261,6 @@ namespace MediaServer.Api.Data.Migrations
                     b.ToTable("SourceFiles");
                 });
 
-            modelBuilder.Entity("MediaServer.Api.Data.TmdbPosterCacheEntry", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FetchedAt")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Kind")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("PosterPath")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TmdbId")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Kind", "TmdbId")
-                        .IsUnique();
-
-                    b.ToTable("TmdbPosterCache");
-                });
-
             modelBuilder.Entity("MediaServer.Api.Data.TmdbRecommendationCacheEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1301,12 +1271,18 @@ namespace MediaServer.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Generator")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Kind")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("PayloadVersion")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("TmdbId")
                         .IsRequired()
@@ -1315,7 +1291,7 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Kind", "TmdbId")
+                    b.HasIndex("Generator", "Kind", "TmdbId")
                         .IsUnique();
 
                     b.ToTable("TmdbRecommendationCache");
@@ -1628,6 +1604,9 @@ namespace MediaServer.Api.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("Played")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Rating")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("StateRevision")

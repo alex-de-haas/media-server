@@ -278,7 +278,8 @@ public sealed class CatalogService(
             // `CatalogId == id` delete below — no Except needed anywhere. Signal stays a composed
             // subquery (UNION of user-data flags and history) for the same no-materialization reason.
             var signalIds = database.UserItemData
-                .Where(data => data.IsFavorite || data.Played || data.PlaybackPositionTicks > 0 || data.PlayCount > 0)
+                .Where(data => data.IsFavorite || data.Played || data.PlaybackPositionTicks > 0 || data.PlayCount > 0 ||
+                    data.Rating != null)
                 .Select(data => data.MediaItemId)
                 .Concat(database.PlaybackHistoryEntries.Select(entry => entry.MediaItemId));
             var now = DateTimeOffset.UtcNow;

@@ -36,6 +36,17 @@ public sealed class TmdbRecommendationCacheEntry
 {
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// Which question was asked of this seed. Part of the key, because TMDb answers more than one.
+    /// </summary>
+    /// <remarks>
+    /// Without it a <c>/similar</c> payload and a <c>/recommendations</c> payload for the same title
+    /// collide on <c>(Kind, TmdbId)</c>: whichever was written first would answer both generators, and
+    /// the second signal would silently become a copy of the first — the worst kind of bug, since the
+    /// feed would look fine and simply stop learning anything new.
+    /// </remarks>
+    public TmdbRecommendationGenerator Generator { get; set; }
+
     public RecommendationKind Kind { get; set; }
 
     /// <summary>The seed title's TMDb id — the thing recommendations were asked for.</summary>
@@ -44,30 +55,44 @@ public sealed class TmdbRecommendationCacheEntry
     /// <summary>The recommended titles, as JSON. Opaque to the database; shaped by the engine.</summary>
     public required string Payload { get; set; }
 
+    /// <summary>
+    /// Which shape <see cref="Payload"/> was written in. A row at any other version is read as a miss.
+    /// </summary>
+    /// <remarks>
+    /// The projection only ever grows, so an old payload deserializes <em>successfully</em> into the
+    /// current shape with every new field null — which the scorer would read as "this title has no
+    /// votes and no genres" rather than "nobody asked TMDb for them yet". A version is the difference
+    /// between refetching once and quietly ranking half the catalogue as featureless forever.
+    /// </remarks>
+    public int PayloadVersion { get; set; }
+
     /// <summary>When this was fetched; the reader enforces the TTL, so a stale row is a miss, not a lie.</summary>
     public DateTimeOffset FetchedAt { get; set; }
 }
 
-/// <summary>
-/// One title's poster path, cached.
-/// </summary>
+/// <summary>Which TMDb list a cached payload came from.</summary>
 /// <remarks>
-/// Trakt returns no artwork, so a title only it suggested arrives posterless and would render as a
-/// grey box. Looking the poster up costs one TMDb call per title, which is worth caching hard: a
-/// poster path changes about as often as the film's title does.
+/// Values are pinned because they are persisted as integers: renumbering would silently relabel every
+/// cached row. <c>/recommendations</c> and <c>/similar</c> are genuinely different signals — the first
+/// is behavioural ("people who watched this also watched"), the second is content-based — so the
+/// engine wants both rather than treating one as a synonym for the other.
 /// </remarks>
-public sealed class TmdbPosterCacheEntry
+public enum TmdbRecommendationGenerator
 {
-    public Guid Id { get; set; }
+    /// <summary><c>/{type}/{id}/recommendations</c>. The value every pre-existing cache row carries.</summary>
+    Seeds = 0,
 
-    public RecommendationKind Kind { get; set; }
+    /// <summary><c>/{type}/{id}/similar</c>.</summary>
+    Similar = 1,
 
-    public required string TmdbId { get; set; }
+    /// <summary><c>/person/{id}/{movie,tv}_credits</c> — "more from this director".</summary>
+    People = 2,
 
-    /// <summary>The path TMDb reports, or null when it has no poster — a cached negative, not a miss.</summary>
-    public string? PosterPath { get; set; }
-
-    public DateTimeOffset FetchedAt { get; set; }
+    /// <summary>
+    /// <c>/discover/{movie,tv}</c> from the profile's own facets. Keyed by a hash of the facet
+    /// signature rather than by a title id, because the question is not about any one title.
+    /// </summary>
+    Discover = 3,
 }
 
 /// <summary>
@@ -94,7 +119,7 @@ public sealed class RecommendationShelfItem
 
     public int AppUserId { get; set; }
 
-    /// <summary>Position in the fused feed, ascending and dense from zero.</summary>
+    /// <summary>Position in the ranked feed, ascending and dense from zero.</summary>
     public int Rank { get; set; }
 
     public Guid MediaItemId { get; set; }
@@ -112,8 +137,7 @@ public sealed class RecommendationShelfItem
 /// the timestamp off the rows would mean a user whose feed legitimately yields nothing — no history
 /// yet, or no overlap between the recommendations and the library — has nothing recording that the
 /// question was asked, so every view listing would rebuild from scratch. That is the exact cost this
-/// whole snapshot exists to avoid, and for a Trakt-backed user it would be upstream API calls on
-/// every library refresh.
+/// whole snapshot exists to avoid — for a large library the shelf build ranks the whole catalogue.
 /// </remarks>
 public sealed class RecommendationShelfGeneration
 {
@@ -129,6 +153,11 @@ public sealed class RecommendationShelfGeneration
 /// <remarks>
 /// Server-side rather than browser storage so the choice follows the user between devices — the same
 /// reason the calendar keeps its state in the URL rather than in local storage.
+/// <para>
+/// This once also held which sources the user had narrowed the feed to. With one engine there is
+/// nothing to narrow, so the column is gone rather than left as a setting that reads back as a
+/// preference nobody can express.
+/// </para>
 /// </remarks>
 public sealed class RecommendationPreference
 {
@@ -137,10 +166,15 @@ public sealed class RecommendationPreference
     public int AppUserId { get; set; }
 
     /// <summary>
-    /// Comma-separated provider keys the user restricted the feed to, or null for "every available
-    /// source" — the default, and distinct from an empty string, which would mean "none".
+    /// How hard to push against TMDb's popularity bias: 0 leaves it alone, higher favours deep cuts.
     /// </summary>
-    public string? Sources { get; set; }
+    /// <remarks>
+    /// Surfaced as a <b>Popular ↔ Deep cuts</b> control. There is no defensible single default — how
+    /// much of the mainstream a viewer wants is a taste question, not a correctness one — so it starts
+    /// at zero, which is exactly the behaviour the feed had before the dial existed, and the operator
+    /// moves it.
+    /// </remarks>
+    public double PopularityBias { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
 

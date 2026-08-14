@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Check, EyeOff, Plus, Sparkles } from "lucide-react";
-import type { Recommendation } from "@/lib/media-server";
-import { Badge } from "@/components/ui/badge";
+import { Check, EyeOff, Plus } from "lucide-react";
+import { reasonText, type Recommendation } from "@/lib/media-server";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -16,19 +15,21 @@ export function RecommendationCard({
   onHide,
   onTrack,
   onOpen,
+  showReason = false,
 }: {
   item: Recommendation;
   onHide: (item: Recommendation) => void;
   onTrack: (item: Recommendation) => void;
   onOpen: (item: Recommendation) => void;
+  /** Render the reason as a third line. The Home row leaves it off and keeps the tooltip instead. */
+  showReason?: boolean;
 }) {
+  const reason = reasonText(item.reason);
   // The media-item id, not the public id: the detail routes are declared `{id:guid}` and resolve by
   // MediaItem.Id, so a public id — a deterministic hash — would not even match the route.
   const href = item.inLibrary && item.mediaItemId
     ? `/${item.kind === "Series" ? "series" : "movies"}/${item.mediaItemId}`
     : null;
-  // Independent engines agreeing is the strongest signal the feed has, so it is worth saying out loud.
-  const agreed = item.sources.length > 1;
 
   const poster = (
     <span className="bg-secondary relative block aspect-[2/3] w-full overflow-hidden rounded-md">
@@ -39,11 +40,6 @@ export function RecommendationCard({
         <span className="text-muted-foreground flex h-full w-full items-center justify-center p-2 text-center text-xs">
           No poster
         </span>
-      )}
-      {agreed && (
-        <Badge className="absolute top-1 left-1 gap-1 px-1.5 py-0" variant="secondary" title="Both sources suggested this">
-          <Sparkles className="size-3" aria-hidden /> Both
-        </Badge>
       )}
     </span>
   );
@@ -73,7 +69,7 @@ export function RecommendationCard({
       {/* Same two lines as an ordinary poster card — 13px name over a 12px muted caption — so a
           recommendation sitting next to a library tile on Home reads at the same weight. */}
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate text-[13px] font-medium" title={item.title}>
+        <span className="truncate text-[13px] font-medium" title={reason ? `${item.title} — ${reason}` : item.title}>
           {item.title}
         </span>
         {/* The same `kind · year` caption an ordinary poster card carries. Availability is the amber check
@@ -88,6 +84,14 @@ export function RecommendationCard({
             <Check data-testid="rec-availability" className="text-brand size-3.5 shrink-0" aria-label="In library" />
           )}
         </span>
+        {/* A third line is one more than the two this tile was deliberately matched to, so it appears
+            only where there is room for it — the grid on the recommendations page. In the Home row it
+            stays a tooltip, which costs no height and is still there for anyone who wonders. */}
+        {reason && showReason && (
+          <span className="text-muted-foreground/80 truncate text-[11px]" data-testid="rec-reason">
+            {reason}
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-1">

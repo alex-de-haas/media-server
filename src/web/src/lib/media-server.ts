@@ -285,6 +285,9 @@ export interface UserItemData {
   playedPercentage: number | null;
   lastPlayedDate: string | null;
   unplayedItemCount: number | null;
+  // The user's own 1-5 star verdict, or null when unrated. Named apart from the community rating on
+  // the item itself, and from Jellyfin's own 0-10 `Rating` on user data.
+  userRating: number | null;
 }
 
 export interface LibraryItem {
@@ -719,20 +722,57 @@ export interface Recommendation {
   inLibrary: boolean;
   /** The detail routes are `{id:guid}` and resolve by this — a public id would never match. */
   mediaItemId: string | null;
-  /** Providers that suggested it; more than one means independent engines agreed. */
-  sources: string[];
+  /** Why it is here, as data — the server never composes the sentence. Null when nothing could say. */
+  reason: RecommendationReason | null;
 }
 
-export interface RecommendationSource {
-  key: string;
-  displayName: string;
+/**
+ * Why a card is in the feed.
+ *
+ * Structured rather than a ready-made sentence: the server knows what produced a candidate, and only
+ * the client knows how its own surface phrases things and how much room the line has.
+ */
+export interface RecommendationReason {
+  kind: "seed" | "rated-seed" | "franchise" | "person" | "in-library" | "taste";
+  detail: string | null;
+  rating: number | null;
+}
+
+/** The reason as one short line, or null when there is nothing worth saying. */
+export function reasonText(reason: RecommendationReason | null): string | null {
+  if (!reason) return null;
+  switch (reason.kind) {
+    case "rated-seed":
+      // Without stars there is nothing a star phrasing can say, so fall back to the plain watch —
+      // "you rated this null★" is worse than saying less.
+      if (!reason.detail) return null;
+      return reason.rating == null
+        ? `Because you watched ${reason.detail}`
+        : `Because you rated ${reason.detail} ${reason.rating}★`;
+    case "seed":
+      return reason.detail ? `Because you watched ${reason.detail}` : null;
+    case "franchise":
+      return reason.detail ? `Next in ${reason.detail}` : "Next in a series you started";
+    case "person":
+      return reason.detail ? `More from ${reason.detail}` : null;
+    case "in-library":
+      return "Already in your library";
+    case "taste":
+      return "Matches what you watch";
+  }
 }
 
 export interface RecommendationFeed {
   items: Recommendation[];
-  /** Every source available to this user, selected or not — so the control can offer them back. */
-  sources: RecommendationSource[];
-  selectedSources: string[];
+  /** Where this user's Popular ↔ Deep cuts dial sits. 0 leaves TMDb's own ordering alone. */
+  popularityBias: number;
+  /** The dial's far end, so the control does not hardcode the server's range. */
+  maxPopularityBias: number;
+  /**
+   * Which question the feed answered: "history" is the ordinary case, "library" means the viewer has
+   * watched nothing and the instance answered from what it holds. Null when there was nothing to say.
+   */
+  rung: "history" | "library" | null;
 }
 
 /** A watched mark with no date: shown in a list, never placed on a guessed day. */
@@ -804,6 +844,7 @@ export interface RemovedTitle {
   isFavorite: boolean;
   playCount: number;
   lastWatchedAt: string | null;
+  userRating: number | null;
 }
 
 // Result of a per-catalog import scan: orphan media files under the root are ingested from identify.
@@ -1059,6 +1100,16 @@ export const mediaServer = {
     }),
   setFavorite: (id: string, favorite: boolean) =>
     apiJson<UserItemData>(`${BASE}/library/${id}/favorite`, { method: favorite ? "POST" : "DELETE" }),
+  // The 1-5 star verdict on a watched work — a separate system from the favorite above, which is
+  // curation. `null` clears it back to unrated, which is a different statement from one star.
+  setRating: (id: string, rating: number | null) =>
+    rating === null
+      ? apiJson<UserItemData>(`${BASE}/library/${id}/rating`, { method: "DELETE" })
+      : apiJson<UserItemData>(`${BASE}/library/${id}/rating`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ rating }),
+        }),
   // Without deleteUserData, an item someone favorited or watched survives as a hidden tombstone and a
   // re-download restores it with its history; deleteUserData forces the full purge.
   deleteLibraryItem: (id: string, deleteFiles: boolean, deleteUserData: boolean) =>
@@ -1072,6 +1123,9 @@ export const mediaServer = {
   // Removed titles: tombstoned movies/series that keep watch history and favorites after deletion.
   listRemovedTitles: () => apiJson<RemovedTitle[]>(`${BASE}/library/removed`),
   clearRemovedFavorite: (id: string) => send(`/library/removed/${id}/favorite`, "DELETE"),
+  // Separate from the favorite clear above: a deleted file does not retract a verdict on a film that
+  // was watched, so a rating survives the removal until the user drops it.
+  clearRemovedRating: (id: string) => send(`/library/removed/${id}/rating`, "DELETE"),
   // Permanently purges the tombstone and every trace of its history (admin).
   purgeRemovedTitle: (id: string) => send(`/library/removed/${id}`, "DELETE"),
   // Delete one sidecar — an external track file beside a library file (admin). Without deleteFile only the
@@ -1150,8 +1204,8 @@ export const mediaServer = {
     send(`/recommendations/hide`, "POST", { kind, tmdbId }),
   unhideRecommendation: (kind: RecommendationKind, tmdbId: string) =>
     send(`/recommendations/hide?kind=${kind}&tmdbId=${encodeURIComponent(tmdbId)}`, "DELETE"),
-  setRecommendationSources: (sources: string[] | null) =>
-    send(`/recommendations/sources`, "PUT", { sources }),
+  setRecommendationPopularityBias: (popularityBias: number) =>
+    send(`/recommendations/popularity-bias`, "PUT", { popularityBias }),
   listWatchHistoryProviders: () =>
     apiJson<WatchHistoryProvider[]>(`${BASE}/watch-history/providers`),
   // The range is the visible grid as UTC instants; the server returns raw plays and the browser

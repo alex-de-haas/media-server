@@ -1,110 +1,240 @@
-# Recommendation Providers
+# Recommendations
 
 Created: 2026-07-25
-Updated: 2026-08-06
+Updated: 2026-08-14
 
 ## Description
 
-A "what should I watch next" surface fed by two independent engines behind one
-provider abstraction. The **built-in engine** works for every user with no
-external account; the **Trakt provider** upgrades the feed for users who
-connected one. When both are enabled their ranked lists are fused, and a title
-both engines chose is boosted — two engines built on different data landing on
-the same title is the strongest evidence this feature has.
+A "what should I watch next" surface built entirely from what this instance
+already knows: what the viewer watched, what they said about it, and what the
+library holds. TMDb answers "what is like X" and supplies public metadata; every
+judgement about *this* viewer is made locally.
 
-## Provider boundary
+There is **one engine**. There was briefly a second source — Trakt — and rank
+fusion to merge them; both are gone. Registering a Trakt OAuth application now
+requires VIP, so almost no operator could reach it, and the engine had grown a
+shaped output (diversity, caps) that fusion could only flatten back into
+positions and re-derive. Trakt **watched-history sync is a separate feature and
+is untouched** — see [watch-history providers](../watch-history-providers/feature.md).
 
-`IRecommendationProvider` mirrors the watched-history provider pattern:
-adapters are resolved by stable key, availability is asked **per user**, and
-`RecommendationProviderRegistry` rejects duplicate or whitespace-padded keys at
-startup rather than letting one source silently shadow another. A provider that
-throws during its availability check is skipped, not propagated.
+## Star ratings
 
-Providers know nothing about the local library. Everything the library alone
-can answer — held, watched, hidden — lives in the feed service, so a provider
-stays a pure source and the same rules apply to all of them.
+A watched movie or series can be rated **1–5 stars**. This is the strongest
+signal the feature has, and the schema had nothing like it before: the engine
+could see a play, a favorite and a rewatch, so a film watched and endured seeded
+the feed as loudly as one watched and loved.
 
-## Built-in engine (TMDb + local history)
+**It is not a second favorite.** A favorite is curation — "keep this where I can
+find it" — applies to any item including seasons, and travels to a connected
+provider. A rating is a judgement on a work, stays local, and places the title in
+no list. Neither writes the other, and a title can honestly be both a favorite
+and two stars.
 
-TMDb answers "what is like X", so all the personalization is in choosing the
-X's:
+`UserItemData.Rating` is nullable because *unrated* and *one star* are opposite
+statements. Clearing a rating is its own action, not a synonym for rating badly.
 
-- **Seeds** come from `PlaybackHistoryEntries`, capped at 20 (each is one
-  request on a cold cache). An episode play seeds its **series**, so a binge
-  cannot spend the whole budget on one show.
-- **Weighting**: exponential recency decay on a 90-day half-life, ×1.5 for a
-  favorite, ×1.25 for a rewatched movie. Undated marks still seed — a library
-  migrated from aggregate counts would otherwise look unwatched — they simply
-  earn no recency bonus. Items with no TMDb id are skipped; an id in the
-  `Providers` map counts.
-- **Aggregation** ranks a candidate by **how many seeds recommend it** before
-  how strongly any one does: breadth across a viewer's own taste beats depth.
-  Within a seed, TMDb's own order still carries information, so a contribution
-  decays down the list.
-- Seeds are never recommended back, and with nothing watched the engine returns
-  nothing — trending filler would not be a recommendation.
+### What each star means, and why the curve is not linear
 
-Available whenever the instance has a TMDb key, which it needs anyway.
+| ★ | Meaning | Seed weight |
+| --- | --- | --- |
+| ★★★★★ | nothing to fault in it | ×6.5 |
+| ★★★★ | loved it — where most favorites land | ×4.0 |
+| ★★★ | a good film, no regrets | ×1.7 |
+| *unrated watch* | — | ×1.0 |
+| ★★ | worth it only with nothing else on | not seeded |
+| ★ | disliked it; the time is the loss | not seeded |
 
-## Trakt provider
+Everything is priced in ordinary unrated watches, which keeps their weight at
+1.0 — so an instance where nobody rates anything ranks exactly as it did before
+ratings existed.
 
-A thin adapter: Trakt runs its engine over a far wider history than this
-instance's, so its order is taken as the rank rather than re-scored. Both kind
-feeds are read and **interleaved**, because Trakt ranks movies and shows
-separately and appending would bury every show below every movie. Both the
-wrapped (`{ "movie": {...} }`) and bare response shapes are accepted.
+The mass of a five-point scale sits at 2–4 and the top is *reserved*, so the
+qualitative break is between 3 and 4 (×2.35), not between 4 and 5 (×1.6). A
+linear map would price "no regrets" at three fifths of "flawless".
 
-Titles without a TMDb id are dropped: nothing downstream could merge or match
-them. Availability requires a connection in `Connected` status — one awaiting
-reconnection is not offered, which reads better than a source that is present
-and always empty. Every failure path yields an empty list; this source is an
-upgrade over the built-in engine, never a dependency of it.
+**One and two stars do not seed.** Asking TMDb what is like a film the viewer
+would not repeat spends one of twenty requests fetching candidates the scorer
+then has to push back down. Their facets are still read — they are removed as
+*sources of candidates*, not as evidence — and they are the strongest entries in
+the negative profile: a hide judges a title never watched, a low rating is a
+verdict after watching one.
 
-## Fusion
+A seed and its facets always carry the same sign, so the line between seeding
+and not seeding is the same line as between positive and negative.
 
-Rank-based by necessity: Trakt returns positions without scores, TMDb returns
-vote metadata on items, and mixing those scales would be inventing a common
-unit. Reciprocal rank fusion (k=60) needs only position, which both genuinely
-have.
+### A rating does not decay
 
-A title present in more than one provider's list is multiplied by 1.5 per extra
-agreeing provider — enough that two engines quietly agreeing near the bottom
-outranks one shouting at the top. One provider listing a title twice is **not**
-agreement with itself. Kind is part of identity, so a movie and a show sharing
-a TMDb number never merge. Equal scores break by TMDb id, so the feed does not
-reshuffle between identical requests.
+```
+w(s) = Rewatch(s) · ( Rating(s) ?? Decay(age) · (Favorite(s) ? 1.5 : 1.0) )
+```
+
+The 90-day half-life applies to the **unrated branch only**. A rating is a
+standing statement about taste; the way to revise it is to re-rate or clear it,
+which is the viewer saying so rather than the engine assuming after ninety days.
+Left decaying, a 5★ from two years ago would be worth 0.02 against 1.0 for a film
+watched yesterday and never thought about again.
+
+Recency did not disappear — it moved into the tie-break. Rated weights are
+discrete constants, so among forty films rated five stars the twenty watched most
+recently take the seed slots.
+
+**Four of the twenty seed slots are reserved for recency.** Without them, once
+twenty titles are rated 3★ or better an unrated watch could never seed again —
+not rarely, never — and the feed would stop noticing what the viewer watched last
+week. Ratings own sixteen slots; recency keeps four.
+
+### Where a rating is given
+
+- `PUT /api/library/{id:guid}/rating` and `DELETE …/rating`, mirroring the
+  favorite pair. Out of range, or a season or episode, is a 400 rather than a
+  silently ignored write.
+- The detail page carries a five-star control; clicking the lit star clears it.
+  **Favorite is a heart**, not a star, so the two gestures do not share a mark.
+- Ratings survive what they should: a delete tombstones rather than purges the
+  row, a remap keeps the higher of two, and a removed title keeps its rating
+  until an explicit clear — deleting a file does not retract a verdict.
+- Nothing syncs a rating anywhere.
+
+## The taste profile
+
+Per user, built entirely from local data at zero request cost, over five facet
+families: **genres, keywords, people, decade, original language**.
+
+- **People are weighted by role**, not by presence: director 1.0, writer 0.6,
+  cast by billing order. `MediaItemPerson` already carries `Order`, `Job` and
+  `Department`, so this is a join.
+- **Facets are IDF-damped against the library's own frequencies.** Without it
+  "Drama" dominates every profile and every viewer looks alike; the point of a
+  profile is what distinguishes this one.
+- **Each family is normalized separately**, so a title carrying sixteen keywords
+  cannot outvote one carrying four.
+- **Liked and disliked are two vectors, not one signed vector.** A viewer can
+  like thrillers and still have rejected three of them, and collapsing that would
+  let a handful of one-star films erase a family they demonstrably enjoy.
+
+Negative input comes from 1★ and 2★ ratings, abandonment (started, stopped under
+15%, never finished) and hides. Positive input includes the watchlist at 0.4 of a
+watch — wanting to see something is a weaker statement than having seen it — and
+only for tracked titles that resolved to a library item, since fetching for a
+pure wishlist row would break the zero-request promise.
+
+Unlike the seed set the profile is **not capped**: seeds are capped because each
+costs a request, facets cost a join.
+
+### Caching, by stamp rather than invalidation
+
+The profile and the library facet index are cached against a **stamp of their own
+inputs** — play counts, the sum of `UserItemData.StateRevision`, hide and
+watchlist counts, and a library generation (work count plus the latest
+`UpdatedAt` and `FetchedAt`).
+
+The alternative was hooking six write paths, where a forgotten hook fails
+*silently*: the feed keeps answering, from a profile describing a viewer who no
+longer exists. A stamp cannot be forgotten — either a new signal moves one of the
+counts, or it was not an input.
+
+Building the index parses every title's raw metadata for its keywords, because
+nothing persists them. That parse is why the index is cached per library
+generation rather than computed per request.
+
+## The engine, in three stages
+
+**Generate** — several strategies contribute candidates and a reason, with no
+claim about global order. A generator that throws is skipped, so one dead
+strategy costs its own contribution rather than the feed.
+
+| Generator | Origin | TMDb cost |
+| --- | --- | --- |
+| `seeds` | `/{type}/{id}/recommendations` | 20 per user, cold, shared cache |
+| `similar` | `/{type}/{id}/similar` for the top 8 seeds | +8 |
+| `people` | `/person/{id}/{movie,tv}_credits` for the profile's top 5 | ~10, cached 30 days |
+| `discover` | `/discover/{movie,tv}` from the profile's top genres | 2, cached by query hash |
+| `collections` | local `MovieCollection` | **none** |
+| `held` | local unwatched titles ranked by the profile | **none** |
+
+Generators are **not** user-facing toggles: a viewer cannot meaningfully choose
+between "seeds" and "discover". `/recommendations` and `/similar` are genuinely
+different signals — behavioural versus content-based — which is why the cache is
+keyed by generator as well as by title.
+
+`discover` sorts by **vote count, not popularity**: asking TMDb for the most
+popular titles in a genre returns the blockbusters every other path already
+found, which is the bias it exists to escape.
+
+**Score** — one scorer, one unit:
+
+```
+score(c) = CF(c) + 0.6·affinity(c) − 0.8·aversion(c) + 0.25·quality(c)
+```
+
+- **`CF(c) = ( Σ w(seed)/(pos+1) ) · (1 + ln(seeds))`**, normalized against the
+  pool's own maximum. Breadth across a viewer's taste is a **factor, not a veto**
+  — ranking by seed count first let two weak old seeds outrank the top pick of a
+  film loved yesterday, and amplified popularity bias, since the titles in the
+  most lists are by construction the most globally linked.
+- **Aversion outweighs affinity.** "Not this" is more specific than liking
+  something, and suggesting more of what was just rejected is the failure people
+  notice.
+- **`quality`** smooths the community score toward the mean by vote count, so
+  10.0 from three votes stops outranking real acclaim.
+- **Popularity de-bias** divides the collaborative term by `1 + γ·ln(1+popularity)`,
+  with γ the per-user **Popular ↔ Deep cuts** dial. Zero is the default and
+  reproduces the ordering the feed had before the dial existed.
+- **A candidate with no features is scored on the terms it has.** Facet
+  similarity drops out and an unknown vote count lands on the prior, never at the
+  bottom. Absent evidence must not read as evidence against.
+
+Facets for TMDb candidates come free: the cached list object carries `genre_ids`,
+`original_language` and the year, which is three families at zero extra cost.
+Local titles are read properly, with keywords and the person graph.
+
+**Re-rank** — greedy MMR against the facets already picked, plus hard caps: two
+per franchise, two per director, no genre past 40% of the list. Caps **discard
+rather than reorder**, so the scored pool is six times the limit and a list that
+runs out of allowed candidates stops short rather than breaking a cap.
+
+## Reasons
+
+Every card carries why it is there, as **structured data rather than a sentence**:
+the server knows what produced a candidate, the client knows how its surface
+phrases things and in what language.
+
+A rated seed wins over a bare watch — "because you rated *Arrival* five stars" is
+an argument the viewer already agreed with. Otherwise the strategy explains
+itself: a franchise, a person, "already in your library", "matches what you
+watch".
+
+Rendered as a third line on the recommendations grid, where there is room, and as
+a tooltip in the Home row, which keeps the two lines its tile was matched to.
+
+## Cold start
+
+The response names which question it answered, so a weaker answer is not
+presented as the ordinary one.
+
+1. **`history`** — built from what the viewer watched and said. The ordinary case.
+2. **`library`** — for a viewer with no history: an operator chose to acquire
+   every title here, and that is taste before anything is played.
+
+With neither, the engine returns nothing. Trending filler would not be a
+recommendation.
 
 ## Feed service
 
-Asks the available providers (narrowed by the user's source preference), fuses
-generously — four times the limit — and only then filters, so excluding watched
-and hidden titles shortens nothing.
+The engine deliberately knows nothing about library *state*; the feed service
+answers what only the library can.
 
 - **In library** is resolved by TMDb id across every movie and series. Several
-  catalogs can hold the same title (a 4K edition beside a regular one); all
-  copies are kept, and the oldest is the one a card links to, so adding a second
-  edition does not change a link a user already follows. The **library's own
-  title wins**, because that is the name shown everywhere else in the app. The
-  link carries the **media-item id**: the detail routes are declared
-  `{id:guid}` and resolve by it, so a public id would never match.
+  catalogs can hold the same title; all copies are kept, the oldest is what a
+  card links to, and the **library's own title wins**. The link carries the
+  media-item id, because the detail routes are `{id:guid}`.
 - **Watched** excludes a played movie, and a series once *any* episode has been
-  played — a part-watched show belongs to Next Up, not to discovery. A play
-  against *any* copy counts: watching the 4K edition means you watched it.
-- **Hidden** titles are per user and keyed by TMDb identity rather than by
-  local item, so a hide survives the title later being added or removed.
-- **Posters** are backfilled from TMDb for cards whose source supplied none
-  (Trakt supplies none at all), *after* the limit is applied so nobody pays for
-  candidates they will not see. A title TMDb genuinely has no poster for is
-  cached as a negative, so it costs one request ever rather than one per view.
-
-## Caching
-
-- `TmdbRecommendationCache` — per **seed title**, 7-day TTL enforced on read.
-  Shared across users and safe to share: a row records what TMDb says about a
-  public title, never who asked. An unreachable TMDb falls back to the stale
-  payload, because a week-old list beats an empty feed.
-- `TmdbPosterCache` — per title, 30-day TTL. An outage is never cached as "no
-  poster"; that would blank a title for a month.
+  played. A play against any copy counts.
+- **Hidden** titles are per user and keyed by TMDb identity, so a hide survives
+  the title being added or removed.
+- Ranking asks for four times the limit and filters afterwards, so excluding
+  watched and hidden titles shortens nothing.
+- Every candidate carries its own artwork; there is no poster lookup or cache.
 
 ## API
 
@@ -112,150 +242,143 @@ and hidden titles shortens nothing.
 GET    /api/recommendations?kind=&limit=
 POST   /api/recommendations/hide          { kind, tmdbId }
 DELETE /api/recommendations/hide?kind=&tmdbId=
-PUT    /api/recommendations/sources       { sources }
+PUT    /api/recommendations/popularity-bias { popularityBias }
+PUT    /api/library/{id:guid}/rating      { rating }
+DELETE /api/library/{id:guid}/rating
 ```
 
 All authenticated and scoped to the caller; none accepts a user id, because a
 feed is built from what someone watched and serving another user's would leak
-exactly that. Hide and unhide are idempotent. The feed response carries the
-items, **every** source available to the user (so the control can offer back
-one that is currently off), and the selected set.
-
-A stored preference naming only sources that have since disappeared falls back
-to all available rather than silently emptying the feed.
+exactly that. Hide and unhide are idempotent. `/native/v1/recommendations`
+returns the same feed envelope.
 
 ## Surface
 
 - A **Recommended for you** row on the home page, rendered only when there is
-  something to say, with "See all" leading to `/recommendations`. No new
-  top-level tab — navigation stays browse-and-manage.
-- The page filters by kind (`All | Movies | Series`) and by availability
-  (`Everything | In library | Not in library`). The source control appears only
-  once a second source exists; turning the last one off is treated as "all"
-  rather than leaving an unexplained empty feed.
-- A card carries the same two lines as a library poster tile: the title under
-  the art, then a `Movie · 2010` caption. A title already held is marked with
-  an amber check beside that caption — the same mark the tracked drawer and the
-  calendar use — and a discovery carries no mark at all.
+  something to say, with "See all" leading to `/recommendations`.
+- The page filters by kind (`All | Movies | Series`) and availability
+  (`Everything | In library | Not in library`), and carries the **Popular ↔ Deep
+  cuts** slider.
+- A card shows the title, a `Movie · 2010` caption, an amber check when the title
+  is held, and its reason.
 - A held title links to its detail page. A discovery's poster opens the
-  [title preview](../title-preview/feature.md), and the card offers **Track**,
-  handing off to the existing watchlist flow — this page never pretends playback
-  is available for something the instance does not have, and acquisition stays
-  in [Watchlist and discovery](../watchlist-and-discovery.md).
+  [title preview](../title-preview/feature.md) and the card offers **Track**;
+  acquisition stays in [Watchlist and discovery](../watchlist-and-discovery.md).
 - Hiding is one click, so undo is one click: the toast carries it.
-- A title both engines chose is badged **Both**.
 
 ## Jellyfin surface — the Recommended view
 
 The held half of the feed is also a library on the [Jellyfin
 surface](../jellyfin-compatibility/feature.md), so a suggestion is something the
-user can press play on rather than read about.
+user can press play on.
 
-- A synthetic **Recommended** `CollectionFolder` sits beside the catalog views
-  and Collections, advertised only while the requesting user's shelf holds
-  something — an empty library tile explains nothing. Its `CollectionType` is
-  null (Jellyfin's mixed content): the shelf holds series as well as films.
-- `Items/Latest` for this view returns **the shelf itself**, in rank order. This
-  is the deliberate opposite of the Collections view, which returns empty —
-  "recently added to a franchise" means nothing, whereas for a shelf the current
-  selection *is* the latest thing about it. It is also the only per-library hook
-  a client offers onto its home screen.
-- Opening the view returns the same titles in the same order. The listing
-  bypasses the regular browse path, which ends in an alphabetical sort and would
-  otherwise replace rank with the alphabet before a client ever saw it. An
-  explicit `IncludeItemTypes` is still honored.
-- **Held titles only.** A discovery card has no meaning on a surface whose only
-  verb is Play; acquisition stays in the web UI.
-- **The row is labelled by the client, from the view's name.** Infuse renders it
-  as *"Latest Recommended - Local"* — its own template around the library name,
-  which is why the view is called `Recommended` rather than anything longer.
-- **A newly appearing view reaches the home screen one step late.** The home
-  screen is built from the client's cached library list, not from a fresh
-  `/UserViews`: the fan-out of `Items/Latest` goes out before the new list is
-  read, and the new library's row is fetched as a follow-up request right after.
-  So the first time a user's shelf becomes non-empty, the library is browsable
-  immediately while its row appears on the next library-list refresh. Nothing to
-  fix server-side — the client drives both.
-- Rows are ordinary `MediaItem`s, so playback, artwork, resume and watched state
-  work unchanged, and a film appears both here and in its own catalog — how
-  Jellyfin models a title belonging to two views.
+- A synthetic **Recommended** `CollectionFolder` sits beside the catalog views,
+  advertised only while the requesting user's shelf holds something. Its
+  `CollectionType` is null (mixed content): the shelf holds series as well as
+  films.
+- `Items/Latest` returns **the shelf itself**, in rank order — the deliberate
+  opposite of the Collections view, and the only per-library hook onto a client's
+  home screen. Opening the view returns the same titles in the same order,
+  bypassing the alphabetical browse path.
+- **Held titles only.** A discovery card has no meaning where the only verb is
+  Play.
+- The row is labelled by the client from the view's name; Infuse renders it as
+  *"Latest Recommended - Local"*.
+- A newly appearing view reaches the home screen one refresh late, because the
+  client builds it from its cached library list. Nothing to fix server-side.
 
 ### The shelf
 
 `RecommendationShelfItem` stores an ordered list of media-item foreign keys per
-user, and nothing else. Title, artwork, sources and user data are read live, so
-the snapshot pins only what is expensive to recompute and must stay still: which
-titles, in what order. The row and the grid are two separate requests that have
-to agree, and anything with an independent expiry could lapse between them.
+user, and nothing else. Title, artwork and user data are read live, so the
+snapshot pins only what is expensive to recompute and must stay still: which
+titles, in what order — the row and the opened grid are two requests that have to
+agree.
 
-- **100 candidates**, an order of magnitude more than a row shows. The build asks
-  providers for far more than the web feed does, because held titles are a small
-  fraction of any list — and it costs nothing, since the built-in engine fetches
-  every seed either way and only trims at the end.
-- **Watched and hidden are applied on read**, not by invalidating the shelf, so a
-  title leaves the moment it is played rather than when the generation expires.
-  A series counts as seen once any episode has been played, and a play against
-  *any* local copy counts — the shelf pins one copy, but watching the 4K edition
-  still means you watched it.
+The `held` generator is what makes this work. The shelf used to be *the discovery
+feed intersected with the library*, which could surface a local title only when
+TMDb happened to link it to something watched; asking the library directly fills
+it every time and costs no requests.
+
+- **100 candidates**, an order of magnitude more than a row shows.
+- **Watched and hidden are applied on read**, so a title leaves the moment it is
+  played rather than when the generation expires.
 - **The generation is recorded separately from the rows**, because an empty shelf
-  is still an answer. A user whose feed legitimately yields nothing — no history
-  yet, or no overlap between the suggestions and the library — would otherwise
-  have nothing saying the question was asked, and every view listing would
-  rebuild from scratch: for a Trakt-backed user, an upstream call per refresh.
+  is still an answer.
 - **One-day TTL**, refreshed lazily: a missing shelf is built synchronously, a
-  stale one is served while a rebuild runs behind the request. Rebuilds are
+  stale one served while a rebuild runs behind the request. Rebuilds are
   single-flight per user — a client fans `Items/Latest` across every library at
-  once, and without that each would start its own.
-- No poster lookup ever happens on this path; every surviving row has local
-  artwork.
+  once.
+
+## Evaluation
+
+Every weight above is a claim about how much a signal is worth, and the numbers
+live in `RecommendationWeights` so they can be measured rather than asserted. The
+offline harness (in the test project) holds out each user's most recent plays,
+rebuilds the engine from the remainder inside a transaction it always rolls back,
+and reports **recall@20** and **nDCG@20**; `SweepAsync` runs several
+configurations over the same history so the numbers are comparable.
+
+Two honest limits: it is only meaningful against a **real** history — a synthetic
+one scores whatever rule generated it — and it runs the cached `seeds` lists
+only, so it measures the ranking and the profile rather than the reach of the
+network generators.
 
 ## Not included
 
-Deliberately out of scope: propagating a hide to Trakt's
-`DELETE /recommendations/{type}/{id}`, episode-level recommendations, and any
-direct hand-off from a discovery card into torrent intake.
+Deliberately out of scope: episode-level recommendations, any direct hand-off
+from a discovery card into torrent intake, syncing ratings to any provider, and
+the two upper rungs of the cold-start ladder (borrowing another user's history,
+which is a privacy question; and trending filtered through the profile).
 
 ## Testing Expectations
 
-- `RecommendationSeedSelectorTests` — episode→series collapsing, recency and
-  favorite and rewatch weighting, undated marks seeding without a bonus, the
-  seed cap, TMDb id resolution including the providers map, and that another
-  user's history never seeds this feed.
-- `LibraryRecommendationProviderTests` — agreement across seeds outranking a
-  single seed's favorite, TMDb order as tiebreak, seeds never recommended back,
-  silence with no history, dense ranks, series seeds asking the series
-  endpoint, and survivability when one seed cannot be answered.
-- `TmdbRecommendationSourceTests` — cache hits costing no request, TTL
-  expiry refreshing in place, stale-payload fallback on an outage, per-kind
-  endpoints and rows, and malformed entries dropped.
-- `RecommendationFusionTests` — agreement outranking a shouted single list,
-  identity merge for one provider, no self-agreement, poster preservation
-  across sources, kind as part of identity, and stable ordering.
-- `TraktRecommendationProviderTests` — availability gating, interleaving,
-  wrapped/bare shapes, TMDb-id-less titles dropped, and empty results on every
-  failure path.
+- `RecommendationSeedSelectorTests` — the rating curve per star, 1★/2★ never
+  seeding, ratings not decaying while unrated watches do, recency ordering within
+  a rating band, a rating superseding the favorite boost, unrated watches
+  retiring as ratings accumulate, the reserved recency slots admitting a fresh
+  unrated watch and refusing a disliked one, episode→series collapsing, undated
+  marks seeding without a bonus, the seed cap, and another user's history never
+  seeding this feed.
+- `RecommendationEngineTests` — breadth as a factor not a veto, acclaim over a
+  perfect score from three votes, a featureless candidate scored on the terms it
+  has, the popularity dial demoting a blockbuster and doing nothing at zero,
+  seeds never recommended back, held titles reaching the feed with TMDb silent,
+  the rated-seed reason, and the cold-start rungs including silence at the bottom.
+- `TasteProfileBuilderTests` — facets becoming a profile, IDF damping a common
+  genre below a rare one, per-family normalization, role weighting, low ratings
+  and abandonment and hides as negatives with a 1★ outweighing a hide, the
+  watchlist counting less than a watch, affinity judging a candidate on the
+  families it has, and another user's history never reaching this profile.
+- `TasteProfileCacheTests` — every input moving the stamp (rating, favorite,
+  play, hide, watchlist, library add, re-enrich) and another user's activity not.
+- `RecommendationScorer` / `RecommendationRerankerTests` — score order preserved
+  when nothing is alike, a slightly worse but different candidate beating a near
+  duplicate, and the franchise, director and genre caps including stopping short
+  rather than breaking one.
+- `LocalGeneratorTests` / `RemoteGeneratorTests` — held offering unwatched
+  matches and making no collaborative claim, collections offering the next film
+  but never a tracked one, people asking about the right person and skipping one
+  with no TMDb id, discover asking by genre and never by popularity, and the
+  discovery signature being short, stable and distinct.
+- `TmdbRecommendationSourceTests` — cache hits costing no request, TTL expiry,
+  stale-payload fallback on an outage, the widened features round-tripping, two
+  generators for one seed not overwriting each other, and an old payload version
+  read as a miss rather than as a title with no votes.
 - `RecommendationFeedServiceTests` — in-library marking and title precedence,
-  watched and hidden exclusion, per-user isolation of both history and hides,
-  filtering after fusion keeping the feed full, source preference including the
-  vanished-source fallback, poster backfill only for surviving cards, and
-  multi-copy titles — a play on any copy excluding the title, and a stable
-  representative for the link.
-- `RecommendationShelfServiceTests` — held-only contents with the library filter
-  applied before the limit; no poster lookup on this path; rank preserved as
-  stored; read-time exclusion of watched, part-watched series and hidden titles,
-  including a play against another copy of a stored title; another user's plays
-  and hides not touching this shelf; a stale generation served rather than
-  rebuilt in the request, and rebuilt behind it; an empty generation not rebuilt
-  on every read but still rebuilt once its TTL expires; concurrent readers
-  building once; a deleted title leaving without breaking the rest; a shelf whose
-  every title is watched counting as empty; a rebuild replacing the generation
-  rather than appending.
+  watched and hidden exclusion, per-user isolation, filtering after ranking
+  keeping the feed full, and multi-copy titles.
+- `RecommendationShelfServiceTests` — held-only contents, rank preserved,
+  read-time exclusion of watched and hidden titles, concurrent readers building
+  once, an empty generation not rebuilt on every read but rebuilt once its TTL
+  expires, and a deleted title leaving without breaking the rest.
+- `RecommendationEvaluationTests` — the harness's arithmetic (recall, nDCG,
+  the cut) and that a run leaves the history exactly as it found it.
 - `JellyfinRecommendationsTests` — the view advertised only when the shelf has
-  something, as mixed content, and never to an anonymous caller; its id
-  resolving as a view only while non-empty; `Latest` returning the shelf in rank
-  order and passing its limit through, while the Collections view still returns
-  empty; browsing keeping rank rather than sorting by title, honoring a type
-  filter and paging; and the view never appearing as an item in a flat scan.
-- `e2e/recommendations.spec.ts` — the library/discovery split, the Both badge,
-  the availability filter, hide-with-undo, the conditional source control, the
+  something, `Latest` returning it in rank order, browsing keeping rank, and the
+  view never appearing in a flat scan.
+- `e2e/recommendations.spec.ts` — the library/discovery split, the availability
+  filter, hide-with-undo, the reason line, the popularity dial, the
   self-explaining empty state, and the conditional home row.
+- `e2e/detail.spec.ts` — rating a movie and a series, and clearing a rating by
+  clicking the lit star.

@@ -1,5 +1,7 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Recommendations;
+using MediaServer.Api.Recommendations.Generation;
+using MediaServer.Api.Recommendations.Profile;
 using MediaServer.Api.Tests.Jellyfin;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -8,8 +10,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace MediaServer.Api.Tests.Recommendations;
 
 /// <summary>
-/// The feed service answers what providers cannot: is this already held, already watched, already
-/// dismissed — and whose feed is this anyway.
+/// The feed service answers what the engine deliberately does not: is this already held, already
+/// watched, already dismissed — and whose feed is this anyway.
 /// </summary>
 public sealed class RecommendationFeedServiceTests : IDisposable
 {
@@ -19,7 +21,8 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     private readonly int _userId;
     private readonly int _otherUserId;
     private readonly Guid _catalogId = Guid.NewGuid();
-    private readonly List<StubProvider> _providers = [];
+    private readonly StubSource _tmdb = new();
+    private Guid _seedId;
 
     public RecommendationFeedServiceTests()
     {
@@ -42,27 +45,41 @@ public sealed class RecommendationFeedServiceTests : IDisposable
             CreatedAt = _time.GetUtcNow(), UpdatedAt = _time.GetUtcNow(),
         });
         _database.SaveChanges();
+
+        // Every test needs something watched, because the engine only speaks when the viewer has.
+        // Two seeds, one of each kind, because a candidate inherits its seed's kind — a series
+        // suggestion can only come from a series seed. Both are deliberately unremarkable: what
+        // these tests are about is what happens to a candidate afterwards, not how it was chosen.
+        _seedId = AddItem(MediaKind.Movie, "The seed", "seed").Id;
+        AddPlay(_seedId);
+        var seedShow = AddItem(MediaKind.Series, "The series seed", "series-seed");
+        AddPlay(AddItem(MediaKind.Episode, "Seed S1E1", null, seedShow.Id).Id);
     }
 
-    private sealed class StubProvider(string key, params RecommendationCandidate[] candidates)
-        : IRecommendationProvider
+    /// <summary>Answers from a fixed table instead of the network — the real boundary, stubbed.</summary>
+    private sealed class StubSource : ITmdbRecommendationSource
     {
-        public string Key => key;
+        public List<TmdbRecommendedTitle> Movies { get; } = [];
 
-        public string DisplayName => key;
+        public List<TmdbRecommendedTitle> Series { get; } = [];
 
-        public bool Available { get; set; } = true;
+        public Task<IReadOnlyList<TmdbRecommendedTitle>> ForSeedAsync(
+            RecommendationIdentity seed, TmdbRecommendationGenerator generator, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>(
+                generator != TmdbRecommendationGenerator.Seeds
+                    ? []
+                    : seed.Kind == RecommendationKind.Series ? Series : Movies);
 
-        public bool Throws { get; set; }
-
-        public Task<bool> IsAvailableAsync(int appUserId, CancellationToken cancellationToken) =>
-            Task.FromResult(Available);
-
-        public Task<IReadOnlyList<RecommendationCandidate>> GetAsync(
-            int appUserId, int limit, CancellationToken cancellationToken) =>
-            Throws
-                ? Task.FromException<IReadOnlyList<RecommendationCandidate>>(new InvalidOperationException("boom"))
-                : Task.FromResult<IReadOnlyList<RecommendationCandidate>>(candidates);
+        public Task<IReadOnlyList<TmdbRecommendedTitle>> ForListAsync(
+            TmdbRecommendationGenerator generator,
+            RecommendationKind kind,
+            string cacheKey,
+            string path,
+            TimeSpan lifetime,
+            IReadOnlyList<string> arrays,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>(
+                kind == RecommendationKind.Series ? Series : []);
     }
 
     [Fact]
@@ -70,7 +87,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     {
         // The difference between "play this" and "go find this" is the whole point of the flag.
         var movie = AddItem(MediaKind.Movie, "Local Title", "27205");
-        Provider("library", Candidate("27205", 0, "TMDb Title"));
+        SuggestTitled("27205", "TMDb Title");
 
         var item = Assert.Single((await Build()).Items);
 
@@ -84,7 +101,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     [Fact]
     public async Task ATitleTheLibraryLacksIsOfferedAsADiscovery()
     {
-        Provider("library", Candidate("27205", 0, "Inception"));
+        SuggestTitled("27205", "Inception");
 
         var item = Assert.Single((await Build()).Items);
 
@@ -94,11 +111,42 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AHeldTitleWithNoTmdbPosterFallsBackToItsLibraryArtwork()
+    {
+        // `held` and `collections` build candidates from library rows and carry no TMDb path, so
+        // without this the suggestions the instance already owns — the ones worth showing most —
+        // would all render as "No poster".
+        var movie = AddItem(MediaKind.Movie, "Local Title", "27205");
+        _database.ImageAssets.Add(new ImageAsset
+        {
+            Id = Guid.NewGuid(), MediaItemId = movie.Id, ImageType = ImageType.Primary,
+            Provider = "tmdb", RemotePath = "https://cdn/local.jpg", Tag = "tag-1",
+        });
+        _database.SaveChanges();
+        _tmdb.Movies.Add(new TmdbRecommendedTitle("27205", "TMDb Title", 2010, null));
+
+        Assert.Equal("https://cdn/local.jpg", Assert.Single((await Build()).Items).PosterUrl);
+    }
+
+    [Fact]
+    public async Task ATmdbPosterWinsOverTheLibraryCopyWhenTheCandidateHasOne()
+    {
+        // The path came with the list the candidate arrived in; preferring it keeps a discovery and a
+        // held title looking the same, and costs nothing.
+        AddItem(MediaKind.Movie, "Local Title", "27205");
+        _tmdb.Movies.Add(new TmdbRecommendedTitle("27205", "TMDb Title", 2010, "/tmdb.jpg"));
+
+        Assert.Equal(
+            "https://image.tmdb.org/t/p/w500/tmdb.jpg",
+            Assert.Single((await Build()).Items).PosterUrl);
+    }
+
+    [Fact]
     public async Task AWatchedMovieIsNeverRecommended()
     {
         var movie = AddItem(MediaKind.Movie, "Seen", "27205");
         MarkPlayed(movie.Id);
-        Provider("library", Candidate("27205", 0));
+        Suggest("27205");
 
         Assert.Empty((await Build()).Items);
     }
@@ -110,8 +158,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         var series = AddItem(MediaKind.Series, "Started", "95396");
         var episode = AddItem(MediaKind.Episode, "S1E1", null, series.Id);
         AddPlay(episode.Id);
-        Provider("library", new RecommendationCandidate(
-            new RecommendationIdentity(RecommendationKind.Series, "95396"), "Started", 2022, null, 0));
+        SuggestSeries("95396", "Started");
 
         Assert.Empty((await Build()).Items);
     }
@@ -124,7 +171,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         var regular = AddItem(MediaKind.Movie, "Dune", "438631");
         var fourK = AddItem(MediaKind.Movie, "Dune 4K", "438631");
         MarkPlayed(fourK.Id);
-        Provider("library", Candidate("438631", 0));
+        Suggest("438631");
 
         Assert.Empty((await Build()).Items);
         Assert.NotEqual(regular.Id, fourK.Id);
@@ -137,7 +184,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         var first = AddItem(MediaKind.Movie, "Dune", "438631");
         _time.Advance(TimeSpan.FromDays(1));
         AddItem(MediaKind.Movie, "Dune 4K", "438631");
-        Provider("library", Candidate("438631", 0));
+        Suggest("438631");
 
         Assert.Equal(first.Id, Assert.Single((await Build()).Items).MediaItemId);
     }
@@ -147,7 +194,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     {
         var movie = AddItem(MediaKind.Movie, "Seen by them", "27205");
         MarkPlayed(movie.Id, _otherUserId);
-        Provider("library", Candidate("27205", 0));
+        Suggest("27205");
 
         Assert.Single((await Build()).Items);
     }
@@ -155,7 +202,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     [Fact]
     public async Task AHiddenTitleStaysOutUntilItIsRestored()
     {
-        Provider("library", Candidate("27205", 0));
+        Suggest("27205");
         var service = Service();
         var identity = new RecommendationIdentity(RecommendationKind.Movie, "27205");
 
@@ -181,7 +228,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     [Fact]
     public async Task OneUsersHideDoesNotAffectAnother()
     {
-        Provider("library", Candidate("27205", 0));
+        Suggest("27205");
         await Service().HideAsync(
             _otherUserId, new RecommendationIdentity(RecommendationKind.Movie, "27205"),
             _time.GetUtcNow(), CancellationToken.None);
@@ -190,12 +237,12 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task FilteringHappensAfterFusionSoTheFeedIsNotLeftShort()
+    public async Task FilteringHappensAfterRankingSoTheFeedIsNotLeftShort()
     {
-        // Excluding watched titles from the fused head must not simply shorten the result.
+        // Excluding watched titles from the ranked head must not simply shorten the result.
         var seen = AddItem(MediaKind.Movie, "Seen", "1");
         MarkPlayed(seen.Id);
-        Provider("library", Candidate("1", 0), Candidate("2", 1), Candidate("3", 2));
+        Suggest("1", "2", "3");
 
         var items = (await Build(limit: 2)).Items;
 
@@ -206,11 +253,8 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     [Fact]
     public async Task TheKindFilterNarrowsTheFeed()
     {
-        Provider(
-            "library",
-            Candidate("1", 0),
-            new RecommendationCandidate(
-                new RecommendationIdentity(RecommendationKind.Series, "2"), "A Show", 2022, null, 1));
+        Suggest("1");
+        SuggestSeries("2", "A Show");
 
         var movies = (await Build(kind: RecommendationKind.Movie)).Items;
         var series = (await Build(kind: RecommendationKind.Series)).Items;
@@ -219,157 +263,57 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         Assert.Equal("Series", Assert.Single(series).Kind);
     }
 
-    [Fact]
-    public async Task WithNoPreferenceEverySourceIsUsedAndReported()
-    {
-        Provider("library", Candidate("1", 0));
-        Provider("trakt", Candidate("2", 0));
 
-        var feed = await Build();
 
-        Assert.Equal(["library", "trakt"], feed.Sources.Select(source => source.Key).Order());
-        Assert.Equal(["library", "trakt"], feed.SelectedSources.Order());
-        Assert.Equal(2, feed.Items.Count);
-    }
 
-    [Fact]
-    public async Task APreferenceNarrowsWhichSourcesContribute()
-    {
-        Provider("library", Candidate("1", 0));
-        Provider("trakt", Candidate("2", 0));
 
-        await Service().SetSourcesAsync(_userId, ["trakt"], _time.GetUtcNow(), CancellationToken.None);
-        var feed = await Build();
 
-        Assert.Equal("2", Assert.Single(feed.Items).TmdbId);
-        // Unselected sources are still reported, so the control can offer them back.
-        Assert.Equal(2, feed.Sources.Count);
-    }
 
-    [Fact]
-    public async Task ClearingThePreferenceRestoresEverySource()
-    {
-        Provider("library", Candidate("1", 0));
-        Provider("trakt", Candidate("2", 0));
-        var service = Service();
 
-        await service.SetSourcesAsync(_userId, ["trakt"], _time.GetUtcNow(), CancellationToken.None);
-        await service.SetSourcesAsync(_userId, null, _time.GetUtcNow(), CancellationToken.None);
+    private RecommendationFeedService Service() => new(
+        _database, Engine(), NullLogger<RecommendationFeedService>.Instance);
 
-        Assert.Equal(2, (await Build()).Items.Count);
-    }
+    /// <summary>
+    /// The real engine, with only the behavioural seed generator wired.
+    /// </summary>
+    /// <remarks>
+    /// These tests are about what the feed service does <em>after</em> ranking — held, watched,
+    /// hidden, whose feed this is — so the ranking itself is kept as boring as possible. Wiring the
+    /// local generators would make every assertion depend on what the fixture's library happens to
+    /// hold, which is the opposite of what is being tested here.
+    /// </remarks>
+    private RecommendationEngine Engine() => new(
+        _database,
+        new RecommendationSeedSelector(_database, _time),
+        [SeedListGenerator.Recommendations(_tmdb)],
+        new TitleFacetReader(_database),
+        new TasteProfileCache(),
+        new TasteProfileBuilder(_database, new TitleFacetReader(_database), new LibraryFacetIndexCache(), _time),
+        new RecommendationScorer(),
+        new RecommendationReranker(),
+        new RecommendationPreferenceStore(_database),
+        NullLogger<RecommendationEngine>.Instance);
 
-    [Fact]
-    public async Task APreferenceNamingOnlyVanishedSourcesFallsBackRatherThanEmptying()
-    {
-        // A user who selected Trakt and later disconnected it must not be left staring at nothing.
-        Provider("library", Candidate("1", 0));
-        await Service().SetSourcesAsync(_userId, ["trakt"], _time.GetUtcNow(), CancellationToken.None);
 
-        var feed = await Build();
 
-        Assert.Single(feed.Items);
-        Assert.Equal(["library"], feed.SelectedSources);
-    }
-
-    [Fact]
-    public async Task AnUnavailableProviderIsNeitherAskedNorOffered()
-    {
-        Provider("library", Candidate("1", 0));
-        var trakt = Provider("trakt", Candidate("2", 0));
-        trakt.Available = false;
-
-        var feed = await Build();
-
-        Assert.Equal("library", Assert.Single(feed.Sources).Key);
-        Assert.Equal("1", Assert.Single(feed.Items).TmdbId);
-    }
-
-    [Fact]
-    public async Task AProviderThatThrowsDoesNotCostTheUserTheOthers()
-    {
-        Provider("library", Candidate("1", 0));
-        var trakt = Provider("trakt", Candidate("2", 0));
-        trakt.Throws = true;
-
-        Assert.Equal("1", Assert.Single((await Build()).Items).TmdbId);
-    }
-
-    /// <summary>Answers from a fixed table; the real one costs a TMDb request per title.</summary>
-    private sealed class StubPosters : ITmdbPosterLookup
-    {
-        public Dictionary<RecommendationIdentity, string> Urls { get; } = [];
-
-        public List<RecommendationIdentity> Asked { get; } = [];
-
-        public Task<IReadOnlyDictionary<RecommendationIdentity, string>> ForAsync(
-            IReadOnlyCollection<RecommendationIdentity> identities, CancellationToken cancellationToken)
-        {
-            Asked.AddRange(identities);
-            return Task.FromResult<IReadOnlyDictionary<RecommendationIdentity, string>>(
-                identities.Where(Urls.ContainsKey).ToDictionary(identity => identity, identity => Urls[identity]));
-        }
-    }
-
-    private readonly StubPosters _posters = new();
-
-    private RecommendationFeedService Service()
-    {
-        var registry = new RecommendationProviderRegistry(
-            _providers, NullLogger<RecommendationProviderRegistry>.Instance);
-        return new RecommendationFeedService(
-            _database, registry, _posters, NullLogger<RecommendationFeedService>.Instance);
-    }
-
-    [Fact]
-    public async Task ACandidateWithoutArtworkGetsItsPosterLookedUp()
-    {
-        // Trakt returns none, so without this every Trakt-only suggestion renders as a grey box.
-        Provider("trakt", Candidate("27205", 0));
-        _posters.Urls[new RecommendationIdentity(RecommendationKind.Movie, "27205")] = "https://img/p.jpg";
-
-        var item = Assert.Single((await Build()).Items);
-
-        Assert.Equal("https://img/p.jpg", item.PosterUrl);
-    }
-
-    [Fact]
-    public async Task PostersAreOnlyLookedUpForCardsThatSurvivedFiltering()
-    {
-        // Each lookup is a TMDb request; paying for candidates nobody will see would be waste.
-        var seen = AddItem(MediaKind.Movie, "Seen", "1");
-        MarkPlayed(seen.Id);
-        Provider("trakt", Candidate("1", 0), Candidate("2", 1));
-
-        await Build(limit: 1);
-
-        Assert.Equal("2", Assert.Single(_posters.Asked).TmdbId);
-    }
-
-    [Fact]
-    public async Task ACandidateThatAlreadyHasArtworkIsNotLookedUpAgain()
-    {
-        Provider("library", new RecommendationCandidate(
-            new RecommendationIdentity(RecommendationKind.Movie, "1"), "Has one", 2024, "https://img/have.jpg", 0));
-
-        var item = Assert.Single((await Build()).Items);
-
-        Assert.Equal("https://img/have.jpg", item.PosterUrl);
-        Assert.Empty(_posters.Asked);
-    }
 
     private Task<RecommendationFeedDto> Build(RecommendationKind? kind = null, int limit = 20) =>
         Service().BuildAsync(_userId, kind, limit, CancellationToken.None);
 
-    private StubProvider Provider(string key, params RecommendationCandidate[] candidates)
+    /// <summary>What TMDb suggests for the seed, in order. The engine's only input here.</summary>
+    private void Suggest(params string[] tmdbIds)
     {
-        var provider = new StubProvider(key, candidates);
-        _providers.Add(provider);
-        return provider;
+        foreach (var tmdbId in tmdbIds)
+        {
+            _tmdb.Movies.Add(new TmdbRecommendedTitle(tmdbId, $"Title {tmdbId}", 2024, null));
+        }
     }
 
-    private static RecommendationCandidate Candidate(string tmdbId, int rank, string? title = null) =>
-        new(new RecommendationIdentity(RecommendationKind.Movie, tmdbId), title ?? $"Title {tmdbId}", 2024, null, rank);
+    private void SuggestTitled(string tmdbId, string title, string? posterPath = null) =>
+        _tmdb.Movies.Add(new TmdbRecommendedTitle(tmdbId, title, 2024, posterPath));
+
+    private void SuggestSeries(string tmdbId, string title) =>
+        _tmdb.Series.Add(new TmdbRecommendedTitle(tmdbId, title, 2022, null));
 
     private AppUser NewUser(string hostUserId, string email) => new()
     {

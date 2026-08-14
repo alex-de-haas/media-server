@@ -441,15 +441,16 @@ public sealed class LibraryDeleteService(
     }
 
     /// <summary>
-    /// The ids among <paramref name="ids"/> some user has a relationship with: a favorite, watched
-    /// state, a resume position, a play count, or at least one history entry — for <b>any</b> user.
-    /// These are the items a delete tombstones rather than purges.
+    /// The ids among <paramref name="ids"/> some user has a relationship with: a favorite, a rating,
+    /// watched state, a resume position, a play count, or at least one history entry — for <b>any</b>
+    /// user. These are the items a delete tombstones rather than purges.
     /// </summary>
     internal async Task<HashSet<Guid>> CollectSignalIdsAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken)
     {
         var withUserData = await database.UserItemData.AsNoTracking()
             .Where(data => ids.Contains(data.MediaItemId) &&
-                (data.IsFavorite || data.Played || data.PlaybackPositionTicks > 0 || data.PlayCount > 0))
+                (data.IsFavorite || data.Played || data.PlaybackPositionTicks > 0 || data.PlayCount > 0 ||
+                    data.Rating != null))
             .Select(data => data.MediaItemId)
             .Distinct()
             .ToListAsync(cancellationToken);

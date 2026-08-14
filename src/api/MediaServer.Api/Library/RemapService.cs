@@ -291,12 +291,19 @@ public sealed class RemapService(
         await database.UserItemData
             .Where(data => data.MediaItemId == targetId &&
                 database.UserItemData.Any(other => other.MediaItemId == oldId && other.AppUserId == data.AppUserId &&
-                    (other.IsFavorite || other.Played)))
+                    (other.IsFavorite || other.Played || other.Rating != null)))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(data => data.IsFavorite, data => data.IsFavorite ||
                     database.UserItemData.Any(other => other.MediaItemId == oldId && other.AppUserId == data.AppUserId && other.IsFavorite))
                 .SetProperty(data => data.Played, data => data.Played ||
                     database.UserItemData.Any(other => other.MediaItemId == oldId && other.AppUserId == data.AppUserId && other.Played))
+                // The higher of the two ratings survives — the numeric reading of the OR above. MAX
+                // ignores NULLs and yields NULL when neither row carries one, so "unrated" merges with
+                // a rating by taking the rating, and with nothing by staying unrated.
+                .SetProperty(data => data.Rating, data => database.UserItemData
+                    .Where(other => (other.MediaItemId == oldId || other.MediaItemId == targetId) &&
+                        other.AppUserId == data.AppUserId)
+                    .Max(other => other.Rating))
                 .SetProperty(data => data.StateRevision, data => data.StateRevision + 1), cancellationToken);
     }
 }
