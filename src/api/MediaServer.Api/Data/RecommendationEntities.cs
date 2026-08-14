@@ -84,6 +84,15 @@ public enum TmdbRecommendationGenerator
 
     /// <summary><c>/{type}/{id}/similar</c>.</summary>
     Similar = 1,
+
+    /// <summary><c>/person/{id}/{movie,tv}_credits</c> — "more from this director".</summary>
+    People = 2,
+
+    /// <summary>
+    /// <c>/discover/{movie,tv}</c> from the profile's own facets. Keyed by a hash of the facet
+    /// signature rather than by a title id, because the question is not about any one title.
+    /// </summary>
+    Discover = 3,
 }
 
 /// <summary>

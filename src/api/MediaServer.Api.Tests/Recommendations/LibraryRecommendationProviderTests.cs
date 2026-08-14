@@ -65,6 +65,17 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
             return Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>(
                 Lists.TryGetValue(seed.TmdbId, out var list) ? list : []);
         }
+
+        /// <summary>Answers nothing: these tests are about the per-seed lists only.</summary>
+        public Task<IReadOnlyList<TmdbRecommendedTitle>> ForListAsync(
+            TmdbRecommendationGenerator generator,
+            RecommendationKind kind,
+            string cacheKey,
+            string path,
+            TimeSpan lifetime,
+            IReadOnlyList<string> arrays,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>([]);
     }
 
     [Fact]

@@ -238,6 +238,10 @@ builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommend
 builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommendationGenerator>(services =>
     MediaServer.Api.Recommendations.Generation.SeedListGenerator.Similar(
         services.GetRequiredService<ITmdbRecommendationSource>()));
+builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommendationGenerator,
+    MediaServer.Api.Recommendations.Generation.PeopleGenerator>();
+builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommendationGenerator,
+    MediaServer.Api.Recommendations.Generation.DiscoverGenerator>();
 builder.Services.AddScoped<IRecommendationProvider, LibraryRecommendationProvider>();
 builder.Services.AddScoped<IRecommendationProvider, MediaServer.Api.Recommendations.Trakt.TraktRecommendationProvider>();
 builder.Services.AddScoped<ITmdbPosterLookup, TmdbPosterLookup>();

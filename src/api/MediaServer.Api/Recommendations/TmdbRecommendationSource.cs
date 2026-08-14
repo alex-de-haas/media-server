@@ -36,6 +36,28 @@ public interface ITmdbRecommendationSource
     /// </summary>
     Task<IReadOnlyList<TmdbRecommendedTitle>> ForSeedAsync(
         RecommendationIdentity seed, TmdbRecommendationGenerator generator, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Any cached TMDb list, for generators whose question is not "what is like this title".
+    /// </summary>
+    /// <param name="cacheKey">
+    /// What makes this list unique inside its generator — a person id, or a hash of the facets a
+    /// discovery query was built from. Capped at the cache column's width by the caller.
+    /// </param>
+    /// <param name="path">The API path to fetch on a miss, query string included.</param>
+    /// <param name="lifetime">How long the answer stays usable; a person's filmography moves slowly.</param>
+    /// <param name="arrays">
+    /// Which properties of the response hold titles. <c>results</c> for most, but credits arrive under
+    /// <c>cast</c> and <c>crew</c>.
+    /// </param>
+    Task<IReadOnlyList<TmdbRecommendedTitle>> ForListAsync(
+        TmdbRecommendationGenerator generator,
+        RecommendationKind kind,
+        string cacheKey,
+        string path,
+        TimeSpan lifetime,
+        IReadOnlyList<string> arrays,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -79,23 +101,46 @@ public sealed class TmdbRecommendationSource(
     /// Returns an empty list rather than throwing when TMDb is unreachable or the title is unknown:
     /// one bad seed must not cost the user their whole feed.
     /// </remarks>
-    public async Task<IReadOnlyList<TmdbRecommendedTitle>> ForSeedAsync(
+    public Task<IReadOnlyList<TmdbRecommendedTitle>> ForSeedAsync(
         RecommendationIdentity seed, TmdbRecommendationGenerator generator, CancellationToken cancellationToken)
+    {
+        var segment = seed.Kind == RecommendationKind.Movie ? "movie" : "tv";
+        var list = generator == TmdbRecommendationGenerator.Similar ? "similar" : "recommendations";
+        var language = Language();
+
+        return ForListAsync(
+            generator,
+            seed.Kind,
+            seed.TmdbId,
+            $"{segment}/{seed.TmdbId}/{list}?language={Uri.EscapeDataString(language)}",
+            CacheLifetime,
+            ["results"],
+            cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<TmdbRecommendedTitle>> ForListAsync(
+        TmdbRecommendationGenerator generator,
+        RecommendationKind kind,
+        string cacheKey,
+        string path,
+        TimeSpan lifetime,
+        IReadOnlyList<string> arrays,
+        CancellationToken cancellationToken)
     {
         var now = time.GetUtcNow();
         var cached = await database.TmdbRecommendationCache.FirstOrDefaultAsync(
-            row => row.Generator == generator && row.Kind == seed.Kind && row.TmdbId == seed.TmdbId,
+            row => row.Generator == generator && row.Kind == kind && row.TmdbId == cacheKey,
             cancellationToken);
 
         // A stale row is a miss, not a lie: the TTL is enforced on read so an outage cannot serve
         // month-old data indefinitely, and the row is reused as the write target below. A row written
         // in an older shape is a miss for the same reason — see PayloadVersion.
-        if (cached is not null && cached.PayloadVersion == PayloadVersion && now - cached.FetchedAt < CacheLifetime)
+        if (cached is not null && cached.PayloadVersion == PayloadVersion && now - cached.FetchedAt < lifetime)
         {
             return Deserialize(cached.Payload);
         }
 
-        var fetched = await FetchAsync(seed, generator, cancellationToken);
+        var fetched = await FetchAsync(kind, path, arrays, cancellationToken);
         if (fetched is null)
         {
             // TMDb did not answer. Serving the stale payload beats an empty feed — it was accurate a
@@ -104,30 +149,23 @@ public sealed class TmdbRecommendationSource(
             return cached is not null ? Deserialize(cached.Payload) : [];
         }
 
-        await StoreAsync(cached, seed, generator, fetched, now, cancellationToken);
+        await StoreAsync(cached, generator, kind, cacheKey, fetched, now, cancellationToken);
         return fetched;
     }
 
-    private async Task<IReadOnlyList<TmdbRecommendedTitle>?> FetchAsync(
-        RecommendationIdentity seed, TmdbRecommendationGenerator generator, CancellationToken cancellationToken)
-    {
-        var segment = seed.Kind == RecommendationKind.Movie ? "movie" : "tv";
-        var list = generator == TmdbRecommendationGenerator.Similar ? "similar" : "recommendations";
-        var language = settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
+    private string Language() => settings.SupportedLanguages.Count > 0 ? settings.SupportedLanguages[0] : "en-US";
 
+    private async Task<IReadOnlyList<TmdbRecommendedTitle>?> FetchAsync(
+        RecommendationKind kind, string path, IReadOnlyList<string> arrays, CancellationToken cancellationToken)
+    {
         JsonDocument? document;
         try
         {
-            document = await TmdbRequest.GetAsync(
-                httpClientFactory,
-                settings,
-                logger,
-                $"{segment}/{seed.TmdbId}/{list}?language={Uri.EscapeDataString(language)}",
-                cancellationToken);
+            document = await TmdbRequest.GetAsync(httpClientFactory, settings, logger, path, cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "TMDb recommendations for {Seed} could not be fetched.", seed);
+            logger.LogDebug(exception, "TMDb list {Path} could not be fetched.", path);
             return null;
         }
 
@@ -138,21 +176,34 @@ public sealed class TmdbRecommendationSource(
 
         using (document)
         {
-            if (!document.RootElement.TryGetProperty("results", out var results)
-                || results.ValueKind != JsonValueKind.Array)
-            {
-                return null;
-            }
-
             var titles = new List<TmdbRecommendedTitle>(PerSeed);
-            foreach (var element in results.EnumerateArray().Take(PerSeed))
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var array in arrays)
             {
-                if (Read(element, seed.Kind) is { } title)
+                if (!document.RootElement.TryGetProperty(array, out var results)
+                    || results.ValueKind != JsonValueKind.Array)
                 {
-                    titles.Add(title);
+                    continue;
+                }
+
+                foreach (var element in results.EnumerateArray())
+                {
+                    if (titles.Count >= PerSeed)
+                    {
+                        break;
+                    }
+
+                    // A person's cast and crew arrays overlap whenever they acted in something they
+                    // also directed, and the same title twice would count as its own agreement.
+                    if (Read(element, kind) is { } title && seen.Add(title.TmdbId))
+                    {
+                        titles.Add(title);
+                    }
                 }
             }
 
+            // An answer with no readable rows is still an answer; only a failed request is a null.
             return titles;
         }
     }
@@ -220,8 +271,9 @@ public sealed class TmdbRecommendationSource(
 
     private async Task StoreAsync(
         TmdbRecommendationCacheEntry? existing,
-        RecommendationIdentity seed,
         TmdbRecommendationGenerator generator,
+        RecommendationKind kind,
+        string cacheKey,
         IReadOnlyList<TmdbRecommendedTitle> titles,
         DateTimeOffset now,
         CancellationToken cancellationToken)
@@ -237,7 +289,7 @@ public sealed class TmdbRecommendationSource(
         {
             database.TmdbRecommendationCache.Add(new TmdbRecommendationCacheEntry
             {
-                Id = Guid.NewGuid(), Generator = generator, Kind = seed.Kind, TmdbId = seed.TmdbId,
+                Id = Guid.NewGuid(), Generator = generator, Kind = kind, TmdbId = cacheKey,
                 Payload = payload, PayloadVersion = PayloadVersion, FetchedAt = now,
             });
         }
@@ -250,7 +302,8 @@ public sealed class TmdbRecommendationSource(
         {
             // Two users can seed the same title at once and race on the unique index. The fetch
             // already succeeded, so the caller gets its answer; the other writer's row is equally good.
-            logger.LogDebug(exception, "A concurrent write already cached TMDb recommendations for {Seed}.", seed);
+            logger.LogDebug(
+                exception, "A concurrent write already cached this TMDb list ({Generator}/{Key}).", generator, cacheKey);
             database.ChangeTracker.Clear();
         }
     }

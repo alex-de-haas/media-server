@@ -528,16 +528,25 @@ Implemented on one branch as one PR, per AGENTS.md.
 
 ### Phase 4 — generators and scoring
 
-- [ ] **Split sources from generators** by adding an internal generator seam
+- [x] **Split sources from generators** by adding an internal generator seam
       *behind* the built-in provider, which keeps its `library` source key so
       stored preferences, the source control's second-source condition and the
       agreement badge all keep their current meaning.
-- [ ] **Three-stage pipeline** — generate, score, re-rank.
-- [ ] **New generators**: `similar`, `discover`, `people`, `collections`,
-      `held`.
-- [ ] **Unified scorer** implementing the formula above, including the
-      featureless-candidate path.
-- [ ] **MMR re-rank plus franchise, director and genre caps.**
+- [x] **Three-stage pipeline** — generate, score, re-rank. A generator that
+      throws is skipped, so one dead strategy costs its own contribution rather
+      than the feed.
+- [x] **New generators**: `similar`, `discover`, `people`, `collections`,
+      `held`. `discover` sorts by vote count rather than popularity — asking
+      TMDb for the most popular titles in a genre would return the blockbusters
+      every other path already found, which is the bias it exists to escape.
+- [x] **Unified scorer** implementing the formula above, including the
+      featureless-candidate path. Candidate facets come free from the widened
+      cache shape (genres, language, year), so every candidate can be compared
+      against the profile at zero request cost; local titles are read properly
+      instead.
+- [x] **MMR re-rank plus franchise, director and genre caps.** Caps discard
+      rather than reorder, so the pool scored is six times the limit and a list
+      that runs out of allowed candidates stops short rather than breaking one.
 
 ### Phase 5 — surfaces
 

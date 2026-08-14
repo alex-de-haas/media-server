@@ -91,4 +91,7 @@ public static class CandidateFacets
 
     /// <summary>The genre name TMDb's id stands for, for the diversity caps. Null when unknown.</summary>
     public static string? GenreName(int id) => GenreNames.GetValueOrDefault(id);
+
+    /// <summary>The id-to-name table, for the generator that has to turn a profile back into a query.</summary>
+    public static IReadOnlyDictionary<int, string> KnownGenres => GenreNames;
 }
