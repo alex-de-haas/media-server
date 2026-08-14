@@ -63,28 +63,43 @@ public sealed class RecommendationReranker
             return [];
         }
 
-        var remaining = ranked.ToList();
-        var picked = new List<RankedCandidate>(Math.Min(limit, remaining.Count));
-        var pickedFacets = new List<TitleFacets>();
+        // Facets as sets, once. The naive version rebuilt them inside the similarity call, which ran
+        // once per remaining candidate per already-picked candidate per pick — on a four-thousand
+        // title library that was a hundred million allocating LINQ passes, and a request that took
+        // nearly two minutes.
+        var facets = new FacetSets[ranked.Count];
+        var genres = new string[ranked.Count][];
+        for (var index = 0; index < ranked.Count; index++)
+        {
+            facets[index] = FacetSets.Of(ranked[index].Candidate.Facets);
+            genres[index] = [.. Genres(ranked[index].Candidate.Facets)];
+        }
+
+        // The running penalty: how much each remaining candidate resembles the closest thing already
+        // picked. Updated against the one new pick each round rather than recomputed against all of
+        // them, which is what turns this from O(picks² × pool) into O(picks × pool).
+        var closest = new double[ranked.Count];
+        var taken = new bool[ranked.Count];
+
+        var picked = new List<RankedCandidate>(Math.Min(limit, ranked.Count));
         var perCollection = new Dictionary<string, int>(StringComparer.Ordinal);
         var perDirector = new Dictionary<string, int>(StringComparer.Ordinal);
         var perGenre = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        while (picked.Count < limit && remaining.Count > 0)
+        while (picked.Count < limit)
         {
             var bestIndex = -1;
             var bestValue = double.NegativeInfinity;
 
-            for (var index = 0; index < remaining.Count; index++)
+            for (var index = 0; index < ranked.Count; index++)
             {
-                var candidate = remaining[index];
-                if (!Allowed(candidate, groupOf, perCollection, perDirector, perGenre, picked.Count))
+                if (taken[index] ||
+                    !Allowed(ranked[index], genres[index], groupOf, perCollection, perDirector, perGenre, picked.Count))
                 {
                     continue;
                 }
 
-                var value = (RelevanceWeight * candidate.Score)
-                    - ((1 - RelevanceWeight) * MaxSimilarity(candidate.Candidate.Facets, pickedFacets));
+                var value = (RelevanceWeight * ranked[index].Score) - ((1 - RelevanceWeight) * closest[index]);
                 if (value > bestValue)
                 {
                     bestValue = value;
@@ -99,10 +114,9 @@ public sealed class RecommendationReranker
                 break;
             }
 
-            var chosen = remaining[bestIndex];
-            remaining.RemoveAt(bestIndex);
+            var chosen = ranked[bestIndex];
+            taken[bestIndex] = true;
             picked.Add(chosen);
-            pickedFacets.Add(chosen.Candidate.Facets);
 
             var grouping = groupOf(chosen.Identity);
             Count(perCollection, grouping.CollectionKey);
@@ -111,9 +125,17 @@ public sealed class RecommendationReranker
                 Count(perDirector, director);
             }
 
-            foreach (var genre in Genres(chosen.Candidate.Facets))
+            foreach (var genre in genres[bestIndex])
             {
                 Count(perGenre, genre);
+            }
+
+            for (var index = 0; index < ranked.Count; index++)
+            {
+                if (!taken[index])
+                {
+                    closest[index] = Math.Max(closest[index], facets[index].Similarity(facets[bestIndex]));
+                }
             }
         }
 
@@ -122,6 +144,7 @@ public sealed class RecommendationReranker
 
     private static bool Allowed(
         RankedCandidate candidate,
+        IReadOnlyList<string> candidateGenres,
         Func<RecommendationIdentity, CandidateGrouping> groupOf,
         Dictionary<string, int> perCollection,
         Dictionary<string, int> perDirector,
@@ -147,8 +170,16 @@ public sealed class RecommendationReranker
 
         // The cap is measured against the list this pick would produce, so it holds at every length
         // rather than only at the end.
-        var ceiling = (int)Math.Floor(MaxGenreShare * (pickedSoFar + 1));
-        return !Genres(candidate.Candidate.Facets).Any(genre => perGenre.GetValueOrDefault(genre) >= Math.Max(ceiling, 1));
+        var ceiling = Math.Max((int)Math.Floor(MaxGenreShare * (pickedSoFar + 1)), 1);
+        foreach (var genre in candidateGenres)
+        {
+            if (perGenre.GetValueOrDefault(genre) >= ceiling)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void Count(Dictionary<string, int> counts, string? key)
@@ -162,50 +193,75 @@ public sealed class RecommendationReranker
     private static IEnumerable<string> Genres(TitleFacets facets) =>
         facets.Facets.Where(facet => facet.Family == FacetFamily.Genre).Select(facet => facet.Value);
 
-    /// <summary>How much a candidate resembles the most similar thing already picked, on 0–1.</summary>
-    private static double MaxSimilarity(TitleFacets candidate, IReadOnlyList<TitleFacets> picked)
-    {
-        if (candidate.IsEmpty || picked.Count == 0)
-        {
-            return 0;
-        }
-
-        var best = 0d;
-        foreach (var other in picked)
-        {
-            best = Math.Max(best, Similarity(candidate, other));
-        }
-
-        return best;
-    }
-
     /// <summary>
-    /// Facet overlap between two titles: the share of one's facets the other also carries, per
-    /// family, averaged over the families they have in common.
+    /// One candidate's facets, grouped by family and de-duplicated, ready to intersect.
     /// </summary>
-    private static double Similarity(TitleFacets left, TitleFacets right)
+    /// <remarks>
+    /// Built once per candidate. Overlap between two titles is the share of facets they have in
+    /// common, per family, averaged over the families they both carry — the same measure as before,
+    /// with the set-building hoisted out of the inner loop.
+    /// </remarks>
+    private sealed class FacetSets(List<(FacetFamily Family, HashSet<string> Values)> families)
     {
-        var total = 0d;
-        var families = 0;
+        private readonly List<(FacetFamily Family, HashSet<string> Values)> _families = families;
 
-        foreach (var group in left.Facets.GroupBy(facet => facet.Family))
+        public static FacetSets Of(TitleFacets facets)
         {
-            var other = right.Facets.Where(facet => facet.Family == group.Key).Select(facet => facet.Value).ToHashSet();
-            if (other.Count == 0)
+            var families = new List<(FacetFamily, HashSet<string>)>(4);
+            foreach (var group in facets.Facets.GroupBy(facet => facet.Family))
             {
-                continue;
+                families.Add((group.Key, [.. group.Select(facet => facet.Value)]));
             }
 
-            families++;
-            var shared = group.Count(facet => other.Contains(facet.Value));
-            var union = group.Select(facet => facet.Value).Concat(other).Distinct().Count();
-            if (union > 0)
-            {
-                total += (double)shared / union;
-            }
+            return new FacetSets(families);
         }
 
-        return families == 0 ? 0 : total / families;
+        public double Similarity(FacetSets other)
+        {
+            if (_families.Count == 0 || other._families.Count == 0)
+            {
+                return 0;
+            }
+
+            var total = 0d;
+            var shared = 0;
+
+            foreach (var (family, values) in _families)
+            {
+                HashSet<string>? theirs = null;
+                foreach (var (otherFamily, otherValues) in other._families)
+                {
+                    if (otherFamily == family)
+                    {
+                        theirs = otherValues;
+                        break;
+                    }
+                }
+
+                if (theirs is null)
+                {
+                    continue;
+                }
+
+                shared++;
+                var intersection = 0;
+                foreach (var value in values)
+                {
+                    if (theirs.Contains(value))
+                    {
+                        intersection++;
+                    }
+                }
+
+                var union = values.Count + theirs.Count - intersection;
+                if (union > 0)
+                {
+                    total += (double)intersection / union;
+                }
+            }
+
+            return shared == 0 ? 0 : total / shared;
+        }
     }
 }
 

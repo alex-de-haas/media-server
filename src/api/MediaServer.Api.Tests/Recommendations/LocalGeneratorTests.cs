@@ -19,6 +19,7 @@ public sealed class LocalGeneratorTests : IDisposable
     private readonly TestTimeProvider _time = new(DateTimeOffset.Parse("2026-08-14T12:00:00Z"));
     private readonly int _userId;
     private readonly Guid _catalogId = Guid.NewGuid();
+    private readonly LibraryFacetIndexCache _indexCache = new();
 
     public LocalGeneratorTests()
     {
@@ -126,6 +127,20 @@ public sealed class LocalGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task HeldNeverOffersBackATitleTheViewerHasRated()
+    {
+        // Rating something is saying you have seen it. On an imported library that is often the only
+        // trace there is — no play, no watched mark — and offering it back is the feed telling the
+        // viewer about a film they have already graded.
+        var watched = AddMovie("Heat", "crime", tmdbId: "1");
+        AddPlay(watched.Id);
+        var rated = AddMovie("Sicario", "crime", tmdbId: "2");
+        Rate(rated.Id, 4);
+
+        Assert.DoesNotContain(await Held(), candidate => candidate.Identity.TmdbId == "2");
+    }
+
+    [Fact]
     public async Task CollectionsOffersTheNextFilmInAFranchiseAlreadyStarted()
     {
         var collection = AddCollection("Mission: Impossible");
@@ -162,7 +177,7 @@ public sealed class LocalGeneratorTests : IDisposable
     }
 
     private async Task<IReadOnlyList<GeneratedCandidate>> Held(TasteProfile? profile = null) =>
-        await new HeldGenerator(_database, new TitleFacetReader(_database))
+        await new HeldGenerator(_database, new TitleFacetReader(_database), _indexCache)
             .GenerateAsync(await ContextAsync(profile), CancellationToken.None);
 
     private async Task<IReadOnlyList<GeneratedCandidate>> Collections() =>
@@ -173,7 +188,7 @@ public sealed class LocalGeneratorTests : IDisposable
         var seeds = await new RecommendationSeedSelector(_database, _time)
             .SelectAsync(_userId, CancellationToken.None);
         var built = profile ?? await new TasteProfileBuilder(
-                _database, new TitleFacetReader(_database), new LibraryFacetIndexCache(), _time)
+                _database, new TitleFacetReader(_database), _indexCache, _time)
             .BuildAsync(_userId, CancellationToken.None);
 
         return new GeneratorContext(
@@ -207,6 +222,15 @@ public sealed class LocalGeneratorTests : IDisposable
         });
         _database.SaveChanges();
         return item;
+    }
+
+    private void Rate(Guid itemId, int stars)
+    {
+        _database.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = itemId, Rating = stars,
+        });
+        _database.SaveChanges();
     }
 
     private void AddPlay(Guid itemId)

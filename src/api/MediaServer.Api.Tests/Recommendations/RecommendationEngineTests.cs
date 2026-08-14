@@ -22,6 +22,7 @@ public sealed class RecommendationEngineTests : IDisposable
     private readonly StubSource _tmdb = new();
     private readonly int _userId;
     private readonly Guid _catalogId = Guid.NewGuid();
+    private readonly LibraryFacetIndexCache _indexCache = new();
 
     public RecommendationEngineTests()
     {
@@ -377,8 +378,9 @@ public sealed class RecommendationEngineTests : IDisposable
         new RecommendationSeedSelector(_database, _time),
         [SeedListGenerator.Recommendations(_tmdb), SeedListGenerator.Similar(_tmdb)],
         new TitleFacetReader(_database),
+        _indexCache,
         new TasteProfileCache(),
-        new TasteProfileBuilder(_database, new TitleFacetReader(_database), new LibraryFacetIndexCache(), _time),
+        new TasteProfileBuilder(_database, new TitleFacetReader(_database), _indexCache, _time),
         new RecommendationScorer(),
         new RecommendationReranker(),
         new RecommendationPreferenceStore(_database),
@@ -387,10 +389,11 @@ public sealed class RecommendationEngineTests : IDisposable
     private RecommendationEngine Engine() => new(
         _database,
         new RecommendationSeedSelector(_database, _time),
-        [SeedListGenerator.Recommendations(_tmdb), new HeldGenerator(_database, new TitleFacetReader(_database))],
+        [SeedListGenerator.Recommendations(_tmdb), new HeldGenerator(_database, new TitleFacetReader(_database), _indexCache)],
         new TitleFacetReader(_database),
+        _indexCache,
         new TasteProfileCache(),
-        new TasteProfileBuilder(_database, new TitleFacetReader(_database), new LibraryFacetIndexCache(), _time),
+        new TasteProfileBuilder(_database, new TitleFacetReader(_database), _indexCache, _time),
         new RecommendationScorer(),
         new RecommendationReranker(),
         new RecommendationPreferenceStore(_database),

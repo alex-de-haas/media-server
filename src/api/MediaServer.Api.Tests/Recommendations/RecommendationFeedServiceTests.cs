@@ -23,6 +23,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     private readonly Guid _catalogId = Guid.NewGuid();
     private readonly StubSource _tmdb = new();
     private Guid _seedId;
+    private readonly LibraryFacetIndexCache _indexCache = new();
 
     public RecommendationFeedServiceTests()
     {
@@ -287,8 +288,9 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         new RecommendationSeedSelector(_database, _time),
         [SeedListGenerator.Recommendations(_tmdb)],
         new TitleFacetReader(_database),
+        _indexCache,
         new TasteProfileCache(),
-        new TasteProfileBuilder(_database, new TitleFacetReader(_database), new LibraryFacetIndexCache(), _time),
+        new TasteProfileBuilder(_database, new TitleFacetReader(_database), _indexCache, _time),
         new RecommendationScorer(),
         new RecommendationReranker(),
         new RecommendationPreferenceStore(_database),

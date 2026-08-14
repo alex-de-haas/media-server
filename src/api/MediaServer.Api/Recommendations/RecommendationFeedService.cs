@@ -317,8 +317,12 @@ public sealed class RecommendationFeedService(
         // Every copy, not just the representative: watching the 4K edition counts.
         var itemIds = library.Values.SelectMany(title => title.CopyIds).ToHashSet();
 
+        // A rating counts as watched. Nobody rates a film they have not seen, and this instance is
+        // often not where they saw it — an imported library, or a viewer grading their back catalogue,
+        // has ratings and no playback at all. Without this the feed recommends the very titles the
+        // viewer has already told it what they think of.
         var playedItemIds = await database.UserItemData.AsNoTracking()
-            .Where(row => row.AppUserId == appUserId && row.Played)
+            .Where(row => row.AppUserId == appUserId && (row.Played || row.Rating != null))
             .Select(row => row.MediaItemId)
             .ToListAsync(cancellationToken);
 

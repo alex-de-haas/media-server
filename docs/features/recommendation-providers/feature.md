@@ -33,6 +33,14 @@ and two stars.
 `UserItemData.Rating` is nullable because *unrated* and *one star* are opposite
 statements. Clearing a rating is its own action, not a synonym for rating badly.
 
+**A rating counts as having watched.** Nobody rates a film they have not seen, and
+this instance is frequently not where they saw it — an imported library, or a
+viewer grading their back catalogue, has ratings and no playback rows at all. So
+a rating both **excludes** a title from the feed and **seeds** it, exactly as a
+play does. Requiring a play alongside it would have left the strongest signal the
+schema carries doing nothing at all, while the feed recommended back the very
+titles the viewer had already graded.
+
 ### What each star means, and why the curve is not linear
 
 | ★ | Meaning | Seed weight |
@@ -135,7 +143,11 @@ counts, or it was not an input.
 
 Building the index parses every title's raw metadata for its keywords, because
 nothing persists them. That parse is why the index is cached per library
-generation rather than computed per request.
+generation rather than computed per request — and why the index **keeps** the
+facets it parsed rather than only their frequencies. Discarding them meant the
+profile, the `held` generator and the engine's facet attachment each re-parsed the
+whole library on every request; sharing one parse took `held` from 430ms to 38ms
+on a four-thousand-title library.
 
 ## The engine, in three stages
 
@@ -192,6 +204,13 @@ Local titles are read properly, with keywords and the person graph.
 per franchise, two per director, no genre past 40% of the list. Caps **discard
 rather than reorder**, so the scored pool is six times the limit and a list that
 runs out of allowed candidates stops short rather than breaking a cap.
+
+The MMR keeps a **running** closeness per candidate, updated against each new pick
+rather than recomputed against every pick, and compares pre-built facet sets. The
+naive form — rebuild the sets inside the comparison, compare against all picked,
+for every candidate, on every pick — is O(picks² × pool) with an allocating inner
+loop, and on a four-thousand-title library one request took **110 seconds**. The
+same request now takes about 0.4s.
 
 ## Reasons
 

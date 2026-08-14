@@ -229,9 +229,10 @@ public sealed class RecommendationEvaluationHarness(Func<MediaServerDbContext> n
             [
                 SeedListGenerator.Recommendations(source),
                 new CollectionsGenerator(context),
-                new HeldGenerator(context, facets),
+                new HeldGenerator(context, facets, indexCache),
             ],
             facets,
+            indexCache,
             new TasteProfileCache(),
             new TasteProfileBuilder(context, facets, indexCache, time),
             new RecommendationScorer(weights),

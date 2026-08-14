@@ -46,6 +46,7 @@ public sealed class RecommendationEngine(
     RecommendationSeedSelector seeds,
     IEnumerable<IRecommendationGenerator> generators,
     TitleFacetReader facetReader,
+    LibraryFacetIndexCache facetIndex,
     TasteProfileCache profiles,
     TasteProfileBuilder profileBuilder,
     RecommendationScorer scorer,
@@ -246,7 +247,7 @@ public sealed class RecommendationEngine(
             .Select(entry => entry.MediaItemId!.Value)
             .ToList();
         var local = localIds.Count > 0
-            ? await facetReader.ReadAsync(localIds, cancellationToken)
+            ? await facetIndex.FacetsForAsync(localIds, database, facetReader, cancellationToken)
             : new Dictionary<Guid, TitleFacets>();
 
         foreach (var entry in pooled.Values)

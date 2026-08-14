@@ -14,9 +14,23 @@ namespace MediaServer.Api.Recommendations.Profile;
 /// inverse document frequency measures: a facet is interesting in proportion to how rarely the
 /// library holds it.
 /// </remarks>
-public sealed class LibraryFacetIndex(int documentCount, IReadOnlyDictionary<(FacetFamily, string), int> frequencies)
+public sealed class LibraryFacetIndex(
+    int documentCount,
+    IReadOnlyDictionary<(FacetFamily, string), int> frequencies,
+    IReadOnlyDictionary<Guid, TitleFacets> byItem)
 {
     public int DocumentCount { get; } = documentCount;
+
+    /// <summary>
+    /// The facets themselves, kept rather than discarded.
+    /// </summary>
+    /// <remarks>
+    /// Building the index already parses every title's raw metadata for its keywords — the expensive
+    /// part — so throwing the result away meant the profile, the `held` generator and the engine's
+    /// facet attachment each parsed the same library again on every request. Keeping it turns three
+    /// full passes per request into none.
+    /// </remarks>
+    public IReadOnlyDictionary<Guid, TitleFacets> ByItem { get; } = byItem;
 
     /// <summary>
     /// The damping factor for one facet: <c>ln(1 + N/df)</c>.
@@ -58,6 +72,52 @@ public sealed class LibraryFacetIndexCache
     private readonly SemaphoreSlim _lock = new(1, 1);
     private LibraryGeneration _generation;
     private LibraryFacetIndex? _index;
+
+    /// <summary>
+    /// Facets for the given items, served from the cached index and read only for what it lacks.
+    /// </summary>
+    /// <remarks>
+    /// The index covers every held work, which is nearly always the whole question. A tombstoned title
+    /// the viewer rated, or an item added since the stamp was taken, falls through to a direct read —
+    /// correctness first, and it is a handful of rows rather than the library.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<Guid, TitleFacets>> FacetsForAsync(
+        IReadOnlyCollection<Guid> itemIds,
+        MediaServerDbContext database,
+        TitleFacetReader reader,
+        CancellationToken cancellationToken)
+    {
+        if (itemIds.Count == 0)
+        {
+            return new Dictionary<Guid, TitleFacets>();
+        }
+
+        var index = await GetAsync(database, reader, cancellationToken);
+        var result = new Dictionary<Guid, TitleFacets>(itemIds.Count);
+        var missing = new List<Guid>();
+
+        foreach (var id in itemIds)
+        {
+            if (index.ByItem.TryGetValue(id, out var facets))
+            {
+                result[id] = facets;
+            }
+            else
+            {
+                missing.Add(id);
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            foreach (var (id, facets) in await reader.ReadAsync(missing, cancellationToken))
+            {
+                result[id] = facets;
+            }
+        }
+
+        return result;
+    }
 
     /// <summary>The index for the library as it stands, rebuilt only when the library has moved.</summary>
     public async Task<LibraryFacetIndex> GetAsync(
@@ -106,7 +166,7 @@ public sealed class LibraryFacetIndexCache
             }
         }
 
-        return new LibraryFacetIndex(byItem.Count, frequencies);
+        return new LibraryFacetIndex(byItem.Count, frequencies, byItem);
     }
 
     /// <summary>Movies and series the instance still holds — the documents the frequencies are over.</summary>

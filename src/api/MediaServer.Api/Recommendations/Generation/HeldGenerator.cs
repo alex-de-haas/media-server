@@ -15,7 +15,9 @@ namespace MediaServer.Api.Recommendations.Generation;
 /// around: every row is playable, which is the only verb that surface has.
 /// </remarks>
 public sealed class HeldGenerator(
-    MediaServerDbContext database, TitleFacetReader facets) : IRecommendationGenerator
+    MediaServerDbContext database,
+    TitleFacetReader facets,
+    LibraryFacetIndexCache index) : IRecommendationGenerator
 {
     public const string GeneratorKey = "held";
 
@@ -53,7 +55,8 @@ public sealed class HeldGenerator(
             return [];
         }
 
-        var facetsByItem = await facets.ReadAsync([.. eligible.Select(work => work.Id)], cancellationToken);
+        var facetsByItem = await index.FacetsForAsync(
+            [.. eligible.Select(work => work.Id)], database, facets, cancellationToken);
 
         var candidates = new List<GeneratedCandidate>();
         foreach (var work in eligible)
@@ -98,7 +101,10 @@ public sealed class HeldGenerator(
     /// <summary>
     /// Works this user has watched — a movie played, or a series with any episode played.
     /// </summary>
-    /// <remarks>A part-watched show belongs to Next Up, not to discovery.</remarks>
+    /// <remarks>
+    /// A part-watched show belongs to Next Up, not to discovery. A rated title counts as watched even
+    /// with no play behind it: rating something is saying you have seen it.
+    /// </remarks>
     private async Task<HashSet<Guid>> WatchedWorkIdsAsync(int appUserId, CancellationToken cancellationToken)
     {
         var played = await database.PlaybackHistoryEntries.AsNoTracking()
@@ -111,8 +117,10 @@ public sealed class HeldGenerator(
             .Distinct()
             .ToListAsync(cancellationToken);
 
+        // A rating is a statement about a title the viewer has seen, so it excludes just as a play
+        // does — otherwise the library's own generator keeps offering back what they already graded.
         var marked = await database.UserItemData.AsNoTracking()
-            .Where(row => row.AppUserId == appUserId && row.Played)
+            .Where(row => row.AppUserId == appUserId && (row.Played || row.Rating != null))
             .Join(
                 database.MediaItems.AsNoTracking(),
                 row => row.MediaItemId,

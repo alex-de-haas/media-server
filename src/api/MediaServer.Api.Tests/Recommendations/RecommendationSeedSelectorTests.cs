@@ -342,6 +342,32 @@ public sealed class RecommendationSeedSelectorTests : IDisposable
     }
 
     [Fact]
+    public async Task ARatedTitleSeedsEvenWithNoPlaybackBehindIt()
+    {
+        // This instance is often not where the viewer saw the film — an imported library, or someone
+        // grading their back catalogue, has ratings and no playback at all. Seeding only from plays
+        // left the strongest signal the schema carries doing nothing.
+        var rated = AddMovie("Rated elsewhere", tmdbId: "1");
+        Rate(rated.Id, 5);
+
+        var seed = Assert.Single(await Select());
+
+        Assert.Equal("1", seed.Identity.TmdbId);
+        Assert.Equal(6.5, seed.Weight, precision: 6);
+    }
+
+    [Fact]
+    public async Task ARatedTitleWithNoPlaybackStillObeysTheCurve()
+    {
+        // Including the bottom of it: one and two stars are evidence, never seeds, however they were
+        // recorded.
+        var disliked = AddMovie("Disliked", tmdbId: "1");
+        Rate(disliked.Id, 1);
+
+        Assert.Empty(await Select());
+    }
+
+    [Fact]
     public async Task AnotherUsersHistoryNeverSeedsThisUsersFeed()
     {
         var movie = AddMovie("Theirs", tmdbId: "1");
