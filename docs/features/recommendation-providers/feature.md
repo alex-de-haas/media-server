@@ -37,7 +37,8 @@ statements. Clearing a rating is its own action, not a synonym for rating badly.
 this instance is frequently not where they saw it — an imported library, or a
 viewer grading their back catalogue, has ratings and no playback rows at all. So
 a rating both **excludes** a title from the feed and **seeds** it, exactly as a
-play does. Requiring a play alongside it would have left the strongest signal the
+play does — including in the Jellyfin shelf, which has its own read-time
+exclusion and has to be told the same thing. Requiring a play alongside it would have left the strongest signal the
 schema carries doing nothing at all, while the feed recommended back the very
 titles the viewer had already graded.
 

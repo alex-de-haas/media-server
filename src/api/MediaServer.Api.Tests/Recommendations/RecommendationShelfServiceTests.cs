@@ -165,6 +165,25 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ARatedTitleLeavesTheShelfEvenWithNoPlayBehindIt()
+    {
+        // The shelf has its own read-time exclusion, separate from the feed's, and it has to be told
+        // the same thing: rating something is saying you have seen it. Otherwise a title rated but
+        // never played through this instance sits on the shelf and a rebuild puts it back.
+        var held = AddItem(MediaKind.Movie, "Rated", "27205");
+        Suggest("27205");
+        Assert.Single(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
+
+        _database.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = held.Id, Rating = 2,
+        });
+        _database.SaveChanges();
+
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ASeriesWithOnePlayedEpisodeLeavesTheShelf()
     {
         // A part-watched show belongs to Next Up, not to a recommendation row.
