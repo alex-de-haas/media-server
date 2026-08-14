@@ -26,10 +26,17 @@ public sealed record RecommendationDto(
 /// <param name="Items">The merged, filtered feed.</param>
 /// <param name="Sources">Every source available to this user, whether or not it is currently selected.</param>
 /// <param name="SelectedSources">The user's narrowing, or every available source when they have none.</param>
+/// <param name="PopularityBias">
+/// Where this user's <b>Popular ↔ Deep cuts</b> dial sits, so the control can render its own state
+/// rather than guessing at it.
+/// </param>
+/// <param name="MaxPopularityBias">The dial's far end, so the UI need not hardcode the server's range.</param>
 public sealed record RecommendationFeedDto(
     IReadOnlyList<RecommendationDto> Items,
     IReadOnlyList<RecommendationProviderDescriptor> Sources,
-    IReadOnlyList<string> SelectedSources);
+    IReadOnlyList<string> SelectedSources,
+    double PopularityBias = 0,
+    double MaxPopularityBias = RecommendationPreferenceStore.MaxPopularityBias);
 
 /// <summary>
 /// Builds one user's merged feed: ask the available providers, fuse, then answer the questions only
@@ -79,7 +86,12 @@ public sealed class RecommendationFeedService(
         var fused = RecommendationFusion.Fuse(lists, limit * 4);
         var items = await ProjectAsync(appUserId, fused, kind, limit, cancellationToken);
 
-        return new RecommendationFeedDto(items, descriptors, [.. selected]);
+        var preference = await database.RecommendationPreferences.AsNoTracking()
+            .Where(row => row.AppUserId == appUserId)
+            .Select(row => (double?)row.PopularityBias)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new RecommendationFeedDto(items, descriptors, [.. selected], preference ?? 0);
     }
 
     /// <summary>

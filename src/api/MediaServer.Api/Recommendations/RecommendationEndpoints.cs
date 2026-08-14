@@ -10,6 +10,9 @@ public sealed record RecommendationHideRequest(RecommendationKind Kind, string T
 /// <summary>The user's source narrowing; an empty or absent list means "every available source".</summary>
 public sealed record RecommendationSourcesRequest(IReadOnlyList<string>? Sources);
 
+/// <summary>Where the user put the Popular ↔ Deep cuts dial. 0 leaves TMDb's ordering alone.</summary>
+public sealed record RecommendationPopularityBiasRequest(double PopularityBias);
+
 /// <summary>
 /// The recommendations surface, scoped to the signed-in user.
 /// </summary>
@@ -115,6 +118,33 @@ public static class RecommendationEndpoints
 
             await feed.SetSourcesAsync(user.Id, request.Sources, time.GetUtcNow(), cancellationToken);
             return Results.NoContent();
+        });
+
+        // The Popular ↔ Deep cuts dial. Its own route rather than a field on /sources: the two are
+        // separate statements, and a client sending one must not silently reset the other.
+        group.MapPut("/popularity-bias", async (
+            RecommendationPopularityBiasRequest request,
+            ClaimsPrincipal principal,
+            RecommendationPreferenceStore preferences,
+            MediaServerDbContext database,
+            TimeProvider time,
+            CancellationToken cancellationToken) =>
+        {
+            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            var stored = await preferences.SetPopularityBiasAsync(
+                user.Id, request.PopularityBias, time.GetUtcNow(), cancellationToken);
+
+            return stored
+                ? Results.NoContent()
+                : Results.BadRequest(new
+                {
+                    error = $"'popularityBias' must be between 0 and {RecommendationPreferenceStore.MaxPopularityBias}.",
+                });
         });
     }
 }

@@ -94,6 +94,24 @@ test("the source control appears only when there is a second source", async ({ p
   await expect(page.getByRole("group", { name: "Sources" })).toHaveCount(0);
 });
 
+test("the popularity dial shows where it sits and saves where it is left", async ({ page }) => {
+  // Unlike the source control this is always offered: it applies to the built-in engine, which every
+  // instance has, and there is no defensible default for how much mainstream a viewer wants.
+  await setupApp(page, { recommendations: { ...feed, popularityBias: 0.8, maxPopularityBias: 2 } });
+  await page.goto("/recommendations");
+
+  const dial = page.getByLabel("Popular to deep cuts");
+  await expect(dial).toHaveValue("0.8");
+
+  const saved = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/proxy/api/recommendations/popularity-bias") && request.method() === "PUT",
+  );
+  await dial.fill("1.5");
+  await dial.blur();
+  expect((await saved).postDataJSON()).toEqual({ popularityBias: 1.5 });
+});
+
 test("an empty feed explains itself rather than showing a blank page", async ({ page }) => {
   await setupApp(page, { recommendations: { items: [], sources: [], selectedSources: [] } });
   await page.goto("/recommendations");

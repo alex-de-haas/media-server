@@ -36,6 +36,17 @@ public sealed class TmdbRecommendationCacheEntry
 {
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// Which question was asked of this seed. Part of the key, because TMDb answers more than one.
+    /// </summary>
+    /// <remarks>
+    /// Without it a <c>/similar</c> payload and a <c>/recommendations</c> payload for the same title
+    /// collide on <c>(Kind, TmdbId)</c>: whichever was written first would answer both generators, and
+    /// the second signal would silently become a copy of the first — the worst kind of bug, since the
+    /// feed would look fine and simply stop learning anything new.
+    /// </remarks>
+    public TmdbRecommendationGenerator Generator { get; set; }
+
     public RecommendationKind Kind { get; set; }
 
     /// <summary>The seed title's TMDb id — the thing recommendations were asked for.</summary>
@@ -44,8 +55,35 @@ public sealed class TmdbRecommendationCacheEntry
     /// <summary>The recommended titles, as JSON. Opaque to the database; shaped by the engine.</summary>
     public required string Payload { get; set; }
 
+    /// <summary>
+    /// Which shape <see cref="Payload"/> was written in. A row at any other version is read as a miss.
+    /// </summary>
+    /// <remarks>
+    /// The projection only ever grows, so an old payload deserializes <em>successfully</em> into the
+    /// current shape with every new field null — which the scorer would read as "this title has no
+    /// votes and no genres" rather than "nobody asked TMDb for them yet". A version is the difference
+    /// between refetching once and quietly ranking half the catalogue as featureless forever.
+    /// </remarks>
+    public int PayloadVersion { get; set; }
+
     /// <summary>When this was fetched; the reader enforces the TTL, so a stale row is a miss, not a lie.</summary>
     public DateTimeOffset FetchedAt { get; set; }
+}
+
+/// <summary>Which TMDb list a cached payload came from.</summary>
+/// <remarks>
+/// Values are pinned because they are persisted as integers: renumbering would silently relabel every
+/// cached row. <c>/recommendations</c> and <c>/similar</c> are genuinely different signals — the first
+/// is behavioural ("people who watched this also watched"), the second is content-based — so the
+/// engine wants both rather than treating one as a synonym for the other.
+/// </remarks>
+public enum TmdbRecommendationGenerator
+{
+    /// <summary><c>/{type}/{id}/recommendations</c>. The value every pre-existing cache row carries.</summary>
+    Seeds = 0,
+
+    /// <summary><c>/{type}/{id}/similar</c>.</summary>
+    Similar = 1,
 }
 
 /// <summary>
@@ -141,6 +179,17 @@ public sealed class RecommendationPreference
     /// source" — the default, and distinct from an empty string, which would mean "none".
     /// </summary>
     public string? Sources { get; set; }
+
+    /// <summary>
+    /// How hard to push against TMDb's popularity bias: 0 leaves it alone, higher favours deep cuts.
+    /// </summary>
+    /// <remarks>
+    /// Surfaced as a <b>Popular ↔ Deep cuts</b> control. There is no defensible single default — how
+    /// much of the mainstream a viewer wants is a taste question, not a correctness one — so it starts
+    /// at zero, which is exactly the behaviour the feed had before the dial existed, and the operator
+    /// moves it.
+    /// </remarks>
+    public double PopularityBias { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
 

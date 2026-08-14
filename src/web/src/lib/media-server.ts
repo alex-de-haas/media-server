@@ -725,6 +725,10 @@ export interface RecommendationFeed {
   /** Every source available to this user, selected or not — so the control can offer them back. */
   sources: RecommendationSource[];
   selectedSources: string[];
+  /** Where this user's Popular ↔ Deep cuts dial sits. 0 leaves TMDb's own ordering alone. */
+  popularityBias: number;
+  /** The dial's far end, so the control does not hardcode the server's range. */
+  maxPopularityBias: number;
 }
 
 /** A watched mark with no date: shown in a list, never placed on a guessed day. */
@@ -1157,6 +1161,10 @@ export const mediaServer = {
     send(`/recommendations/hide?kind=${kind}&tmdbId=${encodeURIComponent(tmdbId)}`, "DELETE"),
   setRecommendationSources: (sources: string[] | null) =>
     send(`/recommendations/sources`, "PUT", { sources }),
+  // Its own route rather than a field on sources: the two are separate statements, and sending one
+  // must not silently reset the other.
+  setRecommendationPopularityBias: (popularityBias: number) =>
+    send(`/recommendations/popularity-bias`, "PUT", { popularityBias }),
   listWatchHistoryProviders: () =>
     apiJson<WatchHistoryProvider[]>(`${BASE}/watch-history/providers`),
   // The range is the visible grid as UTC instants; the server returns raw plays and the browser

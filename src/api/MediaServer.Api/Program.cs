@@ -214,6 +214,8 @@ builder.Services.AddScoped<WatchHistoryEntryService>();
 
 builder.Services.AddScoped<IRecommendationProviderRegistry, RecommendationProviderRegistry>();
 builder.Services.AddScoped<RecommendationSeedSelector>();
+builder.Services.AddScoped<RecommendationScorer>();
+builder.Services.AddScoped<RecommendationPreferenceStore>();
 builder.Services.AddScoped<ITmdbRecommendationSource, TmdbRecommendationSource>();
 builder.Services.AddScoped<IRecommendationProvider, LibraryRecommendationProvider>();
 builder.Services.AddScoped<IRecommendationProvider, MediaServer.Api.Recommendations.Trakt.TraktRecommendationProvider>();

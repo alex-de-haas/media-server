@@ -1,4 +1,5 @@
 using MediaServer.Api.Configuration;
+using MediaServer.Api.Data;
 
 namespace MediaServer.Api.Recommendations;
 
@@ -11,12 +12,17 @@ namespace MediaServer.Api.Recommendations;
 /// personalization is entirely in which X's are asked about and how strongly each counts, which is
 /// <see cref="RecommendationSeedSelector"/>'s job.
 ///
-/// A candidate recommended by several seeds ranks above one recommended by a single seed: agreement
-/// across a viewer's own taste is a stronger signal than any one title's list.
+/// Agreement across a viewer's own taste is a strong signal — but a factor, not a veto. Ranking by
+/// the <em>number</em> of seeds before the strength of any of them, as this once did, let two weak
+/// old seeds unconditionally outrank the top pick of a film loved yesterday, and amplified TMDb's
+/// popularity bias into the bargain: the titles appearing in the most lists are by construction the
+/// most globally linked ones, so every user's feed converged on the same blockbusters.
 /// </remarks>
 public sealed class LibraryRecommendationProvider(
     RecommendationSeedSelector seeds,
     ITmdbRecommendationSource tmdb,
+    RecommendationScorer scorer,
+    RecommendationPreferenceStore preferences,
     MediaServerSettings settings,
     ILogger<LibraryRecommendationProvider> logger) : IRecommendationProvider
 {
@@ -41,12 +47,13 @@ public sealed class LibraryRecommendationProvider(
             return [];
         }
 
+        var popularityBias = await preferences.PopularityBiasAsync(appUserId, cancellationToken);
         var seedIdentities = selected.Select(seed => seed.Identity).ToHashSet();
         var scores = new Dictionary<RecommendationIdentity, Aggregate>();
 
         foreach (var seed in selected)
         {
-            var titles = await tmdb.ForSeedAsync(seed.Identity, cancellationToken);
+            var titles = await tmdb.ForSeedAsync(seed.Identity, TmdbRecommendationGenerator.Seeds, cancellationToken);
             for (var position = 0; position < titles.Count; position++)
             {
                 var title = titles[position];
@@ -75,11 +82,13 @@ public sealed class LibraryRecommendationProvider(
         logger.LogDebug(
             "Built-in recommendations: {Seeds} seeds produced {Candidates} candidates.", selected.Count, scores.Count);
 
-        return [.. scores
-            .OrderByDescending(entry => entry.Value.Seeds)
-            .ThenByDescending(entry => entry.Value.Score)
-            // Stable across runs: an unchanged library must not reshuffle the feed.
-            .ThenBy(entry => entry.Key.TmdbId, StringComparer.Ordinal)
+        var ranked = scorer.Rank(
+            scores.ToDictionary(
+                entry => entry.Key,
+                entry => new ScoredCandidate(entry.Value.Score, entry.Value.Seeds, entry.Value.Title)),
+            popularityBias);
+
+        return [.. ranked
             .Take(limit)
             .Select((entry, rank) => new RecommendationCandidate(
                 entry.Key,

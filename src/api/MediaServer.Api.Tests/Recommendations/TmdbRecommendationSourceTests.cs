@@ -60,14 +60,94 @@ public sealed class TmdbRecommendationSourceTests : IDisposable
         { "results": [ { "id": 27205, "title": "Inception", "release_date": "2010-07-16", "poster_path": "/p.jpg" } ] }
         """;
 
+    private const string OneRichResult = """
+        { "results": [ {
+            "id": 27205, "title": "Inception", "release_date": "2010-07-16", "poster_path": "/p.jpg",
+            "genre_ids": [28, 878], "vote_average": 8.4, "vote_count": 36000,
+            "popularity": 92.5, "original_language": "en"
+        } ] }
+        """;
+
+    [Fact]
+    public async Task TheFeaturesThatCameFreeWithTheRequestAreKeptAndCached()
+    {
+        // The projection is all that is persisted, so anything dropped here cannot be recovered
+        // without a refetch — and these fields are what the quality and popularity terms are made of.
+        _handler.Responses.Enqueue((HttpStatusCode.OK, OneRichResult));
+        var seed = new RecommendationIdentity(RecommendationKind.Movie, "1");
+
+        var fetched = Assert.Single(
+            await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None));
+        var cached = Assert.Single(
+            await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None));
+
+        foreach (var title in new[] { fetched, cached })
+        {
+            Assert.Equal([28, 878], title.GenreIds);
+            Assert.Equal(8.4, title.VoteAverage);
+            Assert.Equal(36_000, title.VoteCount);
+            Assert.Equal(92.5, title.Popularity);
+            Assert.Equal("en", title.OriginalLanguage);
+        }
+
+        Assert.Single(_handler.Requests); // the second read came from the cache
+    }
+
+    [Fact]
+    public async Task TwoGeneratorsForOneSeedDoNotOverwriteEachOther()
+    {
+        // Keyed on (Kind, TmdbId) alone, whichever list was written first would answer both questions
+        // and the second signal would silently become a copy of the first.
+        _handler.Responses.Enqueue((HttpStatusCode.OK, OneResult));
+        _handler.Responses.Enqueue((HttpStatusCode.OK, """
+            { "results": [ { "id": 155, "title": "The Dark Knight", "release_date": "2008-07-18" } ] }
+            """));
+        var seed = new RecommendationIdentity(RecommendationKind.Movie, "1");
+
+        var recommendations = await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None);
+        var similar = await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Similar, CancellationToken.None);
+
+        Assert.Equal("27205", Assert.Single(recommendations).TmdbId);
+        Assert.Equal("155", Assert.Single(similar).TmdbId);
+        Assert.Contains("movie/1/recommendations", _handler.Requests[0], StringComparison.Ordinal);
+        Assert.Contains("movie/1/similar", _handler.Requests[1], StringComparison.Ordinal);
+        Assert.Equal(2, await _database.TmdbRecommendationCache.CountAsync());
+    }
+
+    [Fact]
+    public async Task ARowWrittenInAnOlderShapeIsAMissRatherThanAMisreading()
+    {
+        // An old payload deserializes cleanly into the current shape with every new field null, which
+        // the scorer would read as "no votes" instead of "never asked". Refetching once is the fix.
+        _database.TmdbRecommendationCache.Add(new TmdbRecommendationCacheEntry
+        {
+            Id = Guid.NewGuid(), Generator = TmdbRecommendationGenerator.Seeds, Kind = RecommendationKind.Movie,
+            TmdbId = "1", PayloadVersion = 0, FetchedAt = _time.GetUtcNow(),
+            Payload = """[{"id":"27205","t":"Inception","y":2010,"p":"/p.jpg"}]""",
+        });
+        await _database.SaveChangesAsync();
+        _handler.Responses.Enqueue((HttpStatusCode.OK, OneRichResult));
+
+        var result = Assert.Single(await Source().ForSeedAsync(
+            new RecommendationIdentity(RecommendationKind.Movie, "1"),
+            TmdbRecommendationGenerator.Seeds,
+            CancellationToken.None));
+
+        Assert.Single(_handler.Requests);
+        Assert.Equal(8.4, result.VoteAverage);
+        // Refreshed in place rather than duplicated: the row is still unique on its key.
+        var row = Assert.Single(await _database.TmdbRecommendationCache.ToListAsync());
+        Assert.Equal(TmdbRecommendationSource.PayloadVersion, row.PayloadVersion);
+    }
+
     [Fact]
     public async Task AFreshCacheHitCostsNoRequest()
     {
         _handler.Responses.Enqueue((HttpStatusCode.OK, OneResult));
         var seed = new RecommendationIdentity(RecommendationKind.Movie, "1");
 
-        var first = await Source().ForSeedAsync(seed, CancellationToken.None);
-        var second = await Source().ForSeedAsync(seed, CancellationToken.None);
+        var first = await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None);
+        var second = await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None);
 
         Assert.Equal("27205", Assert.Single(first).TmdbId);
         Assert.Equal("27205", Assert.Single(second).TmdbId);
@@ -83,9 +163,9 @@ public sealed class TmdbRecommendationSourceTests : IDisposable
             """{ "results": [ { "id": 999, "title": "Newer", "release_date": "2026-01-01" } ] }"""));
         var seed = new RecommendationIdentity(RecommendationKind.Movie, "1");
 
-        await Source().ForSeedAsync(seed, CancellationToken.None);
+        await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None);
         _time.Advance(TmdbRecommendationSource.CacheLifetime + TimeSpan.FromHours(1));
-        var refreshed = await Source().ForSeedAsync(seed, CancellationToken.None);
+        var refreshed = await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None);
 
         Assert.Equal("999", Assert.Single(refreshed).TmdbId);
         Assert.Equal(2, _handler.Requests.Count);
@@ -99,11 +179,11 @@ public sealed class TmdbRecommendationSourceTests : IDisposable
         // A week-old list beats an empty feed; recommendations are not time-critical.
         _handler.Responses.Enqueue((HttpStatusCode.OK, OneResult));
         var seed = new RecommendationIdentity(RecommendationKind.Movie, "1");
-        await Source().ForSeedAsync(seed, CancellationToken.None);
+        await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None);
 
         _time.Advance(TmdbRecommendationSource.CacheLifetime + TimeSpan.FromHours(1));
         _handler.Responses.Enqueue((HttpStatusCode.ServiceUnavailable, ""));
-        var result = await Source().ForSeedAsync(seed, CancellationToken.None);
+        var result = await Source().ForSeedAsync(seed, TmdbRecommendationGenerator.Seeds, CancellationToken.None);
 
         Assert.Equal("27205", Assert.Single(result).TmdbId);
     }
@@ -114,7 +194,7 @@ public sealed class TmdbRecommendationSourceTests : IDisposable
         _handler.Responses.Enqueue((HttpStatusCode.ServiceUnavailable, ""));
 
         var result = await Source().ForSeedAsync(
-            new RecommendationIdentity(RecommendationKind.Movie, "1"), CancellationToken.None);
+            new RecommendationIdentity(RecommendationKind.Movie, "1"), TmdbRecommendationGenerator.Seeds, CancellationToken.None);
 
         Assert.Empty(result);
     }
@@ -127,9 +207,9 @@ public sealed class TmdbRecommendationSourceTests : IDisposable
         _handler.Responses.Enqueue((HttpStatusCode.OK,
             """{ "results": [ { "id": 1399, "name": "A Show", "first_air_date": "2011-04-17" } ] }"""));
 
-        await Source().ForSeedAsync(new RecommendationIdentity(RecommendationKind.Movie, "1"), CancellationToken.None);
+        await Source().ForSeedAsync(new RecommendationIdentity(RecommendationKind.Movie, "1"), TmdbRecommendationGenerator.Seeds, CancellationToken.None);
         var show = await Source().ForSeedAsync(
-            new RecommendationIdentity(RecommendationKind.Series, "1"), CancellationToken.None);
+            new RecommendationIdentity(RecommendationKind.Series, "1"), TmdbRecommendationGenerator.Seeds, CancellationToken.None);
 
         Assert.Contains("movie/1/recommendations", _handler.Requests[0], StringComparison.Ordinal);
         Assert.Contains("tv/1/recommendations", _handler.Requests[1], StringComparison.Ordinal);
@@ -145,7 +225,7 @@ public sealed class TmdbRecommendationSourceTests : IDisposable
             """{ "results": [ { "id": 1399, "name": "Game of Thrones", "first_air_date": "2011-04-17" } ] }"""));
 
         var result = await Source().ForSeedAsync(
-            new RecommendationIdentity(RecommendationKind.Series, "1"), CancellationToken.None);
+            new RecommendationIdentity(RecommendationKind.Series, "1"), TmdbRecommendationGenerator.Seeds, CancellationToken.None);
 
         var title = Assert.Single(result);
         Assert.Equal("Game of Thrones", title.Title);
@@ -159,7 +239,7 @@ public sealed class TmdbRecommendationSourceTests : IDisposable
             """{ "results": [ { "title": "No id" }, { "id": 5 }, { "id": 7, "title": "Good" } ] }"""));
 
         var result = await Source().ForSeedAsync(
-            new RecommendationIdentity(RecommendationKind.Movie, "1"), CancellationToken.None);
+            new RecommendationIdentity(RecommendationKind.Movie, "1"), TmdbRecommendationGenerator.Seeds, CancellationToken.None);
 
         Assert.Equal("7", Assert.Single(result).TmdbId);
     }

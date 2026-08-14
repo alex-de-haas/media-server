@@ -53,10 +53,13 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
 
         public List<RecommendationIdentity> Asked { get; } = [];
 
+        public List<TmdbRecommendationGenerator> AskedGenerators { get; } = [];
+
         public Task<IReadOnlyList<TmdbRecommendedTitle>> ForSeedAsync(
-            RecommendationIdentity seed, CancellationToken cancellationToken)
+            RecommendationIdentity seed, TmdbRecommendationGenerator generator, CancellationToken cancellationToken)
         {
             Asked.Add(seed);
+            AskedGenerators.Add(generator);
             return Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>(
                 Lists.TryGetValue(seed.TmdbId, out var list) ? list : []);
         }
@@ -75,6 +78,72 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
 
         Assert.Equal("shared", result[0].Identity.TmdbId);
+    }
+
+    [Fact]
+    public async Task BreadthIsAFactorNotAVeto()
+    {
+        // The bug the weighted score replaces: ranking by seed count first meant two weak, ancient
+        // seeds agreeing on a title unconditionally outranked the top pick of a film loved last week.
+        // Agreement still counts — it is just no longer allowed to win on its own.
+        SeedRated("loved", 5);
+        SeedWatchedLongAgo("old-a");
+        SeedWatchedLongAgo("old-b");
+        _tmdb.Lists["loved"] = [Title("loved-pick")];
+        _tmdb.Lists["old-a"] = [Title("filler-1"), Title("filler-2"), Title("weak-agreed")];
+        _tmdb.Lists["old-b"] = [Title("filler-3"), Title("filler-4"), Title("weak-agreed")];
+
+        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+
+        Assert.Equal("loved-pick", result[0].Identity.TmdbId);
+        Assert.Contains(result, entry => entry.Identity.TmdbId == "weak-agreed");
+    }
+
+    [Fact]
+    public async Task AcclaimBeatsAPerfectScoreFromThreeVotes()
+    {
+        // TMDb reports 10.0 on three votes, and the raw number cannot tell that from real acclaim.
+        // Both candidates sit at the same position of the same seed, so quality is the only difference.
+        SeedWatched("1");
+        _tmdb.Lists["1"] = [Title("thin", voteAverage: 10.0, voteCount: 3)];
+        SeedWatched("2");
+        _tmdb.Lists["2"] = [Title("acclaimed", voteAverage: 8.4, voteCount: 12_000)];
+
+        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+
+        Assert.Equal("acclaimed", result[0].Identity.TmdbId);
+    }
+
+    [Fact]
+    public async Task ACandidateWithNoVoteDataIsScoredOnTheTermsItHas()
+    {
+        // "No features" must mean "average", never "bad" — otherwise every candidate that arrives
+        // before enrichment sinks, which is the path a connected source's suggestions take.
+        SeedWatched("1");
+        _tmdb.Lists["1"] = [Title("featureless"), Title("mediocre", voteAverage: 4.0, voteCount: 5_000)];
+
+        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+
+        Assert.Equal("featureless", result[0].Identity.TmdbId);
+    }
+
+    [Fact]
+    public async Task TheDeepCutsDialDemotesTheBlockbusterAndLeavesItAloneAtZero()
+    {
+        // Both are recommended equally well; only fame separates them. At zero the dial must not
+        // reorder anything, or every existing feed would shift the day it shipped.
+        SeedWatched("1");
+        SeedWatched("2");
+        _tmdb.Lists["1"] = [Title("blockbuster", popularity: 950)];
+        _tmdb.Lists["2"] = [Title("obscure", popularity: 1.4)];
+
+        var untouched = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        Assert.Equal("blockbuster", untouched[0].Identity.TmdbId); // ordinal tiebreak, not the dial
+
+        SetPopularityBias(1.0);
+        var deepCuts = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+
+        Assert.Equal("obscure", deepCuts[0].Identity.TmdbId);
     }
 
     [Fact]
@@ -181,6 +250,8 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         var unconfigured = new LibraryRecommendationProvider(
             new RecommendationSeedSelector(_database, _time),
             _tmdb,
+            new RecommendationScorer(),
+            new RecommendationPreferenceStore(_database),
             new MediaServerSettings(),
             NullLogger<LibraryRecommendationProvider>.Instance);
 
@@ -191,12 +262,43 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
     private LibraryRecommendationProvider Provider() => new(
         new RecommendationSeedSelector(_database, _time),
         _tmdb,
+        new RecommendationScorer(),
+        new RecommendationPreferenceStore(_database),
         new MediaServerSettings { TmdbApiKey = "key" },
         NullLogger<LibraryRecommendationProvider>.Instance);
 
     private static TmdbRecommendedTitle Title(string tmdbId) => new(tmdbId, $"Title {tmdbId}", 2024, null);
 
+    private static TmdbRecommendedTitle Title(
+        string tmdbId, double? voteAverage = null, int? voteCount = null, double? popularity = null) =>
+        new(tmdbId, $"Title {tmdbId}", 2024, null, null, voteAverage, voteCount, popularity);
+
     private void SeedWatched(string tmdbId) => AddPlay(AddItem(MediaKind.Movie, $"Movie {tmdbId}", tmdbId).Id);
+
+    /// <summary>A seed watched long enough ago that its unrated weight has decayed to almost nothing.</summary>
+    private void SeedWatchedLongAgo(string tmdbId) =>
+        AddPlay(AddItem(MediaKind.Movie, $"Movie {tmdbId}", tmdbId).Id, _time.GetUtcNow().AddYears(-2));
+
+    /// <summary>A seed the user gave stars to, which is what the weighted score is meant to respect.</summary>
+    private void SeedRated(string tmdbId, int stars)
+    {
+        var item = AddItem(MediaKind.Movie, $"Movie {tmdbId}", tmdbId);
+        AddPlay(item.Id);
+        _database.UserItemData.Add(new UserItemData
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = item.Id, Rating = stars,
+        });
+        _database.SaveChanges();
+    }
+
+    private void SetPopularityBias(double bias)
+    {
+        _database.RecommendationPreferences.Add(new RecommendationPreference
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId, PopularityBias = bias, UpdatedAt = _time.GetUtcNow(),
+        });
+        _database.SaveChanges();
+    }
 
     private MediaItem AddItem(MediaKind kind, string title, string? tmdbId, Guid? seriesId = null)
     {
@@ -216,12 +318,12 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         return item;
     }
 
-    private void AddPlay(Guid itemId)
+    private void AddPlay(Guid itemId, DateTimeOffset? watchedAt = null)
     {
         _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
         {
             Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = itemId,
-            CreatedAt = _time.GetUtcNow(), WatchedAt = _time.GetUtcNow(),
+            CreatedAt = _time.GetUtcNow(), WatchedAt = watchedAt ?? _time.GetUtcNow(),
             Origin = PlaybackHistoryOrigin.LocalPlayback,
         });
         _database.SaveChanges();

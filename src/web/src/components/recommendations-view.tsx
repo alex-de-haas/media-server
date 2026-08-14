@@ -57,6 +57,7 @@ export function RecommendationsView() {
         <Segmented options={KINDS} value={kind} onChange={setKind} label="Media kind" />
         <Segmented options={PLACES} value={place} onChange={setPlace} label="Availability" />
         {feed.data && feed.data.sources.length > 1 && <SourceControl feed={feed.data} />}
+        {feed.data && <PopularityControl feed={feed.data} />}
       </div>
 
       {feed.isError ? (
@@ -170,6 +171,54 @@ function Segmented<T extends string>({
 }
 
 /** Only meaningful once a second source exists, so the caller renders it conditionally. */
+/**
+ * The Popular ↔ Deep cuts dial.
+ *
+ * TMDb's recommendation lists lean popular, so without a counterweight every instance converges on
+ * the same blockbusters. How much of the mainstream a viewer wants is a taste question rather than a
+ * correctness one, which is why this is a control and not a constant — and why it starts in the
+ * middle of nothing: zero is exactly how the feed ranked before the dial existed.
+ */
+function PopularityControl({ feed }: { feed: { popularityBias: number; maxPopularityBias: number } }) {
+  const queryClient = useQueryClient();
+  // Local state so dragging feels immediate; the server is told once the drag ends.
+  const [value, setValue] = useState<number | null>(null);
+  const save = useMutation({
+    mutationFn: (bias: number) => mediaServer.setRecommendationPopularityBias(bias),
+    onSuccess: () => {
+      setValue(null);
+      queryClient.invalidateQueries({ queryKey: ["recommendations"] });
+    },
+    onError: (error) => {
+      setValue(null);
+      toast.error("Couldn’t change the mix", { description: errorMessage(error) });
+    },
+  });
+
+  const shown = value ?? feed.popularityBias;
+
+  return (
+    <label className="bg-secondary/60 text-muted-foreground flex items-center gap-2 rounded-md px-2 py-1 text-xs">
+      <span>Popular</span>
+      <input
+        type="range"
+        min={0}
+        max={feed.maxPopularityBias}
+        step={0.1}
+        value={shown}
+        disabled={save.isPending}
+        aria-label="Popular to deep cuts"
+        className="accent-brand w-24"
+        onChange={(event) => setValue(Number(event.target.value))}
+        onPointerUp={() => value !== null && save.mutate(value)}
+        onKeyUp={() => value !== null && save.mutate(value)}
+        onBlur={() => value !== null && save.mutate(value)}
+      />
+      <span>Deep cuts</span>
+    </label>
+  );
+}
+
 function SourceControl({ feed }: { feed: { sources: Array<{ key: string; displayName: string }>; selectedSources: string[] } }) {
   const queryClient = useQueryClient();
   const save = useMutation({

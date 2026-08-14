@@ -63,7 +63,9 @@ export interface AppMock {
   deleteWatchHistoryEntry?: (entryId: string) => void; // DELETE /watch-history/entries/{id} — runs before the 204
   setWatchHistoryEntryTime?: (entryId: string, watchedAt: string) => void; // PATCH /watch-history/entries/{id}
   logWatch?: (itemId: string, watchedAt: string) => void; // POST /library/{id}/watches — runs before the 200
-  recommendations?: unknown; // GET /recommendations ({ items, sources, selectedSources })
+  // GET /recommendations. Merged over the envelope's defaults, so a test names only what it cares
+  // about and still gets a well-formed feed.
+  recommendations?: Record<string, unknown>;
   transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
   transcodeLanguages?: string[]; // GET /transcode/languages — what the language field validates against
   mediaBackfill?: { itemsRefreshed: number; remaining: number; sidecarsFilled: number }; // POST /library/backfill-media
@@ -142,10 +144,21 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     // An envelope rather than a list, so it cannot fall through to the empty-array catch-all.
     if (path === "/recommendations") {
       return route.fulfill({
-        json: mock.recommendations ?? { items: [], sources: [], selectedSources: [] },
+        json: {
+          items: [],
+          sources: [],
+          selectedSources: [],
+          popularityBias: 0,
+          maxPopularityBias: 2,
+          ...(mock.recommendations ?? {}),
+        },
       });
     }
-    if (path === "/recommendations/hide" || path === "/recommendations/sources") {
+    if (
+      path === "/recommendations/hide" ||
+      path === "/recommendations/sources" ||
+      path === "/recommendations/popularity-bias"
+    ) {
       return route.fulfill({ status: 204, body: "" });
     }
 

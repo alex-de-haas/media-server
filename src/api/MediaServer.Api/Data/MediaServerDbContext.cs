@@ -724,7 +724,10 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         recommendationCache.HasKey(entity => entity.Id);
         // The engine looks a seed up by its coordinates; uniqueness keeps a refresh replacing the row
         // rather than growing a pile of generations.
-        recommendationCache.HasIndex(entity => new { entity.Kind, entity.TmdbId }).IsUnique();
+        // The generator leads the key: one seed can be asked more than one question, and each answer
+        // is its own row. Existing rows are `/recommendations` answers, which is Generator 0.
+        recommendationCache.HasIndex(entity => new { entity.Generator, entity.Kind, entity.TmdbId }).IsUnique();
+        recommendationCache.Property(entity => entity.Generator).HasConversion<int>();
         recommendationCache.Property(entity => entity.Kind).HasConversion<int>();
         recommendationCache.Property(entity => entity.TmdbId).HasMaxLength(32);
 

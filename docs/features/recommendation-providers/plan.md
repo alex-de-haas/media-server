@@ -470,15 +470,19 @@ Implemented on one branch as one PR, per AGENTS.md.
 
 ### Phase 1 — foundations
 
-- [ ] **Widen the cached candidate shape** to carry `genre_ids`, `vote_average`,
+- [x] **Widen the cached candidate shape** to carry `genre_ids`, `vote_average`,
       `vote_count`, `popularity` and `original_language`, with a payload version
       so existing cache rows are treated as a miss rather than misread.
-- [ ] **Add the generator discriminator to the seed cache** — key, unique index
+- [x] **Add the generator discriminator to the seed cache** — key, unique index
       and migration — so `/similar` and `/recommendations` for one seed stop
       colliding on `(Kind, TmdbId)`. Existing rows migrate in place as `seeds`.
-- [ ] **Replace the lexicographic sort** with `Score · (1 + ln(Seeds))`.
-- [ ] **Quality smoothing and popularity de-bias**, with the `γ` control
-      persisted per user beside the existing source preference.
+- [x] **Replace the lexicographic sort** with `Score · (1 + ln(Seeds))`, in a
+      `RecommendationScorer` that normalizes the collaborative term against the
+      pool before adding quality — so the weights stay meaningful now that a 5★
+      seed is worth 6.5 where the old maximum was about 1.9.
+- [x] **Quality smoothing and popularity de-bias**, with the `γ` control
+      persisted per user beside the existing source preference and surfaced as
+      the **Popular ↔ Deep cuts** slider on the recommendations page.
 
 ### Phase 2 — star ratings
 
