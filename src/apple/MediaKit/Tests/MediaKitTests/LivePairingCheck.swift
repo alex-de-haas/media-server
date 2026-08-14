@@ -163,7 +163,12 @@ struct LivePairingCheck {
         // number worth reading first.
         say("  userData: \(started) started, \(finished) watched")
 
-        guard let sample = library.movies.first(where: { $0.resumeSeconds > 0 }) ?? library.movies.first else {
+        // Prefer one with a poster, so the artwork check below is actually exercised — but a library
+        // where nothing has one is not a failure, and the harness has to know the difference.
+        guard let sample = library.movies.first(where: { $0.resumeSeconds > 0 && $0.hasArtwork })
+            ?? library.movies.first(where: \.hasArtwork)
+            ?? library.movies.first
+        else {
             say("  no films to open")
             return
         }
@@ -179,7 +184,11 @@ struct LivePairingCheck {
             }
         }
 
-        if let url = sample.artworkURL(on: server) {
+        // A title the provider had no poster for answers 404, which is correct. Recording that as a
+        // failure would make this harness cry wolf, and its whole worth is that it does not.
+        if !sample.hasArtwork {
+            say("→ artwork skipped: no poster for \(sample.title)")
+        } else if let url = sample.artworkURL(on: server) {
             say("→ artwork \(url.lastPathComponent)")
             if let data = await session.artwork.image(at: url) {
                 say("  \(data.count) bytes")
