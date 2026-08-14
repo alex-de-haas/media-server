@@ -711,8 +711,6 @@ export interface Recommendation {
   inLibrary: boolean;
   /** The detail routes are `{id:guid}` and resolve by this — a public id would never match. */
   mediaItemId: string | null;
-  /** Providers that suggested it; more than one means independent engines agreed. */
-  sources: string[];
   /** Why it is here, as data — the server never composes the sentence. Null when nothing could say. */
   reason: RecommendationReason | null;
 }
@@ -748,16 +746,8 @@ export function reasonText(reason: RecommendationReason | null): string | null {
   }
 }
 
-export interface RecommendationSource {
-  key: string;
-  displayName: string;
-}
-
 export interface RecommendationFeed {
   items: Recommendation[];
-  /** Every source available to this user, selected or not — so the control can offer them back. */
-  sources: RecommendationSource[];
-  selectedSources: string[];
   /** Where this user's Popular ↔ Deep cuts dial sits. 0 leaves TMDb's own ordering alone. */
   popularityBias: number;
   /** The dial's far end, so the control does not hardcode the server's range. */
@@ -1192,10 +1182,6 @@ export const mediaServer = {
     send(`/recommendations/hide`, "POST", { kind, tmdbId }),
   unhideRecommendation: (kind: RecommendationKind, tmdbId: string) =>
     send(`/recommendations/hide?kind=${kind}&tmdbId=${encodeURIComponent(tmdbId)}`, "DELETE"),
-  setRecommendationSources: (sources: string[] | null) =>
-    send(`/recommendations/sources`, "PUT", { sources }),
-  // Its own route rather than a field on sources: the two are separate statements, and sending one
-  // must not silently reset the other.
   setRecommendationPopularityBias: (popularityBias: number) =>
     send(`/recommendations/popularity-bias`, "PUT", { popularityBias }),
   listWatchHistoryProviders: () =>

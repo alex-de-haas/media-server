@@ -96,28 +96,6 @@ public enum TmdbRecommendationGenerator
 }
 
 /// <summary>
-/// One title's poster path, cached.
-/// </summary>
-/// <remarks>
-/// Trakt returns no artwork, so a title only it suggested arrives posterless and would render as a
-/// grey box. Looking the poster up costs one TMDb call per title, which is worth caching hard: a
-/// poster path changes about as often as the film's title does.
-/// </remarks>
-public sealed class TmdbPosterCacheEntry
-{
-    public Guid Id { get; set; }
-
-    public RecommendationKind Kind { get; set; }
-
-    public required string TmdbId { get; set; }
-
-    /// <summary>The path TMDb reports, or null when it has no poster — a cached negative, not a miss.</summary>
-    public string? PosterPath { get; set; }
-
-    public DateTimeOffset FetchedAt { get; set; }
-}
-
-/// <summary>
 /// One title on one user's Jellyfin recommendation shelf, at a fixed rank.
 /// </summary>
 /// <remarks>
@@ -141,7 +119,7 @@ public sealed class RecommendationShelfItem
 
     public int AppUserId { get; set; }
 
-    /// <summary>Position in the fused feed, ascending and dense from zero.</summary>
+    /// <summary>Position in the ranked feed, ascending and dense from zero.</summary>
     public int Rank { get; set; }
 
     public Guid MediaItemId { get; set; }
@@ -159,8 +137,7 @@ public sealed class RecommendationShelfItem
 /// the timestamp off the rows would mean a user whose feed legitimately yields nothing — no history
 /// yet, or no overlap between the recommendations and the library — has nothing recording that the
 /// question was asked, so every view listing would rebuild from scratch. That is the exact cost this
-/// whole snapshot exists to avoid, and for a Trakt-backed user it would be upstream API calls on
-/// every library refresh.
+/// whole snapshot exists to avoid — for a large library the shelf build ranks the whole catalogue.
 /// </remarks>
 public sealed class RecommendationShelfGeneration
 {
@@ -176,18 +153,17 @@ public sealed class RecommendationShelfGeneration
 /// <remarks>
 /// Server-side rather than browser storage so the choice follows the user between devices — the same
 /// reason the calendar keeps its state in the URL rather than in local storage.
+/// <para>
+/// This once also held which sources the user had narrowed the feed to. With one engine there is
+/// nothing to narrow, so the column is gone rather than left as a setting that reads back as a
+/// preference nobody can express.
+/// </para>
 /// </remarks>
 public sealed class RecommendationPreference
 {
     public Guid Id { get; set; }
 
     public int AppUserId { get; set; }
-
-    /// <summary>
-    /// Comma-separated provider keys the user restricted the feed to, or null for "every available
-    /// source" — the default, and distinct from an empty string, which would mean "none".
-    /// </summary>
-    public string? Sources { get; set; }
 
     /// <summary>
     /// How hard to push against TMDb's popularity bias: 0 leaves it alone, higher favours deep cuts.

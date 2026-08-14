@@ -7,10 +7,25 @@ Updated: 2026-08-14
 > Trakt development is wound down: a self-hosted deployment needs its operator to
 > register an OAuth application, and doing that now requires Trakt VIP, so for
 > any operator without it the provider can never reach `Connected` and the feed
-> has exactly one source. The code stays — see [watched-history
-> providers](../watch-history-providers/feature.md) — so this plan makes the
-> built-in engine carry the feature alone **without** breaking the VIP operator
-> for whom Trakt still works.
+> has exactly one source.
+>
+> **Updated 2026-08-14: Trakt recommendations are removed outright.** The plan
+> originally kept them, to avoid breaking an operator for whom Trakt still
+> works. Building the rest showed the fit was worse than that trade assumed: the
+> engine now emits a *shaped* list — MMR plus franchise, director and genre caps
+> — and rank fusion took that apart into positions and re-interleaved it with an
+> opaque list, which can undo exactly the shaping the re-ranker had just applied.
+> The agreement boost, meanwhile, claimed two engines of comparable authority
+> where one is scored on features and the other is a black box. With one source
+> RRF was order-preserving, so nothing was being damaged today — the cost was
+> carried complexity for a case almost nobody can reach.
+>
+> Removed with it: `RecommendationFusion`, the **Both** badge, the source control
+> and the stored source preference, and `TmdbPosterLookup` with its cache table,
+> which existed only because a connected account returned no artwork. Trakt
+> **watched-history sync is untouched** — see [watched-history
+> providers](../watch-history-providers/feature.md); this was only ever about the
+> recommendations feed.
 
 ## Goal
 
@@ -47,59 +62,41 @@ abandonment state — and the engine reads none of them.
 
 The wind-down turns all three from "worth fixing" into "the whole feature":
 fusion across two engines is what [feature.md](feature.md) calls "the strongest
-evidence this feature has", and for almost every operator it no longer happens.
+evidence this feature has", and for almost every operator it no longer happens —
+which is why it is now gone rather than kept as a path nobody takes.
 
 ## Target behavior
 
 Written as a diff against [feature.md](feature.md).
 
-### Sources and generators become different things
+### There is one engine, and generators inside it
 
-Today `IRecommendationProvider` means both "an engine that produces candidates"
-and "a thing the user can toggle in the source control". Splitting them is what
-lets the engine grow without turning the UI into a panel of knobs:
+`IRecommendationProvider` used to mean both "an engine that produces candidates"
+and "a thing the user can toggle in the source control". With Trakt gone the
+second meaning has nothing to describe, so the interface, the registry and the
+stored source preference go with it — a one-implementation abstraction plus a
+setting nobody can express is cost without a reader.
 
-- A **source** is an entry in the source control, with a stable key and a stored
-  preference. There are two: the built-in engine, which **keeps the `library`
-  key it has today**, and Trakt.
-- A **generator** is an internal strategy *inside* the built-in source. Generators
-  are not user-facing toggles; a user cannot meaningfully choose between "seeds"
-  and "discover", and their output is one scored list carrying one key.
+What replaces it is a **generator**: an internal strategy inside the one engine.
+Generators are deliberately not user-facing toggles; a viewer cannot meaningfully
+choose between "seeds" and "discover", and their output is one scored list.
 
-The built-in engine staying a source is load-bearing, not cosmetic. Reserving
-`IRecommendationProvider` for external accounts alone would break three things at
-once:
+### The engine is three stages
 
-- `SelectedSourcesAsync` filters the stored preference against the available
-  keys and falls back to "everything" when nothing survives. A user who had
-  narrowed the feed to `library` would have their preference read as *vanished*
-  and Trakt switched **on** — the opposite of what they chose.
-- The source control appears only once a second source exists. With Trakt as the
-  only source there is never a second, so a VIP operator could never turn it off
-  again.
-- Fusion needs two ranked lists to have anything to fuse, and the **Both** badge
-  needs two source keys to report agreement between.
-
-So the control still appears only once Trakt is connected, exactly as now, the
-stored `library` preference keeps meaning what it meant, and for the common
-single-source instance the feed simply gets better.
-
-### The engine becomes three stages
-
-Today one stage does everything: providers return ranked lists, fusion merges
-positions, the feed service filters. That shape existed because Trakt returned
-positions without scores, so rank was the only common unit.
+One stage used to do everything: providers returned ranked lists, fusion merged
+positions, the feed service filtered. That shape existed because a connected
+account returned positions without scores, so rank was the only unit two sources
+had in common.
 
 - **Generate** — several generators contribute candidates and a reason, with no
   claim about global order.
 - **Score** — one scorer ranks the pooled candidates in a single unit.
 - **Re-rank** — diversity, exclusions and explanations shape the final list.
 
-`RecommendationFusion` is **not** deleted. A connected source still arrives as
-positions without features, and rank fusion remains the honest way to merge that
-with a scored list: the scorer emits a rank, the source has a rank, and RRF plus
-the agreement boost combines them as it does today. What changes is that fusion
-is no longer how the built-in engine ranks *within itself*.
+`RecommendationFusion` is **deleted**. With one source there is nothing to fuse,
+and keeping it would mean flattening the engine's own shaped order back into
+positions and re-deriving it — losing, in the process, the diversity the
+re-ranker had just imposed.
 
 ### Star ratings — the explicit signal the schema never had
 
@@ -381,8 +378,8 @@ score(c) = β_cf·CF(c) + Σ_family β_f·cos(profile_f, facets_c) + β_q·Quali
 drop out, and the candidate rides its collaborative and quality terms. This is
 the path a source-supplied candidate takes before enrichment, and it must stay
 correct: the alternative — treating "no features" as "zero similarity" — would
-sink every Trakt suggestion to the bottom and quietly disable the source for the
-operator paying for it.
+sink every candidate that arrives bare — which is every candidate from a
+generator that returns ids without features.
 
 ### Re-ranking
 
@@ -528,10 +525,10 @@ Implemented on one branch as one PR, per AGENTS.md.
 
 ### Phase 4 — generators and scoring
 
-- [x] **Split sources from generators** by adding an internal generator seam
-      *behind* the built-in provider, which keeps its `library` source key so
-      stored preferences, the source control's second-source condition and the
-      agreement badge all keep their current meaning.
+- [x] **Split sources from generators** by adding an internal generator seam.
+      Shipped first *behind* the provider, so the stored `library` preference and
+      the source control kept their meaning; both were then removed outright with
+      Trakt, leaving the seam and one engine.
 - [x] **Three-stage pipeline** — generate, score, re-rank. A generator that
       throws is skipped, so one dead strategy costs its own contribution rather
       than the feed.
@@ -574,13 +571,12 @@ Implemented on one branch as one PR, per AGENTS.md.
 
 ### Phase 6 — proof
 
-- [ ] **Trakt still works when connected** — fusion, the agreement boost, the
-      **Both** badge, the source control and poster backfill all exercised
-      against a stubbed connected source, so the wind-down does not become a
-      silent regression for a VIP operator.
-- [ ] **A stored `library`-only preference survives the refactor** — with Trakt
-      connected it must keep Trakt off, not be read as a vanished source and fall
-      back to enabling everything.
+- [x] ~~**Trakt still works when connected**~~ and ~~**a stored `library`-only
+      preference survives the refactor**~~ — both dropped, because the surfaces
+      they protected are gone. Trakt recommendations, fusion, the agreement
+      boost, the **Both** badge, the source control, the stored source preference
+      and the poster backfill were all removed; see the note at the top. Trakt
+      watched-history sync is untouched and keeps its own suite.
 - [x] **An instance where nobody rates anything ranks as it did** — unrated stays
       the ×1.0 unit and the favorite boost stays ×1.5 against it, or the addition
       is a silent ranking change for every existing user.
@@ -637,10 +633,8 @@ Implemented on one branch as one PR, per AGENTS.md.
   library tile the user did not ask for.
 - **Is `/discover` worth its complexity** before the evaluation harness can show
   it beats `similar` at reaching the long tail?
-- **Does the agreement boost survive?** It was tuned for two engines of
-  comparable authority. With one scored engine and one rank-only source that
-  almost nobody can connect, 1.5 per extra agreeing provider may now be
-  overstating a source the scorer cannot inspect.
+- ~~**Does the agreement boost survive?**~~ Answered by deleting it. It was tuned
+  for two engines of comparable authority, and there is one engine.
 
 ## Verification steps
 
@@ -661,9 +655,8 @@ Implemented on one branch as one PR, per AGENTS.md.
    TMDb key removed to prove it costs no requests.
 7. Confirm a user with no playback history gets the library-profile rung rather
    than an empty feed, and that the response says which rung answered.
-8. With a stubbed connected source, confirm the feed still fuses, badges
-   agreement, and backfills posters — the VIP path, which no local instance can
-   exercise for real — and that a preference stored as `library` still means
-   "built-in only" rather than falling back to every source.
+8. Confirm Trakt **watched-history sync** still connects, syncs and pushes
+   favorites — the removal touched only the recommendations feed, and that is
+   the claim worth checking rather than assuming.
 9. Refresh a catalog and confirm the cached profiles rebuild rather than serving
    facets damped against the previous library.

@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Check, EyeOff, Plus, Sparkles } from "lucide-react";
+import { Check, EyeOff, Plus } from "lucide-react";
 import { reasonText, type Recommendation } from "@/lib/media-server";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -31,8 +30,6 @@ export function RecommendationCard({
   const href = item.inLibrary && item.mediaItemId
     ? `/${item.kind === "Series" ? "series" : "movies"}/${item.mediaItemId}`
     : null;
-  // Independent engines agreeing is the strongest signal the feed has, so it is worth saying out loud.
-  const agreed = item.sources.length > 1;
 
   const poster = (
     <span className="bg-secondary relative block aspect-[2/3] w-full overflow-hidden rounded-md">
@@ -43,11 +40,6 @@ export function RecommendationCard({
         <span className="text-muted-foreground flex h-full w-full items-center justify-center p-2 text-center text-xs">
           No poster
         </span>
-      )}
-      {agreed && (
-        <Badge className="absolute top-1 left-1 gap-1 px-1.5 py-0" variant="secondary" title="Both sources suggested this">
-          <Sparkles className="size-3" aria-hidden /> Both
-        </Badge>
       )}
     </span>
   );

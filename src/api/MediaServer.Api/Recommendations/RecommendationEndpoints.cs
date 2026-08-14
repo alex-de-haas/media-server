@@ -7,9 +7,6 @@ namespace MediaServer.Api.Recommendations;
 /// <summary>The title a hide or unhide acts on.</summary>
 public sealed record RecommendationHideRequest(RecommendationKind Kind, string TmdbId);
 
-/// <summary>The user's source narrowing; an empty or absent list means "every available source".</summary>
-public sealed record RecommendationSourcesRequest(IReadOnlyList<string>? Sources);
-
 /// <summary>Where the user put the Popular ↔ Deep cuts dial. 0 leaves TMDb's ordering alone.</summary>
 public sealed record RecommendationPopularityBiasRequest(double PopularityBias);
 
@@ -99,24 +96,6 @@ public static class RecommendationEndpoints
 
             // Idempotent: unhiding something that is not hidden is the state the caller wanted.
             await feed.UnhideAsync(user.Id, new RecommendationIdentity(kind, tmdbId.Trim()), cancellationToken);
-            return Results.NoContent();
-        });
-
-        group.MapPut("/sources", async (
-            RecommendationSourcesRequest request,
-            ClaimsPrincipal principal,
-            RecommendationFeedService feed,
-            MediaServerDbContext database,
-            TimeProvider time,
-            CancellationToken cancellationToken) =>
-        {
-            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
-            if (user is null)
-            {
-                return Results.Unauthorized();
-            }
-
-            await feed.SetSourcesAsync(user.Id, request.Sources, time.GetUtcNow(), cancellationToken);
             return Results.NoContent();
         });
 

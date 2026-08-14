@@ -7,8 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.Tests.Recommendations;
 
 /// <summary>
-/// The Popular ↔ Deep cuts dial: its default, its bounds, and that it shares a row with the source
-/// preference without either setting clobbering the other.
+/// The Popular ↔ Deep cuts dial: its default and its bounds.
 /// </summary>
 public sealed class RecommendationPreferenceStoreTests : IDisposable
 {
@@ -60,34 +59,7 @@ public sealed class RecommendationPreferenceStoreTests : IDisposable
         Assert.Equal(0, await Store().PopularityBiasAsync(_userId, CancellationToken.None));
     }
 
-    [Fact]
-    public async Task SettingTheDialDoesNotDisturbTheSourcePreference()
-    {
-        // The two live in one row but are separate statements: narrowing sources is not a claim about
-        // popularity, and moving the dial is not a claim about sources.
-        _database.RecommendationPreferences.Add(new RecommendationPreference
-        {
-            Id = Guid.NewGuid(), AppUserId = _userId, Sources = "library", UpdatedAt = _time.GetUtcNow(),
-        });
-        await _database.SaveChangesAsync();
 
-        Assert.True(await Store().SetPopularityBiasAsync(_userId, 1.5, _time.GetUtcNow(), CancellationToken.None));
-
-        _database.ChangeTracker.Clear();
-        var row = await _database.RecommendationPreferences.SingleAsync();
-        Assert.Equal("library", row.Sources);
-        Assert.Equal(1.5, row.PopularityBias);
-    }
-
-    [Fact]
-    public async Task SettingTheDialFirstLeavesEverySourceAvailable()
-    {
-        // A null Sources means "every available source". Creating the row for the dial's sake must
-        // not read as the user having turned sources off.
-        Assert.True(await Store().SetPopularityBiasAsync(_userId, 0.5, _time.GetUtcNow(), CancellationToken.None));
-
-        Assert.Null((await _database.RecommendationPreferences.SingleAsync()).Sources);
-    }
 
     private RecommendationPreferenceStore Store() => new(_database);
 

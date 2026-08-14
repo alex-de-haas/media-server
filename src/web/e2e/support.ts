@@ -146,19 +146,13 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
       return route.fulfill({
         json: {
           items: [],
-          sources: [],
-          selectedSources: [],
           popularityBias: 0,
           maxPopularityBias: 2,
           ...(mock.recommendations ?? {}),
         },
       });
     }
-    if (
-      path === "/recommendations/hide" ||
-      path === "/recommendations/sources" ||
-      path === "/recommendations/popularity-bias"
-    ) {
+    if (path === "/recommendations/hide" || path === "/recommendations/popularity-bias") {
       return route.fulfill({ status: 204, body: "" });
     }
 

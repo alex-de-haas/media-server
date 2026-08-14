@@ -2352,8 +2352,7 @@
           "year",
           "posterUrl",
           "inLibrary",
-          "mediaItemId",
-          "sources"
+          "mediaItemId"
         ],
         "type": "object",
         "properties": {
@@ -2391,12 +2390,6 @@
             ],
             "format": "uuid"
           },
-          "sources": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "reason": {
             "oneOf": [
               {
@@ -2411,9 +2404,7 @@
       },
       "RecommendationFeedDto": {
         "required": [
-          "items",
-          "sources",
-          "selectedSources"
+          "items"
         ],
         "type": "object",
         "properties": {
@@ -2421,18 +2412,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RecommendationDto"
-            }
-          },
-          "sources": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RecommendationProviderDescriptor"
-            }
-          },
-          "selectedSources": {
-            "type": "array",
-            "items": {
-              "type": "string"
             }
           },
           "popularityBias": {
@@ -2467,21 +2446,6 @@
           "Series",
           null
         ]
-      },
-      "RecommendationProviderDescriptor": {
-        "required": [
-          "key",
-          "displayName"
-        ],
-        "type": "object",
-        "properties": {
-          "key": {
-            "type": "string"
-          },
-          "displayName": {
-            "type": "string"
-          }
-        }
       },
       "RecommendationReason": {
         "required": [

@@ -212,7 +212,6 @@ builder.Services.AddScoped<FavoritesSyncService>();
 builder.Services.AddScoped<WatchHistoryCalendarService>();
 builder.Services.AddScoped<WatchHistoryEntryService>();
 
-builder.Services.AddScoped<IRecommendationProviderRegistry, RecommendationProviderRegistry>();
 builder.Services.AddScoped<RecommendationSeedSelector>();
 builder.Services.AddScoped<RecommendationScorer>();
 builder.Services.AddScoped<RecommendationPreferenceStore>();
@@ -242,9 +241,6 @@ builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommend
     MediaServer.Api.Recommendations.Generation.PeopleGenerator>();
 builder.Services.AddScoped<MediaServer.Api.Recommendations.Generation.IRecommendationGenerator,
     MediaServer.Api.Recommendations.Generation.DiscoverGenerator>();
-builder.Services.AddScoped<IRecommendationProvider, LibraryRecommendationProvider>();
-builder.Services.AddScoped<IRecommendationProvider, MediaServer.Api.Recommendations.Trakt.TraktRecommendationProvider>();
-builder.Services.AddScoped<ITmdbPosterLookup, TmdbPosterLookup>();
 builder.Services.AddScoped<RecommendationFeedService>();
 builder.Services.AddScoped<RecommendationShelfService>();
 builder.Services.AddScoped<IRecommendationShelf>(services => services.GetRequiredService<RecommendationShelfService>());

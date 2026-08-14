@@ -27,7 +27,7 @@ const PLACES: Array<{ value: LibraryFilter; label: string }> = [
   { value: "discover", label: "Not in library" },
 ];
 
-/** The full recommendations page: the merged feed, its filters, and the source control. */
+/** The full recommendations page: the feed, its filters, and the Popular ↔ Deep cuts dial. */
 export function RecommendationsView() {
   const [kind, setKind] = useState<KindFilter>("all");
   const [place, setPlace] = useState<LibraryFilter>("all");
@@ -56,7 +56,6 @@ export function RecommendationsView() {
       <div className="flex flex-wrap items-center gap-2">
         <Segmented options={KINDS} value={kind} onChange={setKind} label="Media kind" />
         <Segmented options={PLACES} value={place} onChange={setPlace} label="Availability" />
-        {feed.data && feed.data.sources.length > 1 && <SourceControl feed={feed.data} />}
         {feed.data && <PopularityControl feed={feed.data} />}
       </div>
 
@@ -118,7 +117,6 @@ export function recommendationOf(target: TitlePreviewTarget, items: Recommendati
       posterUrl: target.posterUrl ?? null,
       inLibrary: false,
       mediaItemId: null,
-      sources: [],
       reason: null,
     }
   );
@@ -172,7 +170,6 @@ function Segmented<T extends string>({
   );
 }
 
-/** Only meaningful once a second source exists, so the caller renders it conditionally. */
 /**
  * The Popular ↔ Deep cuts dial.
  *
@@ -221,48 +218,6 @@ function PopularityControl({ feed }: { feed: { popularityBias: number; maxPopula
   );
 }
 
-function SourceControl({ feed }: { feed: { sources: Array<{ key: string; displayName: string }>; selectedSources: string[] } }) {
-  const queryClient = useQueryClient();
-  const save = useMutation({
-    mutationFn: (sources: string[] | null) => mediaServer.setRecommendationSources(sources),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["recommendations"] }),
-    onError: (error) => toast.error("Couldn’t change sources", { description: errorMessage(error) }),
-  });
-
-  const toggle = (key: string) => {
-    const selected = new Set(feed.selectedSources);
-    if (selected.has(key)) {
-      selected.delete(key);
-    } else {
-      selected.add(key);
-    }
-
-    // Turning the last source off would leave an unexplained empty feed; treat it as "all" instead.
-    save.mutate(selected.size === 0 ? null : [...selected]);
-  };
-
-  return (
-    <div className="bg-secondary/60 flex items-center gap-0.5 rounded-md p-0.5" role="group" aria-label="Sources">
-      {feed.sources.map((source) => (
-        <button
-          key={source.key}
-          type="button"
-          aria-pressed={feed.selectedSources.includes(source.key)}
-          disabled={save.isPending}
-          className={cn(
-            "rounded px-2 py-0.5 text-xs font-medium transition-colors",
-            feed.selectedSources.includes(source.key)
-              ? "bg-background shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-          onClick={() => toggle(source.key)}
-        >
-          {source.displayName}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /**
  * Hide (with undo) and Track, shared by the page and the home row so both behave identically.

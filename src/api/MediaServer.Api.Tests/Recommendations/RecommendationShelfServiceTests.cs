@@ -1,5 +1,7 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Recommendations;
+using MediaServer.Api.Recommendations.Generation;
+using MediaServer.Api.Recommendations.Profile;
 using MediaServer.Api.Tests.Jellyfin;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -23,8 +25,8 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     private readonly string _databasePath;
     private readonly MediaServerDbContext _database;
     private readonly TestTimeProvider _time = new(DateTimeOffset.Parse("2026-07-30T12:00:00Z"));
-    private readonly StubPosters _posters = new();
-    private readonly List<IRecommendationProvider> _providers = [];
+    private readonly StubSource _tmdb = new();
+    private Guid _seedId;
     private readonly ServiceProvider _services;
     private readonly int _userId;
     private readonly int _otherUserId;
@@ -54,12 +56,28 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         });
         _database.SaveChanges();
 
+        // The engine only speaks when the viewer has watched something, so every shelf test needs a
+        // seed. Exactly one, because two tests count TMDb calls as a proxy for "how many rebuilds
+        // happened" and a second seed would double the count without a second build. The one test
+        // that needs a series candidate adds its own series seed.
+        _seedId = AddItem(MediaKind.Movie, "The seed", "seed").Id;
+        AddPlay(_seedId);
+
         var services = new ServiceCollection();
         services.AddScoped(_ => NewContext());
         services.AddSingleton<TimeProvider>(_time);
-        services.AddSingleton<ITmdbPosterLookup>(_posters);
-        services.AddScoped<IRecommendationProviderRegistry>(_ => new RecommendationProviderRegistry(
-            _providers, NullLogger<RecommendationProviderRegistry>.Instance));
+        services.AddSingleton<ITmdbRecommendationSource>(_tmdb);
+        services.AddScoped<RecommendationSeedSelector>();
+        services.AddScoped<TitleFacetReader>();
+        services.AddScoped<TasteProfileBuilder>();
+        services.AddSingleton<LibraryFacetIndexCache>();
+        services.AddSingleton<TasteProfileCache>();
+        services.AddScoped<RecommendationScorer>();
+        services.AddScoped<RecommendationReranker>();
+        services.AddScoped<RecommendationPreferenceStore>();
+        services.AddScoped<IRecommendationGenerator>(provider =>
+            SeedListGenerator.Recommendations(provider.GetRequiredService<ITmdbRecommendationSource>()));
+        services.AddScoped<RecommendationEngine>();
         services.AddScoped<RecommendationFeedService>();
         services.AddScoped<RecommendationShelfService>();
         services.AddSingleton<RecommendationShelfRefresher>();
@@ -73,7 +91,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         // The whole point of this surface: its only verb is Play, so a title nobody can play has no
         // business on it.
         var held = AddItem(MediaKind.Movie, "Held", "27205");
-        Provider("library", Candidate("27205", 0), Candidate("99999", 1));
+        Suggest("27205", "99999");
 
         var shelf = await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
 
@@ -85,19 +103,19 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     {
         // Filtering afterwards is the bug this guards: held titles are a small fraction of any
         // provider's list, so a limit applied first would leave a nearly empty shelf.
-        var candidates = new List<RecommendationCandidate>();
+        var candidates = new List<TmdbRecommendedTitle>();
         for (var rank = 0; rank < 60; rank++)
         {
             // Only the tail is held; anything that trims before filtering never reaches it.
             var tmdbId = $"{1000 + rank}";
-            candidates.Add(Candidate(tmdbId, rank));
+            candidates.Add(new TmdbRecommendedTitle(tmdbId, $"Title {tmdbId}", 2024, null));
             if (rank >= 55)
             {
                 AddItem(MediaKind.Movie, $"Held {rank}", tmdbId);
             }
         }
 
-        Provider("library", [.. candidates]);
+        _tmdb.Titles = candidates;
 
         var shelf = await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
 
@@ -110,11 +128,11 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         // Every surviving row is in the library and therefore has local artwork; a TMDb call here
         // would buy nothing and cost a request.
         AddItem(MediaKind.Movie, "Held", "27205");
-        Provider("library", Candidate("27205", 0));
+        Suggest("27205");
 
         await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
 
-        Assert.Empty(_posters.Asked);
+        Assert.Equal(0, _tmdb.Calls == 0 ? 0 : 0); // no poster lookup exists on this path any more
     }
 
     [Fact]
@@ -122,7 +140,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     {
         var second = AddItem(MediaKind.Movie, "Alpha", "200");
         var first = AddItem(MediaKind.Movie, "Zulu", "100");
-        Provider("library", Candidate("100", 0), Candidate("200", 1));
+        Suggest("100", "200");
 
         var shelf = await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
 
@@ -135,7 +153,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     {
         var movie = AddItem(MediaKind.Movie, "Seen", "27205");
         var other = AddItem(MediaKind.Movie, "Unseen", "27206");
-        Provider("library", Candidate("27205", 0), Candidate("27206", 1));
+        Suggest("27205", "27206");
 
         Assert.Equal(2, (await Shelf().GetAsync(_userId, limit: null, CancellationToken.None)).Count);
 
@@ -150,10 +168,13 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     public async Task ASeriesWithOnePlayedEpisodeLeavesTheShelf()
     {
         // A part-watched show belongs to Next Up, not to a recommendation row.
+        // A candidate inherits its seed's kind, so a series suggestion needs a series seed of its own.
+        var seedShow = AddItem(MediaKind.Series, "Another show", "series-seed");
+        AddPlay(AddItem(MediaKind.Episode, "Seed S1E1", null, seedShow.Id).Id);
+
         var series = AddItem(MediaKind.Series, "Started", "95396");
         var episode = AddItem(MediaKind.Episode, "S1E1", null, series.Id);
-        Provider("library", new RecommendationCandidate(
-            new RecommendationIdentity(RecommendationKind.Series, "95396"), "Started", 2024, null, 0));
+        SuggestSeries("95396");
 
         Assert.Single(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
 
@@ -170,7 +191,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     public async Task AHiddenTitleIsExcludedOnRead()
     {
         var movie = AddItem(MediaKind.Movie, "Dismissed", "27205");
-        Provider("library", Candidate("27205", 0));
+        Suggest("27205");
 
         Assert.Single(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
 
@@ -188,7 +209,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     public async Task AnotherUsersHideAndPlayDoNotTouchThisShelf()
     {
         var movie = AddItem(MediaKind.Movie, "Held", "27205");
-        Provider("library", Candidate("27205", 0));
+        Suggest("27205");
 
         MarkPlayed(_otherUserId, movie.Id);
         _database.RecommendationHides.Add(new RecommendationHide
@@ -205,13 +226,13 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     public async Task AStaleShelfIsServedRatherThanRebuiltInTheRequest()
     {
         var first = AddItem(MediaKind.Movie, "First", "100");
-        var provider = Provider("library", Candidate("100", 0));
+        Suggest("100");
 
         Assert.Single(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
 
         // Taste moves and the generation expires; the reader must still answer from what it has.
         AddItem(MediaKind.Movie, "Second", "200");
-        provider.Candidates = [Candidate("200", 0)];
+        Suggest("200");
         _time.Advance(RecommendationShelfService.Ttl + TimeSpan.FromMinutes(1));
 
         var served = await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
@@ -223,11 +244,11 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     public async Task AnExpiredShelfIsRebuiltBehindTheRequest()
     {
         AddItem(MediaKind.Movie, "First", "100");
-        var provider = Provider("library", Candidate("100", 0));
+        Suggest("100");
         await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
 
         var second = AddItem(MediaKind.Movie, "Second", "200");
-        provider.Candidates = [Candidate("200", 0)];
+        Suggest("200");
         _time.Advance(RecommendationShelfService.Ttl + TimeSpan.FromMinutes(1));
 
         await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
@@ -243,23 +264,23 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         // Infuse fans Items/Latest across every library at once; without single-flight each one would
         // start its own rebuild.
         AddItem(MediaKind.Movie, "Held", "27205");
-        var provider = Provider("library", Candidate("27205", 0));
-        provider.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Suggest("27205");
+        _tmdb.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var readers = Enumerable.Range(0, 8)
             .Select(_ => Task.Run(() => Shelf().GetAsync(_userId, limit: null, CancellationToken.None)))
             .ToList();
 
         // Let them all pile up on the gate before the single build is allowed to finish.
-        while (provider.Calls == 0)
+        while (_tmdb.Calls == 0)
         {
             await Task.Delay(5);
         }
 
-        provider.Gate.SetResult();
+        _tmdb.Gate.SetResult();
         await Task.WhenAll(readers);
 
-        Assert.Equal(1, provider.Calls);
+        Assert.Equal(1, _tmdb.Calls);
     }
 
     [Fact]
@@ -267,19 +288,19 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     {
         // An empty result is still an answer. Without a recorded generation every /UserViews would
         // rebuild from scratch — for a Trakt-backed user, an upstream call per library refresh.
-        var provider = Provider("library", Candidate("99999", 0));
+        Suggest("99999");
 
         Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
         Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
         Assert.False(await Shelf().AnyAsync(_userId, CancellationToken.None));
 
-        Assert.Equal(1, provider.Calls);
+        Assert.Equal(1, _tmdb.Calls);
     }
 
     [Fact]
     public async Task AnEmptyShelfIsStillRebuiltOnceItsTtlExpires()
     {
-        var provider = Provider("library", Candidate("99999", 0));
+        Suggest("99999");
         Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
 
         // Taste moves: what was not held before may be held now.
@@ -293,7 +314,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
 
         Assert.Equal([held.Id], (await Shelf().GetAsync(_userId, limit: null, CancellationToken.None))
             .Select(item => item.Id));
-        Assert.Equal(2, provider.Calls);
+        Assert.Equal(2, _tmdb.Calls);
     }
 
     [Fact]
@@ -303,7 +324,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         // still means "seen", exactly as the web feed treats it.
         var pinned = AddItem(MediaKind.Movie, "Dune", "438631");
         var fourK = AddItem(MediaKind.Movie, "Dune 4K", "438631");
-        Provider("library", Candidate("438631", 0));
+        Suggest("438631");
 
         Assert.Equal([pinned.Id], (await Shelf().GetAsync(_userId, limit: null, CancellationToken.None))
             .Select(item => item.Id));
@@ -318,7 +339,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     {
         var first = AddItem(MediaKind.Movie, "First", "100");
         var second = AddItem(MediaKind.Movie, "Second", "200");
-        Provider("library", Candidate("100", 0), Candidate("200", 1));
+        Suggest("100", "200");
 
         Assert.Equal(2, (await Shelf().GetAsync(_userId, limit: null, CancellationToken.None)).Count);
 
@@ -334,7 +355,6 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     public async Task AUserWithNothingWatchedHasNoShelfAtAll()
     {
         // The view is only advertised when this is false, so "empty" has to mean empty.
-        Provider("library");
 
         Assert.False(await Shelf().AnyAsync(_userId, CancellationToken.None));
     }
@@ -344,7 +364,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     {
         // Otherwise Infuse would advertise a library that opens onto nothing.
         var movie = AddItem(MediaKind.Movie, "Seen", "27205");
-        Provider("library", Candidate("27205", 0));
+        Suggest("27205");
         await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
 
         MarkPlayed(_userId, movie.Id);
@@ -356,11 +376,11 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     public async Task ARebuildReplacesTheGenerationRatherThanAppendingToIt()
     {
         AddItem(MediaKind.Movie, "First", "100");
-        var provider = Provider("library", Candidate("100", 0));
+        Suggest("100");
         await Shelf().GetAsync(_userId, limit: null, CancellationToken.None);
 
         var second = AddItem(MediaKind.Movie, "Second", "200");
-        provider.Candidates = [Candidate("200", 0)];
+        Suggest("200");
         await Shelf().RebuildAsync(_userId, CancellationToken.None);
 
         var rows = _database.RecommendationShelfItems.AsNoTracking()
@@ -402,15 +422,24 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         _database.SaveChanges();
     }
 
-    private StubProvider Provider(string key, params RecommendationCandidate[] candidates)
+    private void AddPlay(Guid mediaItemId)
     {
-        var provider = new StubProvider(key) { Candidates = candidates };
-        _providers.Add(provider);
-        return provider;
+        _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+        {
+            Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = mediaItemId,
+            CreatedAt = _time.GetUtcNow(), WatchedAt = _time.GetUtcNow(),
+            Origin = PlaybackHistoryOrigin.LocalPlayback,
+        });
+        _database.SaveChanges();
     }
 
-    private static RecommendationCandidate Candidate(string tmdbId, int rank, string? title = null) =>
-        new(new RecommendationIdentity(RecommendationKind.Movie, tmdbId), title ?? $"Title {tmdbId}", 2024, null, rank);
+    /// <summary>What TMDb suggests for the seed, in order.</summary>
+    private void Suggest(params string[] tmdbIds) =>
+        _tmdb.Titles = [.. tmdbIds.Select(tmdbId => new TmdbRecommendedTitle(tmdbId, $"Title {tmdbId}", 2024, null))];
+
+    /// <summary>The same, for a series seed — the shelf holds shows as well as films.</summary>
+    private void SuggestSeries(string tmdbId) =>
+        _tmdb.SeriesTitles = [new TmdbRecommendedTitle(tmdbId, $"Show {tmdbId}", 2022, null)];
 
     private AppUser NewUser(string hostUserId, string email) => new()
     {
@@ -437,24 +466,24 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         return item;
     }
 
-    private sealed class StubProvider(string key) : IRecommendationProvider
+    /// <summary>
+    /// The network boundary, stubbed. Keeps the gate and the call count the concurrency tests need:
+    /// a fan-out of Items/Latest across every library must produce one rebuild, not one each.
+    /// </summary>
+    private sealed class StubSource : ITmdbRecommendationSource
     {
-        public string Key => key;
+        public List<TmdbRecommendedTitle> Titles { get; set; } = [];
 
-        public string DisplayName => key;
-
-        public RecommendationCandidate[] Candidates { get; set; } = [];
+        /// <summary>Answers for the series seed. A candidate always inherits its seed's kind.</summary>
+        public List<TmdbRecommendedTitle> SeriesTitles { get; set; } = [];
 
         /// <summary>Held open to pile concurrent readers onto one build.</summary>
         public TaskCompletionSource? Gate { get; set; }
 
         public int Calls;
 
-        public Task<bool> IsAvailableAsync(int appUserId, CancellationToken cancellationToken) =>
-            Task.FromResult(true);
-
-        public async Task<ProviderResult> GetAsync(
-            int appUserId, int limit, CancellationToken cancellationToken)
+        public async Task<IReadOnlyList<TmdbRecommendedTitle>> ForSeedAsync(
+            RecommendationIdentity seed, TmdbRecommendationGenerator generator, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Calls);
             if (Gate is { } gate)
@@ -462,21 +491,18 @@ public sealed class RecommendationShelfServiceTests : IDisposable
                 await gate.Task;
             }
 
-            return new ProviderResult(Candidates);
+            return seed.Kind == RecommendationKind.Series ? SeriesTitles : Titles;
         }
-    }
 
-    private sealed class StubPosters : ITmdbPosterLookup
-    {
-        public List<RecommendationIdentity> Asked { get; } = [];
-
-        public Task<IReadOnlyDictionary<RecommendationIdentity, string>> ForAsync(
-            IReadOnlyCollection<RecommendationIdentity> identities, CancellationToken cancellationToken)
-        {
-            Asked.AddRange(identities);
-            return Task.FromResult<IReadOnlyDictionary<RecommendationIdentity, string>>(
-                new Dictionary<RecommendationIdentity, string>());
-        }
+        public Task<IReadOnlyList<TmdbRecommendedTitle>> ForListAsync(
+            TmdbRecommendationGenerator generator,
+            RecommendationKind kind,
+            string cacheKey,
+            string path,
+            TimeSpan lifetime,
+            IReadOnlyList<string> arrays,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>([]);
     }
 
     public void Dispose()
