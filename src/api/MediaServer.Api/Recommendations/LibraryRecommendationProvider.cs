@@ -33,17 +33,20 @@ public sealed class LibraryRecommendationProvider(
         // No per-user setup: if the instance can talk to TMDb at all, every user has this source.
         Task.FromResult(!string.IsNullOrWhiteSpace(settings.TmdbApiKey));
 
-    public async Task<IReadOnlyList<RecommendationCandidate>> GetAsync(
+    public async Task<ProviderResult> GetAsync(
         int appUserId, int limit, CancellationToken cancellationToken)
     {
-        var ranked = await engine.RankAsync(appUserId, limit, cancellationToken);
+        var result = await engine.RankAsync(appUserId, limit, cancellationToken);
 
-        return [.. ranked.Select((entry, rank) => new RecommendationCandidate(
-            entry.Identity,
-            entry.Candidate.Title.Title,
-            entry.Candidate.Title.Year,
-            PosterUrl(entry.Candidate.Title.PosterPath),
-            rank))];
+        return new ProviderResult(
+            [.. result.Candidates.Select((entry, rank) => new RecommendationCandidate(
+                entry.Identity,
+                entry.Candidate.Title.Title,
+                entry.Candidate.Title.Year,
+                PosterUrl(entry.Candidate.Title.PosterPath),
+                rank,
+                entry.Candidate.Reason))],
+            result.Rung);
     }
 
     private static string? PosterUrl(string? posterPath) =>

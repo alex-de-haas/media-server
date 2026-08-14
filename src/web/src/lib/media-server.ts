@@ -713,6 +713,39 @@ export interface Recommendation {
   mediaItemId: string | null;
   /** Providers that suggested it; more than one means independent engines agreed. */
   sources: string[];
+  /** Why it is here, as data — the server never composes the sentence. Null when nothing could say. */
+  reason: RecommendationReason | null;
+}
+
+/**
+ * Why a card is in the feed.
+ *
+ * Structured rather than a ready-made sentence: the server knows what produced a candidate, and only
+ * the client knows how its own surface phrases things and how much room the line has.
+ */
+export interface RecommendationReason {
+  kind: "seed" | "rated-seed" | "franchise" | "person" | "in-library" | "taste";
+  detail: string | null;
+  rating: number | null;
+}
+
+/** The reason as one short line, or null when there is nothing worth saying. */
+export function reasonText(reason: RecommendationReason | null): string | null {
+  if (!reason) return null;
+  switch (reason.kind) {
+    case "rated-seed":
+      return reason.detail ? `Because you rated ${reason.detail} ${reason.rating}★` : null;
+    case "seed":
+      return reason.detail ? `Because you watched ${reason.detail}` : null;
+    case "franchise":
+      return reason.detail ? `Next in ${reason.detail}` : "Next in a series you started";
+    case "person":
+      return reason.detail ? `More from ${reason.detail}` : null;
+    case "in-library":
+      return "Already in your library";
+    case "taste":
+      return "Matches what you watch";
+  }
 }
 
 export interface RecommendationSource {

@@ -550,14 +550,27 @@ Implemented on one branch as one PR, per AGENTS.md.
 
 ### Phase 5 — surfaces
 
-- [ ] **Reasons on the card** in the web feed, and in `/native/v1/recommendations`,
-      including the rating-seeded phrasing. The card's anatomy is now fixed —
-      title, then a `kind · year` caption, then the amber held check — so a reason
-      is a third line competing with two that were deliberately matched to an
-      ordinary poster tile, and may belong in the preview rather than on the tile.
-- [ ] **Library-first Jellyfin shelf.**
-- [ ] **Cold-start ladder**, with the fallback rung labelled in the response so
-      the UI can say which question it answered.
+- [x] **Reasons on the card** in the web feed, and in `/native/v1/recommendations`,
+      including the rating-seeded phrasing. Shipped as **structured data, not a
+      sentence** — the server knows what produced a candidate, the client knows
+      how its surface phrases things and what language the reader wants. The
+      anatomy question resolved as: a third line on the recommendations grid,
+      where there is room, and a tooltip in the Home row, which keeps the two
+      lines it was deliberately matched to.
+- [x] **Library-first Jellyfin shelf** — the `held` generator puts every
+      unwatched library title into the candidate pool, so the shelf fills from
+      the library rather than from *discovery ∩ library*, and costs no requests.
+- [ ] **Cold-start ladder** — rungs 1 and 2 ship, and the response names which
+      one answered (`history` / `library`). Rungs 3 and 4 do not:
+  - [x] history-based, which ratings reach first;
+  - [x] the library's own profile, for a viewer with no history;
+  - [ ] other users' history on the same instance — a multi-user instance makes
+        this a privacy question (whose taste is being borrowed, and do they
+        know) that the plan never answered, and guessing it in code is the wrong
+        place to decide;
+  - [ ] trending filtered through the profile — needs a trending endpoint and
+        its own cache, and it is the rung most likely to read as the filler this
+        feature refuses to serve.
 
 ### Phase 6 — proof
 

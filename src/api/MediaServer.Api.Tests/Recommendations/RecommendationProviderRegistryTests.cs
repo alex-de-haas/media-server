@@ -19,9 +19,9 @@ public sealed class RecommendationProviderRegistryTests
         public Task<bool> IsAvailableAsync(int appUserId, CancellationToken cancellationToken) =>
             throws is not null ? Task.FromException<bool>(throws) : Task.FromResult(available);
 
-        public Task<IReadOnlyList<RecommendationCandidate>> GetAsync(
+        public Task<ProviderResult> GetAsync(
             int appUserId, int limit, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<RecommendationCandidate>>([]);
+            Task.FromResult(ProviderResult.Empty);
     }
 
     private static RecommendationProviderRegistry Registry(params IRecommendationProvider[] providers) =>

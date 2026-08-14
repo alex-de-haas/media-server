@@ -58,11 +58,14 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         public Task<bool> IsAvailableAsync(int appUserId, CancellationToken cancellationToken) =>
             Task.FromResult(Available);
 
-        public Task<IReadOnlyList<RecommendationCandidate>> GetAsync(
+        /// <summary>Which cold-start rung this stub claims to have answered, if any.</summary>
+        public string? Rung { get; set; }
+
+        public Task<ProviderResult> GetAsync(
             int appUserId, int limit, CancellationToken cancellationToken) =>
             Throws
-                ? Task.FromException<IReadOnlyList<RecommendationCandidate>>(new InvalidOperationException("boom"))
-                : Task.FromResult<IReadOnlyList<RecommendationCandidate>>(candidates);
+                ? Task.FromException<ProviderResult>(new InvalidOperationException("boom"))
+                : Task.FromResult(new ProviderResult(candidates, Rung));
     }
 
     [Fact]

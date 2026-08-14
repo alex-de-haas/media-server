@@ -54,9 +54,42 @@ public sealed class TasteProfileBuilder(
     /// <summary>One star: the time is the loss. The strongest negative the schema can carry.</summary>
     internal const double OneStarWeight = 1.0;
 
+    /// <summary>
+    /// A profile from the library itself, for a viewer who has not watched anything yet.
+    /// </summary>
+    /// <remarks>
+    /// The second rung of the cold-start ladder. An operator chose to acquire every title in this
+    /// library, and that is taste — weaker and less personal than a viewing history, but a real
+    /// answer, and far better than the trending filler the feature refuses to serve. Every held work
+    /// counts equally: there is no viewer to weigh them for, and inventing an order here would be
+    /// dressing up the catalogue as a preference.
+    /// </remarks>
+    public async Task<TasteProfile> BuildFromLibraryAsync(CancellationToken cancellationToken)
+    {
+        var workIds = await database.MediaItems.AsNoTracking()
+            .Where(item => item.RemovedAt == null && item.CatalogId != null &&
+                (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series))
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (workIds.Count == 0)
+        {
+            return TasteProfile.Empty;
+        }
+
+        var signals = workIds.ToDictionary(id => id, _ => new TitleSignal(1));
+        return await AssembleAsync(signals, cancellationToken);
+    }
+
     public async Task<TasteProfile> BuildAsync(int appUserId, CancellationToken cancellationToken)
     {
         var signals = await SignalsAsync(appUserId, cancellationToken);
+        return await AssembleAsync(signals, cancellationToken);
+    }
+
+    /// <summary>Turns weighted titles into normalized, damped facet vectors.</summary>
+    private async Task<TasteProfile> AssembleAsync(
+        Dictionary<Guid, TitleSignal> signals, CancellationToken cancellationToken)
+    {
         if (signals.Count == 0)
         {
             return TasteProfile.Empty;

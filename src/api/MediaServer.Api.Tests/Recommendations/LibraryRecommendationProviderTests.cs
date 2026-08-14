@@ -88,7 +88,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         _tmdb.Lists["1"] = [Title("shared"), Title("only-a")];
         _tmdb.Lists["2"] = [Title("only-b"), Title("shared")];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("shared", result[0].Identity.TmdbId);
     }
@@ -106,7 +106,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         _tmdb.Lists["old-a"] = [Title("filler-1"), Title("filler-2"), Title("weak-agreed")];
         _tmdb.Lists["old-b"] = [Title("filler-3"), Title("filler-4"), Title("weak-agreed")];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("loved-pick", result[0].Identity.TmdbId);
         Assert.Contains(result, entry => entry.Identity.TmdbId == "weak-agreed");
@@ -122,7 +122,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         SeedWatched("2");
         _tmdb.Lists["2"] = [Title("acclaimed", voteAverage: 8.4, voteCount: 12_000)];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("acclaimed", result[0].Identity.TmdbId);
     }
@@ -135,7 +135,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         SeedWatched("1");
         _tmdb.Lists["1"] = [Title("featureless"), Title("mediocre", voteAverage: 4.0, voteCount: 5_000)];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("featureless", result[0].Identity.TmdbId);
     }
@@ -150,13 +150,92 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         _tmdb.Lists["1"] = [Title("blockbuster", popularity: 950)];
         _tmdb.Lists["2"] = [Title("obscure", popularity: 1.4)];
 
-        var untouched = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var untouched = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
         Assert.Equal("blockbuster", untouched[0].Identity.TmdbId); // ordinal tiebreak, not the dial
 
         SetPopularityBias(1.0);
-        var deepCuts = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var deepCuts = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("obscure", deepCuts[0].Identity.TmdbId);
+    }
+
+    [Fact]
+    public async Task ACardNamesTheSeedThatEarnedItAndTheStarsItGot()
+    {
+        // The most convincing sentence this feature can print, and free: the weight already knew.
+        SeedRated("1", 5);
+        _tmdb.Lists["1"] = [Title("because-of-that")];
+
+        var card = Assert.Single((await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates);
+
+        Assert.Equal(RecommendationReason.RatedSeed, card.Reason!.Kind);
+        Assert.Equal("Movie 1", card.Reason.Detail);
+        Assert.Equal(5, card.Reason.Rating);
+    }
+
+    [Fact]
+    public async Task AnUnratedSeedIsNamedWithoutInventingStars()
+    {
+        SeedWatched("1");
+        _tmdb.Lists["1"] = [Title("because-of-that")];
+
+        var card = Assert.Single((await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates);
+
+        Assert.Equal(RecommendationReason.Seed, card.Reason!.Kind);
+        Assert.Null(card.Reason.Rating);
+    }
+
+    [Fact]
+    public async Task AFeedBuiltFromHistorySaysSo()
+    {
+        SeedWatched("1");
+        _tmdb.Lists["1"] = [Title("something")];
+
+        Assert.Equal(
+            RecommendationRung.History,
+            (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Rung);
+    }
+
+    [Fact]
+    public async Task WithNoHistoryTheLibraryItselfAnswersAndTheFeedAdmitsIt()
+    {
+        // An operator chose to acquire these titles, and that is taste before anything is played —
+        // a weaker answer than a viewing history, and a real one, which is why it is labelled.
+        AddItem(MediaKind.Movie, "Held one", "10", genre: "crime");
+        AddItem(MediaKind.Movie, "Held two", "11", genre: "crime");
+
+        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+
+        Assert.Equal(RecommendationRung.Library, result.Rung);
+        Assert.NotEmpty(result.Candidates);
+        Assert.All(result.Candidates, card => Assert.Equal(RecommendationReason.InLibrary, card.Reason!.Kind));
+    }
+
+    [Fact]
+    public async Task HeldTitlesReachTheFeedEvenWhenTmdbSaysNothing()
+    {
+        // What makes the Jellyfin shelf fill. It used to be the discovery feed intersected with the
+        // library, so a local title could only appear when TMDb happened to link it to something
+        // watched — after the filter the pool was a handful. Asking the library directly costs no
+        // requests and every row is playable, which is the only verb that surface has.
+        var watched = AddItem(MediaKind.Movie, "Heat", "1", genre: "crime");
+        AddPlay(watched.Id);
+        AddItem(MediaKind.Movie, "Sicario", "2", genre: "crime");
+        // TMDb is asked and answers with nothing at all.
+
+        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+
+        Assert.Equal(RecommendationRung.History, result.Rung);
+        Assert.Contains(result.Candidates, card => card.Identity.TmdbId == "2");
+    }
+
+    [Fact]
+    public async Task WithNeitherHistoryNorLibraryTheEngineStillSaysNothing()
+    {
+        // The bottom of the ladder is silence, not filler. Trending would not be a recommendation.
+        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+
+        Assert.Empty(result.Candidates);
     }
 
     [Fact]
@@ -165,7 +244,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         SeedWatched("1");
         _tmdb.Lists["1"] = [Title("first"), Title("second"), Title("third")];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal(["first", "second", "third"], result.Select(entry => entry.Identity.TmdbId));
     }
@@ -179,7 +258,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         _tmdb.Lists["1"] = [Title("2"), Title("fresh")];
         _tmdb.Lists["2"] = [Title("1")];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("fresh", Assert.Single(result).Identity.TmdbId);
     }
@@ -189,7 +268,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
     {
         // Filler (trending, popular) would not be a recommendation, and pretending otherwise is worse
         // than an empty row the UI can explain.
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Empty(result);
         Assert.Empty(_tmdb.Asked);
@@ -201,7 +280,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         SeedWatched("1");
         _tmdb.Lists["1"] = [Title("a"), Title("b"), Title("c")];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal([0, 1, 2], result.Select(entry => entry.Rank));
     }
@@ -212,7 +291,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         SeedWatched("1");
         _tmdb.Lists["1"] = [.. Enumerable.Range(0, 15).Select(index => Title($"c{index}"))];
 
-        var result = await Provider().GetAsync(_userId, 5, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 5, CancellationToken.None)).Candidates;
 
         Assert.Equal(5, result.Count);
     }
@@ -227,7 +306,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         AddPlay(episode.Id);
         _tmdb.Lists["95396"] = [Title("similar-show")];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal(RecommendationKind.Series, Assert.Single(_tmdb.Asked).Kind);
         Assert.Equal(RecommendationKind.Series, Assert.Single(result).Identity.Kind);
@@ -241,7 +320,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         SeedWatched("2");
         _tmdb.Lists["2"] = [Title("from-the-other-seed")];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("from-the-other-seed", Assert.Single(result).Identity.TmdbId);
     }
@@ -252,7 +331,7 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         SeedWatched("1");
         _tmdb.Lists["1"] = [new TmdbRecommendedTitle("a", "A Title", 2021, "/poster.jpg")];
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("https://image.tmdb.org/t/p/w500/poster.jpg", Assert.Single(result).PosterUrl);
     }
@@ -270,14 +349,14 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         new(Engine(), new MediaServerSettings { TmdbApiKey = "key" });
 
     /// <summary>
-    /// The engine with only the behavioural seed generator wired, which is what these tests are about:
-    /// the local generators have their own suites, and mixing them in here would make every assertion
-    /// about aggregation depend on what the fixture happens to hold.
+    /// The behavioural seed generator plus the held one. The seed lists are what these tests are about;
+    /// `held` is here because the cold-start ladder has nothing to fall to without it, and it stays
+    /// quiet whenever the fixture's library is empty — which it is for every aggregation test.
     /// </summary>
     private RecommendationEngine Engine() => new(
         _database,
         new RecommendationSeedSelector(_database, _time),
-        [SeedListGenerator.Recommendations(_tmdb)],
+        [SeedListGenerator.Recommendations(_tmdb), new HeldGenerator(_database, new TitleFacetReader(_database))],
         new TitleFacetReader(_database),
         new TasteProfileCache(),
         new TasteProfileBuilder(_database, new TitleFacetReader(_database), new LibraryFacetIndexCache(), _time),
@@ -319,12 +398,13 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         _database.SaveChanges();
     }
 
-    private MediaItem AddItem(MediaKind kind, string title, string? tmdbId, Guid? seriesId = null)
+    private MediaItem AddItem(
+        MediaKind kind, string title, string? tmdbId, Guid? seriesId = null, string? genre = null)
     {
         var item = new MediaItem
         {
             Id = Guid.NewGuid(), CatalogId = _catalogId, Kind = kind, Title = title, SeriesId = seriesId,
-            AddedAt = _time.GetUtcNow(), UpdatedAt = _time.GetUtcNow(),
+            Year = 2016, AddedAt = _time.GetUtcNow(), UpdatedAt = _time.GetUtcNow(),
         };
         if (tmdbId is not null)
         {
@@ -333,6 +413,15 @@ public sealed class LibraryRecommendationProviderTests : IDisposable
         }
 
         _database.MediaItems.Add(item);
+        if (genre is not null)
+        {
+            _database.MetadataRecords.Add(new MetadataRecord
+            {
+                Id = Guid.NewGuid(), MediaItemId = item.Id, Provider = "tmdb", Language = "en-US",
+                Genres = [genre], FetchedAt = _time.GetUtcNow(),
+            });
+        }
+
         _database.SaveChanges();
         return item;
     }

@@ -54,7 +54,7 @@ public sealed class PeopleGenerator(
         }
 
         var candidates = new List<GeneratedCandidate>();
-        foreach (var (personTmdbId, weight) in people)
+        foreach (var (personTmdbId, personName, weight) in people)
         {
             foreach (var kind in new[] { RecommendationKind.Movie, RecommendationKind.Series })
             {
@@ -81,7 +81,10 @@ public sealed class PeopleGenerator(
                     // No meaningful order inside a filmography — TMDb returns it roughly by date — so
                     // the position decay is gentler than a ranked list's.
                     candidates.Add(new GeneratedCandidate(
-                        identity, titles[position], CreditWeight * weight / (1 + (position * 0.1))));
+                        identity,
+                        titles[position],
+                        CreditWeight * weight / (1 + (position * 0.1)),
+                        ReasonDetail: personName));
                 }
             }
         }
@@ -97,7 +100,7 @@ public sealed class PeopleGenerator(
     /// own. A person this instance knows only from a non-TMDb provider is skipped rather than guessed
     /// at.
     /// </remarks>
-    private async Task<IReadOnlyList<(string TmdbId, double Weight)>> TopPeopleAsync(
+    private async Task<IReadOnlyList<(string TmdbId, string Name, double Weight)>> TopPeopleAsync(
         GeneratorContext context, CancellationToken cancellationToken)
     {
         var localIds = await database.MediaItemPersons.AsNoTracking()
@@ -118,13 +121,13 @@ public sealed class PeopleGenerator(
         }
 
         var ids = weighted.Select(entry => entry.Id).ToList();
-        var providerIds = await database.Persons.AsNoTracking()
+        var known = await database.Persons.AsNoTracking()
             .Where(person => ids.Contains(person.Id) && person.Provider == "tmdb")
-            .Select(person => new { person.Id, person.ProviderId })
-            .ToDictionaryAsync(person => person.Id, person => person.ProviderId, cancellationToken);
+            .Select(person => new { person.Id, person.ProviderId, person.Name })
+            .ToDictionaryAsync(person => person.Id, person => person, cancellationToken);
 
         return [.. weighted
-            .Where(entry => providerIds.ContainsKey(entry.Id))
-            .Select(entry => (providerIds[entry.Id], entry.Weight))];
+            .Where(entry => known.ContainsKey(entry.Id))
+            .Select(entry => (known[entry.Id].ProviderId, known[entry.Id].Name, entry.Weight))];
     }
 }

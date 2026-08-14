@@ -74,6 +74,7 @@ export function RecommendationsView() {
         <Grid>
           {items.map((item) => (
             <RecommendationCard
+              showReason
               key={`${item.kind}:${item.tmdbId}`}
               item={item}
               onHide={hide}
@@ -118,6 +119,7 @@ export function recommendationOf(target: TitlePreviewTarget, items: Recommendati
       inLibrary: false,
       mediaItemId: null,
       sources: [],
+      reason: null,
     }
   );
 }

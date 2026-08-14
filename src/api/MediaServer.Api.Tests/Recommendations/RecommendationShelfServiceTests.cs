@@ -453,7 +453,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         public Task<bool> IsAvailableAsync(int appUserId, CancellationToken cancellationToken) =>
             Task.FromResult(true);
 
-        public async Task<IReadOnlyList<RecommendationCandidate>> GetAsync(
+        public async Task<ProviderResult> GetAsync(
             int appUserId, int limit, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Calls);
@@ -462,7 +462,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
                 await gate.Task;
             }
 
-            return Candidates;
+            return new ProviderResult(Candidates);
         }
     }
 

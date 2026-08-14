@@ -98,7 +98,7 @@ public sealed class TraktRecommendationProviderTests : IDisposable
     public async Task WithoutAConnectionTheSourceIsUnavailableAndSilent()
     {
         Assert.False(await Provider(connected: false).IsAvailableAsync(_userId, CancellationToken.None));
-        Assert.Empty(await Provider(connected: false).GetAsync(_userId, 10, CancellationToken.None));
+        Assert.Empty((await Provider(connected: false).GetAsync(_userId, 10, CancellationToken.None)).Candidates);
         Assert.Empty(_handler.Requests);
     }
 
@@ -122,7 +122,7 @@ public sealed class TraktRecommendationProviderTests : IDisposable
             [ { "title": "Severance", "year": 2022, "ids": { "trakt": 2, "tmdb": 95396 } } ]
             """);
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal(2, result.Count);
         Assert.Contains(result, entry => entry.Identity == new RecommendationIdentity(RecommendationKind.Movie, "27205"));
@@ -144,7 +144,7 @@ public sealed class TraktRecommendationProviderTests : IDisposable
             [ { "title": "S1", "ids": { "tmdb": 3 } }, { "title": "S2", "ids": { "tmdb": 4 } } ]
             """);
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal(
             [RecommendationKind.Movie, RecommendationKind.Series, RecommendationKind.Movie, RecommendationKind.Series],
@@ -162,7 +162,7 @@ public sealed class TraktRecommendationProviderTests : IDisposable
             """);
         _handler.Enqueue(HttpStatusCode.OK, "[]");
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("Wrapped", Assert.Single(result).Title);
     }
@@ -179,7 +179,7 @@ public sealed class TraktRecommendationProviderTests : IDisposable
             """);
         _handler.Enqueue(HttpStatusCode.OK, "[]");
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal("Usable", Assert.Single(result).Title);
     }
@@ -192,7 +192,7 @@ public sealed class TraktRecommendationProviderTests : IDisposable
         _handler.Enqueue(HttpStatusCode.ServiceUnavailable, "");
         _handler.Enqueue(HttpStatusCode.ServiceUnavailable, "");
 
-        Assert.Empty(await Provider().GetAsync(_userId, 10, CancellationToken.None));
+        Assert.Empty((await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates);
     }
 
     [Fact]
@@ -202,7 +202,7 @@ public sealed class TraktRecommendationProviderTests : IDisposable
         _handler.Enqueue(HttpStatusCode.ServiceUnavailable, "");
         _handler.Enqueue(HttpStatusCode.OK, """[ { "title": "S1", "ids": { "tmdb": 3 } } ]""");
 
-        var result = await Provider().GetAsync(_userId, 10, CancellationToken.None);
+        var result = (await Provider().GetAsync(_userId, 10, CancellationToken.None)).Candidates;
 
         Assert.Equal(RecommendationKind.Series, Assert.Single(result).Identity.Kind);
     }
@@ -216,7 +216,7 @@ public sealed class TraktRecommendationProviderTests : IDisposable
         _handler.Enqueue(HttpStatusCode.OK,
             JsonSerializer.Serialize(Enumerable.Range(10, 5).Select(id => new { title = $"S{id}", ids = new { tmdb = id } })));
 
-        Assert.Equal(3, (await Provider().GetAsync(_userId, 3, CancellationToken.None)).Count);
+        Assert.Equal(3, (await Provider().GetAsync(_userId, 3, CancellationToken.None)).Candidates.Count);
     }
 
     private void Connect(WatchHistoryConnectionStatus status = WatchHistoryConnectionStatus.Connected)

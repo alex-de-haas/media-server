@@ -2396,6 +2396,16 @@
             "items": {
               "type": "string"
             }
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RecommendationReason"
+              }
+            ]
           }
         }
       },
@@ -2442,6 +2452,12 @@
             ],
             "format": "double",
             "default": 2
+          },
+          "rung": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -2464,6 +2480,32 @@
           },
           "displayName": {
             "type": "string"
+          }
+        }
+      },
+      "RecommendationReason": {
+        "required": [
+          "kind"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rating": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },

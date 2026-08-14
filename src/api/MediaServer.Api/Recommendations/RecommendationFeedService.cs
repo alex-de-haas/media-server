@@ -20,7 +20,9 @@ public sealed record RecommendationDto(
     string? PosterUrl,
     bool InLibrary,
     Guid? MediaItemId,
-    IReadOnlyList<string> Sources);
+    IReadOnlyList<string> Sources,
+    /// <summary>Why this card is here, as data the client phrases itself. Null when no source could say.</summary>
+    RecommendationReason? Reason = null);
 
 /// <summary>The feed plus what the UI needs to render its controls honestly.</summary>
 /// <param name="Items">The merged, filtered feed.</param>
@@ -36,7 +38,12 @@ public sealed record RecommendationFeedDto(
     IReadOnlyList<RecommendationProviderDescriptor> Sources,
     IReadOnlyList<string> SelectedSources,
     double PopularityBias = 0,
-    double MaxPopularityBias = RecommendationPreferenceStore.MaxPopularityBias);
+    double MaxPopularityBias = RecommendationPreferenceStore.MaxPopularityBias,
+    /// <summary>
+    /// Which question the feed ended up answering, so the surface can say so rather than presenting a
+    /// weaker answer as if it were the ordinary one. Null when no source had a ladder to report.
+    /// </summary>
+    string? Rung = null);
 
 /// <summary>
 /// Builds one user's merged feed: ask the available providers, fuse, then answer the questions only
@@ -91,7 +98,11 @@ public sealed class RecommendationFeedService(
             .Select(row => (double?)row.PopularityBias)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return new RecommendationFeedDto(items, descriptors, [.. selected], preference ?? 0);
+        // The first source that answered a question worth naming. Only the built-in engine has a
+        // ladder to fall down, so in practice this is its rung or nothing.
+        var rung = lists.Select(list => list.Rung).FirstOrDefault(value => value is not null);
+
+        return new RecommendationFeedDto(items, descriptors, [.. selected], preference ?? 0, Rung: rung);
     }
 
     /// <summary>
@@ -157,8 +168,8 @@ public sealed class RecommendationFeedService(
         {
             try
             {
-                var candidates = await provider.GetAsync(appUserId, perProvider, cancellationToken);
-                lists.Add(new RankedList(provider.Key, candidates));
+                var result = await provider.GetAsync(appUserId, perProvider, cancellationToken);
+                lists.Add(new RankedList(provider.Key, result.Candidates, result.Rung));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -211,7 +222,8 @@ public sealed class RecommendationFeedService(
                 entry.PosterUrl,
                 held is not null,
                 held?.Id,
-                entry.Sources));
+                entry.Sources,
+                entry.Reason));
 
             if (items.Count == limit)
             {

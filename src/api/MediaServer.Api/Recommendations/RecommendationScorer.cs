@@ -20,6 +20,12 @@ public sealed record ScoredCandidate(
     IReadOnlyList<string> Generators,
     string? TopSeedTmdbId = null)
 {
+    /// <summary>What to name when explaining this card — a person, a franchise. Set by its generator.</summary>
+    public string? ReasonDetail { get; init; }
+
+    /// <summary>The composed explanation, filled in after the re-rank so it costs only what is shown.</summary>
+    public RecommendationReason? Reason { get; init; }
+
     public ScoredCandidate(double collaborative, int seeds, TmdbRecommendedTitle title)
         : this(collaborative, seeds, title, TitleFacets.Empty, [])
     {

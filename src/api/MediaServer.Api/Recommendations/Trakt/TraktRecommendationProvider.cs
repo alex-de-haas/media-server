@@ -42,7 +42,7 @@ public sealed class TraktRecommendationProvider(
         return connection is not null;
     }
 
-    public async Task<IReadOnlyList<RecommendationCandidate>> GetAsync(
+    public async Task<ProviderResult> GetAsync(
         int appUserId, int limit, CancellationToken cancellationToken)
     {
         var connection = await database.WatchHistoryConnections.FirstOrDefaultAsync(
@@ -51,7 +51,7 @@ public sealed class TraktRecommendationProvider(
 
         if (connection is null)
         {
-            return [];
+            return ProviderResult.Empty;
         }
 
         var credentials = await authorization.ReadCredentialsAsync(connection, cancellationToken);
@@ -60,7 +60,7 @@ public sealed class TraktRecommendationProvider(
             // Includes the reconnect case, which ReadCredentialsAsync has already recorded on the
             // connection — Settings is where that gets surfaced, not the recommendations feed.
             logger.LogDebug("Trakt recommendations skipped: {Detail}", credentials.Detail);
-            return [];
+            return ProviderResult.Empty;
         }
 
         var token = credentials.Value!.AccessToken;
@@ -69,8 +69,9 @@ public sealed class TraktRecommendationProvider(
 
         // Trakt ranks each kind separately, so interleave rather than concatenating: appending would
         // bury every series below every movie for no reason either list implies.
-        return [.. Interleave(movies, shows).Take(limit).Select(
-            (candidate, rank) => candidate with { Rank = rank })];
+        return new ProviderResult(
+            [.. Interleave(movies, shows).Take(limit).Select(
+                (candidate, rank) => candidate with { Rank = rank })]);
     }
 
     private async Task<List<RecommendationCandidate>> FetchAsync(

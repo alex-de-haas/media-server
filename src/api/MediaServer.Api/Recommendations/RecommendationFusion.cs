@@ -1,7 +1,8 @@
 namespace MediaServer.Api.Recommendations;
 
 /// <summary>One provider's ranked contribution to the merged feed.</summary>
-public sealed record RankedList(string ProviderKey, IReadOnlyList<RecommendationCandidate> Candidates);
+public sealed record RankedList(
+    string ProviderKey, IReadOnlyList<RecommendationCandidate> Candidates, string? Rung = null);
 
 /// <summary>A merged suggestion, and which sources put it there.</summary>
 public sealed record FusedRecommendation(
@@ -9,6 +10,8 @@ public sealed record FusedRecommendation(
     string Title,
     int? Year,
     string? PosterUrl,
+    /// <summary>The best-placed source's explanation, when it had one.</summary>
+    RecommendationReason? Reason,
     /// <summary>Provider keys that suggested this, in registry order. More than one means agreement.</summary>
     IReadOnlyList<string> Sources,
     double Score);
@@ -90,7 +93,8 @@ public static class RecommendationFusion
         public FusedRecommendation ToResult()
         {
             var boosted = score * Math.Pow(AgreementBoost, sources.Count - 1);
-            return new FusedRecommendation(best.Identity, best.Title, best.Year, best.PosterUrl, sources, boosted);
+            return new FusedRecommendation(
+                best.Identity, best.Title, best.Year, best.PosterUrl, best.Reason, sources, boosted);
         }
     }
 }

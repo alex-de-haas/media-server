@@ -15,6 +15,7 @@ const feed = {
       inLibrary: true,
       mediaItemId: "b7f3c2d1-0000-4000-8000-000000000001",
       sources: ["library"],
+      reason: { kind: "rated-seed", detail: "Arrival", rating: 5 },
     },
     {
       kind: "Series",
@@ -25,6 +26,7 @@ const feed = {
       inLibrary: false,
       mediaItemId: null,
       sources: ["library", "trakt"],
+      reason: null,
     },
   ],
   sources: [
@@ -110,6 +112,16 @@ test("the popularity dial shows where it sits and saves where it is left", async
   await dial.fill("1.5");
   await dial.blur();
   expect((await saved).postDataJSON()).toEqual({ popularityBias: 1.5 });
+});
+
+test("a card says why it is here, and says nothing when nothing could say", async ({ page }) => {
+  // The reason is a third line on the page's grid, where there is room for one. On the Home row the
+  // card keeps its deliberate two lines and the reason stays in the tooltip.
+  await setupApp(page, { recommendations: feed });
+  await page.goto("/recommendations");
+
+  await expect(page.getByTestId("rec-reason")).toHaveCount(1);
+  await expect(page.getByTestId("rec-reason")).toHaveText("Because you rated Arrival 5★");
 });
 
 test("an empty feed explains itself rather than showing a blank page", async ({ page }) => {

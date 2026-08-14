@@ -10,12 +10,18 @@ namespace MediaServer.Api.Recommendations.Generation;
 /// </param>
 /// <param name="SeedTmdbId">The seed that produced it, when there was one — the raw material of a reason.</param>
 /// <param name="MediaItemId">Set when the candidate is a title this instance already holds.</param>
+/// <param name="ReasonDetail">
+/// What to name when explaining this candidate — a person, a franchise. Filled by the generator
+/// because only it knows: reconstructing it downstream would mean re-deriving what produced the
+/// candidate from what the candidate looks like, which is a guess dressed as an explanation.
+/// </param>
 public sealed record GeneratedCandidate(
     RecommendationIdentity Identity,
     TmdbRecommendedTitle Title,
     double Contribution,
     string? SeedTmdbId = null,
-    Guid? MediaItemId = null);
+    Guid? MediaItemId = null,
+    string? ReasonDetail = null);
 
 /// <summary>Everything a generator is allowed to know about the user it is generating for.</summary>
 /// <param name="SeedIdentities">

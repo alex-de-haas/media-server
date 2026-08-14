@@ -31,12 +31,29 @@ public readonly record struct RecommendationIdentity(RecommendationKind Kind, st
 /// <param name="Year">Release/first-air year, when known.</param>
 /// <param name="PosterUrl">Absolute poster URL, when the source supplied one.</param>
 /// <param name="Rank">0-based position in this provider's ranked list. Fusion reads position, not score.</param>
+/// <param name="Reason">
+/// Why this source put it here, when the source can say. A connected account returns a position and
+/// nothing else, so this is null for it — and a card without a reason simply shows none, rather than
+/// the feed inventing one.
+/// </param>
 public sealed record RecommendationCandidate(
     RecommendationIdentity Identity,
     string Title,
     int? Year,
     string? PosterUrl,
-    int Rank);
+    int Rank,
+    RecommendationReason? Reason = null);
+
+/// <summary>One source's answer for one user.</summary>
+/// <param name="Candidates">Its ranked list.</param>
+/// <param name="Rung">
+/// Which question the source ended up answering, when it has more than one to answer. Null for a
+/// source that only ever does the one thing — a connected account has no cold-start ladder to climb.
+/// </param>
+public sealed record ProviderResult(IReadOnlyList<RecommendationCandidate> Candidates, string? Rung = null)
+{
+    public static readonly ProviderResult Empty = new([]);
+}
 
 /// <summary>
 /// One source of recommendations for a single user.
@@ -74,6 +91,6 @@ public interface IRecommendationProvider
     /// The caller applies library, watched, and hidden filtering — a provider does not need to know
     /// about the local library.
     /// </remarks>
-    Task<IReadOnlyList<RecommendationCandidate>> GetAsync(
+    Task<ProviderResult> GetAsync(
         int appUserId, int limit, CancellationToken cancellationToken);
 }

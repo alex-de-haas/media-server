@@ -5,6 +5,27 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Recommendations;
 
+/// <summary>Which question the engine ended up answering.</summary>
+/// <remarks>
+/// Reported rather than hidden, so the surface can say what it did. A feed built from a library
+/// nobody has watched yet is a weaker answer than one built from a viewing history, and presenting
+/// the two identically would be quietly overstating the second.
+/// </remarks>
+public static class RecommendationRung
+{
+    /// <summary>Built from what this viewer watched and said about it. The ordinary case.</summary>
+    public const string History = "history";
+
+    /// <summary>Built from what the library holds, for a viewer with no history yet.</summary>
+    public const string Library = "library";
+}
+
+/// <summary>The engine's answer, and which rung of the cold-start ladder produced it.</summary>
+public sealed record EngineResult(IReadOnlyList<RankedCandidate> Candidates, string Rung)
+{
+    public static readonly EngineResult Empty = new([], RecommendationRung.History);
+}
+
 /// <summary>
 /// The built-in engine, in three stages: generate, score, re-rank.
 /// </summary>
@@ -42,17 +63,25 @@ public sealed class RecommendationEngine(
     /// </remarks>
     internal const int PoolFactor = 6;
 
-    public async Task<IReadOnlyList<RankedCandidate>> RankAsync(
+    public async Task<EngineResult> RankAsync(
         int appUserId, int limit, CancellationToken cancellationToken)
     {
         var selected = await seeds.SelectAsync(appUserId, cancellationToken);
         var profile = await profiles.GetAsync(appUserId, database, profileBuilder, cancellationToken);
+        var rung = RecommendationRung.History;
 
         if (selected.Count == 0 && profile.IsEmpty)
         {
-            // Nothing watched and nothing said: this engine has nothing to offer, and trending-style
-            // filler would not be a recommendation.
-            return [];
+            // Nothing watched and nothing said. Rather than the trending filler this feature refuses
+            // to serve, fall to what the instance can still answer honestly: an operator chose every
+            // title in this library, and that is taste before anything is played.
+            profile = await profileBuilder.BuildFromLibraryAsync(cancellationToken);
+            rung = RecommendationRung.Library;
+
+            if (profile.IsEmpty)
+            {
+                return EngineResult.Empty;
+            }
         }
 
         var context = new GeneratorContext(
@@ -65,7 +94,7 @@ public sealed class RecommendationEngine(
         var pooled = await GenerateAsync(context, cancellationToken);
         if (pooled.Count == 0)
         {
-            return [];
+            return EngineResult.Empty;
         }
 
         await AttachFacetsAsync(pooled, cancellationToken);
@@ -77,10 +106,91 @@ public sealed class RecommendationEngine(
             popularityBias);
 
         var grouping = await GroupingsAsync(pooled, cancellationToken);
-        return reranker.Rerank(
+        var shaped = reranker.Rerank(
             [.. ranked.Take(limit * PoolFactor)],
             limit,
             identity => grouping.GetValueOrDefault(identity) ?? CandidateGrouping.None);
+
+        return new EngineResult(await WithReasonsAsync(appUserId, shaped, cancellationToken), rung);
+    }
+
+    /// <summary>
+    /// Names why each surviving card is here.
+    /// </summary>
+    /// <remarks>
+    /// Done after the re-rank rather than before it, so the seed lookup only touches titles the viewer
+    /// will actually see. A rated seed is the most convincing sentence this feature can print — "you
+    /// gave this five stars" is an argument the viewer already agreed with — so it wins over a bare
+    /// watch whenever the stars are there.
+    /// </remarks>
+    private async Task<IReadOnlyList<RankedCandidate>> WithReasonsAsync(
+        int appUserId, IReadOnlyList<RankedCandidate> shaped, CancellationToken cancellationToken)
+    {
+        var seedIds = shaped
+            .Select(entry => entry.Candidate.TopSeedTmdbId)
+            .Where(seed => seed is not null)
+            .Select(seed => seed!)
+            .Distinct()
+            .ToList();
+
+        var seeds = new Dictionary<string, (string Title, int? Rating)>(StringComparer.Ordinal);
+        if (seedIds.Count > 0)
+        {
+            var rows = await database.MediaItems.AsNoTracking()
+                .Where(item => item.IdentityProvider == "tmdb" && item.IdentityProviderId != null &&
+                    seedIds.Contains(item.IdentityProviderId))
+                .GroupJoin(
+                    database.UserItemData.AsNoTracking().Where(data => data.AppUserId == appUserId),
+                    item => item.Id,
+                    data => data.MediaItemId,
+                    (item, data) => new { item.IdentityProviderId, item.Title, Data = data })
+                .SelectMany(
+                    row => row.Data.DefaultIfEmpty(),
+                    (row, data) => new { row.IdentityProviderId, row.Title, Rating = data == null ? null : data.Rating })
+                .ToListAsync(cancellationToken);
+
+            foreach (var row in rows.Where(row => row.IdentityProviderId is not null))
+            {
+                seeds[row.IdentityProviderId!] = (row.Title, row.Rating);
+            }
+        }
+
+        return [.. shaped.Select(entry => entry with { Candidate = entry.Candidate with { Reason = ReasonFor(entry.Candidate, seeds) } })];
+    }
+
+    private static RecommendationReason? ReasonFor(
+        ScoredCandidate candidate, IReadOnlyDictionary<string, (string Title, int? Rating)> seeds)
+    {
+        if (candidate.TopSeedTmdbId is { } seedId && seeds.GetValueOrDefault(seedId) is { Title: not null } seed)
+        {
+            return seed.Rating is { } stars
+                ? new RecommendationReason(RecommendationReason.RatedSeed, seed.Title, stars)
+                : new RecommendationReason(RecommendationReason.Seed, seed.Title);
+        }
+
+        // No seed behind it, so the strategy that found it is the explanation. Order matters: the
+        // most specific claim a generator can make wins over the vaguest one that also applies.
+        if (candidate.Generators.Contains(Generation.CollectionsGenerator.GeneratorKey))
+        {
+            return new RecommendationReason(RecommendationReason.Franchise, candidate.ReasonDetail);
+        }
+
+        if (candidate.Generators.Contains(Generation.PeopleGenerator.GeneratorKey))
+        {
+            return new RecommendationReason(RecommendationReason.Person, candidate.ReasonDetail);
+        }
+
+        if (candidate.Generators.Contains(Generation.HeldGenerator.GeneratorKey))
+        {
+            return new RecommendationReason(RecommendationReason.InLibrary);
+        }
+
+        if (candidate.Generators.Contains(Generation.DiscoverGenerator.GeneratorKey))
+        {
+            return new RecommendationReason(RecommendationReason.Taste);
+        }
+
+        return null;
     }
 
     /// <summary>Runs every generator and pools what they produce, keyed by identity.</summary>
@@ -201,6 +311,7 @@ public sealed class RecommendationEngine(
     private sealed class Pooled(GeneratedCandidate candidate, string generatorKey)
     {
         private readonly List<string> _generators = [generatorKey];
+        private string? _reasonDetail = candidate.ReasonDetail;
 
         public TmdbRecommendedTitle Title { get; private set; } = candidate.Title;
 
@@ -239,6 +350,8 @@ public sealed class RecommendationEngine(
                 Title = other.Title;
             }
 
+            _reasonDetail ??= other.ReasonDetail;
+
             if (!_generators.Contains(generator))
             {
                 _generators.Add(generator);
@@ -246,6 +359,6 @@ public sealed class RecommendationEngine(
         }
 
         public ScoredCandidate ToScored() =>
-            new(Collaborative, Seeds, Title, Facets, _generators, TopSeed);
+            new(Collaborative, Seeds, Title, Facets, _generators, TopSeed) { ReasonDetail = _reasonDetail };
     }
 }

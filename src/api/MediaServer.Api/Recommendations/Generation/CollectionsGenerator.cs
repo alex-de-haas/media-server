@@ -55,10 +55,15 @@ public sealed class CollectionsGenerator(MediaServerDbContext database) : IRecom
         var siblings = await database.MediaItems.AsNoTracking()
             .Where(item => item.RemovedAt == null && item.CollectionId != null &&
                 watchedCollections.Contains(item.CollectionId!.Value) && item.Kind == MediaKind.Movie)
-            .Select(item => new
-            {
-                item.Id, item.Title, item.Year, item.IdentityProvider, item.IdentityProviderId, item.Providers,
-            })
+            .Join(
+                database.MovieCollections.AsNoTracking(),
+                item => item.CollectionId!.Value,
+                collection => collection.Id,
+                (item, collection) => new
+                {
+                    item.Id, item.Title, item.Year, item.IdentityProvider, item.IdentityProviderId, item.Providers,
+                    CollectionName = collection.Name,
+                })
             .ToListAsync(cancellationToken);
 
         var tracked = await database.WatchlistEntries.AsNoTracking()
@@ -93,7 +98,8 @@ public sealed class CollectionsGenerator(MediaServerDbContext database) : IRecom
                 new TmdbRecommendedTitle(tmdbId, sibling.Title, sibling.Year, null),
                 SiblingWeight,
                 SeedTmdbId: null,
-                MediaItemId: sibling.Id));
+                MediaItemId: sibling.Id,
+                ReasonDetail: sibling.CollectionName));
         }
 
         return candidates;
