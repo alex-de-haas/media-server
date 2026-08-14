@@ -216,6 +216,12 @@ builder.Services.AddScoped<IRecommendationProviderRegistry, RecommendationProvid
 builder.Services.AddScoped<RecommendationSeedSelector>();
 builder.Services.AddScoped<RecommendationScorer>();
 builder.Services.AddScoped<RecommendationPreferenceStore>();
+builder.Services.AddScoped<MediaServer.Api.Recommendations.Profile.TitleFacetReader>();
+builder.Services.AddScoped<MediaServer.Api.Recommendations.Profile.TasteProfileBuilder>();
+// Singletons: both hold state that is expensive to rebuild and valid for the whole instance, and
+// both re-check their own stamp on every read, so a stale one costs a comparison rather than a bug.
+builder.Services.AddSingleton<MediaServer.Api.Recommendations.Profile.LibraryFacetIndexCache>();
+builder.Services.AddSingleton<MediaServer.Api.Recommendations.Profile.TasteProfileCache>();
 builder.Services.AddScoped<ITmdbRecommendationSource, TmdbRecommendationSource>();
 builder.Services.AddScoped<IRecommendationProvider, LibraryRecommendationProvider>();
 builder.Services.AddScoped<IRecommendationProvider, MediaServer.Api.Recommendations.Trakt.TraktRecommendationProvider>();

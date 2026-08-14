@@ -504,17 +504,27 @@ Implemented on one branch as one PR, per AGENTS.md.
 
 ### Phase 3 — the profile
 
-- [ ] **Taste profile builder** over genres, keywords, people (role- and
+- [x] **Taste profile builder** over genres, keywords, people (role- and
       billing-weighted), decade and original language, with IDF damping and
-      per-family normalization.
-- [ ] **Profile cache** keyed per user, invalidated by play, favorite, hide,
-      rating and watchlist mutation, plus a library facet generation so an added,
-      removed or re-enriched item rebuilds the profiles damped against it.
-- [ ] **Negative signals** — low-rated facets, abandonment and hidden-title
+      per-family normalization. Keywords are the expensive family: nothing
+      persists them, so they are parsed out of `MetadataRecord.Raw`, which is
+      what makes the library index worth caching rather than computing per
+      request.
+- [x] **Profile cache** keyed per user, rebuilt from a **stamp of its own
+      inputs** rather than by invalidation. Hooking six write paths would mean a
+      seventh signal silently ranking against a profile that no longer matches;
+      a stamp derived from the inputs cannot be forgotten. The library facet
+      generation is part of it, so an added, removed or re-enriched item rebuilds
+      the profiles damped against it.
+- [x] **Negative signals** — low-rated facets, abandonment and hidden-title
       facets, with a 1★ weighing more than a hide and needing no volume threshold.
-- [ ] **Positive signals currently ignored** — `WatchlistEntry` / `TrackedTitle`
+      Positive and negative are kept as two vectors, not one signed one: a viewer
+      can like thrillers and still have rejected three of them.
+- [x] **Positive signals currently ignored** — `WatchlistEntry` / `TrackedTitle`
       as explicit intent feeding the profile (never as output: a tracked title is
-      already wanted).
+      already wanted). Only tracked titles that resolved to a library item carry
+      facets; fetching for a pure wishlist row would break the promise that a
+      profile costs no requests.
 
 ### Phase 4 — generators and scoring
 
