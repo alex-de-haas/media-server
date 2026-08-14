@@ -184,6 +184,24 @@ exactly that, gated behind an environment variable so it can never run in CI.
 
 ## Browsing
 
+Verified against production on 2026-08-14, after the two failures below were fixed:
+
+```text
+→ draining the sync feed
+  128 titles: 113 films, 15 series
+  userData: 0 started, 62 watched
+→ detail for 2012
+  1 version(s), runtime 158 min
+    MKV — 33,7 GB, 7 audio, 8 subtitle
+→ artwork primary
+  1559701 bytes
+```
+
+Two things that run did **not** exercise, and neither is a claim this document makes: no
+title was mid-watch, so the resume marker was never drawn from real data, and the film
+opened had no track beside the file, so the sidecar mark is still only under test.
+
+
 Two tabs, Movies and Series, over a poster grid. Catalogs are mixed rather than shown as a
 level of their own — whether a film sits on the SSD or the spinning disk is an operator's
 concern, not a viewer's — and `catalogId` travels on every title so a filter can be laid
@@ -220,6 +238,17 @@ tell, so a `401` re-mints the grant and retries once, in a middleware where the 
 invisible to everything above it. Concurrent failures produce one exchange, not one each,
 and a request carrying a body is never retried — an `HTTPBody` is a stream consumed by the
 attempt that failed.
+
+### Two failures found this way, and neither by a test
+
+Both were invisible to the suite and both made browsing impossible. They are described
+below because the pattern is the point: the generator's defaults and what .NET emits are not
+the same, nothing in the pipeline compares them, and stubs written to match the client agree
+with the client. Sixty-one passing tests said browsing worked; the first run against the
+real server said it had never worked at all.
+
+`LivePairingCheck` exists for exactly this, and is worth running *before* building on
+something rather than after.
 
 ### The generated client and .NET disagree about dates, too
 
