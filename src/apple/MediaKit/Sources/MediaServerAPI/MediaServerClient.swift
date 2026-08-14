@@ -12,12 +12,13 @@ public enum MediaServerAPIClient {
     public static func make(
         server: URL,
         token: String?,
-        transport: (any ClientTransport)? = nil
+        transport: (any ClientTransport)? = nil,
+        middlewares: [any ClientMiddleware] = []
     ) -> Client {
         Client(
             serverURL: server,
             transport: transport ?? URLSessionTransport(configuration: .init(session: session())),
-            middlewares: token.map { [BearerMiddleware(token: $0)] } ?? [])
+            middlewares: middlewares + (token.map { [BearerMiddleware(token: $0)] } ?? []))
     }
 
     /// Cookies off, for the same reason the pairing client turns them off: they are not isolated by

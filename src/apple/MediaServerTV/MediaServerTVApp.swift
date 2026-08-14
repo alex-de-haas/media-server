@@ -13,14 +13,13 @@ struct MediaServerTVApp: App {
     }
 }
 
-/// Paired or not. There is nothing else yet — browsing and playback are the next phases of
-/// `docs/features/apple-client-core/plan.md`.
+/// Paired or not. Playback is the next phase of `docs/features/apple-client-core/plan.md`.
 struct RootView: View {
     let session: PairingSession
 
     var body: some View {
         if case .paired(let paired) = session.state {
-            PairedView(paired: paired, session: session)
+            LibraryView(session: ServerSession(paired: paired))
         } else {
             PairingView(session: session)
         }

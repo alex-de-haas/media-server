@@ -182,6 +182,52 @@ mistake — modelled as a number, delivered as the string `"1"` — passed forty
 would have failed here on the first line. `LivePairingCheck` in the test target is kept for
 exactly that, gated behind an environment variable so it can never run in CI.
 
+## Browsing
+
+Two tabs, Movies and Series, over a poster grid. Catalogs are mixed rather than shown as a
+level of their own — whether a film sits on the SSD or the spinning disk is an operator's
+concern, not a viewer's — and `catalogId` travels on every title so a filter can be laid
+over this later.
+
+**There is no route that lists a library.** `items/{id}` fetches one title and everything
+else goes through `sync`, so browsing drains that feed into memory at launch. Nothing is
+persisted: the schema, the cursor kept between launches, the reset when a cursor goes stale
+and the tombstones are the expensive half of a local mirror, and none of it is built. A few
+hundred titles cost a couple of requests.
+
+**Artwork comes from this instance**, not from the provider's CDN that `posterUrl` names —
+a client on the same network keeps working with no internet at all, and browsing stops being
+visible to TMDb. That route is bearer-authenticated, which is why `AsyncImage` cannot be
+used and there is a loader of our own.
+
+A title's own screen is fetched when it opens: versions ordered so the default leads, audio
+and subtitle tracks, and a mark against the ones beside the file rather than inside it.
+
+### The credential refreshes on a refusal, not on a clock
+
+The app grant states an `expiresAt` thirty days out — its *absolute* cap — but it also
+lapses after seven days idle, and nothing in the token says which comes first. A television
+left alone for a week holds a credential that looks fresh and is not. Only a request can
+tell, so a `401` re-mints the grant and retries once, in a middleware where the retry is
+invisible to everything above it. Concurrent failures produce one exchange, not one each,
+and a request carrying a body is never retried — an `HTTPBody` is a stream consumed by the
+attempt that failed.
+
+### The generated client was quietly dropping fields
+
+`swift-openapi-generator` does not support a bare `null` schema, and ASP.NET describes a
+nullable reference as `oneOf: [{ "type": "null" }, { "$ref": … }]`. The generator **skipped
+those properties entirely**, with a warning nobody read — eight of them, including
+`LibraryItemDto.userData`, which carries resume position and watched state, and
+`NativePlaybackResolution.transport`, which decides how playback is delivered.
+
+That is worse than either failure generating a client was meant to prevent: not a compile
+error, not a decoding failure, just a field that silently is not there.
+`NullableRefSchemaTransformer` on the server now rewrites those unions into the plain
+reference every generator reads — the wire is unchanged, only its description — and
+`scripts/generate-apple-client.sh` fails on any remaining "skipping" so the next one cannot
+pass unnoticed.
+
 ## Building
 
 ```bash
@@ -235,6 +281,12 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
 - **Overrides narrow and never widen**, for every case of the enum.
 - **The store**: a choice survives a relaunch, a fresh install gets the automatic answer,
   and something written by a version with a different shape falls back rather than throwing.
+- **The credential refresh**: a `401` re-mints and retries with the new token, the result is
+  stored, concurrent failures cause one exchange rather than several, and a refusal Core
+  will not fix is passed through instead of retried.
+- **Draining the feed**: every page is read, a feed claiming more without moving its cursor
+  stops instead of looping, kinds this client does not list are dropped, and `userData`
+  arrives — the last because it is exactly what the generator used to remove.
 - **The simulator cannot answer the Dolby Vision question** and never will, reporting no
   HDR-eligible output. Every claim about it is checked on an Apple TV 4K, which is how every
   measurement in the epic was taken.

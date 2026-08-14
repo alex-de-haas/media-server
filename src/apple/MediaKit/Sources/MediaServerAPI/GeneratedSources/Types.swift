@@ -532,6 +532,8 @@ public enum Components {
             public var libraryPath: Swift.String?
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/contentPath`.
             public var contentPath: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/userData`.
+            public var userData: Components.Schemas.UserItemDataDto?
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/defaultSourceId`.
             public var defaultSourceId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/mediaSources`.
@@ -593,6 +595,7 @@ public enum Components {
             ///   - logoUrl:
             ///   - libraryPath:
             ///   - contentPath:
+            ///   - userData:
             ///   - defaultSourceId:
             ///   - mediaSources:
             ///   - seasons:
@@ -635,6 +638,7 @@ public enum Components {
                 logoUrl: Swift.String? = nil,
                 libraryPath: Swift.String? = nil,
                 contentPath: Swift.String? = nil,
+                userData: Components.Schemas.UserItemDataDto? = nil,
                 defaultSourceId: Swift.String? = nil,
                 mediaSources: [Components.Schemas.MediaSourceDto],
                 seasons: [Components.Schemas.SeasonSummaryDto]? = nil,
@@ -677,6 +681,7 @@ public enum Components {
                 self.logoUrl = logoUrl
                 self.libraryPath = libraryPath
                 self.contentPath = contentPath
+                self.userData = userData
                 self.defaultSourceId = defaultSourceId
                 self.mediaSources = mediaSources
                 self.seasons = seasons
@@ -720,6 +725,7 @@ public enum Components {
                 case logoUrl
                 case libraryPath
                 case contentPath
+                case userData
                 case defaultSourceId
                 case mediaSources
                 case seasons
@@ -784,6 +790,8 @@ public enum Components {
             public var year: Swift.Int32?
             /// - Remark: Generated from `#/components/schemas/LibraryItemDto/posterUrl`.
             public var posterUrl: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/LibraryItemDto/userData`.
+            public var userData: Components.Schemas.UserItemDataDto?
             /// Creates a new `LibraryItemDto`.
             ///
             /// - Parameters:
@@ -794,6 +802,7 @@ public enum Components {
             ///   - title:
             ///   - year:
             ///   - posterUrl:
+            ///   - userData:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
@@ -801,7 +810,8 @@ public enum Components {
                 kind: Swift.String,
                 title: Swift.String,
                 year: Swift.Int32? = nil,
-                posterUrl: Swift.String? = nil
+                posterUrl: Swift.String? = nil,
+                userData: Components.Schemas.UserItemDataDto? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
@@ -810,6 +820,7 @@ public enum Components {
                 self.title = title
                 self.year = year
                 self.posterUrl = posterUrl
+                self.userData = userData
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -819,6 +830,7 @@ public enum Components {
                 case title
                 case year
                 case posterUrl
+                case userData
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaKind`.
@@ -1122,6 +1134,8 @@ public enum Components {
             public var versionName: Swift.String?
             /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution/decision`.
             public var decision: Components.Schemas.NativePlaybackDecision
+            /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution/transport`.
+            public var transport: Components.Schemas.NativePlaybackTransport?
             /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution/url`.
             public var url: Swift.String?
             /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution/signalling`.
@@ -1136,6 +1150,7 @@ public enum Components {
             ///   - mediaSourceId:
             ///   - versionName:
             ///   - decision:
+            ///   - transport:
             ///   - url:
             ///   - signalling:
             ///   - sourceDynamicRange:
@@ -1144,6 +1159,7 @@ public enum Components {
                 mediaSourceId: Swift.String,
                 versionName: Swift.String? = nil,
                 decision: Components.Schemas.NativePlaybackDecision,
+                transport: Components.Schemas.NativePlaybackTransport? = nil,
                 url: Swift.String? = nil,
                 signalling: Swift.String? = nil,
                 sourceDynamicRange: Swift.String? = nil,
@@ -1152,6 +1168,7 @@ public enum Components {
                 self.mediaSourceId = mediaSourceId
                 self.versionName = versionName
                 self.decision = decision
+                self.transport = transport
                 self.url = url
                 self.signalling = signalling
                 self.sourceDynamicRange = sourceDynamicRange
@@ -1161,6 +1178,7 @@ public enum Components {
                 case mediaSourceId
                 case versionName
                 case decision
+                case transport
                 case url
                 case signalling
                 case sourceDynamicRange
@@ -1808,6 +1826,8 @@ public enum Components {
             public var inLibrary: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/RecommendationDto/mediaItemId`.
             public var mediaItemId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/RecommendationDto/reason`.
+            public var reason: Components.Schemas.RecommendationReason?
             /// Creates a new `RecommendationDto`.
             ///
             /// - Parameters:
@@ -1818,6 +1838,7 @@ public enum Components {
             ///   - posterUrl:
             ///   - inLibrary:
             ///   - mediaItemId:
+            ///   - reason:
             public init(
                 kind: Swift.String,
                 tmdbId: Swift.String,
@@ -1825,7 +1846,8 @@ public enum Components {
                 year: Swift.Int32? = nil,
                 posterUrl: Swift.String? = nil,
                 inLibrary: Swift.Bool,
-                mediaItemId: Swift.String? = nil
+                mediaItemId: Swift.String? = nil,
+                reason: Components.Schemas.RecommendationReason? = nil
             ) {
                 self.kind = kind
                 self.tmdbId = tmdbId
@@ -1834,6 +1856,7 @@ public enum Components {
                 self.posterUrl = posterUrl
                 self.inLibrary = inLibrary
                 self.mediaItemId = mediaItemId
+                self.reason = reason
             }
             public enum CodingKeys: String, CodingKey {
                 case kind
@@ -1843,6 +1866,7 @@ public enum Components {
                 case posterUrl
                 case inLibrary
                 case mediaItemId
+                case reason
             }
         }
         /// - Remark: Generated from `#/components/schemas/RecommendationFeedDto`.
@@ -2002,6 +2026,8 @@ public enum Components {
             public var title: Swift.String
             /// - Remark: Generated from `#/components/schemas/SeasonSummaryDto/episodeCount`.
             public var episodeCount: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/SeasonSummaryDto/userData`.
+            public var userData: Components.Schemas.UserItemDataDto?
             /// Creates a new `SeasonSummaryDto`.
             ///
             /// - Parameters:
@@ -2010,18 +2036,21 @@ public enum Components {
             ///   - seasonNumber:
             ///   - title:
             ///   - episodeCount:
+            ///   - userData:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
                 seasonNumber: Swift.Int32? = nil,
                 title: Swift.String,
-                episodeCount: Swift.Int32
+                episodeCount: Swift.Int32,
+                userData: Components.Schemas.UserItemDataDto? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
                 self.seasonNumber = seasonNumber
                 self.title = title
                 self.episodeCount = episodeCount
+                self.userData = userData
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -2029,6 +2058,7 @@ public enum Components {
                 case seasonNumber
                 case title
                 case episodeCount
+                case userData
             }
         }
         /// - Remark: Generated from `#/components/schemas/SeriesMonitorScope`.
@@ -2380,14 +2410,20 @@ public enum Components {
             public var inLibrary: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/libraryItemId`.
             public var libraryItemId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/monitorScope`.
+            public var monitorScope: Components.Schemas.SeriesMonitorScope?
             /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/monitoredSeasons`.
             public var monitoredSeasons: [Swift.Int32]?
             /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/regionOverride`.
             public var regionOverride: Swift.String?
             /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/note`.
             public var note: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/nextRelease`.
+            public var nextRelease: Components.Schemas.NextReleaseDto?
             /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/hasDates`.
             public var hasDates: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/libraryGap`.
+            public var libraryGap: Components.Schemas.LibraryGapDto?
             /// - Remark: Generated from `#/components/schemas/WatchlistItemDto/reminders`.
             public var reminders: [Components.Schemas.ReminderDto]
             /// Creates a new `WatchlistItemDto`.
@@ -2404,10 +2440,13 @@ public enum Components {
             ///   - productionStatus:
             ///   - inLibrary:
             ///   - libraryItemId:
+            ///   - monitorScope:
             ///   - monitoredSeasons:
             ///   - regionOverride:
             ///   - note:
+            ///   - nextRelease:
             ///   - hasDates:
+            ///   - libraryGap:
             ///   - reminders:
             public init(
                 id: Swift.String,
@@ -2421,10 +2460,13 @@ public enum Components {
                 productionStatus: Swift.String? = nil,
                 inLibrary: Swift.Bool,
                 libraryItemId: Swift.String? = nil,
+                monitorScope: Components.Schemas.SeriesMonitorScope? = nil,
                 monitoredSeasons: [Swift.Int32]? = nil,
                 regionOverride: Swift.String? = nil,
                 note: Swift.String? = nil,
+                nextRelease: Components.Schemas.NextReleaseDto? = nil,
                 hasDates: Swift.Bool,
+                libraryGap: Components.Schemas.LibraryGapDto? = nil,
                 reminders: [Components.Schemas.ReminderDto]
             ) {
                 self.id = id
@@ -2438,10 +2480,13 @@ public enum Components {
                 self.productionStatus = productionStatus
                 self.inLibrary = inLibrary
                 self.libraryItemId = libraryItemId
+                self.monitorScope = monitorScope
                 self.monitoredSeasons = monitoredSeasons
                 self.regionOverride = regionOverride
                 self.note = note
+                self.nextRelease = nextRelease
                 self.hasDates = hasDates
+                self.libraryGap = libraryGap
                 self.reminders = reminders
             }
             public enum CodingKeys: String, CodingKey {
@@ -2456,10 +2501,13 @@ public enum Components {
                 case productionStatus
                 case inLibrary
                 case libraryItemId
+                case monitorScope
                 case monitoredSeasons
                 case regionOverride
                 case note
+                case nextRelease
                 case hasDates
+                case libraryGap
                 case reminders
             }
         }
