@@ -11,6 +11,10 @@ public static class TorrentEndpoints
         // web seeds this on mount, then keeps it live from the `vpnStatusChanged` SSE event.
         routes.MapGet("/api/vpn", (ITorrentEngine engine) => Results.Ok(engine.GetVpnStatus())).RequireAuthorization();
 
+        // Same contract for DHT health: seeded on mount, then kept live by `dhtStatusChanged`. Null when
+        // downloading is disabled or the engine predates /dht — the UI hides the indicator either way.
+        routes.MapGet("/api/dht", (ITorrentEngine engine) => Results.Ok(engine.GetDhtStatus())).RequireAuthorization();
+
         var group = routes.MapGroup("/api/torrents").RequireAuthorization();
 
         group.MapGet("/", async (TorrentService service, CancellationToken cancellationToken) =>

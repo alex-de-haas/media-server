@@ -119,6 +119,17 @@ export interface VpnStatus {
   checkedAt: string;
 }
 
+// Engine-wide DHT health. `enabled` is the engine's setting; `running` means enabled *and* an engine is
+// actually running it (the engine is recycled while nothing downloads, so idle reports false). `state` is
+// MonoTorrent's NotReady/Initialising/Ready while running, else null. The whole object is null when
+// downloading is disabled or the engine predates /dht — the UI hides the indicator in that case.
+export interface DhtStatus {
+  enabled: boolean;
+  running: boolean;
+  state: string | null;
+  nodeCount: number;
+}
+
 // Where an already-mapped source file points. provider/providerId carry the identity used for the
 // mapping (an episode's identity is its series' provider reference) so the review dialog can pre-select
 // the same series; null for extras, which have no provider identity of their own.
@@ -949,6 +960,7 @@ export const mediaServer = {
 
   listDownloads: () => apiJson<Download[]>(`${BASE}/torrents`),
   getVpnStatus: () => apiJson<VpnStatus | null>(`${BASE}/vpn`),
+  getDhtStatus: () => apiJson<DhtStatus | null>(`${BASE}/dht`),
   addTorrent: (input: AddTorrentInput) =>
     apiJson<Download>(`${BASE}/torrents/add`, {
       method: "POST",

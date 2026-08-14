@@ -14,5 +14,7 @@ public interface IRealtimeNotifier
 
     Task VpnStatusChangedAsync(VpnStatusChanged status, CancellationToken cancellationToken = default);
 
+    Task DhtStatusChangedAsync(DhtStatusChanged status, CancellationToken cancellationToken = default);
+
     Task JobChangedAsync(string eventName, JobEvent job, CancellationToken cancellationToken = default);
 }

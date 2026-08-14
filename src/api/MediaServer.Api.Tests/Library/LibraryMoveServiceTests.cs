@@ -715,5 +715,7 @@ public sealed class LibraryMoveServiceTests : IDisposable
         public Task DownloadStateChangedAsync(DownloadStateChanged change, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task IngestStageChangedAsync(IngestStageChanged change, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task VpnStatusChangedAsync(VpnStatusChanged status, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task DhtStatusChangedAsync(DhtStatusChanged status, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

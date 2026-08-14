@@ -351,6 +351,8 @@ public sealed class WatchlistSyncServiceTests : IDisposable
         public Task DownloadStateChangedAsync(DownloadStateChanged change, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task IngestStageChangedAsync(IngestStageChanged change, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task VpnStatusChangedAsync(VpnStatusChanged status, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task DhtStatusChangedAsync(DhtStatusChanged status, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task JobChangedAsync(string eventName, JobEvent job, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

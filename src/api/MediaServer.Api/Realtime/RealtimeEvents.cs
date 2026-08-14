@@ -14,6 +14,7 @@ public static class RealtimeEvents
     public const string IngestStageChanged = "ingestStageChanged";
 
     public const string VpnStatusChanged = "vpnStatusChanged";
+    public const string DhtStatusChanged = "dhtStatusChanged";
 }
 
 /// <summary>Live torrent progress snapshot. Broadcast from the engine's in-memory state; never persisted.
@@ -51,6 +52,11 @@ public sealed record VpnStatusChanged(
     string? ExitIp,
     string? ExitCountry,
     DateTimeOffset CheckedAt);
+
+/// <summary>Engine-wide DHT health for the activity view (mirrors the engine's DhtStatus). A consumer
+/// derives "enabled but not working" as Enabled &amp;&amp; Running &amp;&amp; State == "NotReady" — never
+/// State != "Ready", since Initialising is a healthy start-up.</summary>
+public sealed record DhtStatusChanged(bool Enabled, bool Running, string? State, int NodeCount);
 
 /// <summary>A pipeline stage/status transition for the activity view.</summary>
 public sealed record IngestStageChanged(
