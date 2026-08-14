@@ -47,9 +47,13 @@ public sealed record RankedCandidate(
 /// worth 6.5 where the old maximum was about 1.9). Absolute scores are never compared across requests
 /// — the output is a rank, and fusion consumes positions.
 /// </remarks>
-public sealed class RecommendationScorer
+public sealed class RecommendationScorer(RecommendationWeights? weights = null)
 {
+    private readonly RecommendationWeights _weights = weights ?? RecommendationWeights.Default;
+
     /// <summary>Weight of the pooled collaborative signal — the engine's primary evidence.</summary>
+    /// <remarks>Fixed at one: the other weights are expressed relative to it, so sweeping it too
+    /// would only rescale every result.</remarks>
     internal const double CollaborativeWeight = 1.0;
 
     /// <summary>
@@ -60,21 +64,21 @@ public sealed class RecommendationScorer
     /// what TMDb links to what. It is also the only term a local-only candidate has, which is what
     /// lets "the library ranked by the profile" share a scale with a discovery feed.
     /// </remarks>
-    internal const double AffinityWeight = 0.6;
+    internal const double DefaultAffinityWeight = 0.6;
 
     /// <summary>How hard a resemblance to what the viewer rejected pushes back.</summary>
     /// <remarks>
-    /// Larger than <see cref="AffinityWeight"/> on purpose. A viewer who says "not this" is being
+    /// Larger than the affinity weight on purpose. A viewer who says "not this" is being
     /// specific in a way that liking something is not, and the cost of ignoring it — suggesting more
     /// of what they just rejected — is the failure people notice.
     /// </remarks>
-    internal const double AversionWeight = 0.8;
+    internal const double DefaultAversionWeight = 0.8;
 
     /// <summary>
     /// Weight of the smoothed community score. Small on purpose: it is a tiebreak among titles the
     /// viewer's own history already reached, not a reason to recommend something.
     /// </summary>
-    internal const double QualityWeight = 0.25;
+    internal const double DefaultQualityWeight = 0.25;
 
     /// <summary>
     /// Votes a title needs before its own average outweighs the prior. TMDb reports 10.0 on three
@@ -122,7 +126,7 @@ public sealed class RecommendationScorer
             .Select(entry => new RankedCandidate(
                 entry.Key,
                 entry.Value,
-                Score(entry.Value, debiased[entry.Key] * scale, profile)))
+                Score(entry.Value, debiased[entry.Key] * scale, profile, _weights)))
             .OrderByDescending(entry => entry.Score)
             // Stable across runs: an unchanged library must not reshuffle the feed.
             .ThenBy(entry => entry.Identity.TmdbId, StringComparer.Ordinal)];
@@ -138,11 +142,18 @@ public sealed class RecommendationScorer
     /// quality" — would sink every candidate that arrives bare, which is the path a connected
     /// source's suggestions take and would quietly disable the source for the operator paying for it.
     /// </remarks>
-    internal static double Score(ScoredCandidate candidate, double normalizedCollaborative, TasteProfile profile) =>
-        (CollaborativeWeight * normalizedCollaborative)
-        + (AffinityWeight * profile.Affinity(candidate.Facets))
-        - (AversionWeight * profile.Aversion(candidate.Facets))
-        + (QualityWeight * Quality(candidate.Title));
+    internal static double Score(
+        ScoredCandidate candidate,
+        double normalizedCollaborative,
+        TasteProfile profile,
+        RecommendationWeights? weights = null)
+    {
+        var tuning = weights ?? RecommendationWeights.Default;
+        return (CollaborativeWeight * normalizedCollaborative)
+            + (tuning.AffinityWeight * profile.Affinity(candidate.Facets))
+            - (tuning.AversionWeight * profile.Aversion(candidate.Facets))
+            + (tuning.QualityWeight * Quality(candidate.Title));
+    }
 
     /// <summary>
     /// The collaborative term: pooled contributions, widened by breadth and narrowed by fame.

@@ -281,7 +281,7 @@ public sealed class RecommendationSeedSelectorTests : IDisposable
     {
         // No decay on ratings means a three-star title outranks any unrated watch permanently, so the
         // weighted slots fill with what the viewer actually graded.
-        for (var index = 0; index < RecommendationSeedSelector.WeightedSeeds + 4; index++)
+        for (var index = 0; index < RecommendationSeedSelector.DefaultWeightedSeeds + 4; index++)
         {
             var rated = AddMovie($"Rated {index}", tmdbId: $"r{index}");
             AddPlay(rated.Id, "2025-01-20T20:00:00Z");
@@ -298,7 +298,7 @@ public sealed class RecommendationSeedSelectorTests : IDisposable
 
         Assert.Equal(RecommendationSeedSelector.MaxSeeds, seeds.Count);
         Assert.All(
-            seeds.Take(RecommendationSeedSelector.WeightedSeeds),
+            seeds.Take(RecommendationSeedSelector.DefaultWeightedSeeds),
             seed => Assert.StartsWith("r", seed.Identity.TmdbId, StringComparison.Ordinal));
     }
 

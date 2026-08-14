@@ -21,7 +21,8 @@ public sealed record RecommendationSeed(RecommendationIdentity Identity, double 
 /// still outweighs one watched last year.
 /// </para>
 /// </remarks>
-public sealed class RecommendationSeedSelector(MediaServerDbContext database, TimeProvider time)
+public sealed class RecommendationSeedSelector(
+    MediaServerDbContext database, TimeProvider time, RecommendationWeights? weights = null)
 {
     /// <summary>How many seeds fan out to TMDb. Each is one request on a cold cache.</summary>
     internal const int MaxSeeds = 20;
@@ -29,7 +30,7 @@ public sealed class RecommendationSeedSelector(MediaServerDbContext database, Ti
     /// <summary>
     /// How many of those seeds are chosen purely by weight. The remainder is the recency reserve below.
     /// </summary>
-    internal const int WeightedSeeds = 16;
+    internal const int DefaultWeightedSeeds = 16;
 
     /// <summary>
     /// Slots held for the most recently watched eligible titles that weight alone would never admit.
@@ -41,38 +42,27 @@ public sealed class RecommendationSeedSelector(MediaServerDbContext database, Ti
     /// last week, and a "what should I watch next" that has not moved in a month is dead. These four
     /// slots are where a film watched recently and not yet rated lives.
     /// </remarks>
-    internal const int RecencySlots = MaxSeeds - WeightedSeeds;
+    internal int RecencySlots => MaxSeeds - _weights.WeightedSeeds;
 
     /// <summary>An <em>unrated</em> seed watched this long ago counts half as much as one watched today.</summary>
     internal static readonly TimeSpan RecencyHalfLife = TimeSpan.FromDays(90);
 
-    /// <summary>A favorite says something an ordinary play does not, so it counts for more.</summary>
-    /// <remarks>Applies to unrated titles only: a rating is the more specific statement and supersedes it.</remarks>
-    internal const double FavoriteBoost = 1.5;
-
-    /// <summary>Rewatching is the strongest signal a viewer gives without saying anything.</summary>
-    internal const double RewatchBoost = 1.25;
-
-    /// <summary>The weight of an ordinary watch nobody rated — the unit every rating below is priced in.</summary>
-    internal const double UnratedWeight = 1.0;
-
     /// <summary>
-    /// What each star is worth as a seed, relative to <see cref="UnratedWeight"/>.
+    /// The curve, and everything else about weighting that can be argued over.
     /// </summary>
     /// <remarks>
-    /// Deliberately not linear. On this scale five stars means "nothing to fault", four is where most
-    /// loved films land, and three is "a good film, no regrets" — so the qualitative break sits between
-    /// three and four (×2.35) rather than between four and five (×1.6), and the top of the scale is
-    /// reserved rather than merely high. One and two stars are absent because they do not seed at all:
-    /// asking TMDb what is like a film the viewer would not repeat spends one of the twenty requests
-    /// fetching candidates the feed then has to push back down.
+    /// The rating curve is deliberately not linear. On this scale five stars means "nothing to fault",
+    /// four is where most loved films land, and three is "a good film, no regrets" — so the qualitative
+    /// break sits between three and four (×2.35) rather than between four and five (×1.6), and the top
+    /// of the scale is reserved rather than merely high. One and two stars are absent from the table
+    /// because they do not seed at all: asking TMDb what is like a film the viewer would not repeat
+    /// spends one of the twenty requests fetching candidates the feed then has to push back down.
+    /// <para>
+    /// The numbers live in <see cref="RecommendationWeights"/> so the offline harness can sweep them.
+    /// Nothing in the running app passes anything but the default.
+    /// </para>
     /// </remarks>
-    internal static readonly IReadOnlyDictionary<int, double> RatingWeights = new Dictionary<int, double>
-    {
-        [3] = 1.7,
-        [4] = 4.0,
-        [5] = 6.5,
-    };
+    private readonly RecommendationWeights _weights = weights ?? RecommendationWeights.Default;
 
     public async Task<IReadOnlyList<RecommendationSeed>> SelectAsync(
         int appUserId, CancellationToken cancellationToken)
@@ -134,7 +124,7 @@ public sealed class RecommendationSeedSelector(MediaServerDbContext database, Ti
             var age = latest is { } when ? now - when : RecencyHalfLife * 4;
 
             if (WeightOf(rating.TryGetValue(group.Key, out var stars) ? stars : null,
-                    favorite.Contains(group.Key), age) is not { } weight)
+                    favorite.Contains(group.Key), age, _weights) is not { } weight)
             {
                 // One or two stars: watched, and not worth asking for more of. Still evidence — the
                 // taste profile reads these titles' facets as negatives — but never a seed.
@@ -145,7 +135,7 @@ public sealed class RecommendationSeedSelector(MediaServerDbContext database, Ti
             var distinctPlays = item.Kind == MediaKind.Movie ? group.Count() : 1;
             if (distinctPlays > 1)
             {
-                weight *= RewatchBoost;
+                weight *= _weights.RewatchBoost;
             }
 
             seeds.Add((new RecommendationIdentity(kind, tmdbId), weight, latest));
@@ -161,14 +151,14 @@ public sealed class RecommendationSeedSelector(MediaServerDbContext database, Ti
             .ThenBy(seed => seed.Identity.TmdbId, StringComparer.Ordinal)
             .ToList();
 
-        var chosen = byWeight.Take(WeightedSeeds).ToList();
-        if (byWeight.Count > WeightedSeeds)
+        var chosen = byWeight.Take(_weights.WeightedSeeds).ToList();
+        if (byWeight.Count > _weights.WeightedSeeds)
         {
             // The reserve: the most recently watched of what weight alone left behind. Only titles that
             // reached this list at all are eligible, so a one-star film cannot enter through the back
             // door — it was dropped above.
             chosen.AddRange(byWeight
-                .Skip(WeightedSeeds)
+                .Skip(_weights.WeightedSeeds)
                 .OrderByDescending(seed => seed.Latest ?? DateTimeOffset.MinValue)
                 .ThenBy(seed => seed.Identity.TmdbId, StringComparer.Ordinal)
                 .Take(RecencySlots));
@@ -197,14 +187,15 @@ public sealed class RecommendationSeedSelector(MediaServerDbContext database, Ti
     /// ranking precisely as it ranked before ratings existed.
     /// </para>
     /// </remarks>
-    internal static double? WeightOf(int? rating, bool favorite, TimeSpan age)
+    internal static double? WeightOf(int? rating, bool favorite, TimeSpan age, RecommendationWeights? weights = null)
     {
+        var tuning = weights ?? RecommendationWeights.Default;
         if (rating is { } stars)
         {
-            return RatingWeights.TryGetValue(stars, out var weight) ? weight : null;
+            return tuning.RatingWeights.TryGetValue(stars, out var weight) ? weight : null;
         }
 
-        return Decay(age) * (favorite ? FavoriteBoost : UnratedWeight);
+        return Decay(age) * (favorite ? tuning.FavoriteBoost : tuning.UnratedWeight);
     }
 
     /// <summary>Exponential decay on the half-life: today is 1.0, one half-life ago is 0.5.</summary>
