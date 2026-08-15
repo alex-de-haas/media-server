@@ -1,7 +1,7 @@
 # Recommendations
 
 Created: 2026-07-25
-Updated: 2026-08-14
+Updated: 2026-08-15
 
 ## Description
 
@@ -302,6 +302,16 @@ user can press play on.
   bypassing the alphabetical browse path.
 - **Held titles only.** A discovery card has no meaning where the only verb is
   Play.
+- The view **borrows a tile** the way a catalog does: the backdrop of the title
+  its shelf currently leads with (the next one down when that title has no
+  backdrop yet). The tile is per-user and moves with the shelf, which is the
+  point — a library that suggests different films every day should not look the
+  same every day. The one shelf read that decides whether to advertise the view
+  at all is the read the tile comes from, so the hourly `/UserViews` pays for it
+  once. A shelf whose titles have no artwork is still listed, just without a tile.
+  Being per-user has two consequences on the image route — it answers from the
+  advertised tag before falling back to the caller's own shelf, and it is not
+  publicly cacheable. See [Jellyfin compatibility](../jellyfin-compatibility/feature.md).
 - The row is labelled by the client from the view's name; Infuse renders it as
   *"Latest Recommended - Local"*.
 - A newly appearing view reaches the home screen one refresh late, because the
@@ -397,6 +407,11 @@ which is a privacy question; and trending filtered through the profile).
 - `JellyfinRecommendationsTests` — the view advertised only when the shelf has
   something, `Latest` returning it in rank order, browsing keeping rank, and the
   view never appearing in a flat scan.
+- `JellyfinViewArtworkTests` — the view's borrowed tile: the leading title's
+  backdrop, the fallback past an unenriched title, a shelf with no artwork still
+  being listed, the image route honoring an advertised tag over the caller's own
+  shelf (and falling back when the tag names nothing), and an untagged request
+  needing an acting user.
 - `e2e/recommendations.spec.ts` — the library/discovery split, the availability
   filter, hide-with-undo, the reason line, the popularity dial, the
   self-explaining empty state, and the conditional home row.

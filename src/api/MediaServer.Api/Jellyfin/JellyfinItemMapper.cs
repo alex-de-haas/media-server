@@ -61,8 +61,8 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server, MediaServer
         CollectionType = CollectionType(catalog.Type),
         IsFolder = true,
         DateCreated = catalog.CreatedAt,
-        ImageTags = backdropTag is { Length: > 0 } tag ? new Dictionary<string, string> { ["Primary"] = tag } : null,
-        BackdropImageTags = backdropTag is { Length: > 0 } backdrop ? [backdrop] : null,
+        ImageTags = PrimaryTags(backdropTag),
+        BackdropImageTags = BackdropTags(backdropTag),
     };
 
     /// <summary>
@@ -75,11 +75,12 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server, MediaServer
     /// library. Verified against Infuse 8.x: it renders such a view as an ordinary library, and queries
     /// it once with no type filter rather than once per type.
     /// <para>
-    /// Like the Collections view it advertises no artwork of its own — its contents change with the
-    /// user's taste, so any fixed tile would go stale.
+    /// Like a catalog it owns no artwork, so it borrows some: <paramref name="backdropTag"/> is the
+    /// backdrop of the title its shelf leads with. The tile moves with the shelf, which is the point —
+    /// a library that suggests different films every day should not look the same every day.
     /// </para>
     /// </remarks>
-    public BaseItemDto MapRecommendationsView() => new()
+    public BaseItemDto MapRecommendationsView(string? backdropTag = null) => new()
     {
         Id = JellyfinIds.RecommendationsView(),
         ServerId = server.ServerId,
@@ -87,14 +88,16 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server, MediaServer
         Type = "CollectionFolder",
         CollectionType = null,
         IsFolder = true,
+        ImageTags = PrimaryTags(backdropTag),
+        BackdropImageTags = BackdropTags(backdropTag),
     };
 
     /// <summary>
     /// The synthetic top-level "Collections" view: a Jellyfin <c>boxsets</c> collection folder that holds the
-    /// movie franchises. Unlike catalog views it advertises no artwork of its own (its children — the
-    /// <c>BoxSet</c>s — carry the posters), so Infuse renders it as a labelled library tile.
+    /// movie franchises. It owns no artwork either, so <paramref name="coverTag"/> — a representative
+    /// franchise's backdrop (or poster, when it has no backdrop) — stands in for it.
     /// </summary>
-    public BaseItemDto MapCollectionsView() => new()
+    public BaseItemDto MapCollectionsView(string? coverTag = null) => new()
     {
         Id = JellyfinIds.CollectionsView(),
         ServerId = server.ServerId,
@@ -102,13 +105,28 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server, MediaServer
         Type = "CollectionFolder",
         CollectionType = "boxsets",
         IsFolder = true,
+        ImageTags = PrimaryTags(coverTag),
+        BackdropImageTags = BackdropTags(coverTag),
     };
+
+    // A folder that borrows its art advertises the one tag in both slots; the image endpoint answers a
+    // request for either with the same bytes.
+    private static IReadOnlyDictionary<string, string>? PrimaryTags(string? tag) =>
+        tag is { Length: > 0 } primary ? new Dictionary<string, string> { ["Primary"] = primary } : null;
+
+    private static IReadOnlyList<string>? BackdropTags(string? tag) =>
+        tag is { Length: > 0 } backdrop ? [backdrop] : null;
 
     /// <summary>
     /// Projects a movie franchise as a Jellyfin <c>BoxSet</c> folder under the Collections view. Its members
     /// are the owned movies (queried by <c>ParentId</c>); a movie still appears under its own movie catalog
     /// too, exactly as Jellyfin models collections. Artwork is the collection's own poster/backdrop, served by
     /// <c>JellyfinImageService</c> via the matching tags.
+    /// <para>
+    /// <c>DisplayOrder</c> is Jellyfin's per-BoxSet sort setting, and a franchise is watched in the order it
+    /// was released — so it names the premiere date rather than leaving a client to fall back on the alphabet.
+    /// The members come back in that order too; this only tells a client that sorts for itself which one to use.
+    /// </para>
     /// </summary>
     public BaseItemDto MapBoxSet(MovieCollection collection, int childCount, string? primaryTag, string? backdropTag) => new()
     {
@@ -123,8 +141,9 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server, MediaServer
         DateCreated = collection.UpdatedAt,
         ChildCount = childCount,
         RecursiveItemCount = childCount,
-        ImageTags = primaryTag is { Length: > 0 } primary ? new Dictionary<string, string> { ["Primary"] = primary } : null,
-        BackdropImageTags = backdropTag is { Length: > 0 } backdrop ? [backdrop] : null,
+        DisplayOrder = "PremiereDate",
+        ImageTags = PrimaryTags(primaryTag),
+        BackdropImageTags = BackdropTags(backdropTag),
     };
 
     /// <summary>

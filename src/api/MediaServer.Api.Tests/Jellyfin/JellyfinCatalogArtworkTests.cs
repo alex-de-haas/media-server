@@ -35,7 +35,7 @@ public sealed class JellyfinCatalogArtworkTests : IDisposable
         var images = CreateImageService();
         // The client requests the collection folder's image by the catalog's public id.
         var payload = await images.GetImageAsync(
-            JellyfinIds.Catalog(catalogId), ImageType.Primary, tag: null, index: 0, CancellationToken.None);
+            JellyfinIds.Catalog(catalogId), ImageType.Primary, tag: null, index: 0, appUserId: null, CancellationToken.None);
 
         Assert.NotNull(payload);
         Assert.Equal("newbackdroptag00", payload!.Tag);
@@ -64,7 +64,7 @@ public sealed class JellyfinCatalogArtworkTests : IDisposable
 
         var images = CreateImageService();
         var payload = await images.GetImageAsync(
-            JellyfinIds.Catalog(catalogId), ImageType.Primary, tag: null, index: 0, CancellationToken.None);
+            JellyfinIds.Catalog(catalogId), ImageType.Primary, tag: null, index: 0, appUserId: null, CancellationToken.None);
 
         Assert.Null(payload);
     }
@@ -74,7 +74,7 @@ public sealed class JellyfinCatalogArtworkTests : IDisposable
     {
         var images = CreateImageService();
         var payload = await images.GetImageAsync(
-            "ffffffffffffffffffffffffffffffff", ImageType.Primary, tag: null, index: 0, CancellationToken.None);
+            "ffffffffffffffffffffffffffffffff", ImageType.Primary, tag: null, index: 0, appUserId: null, CancellationToken.None);
 
         Assert.Null(payload);
     }
@@ -110,7 +110,8 @@ public sealed class JellyfinCatalogArtworkTests : IDisposable
             AppDataDir = Path.GetTempPath(),
         };
         return new JellyfinImageService(
-            _db.Create(), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()),
+            _db.Create(), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinShelfArtwork(_db.Create(), new EmptyShelf(), TestSettings.English),
+            new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()),
             new StubHttpClientFactory(), hosty, TestSettings.English);
     }
 

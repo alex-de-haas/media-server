@@ -68,8 +68,15 @@ tie would be whatever the database happened to return that request.
 `ImageSelection` owns all of this, as an expression for the surfaces that rank in
 SQL and as a comparison for the surfaces that hold the rows already. Every
 surface goes through it: the web detail page and grids, the Jellyfin item mapper
-and its image service, catalog (collection-folder) artwork, `/native/v1`,
-recommendations, collections, the watched calendar and the removed-titles list.
+and its image service, catalog (collection-folder) artwork, the synthetic
+Recommended view's borrowed backdrop, `/native/v1`, recommendations, collections,
+the watched calendar and the removed-titles list.
+
+Two of those borrow a backdrop from a title rather than owning one — a catalog tile
+takes its newest title's, the Recommended tile takes the one its shelf leads with.
+There the borrowing decides *which title* first and the ranking only picks among
+that title's backdrops, so a stale title cannot win the tile by holding
+better-ranked art.
 
 The Jellyfin mapper and the image service must rank identically, and do, because
 that contract addresses artwork two ways: by tag, and by **index** into the

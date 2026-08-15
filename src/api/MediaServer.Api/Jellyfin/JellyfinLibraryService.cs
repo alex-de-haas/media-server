@@ -31,6 +31,7 @@ public sealed class JellyfinLibraryService(
     MediaServerDbContext database,
     JellyfinItemMapper mapper,
     JellyfinCatalogArtwork catalogArtwork,
+    JellyfinShelfArtwork shelfArtwork,
     JellyfinCollectionService collections,
     JellyfinPersonService people,
     IRecommendationShelf shelf,
@@ -58,17 +59,24 @@ public sealed class JellyfinLibraryService(
             .ToList();
 
         // Append the synthetic Collections view only when at least one franchise qualifies, so Infuse never
-        // shows an empty "Collections" library.
-        if (await collections.AnyEligibleAsync(cancellationToken))
+        // shows an empty "Collections" library. The cover doubles as that check — a franchise with artwork
+        // is a franchise — so the cheap "is there one at all?" query only runs when none has any art.
+        var cover = await collections.CoverAsync(cancellationToken);
+        if (cover is not null || await collections.AnyEligibleAsync(cancellationToken))
         {
-            views.Add(mapper.MapCollectionsView());
+            views.Add(mapper.MapCollectionsView(cover is null ? null : JellyfinCollectionService.CoverTag(cover)));
         }
 
         // Same rule for the shelf: a user with nothing watched yet has no recommendations, and an empty
-        // library tile explains nothing.
-        if (appUserId is { } userId && await shelf.AnyAsync(userId, cancellationToken))
+        // library tile explains nothing. One read settles both whether the view exists and which title
+        // lends it a tile — this is the hourly /UserViews path, which should not read the shelf twice.
+        if (appUserId is { } userId)
         {
-            views.Add(mapper.MapRecommendationsView());
+            var ranked = await shelf.GetAsync(userId, JellyfinShelfArtwork.Depth, cancellationToken);
+            if (ranked.Count > 0)
+            {
+                views.Add(mapper.MapRecommendationsView((await shelfArtwork.BackdropAsync(ranked, cancellationToken))?.Tag));
+            }
         }
 
         return views;
@@ -77,17 +85,30 @@ public sealed class JellyfinLibraryService(
     /// <summary>A single library/view (collection folder) by its public id, or null if it is not a view.</summary>
     public async Task<BaseItemDto?> GetViewAsync(string publicId, int? appUserId, CancellationToken cancellationToken)
     {
-        // The synthetic Collections view exists only while a franchise qualifies.
+        // The synthetic Collections view exists only while a franchise qualifies, and wears the same
+        // borrowed artwork the view list gives it.
         if (JellyfinCollectionService.IsView(publicId))
         {
-            return await collections.AnyEligibleAsync(cancellationToken) ? mapper.MapCollectionsView() : null;
+            var cover = await collections.CoverAsync(cancellationToken);
+            if (cover is null && !await collections.AnyEligibleAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return mapper.MapCollectionsView(cover is null ? null : JellyfinCollectionService.CoverTag(cover));
         }
 
         // And the Recommended view only while this user's shelf holds something.
         if (IsRecommendationsView(publicId))
         {
-            return appUserId is { } userId && await shelf.AnyAsync(userId, cancellationToken)
-                ? mapper.MapRecommendationsView()
+            if (appUserId is not { } userId)
+            {
+                return null;
+            }
+
+            var ranked = await shelf.GetAsync(userId, JellyfinShelfArtwork.Depth, cancellationToken);
+            return ranked.Count > 0
+                ? mapper.MapRecommendationsView((await shelfArtwork.BackdropAsync(ranked, cancellationToken))?.Tag)
                 : null;
         }
 
@@ -527,6 +548,9 @@ public sealed class JellyfinLibraryService(
     private async Task<IReadOnlyList<MediaItem>> ResolveItemsAsync(JellyfinItemsQuery query, CancellationToken cancellationToken)
     {
         IQueryable<MediaItem> source;
+        // A franchise is watched in the order it was released, so its members sort by year rather than by
+        // the title order every other listing uses.
+        var chronological = false;
         if (query.Ids is { Count: > 0 } ids)
         {
             // An explicit id set is the starting point, not a shortcut past the filters below: a client
@@ -547,6 +571,7 @@ public sealed class JellyfinLibraryService(
         {
             // Browsing into a BoxSet → its member movies (which also remain under their own movie catalog).
             source = collections.MemberMovies(collection.Id);
+            chronological = true;
         }
         else
         {
@@ -596,47 +621,59 @@ public sealed class JellyfinLibraryService(
         // title it renders, not MediaItem.Title — that column holds whatever language the item matched in
         // at ingest, so a Russian library would come back alphabetized by its English names. Paging still
         // happens above this over the ordered list, so the page boundaries stay consistent.
-        var titles = await LocalizedTitlesAsync(items, cancellationToken);
+        var keys = await SortKeysAsync(items, cancellationToken);
         var order = MetadataLanguage.TitleOrder(PreferredLanguage);
+        string Title(MediaItem item) => keys.GetValueOrDefault(item.Id).Title ?? item.Title;
+
+        if (chronological)
+        {
+            // Same year resolution the DTO renders as ProductionYear, so the sequence a client sees matches
+            // the years printed under it. A title with no year at all sorts last rather than heading the
+            // franchise it cannot be placed in.
+            return items
+                .OrderBy(item => item.Year ?? keys.GetValueOrDefault(item.Id).Year ?? int.MaxValue)
+                .ThenBy(Title, order)
+                .ToList();
+        }
+
         return items
             .OrderBy(item => item.ParentIndexNumber)
             .ThenBy(item => item.IndexNumber)
-            .ThenBy(item => titles.GetValueOrDefault(item.Id, item.Title), order)
+            .ThenBy(Title, order)
             .ToList();
     }
 
-    /// <summary>
-    /// The display title of each item in the preferred language, for items that have one. Resolves the
-    /// language exactly as <see cref="JellyfinItemMapper.MapItem"/> does — same record, same
-    /// blank-title fallback — so the key a listing sorts by is the name it goes on to render. Projects two
-    /// columns rather than whole records: this covers the entire result set, while
+    /// <summary>What a listing sorts by, per item: the localized title, and the metadata release year.</summary>
+    /// <remarks>
+    /// The title resolves the language exactly as <see cref="JellyfinItemMapper.MapItem"/> does — same
+    /// record, same blank-title fallback — so the key a listing sorts by is the name it goes on to render.
+    /// Projects three columns rather than whole records: this covers the entire result set, while
     /// <see cref="MapManyAsync"/> loads full metadata (including the raw payload) for one page only.
-    /// </summary>
-    private async Task<Dictionary<Guid, string>> LocalizedTitlesAsync(
+    /// </remarks>
+    private async Task<Dictionary<Guid, (string? Title, int? Year)>> SortKeysAsync(
         IReadOnlyList<MediaItem> items, CancellationToken cancellationToken)
     {
-        var titles = new Dictionary<Guid, string>();
+        var keys = new Dictionary<Guid, (string? Title, int? Year)>();
         // Chunked so a large library never exceeds SQLite's 999-parameter limit in the IN-list.
         foreach (var chunk in items.Select(item => item.Id).Chunk(500))
         {
             var rows = await database.MetadataRecords.AsNoTracking()
                 .Where(record => chunk.Contains(record.MediaItemId))
-                .Select(record => new LocalizedTitle(record.MediaItemId, record.Language, record.Title))
+                .Select(record => new LocalizedTitle(record.MediaItemId, record.Language, record.Title, record.ReleaseDate))
                 .ToListAsync(cancellationToken);
             foreach (var group in rows.GroupBy(row => row.MediaItemId))
             {
-                var title = MetadataLanguage.Pick(group.ToList(), PreferredLanguage, row => row.Language).Title;
-                if (!string.IsNullOrWhiteSpace(title))
-                {
-                    titles[group.Key] = title;
-                }
+                var picked = MetadataLanguage.Pick(group.ToList(), PreferredLanguage, row => row.Language);
+                keys[group.Key] = (
+                    string.IsNullOrWhiteSpace(picked.Title) ? null : picked.Title,
+                    picked.ReleaseDate?.Year);
             }
         }
 
-        return titles;
+        return keys;
     }
 
-    private sealed record LocalizedTitle(Guid MediaItemId, string Language, string? Title);
+    private sealed record LocalizedTitle(Guid MediaItemId, string Language, string? Title, DateTimeOffset? ReleaseDate);
 
     private IQueryable<MediaItem> TopLevelItems() =>
         database.MediaItems.AsNoTracking().Where(item =>

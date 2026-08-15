@@ -51,7 +51,9 @@ public static class NativeImageEndpoints
                 return Results.NotFound();
             }
 
-            var payload = await images.GetImageAsync(publicId, type, tag, index ?? 0, cancellationToken);
+            // Always a real item here (the id came from MediaItems), so no acting user is needed: only the
+            // synthetic Recommended view's tile is per-user, and this route cannot address it.
+            var payload = await images.GetImageAsync(publicId, type, tag, index ?? 0, appUserId: null, cancellationToken);
             if (payload is null)
             {
                 return Results.NotFound();

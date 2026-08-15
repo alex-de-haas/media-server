@@ -31,7 +31,7 @@ For a pack whose files carry recognizable names, no operator action is needed:
   Enrich and Publish walk the whole ingest graph rather than a single item.
 - `CollectionSyncService` links each enriched movie to its
   `belongs_to_collection` franchise, so the pack's films group on the
-  Collections page (see [collections](../collections.md)) without extra work.
+  Collections page (see [collections](../collections/feature.md)) without extra work.
 
 Two identification behaviors carry most of this path for non-English packs —
 ordinal-prefix stripping and script-matched provider search. They belong to the

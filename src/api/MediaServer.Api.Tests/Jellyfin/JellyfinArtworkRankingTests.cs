@@ -55,7 +55,7 @@ public sealed class JellyfinArtworkRankingTests : IDisposable
         Assert.Equal(["backdroptext0001", "backdropru000001"], advertised);
         for (var index = 0; index < advertised!.Count; index++)
         {
-            var payload = await images.GetImageAsync(_publicId, ImageType.Backdrop, tag: null, index: index, CancellationToken.None);
+            var payload = await images.GetImageAsync(_publicId, ImageType.Backdrop, tag: null, index: index, appUserId: null, CancellationToken.None);
             Assert.Equal(advertised[index], payload?.Tag);
         }
     }
@@ -64,7 +64,7 @@ public sealed class JellyfinArtworkRankingTests : IDisposable
     public async Task An_untagged_primary_request_serves_the_advertised_poster()
     {
         var advertised = (await MapAsync()).ImageTags?["Primary"];
-        var payload = await ImageService().GetImageAsync(_publicId, ImageType.Primary, tag: null, index: 0, CancellationToken.None);
+        var payload = await ImageService().GetImageAsync(_publicId, ImageType.Primary, tag: null, index: 0, appUserId: null, CancellationToken.None);
 
         Assert.Equal("posterru00000001", advertised);
         Assert.Equal(advertised, payload?.Tag);
@@ -76,7 +76,7 @@ public sealed class JellyfinArtworkRankingTests : IDisposable
         // Ranking decides what is offered, never what a tag means: a client holding an older tag keeps
         // getting the image it asked for rather than today's winner.
         var payload = await ImageService().GetImageAsync(
-            _publicId, ImageType.Primary, tag: "postertextless01", index: 0, CancellationToken.None);
+            _publicId, ImageType.Primary, tag: "postertextless01", index: 0, appUserId: null, CancellationToken.None);
 
         Assert.Equal("postertextless01", payload?.Tag);
     }
@@ -91,7 +91,7 @@ public sealed class JellyfinArtworkRankingTests : IDisposable
         }
 
         var advertised = (await MapAsync()).ImageTags?["Primary"];
-        var payload = await ImageService().GetImageAsync(_publicId, ImageType.Primary, tag: null, index: 0, CancellationToken.None);
+        var payload = await ImageService().GetImageAsync(_publicId, ImageType.Primary, tag: null, index: 0, appUserId: null, CancellationToken.None);
 
         Assert.Equal("postertextless01", advertised);
         Assert.Equal(advertised, payload?.Tag);
@@ -101,13 +101,15 @@ public sealed class JellyfinArtworkRankingTests : IDisposable
     {
         var library = new JellyfinLibraryService(
             _db.Create(), new JellyfinItemMapper(ServerContext(), Settings), new JellyfinCatalogArtwork(_db.Create(), Settings),
+            new JellyfinShelfArtwork(_db.Create(), new EmptyShelf(), Settings),
             new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), new EmptyShelf(),
             new Api.Library.UserDataService(_db.Create(), TimeProvider.System), Settings);
         return (await library.GetItemAsync(_publicId, includeMediaSources: false, appUserId: null, CancellationToken.None))!;
     }
 
     private JellyfinImageService ImageService() => new(
-        _db.Create(), new JellyfinCatalogArtwork(_db.Create(), Settings), new JellyfinCollectionService(_db.Create()),
+        _db.Create(), new JellyfinCatalogArtwork(_db.Create(), Settings), new JellyfinShelfArtwork(_db.Create(), new EmptyShelf(), Settings),
+        new JellyfinCollectionService(_db.Create()),
         new JellyfinPersonService(_db.Create()), new NeverCalledHttpClientFactory(), Hosty, Settings);
 
     private static Api.Configuration.MediaServerSettings Settings => TestSettings.For("ru-RU", "en-US");

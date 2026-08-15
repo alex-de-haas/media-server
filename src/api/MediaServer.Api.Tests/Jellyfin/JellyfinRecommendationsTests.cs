@@ -33,7 +33,7 @@ public sealed class JellyfinRecommendationsTests : IDisposable
         var hosty = new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = Path.GetTempPath() };
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
-            _db.Create(), new JellyfinItemMapper(server, TestSettings.English), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English),
+            _db.Create(), new JellyfinItemMapper(server, TestSettings.English), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinShelfArtwork(_db.Create(), _shelf, TestSettings.English),
             new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), _shelf, new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
@@ -215,9 +215,6 @@ public sealed class JellyfinRecommendationsTests : IDisposable
             return Task.FromResult<IReadOnlyList<MediaItem>>(
                 limit is { } wanted ? [.. Items.Take(wanted)] : Items);
         }
-
-        public Task<bool> AnyAsync(int appUserId, CancellationToken cancellationToken) =>
-            Task.FromResult(Items.Count > 0);
     }
 
     private void Seed()

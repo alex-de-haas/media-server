@@ -208,6 +208,28 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Listing_matches_a_language_case_insensitively_like_the_detail_page_does()
+    {
+        using (var context = _db.Create())
+        {
+            // The grid ranks in SQL, where text compares case-sensitively by default, while the detail page
+            // ranks in memory. An unexpectedly-cased tag must not make the two disagree.
+            context.ImageAssets.Add(new ImageAsset
+            {
+                Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Primary, Language = "EN",
+                Provider = "tmdb", RemotePath = "https://image.tmdb.org/poster-en.jpg", Tag = "posteren", SortOrder = 7,
+            });
+            context.SaveChanges();
+        }
+
+        var listed = await _library.ListAsync(null, MediaKind.Movie, appUserId: null, CancellationToken.None);
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        Assert.Equal("https://image.tmdb.org/poster-en.jpg", Assert.Single(listed).PosterUrl);
+        Assert.Equal(detail!.PosterUrl, Assert.Single(listed).PosterUrl);
+    }
+
+    [Fact]
     public async Task Listing_prefers_a_titled_poster_over_textless_art()
     {
         using (var context = _db.Create())

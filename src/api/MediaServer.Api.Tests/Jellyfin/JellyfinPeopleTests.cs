@@ -36,7 +36,7 @@ public sealed class JellyfinPeopleTests : IDisposable
         };
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
-            _db.Create(), new JellyfinItemMapper(server, TestSettings.English), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English),
+            _db.Create(), new JellyfinItemMapper(server, TestSettings.English), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinShelfArtwork(_db.Create(), new EmptyShelf(), TestSettings.English),
             new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), new EmptyShelf(),
             new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
@@ -166,18 +166,18 @@ public sealed class JellyfinPeopleTests : IDisposable
             var images = ImageService(appData);
             var personId = JellyfinIds.Person("tmdb", _lead.ProviderId);
 
-            var payload = await images.GetImageAsync(personId, ImageType.Primary, tag: null, index: 0, CancellationToken.None);
+            var payload = await images.GetImageAsync(personId, ImageType.Primary, tag: null, index: 0, appUserId: null, CancellationToken.None);
 
             Assert.NotNull(payload);
             Assert.Equal(tag, payload!.Tag);
             Assert.Equal([7, 7, 7], payload.Content);
 
             // A person has exactly one image: a backdrop request must not be answered with the portrait.
-            Assert.Null(await images.GetImageAsync(personId, ImageType.Backdrop, tag: null, index: 0, CancellationToken.None));
+            Assert.Null(await images.GetImageAsync(personId, ImageType.Backdrop, tag: null, index: 0, appUserId: null, CancellationToken.None));
 
             // And a person the provider has no photo for serves nothing at all.
             Assert.Null(await images.GetImageAsync(
-                JellyfinIds.Person("tmdb", _stranger.ProviderId), ImageType.Primary, tag: null, index: 0, CancellationToken.None));
+                JellyfinIds.Person("tmdb", _stranger.ProviderId), ImageType.Primary, tag: null, index: 0, appUserId: null, CancellationToken.None));
         }
         finally
         {
@@ -314,8 +314,8 @@ public sealed class JellyfinPeopleTests : IDisposable
 
 
     private JellyfinImageService ImageService(string appDataDir) => new(
-        _db.Create(), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinCollectionService(_db.Create()),
-        new JellyfinPersonService(_db.Create()), new StubHttpClientFactory(),
+        _db.Create(), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinShelfArtwork(_db.Create(), new EmptyShelf(), TestSettings.English),
+        new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), new StubHttpClientFactory(),
         new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = appDataDir }, TestSettings.English);
 
     private sealed class StubHttpClientFactory : IHttpClientFactory

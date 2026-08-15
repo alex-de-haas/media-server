@@ -86,10 +86,12 @@ public static class ImageSelection
     /// Lower is better.
     /// </summary>
     /// <remarks>
-    /// The language comparison is a plain equality against the primary subtag because provider image
-    /// languages are bare ISO 639-1 codes — there is no region to strip on the stored side, and the provider
-    /// emits lower case. Written as one conditional chain rather than composed from smaller expressions: EF
-    /// Core translates a nested ternary to <c>CASE WHEN</c>, but cannot translate an invoked sub-expression.
+    /// The comparison is against the primary subtag because provider image languages are bare ISO 639-1
+    /// codes — there is no region to strip on the stored side — and it lower-cases the stored value because
+    /// SQLite compares text case-sensitively by default while the in-memory path does not. Without that the
+    /// two would disagree about an unexpectedly-cased tag, which is exactly the contract this type exists to
+    /// hold. Written as one conditional chain rather than composed from smaller expressions: EF Core
+    /// translates a nested ternary to <c>CASE WHEN</c>, but cannot translate an invoked sub-expression.
     /// </remarks>
     public static Expression<Func<ImageAsset, int>> Rank(ImageType type, string displayLanguage)
     {
@@ -98,9 +100,9 @@ public static class ImageSelection
         // query parameter, where member access on a captured struct leans on client-side evaluation.
         var (tierDisplay, tierEnglish, tierOther, tierUntagged) = TiersFor(type);
 
-        return image => image.Language == null || image.Language == "" || image.Language == NoLanguage ? tierUntagged
-            : image.Language == display ? tierDisplay
-            : image.Language == English ? tierEnglish
+        return image => image.Language == null || image.Language == "" || image.Language.ToLower() == NoLanguage ? tierUntagged
+            : image.Language.ToLower() == display ? tierDisplay
+            : image.Language.ToLower() == English ? tierEnglish
             : tierOther;
     }
 
@@ -133,10 +135,10 @@ public static class ImageSelection
         images.InPreferenceOrder(type, displayLanguage, pinnedTag).FirstOrDefault();
 
     /// <summary>
-    /// The best poster per item as a remote URL — the shape every grid, rail and calendar needs. Ranking
-    /// happens in the database so a large listing does not materialize every candidate, and the item's own pin
-    /// is joined in rather than fetched separately. Chunked because the id list rides as SQL parameters, which
-    /// SQLite caps at 999.
+    /// The best poster per item as a remote URL — the shape every grid, rail and calendar needs. Ranked,
+    /// grouped and reduced to one row per item in the database, so a listing does not transfer every cached
+    /// language variant of every poster; the item's own pin is joined in rather than fetched separately.
+    /// Chunked because the id list rides as SQL parameters, which SQLite caps at 999.
     /// </summary>
     public static async Task<Dictionary<Guid, string>> BestPosterUrlsAsync(
         this MediaServerDbContext database,
@@ -171,21 +173,30 @@ public static class ImageSelection
                         image.SortOrder,
                         image.Tag,
                         Tier = item.PreferredPosterTag != null && image.Tag == item.PreferredPosterTag ? Pinned
-                            : image.Language == null || image.Language == "" || image.Language == NoLanguage ? tierUntagged
-                            : image.Language == display ? tierDisplay
-                            : image.Language == English ? tierEnglish
+                            : image.Language == null || image.Language == "" || image.Language!.ToLower() == NoLanguage ? tierUntagged
+                            : image.Language!.ToLower() == display ? tierDisplay
+                            : image.Language!.ToLower() == English ? tierEnglish
                             : tierOther,
                     })
+                // Grouped and reduced in the database: a listing asks about hundreds of items, each holding
+                // every cached language variant, so materializing the candidates would transfer many times
+                // the rows it needs. One row per item comes back.
+                .GroupBy(row => row.MediaItemId)
+                .Select(group => new
+                {
+                    MediaItemId = group.Key,
+                    Url = group
+                        .OrderBy(row => row.Tier)
+                        .ThenBy(row => row.SortOrder)
+                        .ThenBy(row => row.Tag)
+                        .Select(row => row.RemotePath)
+                        .First(),
+                })
                 .ToListAsync(cancellationToken);
 
-            foreach (var group in rows.GroupBy(row => row.MediaItemId))
+            foreach (var row in rows)
             {
-                posters[group.Key] = group
-                    .OrderBy(row => row.Tier)
-                    .ThenBy(row => row.SortOrder)
-                    .ThenBy(row => row.Tag, StringComparer.Ordinal)
-                    .First()
-                    .RemotePath;
+                posters[row.MediaItemId] = row.Url;
             }
         }
 

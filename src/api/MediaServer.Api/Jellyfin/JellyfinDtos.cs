@@ -87,6 +87,8 @@ public sealed record BaseItemDto
     public string? SortName { get; init; }
     public required string Type { get; init; }
     public string? CollectionType { get; init; }
+    /// <summary>A folder's own sort setting (<c>SortName</c>, <c>PremiereDate</c>); Jellyfin sets it on BoxSets.</summary>
+    public string? DisplayOrder { get; init; }
     public string? MediaType { get; init; }
     public bool IsFolder { get; init; }
     public string? ParentId { get; init; }

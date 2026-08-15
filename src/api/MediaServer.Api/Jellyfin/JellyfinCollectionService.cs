@@ -63,8 +63,41 @@ public sealed class JellyfinCollectionService(MediaServerDbContext database)
     }
 
     /// <summary>
-    /// The published member movies of a collection (unordered; the caller applies the shared item ordering so
-    /// BoxSet members sort like any other movie listing on the Jellyfin surface).
+    /// The franchise whose artwork stands in for the Collections view: the biggest eligible one that has any
+    /// (ties broken by id, so the tile does not change under it from one request to the next). The view owns
+    /// no images — without a borrowed one Infuse renders it as a blank tile among the illustrated catalogs.
+    /// </summary>
+    /// <remarks>
+    /// Resolved in SQL down to a single id rather than by filtering <see cref="EligibleAsync"/>'s result:
+    /// this runs on the <c>/UserViews</c> path, which has no other reason to load every eligible collection.
+    /// </remarks>
+    public async Task<MovieCollection?> CoverAsync(CancellationToken cancellationToken)
+    {
+        var coverId = await database.MediaItems.AsNoTracking()
+            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null
+                && (item.Collection!.BackdropUrl != null || item.Collection.PosterUrl != null))
+            .GroupBy(item => item.CollectionId!.Value)
+            .Where(group => group.Count() >= CollectionMetadata.MinOwnedMovies)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key)
+            .Select(group => (Guid?)group.Key)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return coverId is { } id
+            ? await database.MovieCollections.AsNoTracking().FirstOrDefaultAsync(collection => collection.Id == id, cancellationToken)
+            : null;
+    }
+
+    /// <summary>
+    /// The image tag the Collections view advertises for its cover: the collection's backdrop, or its poster
+    /// when it has none. Mirrors the fallback <see cref="JellyfinImageService"/> serves for the backdrop slot,
+    /// so the tag a client is given always names the bytes it gets back.
+    /// </summary>
+    public static string? CoverTag(MovieCollection collection) => BackdropTag(collection) ?? PrimaryTag(collection);
+
+    /// <summary>
+    /// The published member movies of a collection (unordered; the caller sorts them chronologically, since a
+    /// franchise is watched in release order).
     /// </summary>
     public IQueryable<MediaItem> MemberMovies(Guid collectionId) =>
         database.MediaItems.AsNoTracking()
