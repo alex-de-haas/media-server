@@ -11,15 +11,24 @@ import MediaServerAPI
 public final class PlaybackService {
     private let session: ServerSession
     private let preferences: PlaybackPreferencesStore
+    private let device: any DeviceCapabilities
 
-    public init(session: ServerSession, preferences: PlaybackPreferencesStore = PlaybackPreferencesStore()) {
+    /// - Parameter device: what to report as this machine's abilities. The real hardware by default; a
+    ///   stated one where the question is what *a television* would be offered, which is not something
+    ///   the machine running a diagnostic can answer about itself.
+    public init(
+        session: ServerSession,
+        preferences: PlaybackPreferencesStore = PlaybackPreferencesStore(),
+        device: any DeviceCapabilities = SystemCapabilities()
+    ) {
         self.session = session
         self.preferences = preferences
+        self.device = device
     }
 
     /// Every copy of a title, each with its own verdict, in the order the server listed them.
     public func plans(for itemId: String) async throws -> [PlaybackPlan] {
-        let profile = preferences.load().profile()
+        let profile = preferences.load().profile(for: device)
         let answer = try await session.api().postNativeV1PlaybackResolve(
             body: .json(.init(itemId: itemId, profile: .init(
                 containers: profile.containers,

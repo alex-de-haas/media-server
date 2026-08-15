@@ -136,6 +136,19 @@ Items are addressed by their internal id and resolved to the public one the
 reporting path is keyed by; unpublished and tombstoned items are refused, as
 everywhere else on this surface.
 
+## What a client can present
+
+Two vocabularies meet in this decision and nothing else makes them agree. A probe names what it
+can see: the header probe cannot tell HDR10 from HDR10+ from a container header, so it reports
+the generic **`HDR`**. A client names the formats it decodes — `HDR10`, `Dolby Vision` — and
+never says that word.
+
+So an exact match is not enough. **Everything in this vocabulary rests on HDR10**, and a client
+declaring it can present them all: Dolby Vision carries a base layer, HDR10+ degrades to its,
+and a plain `HDR` is a file the probe could not be more precise about. A format nothing has
+heard of is still refused rather than assumed — a refusal a viewer can read beats a picture
+nobody can watch.
+
 ## Which stream is the picture
 
 A file can carry a cover image the muxer never flagged as attached art, and this library holds
