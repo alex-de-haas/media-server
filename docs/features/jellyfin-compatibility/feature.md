@@ -187,9 +187,16 @@ tiles rather than of labels. A catalog borrows the backdrop of its most recently
 added title; the Collections view borrows the artwork of a representative
 franchise; the Recommended view borrows the backdrop of the title its shelf leads
 with. Each advertises the one tag as both `Primary` and `Backdrop`, and the image
-route answers either request with the same bytes. The Recommended view's tile is
-per-user, so that id is the one the route resolves against the acting user — an
-unauthenticated request for it serves nothing.
+route answers either request with the same bytes.
+
+The Recommended view's tile is the only per-user artwork on this surface, which
+makes two things follow. A request for it is answered from the **advertised tag**
+when it carries one — an admin listing another user's views is given that user's
+tag and must be served that user's tile, not one re-derived from their own shelf —
+and only falls back to the acting user's shelf when the tag is absent or names
+nothing. And that response is `Cache-Control: private`, because every user shares
+the one synthetic id: a shared proxy holding the response would hand one user's
+tile to the next. All other artwork stays publicly cacheable under its tag.
 
 Playback negotiation and streaming:
 

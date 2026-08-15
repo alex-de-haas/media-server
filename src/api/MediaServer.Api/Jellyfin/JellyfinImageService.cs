@@ -149,12 +149,21 @@ public sealed class JellyfinImageService(
 
         if (JellyfinLibraryService.IsRecommendationsView(itemPublicId))
         {
-            if (appUserId is not { } userId)
+            // The advertised tag names the exact backdrop, so it wins over re-deriving one from the
+            // caller's own shelf: an admin listing another user's views is shown that user's tile rather
+            // than their own, and a tag outliving a shelf rebuild still resolves. Serving a backdrop by
+            // tag exposes nothing new — every one of them is already reachable through its own item id.
+            var backdrop = await BackdropByTagAsync(tag, cancellationToken);
+            if (backdrop is null)
             {
-                return null;
+                if (appUserId is not { } userId)
+                {
+                    return null;
+                }
+
+                backdrop = await shelfArtwork.BackdropAsync(userId, cancellationToken);
             }
 
-            var backdrop = await shelfArtwork.BackdropAsync(userId, cancellationToken);
             return backdrop is null ? null : await ServeAssetAsync(backdrop, cancellationToken);
         }
 
@@ -170,6 +179,13 @@ public sealed class JellyfinImageService(
 
         return await ServeAssetAsync(asset, cancellationToken);
     }
+
+    /// <summary>The backdrop an image tag names, for the views that advertise one they do not own.</summary>
+    private async Task<ImageAsset?> BackdropByTagAsync(string? tag, CancellationToken cancellationToken) =>
+        tag is { Length: > 0 }
+            ? await database.ImageAssets.AsNoTracking()
+                .FirstOrDefaultAsync(image => image.ImageType == ImageType.Backdrop && image.Tag == tag, cancellationToken)
+            : null;
 
     /// <summary>Serves a stored image asset from its cached copy, fetching and caching it on first request.</summary>
     private async Task<ImagePayload?> ServeAssetAsync(ImageAsset asset, CancellationToken cancellationToken)

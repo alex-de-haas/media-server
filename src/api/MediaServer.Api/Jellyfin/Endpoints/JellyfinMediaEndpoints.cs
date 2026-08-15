@@ -47,7 +47,12 @@ internal static class JellyfinMediaEndpoints
             return Results.NotFound();
         }
 
-        request.HttpContext.Response.Headers.CacheControl = "public, max-age=86400";
+        // Artwork is immutable under its tag, so it caches hard — except the Recommended view's tile,
+        // which is that user's shelf behind an id every user shares. A shared proxy holding one user's
+        // tile would hand it to the next; that one is private to the client that asked.
+        request.HttpContext.Response.Headers.CacheControl = JellyfinLibraryService.IsRecommendationsView(itemId)
+            ? "private, max-age=86400"
+            : "public, max-age=86400";
         return Results.File(
             payload.Content,
             contentType: payload.ContentType,

@@ -309,6 +309,9 @@ user can press play on.
   same every day. The one shelf read that decides whether to advertise the view
   at all is the read the tile comes from, so the hourly `/UserViews` pays for it
   once. A shelf whose titles have no artwork is still listed, just without a tile.
+  Being per-user has two consequences on the image route — it answers from the
+  advertised tag before falling back to the caller's own shelf, and it is not
+  publicly cacheable. See [Jellyfin compatibility](../jellyfin-compatibility/feature.md).
 - The row is labelled by the client from the view's name; Infuse renders it as
   *"Latest Recommended - Local"*.
 - A newly appearing view reaches the home screen one refresh late, because the
@@ -406,7 +409,9 @@ which is a privacy question; and trending filtered through the profile).
   view never appearing in a flat scan.
 - `JellyfinViewArtworkTests` — the view's borrowed tile: the leading title's
   backdrop, the fallback past an unenriched title, a shelf with no artwork still
-  being listed, and the image route serving those bytes only for an acting user.
+  being listed, the image route honoring an advertised tag over the caller's own
+  shelf (and falling back when the tag names nothing), and an untagged request
+  needing an acting user.
 - `e2e/recommendations.spec.ts` — the library/discovery split, the availability
   filter, hide-with-undo, the reason line, the popularity dial, the
   self-explaining empty state, and the conditional home row.

@@ -151,6 +151,36 @@ public sealed class JellyfinViewArtworkTests : IDisposable
     }
 
     [Fact]
+    public async Task The_recommended_view_image_honors_the_advertised_tag()
+    {
+        // An admin listing another user's views is given that user's tag, and must be served that
+        // user's tile rather than one re-derived from their own shelf.
+        AddMovie("Someone else's", backdropTag: "otherbackdrop000", bytes: [2, 2, 2]);
+        _shelf.Items = [AddMovie("Leading", backdropTag: "shelfbackdrop000", bytes: [1, 1, 1])];
+
+        var payload = await CreateImageService().GetImageAsync(
+            JellyfinIds.RecommendationsView(), ImageType.Primary, tag: "otherbackdrop000", index: 0,
+            appUserId: UserId, CancellationToken.None);
+
+        Assert.NotNull(payload);
+        Assert.Equal("otherbackdrop000", payload?.Tag);
+        Assert.Equal([2, 2, 2], payload!.Content);
+    }
+
+    [Fact]
+    public async Task A_tag_that_names_nothing_falls_back_to_the_acting_users_shelf()
+    {
+        // A tag can outlive the title it named — a stale one must not blank the tile.
+        _shelf.Items = [AddMovie("Leading", backdropTag: "shelfbackdrop000", bytes: [1, 1, 1])];
+
+        var payload = await CreateImageService().GetImageAsync(
+            JellyfinIds.RecommendationsView(), ImageType.Primary, tag: "goneforevergone00", index: 0,
+            appUserId: UserId, CancellationToken.None);
+
+        Assert.Equal("shelfbackdrop000", payload?.Tag);
+    }
+
+    [Fact]
     public async Task The_recommended_view_image_needs_an_acting_user()
     {
         // The shelf is personal: there is no "the" recommendation tile without someone to recommend to.
