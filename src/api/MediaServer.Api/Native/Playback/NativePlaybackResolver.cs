@@ -173,14 +173,16 @@ public sealed class NativePlaybackResolver(
     }
 
     /// <summary>
-    /// Whether this client can present the source's dynamic range in some form. A Dolby Vision source
-    /// is presentable to a client with only HDR10, because profile 8.1's base layer is HDR10 by
-    /// definition — what changes is the signalling, not whether it can be shown.
+    /// Whether this client can present the source's dynamic range in some form.
     /// </summary>
-    /// <summary>The same question, reachable by a test.</summary>
-    internal static bool CanPresentFor(string? hdrFormat, NativeCapabilityProfile profile) =>
-        CanPresent(hdrFormat, profile);
-
+    /// <remarks>
+    /// Not an equality check, because the two sides name things differently: a probe says what it can
+    /// see and a client says what it decodes. Everything in this vocabulary rests on HDR10 — Dolby
+    /// Vision's base layer is HDR10 by definition, HDR10+ degrades to its, and a plain <c>HDR</c> is what
+    /// the header probe reports when a container header will not say which of the two it is. So a client
+    /// declaring HDR10 can present them all; what changes is the signalling, not whether it can be
+    /// shown.
+    /// </remarks>
     private static bool CanPresent(string? hdrFormat, NativeCapabilityProfile profile)
     {
         if (IsSdr(hdrFormat))
@@ -201,6 +203,10 @@ public sealed class NativePlaybackResolver(
         // header-probed HDR film is refused to a television that would play it perfectly.
         return DegradesToHdr10(hdrFormat!) && Supports(profile.HdrFormats, Hdr10);
     }
+
+    /// <summary>The same question, reachable by a test.</summary>
+    internal static bool CanPresentFor(string? hdrFormat, NativeCapabilityProfile profile) =>
+        CanPresent(hdrFormat, profile);
 
     private const string Hdr10 = "HDR10";
 
