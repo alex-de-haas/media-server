@@ -165,14 +165,24 @@ struct LivePairingCheck {
 
         // A named title when one is asked for, because the interesting questions are usually about a
         // particular file — the one with nine subtitle tracks, the one on the spinning disk.
-        let wanted = ProcessInfo.processInfo.environment["MEDIASERVER_LIVE_TITLE"]
+        // Blank counts as absent: `contains("")` matches everything, so an env var left empty would
+        // silently pick the first film and answer a question nobody asked.
+        let wanted = ProcessInfo.processInfo.environment["MEDIASERVER_LIVE_TITLE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilWhenEmpty
+
+        // Films only. A series carries no media sources of its own — they hang off its episodes, which
+        // this feed does not list — so matching one would end in "nothing would play" about a server
+        // behaving perfectly.
         let named = wanted.flatMap { name in
             library.movies.first { $0.title.localizedCaseInsensitiveContains(name) }
-                ?? library.series.first { $0.title.localizedCaseInsensitiveContains(name) }
         }
 
         if let wanted, named == nil {
-            Issue.record("no title matching \(wanted) in this library")
+            let asSeries = library.series.contains { $0.title.localizedCaseInsensitiveContains(wanted) }
+            Issue.record(asSeries
+                ? "\(wanted) is a series; it has no media sources of its own, so name a film"
+                : "no film matching \(wanted) in this library")
             return
         }
 
@@ -295,4 +305,9 @@ struct LivePairingCheck {
         say("")
         say("✅ pairing, browsing, detail and playback negotiation all work against \(bootstrap.serverName)")
     }
+}
+
+private extension String {
+    /// A name that is only whitespace is not a name.
+    var nilWhenEmpty: String? { isEmpty ? nil : self }
 }

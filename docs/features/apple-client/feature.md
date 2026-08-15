@@ -182,6 +182,22 @@ mistake — modelled as a number, delivered as the string `"1"` — passed forty
 would have failed here on the first line. `LivePairingCheck` in the test target is kept for
 exactly that, gated behind an environment variable so it can never run in CI.
 
+It runs the whole chain — pair, drain the library, open a title, resolve playback, and probe
+the stream with the two-byte range request AVFoundation opens with — against whatever
+`MEDIASERVER_LIVE` names, a local dev server as readily as production:
+
+| Variable | What it does |
+| --- | --- |
+| `MEDIASERVER_LIVE` | The address to run against. Absent, the check does nothing. |
+| `MEDIASERVER_LIVE_LOG` | Where to write the running commentary, which is worth setting: `swift test` holds its own output until the run ends, long after the pairing code has to be read and approved. |
+| `MEDIASERVER_LIVE_TITLE` | A **film** to target rather than whichever has a poster. The interesting questions are about a particular file — the one with nine subtitle tracks, the one on a spinning disk. A name matching nothing is a failure, not a quiet fallback to some other film. Series are refused with a reason: their media sources hang off episodes, which this feed does not list. |
+| `MEDIASERVER_LIVE_TOKENS` | Print the stream URL with its signed token, for pointing `ffprobe` or `curl` at exactly those bytes. Off by default, because logs get pasted into issues. |
+
+It asks as an **Apple TV 4K** rather than as the Mac it runs on. A detected profile would ask
+"what would a Mac with no HDR be offered", which is a real question and not the one this
+client exists to answer — and answering the wrong one hid a dynamic-range defect for two
+rounds.
+
 ## Browsing
 
 Verified against production on 2026-08-14, after the two failures below were fixed:
