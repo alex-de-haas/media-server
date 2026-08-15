@@ -157,6 +157,11 @@ could not be more precise about.
 A format nothing has heard of is still refused rather than assumed — a refusal a viewer can read
 beats a picture nobody can watch.
 
+**The same parsing decides the signalling.** A source stored as `Dolby Vision · HDR10` and
+compared whole against `Dolby Vision` matches nothing, and the film would be written with the
+cross-compatible entry — a television that can show Dolby Vision quietly getting HDR10 instead,
+which is the one thing this feature exists to deliver.
+
 ## Which stream is the picture
 
 A file can carry a cover image the muxer never flagged as attached art, and this library holds

@@ -71,6 +71,39 @@ public sealed class DynamicRangeTests
         Assert.False(NativePlaybackResolver.CanPresentFor("HDR10+", SdrOnly));
     }
 
+    [Theory]
+    [InlineData("Dolby Vision")]
+    [InlineData("Dolby Vision \u00b7 HDR10")]
+    [InlineData("HDR10 \u00b7 Dolby Vision")]
+    public void A_dolby_vision_source_is_signalled_as_dolby_vision(string format)
+    {
+        // The downgrade this guards against is silent: a compound compared whole against "Dolby Vision"
+        // matches nothing, the film is signalled hvc1, and a television that can show Dolby Vision
+        // quietly gets HDR10 instead. Which is the one thing this feature exists to deliver.
+        Assert.Equal("dvh1", NativePlaybackResolver.SignallingForTest(format, Television));
+    }
+
+    [Theory]
+    [InlineData("HDR10")]
+    [InlineData("HDR")]
+    [InlineData("HDR10+")]
+    [InlineData("SDR")]
+    [InlineData(null)]
+    public void Everything_else_gets_the_cross_compatible_entry(string? format)
+    {
+        Assert.Equal("hvc1", NativePlaybackResolver.SignallingForTest(format, Television));
+    }
+
+    [Fact]
+    public void A_client_that_cannot_show_dolby_vision_is_not_sent_it()
+    {
+        // The spike established that a dvh1 track on a device that cannot present it does not degrade —
+        // it breaks. So this is not a preference.
+        var hdr10Only = new NativeCapabilityProfile(["mp4"], ["hevc"], ["eac3"], ["SDR", "HDR10"]);
+
+        Assert.Equal("hvc1", NativePlaybackResolver.SignallingForTest("Dolby Vision \u00b7 HDR10", hdr10Only));
+    }
+
     [Fact]
     public void A_format_nothing_has_heard_of_is_refused_rather_than_assumed()
     {
