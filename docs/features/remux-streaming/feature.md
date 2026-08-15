@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-11
+Updated: 2026-08-15
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -75,7 +75,7 @@ directory, which is the old layout; a one-time startup migration moves files fro
 The file stores the steps rather than the values. Within a track the timestamps and
 offsets both climb in small repetitive increments, so variable-length deltas take a
 sample from about 21 bytes to **between 7 and 13**. Loading one takes a fraction of a
-second, so it is read per request rather than held in memory.
+second, so it is read per request; what is kept between requests is the *built header*, for the reason below.
 
 It is a range rather than a number, and the reason is worth knowing: between two
 consecutive frames of one track lie all the other tracks' data for that stretch of the
@@ -383,6 +383,27 @@ gap worth naming: a whole anime series walks **1 track of 5**, its every audio t
 AAC or FLAC. Those titles are indexed and still refused, with
 `packaging_unsupported_audio`. Support for `mp4a`/`esds` stopped being theoretical the day
 that was measured.
+
+## The header is built once and kept
+
+Synthesising a header is cheap arithmetic over an index that is already in memory: 80 ms to read a
+12 MB index, 96 ms to lay out the sample tables. What is not cheap is that the synthesiser opens the
+**film**. Subtitle text is rewritten rather than referenced, so every cue is read from the source; an
+E-AC-3 track is probed at sixty-four places to confirm its frame size does not vary.
+
+A title with nine subtitle tracks costs some eighteen thousand scattered reads across thirty
+gigabytes — and it paid them again on **every byte-range request**, of which a player makes one after
+another for as long as it plays. Measured on production: seven seconds to first byte, and a film on a
+spinning disk that stopped rather than played, while the same file through the Jellyfin surface
+played perfectly.
+
+`RemuxHeaderCache` keeps the built result under the same key the ETag uses, so anything that changes
+the body — a different dub, an edited subtitle file, a replaced source — lands on a different entry.
+512 MB, least recently used evicted first.
+
+It does not make the **first** request cheap, only every one after it. The repair for that is to move
+the subtitle text and the audio frame size into the index, which is walked in the background precisely
+so that playback waits for nothing.
 
 ## Testing Expectations
 

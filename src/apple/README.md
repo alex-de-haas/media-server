@@ -80,6 +80,22 @@ Revisit when the app has users other than its author.
 
 ## Signing and TestFlight
 
+Device builds read the team identifier from **`MEDIASERVER_TEAM`**, which the project references as
+`$(MEDIASERVER_TEAM)` rather than hard-coding — the identifier belongs to whoever is building, not to
+the repository:
+
+```bash
+MEDIASERVER_TEAM=XXXXXXXXXX xcodebuild -project src/apple/MediaServerTV.xcodeproj \
+  -scheme MediaServerTV -destination 'platform=tvOS,name=<your Apple TV>' \
+  -allowProvisioningUpdates build
+```
+
+`security find-identity -v -p codesigning` names the certificate; the team is the `OU` of its
+subject. `-allowProvisioningUpdates` registers the bundle identifier with the developer account the
+first time, which is a change to that account rather than to this machine.
+
+Simulator builds ignore it entirely.
+
 Nothing is signed yet, and simulator builds do not need it to be: they sign themselves with
 "Sign to Run Locally" and need no account or team. It is **device** builds that stop on
 "Signing requires a development team", along with a TestFlight lane — both need an Apple

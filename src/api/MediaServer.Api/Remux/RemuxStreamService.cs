@@ -26,15 +26,18 @@ internal enum RemuxRefusal
 /// Serves a media source as an MP4 computed over the untouched file, optionally with a sidecar dub
 /// alongside it.
 ///
-/// Nothing is produced here and nothing is stored: the indexes were built in the background, the header is
-/// computed per request, and the media comes straight out of the files. A sidecar is simply a second file
+/// No media is produced and none is stored: the indexes were built in the background and the bytes come
+/// straight out of the files as they stand. The header is computed rather than kept on disk — but it is
+/// kept in memory once built, because building it reads thousands of scattered places in the film. See
+/// <see cref="RemuxHeaderCache"/>. A sidecar is simply a second file
 /// wrapped in a second <c>mdat</c> — an external dub is a track like any other once its samples can be
 /// pointed at, which is the thing no other client of this library can do.
 /// </summary>
-public sealed class RemuxStreamService(
+internal sealed class RemuxStreamService(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
-    RemuxIndexStore store)
+    RemuxIndexStore store,
+    RemuxHeaderCache headers)
 {
     private sealed record StreamRow(
         Guid Id, StreamType Type, int Index, bool IsExternal, string? ExternalPath, string? Codec,
@@ -205,13 +208,6 @@ public sealed class RemuxStreamService(
                     ? SubtitleDefault.Embedded
                     : SubtitleDefault.None;
 
-            var built = Mp4Synthesizer.Build(inputs, tracks, signalling, externalText, subtitleDefault);
-            if (built is null)
-            {
-                await DisposeAllAsync(opened);
-                return (null, RemuxRefusal.NotPackageable);
-            }
-
             var file = new FileInfo(absolute);
             // The tag covers everything the answer is made of: the source, the tracks chosen, the
             // signalling asked for, and every sidecar carried with it. A viewer switching dub gets a
@@ -222,7 +218,12 @@ public sealed class RemuxStreamService(
                 .Append('-').Append(file.Length.ToString("x"))
                 .Append('-').Append(file.LastWriteTimeUtc.Ticks.ToString("x"))
                 .Append('-').Append(string.Join('.', tracks.Select(track => $"{track.Input}:{track.Number}")))
-                .Append('-').Append(signalling);
+                .Append('-').Append(signalling)
+                // Which subtitle is *on*, not merely which are carried. The track list is identical
+                // whether the first one was chosen or none was — only the enabled flag differs — so
+                // without this both answers share a tag and an entry, and whichever request arrives
+                // first decides whether words appear for everyone after it.
+                .Append('-').Append(subtitleDefault);
 
             var lastModified = file.LastWriteTimeUtc;
             foreach (var (id, info) in carried)
@@ -238,7 +239,24 @@ public sealed class RemuxStreamService(
                 }
             }
 
-            var etag = new EntityTagHeaderValue($"\"{validator}\"");
+            var key = validator.ToString();
+            var etag = new EntityTagHeaderValue($"\"{key}\"");
+
+            // The same key the tag uses, so anything that changes the body changes the entry. Built once
+            // and kept: the synthesis itself is milliseconds, but it reads thousands of scattered places
+            // in the film to do it, and a player asks for range after range.
+            var built = headers.Get(key);
+            if (built is null)
+            {
+                built = Mp4Synthesizer.Build(inputs, tracks, signalling, externalText, subtitleDefault);
+                if (built is null)
+                {
+                    await DisposeAllAsync(opened);
+                    return (null, RemuxRefusal.NotPackageable);
+                }
+
+                headers.Put(key, built);
+            }
 
             // The wrapper of every input after the first sits between the files, which is where the
             // sample offsets expect it. Nothing else knows to put it there.
