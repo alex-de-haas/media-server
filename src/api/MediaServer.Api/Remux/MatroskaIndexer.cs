@@ -393,6 +393,13 @@ internal static class MatroskaIndexer
     private const int UnitProbe = 4096;
 
     /// <summary>
+    /// An E-AC-3 sync frame header, which is all the block count needs. Read per frame, so the
+    /// difference between this and <see cref="UnitProbe"/> is the difference between a walk that reads
+    /// headers and one that reads the film.
+    /// </summary>
+    private const int SyncHeader = 16;
+
+    /// <summary>
     /// Takes from a sample the things a header needs and a sample table cannot hold: the text of a
     /// subtitle, the first audio unit, and whether every audio frame carries the same number of samples.
     ///
@@ -410,18 +417,45 @@ internal static class MatroskaIndexer
                 (track.CueText ??= []).Add(SubtitleText.Convert(text, track.CodecId));
                 break;
 
+            // AAC is described entirely from CodecPrivate, so its frames are never worth reading.
+            case IndexedTrackKind.Audio when track.CodecId == "A_AAC":
+                break;
+
             case IndexedTrackKind.Audio:
-                var unit = new byte[Math.Min(size, UnitProbe)];
-                stream.Position = offset;
-                stream.ReadExactly(unit);
-                track.FirstUnit ??= unit;
+                if (track.FirstUnit is null)
+                {
+                    // Enough of the first unit to describe the track: a sync frame for AC-3, the
+                    // substream walk for E-AC-3.
+                    var unit = new byte[Math.Min(size, UnitProbe)];
+                    stream.Position = offset;
+                    stream.ReadExactly(unit);
+                    track.FirstUnit = unit;
+                }
+                else if (track.CodecId != "A_EAC3" || track.ConstantFrameSamples < 0)
+                {
+                    // Nothing left to learn from this track. Reading every frame anyway is what turned a
+                    // header-only walk into one that read most of the audio in the film.
+                    break;
+                }
 
                 // Answered over every frame rather than over sixty-four of them, which is both stricter
-                // and cheaper: the walk is here anyway, and a stream that varies must be refused rather
-                // than given a timeline built on its first frame.
-                if (track.CodecId == "A_EAC3" && track.ConstantFrameSamples >= 0)
+                // and cheaper: a stream that varies must be refused rather than given a timeline built
+                // on its first frame. Only the sync header is needed for it, not the frame.
+                if (track.CodecId == "A_EAC3")
                 {
-                    var frame = Mp4Writer.DescribeEac3(unit)?.SamplesPerFrame ?? -1;
+                    byte[] header;
+                    if (track.FirstUnit is { } first && track.ConstantFrameSamples == 0)
+                    {
+                        header = first;
+                    }
+                    else
+                    {
+                        header = new byte[Math.Min(size, SyncHeader)];
+                        stream.Position = offset;
+                        stream.ReadExactly(header);
+                    }
+
+                    var frame = Mp4Writer.DescribeEac3(header)?.SamplesPerFrame ?? -1;
                     track.ConstantFrameSamples = track.ConstantFrameSamples switch
                     {
                         _ when frame < 0 => -1,                     // unreadable: refuse the track

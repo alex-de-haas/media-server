@@ -136,6 +136,59 @@ public sealed class IndexCarriesCuesTests
         Assert.Equal(["hvc1", "tx3g"], built.SampleEntries);
     }
 
+    [Fact]
+    public void An_audio_track_is_read_once_rather_than_once_per_frame()
+    {
+        // The walk is a header pass. Reading four kilobytes per audio frame turned it into one that
+        // read most of the film - measured as 26 GB at 831 MB/s, which is the whole file.
+        var counting = new CountingStream(WithAudio("A_AC3", frames: 40));
+        _ = MatroskaIndexer.Build(counting);
+
+        // The first unit, and nothing after it.
+        Assert.True(counting.Reads < 20, $"read {counting.Reads} times");
+    }
+
+    [Fact]
+    public void An_aac_track_is_never_read_at_all()
+    {
+        // AAC is described entirely from CodecPrivate, so even its first frame is not worth a seek.
+        var counting = new CountingStream(WithAudio("A_AAC", frames: 40));
+        var index = MatroskaIndexer.Build(counting);
+
+        Assert.Null(Assert.Single(index.Tracks).FirstUnit);
+        Assert.True(counting.Reads < 15, $"read {counting.Reads} times");
+    }
+
+    private static byte[] WithAudio(string codec, int frames)
+    {
+        var blocks = Enumerable.Range(0, frames)
+            .Select(i => SimpleBlock(2, (short)(i * 32), true, Ac3Frame(1_500)))
+            .ToArray();
+
+        return ContainerBuilders.Matroska(
+            ContainerBuilders.Info(400),
+            Tracks(TrackEntry(2, 2, codec, channels: 6)),
+            Cluster(0, blocks));
+    }
+
+    /// <summary>Counts how often anything asks the source for bytes.</summary>
+    private sealed class CountingStream(byte[] content) : MemoryStream(content)
+    {
+        public int Reads { get; private set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Reads++;
+            return base.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            Reads++;
+            return base.Read(buffer);
+        }
+    }
+
     /// <summary>A source that throws if anything asks it for bytes.</summary>
     private sealed class UnreadableStream(long length) : Stream
     {
