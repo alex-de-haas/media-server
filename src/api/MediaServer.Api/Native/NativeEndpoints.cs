@@ -68,6 +68,7 @@ public static class NativeEndpoints
             MediaServerDbContext database,
             LibraryReadService library,
             NativeUrlTokenService tokens,
+            MediaServerSettings settings,
             CancellationToken cancellationToken) =>
         {
             if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } appUserId)
@@ -81,7 +82,7 @@ public static class NativeEndpoints
                 return Results.NotFound();
             }
 
-            var images = await NativeImageEndpoints.BuildAsync(database, id, cancellationToken);
+            var images = await NativeImageEndpoints.BuildAsync(database, id, settings.PreferredLanguage, cancellationToken);
             return Results.Ok(new NativeItemDto(detail, NativeItemUrls.Build(detail, appUserId, tokens), images));
         }).RequireAuthorization().Produces<NativeItemDto>().Produces(StatusCodes.Status404NotFound);
 

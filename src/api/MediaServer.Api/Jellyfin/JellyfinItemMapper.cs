@@ -1,6 +1,8 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
 using MediaServer.Api.Media;
+using MediaServer.Api.Metadata;
 using MediaServer.Api.Jellyfin.Streaming;
 
 namespace MediaServer.Api.Jellyfin;
@@ -21,7 +23,7 @@ public sealed record ItemParents(
 /// public ids; raw host paths are never emitted. The library service loads the entities (localized
 /// metadata, images, sources, user data, resolved parents) and this projects them.
 /// </summary>
-public sealed class JellyfinItemMapper(JellyfinServerContext server)
+public sealed class JellyfinItemMapper(JellyfinServerContext server, MediaServerSettings settings)
 {
     /// <summary>Cast credits emitted per item, by billing order. A TMDb credit block runs to hundreds.</summary>
     public const int MaxCastCredits = 30;
@@ -197,7 +199,7 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
             // Jellyfin ExtraType for the generic case and groups them under the client's Extras section.
             ExtraType = item.Kind == MediaKind.Video && item.SeriesId is not null ? "Clip" : null,
             SpecialFeatureCount = specialFeatureCount,
-            ImageTags = PrimaryImageTags(images),
+            ImageTags = PrimaryImageTags(images, item.PreferredPosterTag),
             BackdropImageTags = BackdropTags(images),
             ProviderIds = ProviderIds(item),
             People = People(credits),
@@ -306,17 +308,20 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         return meta?.RuntimeTicks;
     }
 
-    private static IReadOnlyDictionary<string, string>? PrimaryImageTags(IReadOnlyList<ImageAsset> images)
+    /// <summary>
+    /// The Primary and Logo tags, ranked by <see cref="ImageSelection"/>. The same ranking runs in
+    /// <see cref="JellyfinImageService"/> when the bytes are served — a client may address artwork by index
+    /// rather than by the tag advertised here, so the two must agree on the order.
+    /// </summary>
+    private IReadOnlyDictionary<string, string>? PrimaryImageTags(IReadOnlyList<ImageAsset> images, string? pinnedPosterTag)
     {
         var tags = new Dictionary<string, string>();
-        var primary = images.Where(image => image.ImageType == ImageType.Primary).OrderBy(image => image.SortOrder).FirstOrDefault();
-        if (primary is not null)
+        if (images.Best(ImageType.Primary, settings.PreferredLanguage, pinnedPosterTag) is { } primary)
         {
             tags["Primary"] = primary.Tag;
         }
 
-        var logo = images.Where(image => image.ImageType == ImageType.Logo).OrderBy(image => image.SortOrder).FirstOrDefault();
-        if (logo is not null)
+        if (images.Best(ImageType.Logo, settings.PreferredLanguage) is { } logo)
         {
             tags["Logo"] = logo.Tag;
         }
@@ -324,11 +329,10 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server)
         return tags.Count > 0 ? tags : null;
     }
 
-    private static IReadOnlyList<string>? BackdropTags(IReadOnlyList<ImageAsset> images)
+    private IReadOnlyList<string>? BackdropTags(IReadOnlyList<ImageAsset> images)
     {
         var backdrops = images
-            .Where(image => image.ImageType == ImageType.Backdrop)
-            .OrderBy(image => image.SortOrder)
+            .InPreferenceOrder(ImageType.Backdrop, settings.PreferredLanguage)
             .Select(image => image.Tag)
             .ToList();
         return backdrops.Count > 0 ? backdrops : null;

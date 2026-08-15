@@ -32,24 +32,22 @@ public sealed class ReplaceCrfWithQualityLevelMigrationTests : IDisposable
         _database.Database.GetService<IMigrator>().Migrate(PreviousMigration);
 
         // A job hangs off a catalog, a media item and a source, and the table rebuild SQLite performs would
-        // trip over missing parents. Only TranscodeJobs changed in this migration, so these three still
-        // match the current model and can be seeded through the context.
-        var now = DateTimeOffset.UtcNow;
-        _database.Catalogs.Add(new Catalog
-        {
-            Id = _catalogId, Name = "Movies", Type = CatalogType.Movie, Root = "/movies",
-            NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now,
-        });
-        _database.MediaItems.Add(new MediaItem
-        {
-            Id = _itemId, CatalogId = _catalogId, Kind = MediaKind.Movie, Title = "Inception", Year = 2010,
-            AddedAt = now, UpdatedAt = now,
-        });
-        _database.MediaSources.Add(new MediaSource
-        {
-            Id = _sourceId, MediaItemId = _itemId, Container = "mkv", Path = "in.mkv", CreatedAt = now,
-        });
-        _database.SaveChanges();
+        // trip over missing parents. Seeded as raw INSERTs against the schema *of that migration* rather than
+        // through the context: the entities describe today's model, so any column added to one of these tables
+        // afterwards — none of which this migration is about — would otherwise break this fixture.
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        _database.Database.ExecuteSqlRaw(
+            """
+            INSERT INTO "Catalogs" ("Id", "Name", "Type", "Root", "NamingTemplate", "DefaultKeepSeeding", "CreatedAt", "UpdatedAt")
+            VALUES ({0}, 'Movies', 0, '/movies', '{{Title}} ({{Year}})', 0, {1}, {1});
+
+            INSERT INTO "MediaItems" ("Id", "CatalogId", "Kind", "Title", "Providers", "AddedAt", "UpdatedAt")
+            VALUES ({2}, {0}, 0, 'Inception', '{{}}', {1}, {1});
+
+            INSERT INTO "MediaSources" ("Id", "MediaItemId", "Container", "Path", "SizeBytes", "DurationTicks", "CreatedAt")
+            VALUES ({3}, {2}, 'mkv', 'in.mkv', 0, 0, {1});
+            """,
+            _catalogId.ToString(), now, _itemId.ToString(), _sourceId.ToString());
     }
 
     public void Dispose()

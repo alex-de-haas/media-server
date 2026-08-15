@@ -469,6 +469,19 @@ export interface TitlePreview {
   mediaItemId: string | null;
 }
 
+// One artwork candidate an item holds. `language` is the provider's tag for the language of the text
+// printed on the image — null when it carries none, which is what makes a poster hard to identify and a
+// backdrop good. `selected` marks the one the surfaces show today, `pinned` the operator's own choice.
+export interface ItemImage {
+  type: "Primary" | "Backdrop" | "Logo";
+  tag: string;
+  url: string;
+  language: string | null;
+  sortOrder: number;
+  pinned: boolean;
+  selected: boolean;
+}
+
 // A TV network/distributor surfaced on series detail.
 export interface Network {
   name: string;
@@ -1144,6 +1157,13 @@ export const mediaServer = {
   // "Title (Year) - {version}.ext" and syncs the stored label.
   setSourceVersion: (sourceId: string, versionName: string | null) =>
     send(`/library/sources/${sourceId}/version`, "PUT", { versionName }),
+  // The artwork this instance already holds for an item, ranked as every surface ranks it — so the first
+  // entry of a role is the one on screen. Costs no provider request.
+  listItemImages: (id: string) => apiJson<ItemImage[]>(`${BASE}/library/${id}/images`),
+  // Pin one of those posters, overriding the language ranking for this item (pass null to hand the choice
+  // back to it); admin only.
+  setPreferredPoster: (id: string, tag: string | null) =>
+    tag === null ? send(`/library/${id}/poster`, "DELETE") : send(`/library/${id}/poster`, "PUT", { tag }),
   refreshMetadata: (id: string) => send(`/library/${id}/refresh`, "POST"),
   refreshMedia: (id: string) => send(`/library/${id}/refresh-media`, "POST"),
   remapLibraryItem: (id: string, input: RemapInput) =>

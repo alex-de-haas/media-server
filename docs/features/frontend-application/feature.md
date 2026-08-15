@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-08-06
+Updated: 2026-08-15
 
 ## Description
 
@@ -49,8 +49,11 @@ section).
   row or a whole season from its heading; both confirm first, with a "Delete files from
   disk" checkbox that defaults to off, and both return to the library grid when the
   delete leaves the series with nothing in it.
-  Detail admin controls support metadata refresh, remap where applicable, and
-  deletion. **Playback is not in-browser** — Play deep-links to an Infuse/Jellyfin
+  Detail admin controls support metadata refresh, remap where applicable,
+  deletion, and **Choose poster…** — the cached posters for the title with the text
+  language of each spelled out, overriding the automatic [artwork
+  language](../artwork-language/feature.md) choice for a title that came out
+  ambiguous. **Playback is not in-browser** — Play deep-links to an Infuse/Jellyfin
   client.
 - **Downloads** (`/downloads`) — torrent list with live progress, ratio, and
   seeding status; add (with catalog + `keepSeeding`, showing each catalog's free

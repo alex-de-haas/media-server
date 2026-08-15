@@ -256,6 +256,26 @@ public static class LibraryEndpoints
             };
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
+        // The artwork this item holds, ranked as the surfaces rank it — the candidate list behind "Change
+        // poster". Cached rows only, so it costs no provider request.
+        group.MapGet("/{id:guid}/images", async (Guid id, ItemArtworkService artwork, CancellationToken cancellationToken) =>
+            await artwork.ListAsync(id, cancellationToken) is { } images ? Results.Ok(images) : Results.NotFound());
+
+        // Pin one of those posters, overriding the language ranking for this item (admin only).
+        group.MapPut("/{id:guid}/poster", async (
+            Guid id, PinPosterRequest request, ItemArtworkService artwork, CancellationToken cancellationToken) =>
+            await artwork.PinAsync(id, request.Tag, cancellationToken) switch
+            {
+                PinPosterResult.Ok => Results.NoContent(),
+                PinPosterResult.InvalidTag => Results.BadRequest(new { error = "This item has no poster with that tag." }),
+                _ => Results.NotFound(),
+            }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Hand the choice back to the ranking (admin only).
+        group.MapDelete("/{id:guid}/poster", async (Guid id, ItemArtworkService artwork, CancellationToken cancellationToken) =>
+            await artwork.ClearAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound())
+            .RequireAuthorization(AppRoles.AdminPolicy);
+
         // Re-fetch provider metadata + images for one item (admin only).
         group.MapPost("/{id:guid}/refresh", async (Guid id, LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
         {

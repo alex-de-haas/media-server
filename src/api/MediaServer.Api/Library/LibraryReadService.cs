@@ -308,9 +308,9 @@ public sealed class LibraryReadService(
             item.IndexNumber,
             item.IndexNumberEnd,
             item.ParentIndexNumber,
-            ImageUrl(images, ImageType.Primary),
-            ImageUrl(images, ImageType.Backdrop),
-            LogoUrl(images),
+            ImageUrl(images, ImageType.Primary, item.PreferredPosterTag),
+            ImageUrl(images, ImageType.Backdrop, null),
+            ImageUrl(images, ImageType.Logo, null),
             item.LibraryPath,
             contentPath,
             userDataByItem.GetValueOrDefault(item.Id),
@@ -460,28 +460,10 @@ public sealed class LibraryReadService(
             userDataBySeason.GetValueOrDefault(season.Id))).ToList();
     }
 
-    // Chunked so a large library (itemIds > 999) never exceeds SQLite's parameter limit in the IN-list.
-    private async Task<Dictionary<Guid, string>> PostersAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
-    {
-        var posters = new Dictionary<Guid, string>();
-        foreach (var chunk in itemIds.Chunk(500))
-        {
-            var rows = await database.ImageAssets.AsNoTracking()
-                .Where(image => chunk.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
-                .GroupBy(image => image.MediaItemId)
-                .Select(group => new
-                {
-                    MediaItemId = group.Key,
-                    Url = group.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First(),
-                })
-                .ToListAsync(cancellationToken);
-            foreach (var row in rows)
-            {
-                posters[row.MediaItemId] = row.Url;
-            }
-        }
-        return posters;
-    }
+    // The poster for a set of cards: language-ranked, pin-aware and chunked, in the helper every listing
+    // surface shares (see ImageSelection).
+    private Task<Dictionary<Guid, string>> PostersAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken) =>
+        database.BestPosterUrlsAsync(itemIds, settings.PreferredLanguage, cancellationToken);
 
     private async Task<Dictionary<Guid, MetadataRecord>> MetadataByItemAsync(
         IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
@@ -517,36 +499,12 @@ public sealed class LibraryReadService(
     private static string TitleFor(MetadataRecord? meta, string fallback) =>
         !string.IsNullOrWhiteSpace(meta?.Title) ? meta!.Title! : fallback;
 
-    private static string? ImageUrl(IReadOnlyList<ImageAsset> images, ImageType type) =>
-        images.Where(image => image.ImageType == type).OrderBy(image => image.SortOrder)
-            .Select(image => image.RemotePath).FirstOrDefault();
-
     /// <summary>
-    /// The best title logo: prefer the configured language, then English, then a language-neutral logo,
-    /// then whatever is first. Logos are tagged with a 2-letter language (or null) by the provider.
+    /// The artwork to render for one role: the language ranking for that role, with the operator's pinned
+    /// poster ahead of it. See <see cref="ImageSelection"/> for why the ranking differs per role.
     /// </summary>
-    private string? LogoUrl(IReadOnlyList<ImageAsset> images)
-    {
-        var logos = images.Where(image => image.ImageType == ImageType.Logo).ToList();
-        if (logos.Count == 0)
-        {
-            return null;
-        }
-
-        var preferred = settings.PreferredLanguage;
-        var prefix = preferred.Length >= 2 ? preferred[..2] : preferred;
-
-        string? Pick(string? language) => logos
-            .Where(image => string.Equals(image.Language, language, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(image => image.SortOrder)
-            .Select(image => image.RemotePath)
-            .FirstOrDefault();
-
-        return Pick(prefix)
-            ?? Pick("en")
-            ?? Pick(null)
-            ?? logos.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First();
-    }
+    private string? ImageUrl(IReadOnlyList<ImageAsset> images, ImageType type, string? pinnedPosterTag) =>
+        images.Best(type, settings.PreferredLanguage, type == ImageType.Primary ? pinnedPosterTag : null)?.RemotePath;
 
     private const int MaxCast = 20;
 

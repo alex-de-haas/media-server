@@ -95,11 +95,14 @@ public sealed class EnrichService(
         }
 
         var existing = await database.ImageAssets.Where(image => image.MediaItemId == item.Id).ToListAsync(cancellationToken);
-        var byRemote = existing.ToDictionary(image => image.RemotePath, StringComparer.Ordinal);
+        // A set rather than a dictionary keyed by remote path: ToDictionary throws on a duplicate, and two
+        // enriches of one item can race (a manual refresh alongside a catalog-wide one — the coordinator
+        // serializes catalogs, not items), which would leave that item permanently un-enrichable.
+        var byRemote = existing.Select(image => image.RemotePath).ToHashSet(StringComparer.Ordinal);
 
         foreach (var image in images)
         {
-            if (byRemote.ContainsKey(image.RemotePath))
+            if (!byRemote.Add(image.RemotePath))
             {
                 continue;
             }

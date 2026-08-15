@@ -1,7 +1,7 @@
 # Jellyfin Compatibility
 
 Created: 2026-06-15
-Updated: 2026-08-02
+Updated: 2026-08-15
 
 ## Description
 
@@ -174,6 +174,13 @@ Artwork:
 
 - `GET|HEAD /Items/{itemId}/Images/{imageType}`
 - `GET|HEAD /Items/{itemId}/Images/{imageType}/{imageIndex}`
+
+Which image each of those answers is the shared
+[artwork language](../artwork-language/feature.md) ranking, and the mapper that
+advertises `ImageTags`/`BackdropImageTags` applies the same one — a client may
+address a backdrop by its **index** into the advertised list, so the two halves
+have to agree. A tag always resolves to exactly the image it names, so a client
+holding an older tag still gets the image it asked for.
 
 The same routes serve a person's profile photo, addressed by the person id.
 Person and collection artwork are remote provider URLs with no `ImageAsset` row

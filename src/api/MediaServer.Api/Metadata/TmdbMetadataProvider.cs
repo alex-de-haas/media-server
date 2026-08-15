@@ -109,7 +109,16 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
         ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken)
     {
         var type = TmdbType(kind);
-        var imageLanguages = string.Join(',', languages.Select(language => language.Split('-')[0]).Distinct().Append("null"));
+        // English rides along even when it is not a configured language: artwork falls back down a language
+        // chain at display time (see ImageSelection), and on a single-language instance the chain would
+        // otherwise dead-end at textless art — a poster with no title on it, which is the one thing a poster
+        // must have. One request either way, and the binaries are only fetched when a client asks for one.
+        var imageLanguages = string.Join(
+            ',',
+            languages.Select(language => language.Split('-')[0])
+                .Append("en")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Append("null"));
         var document = await GetAsync($"{type}/{reference.Id}/images?include_image_language={imageLanguages}", cancellationToken);
         if (document is null)
         {

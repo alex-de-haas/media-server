@@ -272,7 +272,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
 
 
     private RecommendationFeedService Service() => new(
-        _database, Engine(), NullLogger<RecommendationFeedService>.Instance);
+        _database, Engine(), TestSettings.English, NullLogger<RecommendationFeedService>.Instance);
 
     /// <summary>
     /// The real engine, with only the behavioural seed generator wired.

@@ -362,6 +362,10 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         image.Property(entity => entity.Provider).IsRequired();
         image.Property(entity => entity.RemotePath).IsRequired();
         image.Property(entity => entity.Tag).IsRequired();
+        // The remote path identifies an image within an item — it is what enrich dedups on, and what Tag is
+        // derived from. Unique so two concurrent enriches cannot both insert it, the way MetadataRecord is
+        // protected above.
+        image.HasIndex(entity => new { entity.MediaItemId, entity.RemotePath }).IsUnique();
 
         image.HasOne(entity => entity.MediaItem)
             .WithMany()

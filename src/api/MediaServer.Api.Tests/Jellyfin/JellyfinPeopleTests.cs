@@ -36,7 +36,7 @@ public sealed class JellyfinPeopleTests : IDisposable
         };
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
-            _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
+            _db.Create(), new JellyfinItemMapper(server, TestSettings.English), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English),
             new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), new EmptyShelf(),
             new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
@@ -314,9 +314,9 @@ public sealed class JellyfinPeopleTests : IDisposable
 
 
     private JellyfinImageService ImageService(string appDataDir) => new(
-        _db.Create(), new JellyfinCatalogArtwork(_db.Create()), new JellyfinCollectionService(_db.Create()),
+        _db.Create(), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinCollectionService(_db.Create()),
         new JellyfinPersonService(_db.Create()), new StubHttpClientFactory(),
-        new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = appDataDir });
+        new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = appDataDir }, TestSettings.English);
 
     private sealed class StubHttpClientFactory : IHttpClientFactory
     {

@@ -1,4 +1,6 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Recommendations;
@@ -57,6 +59,7 @@ public sealed record RecommendationFeedDto(
 public sealed class RecommendationFeedService(
     MediaServerDbContext database,
     RecommendationEngine engine,
+    MediaServerSettings settings,
     ILogger<RecommendationFeedService> logger)
 {
     /// <summary>How many the engine is asked for before filtering. Bounded, since each candidate costs work.</summary>
@@ -227,17 +230,7 @@ public sealed class RecommendationFeedService(
             return [];
         }
 
-        var images = await database.ImageAssets.AsNoTracking()
-            .Where(image => itemIds.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
-            .GroupBy(image => image.MediaItemId)
-            .Select(group => new
-            {
-                MediaItemId = group.Key,
-                Url = group.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First(),
-            })
-            .ToListAsync(cancellationToken);
-
-        return images.ToDictionary(image => image.MediaItemId, image => image.Url);
+        return await database.BestPosterUrlsAsync(itemIds, settings.PreferredLanguage, cancellationToken);
     }
 
     private async Task<HashSet<RecommendationIdentity>> HiddenAsync(
