@@ -190,19 +190,29 @@ public sealed class NativePlaybackResolver(
             return true;
         }
 
-        // What the client says outright.
-        if (Supports(profile.HdrFormats, hdrFormat))
-        {
-            return true;
-        }
-
-        // Everything else in this vocabulary rests on HDR10, so a client that declares it can present
-        // them all. Dolby Vision carries a base layer; HDR10+ degrades to its; and a plain "HDR" is what
-        // the header probe reports when it cannot tell the two apart, since a container header does not
-        // say. A client never claims that word — it names the formats it decodes — so without this a
-        // header-probed HDR film is refused to a television that would play it perfectly.
-        return DegradesToHdr10(hdrFormat!) && Supports(profile.HdrFormats, Hdr10);
+        // The field holds what a probe wrote, and this library contains values naming more than one
+        // format — "Dolby Vision · HDR10", which is what a profile 8.1 file honestly is. A source is
+        // presentable when *any* of the formats it names can be shown.
+        return Formats(hdrFormat!).Any(format =>
+            Supports(profile.HdrFormats, format)
+            // Everything in this vocabulary rests on HDR10, so a client declaring it can present them
+            // all. Dolby Vision carries a base layer; HDR10+ degrades to its; and a plain "HDR" is what
+            // the header probe reports when a container header will not say which of the two it is — a
+            // word no client ever claims, since clients name the formats they decode.
+            || (DegradesToHdr10(format) && Supports(profile.HdrFormats, Hdr10)));
     }
+
+    /// <summary>
+    /// The formats a stored value names. Usually one, and more when a probe recorded a file as several —
+    /// splitting is what keeps a compound from being compared whole against a vocabulary of singles.
+    /// </summary>
+    private static IEnumerable<string> Formats(string hdrFormat) =>
+        // The middle dot this library's data uses, and a comma as the obvious alternative. Not '+',
+        // which is part of "HDR10+" rather than a separator between two names.
+        hdrFormat.Split(['\u00b7', ','], StringSplitOptions.RemoveEmptyEntries
+                | StringSplitOptions.TrimEntries)
+            .Prepend(hdrFormat.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The same question, reachable by a test.</summary>
     internal static bool CanPresentFor(string? hdrFormat, NativeCapabilityProfile profile) =>

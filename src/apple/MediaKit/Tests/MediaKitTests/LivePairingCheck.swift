@@ -179,7 +179,7 @@ struct LivePairingCheck {
         for version in detail.versions {
             say("    \(version.versionName ?? version.container.uppercased()) — "
                 + "\(version.sizeDescription), "
-                + "video=[\(version.videos.map { $0.codec ?? "?" }.joined(separator: ", "))], "
+                + "video=[\(version.videos.map { "\($0.codec ?? "?")/\($0.hdrFormat ?? "?")" }.joined(separator: ", "))], "
                 + "\(version.audio.count) audio, \(version.subtitles.count) subtitle")
             for track in version.audio where track.isExternal {
                 say("      beside the file: \(track.label)")

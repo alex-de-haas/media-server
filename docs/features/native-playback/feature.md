@@ -143,11 +143,19 @@ can see: the header probe cannot tell HDR10 from HDR10+ from a container header,
 the generic **`HDR`**. A client names the formats it decodes — `HDR10`, `Dolby Vision` — and
 never says that word.
 
-So an exact match is not enough. **Everything in this vocabulary rests on HDR10**, and a client
-declaring it can present them all: Dolby Vision carries a base layer, HDR10+ degrades to its,
-and a plain `HDR` is a file the probe could not be more precise about. A format nothing has
-heard of is still refused rather than assumed — a refusal a viewer can read beats a picture
-nobody can watch.
+So an exact match is not enough, for two reasons.
+
+**A stored value can name more than one format.** This library holds `Dolby Vision · HDR10`,
+which is what a profile 8.1 file honestly is — and compared whole against a vocabulary of
+single names it matches nothing at all. A source is presentable when **any** of the formats it
+names is.
+
+**Everything in this vocabulary rests on HDR10**, so a client declaring it can present them all:
+Dolby Vision carries a base layer, HDR10+ degrades to its, and a plain `HDR` is a file the probe
+could not be more precise about.
+
+A format nothing has heard of is still refused rather than assumed — a refusal a viewer can read
+beats a picture nobody can watch.
 
 ## Which stream is the picture
 

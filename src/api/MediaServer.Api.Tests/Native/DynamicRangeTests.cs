@@ -46,6 +46,31 @@ public sealed class DynamicRangeTests
         Assert.True(NativePlaybackResolver.CanPresentFor(null, SdrOnly));
     }
 
+    [Theory]
+    [InlineData("Dolby Vision \u00b7 HDR10")]
+    [InlineData("Dolby Vision, HDR10")]
+    [InlineData("HDR10 \u00b7 Dolby Vision")]
+    public void A_value_naming_several_formats_is_presentable_when_any_of_them_is(string format)
+    {
+        // Production holds "Dolby Vision · HDR10" — what a profile 8.1 file honestly is. Compared whole
+        // against a vocabulary of single names it matches nothing, and a television was refused a film
+        // it would have played.
+        Assert.True(NativePlaybackResolver.CanPresentFor(format, Television));
+    }
+
+    [Fact]
+    public void A_compound_of_things_a_display_cannot_show_is_still_refused()
+    {
+        Assert.False(NativePlaybackResolver.CanPresentFor("Dolby Vision \u00b7 HDR10", SdrOnly));
+    }
+
+    [Fact]
+    public void The_plus_in_hdr10_plus_is_part_of_the_name_rather_than_a_separator()
+    {
+        Assert.True(NativePlaybackResolver.CanPresentFor("HDR10+", Television));
+        Assert.False(NativePlaybackResolver.CanPresentFor("HDR10+", SdrOnly));
+    }
+
     [Fact]
     public void A_format_nothing_has_heard_of_is_refused_rather_than_assumed()
     {
