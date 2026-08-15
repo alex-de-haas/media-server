@@ -1,6 +1,6 @@
 # Artwork Language — a poster that says which film this is
 
-Status: Draft
+Status: Ready
 Created: 2026-08-15
 Updated: 2026-08-15
 
@@ -142,6 +142,23 @@ therefore caches no English artwork and the chain above dead-ends at untagged.
 fetched lazily (`ImageAsset.LocalPath` is null until a client asks), so the extra
 rows cost rows.
 
+Two consequences to be honest about:
+
+- **Existing items gain the English tier only after a refresh.** The chain starts
+  working immediately over what is already cached, but a library that has never
+  requested `en` has no English rows to fall back to until
+  `catalog:refresh-metadata` runs. That is an operator action, not a migration,
+  and it is worth saying in the release note rather than hiding.
+- **That refresh will collide `SortOrder`.** `UpsertImagesAsync` never updates an
+  existing row (`EnrichService.cs:102-105`), so a new poster takes its index from
+  the *new* response while the incumbent keeps its old one — two rows can both
+  hold `SortOrder = 0`. Since SQLite leaves such a tie unspecified, the current
+  `OrderBy(SortOrder).First()` would start flapping between requests. The rank
+  therefore has to be a **total** order: language tier, then `SortOrder`, then
+  `Tag` as the final deterministic tiebreak. Renumbering rows at write time would
+  also fix it, but a total order at read time fixes it for data that is already in
+  the table.
+
 ### One selection helper, not fourteen selection expressions
 
 A new `ImageSelection` beside `MetadataLanguage` owns the rules above and is the
@@ -246,7 +263,9 @@ Implemented on one branch as one PR, per `AGENTS.md`.
 - [ ] `ImageSelection` in `src/api/MediaServer.Api/Metadata/`: per-role rank
       expressions, in-memory `Pick`, and the shared *best-per-item* `IQueryable`
       extension. Primary-subtag comparison reused from `MetadataLanguage`, not
-      re-derived as a two-character prefix; `null` and `""` are one untagged tier.
+      re-derived as a two-character prefix; `null` and `""` are one untagged tier;
+      the order is total — tier, then `SortOrder`, then `Tag` — so colliding sort
+      orders cannot flap.
 - [ ] `en` appended unconditionally to `include_image_language` in
       `TmdbMetadataProvider.GetImagesAsync`.
 - [ ] All fourteen selections routed through the helper: `LibraryReadService`
@@ -262,6 +281,15 @@ Implemented on one branch as one PR, per `AGENTS.md`.
       rank, so index-addressed backdrops still resolve to the advertised tag.
 - [ ] The four duplicated *best-Primary-per-item* queries collapse into the one
       extension.
+- [ ] Write-path hardening, prompted by this change making a library-wide refresh
+      the recommended follow-up: `UpsertImagesAsync` builds its dedup index
+      duplicate-tolerantly instead of `ToDictionary`, which throws on a duplicate
+      `RemotePath` and would then poison every later enrich of that item
+      (`EnrichService.cs:98`), and `(MediaItemId, RemotePath)` gains the unique
+      index `MetadataRecord` already has (`MediaServerDbContext.cs:349`), with the
+      migration de-duplicating first. `POST /api/library/{id}/refresh` has no
+      concurrency guard (`LibraryEndpoints.cs:260`), so the race is reachable
+      today.
 
 ### Phase 2 — the operator's override
 
@@ -300,31 +328,35 @@ than permanent.
 
 ## Open questions
 
-- **Does the chain start from the configured language or from the record actually
-  displayed?** `EnrichService.ResolveLanguages` puts a catalog's
-  `metadataLanguage` **first** when fetching (`EnrichService.cs:124`), but every
-  read surface picks metadata with the global `PreferredLanguage`
-  (`LibraryReadService.cs:509`) and ignores the catalog override. So an Anime
-  catalog pinned to `ja` today displays a Russian title with an arbitrary poster.
-  Options: (a) artwork follows `PreferredLanguage`, matching what the title does
-  today — smallest change, keeps art and title in one language; (b) artwork
-  follows the catalog's `metadataLanguage` where set, which fixes the poster but
-  leaves the title mismatched; (c) fix the display-language resolution itself to
-  honour the catalog override, and let artwork follow it — correct, but a
-  behavior change to titles and ordering that is not what this plan is about.
-  **Recommendation: (a) now, (c) as its own change.**
-- **Is a "prefer textless posters" setting wanted at all?** Some operators like
-  clean art. The per-item pin covers the individual case; a global inversion of
-  the poster chain would be one boolean in the settings row. **Recommendation:
-  no — ship the chain and the pin, add the toggle only if the default proves
-  wrong in practice.**
-- **Should the item's `original_language` join `include_image_language`?** It
-  would add the native-language one-sheet as a tier for films whose display
-  language has none. Cheap, but it widens what is cached for every title.
-- **Resolved on approval (2026-08-15):** the per-item poster pin ships in this PR
-  rather than being cut. It is the half that answers the franchise case for
-  certain — where TMDb simply has no titled Russian poster, no ranking can
-  invent one.
+None. All five were resolved in chat on 2026-08-15 and are recorded below as
+decisions; nothing in this plan is waiting on an answer.
+
+### Resolved on approval, 2026-08-15
+
+- **The per-item poster pin ships in this PR** rather than being cut. It is the
+  half that answers the franchise case for certain — where TMDb simply has no
+  titled Russian poster, no ranking can invent one.
+- **The chain starts from the global `PreferredLanguage`**, matching what titles
+  already do. `EnrichService.ResolveLanguages` puts a catalog's `metadataLanguage`
+  first when *fetching* (`EnrichService.cs:124`), but every read surface resolves
+  display metadata with the global preference (`LibraryReadService.cs:509`) and
+  ignores the override — so an Anime catalog pinned to `ja` shows a Russian title
+  today. Artwork follows the title rather than diverging from it. Making the
+  display language honour the catalog override is a real gap, and it is **its own
+  change**: it moves titles and listing order, which this plan is not about.
+- **No "prefer textless" setting.** The per-item pin covers the operator who wants
+  clean art on a particular title, and a global inversion would be a knob
+  contradicting the default the plan just argued for. Revisit only if the default
+  proves wrong in practice.
+- **`original_language` does not join `include_image_language`.** It would add a
+  native-language tier for films whose display language has none, but it widens
+  what is cached for every title in the library to serve a narrow case.
+- **The within-tier tiebreak stays the provider's order.** `SortOrder` is TMDb's
+  own array position, which is its vote ordering, and `AppendImages` makes it a
+  dense per-type rank (`TmdbMetadataProvider.cs:155-165`). TMDb's `vote_average`
+  and `vote_count` are present in the payload and discarded today; persisting them
+  would make the tiebreak explicit at the cost of two columns and a migration, and
+  is deferred until the proxy visibly misfires.
 - **Within-tier tiebreak.** TMDb's array position is used as a proxy for its vote
   ordering. Persisting `vote_average`/`vote_count` on `ImageAsset` would make the
   tiebreak explicit and survive a provider reordering, at the cost of a column
@@ -352,7 +384,12 @@ than permanent.
   `RemovedTitlesServiceTests`, `CollectionReadServiceTests` — each grid poster
   follows the chain via the shared extension.
 - Enrich — `include_image_language` contains `en` even when `SUPPORTED_LANGUAGES`
-  does not, and re-enrich still neither duplicates nor reorders rows.
+  does not; re-enrich still neither duplicates nor reorders rows; a duplicate
+  `RemotePath` already in the table no longer throws; and two rows sharing a
+  `SortOrder` resolve to the same image on every call (the `Tag` tiebreak).
+  `FakeMetadataProvider` (`Fakes.cs:29`) returns one `en` poster today and needs
+  language variety; `EnrichService` already takes `MediaServerSettings`
+  (`EnrichService.cs:17-22`), so no test wiring changes for a new dependency.
 - Poster override — pin, clear, unknown tag (`400`), unknown item (`404`),
   non-admin (`403`), and survival across a re-enrich and a remap.
 - Web unit tests for the dialog; `src/web/e2e/detail.spec.ts` for pinning a poster
