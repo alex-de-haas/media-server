@@ -42,6 +42,16 @@ public struct TitleTrack: Identifiable, Equatable, Sendable {
     public let language: String?
     public let codec: String?
 
+    /// What the probe said this stream's dynamic range is.
+    ///
+    /// Usually one name — `SDR`, `HDR10`, `Dolby Vision`, or the generic `HDR` a container header cannot
+    /// be more precise than — but it can name **several**, separated by a middle dot or a comma:
+    /// production holds `Dolby Vision · HDR10`, which is what a profile 8.1 file honestly is.
+    ///
+    /// Carried because a refusal saying "unsupported dynamic range" is unactionable without it, exactly
+    /// as one about a codec is.
+    public let hdrFormat: String?
+
     /// Beside the video rather than inside it — a dubbed track or a subtitle file this library carries
     /// and no other client of it can play.
     public let isExternal: Bool
@@ -127,6 +137,7 @@ extension TitleTrack {
         self.id = dto.id
         self.language = dto.language
         self.codec = dto.codec
+        self.hdrFormat = dto.hdrFormat
         self.isExternal = dto.isExternal ?? false
 
         // The server's own title when it has one — "Commentary", "Forced" — and otherwise something

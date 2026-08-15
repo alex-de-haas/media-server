@@ -75,19 +75,80 @@ public sealed class NativePlaybackResolver(
         NativeCapabilityProfile profile,
         RemuxReadinessState readiness)
     {
-        NativePlaybackResolution Unsupported(string reason) =>
-            new(sourceId, versionName, NativePlaybackDecision.Unsupported, null, null, null, null, reason);
+        var verdict = Judge(path, container, streams, profile, readiness);
+        var video = Picture(streams);
+
+        switch (verdict.Decision)
+        {
+            case NativePlaybackDecision.DirectPlay:
+                return new NativePlaybackResolution(
+                    sourceId,
+                    versionName,
+                    NativePlaybackDecision.DirectPlay,
+                    Transport: NativePlaybackTransport.ByteRange,
+                    Url: $"{NativeEndpoints.RoutePrefix}/media/{sourceId:D}?token=" +
+                         tokens.Mint(appUserId, sourceId, NativeUrlTokenMethods.Read),
+                    // Deliberately null. Direct play serves the file byte for byte, so its sample entry
+                    // is whatever was written on disk — promising a choice here would be a promise
+                    // nothing keeps. The choice exists only where we build the container.
+                    Signalling: null,
+                    SourceDynamicRange: video?.HdrFormat,
+                    Reason: null);
+
+            case NativePlaybackDecision.Remux:
+                var signalling = SignallingFor(video?.HdrFormat, profile);
+                return new NativePlaybackResolution(
+                    sourceId,
+                    versionName,
+                    NativePlaybackDecision.Remux,
+                    Transport: NativePlaybackTransport.ByteRange,
+                    Url: $"{NativeEndpoints.RoutePrefix}/media/{sourceId:D}/remux?token=" +
+                         tokens.Mint(appUserId, sourceId, NativeUrlTokenMethods.Read) +
+                         $"&signalling={signalling}",
+                    // Here the signalling is ours to choose, because we are the ones writing it.
+                    Signalling: signalling,
+                    SourceDynamicRange: video?.HdrFormat,
+                    Reason: null);
+
+            default:
+                return new NativePlaybackResolution(
+                    sourceId, versionName, NativePlaybackDecision.Unsupported,
+                    null, null, null, null, verdict.Reason);
+        }
+    }
+
+    /// <summary>What a source amounts to for a client, before any URL is minted.</summary>
+    internal readonly record struct Verdict(NativePlaybackDecision Decision, string? Reason);
+
+    /// <summary>
+    /// The whole decision, and nothing but the decision.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="Resolve"/> so it can be run over a library's real facts without a
+    /// database, a token service, or a deploy. Every mismatch found in this negotiation so far has been
+    /// in the data rather than the logic — a cover image among the video streams, a dynamic range naming
+    /// two formats — and none of them was reachable from a fixture written by the same person who wrote
+    /// the code being tested.
+    /// </remarks>
+    internal static Verdict Judge(
+        string? path,
+        string? container,
+        IReadOnlyList<StreamFacts> streams,
+        NativeCapabilityProfile profile,
+        RemuxReadinessState readiness)
+    {
+        static Verdict No(string reason) => new(NativePlaybackDecision.Unsupported, reason);
 
         if (string.IsNullOrWhiteSpace(path))
         {
-            return Unsupported(NativePlaybackReasons.NoFile);
+            return No(NativePlaybackReasons.NoFile);
         }
 
         var video = Picture(streams);
         if (video is not null && !Supports(profile.VideoCodecs, video.Codec))
         {
             // Re-encoding is out of scope for this surface, so an undecodable picture is the end of it.
-            return Unsupported(NativePlaybackReasons.UnsupportedVideoCodec);
+            return No(NativePlaybackReasons.UnsupportedVideoCodec);
         }
 
         // A sidecar dub counts: the client can fetch it as its own file, so a source whose embedded
@@ -95,36 +156,24 @@ public sealed class NativePlaybackResolver(
         var audio = streams.Where(stream => stream.StreamType == StreamType.Audio).ToList();
         if (audio.Count == 0)
         {
-            return Unsupported(NativePlaybackReasons.NoAudioTrack);
+            return No(NativePlaybackReasons.NoAudioTrack);
         }
 
         if (!audio.Any(track => Supports(profile.AudioCodecs, track.Codec) && WithinChannels(profile, track)))
         {
-            return Unsupported(NativePlaybackReasons.UnsupportedAudioCodec);
+            return No(NativePlaybackReasons.UnsupportedAudioCodec);
         }
 
         // Can this client manage the source's range at all? Separate question from which signalling we
         // would write, and the only one that applies to a file served as it is.
         if (!CanPresent(video?.HdrFormat, profile))
         {
-            return Unsupported(NativePlaybackReasons.UnsupportedDynamicRange);
+            return No(NativePlaybackReasons.UnsupportedDynamicRange);
         }
 
         if (Supports(profile.Containers, container))
         {
-            return new NativePlaybackResolution(
-                sourceId,
-                versionName,
-                NativePlaybackDecision.DirectPlay,
-                Transport: NativePlaybackTransport.ByteRange,
-                Url: $"{NativeEndpoints.RoutePrefix}/media/{sourceId:D}?token=" +
-                     tokens.Mint(appUserId, sourceId, NativeUrlTokenMethods.Read),
-                // Deliberately null. Direct play serves the file byte for byte, so its sample entry is
-                // whatever was written on disk — promising a choice here would be a promise nothing
-                // keeps. The choice exists only where we build the container, which is the remux path.
-                Signalling: null,
-                SourceDynamicRange: video?.HdrFormat,
-                Reason: null);
+            return new Verdict(NativePlaybackDecision.DirectPlay, null);
         }
 
         // The client's support is not the question from here on: we have to write the sample entries, and
@@ -134,16 +183,16 @@ public sealed class NativePlaybackResolver(
         // about a source that will never work is the more misleading of the two.
         if (video is not null && !RemuxCodecs.CanPackageVideo(video.Codec))
         {
-            // A remux with no picture is not a remux. AV1 is the case that reaches here: a recent Apple TV
-            // decodes it, so nothing on the client's side of the question ruled it out.
-            return Unsupported(NativePlaybackReasons.PackagingUnsupportedVideo);
+            // A remux with no picture is not a remux. AV1 is the case that reaches here: a recent Apple
+            // TV decodes it, so nothing on the client's side of the question ruled it out.
+            return No(NativePlaybackReasons.PackagingUnsupportedVideo);
         }
 
         // And one whose only audio track we cannot describe would play as a silent film.
         if (!streams.Any(stream =>
                 stream.StreamType == StreamType.Audio && RemuxCodecs.CanPackageAudio(stream.Codec)))
         {
-            return Unsupported(NativePlaybackReasons.PackagingUnsupportedAudio);
+            return No(NativePlaybackReasons.PackagingUnsupportedAudio);
         }
 
         // The codecs are fine and only the container is not, which is a packaging problem. Saying so
@@ -152,24 +201,12 @@ public sealed class NativePlaybackResolver(
         {
             // Two different answers, and the difference matters to a client: a container nothing can
             // index will never become playable, while a file the walk has not reached yet will.
-            return Unsupported(readiness == RemuxReadinessState.Pending
+            return No(readiness == RemuxReadinessState.Pending
                 ? NativePlaybackReasons.PackagingPending
                 : NativePlaybackReasons.PackagingUnavailable);
         }
 
-        var signalling = SignallingFor(video?.HdrFormat, profile);
-        return new NativePlaybackResolution(
-            sourceId,
-            versionName,
-            NativePlaybackDecision.Remux,
-            Transport: NativePlaybackTransport.ByteRange,
-            Url: $"{NativeEndpoints.RoutePrefix}/media/{sourceId:D}/remux?token=" +
-                 tokens.Mint(appUserId, sourceId, NativeUrlTokenMethods.Read) +
-                 $"&signalling={signalling}",
-            // Here the signalling is ours to choose, because we are the ones writing the container.
-            Signalling: signalling,
-            SourceDynamicRange: video?.HdrFormat,
-            Reason: null);
+        return new Verdict(NativePlaybackDecision.Remux, null);
     }
 
     /// <summary>
@@ -190,19 +227,27 @@ public sealed class NativePlaybackResolver(
             return true;
         }
 
-        // What the client says outright.
-        if (Supports(profile.HdrFormats, hdrFormat))
-        {
-            return true;
-        }
-
-        // Everything else in this vocabulary rests on HDR10, so a client that declares it can present
-        // them all. Dolby Vision carries a base layer; HDR10+ degrades to its; and a plain "HDR" is what
-        // the header probe reports when it cannot tell the two apart, since a container header does not
-        // say. A client never claims that word — it names the formats it decodes — so without this a
-        // header-probed HDR film is refused to a television that would play it perfectly.
-        return DegradesToHdr10(hdrFormat!) && Supports(profile.HdrFormats, Hdr10);
+        // The field holds what a probe wrote, and this library contains values naming more than one
+        // format — "Dolby Vision · HDR10", which is what a profile 8.1 file honestly is. A source is
+        // presentable when *any* of the formats it names can be shown.
+        return Formats(hdrFormat!).Any(format =>
+            Supports(profile.HdrFormats, format)
+            // Everything in this vocabulary rests on HDR10, so a client declaring it can present them
+            // all. Dolby Vision carries a base layer; HDR10+ degrades to its; and a plain "HDR" is what
+            // the header probe reports when a container header will not say which of the two it is — a
+            // word no client ever claims, since clients name the formats they decode.
+            || (DegradesToHdr10(format) && Supports(profile.HdrFormats, Hdr10)));
     }
+
+    /// <summary>
+    /// The formats a stored value names. Usually one, and more when a probe recorded a file as several —
+    /// splitting is what keeps a compound from being compared whole against a vocabulary of singles.
+    /// </summary>
+    private static IEnumerable<string> Formats(string hdrFormat) =>
+        // The middle dot this library's data uses, and a comma as the obvious alternative. Not '+',
+        // which is part of "HDR10+" rather than a separator between two names.
+        hdrFormat.Split(['\u00b7', ','], StringSplitOptions.RemoveEmptyEntries
+            | StringSplitOptions.TrimEntries);
 
     /// <summary>The same question, reachable by a test.</summary>
     internal static bool CanPresentFor(string? hdrFormat, NativeCapabilityProfile profile) =>
@@ -220,6 +265,10 @@ public sealed class NativePlaybackResolver(
     /// path: a file served as it is carries whatever signalling it was written with, which nothing here
     /// gets to choose.
     /// </summary>
+    /// <summary>The same question, reachable by a test.</summary>
+    internal static string? SignallingForTest(string? hdrFormat, NativeCapabilityProfile profile) =>
+        SignallingFor(hdrFormat, profile);
+
     private static string? SignallingFor(string? hdrFormat, NativeCapabilityProfile profile)
     {
         if (IsSdr(hdrFormat))
@@ -227,7 +276,12 @@ public sealed class NativePlaybackResolver(
             return NativeSignalling.CrossCompatible;
         }
 
-        return hdrFormat!.Equals(DolbyVision, StringComparison.OrdinalIgnoreCase)
+        // The same parsing the presentability check uses, and for the same reason. A source stored as
+        // "Dolby Vision · HDR10" compared whole against "Dolby Vision" matches nothing, and the film
+        // would be signalled as plain HDR10 to a television that can show Dolby Vision — the exact
+        // downgrade this whole feature exists to avoid, delivered silently.
+        return Formats(hdrFormat!).Any(format =>
+                   format.Equals(DolbyVision, StringComparison.OrdinalIgnoreCase))
                && Supports(profile.HdrFormats, DolbyVision)
             ? NativeSignalling.DolbyVision
             : NativeSignalling.CrossCompatible;
