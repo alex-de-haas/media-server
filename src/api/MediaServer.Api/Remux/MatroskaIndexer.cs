@@ -370,6 +370,11 @@ internal static class MatroskaIndexer
 
         foreach (var (offset, size) in frames)
         {
+            // Collected while the walk is already here. Everything the synthesiser used to fetch from
+            // the film is fixed the moment the file is written, so fetching it per request was work
+            // being done in the wrong place — see RemuxHeaderCache for what that cost.
+            Capture(stream, track, offset, size);
+
             track.Samples.Add(new IndexedSample(timestamp, offset, size, key));
             if (duration > 0)
             {
@@ -381,6 +386,109 @@ internal static class MatroskaIndexer
             {
                 track.SampleDurations?.Add(0);
             }
+        }
+    }
+
+    /// <summary>Enough of an audio unit to describe it; more than any descriptor needs.</summary>
+    private const int UnitProbe = 4096;
+
+    /// <summary>
+    /// An E-AC-3 sync frame header, which is all the block count needs. Read per frame, so the
+    /// difference between this and <see cref="UnitProbe"/> is the difference between a walk that reads
+    /// headers and one that reads the film.
+    /// </summary>
+    private const int SyncHeader = 16;
+
+    /// <summary>
+    /// Generous for a line of dialogue by three orders of magnitude. Its purpose is not to trim anything
+    /// real but to keep a malformed file from being read into memory a sample at a time.
+    /// </summary>
+    private const int MaxCue = 256 * 1024;
+
+    /// <summary>
+    /// Takes from a sample the things a header needs and a sample table cannot hold: the text of a
+    /// subtitle, the first audio unit, and whether every audio frame carries the same number of samples.
+    ///
+    /// All of it is read from where the walk already stands, so it costs a sequential read rather than a
+    /// seek. The synthesiser then never opens the film at all.
+    /// </summary>
+    private static void Capture(Stream stream, IndexedTrack track, long offset, int size)
+    {
+        switch (track.Kind)
+        {
+            case IndexedTrackKind.Subtitle when SubtitleText.IsConvertible(track.CodecId):
+                // A line of dialogue is a few hundred bytes. Something far larger is not a subtitle this
+                // understands, and **truncating it would be the worst answer** — a cut in the middle of a
+                // UTF-8 sequence corrupts the text, and a cue silently missing its end reads as fact.
+                // So the whole track stops being captured and synthesis reads the source for it, which
+                // is what it always did.
+                if (size > MaxCue)
+                {
+                    track.CueText = null;
+                    track.CuesTooLarge = true;
+                    break;
+                }
+
+                if (track.CuesTooLarge)
+                {
+                    break;
+                }
+
+                var text = new byte[size];
+                stream.Position = offset;
+                stream.ReadExactly(text);
+                (track.CueText ??= []).Add(SubtitleText.Convert(text, track.CodecId));
+                break;
+
+            // AAC is described entirely from CodecPrivate, so its frames are never worth reading.
+            case IndexedTrackKind.Audio when track.CodecId == "A_AAC":
+                break;
+
+            case IndexedTrackKind.Audio:
+                if (track.FirstUnit is null)
+                {
+                    // Enough of the first unit to describe the track: a sync frame for AC-3, the
+                    // substream walk for E-AC-3.
+                    var unit = new byte[Math.Min(size, UnitProbe)];
+                    stream.Position = offset;
+                    stream.ReadExactly(unit);
+                    track.FirstUnit = unit;
+                }
+                else if (track.CodecId != "A_EAC3" || track.ConstantFrameSamples < 0)
+                {
+                    // Nothing left to learn from this track. Reading every frame anyway is what turned a
+                    // header-only walk into one that read most of the audio in the film.
+                    break;
+                }
+
+                // Answered over every frame rather than over sixty-four of them, which is both stricter
+                // and cheaper: a stream that varies must be refused rather than given a timeline built
+                // on its first frame. Only the sync header is needed for it, not the frame.
+                if (track.CodecId == "A_EAC3")
+                {
+                    byte[] header;
+                    if (track.FirstUnit is { } first && track.ConstantFrameSamples == 0)
+                    {
+                        header = first;
+                    }
+                    else
+                    {
+                        header = new byte[Math.Min(size, SyncHeader)];
+                        stream.Position = offset;
+                        stream.ReadExactly(header);
+                    }
+
+                    var frame = Mp4Writer.DescribeEac3(header)?.SamplesPerFrame ?? -1;
+                    track.ConstantFrameSamples = track.ConstantFrameSamples switch
+                    {
+                        _ when frame < 0 => -1,                     // unreadable: refuse the track
+                        0 => frame,                                 // the first frame sets the answer
+                        var seen when seen == frame => seen,
+                        _ => -1,                                    // it varies
+                    };
+                }
+
+                break;
         }
     }
 

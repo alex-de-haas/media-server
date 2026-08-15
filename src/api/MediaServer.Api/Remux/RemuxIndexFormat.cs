@@ -26,7 +26,7 @@ internal static class RemuxIndexFormat
 
     /// <summary>Bumping this invalidates every stored index, which is the point: a format change must not
     /// be readable as the old one.</summary>
-    internal const ushort Version = 4;
+    internal const ushort Version = 5;
 
     internal sealed record Stamp(long SourceLength, DateTimeOffset SourceModified)
     {
@@ -85,6 +85,21 @@ internal static class RemuxIndexFormat
                 WriteUnsigned(writer, ((ulong)sample.Size << 1) | (sample.IsKeyframe ? 1UL : 0UL));
                 previousTimestamp = sample.Timestamp;
                 previousOffset = sample.Offset;
+            }
+
+            WriteBytes(writer, track.FirstUnit);
+            writer.Write(track.ConstantFrameSamples);
+
+            // The cue text, which is why a subtitle track no longer sends the synthesiser back to the
+            // film. Present-or-not, because writing an empty string per frame of a two-hour picture
+            // would cost more than the text itself.
+            writer.Write(track.CueText is not null);
+            if (track.CueText is { } cues)
+            {
+                foreach (var cue in cues)
+                {
+                    writer.Write(cue);
+                }
             }
 
             // Only subtitles state how long a sample is shown, so the list is written as present-or-not
@@ -176,6 +191,20 @@ internal static class RemuxIndexFormat
                     var packed = ReadUnsigned(reader);
                     track.Samples.Add(new IndexedSample(
                         timestamp, offset, (int)(packed >> 1), (packed & 1) == 1));
+                }
+
+                track.FirstUnit = ReadBytes(reader);
+                track.ConstantFrameSamples = reader.ReadInt32();
+
+                if (reader.ReadBoolean())
+                {
+                    var cues = new List<string>(sampleCount);
+                    for (var c = 0; c < sampleCount; c++)
+                    {
+                        cues.Add(reader.ReadString());
+                    }
+
+                    track.CueText = cues;
                 }
 
                 if (reader.ReadBoolean())

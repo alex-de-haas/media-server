@@ -74,6 +74,43 @@ internal sealed class IndexedTrack
     /// </summary>
     public List<long>? SampleDurations { get; set; }
 
+    /// <summary>
+    /// The text of each subtitle sample, already converted to what a <c>tx3g</c> track carries.
+    ///
+    /// Stored rather than read at playback, and that is the whole point of it. Subtitle text is the one
+    /// thing this design rewrites instead of referencing, so a synthesiser without it must read every
+    /// cue out of the source — thousands of scattered reads across tens of gigabytes, on every
+    /// byte-range request a player makes. The walk is already passing over these bytes.
+    ///
+    /// Index-aligned with <see cref="Samples"/>, and null for every kind but subtitles.
+    /// </summary>
+    public List<string>? CueText { get; set; }
+
+    /// <summary>
+    /// Set when a cue was too large to be one, which stops the track being captured at all.
+    ///
+    /// Not persisted: it exists only to keep the walk from half-filling <see cref="CueText"/> after it
+    /// has given up, and a loaded index simply has no cue text for such a track.
+    /// </summary>
+    public bool CuesTooLarge { get; set; }
+
+    /// <summary>
+    /// Enough of the track's first access unit to describe it — a sync frame for AC-3, the substream
+    /// walk for E-AC-3. Small, and it saves a seek into the film per audio track per request.
+    /// </summary>
+    public byte[]? FirstUnit { get; set; }
+
+    /// <summary>
+    /// How many samples an audio frame carries, when every frame in the track agrees.
+    ///
+    /// Zero when they do not, or when nothing checked. E-AC-3 is the reason it exists: a frame carries
+    /// one, two, three or six blocks of 256 samples and nothing forbids a stream from varying it, so a
+    /// timeline built on the first frame would drift for the whole of its length. The walk answers this
+    /// over *every* frame, which is both cheaper and stricter than the sixty-four probes the synthesiser
+    /// used to make per request.
+    /// </summary>
+    public int ConstantFrameSamples { get; set; }
+
     /// <summary>How many blocks held more than one frame. Diagnostic: lacing is invisible in test material
     /// produced by ffmpeg, so a zero here on a real file is worth a second look rather than relief.</summary>
     public int LacedBlocks { get; set; }

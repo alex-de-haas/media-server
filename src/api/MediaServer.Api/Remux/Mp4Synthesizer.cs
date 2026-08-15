@@ -414,12 +414,20 @@ internal static class Mp4Synthesizer
                 MediaTime: priming);
         }
 
-        var first = track.Samples[0];
-        // Enough of the first access unit to read it: AC-3 needs a sync frame header, E-AC-3 needs to walk
-        // its substreams, and both are small next to the frame itself.
-        var probe = new byte[Math.Min(first.Size, 4096)];
-        source.Position = first.Offset;
-        source.ReadExactly(probe);
+        // The unit the walk kept, so this never opens the film. An index written before that was stored
+        // falls back to reading it, which is what this path always did.
+        byte[] probe;
+        if (track.FirstUnit is { Length: > 0 } storedUnit)
+        {
+            probe = storedUnit;
+        }
+        else
+        {
+            var first = track.Samples[0];
+            probe = new byte[Math.Min(first.Size, 4096)];
+            source.Position = first.Offset;
+            source.ReadExactly(probe);
+        }
 
         if (track.CodecId == "A_EAC3")
         {
@@ -436,12 +444,23 @@ internal static class Mp4Synthesizer
             // sample on every request — but enough of them are read to know the answer is the same
             // throughout. A stream that varies is refused rather than given a timeline built on the
             // first frame, which would drift for the whole of its length.
-            if (!SameThroughout(track, source, eac3.SamplesPerFrame))
+            // The walk answered this over every frame in the track, which is stricter than the
+            // sixty-four probes made here before and costs nothing now. A track whose frames disagree is
+            // refused rather than given a timeline built on its first frame, which would drift for the
+            // whole of its length.
+            if (track.ConstantFrameSamples < 0)
             {
                 return null;
             }
 
-            frameSamples = eac3.SamplesPerFrame;
+            if (track.ConstantFrameSamples == 0 && !SameThroughout(track, source, eac3.SamplesPerFrame))
+            {
+                return null;
+            }
+
+            frameSamples = track.ConstantFrameSamples > 0
+                ? track.ConstantFrameSamples
+                : eac3.SamplesPerFrame;
         }
         else
         {
@@ -492,6 +511,15 @@ internal static class Mp4Synthesizer
             var sample = track.Samples[i];
             if (durations[i] <= 0)
             {
+                continue;
+            }
+
+            // The text the walk converted and kept. This is why a subtitle track no longer sends
+            // playback back into the film: a two-hour picture has thousands of cues, each one a seek,
+            // and they were fetched again on every byte-range request a player made.
+            if (track.CueText is { } storedText && i < storedText.Count)
+            {
+                cues.Add(new TextCue(sample.Timestamp, durations[i], storedText[i]));
                 continue;
             }
 

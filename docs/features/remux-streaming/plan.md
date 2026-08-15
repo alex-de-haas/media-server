@@ -544,14 +544,16 @@ Two operational facts worth keeping, both of which cost time to find:
       A setting — by language, or by count, or simply "only what a viewer has ever
       asked for" — would let that be tuned per instance instead of assumed. Raised
       2026-08-10; not designed.
-- [ ] **Take the source reads out of synthesis.** The header cache stops them being paid
-      repeatedly, but the first request for a title still costs thousands of scattered reads:
-      every subtitle cue, because text is rewritten rather than referenced, and sixty-four
-      probes per E-AC-3 track to confirm the frame size is constant. All of it is fixed at
-      walk time and none of it changes afterwards, so it belongs in the index — which is
-      built in the background exactly so that playback waits for nothing. Costs an index
-      format bump and a full re-walk; buys a first request as cheap as the rest. Raised
-      2026-08-15 from a production measurement.
+- [x] **Take the source reads out of synthesis.** Done 2026-08-15. The walk keeps the
+      converted cue text, the first audio unit, and whether an audio track's frames all
+      carry the same number of samples — the last answered over every frame rather than
+      sixty-four probes. Format version 5; indexes grow to about 9 MB for a thirteen-track
+      film.
+- [ ] **Keep the parsed index in memory.** What is left of a cold request once the source
+      reads are gone: a 9 MB index read and decoded per request, then the header laid out.
+      Half a second on a fast disc, measured. The header cache already covers repeat
+      requests for the same tracks; this covers the first one, and a viewer switching audio
+      track mid-film — which is a different key and therefore a fresh build today.
 - [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
       single-byte-encoded file comes out with its accents wrong.
 - [x] **AAC**, shipped 2026-08-09 with `mp4a` and an `esds`. The config is carried from
