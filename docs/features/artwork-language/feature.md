@@ -142,7 +142,8 @@ Backend tests use xUnit against the in-memory SQLite fixture. Required coverage:
   resolving deterministically.
 - The pin: it outranks every tier, survives a re-enrich that adds better-ranked
   art, is ignored when it matches nothing, and is refused for a non-poster tag, a
-  blank tag or an unknown item.
+  blank tag or an unknown item — with the refusals mapped to `400` for a bad tag and
+  `404` only for a missing item, so the status names what actually went wrong.
 - Both read paths agree — the detail page ranks in memory, the grid ranks in SQL,
   and a pinned poster must appear on both.
 - The Jellyfin mapper and image service rank identically: an index-addressed
@@ -152,3 +153,8 @@ Backend tests use xUnit against the in-memory SQLite fixture. Required coverage:
 - `/native/v1` offers all three roles by the same ranking, and honours the pin.
 - Enrich asks for English artwork even when it is not configured, and does not ask
   for it twice.
+
+A note for whoever writes the next artwork test: the older fixtures seed artwork
+with no language, which now lands in the *winning* tier for a backdrop and the
+*losing* one for a poster. An assertion about tiers has to neutralize that seed —
+give it a language — or it ends up testing the fixture's sort order instead.

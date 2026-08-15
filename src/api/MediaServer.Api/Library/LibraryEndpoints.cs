@@ -264,12 +264,8 @@ public static class LibraryEndpoints
         // Pin one of those posters, overriding the language ranking for this item (admin only).
         group.MapPut("/{id:guid}/poster", async (
             Guid id, PinPosterRequest request, ItemArtworkService artwork, CancellationToken cancellationToken) =>
-            await artwork.PinAsync(id, request.Tag, cancellationToken) switch
-            {
-                PinPosterResult.Ok => Results.NoContent(),
-                PinPosterResult.InvalidTag => Results.BadRequest(new { error = "This item has no poster with that tag." }),
-                _ => Results.NotFound(),
-            }).RequireAuthorization(AppRoles.AdminPolicy);
+            ToResult(await artwork.PinAsync(id, request.Tag, cancellationToken)))
+            .RequireAuthorization(AppRoles.AdminPolicy);
 
         // Hand the choice back to the ranking (admin only).
         group.MapDelete("/{id:guid}/poster", async (Guid id, ItemArtworkService artwork, CancellationToken cancellationToken) =>
@@ -431,6 +427,18 @@ public static class LibraryEndpoints
             new { error = "Only movies and series can be rated." }),
         SetRatingStatus.OutOfRange => Results.BadRequest(
             new { error = $"'rating' must be between {UserRatingScale.Min} and {UserRatingScale.Max}." }),
+        _ => Results.Problem(),
+    };
+
+    /// <summary>
+    /// A pin refused for a tag the item does not hold is a <c>400</c>, not a <c>404</c>: the item exists and the
+    /// caller found it, so pointing at the item would send them looking for the wrong bug.
+    /// </summary>
+    internal static IResult ToResult(PinPosterResult result) => result switch
+    {
+        PinPosterResult.Ok => Results.NoContent(),
+        PinPosterResult.InvalidTag => Results.BadRequest(new { error = "This item has no poster with that tag." }),
+        PinPosterResult.NotFound => Results.NotFound(),
         _ => Results.Problem(),
     };
 }
