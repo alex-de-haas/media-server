@@ -31,7 +31,7 @@ public sealed class CollectionReadServiceTests : IDisposable
     {
         var settings = new MediaServerSettings { SupportedLanguages = ["en-US"] };
         var library = new LibraryReadService(_database, new UserDataService(_database, TimeProvider.System), settings);
-        return new CollectionReadService(_database, library);
+        return new CollectionReadService(_database, library, settings);
     }
 
     [Fact]

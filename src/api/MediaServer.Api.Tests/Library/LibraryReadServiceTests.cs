@@ -147,6 +147,108 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Detail_prefers_a_titled_poster_over_textless_art()
+    {
+        using (var context = _db.Create())
+        {
+            context.ImageAssets.AddRange(
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Primary, Language = null, Provider = "tmdb", RemotePath = "https://image.tmdb.org/poster-textless.jpg", Tag = "postertextless", SortOrder = 0 },
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Primary, Language = "en", Provider = "tmdb", RemotePath = "https://image.tmdb.org/poster-en.jpg", Tag = "posteren", SortOrder = 1 });
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        // The textless poster sorts first and used to win on that alone; a poster has to name the film.
+        Assert.Equal("https://image.tmdb.org/poster-en.jpg", detail!.PosterUrl);
+    }
+
+    [Fact]
+    public async Task Detail_prefers_a_textless_backdrop_because_the_page_draws_its_own_title()
+    {
+        using (var context = _db.Create())
+        {
+            // The seeded backdrop carries no language either, so it would win this tier on sort order —
+            // give it text so the assertion is about the tier and not about the seed.
+            context.ImageAssets.First(image => image.ImageType == ImageType.Backdrop).Language = "en";
+            context.ImageAssets.Add(new ImageAsset
+            {
+                Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Backdrop, Language = null,
+                Provider = "tmdb", RemotePath = "https://image.tmdb.org/backdrop-textless.jpg", Tag = "backdroptextless", SortOrder = 9,
+            });
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        Assert.Equal("https://image.tmdb.org/backdrop-textless.jpg", detail!.BackdropUrl);
+    }
+
+    [Fact]
+    public async Task Detail_and_listing_agree_on_a_pinned_poster()
+    {
+        using (var context = _db.Create())
+        {
+            context.ImageAssets.Add(new ImageAsset
+            {
+                Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Primary, Language = "en",
+                Provider = "tmdb", RemotePath = "https://image.tmdb.org/poster-en.jpg", Tag = "posteren", SortOrder = 1,
+            });
+            context.MediaItems.First(item => item.Id == _movieId).PreferredPosterTag = "posteren";
+            context.SaveChanges();
+        }
+
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+        var listed = await _library.ListAsync(null, MediaKind.Movie, appUserId: null, CancellationToken.None);
+
+        // The pin has to win on both surfaces: the detail page loads entities and ranks in memory, the grid
+        // ranks in SQL, and a library where the two disagree looks broken.
+        Assert.Equal("https://image.tmdb.org/poster-en.jpg", detail!.PosterUrl);
+        Assert.Equal("https://image.tmdb.org/poster-en.jpg", Assert.Single(listed).PosterUrl);
+    }
+
+    [Fact]
+    public async Task Listing_matches_a_language_case_insensitively_like_the_detail_page_does()
+    {
+        using (var context = _db.Create())
+        {
+            // The grid ranks in SQL, where text compares case-sensitively by default, while the detail page
+            // ranks in memory. An unexpectedly-cased tag must not make the two disagree.
+            context.ImageAssets.Add(new ImageAsset
+            {
+                Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Primary, Language = "EN",
+                Provider = "tmdb", RemotePath = "https://image.tmdb.org/poster-en.jpg", Tag = "posteren", SortOrder = 7,
+            });
+            context.SaveChanges();
+        }
+
+        var listed = await _library.ListAsync(null, MediaKind.Movie, appUserId: null, CancellationToken.None);
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        Assert.Equal("https://image.tmdb.org/poster-en.jpg", Assert.Single(listed).PosterUrl);
+        Assert.Equal(detail!.PosterUrl, Assert.Single(listed).PosterUrl);
+    }
+
+    [Fact]
+    public async Task Listing_prefers_a_titled_poster_over_textless_art()
+    {
+        using (var context = _db.Create())
+        {
+            // The seeded poster carries no language; a titled one has to beat it even though it sorts later.
+            context.ImageAssets.Add(new ImageAsset
+            {
+                Id = Guid.NewGuid(), MediaItemId = _movieId, ImageType = ImageType.Primary, Language = "en",
+                Provider = "tmdb", RemotePath = "https://image.tmdb.org/poster-en.jpg", Tag = "posteren", SortOrder = 7,
+            });
+            context.SaveChanges();
+        }
+
+        var listed = await _library.ListAsync(null, MediaKind.Movie, appUserId: null, CancellationToken.None);
+
+        Assert.Equal("https://image.tmdb.org/poster-en.jpg", Assert.Single(listed).PosterUrl);
+    }
+
+    [Fact]
     public async Task Detail_for_series_parses_networks_with_absolute_logo_urls()
     {
         using (var context = _db.Create())

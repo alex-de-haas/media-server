@@ -66,6 +66,8 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         var services = new ServiceCollection();
         services.AddScoped(_ => NewContext());
         services.AddSingleton<TimeProvider>(_time);
+        // The feed resolves each held title's poster, which is ranked by display language.
+        services.AddSingleton(TestSettings.English);
         services.AddSingleton<ITmdbRecommendationSource>(_tmdb);
         services.AddScoped<RecommendationSeedSelector>();
         services.AddScoped<TitleFacetReader>();

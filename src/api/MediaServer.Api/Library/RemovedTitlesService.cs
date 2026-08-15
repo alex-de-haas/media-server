@@ -1,4 +1,6 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Library;
@@ -23,7 +25,7 @@ public sealed record RemovedTitleDto(
 /// the ghost subtree, last watched), and clears a favorite on a ghost — the one write the ordinary
 /// favorite endpoint refuses, because it reaches published items only.
 /// </summary>
-public sealed class RemovedTitlesService(MediaServerDbContext database)
+public sealed class RemovedTitlesService(MediaServerDbContext database, MediaServerSettings settings)
 {
     public async Task<IReadOnlyList<RemovedTitleDto>> ListAsync(int? appUserId, CancellationToken cancellationToken)
     {
@@ -79,20 +81,7 @@ public sealed class RemovedTitlesService(MediaServerDbContext database)
                 .ToDictionaryAsync(data => data.MediaItemId, data => data.Rating, cancellationToken)
             : [];
 
-        var posters = new Dictionary<Guid, string>();
-        var posterRows = await database.ImageAssets.AsNoTracking()
-            .Where(image => rootIds.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
-            .GroupBy(image => image.MediaItemId)
-            .Select(group => new
-            {
-                MediaItemId = group.Key,
-                Url = group.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First(),
-            })
-            .ToListAsync(cancellationToken);
-        foreach (var row in posterRows)
-        {
-            posters[row.MediaItemId] = row.Url;
-        }
+        var posters = await database.BestPosterUrlsAsync(rootIds, settings.PreferredLanguage, cancellationToken);
 
         return roots.Select(root => new RemovedTitleDto(
             root.Id,

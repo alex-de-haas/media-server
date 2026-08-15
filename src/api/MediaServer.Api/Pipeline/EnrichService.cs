@@ -5,6 +5,7 @@ using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.People;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Pipeline;
@@ -95,16 +96,20 @@ public sealed class EnrichService(
         }
 
         var existing = await database.ImageAssets.Where(image => image.MediaItemId == item.Id).ToListAsync(cancellationToken);
-        var byRemote = existing.ToDictionary(image => image.RemotePath, StringComparer.Ordinal);
+        // A set rather than a dictionary keyed by remote path: ToDictionary throws on a duplicate, and two
+        // enriches of one item can race (a manual refresh alongside a catalog-wide one — the coordinator
+        // serializes catalogs, not items), which would leave that item permanently un-enrichable.
+        var byRemote = existing.Select(image => image.RemotePath).ToHashSet(StringComparer.Ordinal);
 
+        var added = new List<ImageAsset>();
         foreach (var image in images)
         {
-            if (byRemote.ContainsKey(image.RemotePath))
+            if (!byRemote.Add(image.RemotePath))
             {
                 continue;
             }
 
-            database.ImageAssets.Add(new ImageAsset
+            var asset = new ImageAsset
             {
                 Id = Guid.NewGuid(),
                 MediaItemId = item.Id,
@@ -114,9 +119,42 @@ public sealed class EnrichService(
                 RemotePath = image.RemotePath,
                 Tag = ImageTag(image.RemotePath),
                 SortOrder = image.SortOrder,
-            });
+            };
+            added.Add(asset);
+            database.ImageAssets.Add(asset);
+        }
+
+        if (added.Count == 0)
+        {
+            return;
+        }
+
+        // The check above only sees what this context read, so two enriches discovering the same new image
+        // can both get past it and the second insert then violates the unique (MediaItemId, RemotePath)
+        // index. That is a race the loser should shrug off rather than fail on: the rows are identical —
+        // Tag is derived from RemotePath — so whoever wrote them first wrote the same thing. Saved here, on
+        // its own, so a conflict costs the artwork nothing and leaves the metadata in this unit of work for
+        // the caller's save.
+        try
+        {
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsUniqueViolation(exception))
+        {
+            foreach (var asset in added)
+            {
+                database.Entry(asset).State = EntityState.Detached;
+            }
         }
     }
+
+    /// <summary>
+    /// Whether a failed save was a unique-index collision rather than a real fault. SQLite reports both a
+    /// constraint failure and a unique failure as extended result codes over <c>SQLITE_CONSTRAINT</c> (19),
+    /// so the primary code is what identifies the class.
+    /// </summary>
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is SqliteException { SqliteErrorCode: 19 };
 
     private IReadOnlyList<string> ResolveLanguages(Catalog catalog)
     {

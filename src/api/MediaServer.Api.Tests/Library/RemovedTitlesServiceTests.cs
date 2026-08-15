@@ -33,7 +33,7 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     [Fact]
     public async Task List_returns_only_tombstoned_top_level_titles_with_signal_summary()
     {
-        var titles = await new RemovedTitlesService(_context).ListAsync(_userId, CancellationToken.None);
+        var titles = await new RemovedTitlesService(_context, TestSettings.English).ListAsync(_userId, CancellationToken.None);
 
         Assert.Equal(2, titles.Count); // the ghost movie and the ghost series; never the published movie
         var movie = Assert.Single(titles, title => title.Id == _ghostMovieId);
@@ -52,7 +52,7 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     [Fact]
     public async Task Clear_favorite_works_on_a_ghost_and_only_on_a_ghost()
     {
-        var service = new RemovedTitlesService(_context);
+        var service = new RemovedTitlesService(_context, TestSettings.English);
 
         Assert.True(await service.ClearFavoriteAsync(_userId, _ghostMovieId, CancellationToken.None));
         Assert.False(await service.ClearFavoriteAsync(_userId, _ghostMovieId, CancellationToken.None)); // nothing left to clear
@@ -68,13 +68,13 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     {
         // The favorite sits on the ghost episode, not the series row — clearing at the title level
         // must reach it, or the flag would be permanently stuck (the ordinary endpoint refuses ghosts).
-        var service = new RemovedTitlesService(_context);
+        var service = new RemovedTitlesService(_context, TestSettings.English);
 
         Assert.True(await service.ClearFavoriteAsync(_userId, _ghostSeriesId, CancellationToken.None));
 
         await using var verify = _db.Create();
         Assert.False(await verify.UserItemData.AnyAsync(data => data.MediaItemId == _ghostEpisodeId && data.IsFavorite));
-        Assert.False((await new RemovedTitlesService(verify).ListAsync(_userId, CancellationToken.None))
+        Assert.False((await new RemovedTitlesService(verify, TestSettings.English).ListAsync(_userId, CancellationToken.None))
             .Single(title => title.Id == _ghostSeriesId).IsFavorite);
     }
 
@@ -83,26 +83,26 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     {
         // Deleting a file does not retract a verdict on a film that was watched, so the two clears are
         // separate gestures. Folding them together would silently discard the judgement.
-        var service = new RemovedTitlesService(_context);
+        var service = new RemovedTitlesService(_context, TestSettings.English);
 
         Assert.True(await service.ClearFavoriteAsync(_userId, _ghostMovieId, CancellationToken.None));
 
         await using var verify = _db.Create();
-        Assert.Equal(4, (await new RemovedTitlesService(verify).ListAsync(_userId, CancellationToken.None))
+        Assert.Equal(4, (await new RemovedTitlesService(verify, TestSettings.English).ListAsync(_userId, CancellationToken.None))
             .Single(title => title.Id == _ghostMovieId).UserRating);
     }
 
     [Fact]
     public async Task Clear_rating_works_on_a_ghost_and_only_on_a_ghost()
     {
-        var service = new RemovedTitlesService(_context);
+        var service = new RemovedTitlesService(_context, TestSettings.English);
 
         Assert.True(await service.ClearRatingAsync(_userId, _ghostMovieId, CancellationToken.None));
         Assert.False(await service.ClearRatingAsync(_userId, _ghostMovieId, CancellationToken.None)); // nothing left
         Assert.False(await service.ClearRatingAsync(_userId, _publishedMovieId, CancellationToken.None));
 
         await using var verify = _db.Create();
-        var title = (await new RemovedTitlesService(verify).ListAsync(_userId, CancellationToken.None))
+        var title = (await new RemovedTitlesService(verify, TestSettings.English).ListAsync(_userId, CancellationToken.None))
             .Single(entry => entry.Id == _ghostMovieId);
         Assert.Null(title.UserRating);
         Assert.True(title.IsFavorite); // the favorite is a separate statement and survives

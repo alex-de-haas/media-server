@@ -1,5 +1,7 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Jellyfin;
@@ -18,7 +20,8 @@ public sealed class JellyfinImageService(
     JellyfinCollectionService collections,
     JellyfinPersonService people,
     IHttpClientFactory httpFactory,
-    HostyOptions hosty)
+    HostyOptions hosty,
+    MediaServerSettings settings)
 {
     public const string HttpClientName = "jellyfin-images";
 
@@ -216,10 +219,14 @@ public sealed class JellyfinImageService(
                 : null;
         }
 
-        var candidates = await database.ImageAssets
-            .Where(image => image.MediaItemId == item.Id && image.ImageType == type)
-            .OrderBy(image => image.SortOrder)
-            .ToListAsync(cancellationToken);
+        // Ranked by ImageSelection, exactly as JellyfinItemMapper ranked them when it advertised the tags:
+        // an index-addressed request (/Images/Backdrop/1) indexes into the list the client was given, so a
+        // resolver ordering differently would serve an image the client was told is another one.
+        var candidates = (await database.ImageAssets
+                .Where(image => image.MediaItemId == item.Id && image.ImageType == type)
+                .ToListAsync(cancellationToken))
+            .InPreferenceOrder(type, settings.PreferredLanguage, type == ImageType.Primary ? item.PreferredPosterTag : null)
+            .ToList();
 
         return tag is { Length: > 0 }
             ? candidates.FirstOrDefault(image => image.Tag == tag)

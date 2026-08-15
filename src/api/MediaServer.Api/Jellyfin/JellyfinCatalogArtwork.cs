@@ -1,4 +1,6 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Jellyfin;
@@ -9,8 +11,15 @@ namespace MediaServer.Api.Jellyfin;
 /// "back plate" on the library tile instead of a blank placeholder. The same backdrop is served when the
 /// client requests the collection folder's image by id.
 /// </summary>
-public sealed class JellyfinCatalogArtwork(MediaServerDbContext database)
+public sealed class JellyfinCatalogArtwork(MediaServerDbContext database, MediaServerSettings settings)
 {
+    /// <summary>
+    /// Which title lends its backdrop is decided before which of that title's backdrops is best: the tile is
+    /// "the newest title's art", so the language ranking breaks ties within one title rather than promoting an
+    /// older title that happens to hold a textless backdrop.
+    /// </summary>
+    private static readonly ImageType Role = ImageType.Backdrop;
+
     /// <summary>Resolves a collection-folder public id back to its catalog id, or null if it is not a catalog.</summary>
     public async Task<Guid?> ResolveCatalogIdAsync(string publicId, CancellationToken cancellationToken)
     {
@@ -41,7 +50,9 @@ public sealed class JellyfinCatalogArtwork(MediaServerDbContext database)
                 && image.MediaItem.ParentId == null
                 && (image.MediaItem.Kind == MediaKind.Movie || image.MediaItem.Kind == MediaKind.Series))
             .OrderByDescending(image => image.MediaItem!.AddedAt)
+            .ThenBy(ImageSelection.Rank(Role, settings.PreferredLanguage))
             .ThenBy(image => image.SortOrder)
+            .ThenBy(image => image.Tag)
             .FirstOrDefaultAsync(cancellationToken);
 
     /// <summary>
@@ -68,6 +79,7 @@ public sealed class JellyfinCatalogArtwork(MediaServerDbContext database)
             {
                 CatalogId = image.MediaItem!.CatalogId!.Value,
                 image.MediaItem.AddedAt,
+                image.Language,
                 image.SortOrder,
                 image.Tag,
             })
@@ -77,6 +89,11 @@ public sealed class JellyfinCatalogArtwork(MediaServerDbContext database)
             .GroupBy(candidate => candidate.CatalogId)
             .ToDictionary(
                 group => group.Key,
-                group => group.OrderByDescending(c => c.AddedAt).ThenBy(c => c.SortOrder).First().Tag);
+                group => group
+                    .OrderByDescending(candidate => candidate.AddedAt)
+                    .ThenBy(candidate => ImageSelection.Tier(Role, candidate.Language, settings.PreferredLanguage))
+                    .ThenBy(candidate => candidate.SortOrder)
+                    .ThenBy(candidate => candidate.Tag, StringComparer.Ordinal)
+                    .First().Tag);
     }
 }

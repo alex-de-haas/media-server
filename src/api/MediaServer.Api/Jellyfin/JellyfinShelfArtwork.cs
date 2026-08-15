@@ -1,4 +1,6 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Metadata;
 using MediaServer.Api.Recommendations;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +13,8 @@ namespace MediaServer.Api.Jellyfin;
 /// <see cref="JellyfinImageService"/> from the ordinary <see cref="ImageAsset"/> cache: the shelf points at
 /// library titles, so nothing new is fetched or cached for the tile.
 /// </summary>
-public sealed class JellyfinShelfArtwork(MediaServerDbContext database, IRecommendationShelf shelf)
+public sealed class JellyfinShelfArtwork(
+    MediaServerDbContext database, IRecommendationShelf shelf, MediaServerSettings settings)
 {
     /// <summary>
     /// How far down the shelf to look for a title with a backdrop. Deep enough that a couple of unenriched
@@ -38,7 +41,6 @@ public sealed class JellyfinShelfArtwork(MediaServerDbContext database, IRecomme
         var itemIds = ranked.Select(item => item.Id).ToList();
         var backdrops = await database.ImageAssets.AsNoTracking()
             .Where(image => image.ImageType == ImageType.Backdrop && itemIds.Contains(image.MediaItemId))
-            .OrderBy(image => image.SortOrder)
             .ToListAsync(cancellationToken);
         if (backdrops.Count == 0)
         {
@@ -46,10 +48,14 @@ public sealed class JellyfinShelfArtwork(MediaServerDbContext database, IRecomme
         }
 
         // Walked in rank order rather than taking whichever image sorts first: the tile should show the
-        // title the shelf leads with.
+        // title the shelf leads with. Which of *that* title's backdrops is then a question for
+        // ImageSelection, which prefers one with no text burned into it (see
+        // docs/features/artwork-language/feature.md) — the shelf tile carries its own label.
         var byItem = backdrops
             .GroupBy(image => image.MediaItemId)
-            .ToDictionary(group => group.Key, group => group.First());
+            .ToDictionary(
+                group => group.Key,
+                group => group.Best(ImageType.Backdrop, settings.PreferredLanguage)!);
         return ranked
             .Select(item => byItem.GetValueOrDefault(item.Id))
             .FirstOrDefault(image => image is not null);

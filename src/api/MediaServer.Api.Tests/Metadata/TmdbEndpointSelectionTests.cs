@@ -46,6 +46,36 @@ public sealed class TmdbEndpointSelectionTests
     }
 
     [Fact]
+    public async Task GetImagesAsync_asks_for_english_artwork_even_when_it_is_not_a_configured_language()
+    {
+        var handler = new RecordingHandler();
+        var provider = new TmdbMetadataProvider(
+            new SingleClientFactory(handler),
+            new MediaServerSettings { TmdbApiKey = Key, SupportedLanguages = ["ru-RU"] },
+            NullLogger<TmdbMetadataProvider>.Instance);
+
+        await provider.GetImagesAsync(
+            new ProviderRef("tmdb", CollidingId), MediaKind.Movie, ["ru-RU"], CancellationToken.None);
+
+        // Without English there is nothing between the Russian art and the textless art for the display
+        // ranking to fall back to, and a poster with no title on it is the failure being fixed.
+        var request = Assert.Single(handler.Requests, uri => uri.Contains("/images"));
+        Assert.Contains("include_image_language=ru,en,null", request);
+    }
+
+    [Fact]
+    public async Task GetImagesAsync_does_not_ask_for_english_twice()
+    {
+        var handler = new RecordingHandler();
+
+        await Provider(handler).GetImagesAsync(
+            new ProviderRef("tmdb", CollidingId), MediaKind.Movie, ["en-US", "en-GB"], CancellationToken.None);
+
+        var request = Assert.Single(handler.Requests, uri => uri.Contains("/images"));
+        Assert.Contains("include_image_language=en,null", request);
+    }
+
+    [Fact]
     public async Task FetchAsync_for_a_movie_hits_the_movie_endpoint_and_never_tv()
     {
         var handler = new RecordingHandler();

@@ -1,5 +1,7 @@
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Collections;
@@ -10,7 +12,8 @@ namespace MediaServer.Api.Collections;
 /// persisted <see cref="MediaItem.CollectionId"/> link (written at enrich time by <see cref="CollectionSyncService"/>);
 /// poster/title resolution for members is reused from <see cref="LibraryReadService"/>.
 /// </summary>
-public sealed class CollectionReadService(MediaServerDbContext database, LibraryReadService library)
+public sealed class CollectionReadService(
+    MediaServerDbContext database, LibraryReadService library, MediaServerSettings settings)
 {
     // A single owned movie is not a browsable "franchise" — only surface a collection once at least this many
     // of its movies are in the library, so the page is franchises rather than a wall of one-offs. Shared with
@@ -96,11 +99,13 @@ public sealed class CollectionReadService(MediaServerDbContext database, Library
     }
 
     // A representative poster per collection (the earliest member's), used when the collection itself has no
-    // artwork. Joins member movies to their primary images, chunked over the collection ids; the earliest
-    // year (then sort order) wins, merged across chunks.
+    // artwork. Joins member movies to their primary images, chunked over the collection ids; the earliest year
+    // wins, and within one year the poster ranking decides — which member represents the franchise is settled
+    // before which of that member's posters is best, so a later film cannot take the tile by holding a
+    // better-ranked poster.
     private async Task<Dictionary<Guid, string>> PosterFallbackAsync(IReadOnlyList<Guid> collectionIds, CancellationToken cancellationToken)
     {
-        var best = new Dictionary<Guid, (int Year, int SortOrder, string RemotePath)>();
+        var best = new Dictionary<Guid, (int Year, int Tier, int SortOrder, string Tag, string RemotePath)>();
         foreach (var chunk in collectionIds.Chunk(ChunkSize))
         {
             var rows = await database.MediaItems.AsNoTracking()
@@ -110,20 +115,40 @@ public sealed class CollectionReadService(MediaServerDbContext database, Library
                     database.ImageAssets.AsNoTracking().Where(image => image.ImageType == ImageType.Primary),
                     item => item.Id,
                     image => image.MediaItemId,
-                    (item, image) => new { CollectionId = item.CollectionId!.Value, Year = item.Year ?? int.MaxValue, image.RemotePath, image.SortOrder })
+                    (item, image) => new
+                    {
+                        CollectionId = item.CollectionId!.Value,
+                        Year = item.Year ?? int.MaxValue,
+                        item.PreferredPosterTag,
+                        image.RemotePath,
+                        image.Language,
+                        image.SortOrder,
+                        image.Tag,
+                    })
                 .ToListAsync(cancellationToken);
 
             foreach (var row in rows)
             {
-                if (!best.TryGetValue(row.CollectionId, out var current) ||
-                    row.Year < current.Year ||
-                    (row.Year == current.Year && row.SortOrder < current.SortOrder))
+                var tier = row.PreferredPosterTag is { Length: > 0 } pinned && string.Equals(row.Tag, pinned, StringComparison.Ordinal)
+                    ? int.MinValue
+                    : ImageSelection.Tier(ImageType.Primary, row.Language, settings.PreferredLanguage);
+                var candidate = (row.Year, Tier: tier, row.SortOrder, row.Tag, row.RemotePath);
+                if (!best.TryGetValue(row.CollectionId, out var current) || Precedes(candidate, current))
                 {
-                    best[row.CollectionId] = (row.Year, row.SortOrder, row.RemotePath);
+                    best[row.CollectionId] = candidate;
                 }
             }
         }
 
         return best.ToDictionary(entry => entry.Key, entry => entry.Value.RemotePath);
     }
+
+    // Year first, then the poster ranking, then the provider order, then the tag — a total order, so the
+    // representative poster of a collection does not depend on the order rows came back in.
+    private static bool Precedes(
+        (int Year, int Tier, int SortOrder, string Tag, string RemotePath) candidate,
+        (int Year, int Tier, int SortOrder, string Tag, string RemotePath) current) =>
+        (candidate.Year, candidate.Tier, candidate.SortOrder).CompareTo((current.Year, current.Tier, current.SortOrder)) is var order && order != 0
+            ? order < 0
+            : string.CompareOrdinal(candidate.Tag, current.Tag) < 0;
 }

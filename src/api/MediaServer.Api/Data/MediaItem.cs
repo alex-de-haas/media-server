@@ -61,6 +61,15 @@ public sealed class MediaItem
     /// source just makes this stale and ordering falls back.</summary>
     public Guid? DefaultSourceId { get; set; }
 
+    /// <summary>
+    /// The <see cref="ImageAsset.Tag"/> of the poster an operator pinned for this item, overriding the
+    /// language ranking every surface otherwise applies (see <c>docs/features/artwork-language/feature.md</c>).
+    /// Null = no preference. The tag rather than the row id or the sort ordinal: it is derived from the
+    /// remote path, so it survives a re-enrich and is already what the image URLs carry. Not a hard FK — a
+    /// pin whose image the provider has withdrawn is simply ignored and the ranking answers again.
+    /// </summary>
+    public string? PreferredPosterTag { get; set; }
+
     /// <summary>Canonical provider, e.g. <c>tmdb</c>.</summary>
     public string? IdentityProvider { get; set; }
 

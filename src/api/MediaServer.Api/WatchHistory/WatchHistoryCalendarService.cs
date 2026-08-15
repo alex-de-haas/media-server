@@ -220,29 +220,9 @@ public sealed class WatchHistoryCalendarService(
         return events;
     }
 
-    private async Task<Dictionary<Guid, string>> PostersAsync(
-        IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
-    {
-        var posters = new Dictionary<Guid, string>();
-        foreach (var chunk in itemIds.Chunk(500))
-        {
-            var rows = await database.ImageAssets.AsNoTracking()
-                .Where(image => chunk.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
-                .GroupBy(image => image.MediaItemId)
-                .Select(group => new
-                {
-                    MediaItemId = group.Key,
-                    Url = group.OrderBy(image => image.SortOrder).Select(image => image.RemotePath).First(),
-                })
-                .ToListAsync(cancellationToken);
-            foreach (var row in rows)
-            {
-                posters[row.MediaItemId] = row.Url;
-            }
-        }
-
-        return posters;
-    }
+    private Task<Dictionary<Guid, string>> PostersAsync(
+        IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken) =>
+        database.BestPosterUrlsAsync(itemIds, settings.PreferredLanguage, cancellationToken);
 
     /// <summary>
     /// Metadata titles win over the scanned title, matching what the rest of the library renders —

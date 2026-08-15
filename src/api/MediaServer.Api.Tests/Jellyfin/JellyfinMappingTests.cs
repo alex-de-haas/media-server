@@ -29,7 +29,7 @@ public sealed class JellyfinMappingTests : IDisposable
         };
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
-            _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()), new JellyfinShelfArtwork(_db.Create(), new EmptyShelf()),
+            _db.Create(), new JellyfinItemMapper(server, TestSettings.English), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinShelfArtwork(_db.Create(), new EmptyShelf(), TestSettings.English),
             new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), new EmptyShelf(), new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
@@ -77,6 +77,54 @@ public sealed class JellyfinMappingTests : IDisposable
         Assert.Equal(_primaryTag, movie.ImageTags?["Primary"]);
         Assert.Equal("27205", movie.ProviderIds?["Tmdb"]);
         Assert.Equal(_moviePublicId, movie.UserData?.Key);
+    }
+
+    [Fact]
+    public async Task Advertises_the_ranked_artwork_and_the_resolver_agrees_with_it()
+    {
+        using (var context = _db.Create())
+        {
+            var movieId = context.MediaItems.First(item => item.PublicId == _moviePublicId).Id;
+            // The seeded poster and backdrop carry no language; giving the backdrop text leaves exactly one
+            // textless candidate, so the backdrop assertion is about the tier rather than the sort order.
+            context.ImageAssets.First(image => image.ImageType == ImageType.Backdrop).Language = "en";
+            context.ImageAssets.AddRange(
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = movieId, ImageType = ImageType.Primary, Language = "en", Provider = "tmdb", RemotePath = "https://image.tmdb.org/p-en.jpg", Tag = "primaryen000001", SortOrder = 9 },
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = movieId, ImageType = ImageType.Backdrop, Language = null, Provider = "tmdb", RemotePath = "https://image.tmdb.org/b-textless.jpg", Tag = "backdroptxt00001", SortOrder = 9 },
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = movieId, ImageType = ImageType.Logo, Language = "ja", Provider = "tmdb", RemotePath = "https://image.tmdb.org/l-ja.png", Tag = "logoja000000001", SortOrder = 0 },
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = movieId, ImageType = ImageType.Logo, Language = "en", Provider = "tmdb", RemotePath = "https://image.tmdb.org/l-en.png", Tag = "logoen000000001", SortOrder = 5 });
+            context.SaveChanges();
+        }
+
+        var movie = await _library.GetItemAsync(_moviePublicId, includeMediaSources: false, appUserId: null, CancellationToken.None);
+
+        // The seeded poster and backdrop carry no language, so under en-US the titled poster wins and the
+        // textless backdrop does — the two roles pull in opposite directions from the same data.
+        Assert.Equal("primaryen000001", movie!.ImageTags?["Primary"]);
+        // The Jellyfin surface used to pick a logo by sort order alone, so the hero title could come back in
+        // a language nobody asked for.
+        Assert.Equal("logoen000000001", movie.ImageTags?["Logo"]);
+        Assert.Equal("backdroptxt00001", movie.BackdropImageTags?[0]);
+    }
+
+    [Fact]
+    public async Task A_pinned_poster_is_the_advertised_primary_tag()
+    {
+        using (var context = _db.Create())
+        {
+            var pinned = context.MediaItems.First(item => item.PublicId == _moviePublicId);
+            context.ImageAssets.Add(new ImageAsset
+            {
+                Id = Guid.NewGuid(), MediaItemId = pinned.Id, ImageType = ImageType.Primary, Language = "en",
+                Provider = "tmdb", RemotePath = "https://image.tmdb.org/p-en.jpg", Tag = "primaryen000001", SortOrder = 1,
+            });
+            pinned.PreferredPosterTag = _primaryTag;
+            context.SaveChanges();
+        }
+
+        var movie = await _library.GetItemAsync(_moviePublicId, includeMediaSources: false, appUserId: null, CancellationToken.None);
+
+        Assert.Equal(_primaryTag, movie!.ImageTags?["Primary"]);
     }
 
     [Fact]

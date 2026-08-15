@@ -69,6 +69,7 @@ export interface AppMock {
   transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
   transcodeLanguages?: string[]; // GET /transcode/languages — what the language field validates against
   mediaBackfill?: { itemsRefreshed: number; remaining: number; sidecarsFilled: number }; // POST /library/backfill-media
+  itemImages?: Record<string, unknown[]>; // GET /library/{id}/images — the poster picker's candidates
 }
 
 export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
@@ -231,6 +232,9 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
         json: mock.childDelete ?? { seasonRemoved: false, seriesRemoved: false },
       });
     }
+
+    const imagesItemId = path.match(/^\/library\/([^/]+)\/images$/)?.[1];
+    if (imagesItemId) return route.fulfill({ json: mock.itemImages?.[imagesItemId] ?? [] });
 
     const detailId = path.match(/^\/library\/([^/]+)$/)?.[1];
     if (detailId && mock.detail?.[detailId]) return route.fulfill({ json: mock.detail[detailId] });

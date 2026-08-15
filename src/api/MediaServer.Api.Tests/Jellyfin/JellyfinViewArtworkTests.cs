@@ -30,8 +30,8 @@ public sealed class JellyfinViewArtworkTests : IDisposable
         _hosty = new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = _root };
         var server = new JellyfinServerContext(_hosty, _settings);
         _library = new JellyfinLibraryService(
-            _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
-            new JellyfinShelfArtwork(_db.Create(), _shelf), new JellyfinCollectionService(_db.Create()),
+            _db.Create(), new JellyfinItemMapper(server, TestSettings.English), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English),
+            new JellyfinShelfArtwork(_db.Create(), _shelf, TestSettings.English), new JellyfinCollectionService(_db.Create()),
             new JellyfinPersonService(_db.Create()), _shelf, new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
@@ -193,9 +193,9 @@ public sealed class JellyfinViewArtworkTests : IDisposable
     }
 
     private JellyfinImageService CreateImageService() => new(
-        _db.Create(), new JellyfinCatalogArtwork(_db.Create()), new JellyfinShelfArtwork(_db.Create(), _shelf),
+        _db.Create(), new JellyfinCatalogArtwork(_db.Create(), TestSettings.English), new JellyfinShelfArtwork(_db.Create(), _shelf, TestSettings.English),
         new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()),
-        new StubHttpClientFactory(), _hosty);
+        new StubHttpClientFactory(), _hosty, TestSettings.English);
 
     private void Seed()
     {

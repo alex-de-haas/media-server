@@ -1,7 +1,7 @@
 # Native Client API
 
 Created: 2026-08-04
-Updated: 2026-08-04
+Updated: 2026-08-15
 
 ## Description
 
@@ -139,7 +139,9 @@ visible to TMDb; the cost is our bandwidth for something a CDN does well, which 
 why it is a deliberate choice. The URLs carry the asset's content-hash tag, so they
 can be cached hard — new artwork means a new tag and therefore a new URL — and the
 item DTO lists only the types the instance actually holds, so a client never asks
-for one that cannot exist. These are bearer-authenticated: only `AVPlayer`'s
+for one that cannot exist — each of them the one the shared [artwork
+language](../artwork-language/feature.md) ranking selects, including a poster the
+operator pinned. These are bearer-authenticated: only `AVPlayer`'s
 self-issued ranged requests need a signed URL.
 
 `GET|HEAD /native/v1/media/{mediaSourceId}` serves the file by byte range, and
@@ -194,4 +196,5 @@ Backend tests use xUnit and Imposter. Required coverage:
 - Item URLs built from the real detail projection, so the test breaks if the
   projection stops carrying what they are built from.
 - Artwork URLs offered only for the types the instance holds, carrying the tag, and
-  absent entirely for an item with no artwork.
+  absent entirely for an item with no artwork; each role picked by the artwork
+  ranking, and a pinned poster offered over the ranking's own answer.

@@ -1,5 +1,6 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Jellyfin;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
@@ -75,16 +76,22 @@ public static class NativeImageEndpoints
     /// types are null, so a client never requests one that cannot exist.
     /// </summary>
     public static async Task<NativeImagesDto> BuildAsync(
-        MediaServerDbContext database, Guid itemId, CancellationToken cancellationToken)
+        MediaServerDbContext database, Guid itemId, string displayLanguage, CancellationToken cancellationToken)
     {
         var assets = await database.ImageAssets.AsNoTracking()
             .Where(image => image.MediaItemId == itemId)
-            .Select(image => new { image.ImageType, image.Tag })
             .ToListAsync(cancellationToken);
+        var pinnedPosterTag = await database.MediaItems.AsNoTracking()
+            .Where(item => item.Id == itemId)
+            .Select(item => item.PreferredPosterTag)
+            .FirstOrDefaultAsync(cancellationToken);
 
+        // Ranked by ImageSelection like every other surface. Before that this projected neither Language nor
+        // SortOrder and took the first row the database happened to return, so a client's poster and logo were
+        // whichever of the cached candidates came back first.
         string? UrlFor(ImageType type)
         {
-            var asset = assets.FirstOrDefault(candidate => candidate.ImageType == type);
+            var asset = assets.Best(type, displayLanguage, type == ImageType.Primary ? pinnedPosterTag : null);
             return asset is null
                 ? null
                 : $"{NativeEndpoints.RoutePrefix}/items/{itemId:D}/images/{type.ToString().ToLowerInvariant()}?tag={asset.Tag}";

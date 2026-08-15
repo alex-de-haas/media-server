@@ -1,7 +1,7 @@
 # Metadata
 
 Created: 2026-06-15
-Updated: 2026-08-09
+Updated: 2026-08-15
 
 ## Description
 
@@ -91,8 +91,12 @@ Efficiency:
 - Use the provider's bulk translations endpoint where available (TMDb
   `/{movie|tv}/{id}/translations` returns all translations in one request) instead
   of one request per language.
-- Fetch language-tagged and neutral images together (TMDb
-  `include_image_language=ru,en,null`).
+- Fetch language-tagged and neutral images together, with **English always
+  included** even when it is not a configured language (TMDb
+  `include_image_language=<supported…>,en,null`) — artwork falls back down a
+  language chain at display time, and without English a single-language instance
+  would dead-end at textless art. Which of the fetched images each surface then
+  shows is [artwork language](../artwork-language/feature.md).
 - Always store `originalTitle` and `originalLanguage` so display is never locked
   to one language.
 - Adding a language to the global list triggers a background **backfill** job to
@@ -105,7 +109,10 @@ Common fields cached per language where applicable:
 - Title, original title, original language, overview, tagline, genres.
 - Release/premiere date, runtime, official rating (certification), community
   rating and vote count.
-- Posters, backdrops, and logos (language-tagged where provided).
+- Posters, backdrops, and logos, each tagged with the language of the text printed
+  on it — or untagged, which is the provider's way of saying the image carries no
+  text at all. Which one a surface shows is [artwork
+  language](../artwork-language/feature.md).
 - Cast and crew (directors for movies, creators for series).
 - Networks and production companies/studios (with logos).
 - External ids (IMDb), trailer (YouTube), keyword tags, homepage, production

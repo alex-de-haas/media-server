@@ -865,3 +865,46 @@ test("admin fixes a misidentified movie and lands on the corrected item", async 
   await expect(page).toHaveURL(/\/movies\/m2$/);
   await expect(page.getByRole("heading", { name: "Arrival" })).toBeVisible();
 });
+
+test("pins a poster from the detail page when the automatic choice is ambiguous", async ({ page }) => {
+  // The point of the control: TMDb's localized poster for a sequel is often the textless international
+  // art, so the operator has to be able to say which picture names the film.
+  await setupApp(page, {
+    library: [aMovie("m1", "John Wick: Chapter 3")],
+    detail: { m1: movieDetail("m1", "John Wick: Chapter 3") },
+    itemImages: {
+      m1: [
+        {
+          type: "Primary",
+          tag: "ru1",
+          url: "https://image.tmdb.org/ru.jpg",
+          language: "ru",
+          sortOrder: 0,
+          pinned: false,
+          selected: true,
+        },
+        {
+          type: "Primary",
+          tag: "en1",
+          url: "https://image.tmdb.org/en.jpg",
+          language: "en",
+          sortOrder: 1,
+          pinned: false,
+          selected: false,
+        },
+      ],
+    },
+  });
+
+  await page.goto("/movies/m1");
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Choose poster…" }).click();
+
+  await expect(page.getByRole("dialog")).toContainText("Choose a poster");
+  const pinned = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/library/m1/poster") && request.method() === "PUT",
+  );
+  // The candidates are labelled by the language of their text, which is what the choice is about.
+  await page.getByRole("button", { name: /^EN/ }).click();
+  expect((await pinned).postDataJSON()).toEqual({ tag: "en1" });
+});

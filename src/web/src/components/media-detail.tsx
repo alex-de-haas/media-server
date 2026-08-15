@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, AudioLines, CalendarPlus, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileOutput, FileQuestion, Film, FolderInput, Heart, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, AudioLines, CalendarPlus, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileOutput, FileQuestion, Film, FolderInput, Heart, Image as ImageIcon, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -24,6 +24,7 @@ import { ExtractDialog } from "@/components/extract-dialog";
 import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
+import { PosterPickerDialog } from "@/components/poster-picker-dialog";
 import { RemapDialog } from "@/components/remap-dialog";
 import { StarRating } from "@/components/star-rating";
 import { TrackTitleControl } from "@/components/track-title-control";
@@ -239,6 +240,7 @@ function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; tit
   const [remapOpen, setRemapOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [logWatchOpen, setLogWatchOpen] = useState(false);
+  const [posterOpen, setPosterOpen] = useState(false);
   // While a move is relocating this item's files, everything that mutates the item or reads its files is
   // locked (the API rejects it with a 409 anyway) — only the provider-side metadata refresh stays usable.
   const moving = useActiveMove(id) !== undefined;
@@ -327,6 +329,12 @@ function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; tit
                   Refresh media data
                 </DropdownMenuItem>
               )}
+              {/* The artwork ranking prefers a poster that carries a title, but TMDb does not always have
+                  one — this is where the operator overrides it for a title that came out ambiguous. */}
+              <DropdownMenuItem onClick={() => setPosterOpen(true)}>
+                <ImageIcon />
+                Choose poster…
+              </DropdownMenuItem>
               {/* Series are corrected per episode (in the episode list), not at the series level. */}
               {kind !== "Series" && (
                 <DropdownMenuItem disabled={moving} onClick={() => setRemapOpen(true)}>
@@ -377,6 +385,8 @@ function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; tit
               setConfirmOpen(false);
             }}
           />
+
+          <PosterPickerDialog itemId={id} title={title} open={posterOpen} onOpenChange={setPosterOpen} />
 
           <RemapDialog
             itemId={id}
