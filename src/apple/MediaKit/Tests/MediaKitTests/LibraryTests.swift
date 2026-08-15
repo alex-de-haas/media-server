@@ -211,6 +211,40 @@ struct ServerSessionTests {
     }
 }
 
+@Suite("Which stream is the film")
+struct TitleVideoTests {
+    private func version(_ codecs: [String]) -> TitleVersion {
+        TitleVersion(
+            id: "s", versionName: nil, container: "mkv", sizeBytes: 1, durationSeconds: 1,
+            videos: codecs.enumerated().map { index, codec in
+                TitleTrack(id: "v\(index)", label: codec, language: nil, codec: codec, isExternal: false)
+            },
+            audio: [], subtitles: [])
+    }
+
+    @Test("A cover listed after the picture is not the picture")
+    func coverSecond() {
+        #expect(version(["hevc", "mjpeg"]).video?.codec == "hevc")
+    }
+
+    @Test("A cover listed before the picture is not the picture either")
+    func coverFirst() {
+        // The case that matters: taking the first would disagree with what the server judges, and the
+        // two disagreeing about what the film is was the whole defect.
+        #expect(version(["mjpeg", "hevc"]).video?.codec == "hevc")
+    }
+
+    @Test("A file whose only video is a still says so rather than claiming none")
+    func onlyAStill() {
+        #expect(version(["png"]).video?.codec == "png")
+    }
+
+    @Test("A source with no video has no film")
+    func noVideo() {
+        #expect(version([]).video == nil)
+    }
+}
+
 @Suite("Reading the library")
 @MainActor
 struct LibraryStoreTests {

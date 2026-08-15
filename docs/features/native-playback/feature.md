@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-08-08
+Updated: 2026-08-15
 
 ## Description
 
@@ -139,18 +139,16 @@ everywhere else on this surface.
 ## Which stream is the picture
 
 A file can carry a cover image the muxer never flagged as attached art, and this library holds
-such files — a 33.7 GB HEVC remux with an `mjpeg` still beside it. In the database that cover
-is a video stream in every way that can be seen: same type, its own index, a codec.
+such files — a 33.7 GB HEVC remux with an `mjpeg` still beside it. In the database that cover is
+a video stream in every way that can be seen: same type, its own index, a codec.
 
-So "the first video track" has to mean the same thing everywhere, and for a while it meant
-three different things. The detail projection ordered by index. The remux path took the first
-track it could describe, having learned about cover art during the spike. The resolver did
-neither — an unordered `FirstOrDefault` — and against production it judged the `mjpeg`, then
-refused a perfectly playable film with `unsupported_video_codec`.
+**The picture is the first video stream by index that is not a still image**, and when every
+video stream is a still, the first of them: such a file is broken either way, and a reason beats
+pretending it has no picture.
 
-It now orders by index and skips still-image codecs, falling back to the first video track when
-every one of them is a still: a file like that is broken either way, and a reason beats
-pretending it has no picture at all.
+The rule is stated in three places and has to mean the same thing in all of them, or two
+surfaces disagree about what the film is — the detail projection a client is shown, the resolver
+that judges what can be played, and the remux path that writes the sample entry.
 
 ## Testing Expectations
 

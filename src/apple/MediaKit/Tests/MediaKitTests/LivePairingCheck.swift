@@ -218,8 +218,11 @@ struct LivePairingCheck {
             // Not a client failure: the reasons above are the server's answer, and a library can hold a
             // copy nothing here can decode. But it is not a success either, and saying so is the whole
             // point of this file.
+            // Recorded, not merely printed. Returning quietly leaves the run green, which is the same
+            // false success this file has now produced twice in different disguises.
             say("")
             say("⚠️  pairing, browsing and detail work — but nothing here would play, for the reasons above")
+            Issue.record("nothing in the library would play")
             return
         }
 

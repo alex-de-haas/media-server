@@ -19,14 +19,24 @@ public struct TitleVersion: Identifiable, Equatable, Sendable {
     /// correct answer about a disc rip from a bug in the negotiation, and neither could I.
     public let videos: [TitleTrack]
 
-    /// The one that is actually the film.
-    public var video: TitleTrack? { videos.first }
+    /// The one that is actually the film: the first that is not a still image.
+    ///
+    /// The same rule the server applies when it decides what to judge, because a cover can sit at a
+    /// lower index than the picture and then the two would disagree about the film — which is the exact
+    /// case this was written for.
+    public var video: TitleTrack? {
+        videos.first { !TitleTrack.stillImages.contains(($0.codec ?? "").lowercased()) } ?? videos.first
+    }
 
     public let audio: [TitleTrack]
     public let subtitles: [TitleTrack]
 }
 
 public struct TitleTrack: Identifiable, Equatable, Sendable {
+    /// Codecs that are a picture rather than a film — cover art the muxer never flagged as attached.
+    /// Kept in step with the server's own list; the two answering differently is the defect.
+    static let stillImages: Set<String> = ["mjpeg", "png", "bmp", "gif", "webp"]
+
     public let id: String
     public let label: String
     public let language: String?
