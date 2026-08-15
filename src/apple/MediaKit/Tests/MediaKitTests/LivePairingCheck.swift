@@ -163,9 +163,23 @@ struct LivePairingCheck {
         // number worth reading first.
         say("  userData: \(started) started, \(finished) watched")
 
-        // Prefer one with a poster, so the artwork check below is actually exercised — but a library
+        // A named title when one is asked for, because the interesting questions are usually about a
+        // particular file — the one with nine subtitle tracks, the one on the spinning disk.
+        let wanted = ProcessInfo.processInfo.environment["MEDIASERVER_LIVE_TITLE"]
+        let named = wanted.flatMap { name in
+            library.movies.first { $0.title.localizedCaseInsensitiveContains(name) }
+                ?? library.series.first { $0.title.localizedCaseInsensitiveContains(name) }
+        }
+
+        if let wanted, named == nil {
+            Issue.record("no title matching \(wanted) in this library")
+            return
+        }
+
+        // Otherwise prefer one with a poster, so the artwork check is actually exercised — but a library
         // where nothing has one is not a failure, and the harness has to know the difference.
-        guard let sample = library.movies.first(where: { $0.resumeSeconds > 0 && $0.hasArtwork })
+        guard let sample = named
+            ?? library.movies.first(where: { $0.resumeSeconds > 0 && $0.hasArtwork })
             ?? library.movies.first(where: \.hasArtwork)
             ?? library.movies.first
         else {
