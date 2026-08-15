@@ -9,10 +9,15 @@ namespace MediaServer.Api.Tests.Remux;
 /// </summary>
 public sealed class RemuxHeaderCacheTests
 {
-    private static RemuxHeaderCache Cache() => new(NullLogger<RemuxHeaderCache>.Instance);
+    /// <summary>
+    /// A budget in kilobytes rather than the shipped 512 MB. Eviction is about arithmetic, not about
+    /// size, and asking a parallel test run to hold gigabytes is how a suite becomes flaky.
+    /// </summary>
+    private static RemuxHeaderCache Cache(long budget = 512 * 1024) =>
+        new(NullLogger<RemuxHeaderCache>.Instance, budget);
 
-    private static Mp4Synthesizer.Result Header(int megabytes) =>
-        new(new byte[megabytes * 1024 * 1024], [], megabytes * 1024L * 1024, ["hvc1"]);
+    private static Mp4Synthesizer.Result Header(int kilobytes) =>
+        new(new byte[kilobytes * 1024], [], kilobytes * 1024L, ["hvc1"]);
 
     [Fact]
     public void A_header_built_once_is_handed_back()
@@ -50,7 +55,7 @@ public sealed class RemuxHeaderCacheTests
     [Fact]
     public void The_least_recently_watched_is_dropped_first()
     {
-        // 512 MB budget against 200 MB headers: the third forces one out, and it must not be the one
+        // A 512 KB budget against 200 KB headers: the third forces one out, and it must not be the one
         // just used — that would be the film someone is watching.
         var cache = Cache();
         cache.Put("a", Header(200));

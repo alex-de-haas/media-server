@@ -89,7 +89,13 @@ public sealed class RemuxCostBenchmark
             return count;
         }
 
-        public override long Seek(long offset, SeekOrigin origin) => Position = offset;
+        public override long Seek(long offset, SeekOrigin origin) => Position = origin switch
+        {
+            SeekOrigin.Begin => offset,
+            SeekOrigin.Current => _position + offset,
+            SeekOrigin.End => length + offset,
+            _ => offset,
+        };
         public override void Flush() { }
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();

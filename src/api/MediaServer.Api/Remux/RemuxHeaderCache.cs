@@ -20,13 +20,13 @@ namespace MediaServer.Api.Remux;
 /// the audio frame size into the index, which is built in the background precisely so that playback
 /// waits for nothing, is the repair for that — see <c>docs/features/remux-streaming/plan.md</c>.
 /// </summary>
-internal sealed class RemuxHeaderCache(ILogger<RemuxHeaderCache> logger)
+internal sealed class RemuxHeaderCache(ILogger<RemuxHeaderCache> logger, long budget = RemuxHeaderCache.DefaultBudget)
 {
     /// <summary>
     /// Enough for a few dozen films. A header is a couple of megabytes for a heavily-tracked title, and
     /// the machines this runs on have gigabytes to spare — but "no limit" is how a cache becomes a leak.
     /// </summary>
-    private const long Budget = 512L * 1024 * 1024;
+    internal const long DefaultBudget = 512L * 1024 * 1024;
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Entry> _entries = [];
@@ -72,7 +72,7 @@ internal sealed class RemuxHeaderCache(ILogger<RemuxHeaderCache> logger)
     /// <summary>Least recently used first, which for this is least recently watched.</summary>
     private void Evict()
     {
-        while (_held > Budget && _entries.Count > 1)
+        while (_held > budget && _entries.Count > 1)
         {
             var oldest = _entries.MinBy(entry => entry.Value.Used);
             _entries.Remove(oldest.Key);
