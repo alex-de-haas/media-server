@@ -15,6 +15,4 @@ internal sealed class EmptyShelf : IRecommendationShelf
 {
     public Task<IReadOnlyList<MediaItem>> GetAsync(int appUserId, int? limit, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<MediaItem>>([]);
-
-    public Task<bool> AnyAsync(int appUserId, CancellationToken cancellationToken) => Task.FromResult(false);
 }

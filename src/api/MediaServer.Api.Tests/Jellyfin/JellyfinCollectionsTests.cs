@@ -27,7 +27,7 @@ public sealed class JellyfinCollectionsTests : IDisposable
         var hosty = new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = Path.GetTempPath() };
         var server = new JellyfinServerContext(hosty, _settings);
         _library = new JellyfinLibraryService(
-            _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()),
+            _db.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(_db.Create()), new JellyfinShelfArtwork(_db.Create(), new EmptyShelf()),
             new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), new EmptyShelf(), new UserDataService(_db.Create(), TimeProvider.System), _settings);
         Seed();
     }
@@ -67,10 +67,12 @@ public sealed class JellyfinCollectionsTests : IDisposable
         Assert.Equal("boxsets", boxset.CollectionType);
         Assert.True(boxset.IsFolder);
         Assert.Equal(JellyfinIds.CollectionsView(), boxset.ParentId);
-        Assert.Equal(2, boxset.ChildCount);
+        Assert.Equal(4, boxset.ChildCount);
         // The BoxSet advertises the collection's own poster.
         Assert.NotNull(boxset.ImageTags);
         Assert.True(boxset.ImageTags!.ContainsKey("Primary"));
+        // And tells a client that sorts for itself to sort the franchise the way it was released.
+        Assert.Equal("PremiereDate", boxset.DisplayOrder);
     }
 
     [Fact]
@@ -79,9 +81,48 @@ public sealed class JellyfinCollectionsTests : IDisposable
         var result = await _library.ListItemsAsync(
             new JellyfinItemsQuery { ParentId = JellyfinIds.Collection(_franchiseId) }, appUserId: null, CancellationToken.None);
 
-        Assert.Equal(2, result.Items.Count);
+        Assert.Equal(4, result.Items.Count);
         Assert.All(result.Items, item => Assert.Equal("Movie", item.Type));
         Assert.Contains(result.Items, item => item.Id == _firstMoviePublicId);
+    }
+
+    [Fact]
+    public async Task Browsing_a_boxset_orders_its_members_by_release_year()
+    {
+        // A franchise is watched in release order, and these titles are named so that the alphabet
+        // disagrees with it: sorted by name, "The Return of the King" would come second.
+        var result = await _library.ListItemsAsync(
+            new JellyfinItemsQuery { ParentId = JellyfinIds.Collection(_franchiseId) }, appUserId: null, CancellationToken.None);
+
+        Assert.Equal(
+            ["The Fellowship of the Ring", "The Two Towers", "The Return of the King", "The Hunt for Gollum"],
+            result.Items.Select(item => item.Name));
+    }
+
+    [Fact]
+    public async Task A_member_whose_year_is_only_in_its_metadata_still_sorts_by_it()
+    {
+        // "The Return of the King" carries no MediaItem.Year — its year comes from the metadata record,
+        // exactly as the ProductionYear the client renders does. Sorting must read the same value, or the
+        // list would contradict the years printed on it.
+        var result = await _library.ListItemsAsync(
+            new JellyfinItemsQuery { ParentId = JellyfinIds.Collection(_franchiseId) }, appUserId: null, CancellationToken.None);
+
+        var returnOfTheKing = Assert.Single(result.Items, item => item.Name == "The Return of the King");
+        Assert.Equal(2003, returnOfTheKing.ProductionYear);
+        Assert.Equal(2, result.Items.ToList().IndexOf(returnOfTheKing));
+    }
+
+    [Fact]
+    public async Task Catalog_listings_are_still_ordered_by_title()
+    {
+        // Chronology is a BoxSet rule, not a library-wide one: the movie catalog itself stays alphabetical.
+        var result = await _library.ListItemsAsync(
+            new JellyfinItemsQuery { ParentId = JellyfinIds.Catalog(_movieCatalogId) }, appUserId: null, CancellationToken.None);
+
+        Assert.Equal(
+            result.Items.Select(item => item.Name).OrderBy(name => name, StringComparer.CurrentCulture),
+            result.Items.Select(item => item.Name));
     }
 
     [Fact]
@@ -92,7 +133,7 @@ public sealed class JellyfinCollectionsTests : IDisposable
         var hosty = new HostyOptions { AppId = "com.haas.media-server", CoreOrigin = "http://localhost:3001", AppDataDir = Path.GetTempPath() };
         var server = new JellyfinServerContext(hosty, _settings);
         var library = new JellyfinLibraryService(
-            bare.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(bare.Create()),
+            bare.Create(), new JellyfinItemMapper(server), new JellyfinCatalogArtwork(bare.Create()), new JellyfinShelfArtwork(bare.Create(), new EmptyShelf()),
             new JellyfinCollectionService(bare.Create()), new JellyfinPersonService(bare.Create()), new EmptyShelf(),
             new UserDataService(bare.Create(), TimeProvider.System), _settings);
 
@@ -127,7 +168,7 @@ public sealed class JellyfinCollectionsTests : IDisposable
         _movieCatalogId = catalog.Id;
         context.Catalogs.Add(catalog);
 
-        // A qualifying franchise (two owned movies) with its own poster.
+        // A qualifying franchise with its own poster.
         var franchise = new MovieCollection
         {
             Id = Guid.NewGuid(),
@@ -147,16 +188,33 @@ public sealed class JellyfinCollectionsTests : IDisposable
         context.MovieCollections.AddRange(franchise, solo);
 
         var first = NewMovie(catalog.Id, "The Fellowship of the Ring", 2001, franchise.Id, now);
+        // No Year of its own: its 2003 comes from the metadata record below, like the rendered
+        // ProductionYear does.
+        var third = NewMovie(catalog.Id, "The Return of the King", null, franchise.Id, now);
         _firstMoviePublicId = first.PublicId!;
         context.MediaItems.AddRange(
             first,
             NewMovie(catalog.Id, "The Two Towers", 2002, franchise.Id, now),
+            third,
+            // Nobody knows when this one came out; it must not head the franchise because of it.
+            NewMovie(catalog.Id, "The Hunt for Gollum", null, franchise.Id, now),
             NewMovie(catalog.Id, "Solo Movie", 2010, solo.Id, now));
+
+        context.MetadataRecords.Add(new MetadataRecord
+        {
+            Id = Guid.NewGuid(),
+            MediaItemId = third.Id,
+            Provider = "tmdb",
+            Language = "en-US",
+            Title = "The Return of the King",
+            ReleaseDate = new DateTimeOffset(2003, 12, 17, 0, 0, 0, TimeSpan.Zero),
+            FetchedAt = now,
+        });
 
         context.SaveChanges();
     }
 
-    private static MediaItem NewMovie(Guid catalogId, string title, int year, Guid collectionId, DateTimeOffset now) => new()
+    private static MediaItem NewMovie(Guid catalogId, string title, int? year, Guid collectionId, DateTimeOffset now) => new()
     {
         Id = Guid.NewGuid(),
         PublicId = Guid.NewGuid().ToString("N"),

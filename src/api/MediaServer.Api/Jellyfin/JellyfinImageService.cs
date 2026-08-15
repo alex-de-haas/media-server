@@ -14,6 +14,7 @@ public sealed record ImagePayload(byte[] Content, string ContentType, string Tag
 public sealed class JellyfinImageService(
     MediaServerDbContext database,
     JellyfinCatalogArtwork catalogArtwork,
+    JellyfinShelfArtwork shelfArtwork,
     JellyfinCollectionService collections,
     JellyfinPersonService people,
     IHttpClientFactory httpFactory,
@@ -125,9 +126,47 @@ public sealed class JellyfinImageService(
     private const string PrimarySlot = "primary";
     private const string BackdropSlot = "backdrop";
 
+    /// <summary>
+    /// The artwork behind a client-facing id: an item's own image, or the one a folder borrows — a catalog's
+    /// latest backdrop, a BoxSet's collection poster, a person's photo, or a synthetic view's tile.
+    /// </summary>
+    /// <param name="appUserId">
+    /// The acting user, needed only by the Recommended view: its tile is that user's own shelf. Null for the
+    /// unauthenticated and for surfaces that only ever address real items.
+    /// </param>
     public async Task<ImagePayload?> GetImageAsync(
-        string itemPublicId, ImageType type, string? tag, int index, CancellationToken cancellationToken)
+        string itemPublicId, ImageType type, string? tag, int index, int? appUserId, CancellationToken cancellationToken)
     {
+        // The synthetic views resolve first: neither id is a media item or a catalog, and both borrow their
+        // artwork from something else in the library — a representative franchise, the shelf's top title.
+        if (JellyfinCollectionService.IsView(itemPublicId))
+        {
+            var cover = await collections.CoverAsync(cancellationToken);
+            // Always the backdrop slot, whichever type was asked for: this is a wide library tile, and the
+            // slot falls back to the collection's poster when it has no backdrop of its own.
+            return cover is null ? null : await GetCollectionImageAsync(cover, ImageType.Backdrop, cancellationToken);
+        }
+
+        if (JellyfinLibraryService.IsRecommendationsView(itemPublicId))
+        {
+            // The advertised tag names the exact backdrop, so it wins over re-deriving one from the
+            // caller's own shelf: an admin listing another user's views is shown that user's tile rather
+            // than their own, and a tag outliving a shelf rebuild still resolves. Serving a backdrop by
+            // tag exposes nothing new — every one of them is already reachable through its own item id.
+            var backdrop = await BackdropByTagAsync(tag, cancellationToken);
+            if (backdrop is null)
+            {
+                if (appUserId is not { } userId)
+                {
+                    return null;
+                }
+
+                backdrop = await shelfArtwork.BackdropAsync(userId, cancellationToken);
+            }
+
+            return backdrop is null ? null : await ServeAssetAsync(backdrop, cancellationToken);
+        }
+
         var asset = await ResolveAssetAsync(itemPublicId, type, tag, index, cancellationToken);
         if (asset is null)
         {
@@ -138,6 +177,19 @@ public sealed class JellyfinImageService(
                 ?? await GetPersonImageAsync(itemPublicId, type, cancellationToken);
         }
 
+        return await ServeAssetAsync(asset, cancellationToken);
+    }
+
+    /// <summary>The backdrop an image tag names, for the views that advertise one they do not own.</summary>
+    private async Task<ImageAsset?> BackdropByTagAsync(string? tag, CancellationToken cancellationToken) =>
+        tag is { Length: > 0 }
+            ? await database.ImageAssets.AsNoTracking()
+                .FirstOrDefaultAsync(image => image.ImageType == ImageType.Backdrop && image.Tag == tag, cancellationToken)
+            : null;
+
+    /// <summary>Serves a stored image asset from its cached copy, fetching and caching it on first request.</summary>
+    private async Task<ImagePayload?> ServeAssetAsync(ImageAsset asset, CancellationToken cancellationToken)
+    {
         if (asset.LocalPath is { Length: > 0 } cached && File.Exists(cached))
         {
             var bytes = await File.ReadAllBytesAsync(cached, cancellationToken);
@@ -182,11 +234,16 @@ public sealed class JellyfinImageService(
     private async Task<ImagePayload?> GetCollectionImageAsync(string itemPublicId, ImageType type, CancellationToken cancellationToken)
     {
         var collection = await collections.ResolveAsync(itemPublicId, cancellationToken);
-        if (collection is null)
-        {
-            return null;
-        }
+        return collection is null ? null : await GetCollectionImageAsync(collection, type, cancellationToken);
+    }
 
+    /// <summary>
+    /// Serves the artwork of a collection that is already resolved — a BoxSet's own, or the cover a
+    /// <see cref="JellyfinCollectionService.CoverAsync">Collections view</see> borrows.
+    /// </summary>
+    private async Task<ImagePayload?> GetCollectionImageAsync(
+        MovieCollection collection, ImageType type, CancellationToken cancellationToken)
+    {
         var remote = type == ImageType.Backdrop ? collection.BackdropUrl ?? collection.PosterUrl : collection.PosterUrl;
         if (string.IsNullOrEmpty(remote))
         {
