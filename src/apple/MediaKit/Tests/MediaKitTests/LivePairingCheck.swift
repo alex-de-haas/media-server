@@ -163,9 +163,33 @@ struct LivePairingCheck {
         // number worth reading first.
         say("  userData: \(started) started, \(finished) watched")
 
-        // Prefer one with a poster, so the artwork check below is actually exercised — but a library
+        // A named title when one is asked for, because the interesting questions are usually about a
+        // particular file — the one with nine subtitle tracks, the one on the spinning disk.
+        // Blank counts as absent: `contains("")` matches everything, so an env var left empty would
+        // silently pick the first film and answer a question nobody asked.
+        let wanted = ProcessInfo.processInfo.environment["MEDIASERVER_LIVE_TITLE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilWhenEmpty
+
+        // Films only. A series carries no media sources of its own — they hang off its episodes, which
+        // this feed does not list — so matching one would end in "nothing would play" about a server
+        // behaving perfectly.
+        let named = wanted.flatMap { name in
+            library.movies.first { $0.title.localizedCaseInsensitiveContains(name) }
+        }
+
+        if let wanted, named == nil {
+            let asSeries = library.series.contains { $0.title.localizedCaseInsensitiveContains(wanted) }
+            Issue.record(asSeries
+                ? "\(wanted) is a series; it has no media sources of its own, so name a film"
+                : "no film matching \(wanted) in this library")
+            return
+        }
+
+        // Otherwise prefer one with a poster, so the artwork check is actually exercised — but a library
         // where nothing has one is not a failure, and the harness has to know the difference.
-        guard let sample = library.movies.first(where: { $0.resumeSeconds > 0 && $0.hasArtwork })
+        guard let sample = named
+            ?? library.movies.first(where: { $0.resumeSeconds > 0 && $0.hasArtwork })
             ?? library.movies.first(where: \.hasArtwork)
             ?? library.movies.first
         else {
@@ -281,4 +305,9 @@ struct LivePairingCheck {
         say("")
         say("✅ pairing, browsing, detail and playback negotiation all work against \(bootstrap.serverName)")
     }
+}
+
+private extension String {
+    /// A name that is only whitespace is not a name.
+    var nilWhenEmpty: String? { isEmpty ? nil : self }
 }
