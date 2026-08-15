@@ -136,6 +136,22 @@ Items are addressed by their internal id and resolved to the public one the
 reporting path is keyed by; unpublished and tombstoned items are refused, as
 everywhere else on this surface.
 
+## Which stream is the picture
+
+A file can carry a cover image the muxer never flagged as attached art, and this library holds
+such files — a 33.7 GB HEVC remux with an `mjpeg` still beside it. In the database that cover
+is a video stream in every way that can be seen: same type, its own index, a codec.
+
+So "the first video track" has to mean the same thing everywhere, and for a while it meant
+three different things. The detail projection ordered by index. The remux path took the first
+track it could describe, having learned about cover art during the spike. The resolver did
+neither — an unordered `FirstOrDefault` — and against production it judged the `mjpeg`, then
+refused a perfectly playable film with `unsupported_video_codec`.
+
+It now orders by index and skips still-image codecs, falling back to the first video track when
+every one of them is a still: a file like that is broken either way, and a reason beats
+pretending it has no picture at all.
+
 ## Testing Expectations
 
 Backend tests use xUnit and Imposter. Required coverage:

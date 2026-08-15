@@ -178,7 +178,9 @@ struct LivePairingCheck {
         say("  \(detail.versions.count) version(s), runtime \(Int((detail.runtimeSeconds ?? 0) / 60)) min")
         for version in detail.versions {
             say("    \(version.versionName ?? version.container.uppercased()) — "
-                + "\(version.sizeDescription), \(version.audio.count) audio, \(version.subtitles.count) subtitle")
+                + "\(version.sizeDescription), "
+                + "video=[\(version.videos.map { $0.codec ?? "?" }.joined(separator: ", "))], "
+                + "\(version.audio.count) audio, \(version.subtitles.count) subtitle")
             for track in version.audio where track.isExternal {
                 say("      beside the file: \(track.label)")
             }
@@ -207,9 +209,47 @@ struct LivePairingCheck {
             case .play(let stream):
                 say("    \(stream.decision.rawValue): signalling \(stream.signalling ?? "none"), "
                     + "source is \(stream.sourceDynamicRange ?? "unstated")")
-            case .refused(let refusal):
+            case .refused(let refusal, _):
                 say("    refused: \(refusal)")
             }
+        }
+
+        guard case .play(let stream)? = plans.first(where: \.isPlayable) else {
+            // Not a client failure: the reasons above are the server's answer, and a library can hold a
+            // copy nothing here can decode. But it is not a success either, and saying so is the whole
+            // point of this file.
+            say("")
+            say("⚠️  pairing, browsing and detail work — but nothing here would play, for the reasons above")
+            return
+        }
+
+        // The strongest check available without a television. AVFoundation opens with a two-byte range
+        // probe purely to learn whether the server honours ranges, and stops before showing anything if
+        // it does not — so issue exactly that, and hold it to what the spike measured.
+        say("→ range probe on the stream URL")
+        var probe = URLRequest(url: stream.url)
+        probe.setValue("bytes=0-1", forHTTPHeaderField: "Range")
+        let (head, response) = try await URLSession.shared.data(for: probe)
+
+        guard let http = response as? HTTPURLResponse else {
+            Issue.record("the stream URL did not answer over HTTP")
+            return
+        }
+
+        let range = http.value(forHTTPHeaderField: "Content-Range") ?? "«no Content-Range»"
+        say("  HTTP \(http.statusCode), \(head.count) bytes, \(range)")
+
+        guard http.statusCode == 206 else {
+            // 206 or nothing plays: a 200 means ranges were ignored, and AVFoundation refuses that after
+            // the two-byte probe rather than falling back to a whole-file read.
+            Issue.record("expected 206 Partial Content, got \(http.statusCode)")
+            return
+        }
+
+        guard range.contains("/"), !range.hasSuffix("/*") else {
+            // The total must be stated. `*` is legal HTTP and AVFoundation rejects it outright.
+            Issue.record("the total length was not declared: \(range)")
+            return
         }
 
         say("")

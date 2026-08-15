@@ -10,6 +10,18 @@ public struct TitleVersion: Identifiable, Equatable, Sendable {
     public let container: String
     public let sizeBytes: Int64
     public let durationSeconds: Double
+
+    /// Every video stream, in the file's own order.
+    ///
+    /// All of them rather than the first, because a file can carry a cover image the muxer never flagged
+    /// as attached art, and it is a video stream in every way a database can see. Kept at all because a
+    /// refusal saying "unsupported video codec" is unactionable without it — a viewer cannot tell a
+    /// correct answer about a disc rip from a bug in the negotiation, and neither could I.
+    public let videos: [TitleTrack]
+
+    /// The one that is actually the film.
+    public var video: TitleTrack? { videos.first }
+
     public let audio: [TitleTrack]
     public let subtitles: [TitleTrack]
 }
@@ -89,6 +101,7 @@ extension TitleVersion {
         self.durationSeconds = Double(dto.durationTicks) / 10_000_000
 
         let streams = dto.streams ?? []
+        self.videos = streams.filter { $0._type.lowercased() == "video" }.map(TitleTrack.init)
         self.audio = streams.filter { $0._type.lowercased() == "audio" }.map(TitleTrack.init)
         self.subtitles = streams.filter { $0._type.lowercased() == "subtitle" }.map(TitleTrack.init)
     }
