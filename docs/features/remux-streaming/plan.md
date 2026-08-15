@@ -549,11 +549,10 @@ Two operational facts worth keeping, both of which cost time to find:
       carry the same number of samples — the last answered over every frame rather than
       sixty-four probes. Format version 5; indexes grow to about 9 MB for a thirteen-track
       film.
-- [ ] **Keep the parsed index in memory.** What is left of a cold request once the source
-      reads are gone: a 9 MB index read and decoded per request, then the header laid out.
-      Half a second on a fast disc, measured. The header cache already covers repeat
-      requests for the same tracks; this covers the first one, and a viewer switching audio
-      track mid-film — which is a different key and therefore a fresh build today.
+- [x] **Keep the parsed index in memory.** Done 2026-08-15, and it was the larger of the
+      two by a distance: warm first-byte went 83 ms to **2.4 ms**. The header cache alone had
+      not moved it, because `store.Load` still re-read and decoded nine megabytes per
+      request — which only showed up once the cold figure stopped being the thing measured.
 - [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
       single-byte-encoded file comes out with its accents wrong.
 - [x] **AAC**, shipped 2026-08-09 with `mp4a` and an `esds`. The config is carried from

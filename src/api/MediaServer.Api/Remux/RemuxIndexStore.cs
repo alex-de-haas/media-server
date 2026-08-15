@@ -98,8 +98,54 @@ public sealed class RemuxIndexStore(string appCacheDirectory, ILogger<RemuxIndex
     /// from, or it cannot be read. Every one of those is answered the same way — rebuild — so they are not
     /// distinguished here.
     /// </summary>
+    /// <summary>
+    /// The index for a source, from memory when it has been read before.
+    ///
+    /// A parsed index is immutable once loaded and every request for the same source wants the same
+    /// one, so re-reading and re-decoding nine megabytes per byte-range request was work with no
+    /// answer of its own. Held under the same stamp the file carries, so a source that was replaced or
+    /// re-encoded reads its new index rather than the one in memory.
+    /// </summary>
+    /// <summary>
+    /// Roughly a dozen feature films. An index is a few megabytes and a heavily-tracked one is ten, so
+    /// this is tens of megabytes on a machine that serves gigabyte files — but "keep everything" is how
+    /// a cache becomes a leak, and a library has hundreds of titles.
+    /// </summary>
+    private const long IndexBudget = 256L * 1024 * 1024;
+
+    private sealed record Held(MatroskaIndex Index, RemuxIndexFormat.Stamp Stamp, long Bytes)
+    {
+        public long Used;
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, Held> _loaded = new();
+    private long _tick;
+
+    private void Hold(Guid mediaSourceId, MatroskaIndex index, RemuxIndexFormat.Stamp stamp, long bytes)
+    {
+        _loaded[mediaSourceId] = new Held(index, stamp, bytes) { Used = Interlocked.Increment(ref _tick) };
+
+        while (_loaded.Values.Sum(entry => entry.Bytes) > IndexBudget && _loaded.Count > 1)
+        {
+            // Least recently used, which for this is least recently watched.
+            var oldest = _loaded.MinBy(entry => Interlocked.Read(ref entry.Value.Used));
+            if (!_loaded.TryRemove(oldest.Key, out _))
+            {
+                break;
+            }
+        }
+    }
+
     internal MatroskaIndex? Load(Guid mediaSourceId, string sourcePath)
     {
+        var file = new FileInfo(sourcePath);
+
+        if (_loaded.TryGetValue(mediaSourceId, out var cached) && cached.Stamp.Matches(file))
+        {
+            cached.Used = Interlocked.Increment(ref _tick);
+            return cached.Index;
+        }
+
         var path = PathFor(mediaSourceId);
         if (!File.Exists(path))
         {
@@ -114,7 +160,13 @@ public sealed class RemuxIndexStore(string appCacheDirectory, ILogger<RemuxIndex
                 return null;
             }
 
-            return read.Stamp.Matches(new FileInfo(sourcePath)) ? read.Index : null;
+            if (!read.Stamp.Matches(file))
+            {
+                return null;
+            }
+
+            Hold(mediaSourceId, read.Index, read.Stamp, new FileInfo(path).Length);
+            return read.Index;
         }
         catch (IOException exception)
         {
@@ -145,6 +197,11 @@ public sealed class RemuxIndexStore(string appCacheDirectory, ILogger<RemuxIndex
 
     internal void Save(Guid mediaSourceId, string sourcePath, MatroskaIndex index)
     {
+        // A rebuilt index would be caught by the stamp anyway, since the source it describes has
+        // changed — but leaving the old one in memory to be rejected later is a trap for whoever reads
+        // this next.
+        _loaded.TryRemove(mediaSourceId, out _);
+
         Directory.CreateDirectory(_directory);
         var file = new FileInfo(sourcePath);
         var stamp = new RemuxIndexFormat.Stamp(file.Length, file.LastWriteTimeUtc);
@@ -163,6 +220,8 @@ public sealed class RemuxIndexStore(string appCacheDirectory, ILogger<RemuxIndex
 
     internal void Delete(Guid mediaSourceId)
     {
+        _loaded.TryRemove(mediaSourceId, out _);
+
         foreach (var path in new[] { PathFor(mediaSourceId), PathFor(mediaSourceId) + ".partial" })
         {
             try

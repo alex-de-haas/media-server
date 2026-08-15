@@ -72,10 +72,17 @@ Under a Core that predates the contract the store falls back to the app data
 directory, which is the old layout; a one-time startup migration moves files from
 `data/remux-index/` into the cache when the two differ.
 
+A parsed index is held in memory once read — a few dozen films' worth, least recently used evicted
+first — under the same stamp the file carries, so a source that was replaced reads its new index
+rather than the one remembered. Re-reading and decoding nine megabytes on every byte-range request
+was work with no answer of its own: every request for a source wants the same index, and a player
+makes one request after another for as long as it plays. Warm requests went from 83 ms to 2.4 ms.
+
 The file stores the steps rather than the values. Within a track the timestamps and
 offsets both climb in small repetitive increments, so variable-length deltas take a
 sample from about 21 bytes to **between 7 and 13**. Loading one takes a fraction of a
-second, so it is read per request; what is kept between requests is the *built header*, for the reason below.
+second, so reading one is not expensive — it was simply being done far more often than it had any reason to
+be. Both the parsed index and the built header are now kept between requests.
 
 It is a range rather than a number, and the reason is worth knowing: between two
 consecutive frames of one track lie all the other tracks' data for that stretch of the
