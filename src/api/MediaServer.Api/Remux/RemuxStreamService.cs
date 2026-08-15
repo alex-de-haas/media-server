@@ -31,10 +31,11 @@ internal enum RemuxRefusal
 /// wrapped in a second <c>mdat</c> — an external dub is a track like any other once its samples can be
 /// pointed at, which is the thing no other client of this library can do.
 /// </summary>
-public sealed class RemuxStreamService(
+internal sealed class RemuxStreamService(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
-    RemuxIndexStore store)
+    RemuxIndexStore store,
+    RemuxHeaderCache headers)
 {
     private sealed record StreamRow(
         Guid Id, StreamType Type, int Index, bool IsExternal, string? ExternalPath, string? Codec,
@@ -205,13 +206,6 @@ public sealed class RemuxStreamService(
                     ? SubtitleDefault.Embedded
                     : SubtitleDefault.None;
 
-            var built = Mp4Synthesizer.Build(inputs, tracks, signalling, externalText, subtitleDefault);
-            if (built is null)
-            {
-                await DisposeAllAsync(opened);
-                return (null, RemuxRefusal.NotPackageable);
-            }
-
             var file = new FileInfo(absolute);
             // The tag covers everything the answer is made of: the source, the tracks chosen, the
             // signalling asked for, and every sidecar carried with it. A viewer switching dub gets a
@@ -238,7 +232,24 @@ public sealed class RemuxStreamService(
                 }
             }
 
-            var etag = new EntityTagHeaderValue($"\"{validator}\"");
+            var key = validator.ToString();
+            var etag = new EntityTagHeaderValue($"\"{key}\"");
+
+            // The same key the tag uses, so anything that changes the body changes the entry. Built once
+            // and kept: the synthesis itself is milliseconds, but it reads thousands of scattered places
+            // in the film to do it, and a player asks for range after range.
+            var built = headers.Get(key);
+            if (built is null)
+            {
+                built = Mp4Synthesizer.Build(inputs, tracks, signalling, externalText, subtitleDefault);
+                if (built is null)
+                {
+                    await DisposeAllAsync(opened);
+                    return (null, RemuxRefusal.NotPackageable);
+                }
+
+                headers.Put(key, built);
+            }
 
             // The wrapper of every input after the first sits between the files, which is where the
             // sample offsets expect it. Nothing else knows to put it there.

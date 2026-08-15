@@ -47,7 +47,9 @@ public sealed class RemuxStreamServiceTests : IDisposable
         _store = new RemuxIndexStore(_root, NullLogger<RemuxIndexStore>.Instance);
     }
 
-    private RemuxStreamService Service() => new(_database, new CatalogPathSandbox(), _store);
+    // A fresh cache per service, so one test's header is never handed to another's assertion.
+    private RemuxStreamService Service() =>
+        new(_database, new CatalogPathSandbox(), _store, new RemuxHeaderCache(NullLogger<RemuxHeaderCache>.Instance));
 
     private static byte[] Ac3Frame(int size) =>
         [0x0B, 0x77, 0x00, 0x00, 0x14, 0x40, 0xEB, .. new byte[Math.Max(0, size - 7)]];

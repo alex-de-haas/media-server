@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-05
-Updated: 2026-08-10
+Updated: 2026-08-15
 
 > Part of the [Apple client](../apple-client/plan.md) epic, and the last server
 > piece before a client can play the library.
@@ -544,6 +544,14 @@ Two operational facts worth keeping, both of which cost time to find:
       A setting — by language, or by count, or simply "only what a viewer has ever
       asked for" — would let that be tuned per instance instead of assumed. Raised
       2026-08-10; not designed.
+- [ ] **Take the source reads out of synthesis.** The header cache stops them being paid
+      repeatedly, but the first request for a title still costs thousands of scattered reads:
+      every subtitle cue, because text is rewritten rather than referenced, and sixty-four
+      probes per E-AC-3 track to confirm the frame size is constant. All of it is fixed at
+      walk time and none of it changes afterwards, so it belongs in the index — which is
+      built in the background exactly so that playback waits for nothing. Costs an index
+      format bump and a full re-walk; buys a first request as cheap as the rest. Raised
+      2026-08-15 from a production measurement.
 - [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
       single-byte-encoded file comes out with its accents wrong.
 - [x] **AAC**, shipped 2026-08-09 with `mp4a` and an `esds`. The config is carried from

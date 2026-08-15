@@ -282,6 +282,9 @@ builder.Services.AddHostedService<ReconcilerWorker>();
 // directory — persistent but never backed up (falling back to the data directory under an older Core).
 // The worker builds them ahead of any viewer, because a walk costs half a minute on a feature film and
 // nothing should press play into that.
+// One per process, and deliberately not per request: what it holds is expensive to build because the
+// synthesiser reads thousands of scattered places in the film, not because the arithmetic is hard.
+builder.Services.AddSingleton<RemuxHeaderCache>();
 builder.Services.AddSingleton(serviceProvider => new RemuxIndexStore(
     hosty.AppCacheDir, serviceProvider.GetRequiredService<ILogger<RemuxIndexStore>>()));
 builder.Services.AddScoped<RemuxIndexService>();

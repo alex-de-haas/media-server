@@ -239,6 +239,11 @@ struct LivePairingCheck {
         // The strongest check available without a television. AVFoundation opens with a two-byte range
         // probe purely to learn whether the server honours ranges, and stops before showing anything if
         // it does not — so issue exactly that, and hold it to what the spike measured.
+        // The whole URL, token and all. It is a credential, so this goes to the local log a human asked
+        // for and nowhere else — but without it nothing else can be pointed at the same bytes.
+        say("  url: \(stream.url.absoluteString)")
+        say("  signalling: \(stream.signalling ?? "«none»"), decision: \(stream.decision)")
+
         say("→ range probe on the stream URL")
         var probe = URLRequest(url: stream.url)
         probe.setValue("bytes=0-1", forHTTPHeaderField: "Range")
