@@ -87,6 +87,14 @@ internal sealed class IndexedTrack
     public List<string>? CueText { get; set; }
 
     /// <summary>
+    /// Set when a cue was too large to be one, which stops the track being captured at all.
+    ///
+    /// Not persisted: it exists only to keep the walk from half-filling <see cref="CueText"/> after it
+    /// has given up, and a loaded index simply has no cue text for such a track.
+    /// </summary>
+    public bool CuesTooLarge { get; set; }
+
+    /// <summary>
     /// Enough of the track's first access unit to describe it — a sync frame for AC-3, the substream
     /// walk for E-AC-3. Small, and it saves a seek into the film per audio track per request.
     /// </summary>

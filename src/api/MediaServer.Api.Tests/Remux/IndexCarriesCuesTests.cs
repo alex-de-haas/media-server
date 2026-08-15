@@ -137,6 +137,25 @@ public sealed class IndexCarriesCuesTests
     }
 
     [Fact]
+    public void A_cue_too_large_to_be_one_gives_up_on_the_track_rather_than_truncating_it()
+    {
+        // Truncating would be the worst answer: a cut in the middle of a UTF-8 sequence corrupts the
+        // text, and a cue silently missing its end reads as fact. With no stored text the synthesiser
+        // reads the source, which is what it always did.
+        var enormous = new byte[300 * 1024];
+        Array.Fill(enormous, (byte)'x');
+
+        var file = ContainerBuilders.Matroska(
+            ContainerBuilders.Info(400),
+            Tracks(TrackEntry(3, 17, "S_TEXT/UTF8")),
+            Cluster(0,
+                BlockGroup(3, 40, false, 60, Text("Fine")),
+                BlockGroup(3, 200, false, 60, enormous)));
+
+        Assert.Null(Assert.Single(Index(file).Tracks).CueText);
+    }
+
+    [Fact]
     public void An_audio_track_is_read_once_rather_than_once_per_frame()
     {
         // The walk is a header pass. Reading four kilobytes per audio frame turned it into one that

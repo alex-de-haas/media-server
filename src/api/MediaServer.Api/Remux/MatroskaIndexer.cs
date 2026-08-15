@@ -400,6 +400,12 @@ internal static class MatroskaIndexer
     private const int SyncHeader = 16;
 
     /// <summary>
+    /// Generous for a line of dialogue by three orders of magnitude. Its purpose is not to trim anything
+    /// real but to keep a malformed file from being read into memory a sample at a time.
+    /// </summary>
+    private const int MaxCue = 256 * 1024;
+
+    /// <summary>
     /// Takes from a sample the things a header needs and a sample table cannot hold: the text of a
     /// subtitle, the first audio unit, and whether every audio frame carries the same number of samples.
     ///
@@ -411,7 +417,24 @@ internal static class MatroskaIndexer
         switch (track.Kind)
         {
             case IndexedTrackKind.Subtitle when SubtitleText.IsConvertible(track.CodecId):
-                var text = new byte[Math.Min(size, 64 * 1024)];
+                // A line of dialogue is a few hundred bytes. Something far larger is not a subtitle this
+                // understands, and **truncating it would be the worst answer** — a cut in the middle of a
+                // UTF-8 sequence corrupts the text, and a cue silently missing its end reads as fact.
+                // So the whole track stops being captured and synthesis reads the source for it, which
+                // is what it always did.
+                if (size > MaxCue)
+                {
+                    track.CueText = null;
+                    track.CuesTooLarge = true;
+                    break;
+                }
+
+                if (track.CuesTooLarge)
+                {
+                    break;
+                }
+
+                var text = new byte[size];
                 stream.Position = offset;
                 stream.ReadExactly(text);
                 (track.CueText ??= []).Add(SubtitleText.Convert(text, track.CodecId));
