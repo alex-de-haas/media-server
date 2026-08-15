@@ -200,8 +200,18 @@ struct LivePairingCheck {
         }
 
         // 6 — what the server would do if this were a television asking to play
-        say("→ resolve playback for \(sample.title)")
-        let playback = PlaybackService(session: session)
+        //
+        // Stated, not detected. This runs on a Mac, where `presentsHDR` is deliberately false, so a
+        // detected profile asks "what would a Mac with no HDR be offered" — which is a real question and
+        // not the one this client exists to answer. An Apple TV 4K is the device the whole design turns
+        // on, so that is what gets described.
+        struct AppleTV4K: DeviceCapabilities {
+            let decodesDolbyVision = true
+            let presentsHDR = true
+        }
+
+        say("→ resolve playback for \(sample.title), as an Apple TV 4K would ask")
+        let playback = PlaybackService(session: session, device: AppleTV4K())
         let plans = try await playback.plans(for: sample.id)
         say("  \(plans.count) copy(ies)")
         for plan in plans {
