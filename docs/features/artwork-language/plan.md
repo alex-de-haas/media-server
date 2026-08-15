@@ -114,6 +114,12 @@ Within a tier the provider's own order stands (`SortOrder`), which is TMDb's
 vote ordering — so the tier decides the language and the community decides the
 image.
 
+**Untagged means null *or* empty.** TMDb's `iso_639_1` is stored verbatim
+(`TmdbMetadataProvider.cs:164`), and an empty string is preserved rather than
+normalized, so today's `LogoUrl` — which compares against literal `null`
+(`LibraryReadService.cs:547`) — silently misses a neutral image tagged `""` and
+falls through to its unordered last resort. The helper treats both as one tier.
+
 The tiers say three things worth stating plainly:
 
 - **Poster: untagged is last, not second.** This is the whole fix. A titled
@@ -153,6 +159,32 @@ only place they exist:
 Deleting that duplication is part of the deliverable, not a side effect: four
 identical hand-written picks are how the rule came to be missing from all four.
 
+Six of the sites cannot see a language even if they wanted to, because their SQL
+projection drops the column: `LibraryReadService.PostersAsync`,
+`JellyfinCatalogArtwork.GetLatestBackdropTagsAsync`,
+`NativeImageEndpoints.BuildAsync`, `RecommendationFeedService.LocalArtworkAsync`,
+`WatchHistoryCalendarService.PostersAsync` and
+`CollectionReadService.PosterFallbackAsync` each select a narrow tuple.
+Widening those projections is part of the work.
+
+### The mapper and the byte resolver must rank in lockstep
+
+`JellyfinItemMapper` advertises tags and `JellyfinImageService.ResolveAssetAsync`
+serves bytes, and the two order independently today (`JellyfinItemMapper.cs:312`,
+`JellyfinImageService.cs:167`). They must apply the *same* rank, because the
+Jellyfin contract addresses artwork two ways:
+
+- by tag — safe, since `ResolveAssetAsync` looks a tag up before falling back to
+  the index (`JellyfinImageService.cs:172`);
+- by **index** — `/Items/{id}/Images/Backdrop/{n}` indexes into the
+  `BackdropImageTags` list the mapper published (`JellyfinItemMapper.cs:327`), so
+  if only one side re-ranks, `Backdrop/1` serves an image the client was told is
+  `Backdrop/0`.
+
+A single shared rank is what keeps that contract intact, and it is the reason the
+helper exposes the same rule as both an expression and an in-memory comparison
+rather than being applied ad hoc per site.
+
 ### Nothing is re-fetched, re-written, or migrated
 
 `ImageAsset.Language` is already populated for every cached row, so the change is
@@ -168,6 +200,21 @@ catalog, and per-user display language — already named as a later additive cha
 in [metadata/feature.md](../metadata/feature.md) — cannot be served by one baked
 ordinal at all. The read-side helper is the same work done where it can still be
 parameterized.
+
+### What this does not touch
+
+- **Collection and person artwork** have no language axis to rank: a BoxSet's
+  poster is `MovieCollection.PosterUrl` and a person's photo is
+  `Person.ProfileUrl`, both single remote URLs with no `ImageAsset` row
+  (`JellyfinImageService.cs:182-225`). Only `CollectionReadService`'s *fallback*
+  poster — borrowed from a member movie — goes through the chain.
+- **Seasons and episodes** are not enriched by the pipeline
+  (`ProcessingStages.cs:287`), so they normally hold no `ImageAsset` rows at all;
+  the chain is a movie/series concern in practice.
+- **The Apple clients need no change.** They consume the URLs the server hands
+  them (`src/apple/MediaKit/Sources/MediaKit/Library/TitleDetail.swift:101`), so
+  which asset those URLs point at is entirely a server decision — `manifest.json`
+  moves, `MARKETING_VERSION` does not.
 
 ### The operator can pin a poster
 
@@ -199,7 +246,7 @@ Implemented on one branch as one PR, per `AGENTS.md`.
 - [ ] `ImageSelection` in `src/api/MediaServer.Api/Metadata/`: per-role rank
       expressions, in-memory `Pick`, and the shared *best-per-item* `IQueryable`
       extension. Primary-subtag comparison reused from `MetadataLanguage`, not
-      re-derived as a two-character prefix.
+      re-derived as a two-character prefix; `null` and `""` are one untagged tier.
 - [ ] `en` appended unconditionally to `include_image_language` in
       `TmdbMetadataProvider.GetImagesAsync`.
 - [ ] All fourteen selections routed through the helper: `LibraryReadService`
@@ -208,12 +255,17 @@ Implemented on one branch as one PR, per `AGENTS.md`.
       `JellyfinCatalogArtwork` (both backdrop paths), `NativeImageEndpoints.BuildAsync`,
       `RecommendationFeedService`, `WatchHistoryCalendarService`,
       `RemovedTitlesService`, `CollectionReadService.PosterFallbackAsync`.
-- [ ] `NativeImageEndpoints.BuildAsync` projects `Language` and `SortOrder` and
-      orders by them — today it orders by nothing.
+- [ ] The six narrow SQL projections widened to carry `Language` (and, for
+      `NativeImageEndpoints.BuildAsync`, `SortOrder` — it projects neither today
+      and therefore orders by nothing at all).
+- [ ] `JellyfinItemMapper` and `JellyfinImageService.ResolveAssetAsync` share one
+      rank, so index-addressed backdrops still resolve to the advertised tag.
 - [ ] The four duplicated *best-Primary-per-item* queries collapse into the one
       extension.
 
 ### Phase 2 — the operator's override
+
+Ships in this PR (approved 2026-08-15).
 
 - [ ] `MediaItem.PreferredPosterTag` (`string?`) and its migration.
 - [ ] `GET /api/library/{id:guid}/images` — cached candidates per type, with
@@ -269,11 +321,10 @@ than permanent.
 - **Should the item's `original_language` join `include_image_language`?** It
   would add the native-language one-sheet as a tier for films whose display
   language has none. Cheap, but it widens what is cached for every title.
-- **Does phase 2 ship in this PR, or is the plan just phase 1?** Under
-  `AGENTS.md` an unchecked deliverable is the only place unfinished work may
-  live, so this is a scope decision, not a note: either the pin ships here or it
-  leaves the plan entirely. **Recommendation: ship it — it is the half that
-  answers the franchise case for certain.**
+- **Resolved on approval (2026-08-15):** the per-item poster pin ships in this PR
+  rather than being cut. It is the half that answers the franchise case for
+  certain — where TMDb simply has no titled Russian poster, no ranking can
+  invent one.
 - **Within-tier tiebreak.** TMDb's array position is used as a proxy for its vote
   ordering. Persisting `vote_average`/`vote_count` on `ImageAsset` would make the
   tiebreak explicit and survive a provider reordering, at the cost of a column
@@ -284,8 +335,9 @@ than permanent.
 - `ImageSelection` unit tests — each role's tier order, including: poster prefers
   a `ru` over an untagged candidate and an `en` over an untagged one; backdrop
   prefers untagged over `ru`; logo keeps `display → en → untagged`; `fil-PH` does
-  not match `fi`; ties inside a tier fall back to `SortOrder`; an item with only
-  untagged art still yields one.
+  not match `fi` (mirroring `MetadataLanguageTests.cs:103`); an `iso_639_1` of
+  `""` ranks with `null` rather than as a foreign language; ties inside a tier
+  fall back to `SortOrder`; an item with only untagged art still yields one.
 - `LibraryReadServiceTests` — the existing logo-language cases keep passing, and
   new poster cases cover the chain, the pin, and an item with no images.
 - `JellyfinMappingTests` — `ImageTags["Primary"]`/`["Logo"]` follow the chain and
@@ -293,7 +345,9 @@ than permanent.
   still resolves in `JellyfinImageService` (tag lookup precedes index —
   `JellyfinImageService.cs:167`).
 - Native — `NativeImageUrlsTests` gains language cases proving `BuildAsync` is
-  deterministic and chain-ordered for all three types.
+  deterministic and chain-ordered for all three types. Its fixture never sets
+  `SortOrder` today (`NativeImageUrlsTests.cs:46-58`), so the current tests cannot
+  detect an ordering change at all; widening the fixture is part of the work.
 - `RecommendationFeedServiceTests`, `WatchHistoryCalendarServiceTests`,
   `RemovedTitlesServiceTests`, `CollectionReadServiceTests` — each grid poster
   follows the chain via the shared extension.
