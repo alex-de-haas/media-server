@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using MediaServer.Api.Data;
 using MediaServer.Api.Jellyfin.Streaming;
 using Microsoft.Net.Http.Headers;
@@ -28,16 +29,19 @@ internal static class JellyfinMediaEndpoints
     }
 
     private static async Task<IResult> ServeImageAsync(
-        HttpRequest request, string itemId, string imageType, int? imageIndex, JellyfinImageService images, CancellationToken cancellationToken)
+        HttpRequest request, ClaimsPrincipal principal, string itemId, string imageType, int? imageIndex,
+        JellyfinImageService images, CancellationToken cancellationToken)
     {
         if (!JellyfinImageService.TryParseImageType(imageType, out var type))
         {
             return Results.NotFound();
         }
 
+        // The acting user matters for one id only — the Recommended view's tile is that user's own shelf.
         var tag = request.Query["tag"].ToString();
         var payload = await images.GetImageAsync(
-            itemId, type, string.IsNullOrEmpty(tag) ? null : tag, imageIndex ?? 0, cancellationToken);
+            itemId, type, string.IsNullOrEmpty(tag) ? null : tag, imageIndex ?? 0,
+            JellyfinPrincipal.AppUserId(principal), cancellationToken);
         if (payload is null)
         {
             return Results.NotFound();

@@ -311,7 +311,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
 
         Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
         Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));
-        Assert.False(await Shelf().AnyAsync(_userId, CancellationToken.None));
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: 1, CancellationToken.None));
 
         Assert.Equal(1, _tmdb.Calls);
     }
@@ -375,7 +375,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     {
         // The view is only advertised when this is false, so "empty" has to mean empty.
 
-        Assert.False(await Shelf().AnyAsync(_userId, CancellationToken.None));
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: 1, CancellationToken.None));
     }
 
     [Fact]
@@ -388,7 +388,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
 
         MarkPlayed(_userId, movie.Id);
 
-        Assert.False(await Shelf().AnyAsync(_userId, CancellationToken.None));
+        Assert.Empty(await Shelf().GetAsync(_userId, limit: 1, CancellationToken.None));
     }
 
     [Fact]

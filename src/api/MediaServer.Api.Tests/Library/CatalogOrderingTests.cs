@@ -138,8 +138,8 @@ public sealed class CatalogOrderingTests : IDisposable
         };
         return new JellyfinLibraryService(
             _db.Create(), new JellyfinItemMapper(new JellyfinServerContext(hosty, settings)),
-            new JellyfinCatalogArtwork(_db.Create()), new JellyfinCollectionService(_db.Create()),
-            new JellyfinPersonService(_db.Create()), new EmptyShelf(),
+            new JellyfinCatalogArtwork(_db.Create()), new JellyfinShelfArtwork(_db.Create(), new EmptyShelf()),
+            new JellyfinCollectionService(_db.Create()), new JellyfinPersonService(_db.Create()), new EmptyShelf(),
             new UserDataService(_db.Create(), TimeProvider.System), settings);
     }
 

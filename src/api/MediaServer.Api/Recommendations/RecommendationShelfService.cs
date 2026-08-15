@@ -65,20 +65,18 @@ public sealed class RecommendationShelfRefresher(
 }
 
 /// <summary>
-/// What a consuming surface needs from the shelf: the titles, and whether there are any.
+/// What a consuming surface needs from the shelf: the titles it should show.
 /// </summary>
 /// <remarks>
 /// Narrow on purpose. The Jellyfin layer should not have to know how a shelf is built — behind this
 /// sit the provider registry, the fusion and the TMDb caches, none of which a view has any business
-/// constructing.
+/// constructing. "Has this user anything at all?" is the same question with a small limit, so it is
+/// not a second method.
 /// </remarks>
 public interface IRecommendationShelf
 {
     /// <summary>The shelf as a client should see it: held, unwatched, unhidden titles in rank order.</summary>
     Task<IReadOnlyList<MediaItem>> GetAsync(int appUserId, int? limit, CancellationToken cancellationToken);
-
-    /// <summary>Whether this user has anything to show at all.</summary>
-    Task<bool> AnyAsync(int appUserId, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -158,15 +156,6 @@ public sealed class RecommendationShelfService(
 
         return [.. surviving];
     }
-
-    /// <summary>Whether this user has anything to show — the question the view list asks.</summary>
-    /// <remarks>
-    /// Deliberately the full read rather than a cheap <c>Any()</c> against the table: a shelf whose
-    /// every title has since been watched is empty in the only sense that matters, and advertising a
-    /// library that opens onto nothing is worse than not advertising it.
-    /// </remarks>
-    public async Task<bool> AnyAsync(int appUserId, CancellationToken cancellationToken) =>
-        (await GetAsync(appUserId, limit: 1, cancellationToken)).Count > 0;
 
     /// <summary>Recomputes this user's generation and replaces the stored one wholesale.</summary>
     public async Task RebuildAsync(int appUserId, CancellationToken cancellationToken)

@@ -1,7 +1,7 @@
 # Jellyfin Compatibility
 
 Created: 2026-06-15
-Updated: 2026-08-02
+Updated: 2026-08-15
 
 ## Description
 
@@ -37,7 +37,7 @@ it — Infuse and any other third-party client keep this surface unchanged.
 - Full Jellyfin administration API.
 - Live TV, DVR, music, photos, books, plugins, playlists. (Movie *collections* —
   TMDb franchises as `BoxSet`s — are supported; see
-  [collections.md](../collections.md).)
+  [collections](../collections/feature.md).)
 - DLNA.
 - On-the-fly transcoding: this surface serves original files only. Offline
   conversion is a separate feature and never happens in a playback request.
@@ -182,6 +182,15 @@ cache sweep recomputes; a person has one image, and a request for anything but
 `Primary` is answered with nothing rather than with the portrait in the wrong
 slot.
 
+Folders own no artwork and borrow it instead, so the library list is a wall of
+tiles rather than of labels. A catalog borrows the backdrop of its most recently
+added title; the Collections view borrows the artwork of a representative
+franchise; the Recommended view borrows the backdrop of the title its shelf leads
+with. Each advertises the one tag as both `Primary` and `Backdrop`, and the image
+route answers either request with the same bytes. The Recommended view's tile is
+per-user, so that id is the one the route resolves against the acting user — an
+unauthenticated request for it serves nothing.
+
 Playback negotiation and streaming:
 
 - `GET|POST /Items/{itemId}/PlaybackInfo`
@@ -218,7 +227,8 @@ Playback state:
 - Catalog (`series`) → `CollectionFolder` with `CollectionType = tvshows`.
 - The synthetic Collections view → `CollectionFolder` with
   `CollectionType = boxsets`; each qualifying `MovieCollection` → `BoxSet` whose
-  children are its owned movies. See [collections.md](../collections.md).
+  children are its owned movies, in release order rather than the alphabetical
+  order every other listing uses. See [collections](../collections/feature.md).
 - The synthetic Recommended view → `CollectionFolder` with a **null**
   `CollectionType` (mixed content), holding the part of the recommendation feed
   this instance actually has. It is personal, so unlike the catalog views it is

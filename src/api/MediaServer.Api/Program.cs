@@ -360,6 +360,7 @@ builder.Services.AddSingleton<JellyfinItemMapper>();
 builder.Services.AddScoped<JellyfinCredentialService>();
 builder.Services.AddScoped<UserDataService>();
 builder.Services.AddScoped<JellyfinCatalogArtwork>();
+builder.Services.AddScoped<JellyfinShelfArtwork>();
 builder.Services.AddScoped<JellyfinCollectionService>();
 builder.Services.AddScoped<JellyfinPersonService>();
 builder.Services.AddScoped<JellyfinLibraryService>();
