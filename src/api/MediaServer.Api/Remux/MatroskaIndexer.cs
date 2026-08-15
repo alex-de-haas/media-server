@@ -370,6 +370,11 @@ internal static class MatroskaIndexer
 
         foreach (var (offset, size) in frames)
         {
+            // Collected while the walk is already here. Everything the synthesiser used to fetch from
+            // the film is fixed the moment the file is written, so fetching it per request was work
+            // being done in the wrong place — see RemuxHeaderCache for what that cost.
+            Capture(stream, track, offset, size);
+
             track.Samples.Add(new IndexedSample(timestamp, offset, size, key));
             if (duration > 0)
             {
@@ -381,6 +386,52 @@ internal static class MatroskaIndexer
             {
                 track.SampleDurations?.Add(0);
             }
+        }
+    }
+
+    /// <summary>Enough of an audio unit to describe it; more than any descriptor needs.</summary>
+    private const int UnitProbe = 4096;
+
+    /// <summary>
+    /// Takes from a sample the things a header needs and a sample table cannot hold: the text of a
+    /// subtitle, the first audio unit, and whether every audio frame carries the same number of samples.
+    ///
+    /// All of it is read from where the walk already stands, so it costs a sequential read rather than a
+    /// seek. The synthesiser then never opens the film at all.
+    /// </summary>
+    private static void Capture(Stream stream, IndexedTrack track, long offset, int size)
+    {
+        switch (track.Kind)
+        {
+            case IndexedTrackKind.Subtitle when SubtitleText.IsConvertible(track.CodecId):
+                var text = new byte[Math.Min(size, 64 * 1024)];
+                stream.Position = offset;
+                stream.ReadExactly(text);
+                (track.CueText ??= []).Add(SubtitleText.Convert(text, track.CodecId));
+                break;
+
+            case IndexedTrackKind.Audio:
+                var unit = new byte[Math.Min(size, UnitProbe)];
+                stream.Position = offset;
+                stream.ReadExactly(unit);
+                track.FirstUnit ??= unit;
+
+                // Answered over every frame rather than over sixty-four of them, which is both stricter
+                // and cheaper: the walk is here anyway, and a stream that varies must be refused rather
+                // than given a timeline built on its first frame.
+                if (track.CodecId == "A_EAC3" && track.ConstantFrameSamples >= 0)
+                {
+                    var frame = Mp4Writer.DescribeEac3(unit)?.SamplesPerFrame ?? -1;
+                    track.ConstantFrameSamples = track.ConstantFrameSamples switch
+                    {
+                        _ when frame < 0 => -1,                     // unreadable: refuse the track
+                        0 => frame,                                 // the first frame sets the answer
+                        var seen when seen == frame => seen,
+                        _ => -1,                                    // it varies
+                    };
+                }
+
+                break;
         }
     }
 

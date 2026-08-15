@@ -401,9 +401,29 @@ played perfectly.
 the body — a different dub, an edited subtitle file, a replaced source — lands on a different entry.
 512 MB, least recently used evicted first.
 
-It does not make the **first** request cheap, only every one after it. The repair for that is to move
-the subtitle text and the audio frame size into the index, which is walked in the background precisely
-so that playback waits for nothing.
+It does not make the **first** request cheap on its own, which is why the walk now keeps what the
+synthesis used to fetch.
+
+## The walk keeps what synthesis used to fetch
+
+Three things were read out of the film every time a header was built, and all three are fixed the
+moment the file is written:
+
+| Kept | Instead of |
+| --- | --- |
+| The converted text of every subtitle cue | Reading each one from the source — thousands of seeks, and 97 % of the total |
+| The first access unit of each audio track | A seek per track to describe it |
+| Whether every audio frame carries the same number of samples | Sixty-four probes per E-AC-3 track |
+
+The last is now *stricter* as well as cheaper: the walk answers it over every frame in the track
+rather than over sixty-four of them, and a track whose frames disagree is refused rather than given a
+timeline built on its first frame.
+
+The cost is index size — a thirteen-track film's index is 9.2 MB, most of it dialogue — and the walk
+reads subtitle payloads rather than seeking past them. Both are paid once, in the background.
+
+On a fast disc this changes nothing measurable: 8,800 reads there are milliseconds. It is the spinning
+disk this is for, where the same reads are seconds and playback stopped rather than played.
 
 ## Testing Expectations
 
