@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-08-08
+Updated: 2026-08-15
 
 ## Description
 
@@ -135,6 +135,20 @@ item and the position today.
 Items are addressed by their internal id and resolved to the public one the
 reporting path is keyed by; unpublished and tombstoned items are refused, as
 everywhere else on this surface.
+
+## Which stream is the picture
+
+A file can carry a cover image the muxer never flagged as attached art, and this library holds
+such files — a 33.7 GB HEVC remux with an `mjpeg` still beside it. In the database that cover is
+a video stream in every way that can be seen: same type, its own index, a codec.
+
+**The picture is the first video stream by index that is not a still image**, and when every
+video stream is a still, the first of them: such a file is broken either way, and a reason beats
+pretending it has no picture.
+
+The rule is stated in three places and has to mean the same thing in all of them, or two
+surfaces disagree about what the film is — the detail projection a client is shown, the resolver
+that judges what can be played, and the remux path that writes the sample entry.
 
 ## Testing Expectations
 

@@ -40,6 +40,11 @@ public sealed class NativePlaybackResolver(
                 source.Path,
                 Streams = database.MediaStreams.AsNoTracking()
                     .Where(stream => stream.MediaSourceId == source.Id)
+                    // Ordered, because "the first video track" has to mean the same thing here as it
+                    // does in the detail projection a client has already been shown. Unordered, SQLite
+                    // may hand back a cover image first and the two surfaces disagree about what the
+                    // film even is.
+                    .OrderBy(stream => stream.Index)
                     .Select(stream => new StreamFacts(
                         stream.StreamType, stream.Codec, stream.HdrFormat, stream.Channels, stream.IsExternal))
                     .ToList(),
@@ -77,7 +82,7 @@ public sealed class NativePlaybackResolver(
             return Unsupported(NativePlaybackReasons.NoFile);
         }
 
-        var video = streams.FirstOrDefault(stream => stream.StreamType == StreamType.Video);
+        var video = Picture(streams);
         if (video is not null && !Supports(profile.VideoCodecs, video.Codec))
         {
             // Re-encoding is out of scope for this surface, so an undecodable picture is the end of it.
@@ -209,6 +214,27 @@ public sealed class NativePlaybackResolver(
 
     // The profile is request input, so a null or blank entry is something a client can actually send.
     // Treated as a non-match rather than dereferenced: a malformed body must not become a 500.
+    /// <summary>
+    /// Codecs that are a still image rather than a film. A cover the muxer did not flag as attached art
+    /// is an ordinary video stream in every way the database can see, and this library holds such files:
+    /// the remux path already skips them, and a resolver that judged one would refuse a perfectly
+    /// playable title for having an undecodable "picture".
+    /// </summary>
+    private static readonly HashSet<string> StillImages =
+        new(StringComparer.OrdinalIgnoreCase) { "mjpeg", "png", "bmp", "gif", "webp" };
+
+    /// <summary>
+    /// The stream that is actually the film: the first video track that is not a still image, and only
+    /// then the first video track at all — a file whose one video stream is a cover is broken either
+    /// way, and refusing it with a reason beats pretending it has no picture.
+    /// </summary>
+    internal static StreamFacts? Picture(IReadOnlyList<StreamFacts> streams)
+    {
+        var video = streams.Where(stream => stream.StreamType == StreamType.Video).ToList();
+        return video.FirstOrDefault(stream => !StillImages.Contains(stream.Codec ?? string.Empty))
+            ?? video.FirstOrDefault();
+    }
+
     private static bool Supports(IReadOnlyList<string>? declared, string? value) =>
         !string.IsNullOrWhiteSpace(value)
         && declared is not null
@@ -216,7 +242,12 @@ public sealed class NativePlaybackResolver(
                !string.IsNullOrWhiteSpace(entry)
                && entry.Trim().Equals(value.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    private sealed record StreamFacts(
+    /// <summary>The same choice, over the entity rather than the projection, so a test can make one.</summary>
+    internal static StreamFacts? PictureFor(IEnumerable<MediaStream> streams) =>
+        Picture([.. streams.OrderBy(stream => stream.Index).Select(stream => new StreamFacts(
+            stream.StreamType, stream.Codec, stream.HdrFormat, stream.Channels, stream.IsExternal))]);
+
+    internal sealed record StreamFacts(
         StreamType StreamType, string? Codec, string? HdrFormat, int? Channels, bool IsExternal);
 }
 
