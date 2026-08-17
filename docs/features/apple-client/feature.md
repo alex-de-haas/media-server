@@ -7,9 +7,17 @@ The first-party client for Apple platforms. It exists because AVFoundation will 
 Matroska and this library is Matroska — the server answers that by
 [repackaging](../remux-streaming/feature.md), and this is what asks.
 
-Today it is a tvOS app that **pairs with a server** and reports what the device it is
-running on can play. What remains — browsing and playback — is planned in
-[`apple-client-core`](../apple-client-core/plan.md) and tracked by the [epic](plan.md).
+Today a viewer pairs a television with a server, browses the library in two tabs, opens a
+title and watches it. All of it is verified against production, and playback on the hardware
+it was built for: a 33.7 GB Dolby Vision profile 8.1 film plays on an Apple TV 4K without
+stutter, badge lit, seeking responsive.
+
+First frame takes about ten seconds there against three on a Mac — the television's processor
+parsing the container's tables — and that is left as it is for now.
+
+What remains is planned in [`apple-client-core`](../apple-client-core/plan.md) and tracked by
+the [epic](plan.md): a track picker of our own, and the local mirror that was deliberately
+deferred.
 
 ## Layout
 
