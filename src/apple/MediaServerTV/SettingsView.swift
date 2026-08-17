@@ -50,6 +50,15 @@ struct SettingsView: View {
             // would find it dark again on the next launch, having already tried the one control offered.
             .onChange(of: preferences) { _, updated in store.save(updated) }
 
+            Toggle("Show playback diagnostics", isOn: $preferences.showDiagnostics)
+
+            Text("Position, buffer, stalls and observed rate, over the picture. Watch the buffer: it "
+                + "falls a second per second whenever nothing is being fetched, so a freeze it predicts "
+                + "is starvation and one it does not is something else.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 900, alignment: .leading)
+
             Button("Sign out", role: .destructive) { pairing.unpair() }
                 .padding(.top, 24)
         }

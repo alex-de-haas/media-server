@@ -155,6 +155,25 @@ lives on the screen a window is on, which a synchronous property has no business
 for and which means nothing before there is a window. Under-claiming costs an SDR picture
 that always works; over-claiming breaks one.
 
+## Playback diagnostics
+
+A switch in Settings puts the player's own numbers over the picture: position, seconds of buffer
+ahead, stalls, and the rate `AVPlayerItemAccessLog` says is being observed.
+
+It exists because diagnosing a stutter from a Mac took a purpose-built harness and still could not
+reproduce what the television did. The machine with the problem is the one that has to be asked, and a
+television has no console to read and no file a viewer can reach — so a diagnostic that writes
+somewhere clever is one nobody uses.
+
+**Buffer ahead is the number that separates the causes.** It falls at one second per second whenever
+the player has stopped fetching, so a freeze preceded by a slow steady fall is starvation, and one
+that arrives with the buffer full is not. Those two want opposite fixes, and for three days they were
+being confused for each other.
+
+Most of it comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls` counts
+what a `playbackStalled` notification can miss, and `observedBitrate` is what the player believes it is
+receiving rather than what a measurement once found.
+
 ## The escape hatch
 
 One thing genuinely cannot be detected. `VTIsHardwareDecodeSupported` reports what the

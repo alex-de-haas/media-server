@@ -47,6 +47,8 @@ struct TitleView: View {
             PlayerView(
                 stream: stream,
                 startAt: detail?.resumeSeconds ?? 0,
+                diagnostics: PlaybackPreferencesStore().load().showDiagnostics
+                    ? PlaybackDiagnostics() : nil,
                 onProgress: { position in
                     guard let session else { return }
                     Task { await playback.report(
