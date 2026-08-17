@@ -124,3 +124,83 @@ public sealed class SynthesizedMp4StreamTests
         Assert.Equal(0, stream.Position);
     }
 }
+
+/// <summary>
+/// That reading onwards does not keep re-seating the part underneath.
+///
+/// Assigning Position discards a FileStream's read buffer, so doing it on every read meant no
+/// buffering and no read-ahead during playback — the one access pattern that is purely sequential.
+/// Measured on production as roughly half the throughput a film needs.
+/// </summary>
+public sealed class SynthesizedMp4StreamSeekTests
+{
+    /// <summary>A part that counts how often it was moved rather than read onwards from.</summary>
+    private sealed class CountingStream(byte[] content) : MemoryStream(content)
+    {
+        public int Seeks { get; private set; }
+
+        public override long Position
+        {
+            get => base.Position;
+            set
+            {
+                if (value != base.Position)
+                {
+                    Seeks++;
+                }
+
+                base.Position = value;
+            }
+        }
+    }
+
+    [Fact]
+    public void Reading_onwards_does_not_move_the_part_at_all()
+    {
+        var part = new CountingStream([.. Enumerable.Range(0, 4096).Select(i => (byte)i)]);
+        var stream = new SynthesizedMp4Stream(new byte[16], [part]);
+
+        var buffer = new byte[512];
+        for (var i = 0; i < 8; i++)
+        {
+            stream.Read(buffer);
+        }
+
+        // The header is consumed first, then the part is entered once and never re-seated.
+        Assert.True(part.Seeks <= 1, $"the part was moved {part.Seeks} times reading straight through");
+    }
+
+    [Fact]
+    public void Seeking_still_moves_it()
+    {
+        var part = new CountingStream([.. Enumerable.Range(0, 4096).Select(i => (byte)i)]);
+        var stream = new SynthesizedMp4Stream(new byte[16], [part]);
+        var buffer = new byte[64];
+
+        stream.Position = 1000;
+        stream.Read(buffer);
+        stream.Position = 3000;
+        stream.Read(buffer);
+
+        Assert.Equal(2, part.Seeks);
+    }
+
+    [Fact]
+    public void A_jump_backwards_reads_the_right_bytes()
+    {
+        // The guard compares positions, so it has to be the *part's* position and not the output's.
+        var content = new byte[4096];
+        for (var i = 0; i < content.Length; i++) { content[i] = (byte)(i % 251); }
+
+        var stream = new SynthesizedMp4Stream(new byte[16], [new CountingStream(content)]);
+        var buffer = new byte[32];
+
+        stream.Position = 16 + 2000;
+        stream.ReadExactly(buffer);
+        Assert.Equal(content[2000..2032], buffer);
+
+        stream.Position = 16 + 100;
+        stream.ReadExactly(buffer);
+        Assert.Equal(content[100..132], buffer);
+    }
+}

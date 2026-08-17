@@ -49,6 +49,22 @@ internal sealed class SynthesizedMp4Stream : Stream
         set => _position = value < 0 ? throw new ArgumentOutOfRangeException(nameof(value)) : value;
     }
 
+    /// <summary>
+    /// Moves a part to where the next read starts, and **only when it is not already there**.
+    ///
+    /// Assigning <see cref="Stream.Position"/> discards a <see cref="FileStream"/>'s read buffer, so
+    /// doing it unconditionally meant every read went to the kernel with nothing carried over — during
+    /// playback, which is the one access pattern that is purely sequential and where the position has
+    /// not moved at all.
+    /// </summary>
+    private static void Seek(Stream part, long to)
+    {
+        if (part.Position != to)
+        {
+            part.Position = to;
+        }
+    }
+
     public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
 
     public override int Read(Span<byte> buffer)
@@ -66,7 +82,7 @@ internal sealed class SynthesizedMp4Stream : Stream
         }
         else
         {
-            _parts[part].Position = within;
+            Seek(_parts[part], within);
             read = _parts[part].Read(buffer[..take]);
         }
 
@@ -87,7 +103,7 @@ internal sealed class SynthesizedMp4Stream : Stream
             return Read(buffer.Span);
         }
 
-        _parts[part].Position = within;
+        Seek(_parts[part], within);
         var read = await _parts[part].ReadAsync(buffer[..take], cancellationToken);
         _position += read;
         return read;

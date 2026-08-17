@@ -291,7 +291,11 @@ internal sealed class RemuxStreamService(
 
     private static FileStream Open(string path) =>
         new(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 64 * 1024, FileOptions.Asynchronous | FileOptions.RandomAccess);
+            // Sequential, not random: a film is read from beginning to end, and telling the kernel
+            // otherwise turns off the read-ahead that makes that cheap. The name is about the *pattern*,
+            // not about whether seeking happens — a viewer skipping a scene still reads onwards from
+            // wherever they land.
+            bufferSize: 256 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
     private static async Task DisposeAllAsync(IEnumerable<Stream> streams)
     {

@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-15
+Updated: 2026-08-17
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -410,6 +410,24 @@ the body — a different dub, an edited subtitle file, a replaced source — lan
 
 It does not make the **first** request cheap on its own, which is why the walk now keeps what the
 synthesis used to fetch.
+
+## Reading is sequential, and says so
+
+A film is read from beginning to end, so the source is opened `SequentialScan` and a part is moved
+only when the next read does not start where the last one ended.
+
+Both halves of that were wrong and both cost roughly half the throughput. `RandomAccess` tells the
+kernel not to read ahead — the opposite of what playback wants. And assigning `Position` discards a
+`FileStream`'s read buffer, so doing it on every read meant every read went to the kernel with
+nothing carried over, during the one access pattern that is purely sequential and where the position
+had not moved at all.
+
+The name is about the *pattern*, not about whether seeking happens: a viewer skipping a scene still
+reads onwards from wherever they land.
+
+Measured locally against the raw file over the same server: 1.95 GB/s through the synthesised stream
+against 2.22 GB/s direct — a 12 % overhead for stitching a header onto a file, where before this the
+synthesised path was the slower one by a wide margin.
 
 ## The walk keeps what synthesis used to fetch
 
