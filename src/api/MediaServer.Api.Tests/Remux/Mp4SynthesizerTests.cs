@@ -641,10 +641,14 @@ public sealed class Mp4SynthesizerTests
     {
         var stream = new MemoryStream(file);
         var index = MatroskaIndexer.Build(stream);
+
+        // Every describable track, stated here rather than taken from `RemuxTrackChoice`: what is under
+        // test is which of them the synthesiser marks enabled, not how many the chooser carries.
         var result = Mp4Synthesizer.Build(
             [new Mp4Synthesizer.Input(index, stream)],
-            [.. RemuxTrackChoice.Resolve(index, null, null)
-                .Select(number => new Mp4Synthesizer.TrackRef(0, number))],
+            [.. index.Tracks
+                .Where(RemuxCodecs.WantsSamples)
+                .Select(track => new Mp4Synthesizer.TrackRef(0, track.Number))],
             VideoSignalling.CrossCompatible,
             externalText,
             subtitleDefault);

@@ -170,39 +170,31 @@ built on its first frame, which would drift for the whole of its length.
 
 Atmos rides on E-AC-3 and survives untouched, because the samples are the same bytes.
 
-### Every describable track is carried, not just the chosen one
+### One track of each kind, not all of them
 
-The container holds **all** the audio tracks a sample entry can be written for, and all the
-text subtitles, each kind with the viewer's choice first.
+The container carries the video, the chosen audio track, and the chosen subtitle — nothing
+else, and that includes the sidecar case: a chosen external dub is the *only* soundtrack,
+not one added beside the file's own. Changing a track means asking for a different URL and
+re-seating the player at the current position.
 
-That order is the whole mechanism for video and audio: a player takes the first track of a
-kind as its default, so the choice arrives as *ordering* rather than as omission, and only
-that track is marked `enabled`.
+**This was the opposite for three days, and the measurement that reversed it is worth
+keeping.** Carrying every describable track made `AVPlayerViewController`'s own picker work:
+switching a dub cost nothing and needed no second request. The price was estimated at "a
+couple of megabytes per audio track" and accepted.
 
-**Subtitles are the exception, and getting it wrong is loud.** Carrying one for the menu is
-not the same as turning it on, so no subtitle is enabled unless the viewer asked for one —
-otherwise every source with embedded subtitles would put words on screen unbidden. A chosen
-*external* subtitle is the awkward case: it is prepared after the referenced tracks, so
-being chosen is not enough to make it first, and it has to overtake the embedded ones
-explicitly.
+The real price, measured on a fifteen-track film: **29.5 MB of sample tables**. One sample
+per chunk is forced on us because the source interleaves its tracks, so `co64` and `stsz`
+cost about twelve bytes a sample and there is no grouping to be had. All of it is read and
+parsed **before the first frame** — the behaviour this whole design was built around.
 
-Each track carries **its own language**, packed into `mdhd` as ISO-639-2 rather than left at
-`und`. Six dubs a viewer cannot tell apart in the menu would be barely better than carrying
-one of them. Tracks of one kind also share an `alternate_group`, saying in the file what a
-player would otherwise have to infer.
+On an Apple TV 4K that was two and a half seconds of transfer before anything could start,
+and a film that stuttered throughout. Two-track titles on the same hardware, the same
+network and the same server played perfectly, which is what identified the *number of
+tracks* rather than the bitrate or the disc as the cause. Cutting to one of each brought the
+same film's header to 7.4 MB.
 
-The alternative was one audio track per request, which is what this used to do. It gave
-`AVPlayerViewController` nothing to choose between, so changing a dub meant asking for a
-different URL and re-seating the player at the current time — a visible re-buffer, and a
-track picker every client would have to build for itself.
-
-The cost is header. A sample table is around twelve bytes a sample once `stsz` and `co64`
-are counted, so an audio track of a feature film adds a couple of megabytes to what is
-fetched before the first frame. It is paid once, at open, by a player that already walks
-every box header of the whole file before it shows anything.
-
-A **sidecar dub** leads the list when one is chosen, and the file's own tracks follow it
-into the same menu rather than disappearing because a dub was picked.
+A viewer changing track now pays a second of interruption when they ask for it. The
+alternative was a film that would not play.
 
 - **Dolby Vision** is offered as a `dvh1` sample entry, and only for HEVC that came with
   a configuration, and only when the client asked. The cross-compatible `hvc1` form

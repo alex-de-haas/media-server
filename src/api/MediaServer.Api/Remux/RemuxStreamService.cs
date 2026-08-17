@@ -132,18 +132,11 @@ internal sealed class RemuxStreamService(
                 var sidecarStream = Open(sidecarPath);
                 opened.Add(sidecarStream);
                 inputs.Add(new Mp4Synthesizer.Input(sidecarIndex, sidecarStream));
-                // The chosen dub leads, so it is the player's default; the file's own tracks follow it
-                // into the same menu rather than disappearing because a dub was picked.
+                // The chosen dub and nothing else. Adding the file's own audio beside it was what made
+                // the menu work when every track was carried; now it would only be a second sample
+                // table in a header a device has to parse before the first frame.
                 tracks.Add(new Mp4Synthesizer.TrackRef(1, dub.Number));
                 carried.Add((sidecar.Id, new FileInfo(sidecarPath)));
-
-                foreach (var number in RemuxTrackChoice.Resolve(index, null, null))
-                {
-                    if (index.Track(number) is { Kind: IndexedTrackKind.Audio })
-                    {
-                        tracks.Add(new Mp4Synthesizer.TrackRef(0, number));
-                    }
-                }
             }
             else
             {

@@ -32,19 +32,21 @@ public sealed class RemuxTrackChoiceTests
     }
 
     [Fact]
-    public void Every_describable_track_is_carried_so_the_player_has_a_menu()
+    public void One_track_of_each_kind_is_carried_rather_than_every_one()
     {
-        // Video, both audio tracks in the file's own order, and the one subtitle that can be rewritten.
-        // The bitmap subtitle is left out because nothing could be written for it.
-        Assert.Equal([1ul, 2ul, 3ul, 9ul], RemuxTrackChoice.Resolve(Library(), null, null));
+        // Video and the first describable audio. No subtitle, because none was asked for.
+        //
+        // Carrying them all made the header 29.5 MB on a fifteen-track film — read and parsed before the
+        // first frame — and an Apple TV could not play it while two-track titles were flawless.
+        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), null, null));
     }
 
     [Fact]
-    public void A_chosen_dub_leads_rather_than_replacing_the_rest()
+    public void A_chosen_dub_is_the_one_carried()
     {
-        // First of a kind is the player's default, so the choice moves to the front — and the others stay
-        // in the container, which is what lets the viewer change their mind without a new request.
-        Assert.Equal([1ul, 3ul, 2ul, 9ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 2, null));
+        // Changing it means a new URL and a re-seated player, which is the cost of a header a device can
+        // actually parse.
+        Assert.Equal([1ul, 3ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 2, null));
     }
 
     [Fact]
@@ -56,14 +58,22 @@ public sealed class RemuxTrackChoiceTests
             Number = 11, Ordinal = 5, Kind = IndexedTrackKind.Subtitle, CodecId = "S_TEXT/ASS",
         });
 
-        Assert.Equal([1ul, 2ul, 3ul, 11ul, 9ul], RemuxTrackChoice.Resolve(index, null, subtitleStreamIndex: 5));
+        Assert.Equal([1ul, 2ul, 11ul], RemuxTrackChoice.Resolve(index, null, subtitleStreamIndex: 5));
     }
 
     [Fact]
-    public void A_stale_choice_falls_back_to_the_files_own_order()
+    public void A_stale_audio_choice_falls_back_to_the_first_that_plays()
     {
-        Assert.Equal([1ul, 2ul, 3ul, 9ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 99, null));
-        Assert.Equal([1ul, 2ul, 3ul, 9ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 42));
+        // Silence would be the worse answer: the index moved, the film did not.
+        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 99, null));
+    }
+
+    [Fact]
+    public void A_stale_subtitle_choice_carries_none_rather_than_some_other_language()
+    {
+        // The two kinds differ on purpose. Nobody asked for Ukrainian by choosing a Russian track that
+        // has since gone, and words in the wrong language are worse than no words.
+        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 42));
     }
 
     [Fact]
@@ -72,7 +82,7 @@ public sealed class RemuxTrackChoiceTests
         // Even asked for by name. A track in the menu that shows nothing when selected is worse than a
         // track that is not offered.
         Assert.DoesNotContain(10ul, RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 4));
-        Assert.Equal([1ul, 2ul, 3ul, 9ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 4));
+        Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 4));
     }
 
     [Fact]
