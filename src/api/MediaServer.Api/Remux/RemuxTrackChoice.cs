@@ -11,16 +11,24 @@ namespace MediaServer.Api.Remux;
 internal static class RemuxTrackChoice
 {
     /// <summary>
-    /// Video, then **every** audio track that can be described, then every subtitle that can — each kind
-    /// with the viewer's choice first, because a player takes the first track of a kind as its default.
+    /// The video, the chosen audio track, and the chosen subtitle — **one of each, not all of them**.
     ///
-    /// Carrying them all is what makes the player's own track menu work. An MP4 holding one audio track
-    /// gives <c>AVPlayerViewController</c> nothing to choose between, so switching a dub would mean
-    /// asking for a different URL and re-seating the player at the current time — a visible re-buffer,
-    /// and a picker the client would have to build for itself. Carrying them all costs header: a sample
-    /// table is around twelve bytes a sample once <c>stsz</c> and <c>co64</c> are counted, so an audio
-    /// track of a feature film adds a couple of megabytes to what is fetched before the first frame.
-    /// That is the trade, taken deliberately — see <c>docs/features/remux-streaming/feature.md</c>.
+    /// The reason is measured rather than argued.
+    ///
+    /// Carrying every track made the player's own menu work — no second request to change a dub. It also
+    /// made the header enormous: a sample table costs about twelve bytes a sample once <c>stsz</c> and
+    /// <c>co64</c> are counted, and one sample per chunk is forced on us because the source interleaves
+    /// its tracks. A film with seven audio tracks and eight subtitles came to **29.5 MB of tables** — all
+    /// of which AVFoundation reads and parses *before the first frame*, which is the measurement this
+    /// whole design was built on.
+    ///
+    /// On an Apple TV that was two and a half seconds of transfer before anything could start, and
+    /// playback that stuttered for the rest of the film. Titles with two tracks played perfectly on the
+    /// same hardware and the same network, which is what identified the size rather than the bitrate as
+    /// the cause.
+    ///
+    /// So a viewer changing track costs a new URL and a re-seated player. That is a second of
+    /// interruption when they ask for it, against a film that plays.
     /// </summary>
     internal static IReadOnlyList<ulong> Resolve(
         MatroskaIndex index, int? audioStreamIndex, int? subtitleStreamIndex)
@@ -32,8 +40,19 @@ internal static class RemuxTrackChoice
             chosen.Add(video.Number);
         }
 
-        chosen.AddRange(Ordered(index, IndexedTrackKind.Audio, audioStreamIndex));
-        chosen.AddRange(Ordered(index, IndexedTrackKind.Subtitle, subtitleStreamIndex));
+        if (Pick(index, IndexedTrackKind.Audio, audioStreamIndex) is { } audio)
+        {
+            chosen.Add(audio.Number);
+        }
+
+        // A subtitle only when one was asked for *and found*: a track in the container is a track the
+        // player may turn on, and nobody asked for subtitles by not choosing any — nor did they ask for
+        // some other language by choosing one that has since gone.
+        if (subtitleStreamIndex is not null
+            && Pick(index, IndexedTrackKind.Subtitle, subtitleStreamIndex, exact: true) is { } subtitle)
+        {
+            chosen.Add(subtitle.Number);
+        }
 
         return chosen;
     }
@@ -48,31 +67,30 @@ internal static class RemuxTrackChoice
             track.Kind == IndexedTrackKind.Video && RemuxCodecs.CanPackageVideo(track));
 
     /// <summary>
-    /// Every track of the kind that a sample entry can be written for, the viewer's choice first.
+    /// The track of that kind to carry: the one at the viewer's stream index, or — unless
+    /// <paramref name="exact"/> — the first that can be described at all.
     ///
     /// Only describable tracks are considered, and that is the point rather than an optimisation. The
-    /// resolver offers a remux when <em>some</em> audio track can be packaged; including the file's other
-    /// ones regardless would put tracks in the player's menu that fall silent when selected. A choice
-    /// landing on such a track is treated exactly like a choice landing on nothing: the order falls back
-    /// to the file's own, and the default becomes the first track that actually plays.
+    /// resolver offers a remux when <em>some</em> audio track can be packaged; taking the file's first
+    /// regardless would hand a viewer whose film leads with TrueHD a container with a picture and no
+    /// sound.
+    ///
+    /// Returns a track rather than its number, because a number has no absent value: the default of
+    /// <c>ulong</c> is zero, which is a track a file may really have.
     /// </summary>
-    private static IEnumerable<ulong> Ordered(
-        MatroskaIndex index, IndexedTrackKind kind, int? streamIndex)
+    private static IndexedTrack? Pick(
+        MatroskaIndex index, IndexedTrackKind kind, int? streamIndex, bool exact = false)
     {
         var ofKind = index.Tracks
             .Where(track => track.Kind == kind && RemuxCodecs.WantsSamples(track))
             .ToList();
 
-        var preferred = streamIndex is { } wanted
-            ? ofKind.FirstOrDefault(track => track.Ordinal == wanted)
-            : null;
-
-        if (preferred is not null)
+        if (streamIndex is { } wanted
+            && ofKind.FirstOrDefault(track => track.Ordinal == wanted) is { } match)
         {
-            ofKind.Remove(preferred);
-            ofKind.Insert(0, preferred);
+            return match;
         }
 
-        return ofKind.Select(track => track.Number);
+        return exact ? null : ofKind.FirstOrDefault();
     }
 }
