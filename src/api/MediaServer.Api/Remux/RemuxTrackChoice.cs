@@ -24,8 +24,8 @@ internal static class RemuxTrackChoice
     ///
     /// On an Apple TV that was two and a half seconds of transfer before anything could start, and
     /// playback that stuttered for the rest of the film. Titles with two tracks played perfectly on the
-    /// same hardware and the same network, which is what identified the size rather than the bitrate as
-    /// the cause.
+    /// same hardware and the same network — including much larger ones — which is what identified the
+    /// **number of tracks** as the cause rather than the file's size or its bitrate.
     ///
     /// So a viewer changing track costs a new URL and a re-seated player. That is a second of
     /// interruption when they ask for it, against a film that plays.

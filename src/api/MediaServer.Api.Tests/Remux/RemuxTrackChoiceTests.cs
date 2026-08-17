@@ -62,9 +62,17 @@ public sealed class RemuxTrackChoiceTests
     }
 
     [Fact]
-    public void A_stale_choice_falls_back_to_the_files_own_order()
+    public void A_stale_audio_choice_falls_back_to_the_first_that_plays()
     {
+        // Silence would be the worse answer: the index moved, the film did not.
         Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), audioStreamIndex: 99, null));
+    }
+
+    [Fact]
+    public void A_stale_subtitle_choice_carries_none_rather_than_some_other_language()
+    {
+        // The two kinds differ on purpose. Nobody asked for Ukrainian by choosing a Russian track that
+        // has since gone, and words in the wrong language are worse than no words.
         Assert.Equal([1ul, 2ul], RemuxTrackChoice.Resolve(Library(), null, subtitleStreamIndex: 42));
     }
 

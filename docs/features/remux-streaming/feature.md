@@ -173,8 +173,9 @@ Atmos rides on E-AC-3 and survives untouched, because the samples are the same b
 ### One track of each kind, not all of them
 
 The container carries the video, the chosen audio track, and the chosen subtitle — nothing
-else. Changing a track means asking for a different URL and re-seating the player at the
-current position.
+else, and that includes the sidecar case: a chosen external dub is the *only* soundtrack,
+not one added beside the file's own. Changing a track means asking for a different URL and
+re-seating the player at the current position.
 
 **This was the opposite for three days, and the measurement that reversed it is worth
 keeping.** Carrying every describable track made `AVPlayerViewController`'s own picker work:
