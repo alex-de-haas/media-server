@@ -82,3 +82,41 @@ struct DiagnosticsPreferenceTests {
         #expect(!PlaybackPreferences().showDiagnostics)
     }
 }
+
+/// The reading that settles what a flat buffer cannot.
+///
+/// A buffer parked at two seconds says bytes arrive exactly as fast as they are spent — equally true of
+/// a path that cannot go faster and of a player that has decided not to ask for more. Only a peak well
+/// above the film's own rate tells those apart, so this arithmetic has to be right.
+@Suite("Inflow")
+struct InflowTests {
+    @Test("Bytes over a second, in the unit a speed test is quoted in")
+    func megabits() {
+        // 12.5 MB in one second is 100 Mbit/s, decimal — the unit an interface reports.
+        #expect(PlaybackDiagnostics.rate(bytes: 12_500_000, over: 1) == 100)
+    }
+
+    @Test("A longer gap between readings is divided out")
+    func acrossSeveralSeconds() {
+        #expect(PlaybackDiagnostics.rate(bytes: 25_000_000, over: 2) == 100)
+    }
+
+    @Test("Nothing arrived is no rate, not a division")
+    func nothingArrived() {
+        #expect(PlaybackDiagnostics.rate(bytes: 0, over: 1) == 0)
+    }
+
+    @Test("No time passed is no rate")
+    func noTime() {
+        // Two samples in the same instant would otherwise divide by zero and poison the session peak
+        // with an infinity that never leaves it.
+        #expect(PlaybackDiagnostics.rate(bytes: 1_000_000, over: 0) == 0)
+    }
+
+    @Test("A total that went backwards is not a negative rate")
+    func wentBackwards() {
+        // The access log reports per-event totals and the player may start a new event; a subtraction
+        // across that boundary can come out negative, which is not a measurement of anything.
+        #expect(PlaybackDiagnostics.rate(bytes: -5_000, over: 1) == 0)
+    }
+}

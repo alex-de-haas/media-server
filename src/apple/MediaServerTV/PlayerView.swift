@@ -17,14 +17,24 @@ struct PlayerView: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
-        let player = AVPlayer(url: stream.url)
+
+        // The item is built here rather than left to `AVPlayer(url:)` for one reason: the read-ahead.
+        // On the television the buffer settled at two or three seconds and stayed there — enough to
+        // play, not enough to survive anything, and every freeze arrived from that ledge. Automatic
+        // buffering picks a byte budget, and a byte budget spent on a 4K container carrying every dub
+        // buys very few seconds. This asks for a cushion in the unit that matters. It is a preference,
+        // not an instruction: the player still narrows it to what it is willing to hold.
+        let item = AVPlayerItem(asset: AVURLAsset(url: stream.url))
+        item.preferredForwardBufferDuration = 60
+
+        let player = AVPlayer(playerItem: item)
         controller.player = player
 
         if startAt > 1 {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
         }
 
-        if let diagnostics, let item = player.currentItem {
+        if let diagnostics {
             diagnostics.start(observing: item)
             // Over the player's own chrome, so it survives the transport bar appearing and going.
             let overlay = UIHostingController(rootView: DiagnosticsOverlay(diagnostics: diagnostics))

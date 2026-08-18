@@ -29,6 +29,14 @@ public final class PlaybackDiagnostics {
         public let stalls: Int
         public let observedBitrate: Double
         public let keepingUp: Bool
+
+        /// Bytes taken from the server since playback began, as the access log counts them. Negative
+        /// where the player has no figure to give.
+        public let bytesTransferred: Int64
+
+        /// Megabits per second that arrived since the previous reading — measured here by subtraction
+        /// rather than taken from the player's own estimate.
+        public let inflow: Double
     }
 
     public private(set) var samples: [Sample] = []
@@ -38,6 +46,14 @@ public final class PlaybackDiagnostics {
     /// below a minute has a different problem from one that reached zero four times.
     public private(set) var lowestBuffer = Double.infinity
     public private(set) var lowestAt: Double = 0
+
+    /// The fastest second of the whole session.
+    ///
+    /// This is the reading that settles the argument a flat buffer cannot. A buffer parked at two
+    /// seconds means bytes arrive at exactly the rate they are consumed — true whether the path cannot
+    /// go faster or the player has decided not to ask. A peak far above what the film needs says the
+    /// path was never the limit.
+    public private(set) var peakInflow: Double = 0
 
     /// Kept short: this is read on a television, at a glance, while something is going wrong.
     private static let keep = 240
@@ -107,10 +123,25 @@ public final class PlaybackDiagnostics {
             lowestAt = position
         }
 
+        // A running total, so what arrived in the last second is a subtraction. The player reports a
+        // negative when it has no count, and the first reading has nothing to subtract from.
+        let now = Date()
+        let transferred = event?.numberOfBytesTransferred ?? -1
+        var inflow: Double = 0
+        if transferred >= 0, let previous = samples.last, previous.bytesTransferred >= 0 {
+            inflow = Self.rate(
+                bytes: transferred - previous.bytesTransferred,
+                over: now.timeIntervalSince(previous.at))
+        }
+
+        peakInflow = max(peakInflow, inflow)
+
         samples.append(Sample(
-            at: Date(), position: position, bufferAhead: ahead, stalls: stalls,
+            at: now, position: position, bufferAhead: ahead, stalls: stalls,
             observedBitrate: event?.observedBitrate ?? 0,
-            keepingUp: item.isPlaybackLikelyToKeepUp))
+            keepingUp: item.isPlaybackLikelyToKeepUp,
+            bytesTransferred: transferred,
+            inflow: inflow))
 
         if samples.count > Self.keep {
             samples.removeFirst(samples.count - Self.keep)
@@ -138,9 +169,28 @@ public final class PlaybackDiagnostics {
         return 0
     }
 
+    /// Megabits per second, from the bytes that arrived between two readings.
+    ///
+    /// Megabits and not mebibits, because that is the unit every speed test and every network interface
+    /// is quoted in, and a diagnostic that has to be converted before it can be compared is one that
+    /// gets compared wrongly.
+    nonisolated static func rate(bytes: Int64, over seconds: TimeInterval) -> Double {
+        guard bytes > 0, seconds > 0 else { return 0 }
+        return Double(bytes) * 8 / seconds / 1_000_000
+    }
+
     /// Megabits per second the player believes it is receiving. Zero until it has an opinion.
     public var observedMbps: Double {
         (samples.last?.observedBitrate ?? 0) / 1_000_000
+    }
+
+    /// What arrived in the last second, measured here rather than estimated by the player.
+    public var inflow: Double { samples.last?.inflow ?? 0 }
+
+    /// Gigabytes taken from the server so far. Against the elapsed position this is the film's real
+    /// cost per second — which for a container carrying every track is not the chosen tracks' bitrate.
+    public var transferredGB: Double {
+        Double(max(samples.last?.bytesTransferred ?? 0, 0)) / 1_000_000_000
     }
 
     public var bufferAhead: Double { samples.last?.bufferAhead ?? 0 }

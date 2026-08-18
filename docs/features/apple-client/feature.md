@@ -158,7 +158,7 @@ that always works; over-claiming breaks one.
 ## Playback diagnostics
 
 A switch in Settings puts the player's own numbers over the picture: position, seconds of buffer
-ahead, stalls, and the rate `AVPlayerItemAccessLog` says is being observed.
+ahead, stalls, what is arriving on the wire, and what the film costs to watch.
 
 It exists because diagnosing a stutter from a Mac took a purpose-built harness and still could not
 reproduce what the television did. The machine with the problem is the one that has to be asked, and a
@@ -170,9 +170,20 @@ the player has stopped fetching, so a freeze preceded by a slow steady fall is s
 that arrives with the buffer full is not. Those two want opposite fixes, and for three days they were
 being confused for each other.
 
-Most of it comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls` counts
-what a `playbackStalled` notification can miss, and `observedBitrate` is what the player believes it is
-receiving rather than what a measurement once found.
+**Peak inflow is what settles the question a flat buffer cannot.** A buffer parked at two seconds means
+bytes arrive at exactly the rate they are spent, and that is equally true of a path that cannot go faster
+and of a player that has decided not to ask for more. The two want opposite fixes, so the session's
+fastest second is kept: a peak far above what the film needs rules the path out. Inflow is measured here,
+by subtracting one reading of `numberOfBytesTransferred` from the next, rather than taken from the
+player's own `observedBitrate` — which is kept beside it, since a disagreement between them is itself
+worth seeing.
+
+Against elapsed position the same total gives what a second of this film costs on the wire, which is
+**not** the chosen tracks' bitrate: the container hands over the untouched file, so a source with eleven
+dubs is paid for in full to hear one.
+
+Most of the rest comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls`
+counts what a `playbackStalled` notification can miss.
 
 ## The escape hatch
 
@@ -346,6 +357,14 @@ Presentation is `AVPlayerViewController` and not a player of our own — the tra
 the skip gestures, the track picker and the Siri remote's whole vocabulary come free. Since
 the container carries every describable track, that picker is a real one: switching a dub
 costs nothing and needs no second request.
+
+The player item is built rather than left to `AVPlayer(url:)`, for the read-ahead alone.
+Left automatic, the buffer settled at two or three seconds on the television and stayed
+there — enough to play, not enough to survive anything, and every freeze arrived from that
+ledge. Automatic buffering picks a budget in bytes, and bytes bought very few seconds of a
+4K container that hands over every dub in the file. `preferredForwardBufferDuration` asks in
+the unit that matters. It is a preference and not an instruction: the player still narrows
+it to what it will hold.
 
 Progress is reported every ten seconds, which is often enough that a resume lands where the
 viewer left and rare enough that a two-hour film is a few hundred requests. A session opens
