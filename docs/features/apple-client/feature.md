@@ -1,15 +1,23 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-14
+Updated: 2026-08-18
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
 [repackaging](../remux-streaming/feature.md), and this is what asks.
 
-Today it is a tvOS app that **pairs with a server** and reports what the device it is
-running on can play. What remains — browsing and playback — is planned in
-[`apple-client-core`](../apple-client-core/plan.md) and tracked by the [epic](plan.md).
+Today a viewer pairs a television with a server, browses the library in two tabs, opens a
+title and watches it. All of it is verified against production, and playback on the hardware
+it was built for: a 33.7 GB Dolby Vision profile 8.1 film plays on an Apple TV 4K without
+stutter, badge lit, seeking responsive.
+
+First frame takes about ten seconds there against three on a Mac — the television's processor
+parsing the container's tables — and that is left as it is for now.
+
+What remains is planned in [`apple-client-core`](../apple-client-core/plan.md) and tracked by
+the [epic](plan.md): a track picker of our own, and the local mirror that was deliberately
+deferred.
 
 ## Layout
 
@@ -146,6 +154,25 @@ without hardware. On macOS `presentsHDR` is `false` rather than assumed: the hon
 lives on the screen a window is on, which a synchronous property has no business reaching
 for and which means nothing before there is a window. Under-claiming costs an SDR picture
 that always works; over-claiming breaks one.
+
+## Playback diagnostics
+
+A switch in Settings puts the player's own numbers over the picture: position, seconds of buffer
+ahead, stalls, and the rate `AVPlayerItemAccessLog` says is being observed.
+
+It exists because diagnosing a stutter from a Mac took a purpose-built harness and still could not
+reproduce what the television did. The machine with the problem is the one that has to be asked, and a
+television has no console to read and no file a viewer can reach — so a diagnostic that writes
+somewhere clever is one nobody uses.
+
+**Buffer ahead is the number that separates the causes.** It falls at one second per second whenever
+the player has stopped fetching, so a freeze preceded by a slow steady fall is starvation, and one
+that arrives with the buffer full is not. Those two want opposite fixes, and for three days they were
+being confused for each other.
+
+Most of it comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls` counts
+what a `playbackStalled` notification can miss, and `observedBitrate` is what the player believes it is
+receiving rather than what a measurement once found.
 
 ## The escape hatch
 

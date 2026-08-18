@@ -11,6 +11,7 @@ import SwiftUI
 struct PlayerView: UIViewControllerRepresentable {
     let stream: PlayableStream
     let startAt: Double
+    let diagnostics: PlaybackDiagnostics?
     let onProgress: (Double) -> Void
     let onFinished: (Double) -> Void
 
@@ -21,6 +22,21 @@ struct PlayerView: UIViewControllerRepresentable {
 
         if startAt > 1 {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
+        }
+
+        if let diagnostics, let item = player.currentItem {
+            diagnostics.start(observing: item)
+            // Over the player's own chrome, so it survives the transport bar appearing and going.
+            let overlay = UIHostingController(rootView: DiagnosticsOverlay(diagnostics: diagnostics))
+            overlay.view.backgroundColor = .clear
+            // A child of the player, not a loose view inside it: a hosting controller that never joins
+            // the hierarchy misses trait changes and appearance callbacks, and is harder to take down.
+            controller.addChild(overlay)
+            controller.contentOverlayView?.addSubview(overlay.view)
+            overlay.view.frame = controller.view.bounds
+            overlay.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            overlay.didMove(toParent: controller)
+            context.coordinator.overlay = overlay
         }
 
         context.coordinator.observe(player, onProgress: onProgress)
@@ -37,16 +53,20 @@ struct PlayerView: UIViewControllerRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onFinished: onFinished)
+        Coordinator(onFinished: onFinished, diagnostics: diagnostics)
     }
 
+    @MainActor
     final class Coordinator {
         private let onFinished: (Double) -> Void
+        private let diagnostics: PlaybackDiagnostics?
         private var token: Any?
         private weak var player: AVPlayer?
+        var overlay: UIHostingController<DiagnosticsOverlay>?
 
-        init(onFinished: @escaping (Double) -> Void) {
+        init(onFinished: @escaping (Double) -> Void, diagnostics: PlaybackDiagnostics?) {
             self.onFinished = onFinished
+            self.diagnostics = diagnostics
         }
 
         /// Every ten seconds, which is often enough that a resume lands where the viewer left and rare
@@ -69,6 +89,11 @@ struct PlayerView: UIViewControllerRepresentable {
             }
 
             token = nil
+            diagnostics?.stop()
+            overlay?.willMove(toParent: nil)
+            overlay?.view.removeFromSuperview()
+            overlay?.removeFromParent()
+            overlay = nil
             onFinished(position)
         }
     }

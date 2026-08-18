@@ -41,9 +41,30 @@ public struct PlaybackPreferences: Codable, Equatable, Sendable {
     public var dynamicRange: DynamicRangeOverride
     public var maxAudioChannels: Int?
 
-    public init(dynamicRange: DynamicRangeOverride = .automatic, maxAudioChannels: Int? = nil) {
+    /// Whether the player shows what it is doing: position, buffer, stalls, observed rate.
+    ///
+    /// Off by default and deliberately in the way when on. A television has no console to read and no
+    /// file a viewer can reach, so the only diagnostic that gets used is the one on screen.
+    public var showDiagnostics: Bool
+
+    public init(
+        dynamicRange: DynamicRangeOverride = .automatic,
+        maxAudioChannels: Int? = nil,
+        showDiagnostics: Bool = false
+    ) {
         self.dynamicRange = dynamicRange
         self.maxAudioChannels = maxAudioChannels
+        self.showDiagnostics = showDiagnostics
+    }
+
+    /// Absent in anything written before diagnostics existed, which must read as off rather than as a
+    /// preference that cannot be decoded.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        dynamicRange = try container.decodeIfPresent(
+            DynamicRangeOverride.self, forKey: .dynamicRange) ?? .automatic
+        maxAudioChannels = try container.decodeIfPresent(Int.self, forKey: .maxAudioChannels)
+        showDiagnostics = try container.decodeIfPresent(Bool.self, forKey: .showDiagnostics) ?? false
     }
 
     /// The profile actually sent: what the device reports, narrowed by what the viewer has chosen.

@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-10
-Updated: 2026-08-14
+Updated: 2026-08-18
 
 > Phase 2 of the [Apple client](../apple-client/plan.md) epic, and the first
 > release worth using. Every server half it needs is built and verified:
@@ -166,9 +166,34 @@ the pairing screen again if the access token itself has gone.
       later works — so it is a state with a retry, not an error.
 - [x] **Sessions**: start, progress, stop, feeding the watch history the web client
       already shows.
-- [ ] **Dolby Vision confirmed on hardware.** The simulator reports no
-      HDR-eligible output and never will, so this is checked on the Apple TV 4K —
-      the same way every measurement in the epic was taken.
+- [x] **Dolby Vision confirmed on hardware.** 2026-08-17, on the Apple TV 4K
+      (2nd generation, tvOS 26.6): the badge appears and a 33.7 GB profile 8.1 film
+      plays without stutter, with responsive seeking.
+
+      It took four attempts to get there, and none of the first three was the cause.
+      Throughput was measured and improved (#207), caches were added (#200, #204),
+      the source reads were moved into the walk (#202) — all real, none of them the
+      defect. The defect was that the container carried every describable track, so
+      a fifteen-track film had **29.5 MB of sample tables** that AVFoundation parses
+      before the first frame. Reversed in #208; the same film's header is now 7.4 MB.
+
+      What identified it was not a measurement of mine but an observation of the
+      user's: 6–8 GB two-track files had always played smoothly, on the same
+      hardware and network, before any of that work. Track count predicted the
+      failure; size and bitrate predicted nothing.
+- [ ] **A track picker of our own.** The debt from #208. The container now carries
+      one audio track and one subtitle, so `AVPlayerViewController`'s own picker has
+      nothing to choose between: changing a dub means resolving a new URL with
+      `audioStreamId` and re-seating the player at the current position — a second
+      of interruption, against a film that plays at all.
+
+      Until it exists a viewer gets the track their stored preference names, which
+      is what the resolver has always chosen for them.
+- [ ] **Startup on a television.** Ten seconds to first frame on the Apple TV
+      against three on a Mac — the difference is the A12 parsing the tables. Left as
+      it is on 2026-08-17: the tables are already minimal, and what remains to trim
+      is our own sequence of `resolve` then session-start then player, three round
+      trips through the tunnel that could be two.
 
 ### Phase 5 — the generated client *(moved ahead of Phase 3 on 2026-08-10)*
 
