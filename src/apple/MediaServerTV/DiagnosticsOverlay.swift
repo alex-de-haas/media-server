@@ -52,14 +52,17 @@ struct DiagnosticsOverlay: View {
         .allowsHitTesting(false)
     }
 
-    /// What a second of this film costs on the wire: everything fetched so far over everything played.
+    /// What a second of this film costs on the wire: everything fetched over everything watched.
     ///
-    /// Not the chosen tracks' bitrate — the container hands over the untouched file, so a source with
-    /// eleven dubs is paid for in full to hear one. Held back until enough has played to mean something,
-    /// since the header alone is megabytes and would read as a wildly expensive first second.
+    /// Watched, not the position — a resume starts an hour in, and dividing this session's bytes by an
+    /// hour nobody fetched would report a fraction of the real cost and send the diagnosis the wrong way.
+    ///
+    /// Not the chosen tracks' bitrate either: the container hands over the untouched file, so a source
+    /// with eleven dubs is paid for in full to hear one. Held back until enough has played to mean
+    /// something, since the header alone is megabytes and would read as a wildly expensive first second.
     private var needed: String {
-        guard diagnostics.position > 20, diagnostics.transferredGB > 0 else { return "—" }
-        let mbps = diagnostics.transferredGB * 8000 / diagnostics.position
+        guard diagnostics.watched > 20, diagnostics.transferredGB > 0 else { return "—" }
+        let mbps = diagnostics.transferredGB * 8000 / diagnostics.watched
         return String(format: "%.0f Мбит/с", mbps)
     }
 

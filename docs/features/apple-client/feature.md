@@ -178,9 +178,13 @@ by subtracting one reading of `numberOfBytesTransferred` from the next, rather t
 player's own `observedBitrate` — which is kept beside it, since a disagreement between them is itself
 worth seeing.
 
-Against elapsed position the same total gives what a second of this film costs on the wire, which is
-**not** the chosen tracks' bitrate: the container hands over the untouched file, so a source with eleven
-dubs is paid for in full to hear one.
+The total is every access-log event added up, not the newest one's counter — the player keeps one per
+event and opens a new one whenever the connection is re-established, so reading only the last makes the
+session total collapse each time. Against the seconds **actually watched** it gives what a second of this
+film costs on the wire, which is **not** the chosen tracks' bitrate: the container hands over the
+untouched file, so a source with eleven dubs is paid for in full to hear one. Watched, because a resume
+starts an hour in and dividing this session's bytes by an hour nobody fetched would report a fraction of
+the real cost; a seek is not watching either.
 
 Most of the rest comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls`
 counts what a `playbackStalled` notification can miss.

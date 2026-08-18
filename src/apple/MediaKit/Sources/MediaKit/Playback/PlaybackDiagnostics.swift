@@ -30,8 +30,8 @@ public final class PlaybackDiagnostics {
         public let observedBitrate: Double
         public let keepingUp: Bool
 
-        /// Bytes taken from the server since playback began, as the access log counts them. Negative
-        /// where the player has no figure to give.
+        /// Bytes taken from the server since playback began: every access-log event added up, not the
+        /// newest one's counter. Negative where the player has no figure to give at all.
         public let bytesTransferred: Int64
 
         /// Megabits per second that arrived since the previous reading — measured here by subtraction
@@ -54,6 +54,13 @@ public final class PlaybackDiagnostics {
     /// go faster or the player has decided not to ask. A peak far above what the film needs says the
     /// path was never the limit.
     public private(set) var peakInflow: Double = 0
+
+    /// Seconds of film actually played this session.
+    ///
+    /// Not the position: a resume starts an hour in, and dividing the bytes this session fetched by an
+    /// hour of media nobody fetched understates the cost by however far in the viewer resumed. Seeks are
+    /// not watching either, so only an advance small enough to be ordinary playback is counted.
+    public private(set) var watched: Double = 0
 
     /// Kept short: this is read on a television, at a glance, while something is going wrong.
     private static let keep = 240
@@ -118,15 +125,17 @@ public final class PlaybackDiagnostics {
             stalls = logged
         }
 
-        if ahead < lowestBuffer, position > 5 {
+        if ahead < lowestBuffer, watched > 5 {
             lowestBuffer = ahead
             lowestAt = position
         }
 
-        // A running total, so what arrived in the last second is a subtraction. The player reports a
-        // negative when it has no count, and the first reading has nothing to subtract from.
+        // Every event added up rather than the last one's counter: `numberOfBytesTransferred` is per
+        // event, so reading only the newest makes the session total collapse each time AVFoundation
+        // opens another one — and the subtraction below would come out negative exactly there.
         let now = Date()
-        let transferred = event?.numberOfBytesTransferred ?? -1
+        let transferred = item.accessLog().map { Self.total(of: $0.events.map(\.numberOfBytesTransferred)) } ?? -1
+
         var inflow: Double = 0
         if transferred >= 0, let previous = samples.last, previous.bytesTransferred >= 0 {
             inflow = Self.rate(
@@ -135,6 +144,10 @@ public final class PlaybackDiagnostics {
         }
 
         peakInflow = max(peakInflow, inflow)
+
+        if let previous = samples.last {
+            watched += Self.advance(from: previous.position, to: position)
+        }
 
         samples.append(Sample(
             at: now, position: position, bufferAhead: ahead, stalls: stalls,
@@ -169,6 +182,25 @@ public final class PlaybackDiagnostics {
         return 0
     }
 
+    /// Bytes taken across the whole session, from each access-log event's own counter.
+    ///
+    /// The player keeps a **counter per event** and opens a new one whenever the connection is
+    /// re-established, so the newest event's figure is not the session's. An event with no figure to
+    /// give reports a negative and contributes nothing rather than subtracting.
+    nonisolated static func total(of perEvent: [Int64]) -> Int64 {
+        perEvent.reduce(0) { $0 + max($1, 0) }
+    }
+
+    /// How much of the film the last second of wall clock actually played.
+    ///
+    /// A seek moves the position by minutes without anybody having watched them, and a backward one
+    /// moves it the wrong way entirely. Only an advance that could plausibly be ordinary playback counts
+    /// — the readings are a second apart, so anything beyond a couple of seconds is a jump.
+    nonisolated static func advance(from: Double, to: Double) -> Double {
+        let moved = to - from
+        return moved > 0 && moved <= 2 ? moved : 0
+    }
+
     /// Megabits per second, from the bytes that arrived between two readings.
     ///
     /// Megabits and not mebibits, because that is the unit every speed test and every network interface
@@ -187,8 +219,9 @@ public final class PlaybackDiagnostics {
     /// What arrived in the last second, measured here rather than estimated by the player.
     public var inflow: Double { samples.last?.inflow ?? 0 }
 
-    /// Gigabytes taken from the server so far. Against the elapsed position this is the film's real
-    /// cost per second — which for a container carrying every track is not the chosen tracks' bitrate.
+    /// Gigabytes taken from the server so far. Against the seconds actually watched this is the film's
+    /// real cost per second — which for a container carrying every track is not the chosen tracks'
+    /// bitrate.
     public var transferredGB: Double {
         Double(max(samples.last?.bytesTransferred ?? 0, 0)) / 1_000_000_000
     }
