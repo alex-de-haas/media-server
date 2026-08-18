@@ -1,4 +1,5 @@
 using MediaServer.Api.Catalogs;
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Remux;
 using MediaServer.Api.Tests.Probe;
@@ -48,8 +49,12 @@ public sealed class RemuxStreamServiceTests : IDisposable
     }
 
     // A fresh cache per service, so one test's header is never handed to another's assertion.
-    private RemuxStreamService Service() =>
-        new(_database, new CatalogPathSandbox(), _store, new RemuxHeaderCache(NullLogger<RemuxHeaderCache>.Instance));
+    // Diagnostics off, which is how the runtime serves unless an operator has asked otherwise.
+    private RemuxStreamService Service(bool diagnostics = false) =>
+        new(_database, new CatalogPathSandbox(), _store,
+            new RemuxHeaderCache(NullLogger<RemuxHeaderCache>.Instance),
+            new MediaServerSettings { PlaybackDiagnosticsEnabled = diagnostics },
+            NullLogger<RemuxStreamService>.Instance);
 
     private static byte[] Ac3Frame(int size) =>
         [0x0B, 0x77, 0x00, 0x00, 0x14, 0x40, 0xEB, .. new byte[Math.Max(0, size - 7)]];
@@ -128,6 +133,37 @@ public sealed class RemuxStreamServiceTests : IDisposable
         Assert.Equal("video/mp4", stream.ContentType);
         Assert.Equal(new FileInfo(Path_("film.mkv")).Length + 1000, content.Length, tolerance: 1000);
         Assert.True(content.CanSeek);
+    }
+
+    [Fact]
+    public async Task Diagnostics_change_what_is_logged_and_not_what_is_served()
+    {
+        // The meter and the share report sit on the serving path, which is the one path that must not
+        // change behaviour when an operator turns a diagnostic on to find out why it is slow.
+        var id = Seed();
+
+        var (plain, _) = await Service().OpenAsync(
+            id, null, null, VideoSignalling.DolbyVision, CancellationToken.None);
+        var (metered, _) = await Service(diagnostics: true).OpenAsync(
+            id, null, null, VideoSignalling.DolbyVision, CancellationToken.None);
+
+        Assert.NotNull(plain);
+        Assert.NotNull(metered);
+        using var plainContent = plain.Content;
+        using var meteredContent = metered.Content;
+
+        Assert.Equal(plainContent.Length, meteredContent.Length);
+        Assert.Equal(Head(plainContent), Head(meteredContent));
+        Assert.Equal(plain.ETag, metered.ETag);
+    }
+
+    private static byte[] Head(Stream stream)
+    {
+        // The fixture's film is small; ask for what is there rather than for a fixed slab.
+        var buffer = new byte[Math.Min(stream.Length, 4096)];
+        stream.Position = 0;
+        stream.ReadExactly(buffer);
+        return buffer;
     }
 
     [Fact]

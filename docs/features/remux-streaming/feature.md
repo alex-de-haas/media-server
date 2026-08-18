@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-17
+Updated: 2026-08-18
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -420,6 +420,28 @@ reads onwards from wherever they land.
 Measured locally against the raw file over the same server: 1.95 GB/s through the synthesised stream
 against 2.22 GB/s direct — a 12 % overhead for stitching a header onto a file, where before this the
 synthesised path was the slower one by a wide margin.
+
+## Where a slow response's time went
+
+`PLAYBACK_DIAGNOSTICS` turns on a meter around the synthesised stream, and it answers one question the
+client cannot: which half of this server a starved player is waiting on.
+
+The split is exact and costs a stopwatch. Time spent **inside** a read of the synthesised stream is the
+disk; time **between** one read and the next is the framework writing what it just got to the socket.
+Every ten seconds, and once more when the response closes, one line says how many megabytes went out,
+at what rate, and what share of the wall clock each half took.
+
+One caveat, which is why this is read next to the client's own buffer rather than alone: a player whose
+buffer is full stops draining the socket, and that idleness is indistinguishable here from a slow
+network. The figure is conclusive only while the client is taking everything it can get.
+
+The same switch logs, once per header built, **how much of the file the chosen tracks actually are**.
+The `mdat` is the source as it stands, so a player reading it sequentially fetches every track in it to
+play two — a film with eleven dubs is paid for in full to hear one. Whether that is worth repairing
+depends entirely on that ratio, which the index already knows.
+
+Both are off by default. A film is thousands of reads a second and none of them should pay for a
+stopwatch nobody is reading.
 
 ## The walk keeps what synthesis used to fetch
 
