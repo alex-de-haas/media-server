@@ -279,7 +279,7 @@
       "type": "boolean",
       "default": "false",
       "label": "Playback diagnostics",
-      "description": "Log every playback-state request from clients like Infuse to logs/playback-diagnostics.log, for investigating watched-state behaviour. Records ids, positions and flags only - no titles, paths or tokens. Leave off for normal use."
+      "description": "Log every playback-state request from clients like Infuse to logs/playback-diagnostics.log, and report where each remux response spends its time - disk or network - plus how much of a file the chosen tracks are. Records ids, positions, flags and rates only - no titles, paths or tokens. Leave off for normal use."
     }
   ],
   "telemetry": {
