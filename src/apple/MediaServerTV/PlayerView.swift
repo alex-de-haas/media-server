@@ -29,9 +29,13 @@ struct PlayerView: UIViewControllerRepresentable {
             // Over the player's own chrome, so it survives the transport bar appearing and going.
             let overlay = UIHostingController(rootView: DiagnosticsOverlay(diagnostics: diagnostics))
             overlay.view.backgroundColor = .clear
+            // A child of the player, not a loose view inside it: a hosting controller that never joins
+            // the hierarchy misses trait changes and appearance callbacks, and is harder to take down.
+            controller.addChild(overlay)
             controller.contentOverlayView?.addSubview(overlay.view)
             overlay.view.frame = controller.view.bounds
             overlay.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            overlay.didMove(toParent: controller)
             context.coordinator.overlay = overlay
         }
 
@@ -86,7 +90,9 @@ struct PlayerView: UIViewControllerRepresentable {
 
             token = nil
             diagnostics?.stop()
+            overlay?.willMove(toParent: nil)
             overlay?.view.removeFromSuperview()
+            overlay?.removeFromParent()
             overlay = nil
             onFinished(position)
         }

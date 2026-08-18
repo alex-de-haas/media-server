@@ -45,33 +45,45 @@ public final class PlaybackDiagnostics {
     private static let log = Logger(subsystem: "com.haas.mediaserver", category: "playback")
 
     private var timer: Timer?
+    private var stallObserver: (any NSObjectProtocol)?
     private weak var item: AVPlayerItem?
 
     public init() {}
 
     public func start(observing item: AVPlayerItem) {
+        // Starting twice would leave the first timer and observer running, doubling every count.
+        stop()
+
         self.item = item
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(stalled),
-            name: AVPlayerItem.playbackStalledNotification, object: item)
+        stallObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.playbackStalledNotification, object: item, queue: nil
+        ) { [weak self] _ in
+            // The notification is posted on whatever thread noticed, which is not necessarily this
+            // one. Hopping is required rather than assumed — `assumeIsolated` would trap.
+            Task { @MainActor [weak self] in self?.recordStall() }
+        }
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sample() }
+            Task { @MainActor [weak self] in self?.sample() }
         }
     }
 
     public func stop() {
         timer?.invalidate()
         timer = nil
-        NotificationCenter.default.removeObserver(self)
+
+        if let stallObserver {
+            NotificationCenter.default.removeObserver(stallObserver)
+        }
+
+        stallObserver = nil
+        item = nil
     }
 
-    @objc private func stalled() {
-        MainActor.assumeIsolated {
-            stalls += 1
-            let position = item?.currentTime().seconds ?? 0
-            Self.log.warning("Playback stalled (#\(self.stalls)) at \(position, format: .fixed(precision: 1))s")
-        }
+    private func recordStall() {
+        stalls += 1
+        let position = item?.currentTime().seconds ?? 0
+        Self.log.warning("Playback stalled (#\(self.stalls)) at \(position, format: .fixed(precision: 1))s")
     }
 
     private func sample() {
@@ -80,10 +92,8 @@ public final class PlaybackDiagnostics {
         let position = item.currentTime().seconds
         guard position.isFinite else { return }
 
-        let loaded = item.loadedTimeRanges.first?.timeRangeValue
-        let ahead = loaded.map {
-            CMTimeGetSeconds($0.start) + CMTimeGetSeconds($0.duration) - position
-        } ?? 0
+        let ahead = Self.bufferAhead(
+            in: item.loadedTimeRanges.map(\.timeRangeValue), at: position)
 
         // The access log's own stall count, which counts what the notification can miss.
         let event = item.accessLog()?.events.last
@@ -105,6 +115,27 @@ public final class PlaybackDiagnostics {
         if samples.count > Self.keep {
             samples.removeFirst(samples.count - Self.keep)
         }
+    }
+
+    /// How much media is loaded past the play head.
+    ///
+    /// The range **containing the position**, not the first one. After a seek the player keeps what it
+    /// had already fetched, so the first range is often an earlier stretch of the film — and measuring
+    /// from its end gives a negative number, which would read as starvation exactly when the buffer is
+    /// healthy. That is the one reading this overlay exists to get right.
+    /// Pure arithmetic over what the player reported, so it is testable without one.
+    nonisolated static func bufferAhead(in ranges: [CMTimeRange], at position: Double) -> Double {
+        for range in ranges {
+            let start = CMTimeGetSeconds(range.start)
+            let end = start + CMTimeGetSeconds(range.duration)
+            if position >= start && position <= end {
+                return end - position
+            }
+        }
+
+        // Nothing covers the play head: whatever is loaded is somewhere else, and there is no buffer
+        // ahead of where the viewer is.
+        return 0
     }
 
     /// Megabits per second the player believes it is receiving. Zero until it has an opinion.
