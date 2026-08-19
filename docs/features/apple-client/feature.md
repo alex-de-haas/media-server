@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -69,6 +69,13 @@ speaking plain HTTP, which made the ordinary self-hosted case unreachable from t
 Local means the private IPv4 ranges, loopback, link-local, and a `.local` name — and nothing that
 merely resembles them: `172.32.0.1` is outside the private range and is somebody's public address,
 and sending a credential there in the clear is how one leaves a house.
+
+The spelling has to be canonical decimal, which is a security property and not tidiness. `010.0.0.1`
+is ten-dot-something to anything parsing it as a number and **8.0.0.1** to the resolver that dials
+it, because a leading zero is octal there. An address that is not plainly decimal is therefore not
+classified at all and falls through to `https` — the safe direction for a guess to be wrong in. The
+host is parsed rather than split by hand for the same reason: a stray port, path or query must not be
+able to move an address onto another network.
 
 The app carries the matching App Transport Security exception, `NSAllowsLocalNetworking`, and only
 that one. A server out on the internet must still present a valid certificate, which is the part

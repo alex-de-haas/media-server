@@ -217,9 +217,10 @@ public final class PairingSession {
     /// here means `http`. Assuming otherwise made the ordinary self-hosted case simply unreachable:
     /// every attempt became a TLS handshake against a server speaking plain HTTP.
     private nonisolated static func assumedScheme(for address: String) -> String {
-        let host = address.split(separator: "/").first.map(String.init) ?? address
-        let bare = host.split(separator: ":").first.map(String.init) ?? host
-        return isOnThisNetwork(bare) ? "http" : "https"
+        // Parsed rather than split by hand. A stray port, path, query or fragment must not change
+        // which network an address is on, and `//host` is the form that answers that in one step.
+        let host = URLComponents(string: "//\(address)")?.host ?? address
+        return isOnThisNetwork(host) ? "http" : "https"
     }
 
     /// Whether an address names something on the local network rather than out on the internet.
@@ -232,11 +233,7 @@ public final class PairingSession {
             return true
         }
 
-        let parts = host.split(separator: ".")
-        guard parts.count == 4 else { return false }
-
-        let octets = parts.compactMap { Int($0) }
-        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return false }
+        guard let octets = canonicalIPv4(host) else { return false }
 
         return switch (octets[0], octets[1]) {
         case (10, _), (127, _), (192, 168): true
@@ -244,5 +241,34 @@ public final class PairingSession {
         case (169, 254): true              // link-local, for a host that never got an address
         default: false
         }
+    }
+
+    /// The four octets of an address written the one way everything agrees on, or nothing.
+    ///
+    /// Canonical decimal only, and that is a security property rather than tidiness. `010.0.0.1` is
+    /// ten-dot-something to anything that parses it as a number, and **8.0.0.1** to the resolver that
+    /// actually dials it, which reads a leading zero as octal. Believing the first reading would send
+    /// this device's bearer token in the clear to a stranger's address while calling it local.
+    ///
+    /// So a spelling that is not plainly decimal is not classified at all — it falls through to
+    /// `https`, which is the safe direction for a guess to fail in.
+    private nonisolated static func canonicalIPv4(_ host: String) -> [Int]? {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return nil }
+
+        var octets: [Int] = []
+        for part in parts {
+            guard (1...3).contains(part.count),
+                  part.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  part.count == 1 || part.first != "0",
+                  let value = Int(part), value <= 255
+            else {
+                return nil
+            }
+
+            octets.append(value)
+        }
+
+        return octets
     }
 }
