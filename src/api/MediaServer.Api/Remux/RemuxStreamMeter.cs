@@ -67,6 +67,12 @@ internal sealed class RemuxStreamMeter(
     private TimeSpan _lastEnded;
     private TimeSpan _reported;
 
+    // Where in the output this response actually read. A player that fetches ten times what it keeps is
+    // either asking for the same bytes twice or reading far ahead and throwing it away, and those want
+    // opposite repairs — the ranges are the only thing that tells them apart.
+    private long _from = -1;
+    private long _to;
+
     /// <summary>
     /// What has been served so far. Exposed so a test can hold the meter to the stream it is measuring:
     /// a meter that misses reads, or counts one twice, reports a rate that is fiction — and the whole
@@ -86,12 +92,25 @@ internal sealed class RemuxStreamMeter(
     /// <summary>Noted before a read and handed back to <see cref="Served"/> when it returns.</summary>
     internal TimeSpan Begin() => _now();
 
-    internal void Served(TimeSpan began, int bytes)
+    internal void Served(TimeSpan began, int bytes) => Served(began, bytes, at: -1);
+
+    /// <param name="at">Where in the output the read started, or -1 when the caller does not say.</param>
+    internal void Served(TimeSpan began, int bytes, long at)
     {
         var ended = _now();
 
         lock (_gate)
         {
+            if (at >= 0)
+            {
+                if (_from < 0)
+                {
+                    _from = at;
+                }
+
+                _to = Math.Max(_to, at + bytes);
+            }
+
             var read = ended - began;
             _reading += read;
             _sinceReading += read;
@@ -161,7 +180,7 @@ internal sealed class RemuxStreamMeter(
         logger.LogInformation(
             "Remux {Label} {Window}: {Megabytes:F1} MB in {Seconds:F2}s = {Mbps:F0} Mbit/s; "
             + "disk {Disk:F0}%, socket {Socket:F0}%; {Reads} reads of {Kilobytes:F0} KB; "
-            + "idle {Idle} before it.",
+            + "idle {Idle} before it; bytes {Range}.",
             label,
             window,
             bytes / 1_000_000d,
@@ -171,6 +190,7 @@ internal sealed class RemuxStreamMeter(
             writing.TotalSeconds / seconds * 100,
             reads,
             bytes / (double)reads / 1000,
-            _idle is { } idle ? $"{idle.TotalMilliseconds:F0} ms" : "nothing");
+            _idle is { } idle ? $"{idle.TotalMilliseconds:F0} ms" : "nothing",
+            _from < 0 ? "unknown" : $"{_from}-{_to}");
     }
 }

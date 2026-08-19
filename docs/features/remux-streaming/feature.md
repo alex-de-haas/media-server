@@ -437,6 +437,10 @@ into a film moves the running mean by nothing and prints the same figure as the 
 it. The closing line is the one that covers everything — and it counts the stretch after the last read as
 socket time, or a response the player took in one go would report `socket 0%` however long it waited.
 
+Each line names **the range of the output it read**, because a player that fetches ten times what it
+keeps is either asking for the same bytes twice or reading far ahead and discarding, and those want
+opposite repairs. Nothing else separates them.
+
 Each line also carries **how long the source sat with nobody reading it** before that response began.
 The first production log made that essential: every line said the server had served its megabytes in a
 tenth of a second at several hundred megabits, and none could say what happened in between. A film
