@@ -94,6 +94,18 @@ MEDIASERVER_TEAM=XXXXXXXXXX xcodebuild -project src/apple/MediaServerTV.xcodepro
 subject. `-allowProvisioningUpdates` registers the bundle identifier with the developer account the
 first time, which is a change to that account rather than to this machine.
 
+**To check that it compiles, and nothing more, turn signing off:**
+
+```bash
+xcodebuild -project src/apple/MediaServerTV.xcodeproj -scheme MediaServerTV \
+  -destination 'generic/platform=tvOS' CODE_SIGNING_ALLOWED=NO build
+```
+
+A signing build **resolves `$(MEDIASERVER_TEAM)` and writes the identifier back into the project**,
+which then rides along in whatever commit comes next and breaks device builds for everyone else. It
+has happened more than once. Without signing there is nothing to resolve, the project file is left
+alone, and the compile is the same — so this is the invocation for a verification build.
+
 Simulator builds ignore it entirely.
 
 Nothing is signed yet, and simulator builds do not need it to be: they sign themselves with
