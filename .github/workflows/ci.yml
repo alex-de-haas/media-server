@@ -93,6 +93,9 @@ jobs:
   web-e2e:
     name: web e2e (Playwright)
     runs-on: ubuntu-latest
+    # A hung job blocks a merge until the six-hour ceiling. This one hung twice in a row, so the
+    # ceiling is now twenty minutes: a stall costs a rerun rather than an afternoon.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: src/web
@@ -114,8 +117,15 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # No `--with-deps`, deliberately. That half shells out to `sudo apt-get`, and it hung three
+      # times running — six minutes without printing a single line, which is `apt-get` waiting in
+      # silence for a lock the runner's own unattended-upgrades still holds. The GitHub image already
+      # carries the libraries Chromium needs, so the apt half bought nothing and cost the merge an
+      # afternoon. If one ever *is* missing, Playwright says which by name when the browser fails to
+      # launch — a loud failure in seconds beats a silent wait.
       - name: Install Playwright browser
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
+        timeout-minutes: 6
 
       - name: E2e (mocked BFF)
         run: pnpm exec playwright test

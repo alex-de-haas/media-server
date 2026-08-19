@@ -1297,6 +1297,8 @@ public enum Components {
             public var surfaceVersion: Swift.String
             /// - Remark: Generated from `#/components/schemas/NativeServerBootstrap/coreOrigin`.
             public var coreOrigin: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativeServerBootstrap/pairingOrigin`.
+            public var pairingOrigin: Swift.String?
             /// Creates a new `NativeServerBootstrap`.
             ///
             /// - Parameters:
@@ -1304,22 +1306,26 @@ public enum Components {
             ///   - appId:
             ///   - surfaceVersion:
             ///   - coreOrigin:
+            ///   - pairingOrigin:
             public init(
                 serverName: Swift.String,
                 appId: Swift.String,
                 surfaceVersion: Swift.String,
-                coreOrigin: Swift.String? = nil
+                coreOrigin: Swift.String? = nil,
+                pairingOrigin: Swift.String? = nil
             ) {
                 self.serverName = serverName
                 self.appId = appId
                 self.surfaceVersion = surfaceVersion
                 self.coreOrigin = coreOrigin
+                self.pairingOrigin = pairingOrigin
             }
             public enum CodingKeys: String, CodingKey {
                 case serverName
                 case appId
                 case surfaceVersion
                 case coreOrigin
+                case pairingOrigin
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativeServerCapabilities`.

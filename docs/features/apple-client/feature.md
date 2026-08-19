@@ -83,8 +83,27 @@ worth keeping. A typed scheme always wins over the assumption.
 
 One constraint had to be read out of Core rather than guessed: `redirectUri` on step 5 is
 checked against the app's installed endpoint origins, even though nothing navigates and the
-authorization code comes back in the body. The address the viewer typed *is* that origin,
-so it is what gets sent.
+authorization code comes back in the body.
+
+**The server names that origin; the client does not assume it.** Bootstrap carries
+`pairingOrigin`, and that is what gets sent. The address a viewer types need not be one Core
+has ever heard of — a television reaching a server across the room types its address on this
+network, and Core knows the app by its installed endpoint. Sending the typed address worked
+only for as long as the two happened to coincide, and when they stopped, pairing failed at
+**step 5**: after the code was displayed, read out, and approved by hand. The most expensive
+place in the whole flow to discover an address was wrong.
+
+That origin is **kept with the pairing**, because every exchange is checked against it and not
+only the first. A grant is re-minted whenever it lapses, by the same call — so storing the
+typed address would refuse a television a week after it paired successfully, which is
+precisely the failure the refresh path exists to prevent.
+
+Nothing new is trusted by taking it from the server. `redirectUri` is checked by Core, so a
+value invented by a hostile endpoint is refused rather than followed, and `coreOrigin` — the
+field that actually matters — already comes from the same answer and is pinned. A server that
+returns no `pairingOrigin` is paired against the typed address, which is what every pairing
+did before this existed and what an older server still gets; the field is optional on the
+stored credential for the same reason, so a Keychain written before it existed still decodes.
 
 The Core a device was approved against is **pinned at pairing time**. Refreshing never re-asks
 an anonymous route where Core lives: the token about to be presented is the full-privilege

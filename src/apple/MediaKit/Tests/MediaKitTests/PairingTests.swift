@@ -100,9 +100,17 @@ private let tokenBody = """
 {"accessToken":"app-token","tokenType":"Bearer","expiresAt":"2030-01-01T00:00:00.000Z","expiresInSeconds":604800}
 """
 
-private func happyServer(polls: [StubTransport.Answer]) -> StubTransport {
+/// A server that names the origin Core has installed it under, which is what a real one does.
+private let bootstrapWithPairingOrigin = """
+{"serverName":"Home","appId":"com.haas.media-server","surfaceVersion":"1",\
+"coreOrigin":"https://core.example","pairingOrigin":"https://media.example.com"}
+"""
+
+private func happyServer(
+    polls: [StubTransport.Answer], bootstrap: String = bootstrapBody
+) -> StubTransport {
     StubTransport([
-        "/native/v1/server/public": [(200, bootstrapBody)],
+        "/native/v1/server/public": [(200, bootstrap)],
         "/api/auth/device/code": [(200, grantBody)],
         "/api/auth/device/token": polls,
         "/api/auth/apps/authorize": [(200, #"{"code":"auth-code","redirectUri":"x","expiresAt":"2030-01-01T00:00:00Z"}"#)],
@@ -374,6 +382,73 @@ struct PairingSessionTests {
             if case .checking = subject.state {} else if case .awaitingApproval = subject.state {} else { return }
             await Task.yield()
         }
+    }
+
+    @Test("The redirect is the origin the server is installed under, not the address typed")
+    func redirectIsTheInstalledOrigin() async {
+        // Core checks the redirect against the app's installed endpoints, so a television that typed a
+        // local address was refused at the last step — after the viewer had already approved the code.
+        let transport = happyServer(
+            polls: [(200, #"{"status":"approved","token":"core-token"}"#)],
+            bootstrap: bootstrapWithPairingOrigin)
+        let subject = session(transport)
+
+        subject.start(address: "192.168.1.50:8096")
+        await settle(subject)
+
+        #expect(transport.body(forPath: "/api/auth/apps/authorize")?["redirectUri"] as? String
+            == "https://media.example.com")
+    }
+
+    @Test("A server that names no origin is paired against the address that was typed")
+    func redirectFallsBackToTheTypedAddress() async {
+        // Which is every pairing that worked before this existed, and every older server after it.
+        let transport = happyServer(polls: [(200, #"{"status":"approved","token":"core-token"}"#)])
+        let subject = session(transport)
+
+        subject.start(address: "media.example")
+        await settle(subject)
+
+        #expect(transport.body(forPath: "/api/auth/apps/authorize")?["redirectUri"] as? String
+            == "https://media.example")
+    }
+
+    @Test("The origin is kept, so a re-mint a week later is not refused for the same reason")
+    func redirectSurvivesARefresh() async {
+        // The grant is re-minted with the same call and the same check. Storing only the typed address
+        // would refuse a television a week after it paired successfully — which is exactly the failure
+        // the refresh path exists to prevent.
+        let store = InMemoryCredentialStore()
+        let transport = happyServer(
+            polls: [(200, #"{"status":"approved","token":"core-token"}"#)],
+            bootstrap: bootstrapWithPairingOrigin)
+
+        let subject = session(transport, store: store)
+        subject.start(address: "192.168.1.50:8096")
+        await settle(subject)
+
+        let paired = try? #require(store.load())
+        #expect(paired?.pairingOrigin?.absoluteString == "https://media.example.com")
+        #expect(paired?.redirectUri.absoluteString == "https://media.example.com")
+        #expect(paired?.server.absoluteString == "http://192.168.1.50:8096")
+    }
+
+    @Test("A pairing stored before the origin existed still redirects to its address")
+    func redirectWithoutAStoredOrigin() async {
+        // Every credential already in a Keychain when this shipped. The field is absent, not empty.
+        let transport = happyServer(polls: [(200, #"{"status":"approved","token":"core-token"}"#)])
+        let subject = session(transport)
+
+        subject.start(address: "media.example")
+        await settle(subject)
+
+        guard case .paired(let paired) = subject.state else {
+            Issue.record("expected a pairing")
+            return
+        }
+
+        #expect(paired.pairingOrigin == nil)
+        #expect(paired.redirectUri == paired.server)
     }
 
     @Test("A code goes on screen before anyone is asked to wait for it")

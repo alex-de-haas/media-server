@@ -19,11 +19,30 @@ public struct ServerBootstrap: Equatable, Sendable {
     /// answer, so it is optional here and refused explicitly where it is used.
     public let coreOrigin: String?
 
-    public init(serverName: String, appId: String, surfaceVersion: String, coreOrigin: String?) {
+    /// The origin Core has installed for this app, and the only thing it will accept as a
+    /// `redirectUri` when this device asks to be authorised.
+    ///
+    /// Told rather than assumed, because the address a viewer types need not be one Core has ever heard
+    /// of. A television reaching a server across the room types its address *on this network*, and Core
+    /// checks the redirect against the app's installed endpoints — so that pairing failed at the last
+    /// step, after the viewer had already approved the code, which is the most expensive place to fail.
+    ///
+    /// Null on a host with no public origin for this app, and then the typed address is used, which is
+    /// what every pairing did before this existed.
+    public let pairingOrigin: String?
+
+    public init(
+        serverName: String,
+        appId: String,
+        surfaceVersion: String,
+        coreOrigin: String?,
+        pairingOrigin: String? = nil
+    ) {
         self.serverName = serverName
         self.appId = appId
         self.surfaceVersion = surfaceVersion
         self.coreOrigin = coreOrigin
+        self.pairingOrigin = pairingOrigin
     }
 
     /// Built from the generated type rather than decoded by hand.
@@ -36,7 +55,8 @@ public struct ServerBootstrap: Equatable, Sendable {
             serverName: generated.serverName,
             appId: generated.appId,
             surfaceVersion: generated.surfaceVersion,
-            coreOrigin: generated.coreOrigin)
+            coreOrigin: generated.coreOrigin,
+            pairingOrigin: generated.pairingOrigin)
     }
 }
 
