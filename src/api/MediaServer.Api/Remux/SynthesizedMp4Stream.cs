@@ -19,12 +19,14 @@ internal sealed class SynthesizedMp4Stream : Stream
     private readonly byte[] _header;
     private readonly IReadOnlyList<Stream> _parts;
     private readonly long[] _starts;                // where each part begins in the output
+    private readonly RemuxStreamMeter? _meter;
     private long _position;
 
-    public SynthesizedMp4Stream(byte[] header, IReadOnlyList<Stream> parts)
+    public SynthesizedMp4Stream(byte[] header, IReadOnlyList<Stream> parts, RemuxStreamMeter? meter = null)
     {
         _header = header;
         _parts = parts;
+        _meter = meter;
         _starts = new long[parts.Count + 1];
         _starts[0] = header.Length;
         for (var i = 0; i < parts.Count; i++)
@@ -74,6 +76,8 @@ internal sealed class SynthesizedMp4Stream : Stream
             return 0;
         }
 
+        var began = _meter?.Begin();
+
         int read;
         if (part < 0)
         {
@@ -87,6 +91,11 @@ internal sealed class SynthesizedMp4Stream : Stream
         }
 
         _position += read;
+        if (began is { } at)
+        {
+            _meter?.Served(at, read);
+        }
+
         return read;
     }
 
@@ -103,9 +112,16 @@ internal sealed class SynthesizedMp4Stream : Stream
             return Read(buffer.Span);
         }
 
+        var began = _meter?.Begin();
         Seek(_parts[part], within);
         var read = await _parts[part].ReadAsync(buffer[..take], cancellationToken);
         _position += read;
+
+        if (began is { } at)
+        {
+            _meter?.Served(at, read);
+        }
+
         return read;
     }
 
@@ -182,6 +198,7 @@ internal sealed class SynthesizedMp4Stream : Stream
     {
         if (disposing)
         {
+            _meter?.Done();
             foreach (var part in _parts)
             {
                 part.Dispose();

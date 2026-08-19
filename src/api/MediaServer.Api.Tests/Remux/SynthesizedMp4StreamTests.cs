@@ -1,4 +1,5 @@
 using MediaServer.Api.Remux;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MediaServer.Api.Tests.Remux;
 
@@ -204,3 +205,78 @@ public sealed class SynthesizedMp4StreamSeekTests
         Assert.Equal(content[100..132], buffer);
     }
 }
+
+/// <summary>
+/// The meter that says where a response's time went, held to the stream it measures.
+///
+/// Its numbers decide whether the next repair is to this server's read path or to the path to the
+/// television, and those want opposite work. A meter that miscounts sends that decision the wrong way.
+/// </summary>
+public sealed class SynthesizedMp4StreamMeterTests
+{
+    private static byte[] Fill(int size, byte value) => Enumerable.Repeat(value, size).ToArray();
+
+    private static SynthesizedMp4Stream Metered(
+        RemuxStreamMeter meter, byte[] header, params byte[][] parts) =>
+        new(header, [.. parts.Select(part => (Stream)new MemoryStream(part))], meter);
+
+    private static byte[] Drain(Stream stream)
+    {
+        var buffer = new MemoryStream();
+        var chunk = new byte[7];
+        int read;
+        while ((read = stream.Read(chunk, 0, chunk.Length)) > 0)
+        {
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
+    }
+
+    [Fact]
+    public void A_meter_sees_every_byte_the_stream_handed_out_exactly_once()
+    {
+        // The meter divides bytes by time to say how fast the film is being served, and that answer is
+        // used to decide whether the disk or the wire is the problem. A miscount is a wrong decision.
+        var meter = new RemuxStreamMeter(NullLogger.Instance, "test");
+        using var stream = Metered(meter, Fill(10, 0x01), Fill(20, 0x02), Fill(5, 0x03));
+
+        var drained = Drain(stream);
+
+        Assert.Equal(35, drained.Length);
+        Assert.Equal(35, meter.Totals.Bytes);
+        Assert.True(meter.Totals.Reads > 1, "a stream read seven bytes at a time is not one read");
+    }
+
+    [Fact]
+    public async Task An_asynchronous_read_is_counted_the_same_as_a_synchronous_one()
+    {
+        // The header comes from memory and the parts from files, and the async path delegates to the
+        // sync one for the header only. Counting that delegation twice would inflate every rate.
+        var meter = new RemuxStreamMeter(NullLogger.Instance, "test");
+        await using var stream = Metered(meter, Fill(10, 0x01), Fill(20, 0x02));
+
+        var buffer = new byte[7];
+        var total = 0;
+        int read;
+        while ((read = await stream.ReadAsync(buffer)) > 0)
+        {
+            total += read;
+        }
+
+        Assert.Equal(30, total);
+        Assert.Equal(30, meter.Totals.Bytes);
+    }
+
+    [Fact]
+    public void Metering_does_not_change_what_is_served()
+    {
+        var header = Fill(10, 0x01);
+        var part = Fill(20, 0x02);
+        using var plain = new SynthesizedMp4Stream(header, [new MemoryStream(part)]);
+        using var metered = Metered(new RemuxStreamMeter(NullLogger.Instance, "test"), header, part);
+
+        Assert.Equal(Drain(plain), Drain(metered));
+    }
+}
+

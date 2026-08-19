@@ -1,0 +1,108 @@
+using MediaServer.Api.Remux;
+using Microsoft.Extensions.Logging;
+
+namespace MediaServer.Api.Tests.Remux;
+
+/// <summary>
+/// The meter that says where a slow response's time went.
+///
+/// Its lines decide whether the next repair belongs to this server's read path or to the path to the
+/// television, and those want opposite work. Every figure in them is a ratio of durations, so the clock
+/// is stated rather than slept through: a test that waits for real time measures the build machine's
+/// mood and not this arithmetic.
+/// </summary>
+public sealed class RemuxStreamMeterTests
+{
+    private sealed class Recorder : ILogger
+    {
+        public List<string> Lines { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel level) => true;
+
+        public void Log<TState>(
+            LogLevel level, EventId id, TState state, Exception? error,
+            Func<TState, Exception?, string> formatter) => Lines.Add(formatter(state, error));
+    }
+
+    private sealed class StatedClock
+    {
+        public TimeSpan Now { get; private set; }
+
+        public TimeSpan At(double seconds)
+        {
+            Now = TimeSpan.FromSeconds(seconds);
+            return Now;
+        }
+    }
+
+    [Fact]
+    public void A_periodic_line_describes_its_own_ten_seconds_and_not_the_response_so_far()
+    {
+        // The cadence exists to show a bad stretch. Averaged over everything that came before, a stall
+        // half an hour into a film moves the running mean by nothing and reports the same figure as the
+        // half hour of health before it — which is the one answer that would send the diagnosis wrong.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(log, "film", () => clock.Now);
+
+        meter.Served(clock.At(0), 62_500_000);
+        meter.Served(clock.At(10), 62_500_000);      // closes a fast ten seconds: 125 MB
+        meter.Served(clock.At(20), 1_250_000);       // closes a starved one: 1.25 MB
+
+        Assert.Equal(2, log.Lines.Count);
+        Assert.Contains("= 100 Mbit/s", log.Lines[0]);
+        Assert.Contains("= 1 Mbit/s", log.Lines[1]);
+    }
+
+    [Fact]
+    public void The_stretch_after_the_last_read_is_socket_time_like_any_other()
+    {
+        // A response the player takes in one go has no gap *between* reads at all. Counting only those
+        // gaps reports "socket 0%" for it — the most misleading answer this meter could give, since a
+        // player stalled on the last chunk is exactly the case being hunted.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(log, "film", () => clock.Now);
+
+        var began = clock.At(0);
+        clock.At(1);                                  // one second getting it off the disk
+        meter.Served(began, 1_000_000);
+
+        clock.At(5);                                  // four more waiting for the wire
+        meter.Done();
+
+        Assert.Single(log.Lines);
+        Assert.Contains("disk 20%, socket 80%", log.Lines[0]);
+    }
+
+    [Fact]
+    public void The_closing_line_is_the_whole_response_and_not_the_last_interval()
+    {
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(log, "film", () => clock.Now);
+
+        meter.Served(clock.At(0), 10_000_000);
+        meter.Served(clock.At(10), 10_000_000);
+        meter.Served(clock.At(20), 10_000_000);
+        meter.Done();
+
+        Assert.Equal(3, log.Lines.Count);
+        Assert.Contains("closed", log.Lines[2]);
+        Assert.Contains("30.0 MB", log.Lines[2]);
+        Assert.Equal((30_000_000, 3), meter.Totals);
+    }
+
+    [Fact]
+    public void A_response_that_never_read_anything_says_nothing()
+    {
+        var log = new Recorder();
+        var meter = new RemuxStreamMeter(log, "film", () => TimeSpan.FromSeconds(5));
+
+        meter.Done();
+
+        Assert.Empty(log.Lines);
+    }
+}

@@ -1,4 +1,5 @@
 using MediaServer.Api.Catalogs;
+using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
@@ -37,7 +38,9 @@ internal sealed class RemuxStreamService(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
     RemuxIndexStore store,
-    RemuxHeaderCache headers)
+    RemuxHeaderCache headers,
+    MediaServerSettings settings,
+    ILogger<RemuxStreamService> logger)
 {
     private sealed record StreamRow(
         Guid Id, StreamType Type, int Index, bool IsExternal, string? ExternalPath, string? Codec,
@@ -249,6 +252,10 @@ internal sealed class RemuxStreamService(
                 }
 
                 headers.Put(key, built);
+                if (settings.PlaybackDiagnosticsEnabled)
+                {
+                    ReportShare(index, tracks, mediaSourceId);
+                }
             }
 
             // The wrapper of every input after the first sits between the files, which is where the
@@ -262,7 +269,12 @@ internal sealed class RemuxStreamService(
 
             return (
                 new RemuxStream(
-                    new SynthesizedMp4Stream(built.Header, parts),
+                    new SynthesizedMp4Stream(
+                        built.Header,
+                        parts,
+                        settings.PlaybackDiagnosticsEnabled
+                            ? new RemuxStreamMeter(logger, mediaSourceId.ToString("N")[..8])
+                            : null),
                     "video/mp4",
                     etag,
                     lastModified),
@@ -273,6 +285,37 @@ internal sealed class RemuxStreamService(
             await DisposeAllAsync(opened);
             throw;
         }
+    }
+
+    /// <summary>
+    /// How much of the file the chosen tracks actually are.
+    ///
+    /// The <c>mdat</c> is the source as it stands, so a player reading it sequentially fetches every
+    /// track in it to play two — a source with eleven dubs is paid for in full to hear one. Whether that
+    /// is worth repairing depends entirely on this ratio, which the index already knows and which no
+    /// amount of reasoning about container layouts can substitute for. Logged once per header built,
+    /// not once per request.
+    /// </summary>
+    private void ReportShare(
+        MatroskaIndex index, IEnumerable<Mp4Synthesizer.TrackRef> tracks, Guid mediaSourceId)
+    {
+        // Input 0 only: a sidecar's samples live in a file of their own and are not part of this share.
+        var chosen = tracks
+            .Where(track => track.Input == 0)
+            .Sum(track => index.Track(track.Number)?.Samples.Sum(sample => (long)sample.Size) ?? 0);
+
+        if (index.SourceLength <= 0)
+        {
+            return;
+        }
+
+        logger.LogInformation(
+            "Remux {Source}: the chosen tracks are {Chosen} MB of a {Total} MB file ({Share:P0}); "
+            + "the remainder is sent and discarded.",
+            mediaSourceId.ToString("N")[..8],
+            chosen / 1_000_000,
+            index.SourceLength / 1_000_000,
+            chosen / (double)index.SourceLength);
     }
 
     /// <summary>An embedded subtitle's position in the container, or null when none was chosen.</summary>
