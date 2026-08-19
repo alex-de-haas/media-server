@@ -39,6 +39,7 @@ internal sealed class RemuxStreamService(
     ICatalogPathSandbox sandbox,
     RemuxIndexStore store,
     RemuxHeaderCache headers,
+    RemuxStreamActivity activity,
     MediaServerSettings settings,
     ILogger<RemuxStreamService> logger)
 {
@@ -273,7 +274,7 @@ internal sealed class RemuxStreamService(
                         built.Header,
                         parts,
                         settings.PlaybackDiagnosticsEnabled
-                            ? new RemuxStreamMeter(logger, mediaSourceId.ToString("N")[..8])
+                            ? new RemuxStreamMeter(logger, mediaSourceId.ToString("N")[..8], activity)
                             : null),
                     "video/mp4",
                     etag,

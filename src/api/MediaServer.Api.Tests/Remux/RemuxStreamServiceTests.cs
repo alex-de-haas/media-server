@@ -53,6 +53,7 @@ public sealed class RemuxStreamServiceTests : IDisposable
     private RemuxStreamService Service(bool diagnostics = false) =>
         new(_database, new CatalogPathSandbox(), _store,
             new RemuxHeaderCache(NullLogger<RemuxHeaderCache>.Instance),
+            new RemuxStreamActivity(),
             new MediaServerSettings { PlaybackDiagnosticsEnabled = diagnostics },
             NullLogger<RemuxStreamService>.Instance);
 
