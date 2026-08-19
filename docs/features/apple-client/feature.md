@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -57,6 +57,29 @@ client a full path into any runtime app, and this walks it:
    bearer-presented Core session is deliberately CSRF-exempt, which is exactly what lets a
    device with no cookie jar do this — then `POST {core}/api/auth/apps/token` narrows it to
    an app identity token.
+
+### The address, and why a bare one is not always `https`
+
+A viewer types a host, not a URL, and a television is no place to type a scheme. A bare address
+therefore becomes `https` — **except** one on this network, which becomes `http`.
+
+That exception is not a convenience. A server across the room has no public name and so can hold no
+certificate for one; assuming `https` turned every attempt into a TLS handshake against a server
+speaking plain HTTP, which made the ordinary self-hosted case unreachable from this app entirely.
+Local means the private IPv4 ranges, loopback, link-local, and a `.local` name — and nothing that
+merely resembles them: `172.32.0.1` is outside the private range and is somebody's public address,
+and sending a credential there in the clear is how one leaves a house.
+
+The spelling has to be canonical decimal, which is a security property and not tidiness. `010.0.0.1`
+is ten-dot-something to anything parsing it as a number and **8.0.0.1** to the resolver that dials
+it, because a leading zero is octal there. An address that is not plainly decimal is therefore not
+classified at all and falls through to `https` — the safe direction for a guess to be wrong in. The
+host is parsed rather than split by hand for the same reason: a stray port, path or query must not be
+able to move an address onto another network.
+
+The app carries the matching App Transport Security exception, `NSAllowsLocalNetworking`, and only
+that one. A server out on the internet must still present a valid certificate, which is the part
+worth keeping. A typed scheme always wins over the assumption.
 
 One constraint had to be read out of Core rather than guessed: `redirectUri` on step 5 is
 checked against the app's installed endpoint origins, even though nothing navigates and the

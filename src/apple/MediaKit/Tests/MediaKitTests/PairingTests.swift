@@ -117,6 +117,54 @@ struct AddressTests {
         #expect(PairingSession.normalise("media.example.com")?.absoluteString == "https://media.example.com")
     }
 
+    @Test("An address on this network becomes http, because there is no certificate for one")
+    func localAddress() {
+        // A server across the room has no public name and so can hold no certificate. Assuming https
+        // made every attempt a TLS handshake against a server speaking plain HTTP — which is to say it
+        // made the ordinary self-hosted case unreachable.
+        #expect(PairingSession.normalise("192.168.1.50:8096")?.absoluteString == "http://192.168.1.50:8096")
+        #expect(PairingSession.normalise("10.0.0.4:8096")?.absoluteString == "http://10.0.0.4:8096")
+        #expect(PairingSession.normalise("172.20.3.9")?.absoluteString == "http://172.20.3.9")
+        #expect(PairingSession.normalise("attic.local:8096")?.absoluteString == "http://attic.local:8096")
+    }
+
+    @Test("An address that only looks local is still https")
+    func notLocal() {
+        // 172.32 is outside the private range and 11.0.0.1 is somebody's public address. Sending either
+        // in the clear because it resembles a home network is how a credential leaves a house.
+        #expect(PairingSession.normalise("172.32.0.1")?.absoluteString == "https://172.32.0.1")
+        #expect(PairingSession.normalise("11.0.0.1")?.absoluteString == "https://11.0.0.1")
+        #expect(PairingSession.normalise("192.168.1")?.absoluteString == "https://192.168.1")
+        #expect(PairingSession.normalise("notlocal.example.com")?.absoluteString
+            == "https://notlocal.example.com")
+    }
+
+    @Test("An address written the way only a parser would read as local is https")
+    func noncanonical() {
+        // `010.0.0.1` is 10.0.0.1 to anything reading it as a number and **8.0.0.1** to the resolver
+        // that dials it, which takes a leading zero as octal. Trusting the first reading would put this
+        // device's bearer token on the wire in the clear, to a stranger's address, while calling it
+        // local. Anything not plainly decimal falls through to https, which is the safe way to be wrong.
+        #expect(PairingSession.normalise("010.0.0.1")?.absoluteString == "https://010.0.0.1")
+        #expect(PairingSession.normalise("192.168.001.1")?.absoluteString == "https://192.168.001.1")
+        #expect(PairingSession.normalise("192.168.1.0256")?.absoluteString == "https://192.168.1.0256")
+        #expect(PairingSession.normalise("192.168.1.256")?.absoluteString == "https://192.168.1.256")
+    }
+
+    @Test("A stray path or query does not move an address to another network")
+    func localWithTrailings() {
+        // The path and query are dropped a moment later anyway; letting them decide the scheme first
+        // would put a local server back behind a TLS handshake it cannot answer.
+        #expect(PairingSession.normalise("192.168.1.50/")?.absoluteString == "http://192.168.1.50")
+        #expect(PairingSession.normalise("192.168.1.50:8096/x?y=1#z")?.absoluteString
+            == "http://192.168.1.50:8096")
+    }
+
+    @Test("A typed scheme always wins over the assumption")
+    func typedSchemeWins() {
+        #expect(PairingSession.normalise("https://192.168.1.50")?.absoluteString == "https://192.168.1.50")
+    }
+
     @Test("An explicit scheme is kept, including http for a server on the local network")
     func explicitScheme() {
         #expect(PairingSession.normalise("http://192.168.1.10:8080")?.absoluteString

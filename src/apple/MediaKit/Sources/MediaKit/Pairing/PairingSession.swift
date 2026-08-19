@@ -191,7 +191,7 @@ public final class PairingSession {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let withScheme = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        let withScheme = trimmed.contains("://") ? trimmed : "\(assumedScheme(for: trimmed))://\(trimmed)"
         guard let components = URLComponents(string: withScheme),
               let host = components.host, !host.isEmpty,
               components.scheme == "http" || components.scheme == "https"
@@ -207,5 +207,68 @@ public final class PairingSession {
         // it in front of every route this client asks for.
         clean.path = ""
         return clean.url
+    }
+
+    /// What to assume when the viewer typed no scheme.
+    ///
+    /// `https` for anything with a name, because that is what a television should be asking for and
+    /// nobody should have to type it on a remote control. But **a server on this network has no
+    /// certificate and cannot get one** — there is no public name to issue it against — so an address
+    /// here means `http`. Assuming otherwise made the ordinary self-hosted case simply unreachable:
+    /// every attempt became a TLS handshake against a server speaking plain HTTP.
+    private nonisolated static func assumedScheme(for address: String) -> String {
+        // Parsed rather than split by hand. A stray port, path, query or fragment must not change
+        // which network an address is on, and `//host` is the form that answers that in one step.
+        let host = URLComponents(string: "//\(address)")?.host ?? address
+        return isOnThisNetwork(host) ? "http" : "https"
+    }
+
+    /// Whether an address names something on the local network rather than out on the internet.
+    ///
+    /// The same question App Transport Security asks before it refuses a plain-HTTP connection, which is
+    /// why the answers have to agree: an address this calls local is one the app is permitted to reach
+    /// without TLS.
+    nonisolated static func isOnThisNetwork(_ host: String) -> Bool {
+        if host.lowercased().hasSuffix(".local") {
+            return true
+        }
+
+        guard let octets = canonicalIPv4(host) else { return false }
+
+        return switch (octets[0], octets[1]) {
+        case (10, _), (127, _), (192, 168): true
+        case (172, 16...31): true          // the private range nobody remembers the shape of
+        case (169, 254): true              // link-local, for a host that never got an address
+        default: false
+        }
+    }
+
+    /// The four octets of an address written the one way everything agrees on, or nothing.
+    ///
+    /// Canonical decimal only, and that is a security property rather than tidiness. `010.0.0.1` is
+    /// ten-dot-something to anything that parses it as a number, and **8.0.0.1** to the resolver that
+    /// actually dials it, which reads a leading zero as octal. Believing the first reading would send
+    /// this device's bearer token in the clear to a stranger's address while calling it local.
+    ///
+    /// So a spelling that is not plainly decimal is not classified at all — it falls through to
+    /// `https`, which is the safe direction for a guess to fail in.
+    private nonisolated static func canonicalIPv4(_ host: String) -> [Int]? {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return nil }
+
+        var octets: [Int] = []
+        for part in parts {
+            guard (1...3).contains(part.count),
+                  part.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  part.count == 1 || part.first != "0",
+                  let value = Int(part), value <= 255
+            else {
+                return nil
+            }
+
+            octets.append(value)
+        }
+
+        return octets
     }
 }
