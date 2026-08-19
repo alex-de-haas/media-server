@@ -82,3 +82,93 @@ struct DiagnosticsPreferenceTests {
         #expect(!PlaybackPreferences().showDiagnostics)
     }
 }
+
+/// The reading that settles what a flat buffer cannot.
+///
+/// A buffer parked at two seconds says bytes arrive exactly as fast as they are spent — equally true of
+/// a path that cannot go faster and of a player that has decided not to ask for more. Only a peak well
+/// above the film's own rate tells those apart, so this arithmetic has to be right.
+@Suite("Inflow")
+struct InflowTests {
+    @Test("Bytes over a second, in the unit a speed test is quoted in")
+    func megabits() {
+        // 12.5 MB in one second is 100 Mbit/s, decimal — the unit an interface reports.
+        #expect(PlaybackDiagnostics.rate(bytes: 12_500_000, over: 1) == 100)
+    }
+
+    @Test("A longer gap between readings is divided out")
+    func acrossSeveralSeconds() {
+        #expect(PlaybackDiagnostics.rate(bytes: 25_000_000, over: 2) == 100)
+    }
+
+    @Test("Nothing arrived is no rate, not a division")
+    func nothingArrived() {
+        #expect(PlaybackDiagnostics.rate(bytes: 0, over: 1) == 0)
+    }
+
+    @Test("No time passed is no rate")
+    func noTime() {
+        // Two samples in the same instant would otherwise divide by zero and poison the session peak
+        // with an infinity that never leaves it.
+        #expect(PlaybackDiagnostics.rate(bytes: 1_000_000, over: 0) == 0)
+    }
+
+    @Test("A total that went backwards is not a negative rate")
+    func wentBackwards() {
+        // Summing every access-log event should make the total monotonic, so this should not arise.
+        // It is guarded anyway: a negative rate would be recorded as a measurement of something.
+        #expect(PlaybackDiagnostics.rate(bytes: -5_000, over: 1) == 0)
+    }
+}
+
+/// The session total, which is not the number the player hands over.
+@Suite("Bytes across access-log events")
+struct TransferredTotalTests {
+    @Test("Every event counts, not just the newest")
+    func acrossEvents() {
+        // `numberOfBytesTransferred` is per event. Reading only the last one makes the total collapse
+        // each time AVFoundation opens another connection — and the film's cost collapses with it.
+        #expect(PlaybackDiagnostics.total(of: [4_000, 6_000, 1_000]) == 11_000)
+    }
+
+    @Test("An event with no figure to give contributes nothing rather than subtracting")
+    func unknownEvent() {
+        #expect(PlaybackDiagnostics.total(of: [4_000, -1, 6_000]) == 10_000)
+    }
+
+    @Test("No events yet is nothing transferred")
+    func noEvents() {
+        #expect(PlaybackDiagnostics.total(of: []) == 0)
+    }
+}
+
+/// Seconds of film actually played, which is what the cost per second is divided by.
+@Suite("Watched time")
+struct AdvanceTests {
+    @Test("An ordinary second of playback counts")
+    func ordinary() {
+        #expect(PlaybackDiagnostics.advance(from: 100, to: 101) == 1)
+    }
+
+    @Test("A resume does not make the hour before it watched")
+    func resume() {
+        // The bytes are this session's; the position is the film's. Dividing one by the other reports a
+        // fraction of the real cost and points the diagnosis at the wrong half of the problem.
+        #expect(PlaybackDiagnostics.advance(from: 0, to: 3_600) == 0)
+    }
+
+    @Test("A forward seek is not watching")
+    func seekForward() {
+        #expect(PlaybackDiagnostics.advance(from: 100, to: 400) == 0)
+    }
+
+    @Test("A backward seek does not subtract from what was watched")
+    func seekBackward() {
+        #expect(PlaybackDiagnostics.advance(from: 400, to: 100) == 0)
+    }
+
+    @Test("A paused second advances nothing")
+    func paused() {
+        #expect(PlaybackDiagnostics.advance(from: 100, to: 100) == 0)
+    }
+}

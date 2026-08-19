@@ -10,6 +10,11 @@ import SwiftUI
 /// **Buffer ahead is the number to watch.** It falls at one second per second whenever the player has
 /// stopped fetching — so a freeze preceded by a slow, steady fall is starvation, and one that arrives
 /// with the buffer full is not.
+///
+/// **Peak inflow is the number that settles what a flat buffer cannot.** A buffer parked at two seconds
+/// means bytes arrive at exactly the rate they are spent, which is equally true of a path that cannot go
+/// faster and of a player that has decided not to ask. A peak far above the film's own rate rules the
+/// path out.
 struct DiagnosticsOverlay: View {
     let diagnostics: PlaybackDiagnostics
 
@@ -19,11 +24,17 @@ struct DiagnosticsOverlay: View {
             row("буфер впереди", String(format: "%.1f с", diagnostics.bufferAhead),
                 warn: diagnostics.bufferAhead < 15)
             row("замираний", "\(diagnostics.stalls)", warn: diagnostics.stalls > 0)
-            row("скорость", String(format: "%.1f Мбит/с", diagnostics.observedMbps))
             row("поспевает", diagnostics.keepingUp ? "да" : "НЕТ", warn: !diagnostics.keepingUp)
 
+            Divider().background(.white.opacity(0.3))
+
+            row("приток", String(format: "%.0f Мбит/с", diagnostics.inflow))
+            row("пик притока", String(format: "%.0f Мбит/с", diagnostics.peakInflow))
+            row("нужно фильму", needed)
+            row("скачано", String(format: "%.2f ГБ", diagnostics.transferredGB))
+            row("плеер считает", String(format: "%.0f Мбит/с", diagnostics.observedMbps))
+
             if diagnostics.lowestBuffer.isFinite {
-                Divider().background(.white.opacity(0.3))
                 row("минимум буфера",
                     String(format: "%.1f с на %.0f с", diagnostics.lowestBuffer, diagnostics.lowestAt),
                     warn: diagnostics.lowestBuffer < 15)
@@ -39,6 +50,20 @@ struct DiagnosticsOverlay: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(false)
+    }
+
+    /// What a second of this film costs on the wire: everything fetched over everything watched.
+    ///
+    /// Watched, not the position — a resume starts an hour in, and dividing this session's bytes by an
+    /// hour nobody fetched would report a fraction of the real cost and send the diagnosis the wrong way.
+    ///
+    /// Not the chosen tracks' bitrate either: the container hands over the untouched file, so a source
+    /// with eleven dubs is paid for in full to hear one. Held back until enough has played to mean
+    /// something, since the header alone is megabytes and would read as a wildly expensive first second.
+    private var needed: String {
+        guard diagnostics.watched > 20, diagnostics.transferredGB > 0 else { return "—" }
+        let mbps = diagnostics.transferredGB * 8000 / diagnostics.watched
+        return String(format: "%.0f Мбит/с", mbps)
     }
 
     private func row(_ label: String, _ value: String, warn: Bool = false) -> some View {
