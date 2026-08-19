@@ -285,6 +285,7 @@ builder.Services.AddHostedService<ReconcilerWorker>();
 // One per process, and deliberately not per request: what it holds is expensive to build because the
 // synthesiser reads thousands of scattered places in the film, not because the arithmetic is hard.
 builder.Services.AddSingleton<RemuxHeaderCache>();
+builder.Services.AddSingleton<RemuxStreamActivity>();
 builder.Services.AddSingleton(serviceProvider => new RemuxIndexStore(
     hosty.AppCacheDir, serviceProvider.GetRequiredService<ILogger<RemuxIndexStore>>()));
 builder.Services.AddScoped<RemuxIndexService>();

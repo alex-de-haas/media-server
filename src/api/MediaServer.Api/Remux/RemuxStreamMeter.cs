@@ -23,12 +23,18 @@ namespace MediaServer.Api.Remux;
 /// Off unless <c>PLAYBACK_DIAGNOSTICS</c> is set. A film is thousands of reads a second and none of them
 /// should pay for a stopwatch nobody is reading.
 /// </summary>
+/// <param name="activity">
+/// Where the gaps between one response and the next are remembered. The meter is alive only while a
+/// response is, so without this it can report a server that is fast and never that it is idle — and a
+/// film delivered in bursts of half a gigabit is exactly a server that is idle.
+/// </param>
 /// <param name="clock">
 /// Elapsed time since the response began. The real one by default; a stated one in tests, because every
 /// figure here is a ratio of durations and a test that has to sleep to produce them measures the build
 /// machine's mood rather than this arithmetic.
 /// </param>
-internal sealed class RemuxStreamMeter(ILogger logger, string label, Func<TimeSpan>? clock = null)
+internal sealed class RemuxStreamMeter(
+    ILogger logger, string label, RemuxStreamActivity? activity = null, Func<TimeSpan>? clock = null)
 {
     /// <summary>Often enough to see a stretch of film go bad, rare enough that a log stays readable.</summary>
     private static readonly TimeSpan Report = TimeSpan.FromSeconds(10);
@@ -40,7 +46,11 @@ internal sealed class RemuxStreamMeter(ILogger logger, string label, Func<TimeSp
     }
 
     private readonly Func<TimeSpan> _now = clock ?? Started();
+    private readonly TimeSpan? _idle = activity?.Opening(label);
     private readonly Lock _gate = new();
+
+    /// <summary>Disposal is allowed to happen twice; reporting a response twice is not.</summary>
+    private bool _done;
 
     // The whole response, which is what the closing line is about.
     private TimeSpan _reading;
@@ -118,10 +128,16 @@ internal sealed class RemuxStreamMeter(ILogger logger, string label, Func<TimeSp
     {
         lock (_gate)
         {
-            if (_reads == 0)
+            // A stream is disposed by whoever finishes with it, and more than one thing does. Without
+            // this every response was logged twice — the second line adding the closing interval to the
+            // socket share a second time, so the figure the whole diagnostic exists for was overstated.
+            if (_done || _reads == 0)
             {
                 return;
             }
+
+            _done = true;
+            activity?.Closed(label);
 
             var elapsed = _now();
 
@@ -143,8 +159,9 @@ internal sealed class RemuxStreamMeter(ILogger logger, string label, Func<TimeSp
         }
 
         logger.LogInformation(
-            "Remux {Label} {Window}: {Megabytes:F1} MB in {Seconds:F1}s = {Mbps:F0} Mbit/s; "
-            + "disk {Disk:F0}%, socket {Socket:F0}%; {Reads} reads of {Kilobytes:F0} KB.",
+            "Remux {Label} {Window}: {Megabytes:F1} MB in {Seconds:F2}s = {Mbps:F0} Mbit/s; "
+            + "disk {Disk:F0}%, socket {Socket:F0}%; {Reads} reads of {Kilobytes:F0} KB; "
+            + "idle {Idle} before it.",
             label,
             window,
             bytes / 1_000_000d,
@@ -153,6 +170,7 @@ internal sealed class RemuxStreamMeter(ILogger logger, string label, Func<TimeSp
             reading.TotalSeconds / seconds * 100,
             writing.TotalSeconds / seconds * 100,
             reads,
-            bytes / (double)reads / 1000);
+            bytes / (double)reads / 1000,
+            _idle is { } idle ? $"{idle.TotalMilliseconds:F0} ms" : "nothing");
     }
 }

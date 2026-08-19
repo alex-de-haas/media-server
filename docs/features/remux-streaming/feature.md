@@ -437,9 +437,19 @@ into a film moves the running mean by nothing and prints the same figure as the 
 it. The closing line is the one that covers everything — and it counts the stretch after the last read as
 socket time, or a response the player took in one go would report `socket 0%` however long it waited.
 
+Each line also carries **how long the source sat with nobody reading it** before that response began.
+The first production log made that essential: every line said the server had served its megabytes in a
+tenth of a second at several hundred megabits, and none could say what happened in between. A film
+needing 50 Mbit/s, delivered in bursts of 500, is idle nine tenths of the time — and that idleness, not
+any rate, is then the whole story.
+
 One caveat, which is why this is read next to the client's own buffer rather than alone: a player whose
 buffer is full stops draining the socket, and that idleness is indistinguishable here from a slow
 network. The figure is conclusive only while the client is taking everything it can get.
+
+A response is reported once however often it is disposed. More than one thing finishes with a stream, and
+before that was guarded every response wrote two lines — the second counting the closing interval into
+the socket share a second time, overstating the very figure this exists to establish.
 
 The same switch logs, once per header built, **how much of the file the chosen tracks actually are**.
 The `mdat` is the source as it stands, so a player reading it sequentially fetches every track in it to

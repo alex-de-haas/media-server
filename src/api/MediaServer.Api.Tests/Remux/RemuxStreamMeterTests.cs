@@ -45,7 +45,7 @@ public sealed class RemuxStreamMeterTests
         // half hour of health before it — which is the one answer that would send the diagnosis wrong.
         var log = new Recorder();
         var clock = new StatedClock();
-        var meter = new RemuxStreamMeter(log, "film", () => clock.Now);
+        var meter = new RemuxStreamMeter(log, "film", clock: () => clock.Now);
 
         meter.Served(clock.At(0), 62_500_000);
         meter.Served(clock.At(10), 62_500_000);      // closes a fast ten seconds: 125 MB
@@ -64,7 +64,7 @@ public sealed class RemuxStreamMeterTests
         // player stalled on the last chunk is exactly the case being hunted.
         var log = new Recorder();
         var clock = new StatedClock();
-        var meter = new RemuxStreamMeter(log, "film", () => clock.Now);
+        var meter = new RemuxStreamMeter(log, "film", clock: () => clock.Now);
 
         var began = clock.At(0);
         clock.At(1);                                  // one second getting it off the disk
@@ -82,7 +82,7 @@ public sealed class RemuxStreamMeterTests
     {
         var log = new Recorder();
         var clock = new StatedClock();
-        var meter = new RemuxStreamMeter(log, "film", () => clock.Now);
+        var meter = new RemuxStreamMeter(log, "film", clock: () => clock.Now);
 
         meter.Served(clock.At(0), 10_000_000);
         meter.Served(clock.At(10), 10_000_000);
@@ -96,10 +96,56 @@ public sealed class RemuxStreamMeterTests
     }
 
     [Fact]
+    public void A_response_is_reported_once_however_often_it_is_disposed()
+    {
+        // A stream is disposed by whoever finishes with it, and more than one thing does. Reporting
+        // twice put a second line in the log whose socket share counted the closing interval again —
+        // overstating the very figure the diagnostic exists to establish.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(log, "film", clock: () => clock.Now);
+
+        meter.Served(clock.At(0), 1_000_000);
+        clock.At(2);
+        meter.Done();
+        clock.At(9);
+        meter.Done();
+
+        Assert.Single(log.Lines);
+    }
+
+    [Fact]
+    public void The_gap_since_the_previous_response_is_reported_with_the_next_one()
+    {
+        // A server that serves its megabytes in a tenth of a second and then waits is not a fast server
+        // — it is an idle one, and only the gap says so.
+        var log = new Recorder();
+        var activity = new RemuxStreamActivity();
+        var clock = new StatedClock();
+
+        var first = new RemuxStreamMeter(log, "film", activity, () => clock.Now);
+        var began = clock.At(0);
+        clock.At(0.5);
+        first.Served(began, 1_000_000);
+        first.Done();
+
+        var second = new RemuxStreamMeter(log, "film", activity, () => clock.Now);
+        began = clock.At(1);
+        clock.At(1.5);
+        second.Served(began, 1_000_000);
+        second.Done();
+
+        Assert.Equal(2, log.Lines.Count);
+        Assert.Contains("idle nothing before it", log.Lines[0]);
+        Assert.Contains("idle ", log.Lines[1]);
+        Assert.DoesNotContain("idle nothing", log.Lines[1]);
+    }
+
+    [Fact]
     public void A_response_that_never_read_anything_says_nothing()
     {
         var log = new Recorder();
-        var meter = new RemuxStreamMeter(log, "film", () => TimeSpan.FromSeconds(5));
+        var meter = new RemuxStreamMeter(log, "film", clock: () => TimeSpan.FromSeconds(5));
 
         meter.Done();
 
