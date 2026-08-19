@@ -1873,6 +1873,12 @@
               "null",
               "string"
             ]
+          },
+          "pairingOrigin": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

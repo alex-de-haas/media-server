@@ -100,9 +100,17 @@ private let tokenBody = """
 {"accessToken":"app-token","tokenType":"Bearer","expiresAt":"2030-01-01T00:00:00.000Z","expiresInSeconds":604800}
 """
 
-private func happyServer(polls: [StubTransport.Answer]) -> StubTransport {
+/// A server that names the origin Core has installed it under, which is what a real one does.
+private let bootstrapWithPairingOrigin = """
+{"serverName":"Home","appId":"com.haas.media-server","surfaceVersion":"1",\
+"coreOrigin":"https://core.example","pairingOrigin":"https://media.example.com"}
+"""
+
+private func happyServer(
+    polls: [StubTransport.Answer], bootstrap: String = bootstrapBody
+) -> StubTransport {
     StubTransport([
-        "/native/v1/server/public": [(200, bootstrapBody)],
+        "/native/v1/server/public": [(200, bootstrap)],
         "/api/auth/device/code": [(200, grantBody)],
         "/api/auth/device/token": polls,
         "/api/auth/apps/authorize": [(200, #"{"code":"auth-code","redirectUri":"x","expiresAt":"2030-01-01T00:00:00Z"}"#)],
@@ -374,6 +382,35 @@ struct PairingSessionTests {
             if case .checking = subject.state {} else if case .awaitingApproval = subject.state {} else { return }
             await Task.yield()
         }
+    }
+
+    @Test("The redirect is the origin the server is installed under, not the address typed")
+    func redirectIsTheInstalledOrigin() async {
+        // Core checks the redirect against the app's installed endpoints, so a television that typed a
+        // local address was refused at the last step — after the viewer had already approved the code.
+        let transport = happyServer(
+            polls: [(200, #"{"status":"approved","token":"core-token"}"#)],
+            bootstrap: bootstrapWithPairingOrigin)
+        let subject = session(transport)
+
+        subject.start(address: "192.168.1.50:8096")
+        await settle(subject)
+
+        #expect(transport.body(forPath: "/api/auth/apps/authorize")?["redirectUri"] as? String
+            == "https://media.example.com")
+    }
+
+    @Test("A server that names no origin is paired against the address that was typed")
+    func redirectFallsBackToTheTypedAddress() async {
+        // Which is every pairing that worked before this existed, and every older server after it.
+        let transport = happyServer(polls: [(200, #"{"status":"approved","token":"core-token"}"#)])
+        let subject = session(transport)
+
+        subject.start(address: "media.example")
+        await settle(subject)
+
+        #expect(transport.body(forPath: "/api/auth/apps/authorize")?["redirectUri"] as? String
+            == "https://media.example")
     }
 
     @Test("A code goes on screen before anyone is asked to wait for it")

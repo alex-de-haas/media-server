@@ -33,7 +33,8 @@ public static class NativeEndpoints
                 ServerName: server.ServerName,
                 AppId: hosty.AppId,
                 SurfaceVersion: NativeSurface.Version,
-                CoreOrigin: hosty.CorePublicOrigin)))
+                CoreOrigin: hosty.CorePublicOrigin,
+                PairingOrigin: hosty.JellyfinPublicOrigin)))
             .Produces<NativeServerBootstrap>();
 
         // Authenticated, and the full answer: what this instance can actually do, so a client hides
@@ -248,7 +249,22 @@ public sealed record NativeServerBootstrap(
     string ServerName,
     string AppId,
     string SurfaceVersion,
-    string? CoreOrigin);
+    string? CoreOrigin,
+
+    /// <summary>
+    /// The origin Core has installed for this app, which is the only thing it will accept as a
+    /// <c>redirectUri</c> when a device asks to be authorised.
+    ///
+    /// It is told rather than assumed because the address a viewer types need not be one Core has ever
+    /// heard of. A television reaching a server across the room types its address on this network, and
+    /// Core checks the redirect against the app's *installed* endpoint origins — so pairing against a
+    /// local address fails at the last step, after the code has already been approved, which is the
+    /// most expensive moment to fail at.
+    ///
+    /// Null when the host has no public origin for this app; a client then falls back to the address it
+    /// was given, which is what every pairing did before this existed.
+    /// </summary>
+    string? PairingOrigin = null);
 
 public sealed record NativeServerDescription(
     string ServerName,
