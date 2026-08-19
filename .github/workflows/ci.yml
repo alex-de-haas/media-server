@@ -93,6 +93,9 @@ jobs:
   web-e2e:
     name: web e2e (Playwright)
     runs-on: ubuntu-latest
+    # A hung job blocks a merge until the six-hour ceiling. This one hung twice in a row, so the
+    # ceiling is now twenty minutes: a stall costs a rerun rather than an afternoon.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: src/web
@@ -114,8 +117,19 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Split, and each half bounded. `--with-deps` shells out to `sudo apt-get`, and both hangs
+      # printed *nothing at all* before stopping — which is what an apt waiting on a prompt looks
+      # like, and not what a stalled download looks like. Separated so the next failure names which
+      # half it was, and told not to ask questions nobody is there to answer.
+      - name: Install Playwright system dependencies
+        run: pnpm exec playwright install-deps chromium
+        timeout-minutes: 6
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
       - name: Install Playwright browser
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
+        timeout-minutes: 6
 
       - name: E2e (mocked BFF)
         run: pnpm exec playwright test
