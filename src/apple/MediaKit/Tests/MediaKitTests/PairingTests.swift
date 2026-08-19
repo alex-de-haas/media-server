@@ -413,6 +413,44 @@ struct PairingSessionTests {
             == "https://media.example")
     }
 
+    @Test("The origin is kept, so a re-mint a week later is not refused for the same reason")
+    func redirectSurvivesARefresh() async {
+        // The grant is re-minted with the same call and the same check. Storing only the typed address
+        // would refuse a television a week after it paired successfully — which is exactly the failure
+        // the refresh path exists to prevent.
+        let store = InMemoryCredentialStore()
+        let transport = happyServer(
+            polls: [(200, #"{"status":"approved","token":"core-token"}"#)],
+            bootstrap: bootstrapWithPairingOrigin)
+
+        let subject = session(transport, store: store)
+        subject.start(address: "192.168.1.50:8096")
+        await settle(subject)
+
+        let paired = try? #require(store.load())
+        #expect(paired?.pairingOrigin?.absoluteString == "https://media.example.com")
+        #expect(paired?.redirectUri.absoluteString == "https://media.example.com")
+        #expect(paired?.server.absoluteString == "http://192.168.1.50:8096")
+    }
+
+    @Test("A pairing stored before the origin existed still redirects to its address")
+    func redirectWithoutAStoredOrigin() async {
+        // Every credential already in a Keychain when this shipped. The field is absent, not empty.
+        let transport = happyServer(polls: [(200, #"{"status":"approved","token":"core-token"}"#)])
+        let subject = session(transport)
+
+        subject.start(address: "media.example")
+        await settle(subject)
+
+        guard case .paired(let paired) = subject.state else {
+            Issue.record("expected a pairing")
+            return
+        }
+
+        #expect(paired.pairingOrigin == nil)
+        #expect(paired.redirectUri == paired.server)
+    }
+
     @Test("A code goes on screen before anyone is asked to wait for it")
     func showsTheCode() async {
         let subject = session(happyServer(polls: [(200, #"{"status":"pending","token":null}"#)]))

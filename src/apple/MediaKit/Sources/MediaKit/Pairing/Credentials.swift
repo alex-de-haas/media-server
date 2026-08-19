@@ -26,13 +26,27 @@ public struct PairedServer: Codable, Equatable, Sendable {
     /// and useless anywhere else.
     public var identity: AppIdentity
 
+    /// The origin Core has this app installed under, kept because **every** exchange is checked against
+    /// it and not only the first.
+    ///
+    /// A grant is re-minted whenever it lapses, and that re-mint is the same call as the initial one.
+    /// Sending the typed address then would refuse a television that pairs by local address a week
+    /// after it paired successfully — which is precisely the failure the refresh path exists to
+    /// prevent. Optional so a pairing stored before this field existed still decodes, and falls back
+    /// to <see cref="server"/> as it always did.
+    public var pairingOrigin: URL?
+
+    /// What to present as the redirect on any exchange for this pairing.
+    public var redirectUri: URL { pairingOrigin ?? server }
+
     public init(
         server: URL,
         serverName: String,
         appId: String,
         coreOrigin: URL,
         coreToken: String,
-        identity: AppIdentity
+        identity: AppIdentity,
+        pairingOrigin: URL? = nil
     ) {
         self.server = server
         self.serverName = serverName
@@ -40,6 +54,7 @@ public struct PairedServer: Codable, Equatable, Sendable {
         self.coreOrigin = coreOrigin
         self.coreToken = coreToken
         self.identity = identity
+        self.pairingOrigin = pairingOrigin
     }
 
     /// Whether the app grant is close enough to lapsing to be worth re-minting now.

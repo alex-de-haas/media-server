@@ -34,7 +34,12 @@ public static class NativeEndpoints
                 AppId: hosty.AppId,
                 SurfaceVersion: NativeSurface.Version,
                 CoreOrigin: hosty.CorePublicOrigin,
-                PairingOrigin: hosty.JellyfinPublicOrigin)))
+                // Whitespace is not an origin. The contract says null means "the host has no public
+                // origin for this app", and a client falls back on that — so a blank setting must read
+                // as absent rather than as an origin nothing will ever match.
+                PairingOrigin: string.IsNullOrWhiteSpace(hosty.JellyfinPublicOrigin)
+                    ? null
+                    : hosty.JellyfinPublicOrigin)))
             .Produces<NativeServerBootstrap>();
 
         // Authenticated, and the full answer: what this instance can actually do, so a client hides

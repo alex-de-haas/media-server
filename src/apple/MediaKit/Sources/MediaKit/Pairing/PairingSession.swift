@@ -71,7 +71,7 @@ public final class PairingSession {
             let identity = try await client.exchange(
                 core: paired.coreOrigin,
                 appId: paired.appId,
-                redirectUri: paired.server,
+                redirectUri: paired.redirectUri,
                 coreToken: paired.coreToken)
 
             var refreshed = paired
@@ -145,9 +145,9 @@ public final class PairingSession {
             // server across the room types its address on this network, which Core has never heard of —
             // and the refusal lands after the code has been approved, the most expensive place to fail.
             // So the server names the origin it is installed under, and that is what gets sent.
-            let redirect = bootstrap.pairingOrigin.flatMap(URL.init(string:)) ?? server
+            let redirect = bootstrap.pairingOrigin.flatMap(URL.init(string:))
             let identity = try await client.exchange(
-                core: core, appId: bootstrap.appId, redirectUri: redirect, coreToken: coreToken)
+                core: core, appId: bootstrap.appId, redirectUri: redirect ?? server, coreToken: coreToken)
 
             let paired = PairedServer(
                 server: server,
@@ -155,7 +155,10 @@ public final class PairingSession {
                 appId: bootstrap.appId,
                 coreOrigin: core,
                 coreToken: coreToken,
-                identity: identity)
+                identity: identity,
+                // Kept, because the grant is re-minted with the same call and the same check. Without
+                // it a television paired by local address would be refused a week later.
+                pairingOrigin: redirect)
 
             store.save(paired)
             state = .paired(paired)

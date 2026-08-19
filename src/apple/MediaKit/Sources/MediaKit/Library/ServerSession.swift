@@ -96,7 +96,7 @@ public final class ServerSession {
                 let identity = try await pairing.exchange(
                     core: paired.coreOrigin,
                     appId: paired.appId,
-                    redirectUri: paired.server,
+                    redirectUri: paired.redirectUri,
                     coreToken: paired.coreToken)
 
                 var refreshed = paired
