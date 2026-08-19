@@ -431,6 +431,12 @@ disk; time **between** one read and the next is the framework writing what it ju
 Every ten seconds, and once more when the response closes, one line says how many megabytes went out,
 at what rate, and what share of the wall clock each half took.
 
+Each periodic line describes **its own ten seconds**, not the response so far. That is the whole reason
+for the cadence: a lifetime average cannot show a bad stretch, because a five-second stall half an hour
+into a film moves the running mean by nothing and prints the same figure as the healthy half hour before
+it. The closing line is the one that covers everything — and it counts the stretch after the last read as
+socket time, or a response the player took in one go would report `socket 0%` however long it waited.
+
 One caveat, which is why this is read next to the client's own buffer rather than alone: a player whose
 buffer is full stops draining the socket, and that idleness is indistinguishable here from a slow
 network. The figure is conclusive only while the client is taking everything it can get.

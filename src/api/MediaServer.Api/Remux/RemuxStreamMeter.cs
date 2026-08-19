@@ -11,7 +11,11 @@ namespace MediaServer.Api.Remux;
 /// exact and costs a stopwatch: time spent inside a read of the synthesised stream is the disk, and time
 /// between one read and the next is the framework writing what it just got to the socket.
 ///
-/// One caveat, and it is why this is read next to the client's buffer rather than alone: a player whose
+/// **Periodic lines describe their own ten seconds, not the response so far.** The cadence exists to show
+/// a bad stretch, and a lifetime average cannot: a five-second stall half an hour into a film moves the
+/// running mean by nothing at all and rounds away to the same figure as the half hour before it.
+///
+/// One caveat, which is why this is read next to the client's buffer rather than alone: a player whose
 /// buffer is full stops draining the socket, and that idleness is indistinguishable from a slow network.
 /// The figure is only conclusive while the client is taking everything it can get — which, for every
 /// measurement that has prompted this, it was.
@@ -19,20 +23,39 @@ namespace MediaServer.Api.Remux;
 /// Off unless <c>PLAYBACK_DIAGNOSTICS</c> is set. A film is thousands of reads a second and none of them
 /// should pay for a stopwatch nobody is reading.
 /// </summary>
-internal sealed class RemuxStreamMeter(ILogger logger, string label)
+/// <param name="clock">
+/// Elapsed time since the response began. The real one by default; a stated one in tests, because every
+/// figure here is a ratio of durations and a test that has to sleep to produce them measures the build
+/// machine's mood rather than this arithmetic.
+/// </param>
+internal sealed class RemuxStreamMeter(ILogger logger, string label, Func<TimeSpan>? clock = null)
 {
     /// <summary>Often enough to see a stretch of film go bad, rare enough that a log stays readable.</summary>
     private static readonly TimeSpan Report = TimeSpan.FromSeconds(10);
 
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private static Func<TimeSpan> Started()
+    {
+        var watch = Stopwatch.StartNew();
+        return () => watch.Elapsed;
+    }
+
+    private readonly Func<TimeSpan> _now = clock ?? Started();
     private readonly Lock _gate = new();
 
+    // The whole response, which is what the closing line is about.
     private TimeSpan _reading;
     private TimeSpan _writing;
-    private TimeSpan _lastEnded;
-    private TimeSpan _reported;
     private long _bytes;
     private long _reads;
+
+    // Since the last periodic line, which is what each periodic line is about.
+    private TimeSpan _sinceReading;
+    private TimeSpan _sinceWriting;
+    private long _sinceBytes;
+    private long _sinceReads;
+
+    private TimeSpan _lastEnded;
+    private TimeSpan _reported;
 
     /// <summary>
     /// What has been served so far. Exposed so a test can hold the meter to the stream it is measuring:
@@ -51,31 +74,41 @@ internal sealed class RemuxStreamMeter(ILogger logger, string label)
     }
 
     /// <summary>Noted before a read and handed back to <see cref="Served"/> when it returns.</summary>
-    internal TimeSpan Begin() => _clock.Elapsed;
+    internal TimeSpan Begin() => _now();
 
     internal void Served(TimeSpan began, int bytes)
     {
-        var ended = _clock.Elapsed;
+        var ended = _now();
 
         lock (_gate)
         {
-            _reading += ended - began;
+            var read = ended - began;
+            _reading += read;
+            _sinceReading += read;
 
             // Before the first read there is nothing to have been waiting for: opening the files and
             // finding the header is the request's cost, not this stream's.
             if (_reads > 0)
             {
-                _writing += began - _lastEnded;
+                var wrote = began - _lastEnded;
+                _writing += wrote;
+                _sinceWriting += wrote;
             }
 
             _lastEnded = ended;
             _bytes += bytes;
+            _sinceBytes += bytes;
             _reads++;
+            _sinceReads++;
 
             if (ended - _reported >= Report)
             {
+                Write("last 10s", _sinceBytes, ended - _reported, _sinceReading, _sinceWriting, _sinceReads);
                 _reported = ended;
-                Write(ended, "");
+                _sinceReading = TimeSpan.Zero;
+                _sinceWriting = TimeSpan.Zero;
+                _sinceBytes = 0;
+                _sinceReads = 0;
             }
         }
     }
@@ -85,32 +118,41 @@ internal sealed class RemuxStreamMeter(ILogger logger, string label)
     {
         lock (_gate)
         {
-            if (_reads > 0)
+            if (_reads == 0)
             {
-                Write(_clock.Elapsed, " (closed)");
+                return;
             }
+
+            var elapsed = _now();
+
+            // The stretch after the last read is socket time like any other, and it is the only stretch
+            // there is for a response the player took in one go. Without it such a response reports
+            // "socket 0%" — the most misleading answer this meter could give.
+            _writing += elapsed - _lastEnded;
+
+            Write("closed", _bytes, elapsed, _reading, _writing, _reads);
         }
     }
 
-    private void Write(TimeSpan elapsed, string suffix)
+    private void Write(string window, long bytes, TimeSpan elapsed, TimeSpan reading, TimeSpan writing, long reads)
     {
         var seconds = elapsed.TotalSeconds;
-        if (seconds <= 0)
+        if (seconds <= 0 || reads == 0)
         {
             return;
         }
 
         logger.LogInformation(
-            "Remux {Label}{Suffix}: {Megabytes:F0} MB in {Seconds:F0}s = {Mbps:F0} Mbit/s; "
+            "Remux {Label} {Window}: {Megabytes:F1} MB in {Seconds:F1}s = {Mbps:F0} Mbit/s; "
             + "disk {Disk:F0}%, socket {Socket:F0}%; {Reads} reads of {Kilobytes:F0} KB.",
             label,
-            suffix,
-            _bytes / 1_000_000d,
+            window,
+            bytes / 1_000_000d,
             seconds,
-            _bytes * 8 / seconds / 1_000_000,
-            _reading.TotalSeconds / seconds * 100,
-            _writing.TotalSeconds / seconds * 100,
-            _reads,
-            _reads == 0 ? 0 : _bytes / (double)_reads / 1000);
+            bytes * 8 / seconds / 1_000_000,
+            reading.TotalSeconds / seconds * 100,
+            writing.TotalSeconds / seconds * 100,
+            reads,
+            bytes / (double)reads / 1000);
     }
 }
