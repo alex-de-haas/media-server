@@ -191,7 +191,7 @@ public final class PairingSession {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let withScheme = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        let withScheme = trimmed.contains("://") ? trimmed : "\(assumedScheme(for: trimmed))://\(trimmed)"
         guard let components = URLComponents(string: withScheme),
               let host = components.host, !host.isEmpty,
               components.scheme == "http" || components.scheme == "https"
@@ -207,5 +207,42 @@ public final class PairingSession {
         // it in front of every route this client asks for.
         clean.path = ""
         return clean.url
+    }
+
+    /// What to assume when the viewer typed no scheme.
+    ///
+    /// `https` for anything with a name, because that is what a television should be asking for and
+    /// nobody should have to type it on a remote control. But **a server on this network has no
+    /// certificate and cannot get one** — there is no public name to issue it against — so an address
+    /// here means `http`. Assuming otherwise made the ordinary self-hosted case simply unreachable:
+    /// every attempt became a TLS handshake against a server speaking plain HTTP.
+    private nonisolated static func assumedScheme(for address: String) -> String {
+        let host = address.split(separator: "/").first.map(String.init) ?? address
+        let bare = host.split(separator: ":").first.map(String.init) ?? host
+        return isOnThisNetwork(bare) ? "http" : "https"
+    }
+
+    /// Whether an address names something on the local network rather than out on the internet.
+    ///
+    /// The same question App Transport Security asks before it refuses a plain-HTTP connection, which is
+    /// why the answers have to agree: an address this calls local is one the app is permitted to reach
+    /// without TLS.
+    nonisolated static func isOnThisNetwork(_ host: String) -> Bool {
+        if host.lowercased().hasSuffix(".local") {
+            return true
+        }
+
+        let parts = host.split(separator: ".")
+        guard parts.count == 4 else { return false }
+
+        let octets = parts.compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return false }
+
+        return switch (octets[0], octets[1]) {
+        case (10, _), (127, _), (192, 168): true
+        case (172, 16...31): true          // the private range nobody remembers the shape of
+        case (169, 254): true              // link-local, for a host that never got an address
+        default: false
+        }
     }
 }

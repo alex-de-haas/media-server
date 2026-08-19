@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  A self-hosted server on this network has no certificate and cannot get one: there is no public
+	  name to issue it against. App Transport Security refuses plain HTTP by default, which made the
+	  ordinary case — a media server across the room — unreachable from this app entirely.
+
+	  NSAllowsLocalNetworking is the narrow exception for exactly that: it permits unencrypted
+	  connections to the local network and to nothing else. A server out on the internet still has to
+	  present a valid certificate, which is the part worth keeping.
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

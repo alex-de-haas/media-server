@@ -58,6 +58,22 @@ client a full path into any runtime app, and this walks it:
    device with no cookie jar do this — then `POST {core}/api/auth/apps/token` narrows it to
    an app identity token.
 
+### The address, and why a bare one is not always `https`
+
+A viewer types a host, not a URL, and a television is no place to type a scheme. A bare address
+therefore becomes `https` — **except** one on this network, which becomes `http`.
+
+That exception is not a convenience. A server across the room has no public name and so can hold no
+certificate for one; assuming `https` turned every attempt into a TLS handshake against a server
+speaking plain HTTP, which made the ordinary self-hosted case unreachable from this app entirely.
+Local means the private IPv4 ranges, loopback, link-local, and a `.local` name — and nothing that
+merely resembles them: `172.32.0.1` is outside the private range and is somebody's public address,
+and sending a credential there in the clear is how one leaves a house.
+
+The app carries the matching App Transport Security exception, `NSAllowsLocalNetworking`, and only
+that one. A server out on the internet must still present a valid certificate, which is the part
+worth keeping. A typed scheme always wins over the assumption.
+
 One constraint had to be read out of Core rather than guessed: `redirectUri` on step 5 is
 checked against the app's installed endpoint origins, even though nothing navigates and the
 authorization code comes back in the body. The address the viewer typed *is* that origin,

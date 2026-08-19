@@ -117,6 +117,33 @@ struct AddressTests {
         #expect(PairingSession.normalise("media.example.com")?.absoluteString == "https://media.example.com")
     }
 
+    @Test("An address on this network becomes http, because there is no certificate for one")
+    func localAddress() {
+        // A server across the room has no public name and so can hold no certificate. Assuming https
+        // made every attempt a TLS handshake against a server speaking plain HTTP — which is to say it
+        // made the ordinary self-hosted case unreachable.
+        #expect(PairingSession.normalise("192.168.1.50:8096")?.absoluteString == "http://192.168.1.50:8096")
+        #expect(PairingSession.normalise("10.0.0.4:8096")?.absoluteString == "http://10.0.0.4:8096")
+        #expect(PairingSession.normalise("172.20.3.9")?.absoluteString == "http://172.20.3.9")
+        #expect(PairingSession.normalise("attic.local:8096")?.absoluteString == "http://attic.local:8096")
+    }
+
+    @Test("An address that only looks local is still https")
+    func notLocal() {
+        // 172.32 is outside the private range and 11.0.0.1 is somebody's public address. Sending either
+        // in the clear because it resembles a home network is how a credential leaves a house.
+        #expect(PairingSession.normalise("172.32.0.1")?.absoluteString == "https://172.32.0.1")
+        #expect(PairingSession.normalise("11.0.0.1")?.absoluteString == "https://11.0.0.1")
+        #expect(PairingSession.normalise("192.168.1")?.absoluteString == "https://192.168.1")
+        #expect(PairingSession.normalise("notlocal.example.com")?.absoluteString
+            == "https://notlocal.example.com")
+    }
+
+    @Test("A typed scheme always wins over the assumption")
+    func typedSchemeWins() {
+        #expect(PairingSession.normalise("https://192.168.1.50")?.absoluteString == "https://192.168.1.50")
+    }
+
     @Test("An explicit scheme is kept, including http for a server on the local network")
     func explicitScheme() {
         #expect(PairingSession.normalise("http://192.168.1.10:8080")?.absoluteString
