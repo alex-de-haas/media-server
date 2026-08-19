@@ -3,7 +3,7 @@
   "id": "com.haas.media-server",
   "name": "Media Server",
   "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
-  "version": "0.62.2",
+  "version": "0.63.0",
   "runtimeProfiles": [
     {
       "key": "docker",
@@ -36,6 +36,8 @@
             {
               "key": "jellyfin",
               "containerPort": 8096,
+              "hostPort": 8096,
+              "expose": "host",
               "protocol": "http",
               "public": true
             }

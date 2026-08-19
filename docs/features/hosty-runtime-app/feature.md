@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-06-15
-Updated: 2026-08-05
+Updated: 2026-08-19
 
 ## Description
 
@@ -31,9 +31,46 @@ Two services with stable keys across runtime profiles:
 - `internal` (not public) — `/api/*` management endpoints and the SignalR hub,
   consumed by `web` via `HOSTY_DEPENDENCY_API_URL`.
 - `jellyfin` (public) — Jellyfin-shaped routes (`/System`, `/Users`, `/Items`,
-  `/Videos`, ...) consumed directly by Infuse and other Jellyfin clients.
+  `/Videos`, ...) and the native client's `/native/v1/*` surface, consumed directly by
+  Infuse, by the Apple clients, and by other Jellyfin clients.
 
 `web` exposes one public `http` port, which is the Shell UI entrypoint.
+
+### The media port is bound on every interface
+
+Under the **`docker` runtime**, `jellyfin` carries `"expose": "host"` with a pinned `hostPort`
+of 8096, so Core publishes it as `0.0.0.0:8096` rather than on loopback. Every other port
+stays on loopback, which is Core's default and right for them: they are reached by Core's own
+proxy. The `dev` profile does not carry the fields — under `localCommand` they are validated
+but inert, and pinning 8096 there would collide with the container's.
+
+This port is different because **its clients are not on this machine**. A television on the
+same network has no route to a loopback port, so without this the only way to a media server
+across the room was out to the internet and back — which measured as a hard ceiling near 100
+Mbit/s and 67 ms of latency per request, on a film needing 53 Mbit/s and holding two seconds
+of buffer.
+
+#### What that makes reachable from the network
+
+The Jellyfin and native surfaces become reachable from anything on the local network. They
+already were from the internet, through Core's endpoint, so this is not a new class of
+exposure — but it is a wider one, and the anonymous part of it is worth stating exactly
+rather than waving at:
+
+| Anonymous route | What it returns |
+| --- | --- |
+| `GET /native/v1/server/public` | server name, app id, surface version, Core's origin |
+| `GET /System/Info/Public` | server id, name, version |
+| `GET|POST /System/Ping` | the server name |
+| `GET /Branding/Configuration` | branding defaults |
+| `GET /Users/Public` | deliberately an empty list — users are never enumerated |
+| `POST /Users/AuthenticateByName` | **issues a credential**; rate-limited to 10 attempts per 30 s per address, with per-account lockout |
+| `/native/v1/media/…` | the media itself, gated by a signed token in the URL rather than by a session |
+
+Everything else requires an identity. The discovery routes are deliberately thin — none of
+them says anything about the library, its users, or which integrations are configured — but
+"thin" is not "nothing", and the login route is the one an operator should weigh: on a
+network shared with guests it is now reachable by them.
 
 ## Runtime Profiles
 
