@@ -70,8 +70,15 @@ internal sealed class RemuxStreamMeter(
     // Where in the output this response actually read. A player that fetches ten times what it keeps is
     // either asking for the same bytes twice or reading far ahead and throwing it away, and those want
     // opposite repairs — the ranges are the only thing that tells them apart.
+    //
+    // Kept twice, for the same reason the byte counts are. A periodic line describes its own ten
+    // seconds, and printing the whole response's span beside one window's bytes would make consecutive
+    // windows appear to cover all the same ground — which reads as re-fetching, the very conclusion
+    // these numbers exist to reach honestly.
     private long _from = -1;
     private long _to;
+    private long _sinceFrom = -1;
+    private long _sinceTo;
 
     /// <summary>
     /// What has been served so far. Exposed so a test can hold the meter to the stream it is measuring:
@@ -108,7 +115,13 @@ internal sealed class RemuxStreamMeter(
                     _from = at;
                 }
 
+                if (_sinceFrom < 0)
+                {
+                    _sinceFrom = at;
+                }
+
                 _to = Math.Max(_to, at + bytes);
+                _sinceTo = Math.Max(_sinceTo, at + bytes);
             }
 
             var read = ended - began;
@@ -132,12 +145,15 @@ internal sealed class RemuxStreamMeter(
 
             if (ended - _reported >= Report)
             {
-                Write("last 10s", _sinceBytes, ended - _reported, _sinceReading, _sinceWriting, _sinceReads);
+                Write("last 10s", _sinceBytes, ended - _reported, _sinceReading, _sinceWriting,
+                    _sinceReads, _sinceFrom, _sinceTo);
                 _reported = ended;
                 _sinceReading = TimeSpan.Zero;
                 _sinceWriting = TimeSpan.Zero;
                 _sinceBytes = 0;
                 _sinceReads = 0;
+                _sinceFrom = -1;
+                _sinceTo = 0;
             }
         }
     }
@@ -165,11 +181,13 @@ internal sealed class RemuxStreamMeter(
             // "socket 0%" — the most misleading answer this meter could give.
             _writing += elapsed - _lastEnded;
 
-            Write("closed", _bytes, elapsed, _reading, _writing, _reads);
+            Write("closed", _bytes, elapsed, _reading, _writing, _reads, _from, _to);
         }
     }
 
-    private void Write(string window, long bytes, TimeSpan elapsed, TimeSpan reading, TimeSpan writing, long reads)
+    private void Write(
+        string window, long bytes, TimeSpan elapsed, TimeSpan reading, TimeSpan writing, long reads,
+        long from, long to)
     {
         var seconds = elapsed.TotalSeconds;
         if (seconds <= 0 || reads == 0)
@@ -191,6 +209,6 @@ internal sealed class RemuxStreamMeter(
             reads,
             bytes / (double)reads / 1000,
             _idle is { } idle ? $"{idle.TotalMilliseconds:F0} ms" : "nothing",
-            _from < 0 ? "unknown" : $"{_from}-{_to}");
+            from < 0 ? "unknown" : $"{from}-{to}");
     }
 }

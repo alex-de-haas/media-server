@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -439,7 +439,10 @@ socket time, or a response the player took in one go would report `socket 0%` ho
 
 Each line names **the range of the output it read**, because a player that fetches ten times what it
 keeps is either asking for the same bytes twice or reading far ahead and discarding, and those want
-opposite repairs. Nothing else separates them.
+opposite repairs. Nothing else separates them. Like the byte counts, a periodic line's range covers
+its own ten seconds and the closing line's covers the response: printing the whole span beside one
+window's bytes would make consecutive windows appear to cover the same ground, which reads as
+re-fetching — the very conclusion this is here to reach honestly.
 
 Each line also carries **how long the source sat with nobody reading it** before that response began.
 The first production log made that essential: every line said the server had served its megabytes in a
