@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-06-15
-Updated: 2026-08-05
+Updated: 2026-08-19
 
 ## Description
 
@@ -31,9 +31,27 @@ Two services with stable keys across runtime profiles:
 - `internal` (not public) — `/api/*` management endpoints and the SignalR hub,
   consumed by `web` via `HOSTY_DEPENDENCY_API_URL`.
 - `jellyfin` (public) — Jellyfin-shaped routes (`/System`, `/Users`, `/Items`,
-  `/Videos`, ...) consumed directly by Infuse and other Jellyfin clients.
+  `/Videos`, ...) and the native client's `/native/v1/*` surface, consumed directly by
+  Infuse, by the Apple clients, and by other Jellyfin clients.
 
 `web` exposes one public `http` port, which is the Shell UI entrypoint.
+
+### The media port is bound on every interface
+
+`jellyfin` carries `"expose": "host"` with a pinned `hostPort` of 8096, so Core publishes it
+as `0.0.0.0:8096` rather than on loopback. Every other port stays on loopback, which is
+Core's default and right for them: they are reached by Core's own proxy.
+
+This one is different because **its clients are not on this machine**. A television on the
+same network has no route to a loopback port, so without this the only way to a media server
+across the room was out to the internet and back — which measured as a hard ceiling near 100
+Mbit/s and 67 ms of latency per request, on a film needing 53 Mbit/s and holding two seconds
+of buffer.
+
+It follows that the Jellyfin and native surfaces are reachable from anything on the local
+network. They already were from the internet, through Core's endpoint, so this is not a new
+class of exposure — but it is a wider one, and both surfaces authenticate every route that
+returns anything.
 
 ## Runtime Profiles
 
