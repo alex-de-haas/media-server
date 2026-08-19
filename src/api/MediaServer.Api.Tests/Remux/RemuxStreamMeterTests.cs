@@ -142,6 +142,61 @@ public sealed class RemuxStreamMeterTests
     }
 
     [Fact]
+    public void The_range_a_response_read_is_reported_with_it()
+    {
+        // A player fetching ten times what it keeps is either asking for the same bytes twice or
+        // reading far ahead and discarding, and those want opposite repairs. Only the ranges tell
+        // them apart, so they have to be right.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(log, "film", clock: () => clock.Now);
+
+        meter.Served(clock.At(0), 1_000, at: 5_000);
+        meter.Served(clock.At(1), 1_000, at: 6_000);
+        clock.At(2);
+        meter.Done();
+
+        Assert.Single(log.Lines);
+        Assert.Contains("bytes 5000-7000", log.Lines[0]);
+    }
+
+    [Fact]
+    public void A_periodic_line_names_the_range_of_its_own_window()
+    {
+        // Printing the whole response's span beside one window's bytes would make consecutive windows
+        // appear to cover all the same ground — which reads as re-fetching, and re-fetching is the
+        // conclusion these numbers exist to reach honestly rather than by accident.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(log, "film", clock: () => clock.Now);
+
+        meter.Served(clock.At(0), 1_000, at: 0);
+        meter.Served(clock.At(10), 1_000, at: 1_000);      // closes the first window
+        meter.Served(clock.At(20), 1_000, at: 500_000);    // closes the second, somewhere else entirely
+        clock.At(21);
+        meter.Done();
+
+        Assert.Equal(3, log.Lines.Count);
+        Assert.Contains("bytes 0-2000", log.Lines[0]);
+        Assert.Contains("bytes 500000-501000", log.Lines[1]);
+        Assert.Contains("bytes 0-501000", log.Lines[2]);   // the closing line is the whole response
+    }
+
+    [Fact]
+    public void A_response_whose_offsets_nobody_stated_says_so_rather_than_inventing_one()
+    {
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(log, "film", clock: () => clock.Now);
+
+        meter.Served(clock.At(0), 1_000);
+        clock.At(1);
+        meter.Done();
+
+        Assert.Contains("bytes unknown", log.Lines[0]);
+    }
+
+    [Fact]
     public void A_response_that_never_read_anything_says_nothing()
     {
         var log = new Recorder();

@@ -77,6 +77,7 @@ internal sealed class SynthesizedMp4Stream : Stream
         }
 
         var began = _meter?.Begin();
+        var at = _position;
 
         int read;
         if (part < 0)
@@ -91,9 +92,9 @@ internal sealed class SynthesizedMp4Stream : Stream
         }
 
         _position += read;
-        if (began is { } at)
+        if (began is { } start)
         {
-            _meter?.Served(at, read);
+            _meter?.Served(start, read, at);
         }
 
         return read;
@@ -113,13 +114,14 @@ internal sealed class SynthesizedMp4Stream : Stream
         }
 
         var began = _meter?.Begin();
+        var at = _position;
         Seek(_parts[part], within);
         var read = await _parts[part].ReadAsync(buffer[..take], cancellationToken);
         _position += read;
 
-        if (began is { } at)
+        if (began is { } start)
         {
-            _meter?.Served(at, read);
+            _meter?.Served(start, read, at);
         }
 
         return read;
