@@ -117,16 +117,12 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Split, and each half bounded. `--with-deps` shells out to `sudo apt-get`, and both hangs
-      # printed *nothing at all* before stopping — which is what an apt waiting on a prompt looks
-      # like, and not what a stalled download looks like. Separated so the next failure names which
-      # half it was, and told not to ask questions nobody is there to answer.
-      - name: Install Playwright system dependencies
-        run: pnpm exec playwright install-deps chromium
-        timeout-minutes: 6
-        env:
-          DEBIAN_FRONTEND: noninteractive
-
+      # No `--with-deps`, deliberately. That half shells out to `sudo apt-get`, and it hung three
+      # times running — six minutes without printing a single line, which is `apt-get` waiting in
+      # silence for a lock the runner's own unattended-upgrades still holds. The GitHub image already
+      # carries the libraries Chromium needs, so the apt half bought nothing and cost the merge an
+      # afternoon. If one ever *is* missing, Playwright says which by name when the browser fails to
+      # launch — a loud failure in seconds beats a silent wait.
       - name: Install Playwright browser
         run: pnpm exec playwright install chromium
         timeout-minutes: 6
