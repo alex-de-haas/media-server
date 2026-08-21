@@ -225,9 +225,9 @@ public static class WatchHistoryEndpoints
                 : Results.Ok(await calendar.LoadUndatedAsync(user.Id, kind, cancellationToken));
         });
 
-        // Gives an undated mark the time it should have had. Not a general timestamp edit: an entry
-        // that already carries a time is refused, because "the recorded time is wrong" is a different
-        // claim from "this play was never timed".
+        // Sets when a play happened: a mark that was never timed takes its instant, and one timed
+        // wrongly is moved to the right one. The play itself is untouched either way — nothing is
+        // recorded and nothing is removed, so the item's play count does not move.
         group.MapPatch("/entries/{entryId:guid}", async (
             Guid entryId,
             SetWatchedAtRequest request,
@@ -447,15 +447,14 @@ public static class WatchHistoryEndpoints
     }
 
     /// <summary>
-    /// What dating an undated mark answers. A caller's own missing entry and someone else's entry are
+    /// What setting a play's time answers. A caller's own missing entry and someone else's entry are
     /// both 404 — the same boundary the deletion route enforces, so neither can be used to probe for the
-    /// other. The two refusals are 400 because the request itself is wrong, not the state.
+    /// other. A future instant is 400 because the request itself is wrong, not the state.
     /// </summary>
     internal static IResult ToResult(SetWatchedAtStatus status) => status switch
     {
         SetWatchedAtStatus.Updated => Results.NoContent(),
         SetWatchedAtStatus.NotFound => Results.NotFound(),
-        SetWatchedAtStatus.AlreadyDated => Results.BadRequest(new { error = "This play already has a time." }),
         _ => Results.BadRequest(new { error = "'watchedAt' cannot be in the future." }),
     };
 

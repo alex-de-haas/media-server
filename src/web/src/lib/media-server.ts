@@ -1279,8 +1279,8 @@ export const mediaServer = {
   // as proof that someone else's entry exists.
   deleteWatchHistoryEntry: (entryId: string) =>
     send(`/watch-history/entries/${entryId}`, "DELETE"),
-  // Gives an undated mark the time it should have had — the play stays the one it always was, so the
-  // count doesn't move. Refused for an entry that already carries a time.
+  // Sets when a play happened: a mark that was never timed takes its instant, and one recorded at the
+  // wrong time is moved to the right one. The entry is stamped either way, so the count doesn't move.
   setWatchHistoryEntryTime: (entryId: string, watchedAt: string) =>
     send(`/watch-history/entries/${entryId}`, "PATCH", { watchedAt }),
 };

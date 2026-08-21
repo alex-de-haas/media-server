@@ -1,25 +1,28 @@
 # Watch-History Manual Entries
 
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-21
 
 ## Description
 
-A signed-in user can state **when** they watched something. Two actions, one
+A signed-in user can state **when** they watched something. Three actions, one
 question:
 
 - **Log watch** records a viewing the server never observed, at an instant the
   user names.
 - **Set time** gives an undated mark the time it should always have had.
+- **Change time** moves a play the server did record to the time it really
+  happened.
 
-Both put a play on a day of the Watched calendar
+All three put a play on a day of the Watched calendar
 ([watch-history-calendar](../watch-history-calendar/feature.md)), which nothing
 else about a hand-made statement does: the watched toggle records a **timeless**
 entry by design, and timeless entries are counted under `Undated N` rather than
 placed on a guessed day.
 
-They exist because a dated play is only ever produced by playback reports
-observed crossing the watched threshold. Two ordinary situations bypass that:
+The first two exist because a dated play is only ever produced by playback
+reports observed crossing the watched threshold. Two ordinary situations bypass
+that:
 
 1. **The viewing happened elsewhere** — another device, a cinema, a disc — and
    the server saw none of it.
@@ -30,9 +33,15 @@ observed crossing the watched threshold. Two ordinary situations bypass that:
    as a deployment, the play is genuinely unobserved, and only the viewer knows
    when it was.
 
+The third exists because an observed instant is the moment the report landed,
+which is not always the moment the viewer means: a film finished on a player left
+running overnight, or a viewing hand-logged onto the wrong evening. The play is
+real; only its time is wrong.
+
 This is the counterpart to
 [watch-history-deletion](../watch-history-deletion/feature.md): that removes a
-play that should not be there, this records one that is missing.
+play that should not be there, this records one that is missing — or moves one
+that is in the wrong place.
 
 ## The toggle is untouched
 
@@ -54,10 +63,17 @@ the menu — a non-admin on a series — still sees no menu at all.
 delete control. Its accessible name carries the title, because two controls with
 the same name leave a screen reader unable to say which row it is on.
 
-Both open the same dialog: one field, pre-filled with the current local time,
-re-stamped each time it opens so "now" means now. A `Now` button restores it
-after browsing to another date. A future instant is refused in the dialog before
-the round trip, and again on the server, which trusts no client clock.
+**Change time…** is the same control on each play in the calendar's day detail,
+beside that play's delete control. It is named down to the timestamp for the same
+reason: a day can hold two plays of one movie.
+
+All three open the same dialog: one field and a `Now` button. Logging a watch and
+dating a mark open on the current local time, re-stamped each time so "now" means
+now; changing a time opens on the time on record instead, because the common
+correction is an hour out rather than a different evening, and starting from now
+would make the user retype a date that was already right. A future instant is
+refused in the dialog before the round trip, and again on the server, which
+trusts no client clock.
 
 The time is entered as local wall-clock and sent as a UTC instant. That is what
 makes it land on the intended day: the calendar buckets by the browser's local
@@ -99,16 +115,33 @@ page.
   latest activity. Backfilling an old viewing must not throw away a position the
   user is in the middle of right now.
 
-## Setting an undated mark's time
+## Setting or changing a play's time
 
 The existing entry is stamped: nothing is created and nothing is destroyed, so
-the play count does not move — the viewing was always recorded, only its time was
-missing. The mark leaves **Watched without a date** and appears in the grid on
-that day. The row's `LastWatchedAt` learns the instant, forwards only.
+the play count does not move — the viewing was always recorded, and moving it in
+time does not make it a second one. A dated mark leaves **Watched without a
+date** and appears in the grid on that day; a corrected play leaves the day it
+was on and appears on the new one.
 
-It is deliberately narrow. An entry that already carries a time is refused:
-"the recorded time is wrong" is a different claim from "this play was never
-timed", and re-dating a play remains out of scope.
+Re-confirming the instant a play already carries changes nothing at all, and in
+particular queues the provider no work: nobody made a correction.
+
+### What `LastWatchedAt` becomes
+
+Forwards only, with one exception. The row can hold a later viewing the entry
+table never received — pre-migration history, or a remap that merged aggregates
+without merging entries — so backfilling an old play must not claim the item has
+gone unwatched since.
+
+The exception is the row pointing at the very play being moved. Then it follows
+it, backwards included, or the item would keep advertising an instant nothing was
+watched at. It is recomputed from the plays that remain rather than simply taking
+the new instant, because pulling this one back can hand the title to another
+play.
+
+`PlayCount`, `Played` and `LastPlayedDate` are untouched, as they are by a
+deletion: when a viewing happened is not a claim about whether it happened, nor
+about the item's ordering.
 
 ## What the provider is told
 
@@ -117,15 +150,20 @@ uses — keyed on the **entry id**. A row-derived key would collide, because a
 second log changes no state on the row and the second event would be swallowed as
 a duplicate.
 
-Dating an existing mark queues **two** events: `RemoveOwnedEntries` for the remote
-timeless mark, and `AddExactWatch` for the play it has become. "Watched, time
-unknown" and "watched at T" are different claims, and the provider holds the
-first — adding without removing would leave the account with the same viewing
-twice, and the next explicit sync would import that timeless mark straight back
-into the undated list the user just emptied. The two are independent (a removal is
-addressed by remote id, an add by identity and instant), so their delivery order
-does not matter. The local entry's link is cleared with them: after the removal
-there is no remote entry left for it to name.
+Setting or changing a time queues **two** events: `RemoveOwnedEntries` for the
+remote entry as it stands, and `AddExactWatch` for the play it has become. The
+claim the provider holds — "watched, time unknown", or "watched at the old T" — is
+no longer the claim being made, and adding without removing would leave the
+account with the same viewing twice, after which the next explicit sync would
+import the stale one straight back into the list the user just corrected. The two
+are independent (a removal is addressed by remote id, an add by identity and
+instant), so their delivery order does not matter. The local entry's link is
+cleared with them: after the removal there is no remote entry left for it to name.
+
+Both are keyed on the entry **and the instant it moved to**. A play corrected
+twice makes two different claims, and an entry-only key would hash the second to
+the first and have it swallowed as a duplicate — leaving the account holding a
+time the user has already replaced.
 
 Only a mark this app **owns** is retired. An `Unresolved` link is left alone, as
 everywhere else — the add committed but its id was never pinned down, and removing
@@ -153,10 +191,10 @@ unknown item, and `400` for a folder, a missing `watchedAt`, or a future instant
 A folder is a `400` rather than a `404` because the item does exist, and saying
 otherwise would send the caller looking for the wrong bug.
 
-`PATCH /entries/{id}` answers `204`, `404` for an entry this user does not have —
-which is also the answer for someone else's, so the route cannot be used to probe
-for one — and `400` for an entry that is already dated or an instant in the
-future.
+`PATCH /entries/{id}` answers `204` — for a mark that had no time and for a play
+being moved alike — `404` for an entry this user does not have, which is also the
+answer for someone else's, so the route cannot be used to probe for one, and
+`400` for a missing `watchedAt` or an instant in the future.
 
 Both allow an instant up to **five minutes** ahead of the server's clock. The
 value is composed from the browser's clock, and refusing a "now" that runs a
@@ -164,9 +202,10 @@ minute fast would fail the most common action there is.
 
 ## Not included
 
-Deliberately out of scope: re-dating a play that already has a time, logging a
-watch for a whole season or series at once, logging one from the episode list,
-and any bulk backfill.
+Deliberately out of scope: editing anything about a play other than its time —
+which item it belongs to, or where it came from — logging a watch for a whole
+season or series at once, logging one from the episode list, moving a whole day's
+plays at once, and any bulk backfill.
 
 ## Testing Expectations
 
@@ -180,10 +219,17 @@ and any bulk backfill.
   work; and an unwatch leaving a logged play alone.
 - `WatchHistoryEntryServiceTests` covers dating: an undated mark taking its
   instant with the play count unmoved; the row learning the time, forwards only;
-  an already-dated, unknown, or another user's entry refused and unchanged; a
-  future instant refused; an owned mark retired remotely and re-stated as an exact
-  play with its local link cleared; an `Unresolved` one only re-stated; and
-  nothing queued at all without a connection.
+  an unknown or another user's entry refused and unchanged; a future instant
+  refused; an owned mark retired remotely and re-stated as an exact play with its
+  local link cleared; an `Unresolved` one only re-stated; and nothing queued at all
+  without a connection.
+- The same tests cover correcting a dated play: the entry moving with the play
+  count unmoved; the row following the play it was pointing at, backwards
+  included, and handing the title to a sibling when one is now the latest; an
+  older play's correction leaving the latest watch alone; the instant a play
+  already carries queueing nothing; an owned play retired and re-stated at its new
+  time; two corrections of one play stating both times rather than colliding on one
+  key; and a future instant refused.
 - `WatchHistoryEndpointMappingTests` covers both routes' status mapping,
   including that an unknown and a foreign entry are indistinguishable.
 - `watch-time.test.ts` covers the conversion: a local ⇄ UTC round trip on both
@@ -192,5 +238,7 @@ and any bulk backfill.
 - `e2e/detail.spec.ts` covers the movie surface: logging a watch from the
   overflow menu sends the instant it was given, and a non-admin sees `Log watch…`
   in that menu and none of the admin items.
-- `e2e/calendar.spec.ts` covers the undated surface: a mark given its time leaves
-  the list, and a future time is refused before any request is sent.
+- `e2e/calendar.spec.ts` covers the calendar surfaces: a mark given its time leaves
+  the undated list, a future time is refused before any request is sent, and a play
+  corrected from the day detail opens on the time on record, sends the new instant,
+  and moves to the day it names.

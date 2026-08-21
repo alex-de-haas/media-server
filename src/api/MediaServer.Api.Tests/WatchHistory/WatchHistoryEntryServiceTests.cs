@@ -8,8 +8,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace MediaServer.Api.Tests.WatchHistory;
 
 /// <summary>
-/// Deleting one recorded play: whose entries a caller may touch, what the aggregates become, and what
-/// the provider is — and is not — asked to remove.
+/// Editing one recorded play — deleting it, or moving it in time: whose entries a caller may touch,
+/// what the aggregates become, and what the provider is — and is not — asked to change.
 /// </summary>
 public sealed class WatchHistoryEntryServiceTests : IDisposable
 {
@@ -413,21 +413,6 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task AnEntryThatAlreadyHasATimeIsRefused()
-    {
-        // "The recorded time is wrong" is a different claim from "this play was never timed", and
-        // re-dating a play stays out of scope.
-        var play = AddPlay("2026-08-01T20:00:00Z");
-
-        var status = await Service().SetWatchedAtAsync(
-            _userId, play.Id, DateTimeOffset.Parse("2026-08-02T20:00:00Z"), CancellationToken.None);
-
-        Assert.Equal(SetWatchedAtStatus.AlreadyDated, status);
-        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
-        Assert.Equal(DateTimeOffset.Parse("2026-08-01T20:00:00Z"), entry.WatchedAt);
-    }
-
-    [Fact]
     public async Task AnUnknownOrForeignMarkIsNotFoundAndUnchanged()
     {
         var theirs = AddTimelessPlay(appUserId: _otherUserId);
@@ -514,6 +499,139 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
 
         Assert.Empty(_database.WatchHistoryOutboxEvents);
+    }
+
+    // ---- Correcting a play that already has a time ----
+
+    [Fact]
+    public async Task ADatedPlayMovesToTheInstantItIsGiven()
+    {
+        // A report can land at an instant the viewer does not recognise — a play left running, or a
+        // viewing logged onto the wrong evening. The play is real; only its time was wrong.
+        var play = AddPlay("2026-08-01T20:00:00Z");
+        AddRow(playCount: 1, played: true, lastWatchedAt: DateTimeOffset.Parse("2026-08-01T20:00:00Z"));
+        var corrected = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
+
+        var status = await Service().SetWatchedAtAsync(_userId, play.Id, corrected, CancellationToken.None);
+
+        Assert.Equal(SetWatchedAtStatus.Updated, status);
+        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(corrected, entry.WatchedAt);
+        // Moved, not re-recorded: one play before, one play after.
+        Assert.Equal(1, (await RowAsync()).PlayCount);
+    }
+
+    [Fact]
+    public async Task CorrectingTheLatestPlayPullsTheRowBackWithIt()
+    {
+        // The row was pointing at this very play. Left where it is, the item would advertise an
+        // instant nothing was watched at.
+        var play = AddPlay("2026-08-01T20:00:00Z");
+        AddRow(playCount: 1, played: true, lastWatchedAt: DateTimeOffset.Parse("2026-08-01T20:00:00Z"));
+        var corrected = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
+
+        await Service().SetWatchedAtAsync(_userId, play.Id, corrected, CancellationToken.None);
+
+        Assert.Equal(corrected, (await RowAsync()).LastWatchedAt);
+    }
+
+    [Fact]
+    public async Task CorrectingTheLatestPlayHandsTheTitleToTheNextOne()
+    {
+        // Pulled back past a sibling, this is no longer the item's most recent viewing — that one is,
+        // and the row has to say so rather than take the corrected instant.
+        var play = AddPlay("2026-08-01T20:00:00Z");
+        AddPlay("2026-07-31T19:00:00Z");
+        AddRow(playCount: 2, played: true, lastWatchedAt: DateTimeOffset.Parse("2026-08-01T20:00:00Z"));
+
+        await Service().SetWatchedAtAsync(
+            _userId, play.Id, DateTimeOffset.Parse("2026-07-20T18:30:00Z"), CancellationToken.None);
+
+        Assert.Equal(DateTimeOffset.Parse("2026-07-31T19:00:00Z"), (await RowAsync()).LastWatchedAt);
+    }
+
+    [Fact]
+    public async Task CorrectingAnOlderPlayLeavesTheLatestWatchAlone()
+    {
+        // The row is pointing at a different, later viewing. Nothing about this correction unmakes it.
+        var play = AddPlay("2026-07-20T20:00:00Z");
+        var latest = DateTimeOffset.Parse("2026-08-01T20:00:00Z");
+        AddRow(playCount: 2, played: true, lastWatchedAt: latest);
+
+        await Service().SetWatchedAtAsync(
+            _userId, play.Id, DateTimeOffset.Parse("2026-07-19T20:00:00Z"), CancellationToken.None);
+
+        Assert.Equal(latest, (await RowAsync()).LastWatchedAt);
+    }
+
+    [Fact]
+    public async Task TheInstantAPlayAlreadyCarriesChangesNothing()
+    {
+        // Re-confirming a time is not a correction. Queueing one would ask the provider to retire and
+        // re-state the play for a change nobody made.
+        Connect();
+        var watchedAt = DateTimeOffset.Parse("2026-08-01T20:00:00Z");
+        var play = AddPlay("2026-08-01T20:00:00Z", remoteId: "111", owned: true);
+
+        var status = await Service().SetWatchedAtAsync(_userId, play.Id, watchedAt, CancellationToken.None);
+
+        Assert.Equal(SetWatchedAtStatus.Updated, status);
+        Assert.Empty(_database.WatchHistoryOutboxEvents);
+        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal("111", entry.ProviderHistoryId);
+    }
+
+    [Fact]
+    public async Task CorrectingAnOwnedPlayRetiresItRemotelyAndRestatesItAtTheNewTime()
+    {
+        Connect();
+        var play = AddPlay("2026-08-01T20:00:00Z", remoteId: "111", owned: true);
+        var corrected = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
+
+        await Service().SetWatchedAtAsync(_userId, play.Id, corrected, CancellationToken.None);
+
+        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync();
+        Assert.Equal(2, queued.Count);
+        var removal = Assert.Single(queued, item => item.Operation == WatchHistoryOutboxOperation.RemoveOwnedEntries);
+        Assert.Contains("111", removal.RemoteIdSnapshot);
+        var add = Assert.Single(queued, item => item.Operation == WatchHistoryOutboxOperation.AddExactWatch);
+        Assert.Equal(corrected, add.OccurredAt);
+    }
+
+    [Fact]
+    public async Task CorrectingTheSamePlayTwiceStatesBothTimes()
+    {
+        // The second correction is a different claim, not a repeat of the first. Keyed on the entry
+        // alone it would hash to the first event and be swallowed as a duplicate, leaving the account
+        // holding a time the user has already replaced.
+        Connect();
+        var play = AddPlay("2026-08-01T20:00:00Z");
+        var first = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
+        var second = DateTimeOffset.Parse("2026-07-29T21:00:00Z");
+
+        await Service().SetWatchedAtAsync(_userId, play.Id, first, CancellationToken.None);
+        await Service().SetWatchedAtAsync(_userId, play.Id, second, CancellationToken.None);
+
+        var adds = await _database.WatchHistoryOutboxEvents.AsNoTracking()
+            .Where(item => item.Operation == WatchHistoryOutboxOperation.AddExactWatch)
+            .ToListAsync();
+        Assert.Equal(2, adds.Count);
+        Assert.Contains(adds, item => item.OccurredAt == first);
+        Assert.Contains(adds, item => item.OccurredAt == second);
+    }
+
+    [Fact]
+    public async Task AFuturePlayTimeIsRefused()
+    {
+        var play = AddPlay("2026-08-01T20:00:00Z");
+
+        var status = await Service().SetWatchedAtAsync(
+            _userId, play.Id, _time.GetUtcNow().AddHours(2), CancellationToken.None);
+
+        Assert.Equal(SetWatchedAtStatus.FutureInstant, status);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-08-01T20:00:00Z"),
+            (await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync()).WatchedAt);
     }
 
     // ---- Helpers ----
