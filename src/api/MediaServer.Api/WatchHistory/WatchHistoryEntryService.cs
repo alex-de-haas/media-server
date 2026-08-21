@@ -57,15 +57,15 @@ public sealed class WatchHistoryEntryService(MediaServerDbContext database, Watc
             row.LastWatchedAt = await LatestWatchAsync(appUserId, entry, previous, row.LastWatchedAt, watchedAt, cancellationToken);
         }
 
-        // The provider is told, when there is one: it holds this play at the time it had — timeless, or
-        // the instant now being corrected — and leaving it that way would have the next explicit sync
-        // import the stale claim straight back. Staged before the save so the stamped entry and the
-        // outbound intent commit together.
+        // The provider is told when there is one and the correction can be stated cleanly — the
+        // recorder decides that, because whether the stale remote claim can be retired is what makes
+        // the difference between correcting a play there and duplicating it. Staged before the save so
+        // the stamped entry and whatever outbound intent it produces commit together.
         var item = await database.MediaItems.FirstOrDefaultAsync(
             media => media.Id == entry.MediaItemId, cancellationToken);
         if (item is not null)
         {
-            await recorder.StageWatchedAtChangedAsync(appUserId, item, row, entry, watchedAt, cancellationToken);
+            await recorder.StageWatchedAtChangedAsync(appUserId, item, row, entry, previous, watchedAt, cancellationToken);
         }
 
         await database.SaveChangesAsync(cancellationToken);

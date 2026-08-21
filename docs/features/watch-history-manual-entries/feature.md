@@ -160,10 +160,34 @@ are independent (a removal is addressed by remote id, an add by identity and
 instant), so their delivery order does not matter. The local entry's link is
 cleared with them: after the removal there is no remote entry left for it to name.
 
-Both are keyed on the entry **and the instant it moved to**. A play corrected
-twice makes two different claims, and an entry-only key would hash the second to
-the first and have it swallowed as a duplicate — leaving the account holding a
-time the user has already replaced.
+Both are keyed on the entry **and the instant it moved to**, so a second
+correction is not hashed to the first and swallowed as a duplicate.
+
+### A correction is exported only when it can be stated cleanly
+
+Retiring the stale claim is a precondition, not a bonus. Only timeless marks ever
+have their remote id resolved — an exact add records no id it could later address
+— so a play that already had a time usually has a remote copy this app can
+neither remove nor recall. Adding the corrected time regardless would put a
+second viewing of one film on the user's profile, and the next explicit sync
+would import the stale one back as another local play: a worse outcome than the
+correction never reaching the provider.
+
+So the export is staged only when one of these holds:
+
+- the entry's remote copy is **owned and resolved** — the timeless-mark case, which
+  is retired by the `RemoveOwnedEntries` above; or
+- the only claim outstanding is an `AddExactWatch` this app queued and has
+  **never attempted**, which the provider cannot have seen. That one is deleted
+  and replaced, so correcting a play twice before delivery states just the latest
+  time. An attempt that already ran is off limits: it may have reached the
+  provider before the process died, which is why delivery re-reads history on a
+  retry rather than re-posting.
+
+Otherwise the correction stays local and is logged as such. The local history is
+still right; the provider keeps the old time — the same standing limitation a
+deleted exact play already carries, recorded in
+[watch-history-deletion](../watch-history-deletion/feature.md).
 
 Only a mark this app **owns** is retired. An `Unresolved` link is left alone, as
 everywhere else — the add committed but its id was never pinned down, and removing
@@ -228,8 +252,12 @@ plays at once, and any bulk backfill.
   included, and handing the title to a sibling when one is now the latest; an
   older play's correction leaving the latest watch alone; the instant a play
   already carries queueing nothing; an owned play retired and re-stated at its new
-  time; two corrections of one play stating both times rather than colliding on one
-  key; and a future instant refused.
+  time; and a future instant refused.
+- And what the provider is told about one: a play whose remote copy cannot be
+  retired queueing nothing while the local move still happens; an untried queued
+  add replaced by the corrected one; an already-attempted add left alone; and two
+  corrections before delivery stating only the latest time while the timeless
+  mark's removal still stands.
 - `WatchHistoryEndpointMappingTests` covers both routes' status mapping,
   including that an unknown and a foreign entry are indistinguishable.
 - `watch-time.test.ts` covers the conversion: a local ⇄ UTC round trip on both

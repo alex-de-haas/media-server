@@ -599,25 +599,81 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CorrectingTheSamePlayTwiceStatesBothTimes()
+    public async Task CorrectingAPlayTheProviderMayHoldQueuesNothing()
     {
-        // The second correction is a different claim, not a repeat of the first. Keyed on the entry
-        // alone it would hash to the first event and be swallowed as a duplicate, leaving the account
-        // holding a time the user has already replaced.
+        // Nothing here can retire the remote copy — an exact add never resolves its id — so stating the
+        // new time would leave the account with the same viewing twice, and the next explicit sync
+        // would import the stale one back as another local play. The correction stays local.
         Connect();
         var play = AddPlay("2026-08-01T20:00:00Z");
+        AddRow(playCount: 1, played: true, lastWatchedAt: DateTimeOffset.Parse("2026-08-01T20:00:00Z"));
+        var corrected = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
+
+        await Service().SetWatchedAtAsync(_userId, play.Id, corrected, CancellationToken.None);
+
+        Assert.Empty(_database.WatchHistoryOutboxEvents);
+        // Local history still moved: the provider's limits are not the user's problem here.
+        Assert.Equal(corrected, (await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync()).WatchedAt);
+    }
+
+    [Fact]
+    public async Task CorrectingAPlayWhoseAddWasNeverSentReplacesThatClaim()
+    {
+        // The queued add has never been attempted, so the provider has not seen it. Dropping it is the
+        // one way a correction can supersede an earlier claim without risking a duplicate.
+        Connect();
+        var play = AddPlay("2026-08-01T20:00:00Z");
+        var queued = QueueAdd(play, DateTimeOffset.Parse("2026-08-01T20:00:00Z"), attempts: 0);
+        var corrected = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
+
+        await Service().SetWatchedAtAsync(_userId, play.Id, corrected, CancellationToken.None);
+
+        var add = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
+        Assert.Equal(WatchHistoryOutboxOperation.AddExactWatch, add.Operation);
+        Assert.Equal(corrected, add.OccurredAt);
+        Assert.NotEqual(queued.Id, add.Id);
+    }
+
+    [Fact]
+    public async Task AnAddAlreadyAttemptedIsLeftAloneAndNotReplaced()
+    {
+        // An attempt may have reached the provider before the process died — which is why delivery
+        // re-reads history on a retry rather than re-posting. Replacing it here would be guessing.
+        Connect();
+        var play = AddPlay("2026-08-01T20:00:00Z");
+        var queued = QueueAdd(play, DateTimeOffset.Parse("2026-08-01T20:00:00Z"), attempts: 1);
+
+        await Service().SetWatchedAtAsync(
+            _userId, play.Id, DateTimeOffset.Parse("2026-07-30T18:30:00Z"), CancellationToken.None);
+
+        var remaining = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
+        Assert.Equal(queued.Id, remaining.Id);
+        Assert.Equal(DateTimeOffset.Parse("2026-08-01T20:00:00Z"), remaining.OccurredAt);
+    }
+
+    [Fact]
+    public async Task CorrectingAPlayTwiceBeforeDeliveryStatesOnlyTheLatestTime()
+    {
+        // Each correction supersedes the untried one before it, so the provider is never told a time
+        // the user has already replaced — and the second add is not swallowed as a duplicate of the
+        // first, which an entry-only idempotency key would do.
+        Connect();
+        var mark = AddTimelessPlay(remoteId: "111", owned: true);
         var first = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
         var second = DateTimeOffset.Parse("2026-07-29T21:00:00Z");
 
-        await Service().SetWatchedAtAsync(_userId, play.Id, first, CancellationToken.None);
-        await Service().SetWatchedAtAsync(_userId, play.Id, second, CancellationToken.None);
+        await Service().SetWatchedAtAsync(_userId, mark.Id, first, CancellationToken.None);
+        await Service().SetWatchedAtAsync(_userId, mark.Id, second, CancellationToken.None);
 
-        var adds = await _database.WatchHistoryOutboxEvents.AsNoTracking()
-            .Where(item => item.Operation == WatchHistoryOutboxOperation.AddExactWatch)
-            .ToListAsync();
-        Assert.Equal(2, adds.Count);
-        Assert.Contains(adds, item => item.OccurredAt == first);
-        Assert.Contains(adds, item => item.OccurredAt == second);
+        var add = Assert.Single(
+            await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync(),
+            item => item.Operation == WatchHistoryOutboxOperation.AddExactWatch);
+        Assert.Equal(second, add.OccurredAt);
+        // The timeless mark's removal still stands: that remote entry has to go whatever time the play
+        // ends up carrying.
+        Assert.Single(
+            await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync(),
+            item => item.Operation == WatchHistoryOutboxOperation.RemoveOwnedEntries);
     }
 
     [Fact]
@@ -750,6 +806,29 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         _database.PlaybackHistoryEntries.Add(entry);
         _database.SaveChanges();
         return entry;
+    }
+
+    /// <summary>An add already queued for one entry, at whatever stage of delivery a test needs.</summary>
+    private WatchHistoryOutboxEvent QueueAdd(PlaybackHistoryEntry entry, DateTimeOffset occurredAt, int attempts)
+    {
+        var queued = new WatchHistoryOutboxEvent
+        {
+            Id = Guid.NewGuid(),
+            ConnectionId = _database.WatchHistoryConnections.Single(link => link.AppUserId == _userId).Id,
+            AppUserId = _userId,
+            MediaItemId = entry.MediaItemId,
+            HistoryEntryId = entry.Id,
+            Operation = WatchHistoryOutboxOperation.AddExactWatch,
+            OccurredAt = occurredAt,
+            IdempotencyKey = Guid.NewGuid().ToString("N"),
+            Status = WatchHistoryOutboxStatus.Pending,
+            Attempts = attempts,
+            CreatedAt = _time.GetUtcNow(),
+            NextAttemptAt = _time.GetUtcNow(),
+        };
+        _database.WatchHistoryOutboxEvents.Add(queued);
+        _database.SaveChanges();
+        return queued;
     }
 
     private void AddRow(int playCount, bool played, DateTimeOffset? lastWatchedAt)

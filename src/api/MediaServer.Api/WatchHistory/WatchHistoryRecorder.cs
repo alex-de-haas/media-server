@@ -180,10 +180,13 @@ public sealed class WatchHistoryRecorder(
     ///
     /// The caller has already stamped <paramref name="entry"/>; this clears the link it carried,
     /// because after the removal there is no remote entry left for it to name.
+    ///
+    /// <paramref name="previous"/> is the instant the entry carried before, and null when it carried
+    /// none. It decides whether the stale claim can be left standing: see below.
     /// </remarks>
     public async Task StageWatchedAtChangedAsync(
-        int appUserId, MediaItem item, UserItemData? row, PlaybackHistoryEntry entry, DateTimeOffset watchedAt,
-        CancellationToken cancellationToken)
+        int appUserId, MediaItem item, UserItemData? row, PlaybackHistoryEntry entry, DateTimeOffset? previous,
+        DateTimeOffset watchedAt, CancellationToken cancellationToken)
     {
         // An Unresolved link is excluded for the reason it always is: the add committed but its id was
         // never pinned down, and removing on a guess destroys history this app did not create. The
@@ -192,6 +195,33 @@ public sealed class WatchHistoryRecorder(
             && entry.LinkStatus != PlaybackHistoryLinkStatus.Unresolved
                 ? id
                 : null;
+
+        // An add this app queued but has never attempted is a claim the provider has not seen. Dropping
+        // it is how one correction supersedes another cleanly. Anything already attempted is off
+        // limits: a previous attempt may have reached the provider before the process died, which is
+        // the reason delivery re-reads history on a retry rather than blindly re-posting.
+        var untried = await database.WatchHistoryOutboxEvents
+            .Where(queued => queued.AppUserId == appUserId
+                && queued.HistoryEntryId == entry.Id
+                && queued.Operation == WatchHistoryOutboxOperation.AddExactWatch
+                && queued.Status == WatchHistoryOutboxStatus.Pending
+                && queued.Attempts == 0)
+            .ToListAsync(cancellationToken);
+
+        database.WatchHistoryOutboxEvents.RemoveRange(untried);
+
+        if (previous is not null && remoteId is null && untried.Count == 0)
+        {
+            // A play that already had a time, whose remote copy this app can neither address nor recall.
+            // Exact adds never resolve a remote id — only timeless marks do — so there is nothing to
+            // remove and no pending claim to replace. Stating the new time anyway would put a second
+            // viewing of one film on the user's profile, and the next explicit sync would import the
+            // stale one back as another local play: worse than the correction simply not reaching the
+            // provider. So it stays local, which is the limitation a deleted exact play already carries.
+            logger.LogInformation(
+                "Not queueing a corrected time for a play whose remote copy cannot be retired.");
+            return;
+        }
 
         var identity = await identities.MapAsync(item, cancellationToken);
 
