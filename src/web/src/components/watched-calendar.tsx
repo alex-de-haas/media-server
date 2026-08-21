@@ -61,13 +61,16 @@ const FILTERS: Array<{ value: WatchedKindFilter; label: string }> = [
 /** The one play a confirmation is currently asking about. */
 type DeleteTarget = { entryId: string; heading: string; detail: string | null };
 
-/** The one undated mark the time dialog is currently asking about. */
-type DateTarget = { entryId: string; title: string };
+/**
+ * The one play the time dialog is currently asking about, and what it is asking. A `watchedAt` of
+ * null is a mark that was never timed; an instant is a recorded time being corrected.
+ */
+type TimeTarget = { entryId: string; title: string; watchedAt: string | null };
 
 /**
  * The Watched mode: a screening diary over the per-play history. It answers "what did I finish on
- * this date"; the only edit it offers is deleting a single play that should not be there, from the
- * day detail or the undated list.
+ * this date", and offers two edits over the day detail and the undated list: deleting a play that
+ * should not be there, and putting one on the day and time it really happened.
  */
 export function WatchedCalendar({
   month,
@@ -82,7 +85,7 @@ export function WatchedCalendar({
   const [dayDetail, setDayDetail] = useState<string | null>(null);
   const [undatedOpen, setUndatedOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const [dateTarget, setDateTarget] = useState<DateTarget | null>(null);
+  const [timeTarget, setTimeTarget] = useState<TimeTarget | null>(null);
   const queryClient = useQueryClient();
 
   const range = monthGridInstants(month);
@@ -105,20 +108,24 @@ export function WatchedCalendar({
     onError: (error) => toast.error("Couldn’t delete this play", { description: errorMessage(error) }),
   });
 
-  // The other half of the undated list: a play that really happened but reached this app without a
-  // time — a client that only marked it played, or a server restarted mid-playback. Nothing new is
-  // recorded; the mark it already has is stamped, so the count stays where it is.
+  // Where a play belongs in time, for the two ways it can be wrong: a mark that arrived without a
+  // time at all — a client that only marked it played, or a server restarted mid-playback — and one
+  // recorded at an instant the viewer does not recognise. Neither records anything new: the entry
+  // that exists is moved, so the play count stays where it is.
   const setTime = useMutation({
-    mutationFn: ({ entryId, watchedAt }: { entryId: string; watchedAt: string }) =>
+    mutationFn: ({ entryId, watchedAt }: { entryId: string; watchedAt: string; correction: boolean }) =>
       mediaServer.setWatchHistoryEntryTime(entryId, watchedAt),
-    onSuccess: () => {
-      setDateTarget(null);
+    onSuccess: (_result, { correction }) => {
+      setTimeTarget(null);
       for (const queryKey of QUERIES_AFFECTED_BY_HISTORY_CHANGE) {
         void queryClient.invalidateQueries({ queryKey });
       }
-      toast.success("Time set");
+      toast.success(correction ? "Time updated" : "Time set");
     },
-    onError: (error) => toast.error("Couldn’t set the time", { description: errorMessage(error) }),
+    onError: (error, { correction }) =>
+      toast.error(correction ? "Couldn’t update the time" : "Couldn’t set the time", {
+        description: errorMessage(error),
+      }),
   });
 
   const byDay = useMemo(
@@ -246,6 +253,7 @@ export function WatchedCalendar({
         groups={detailGroups}
         onClose={() => setDayDetail(null)}
         onDelete={setDeleteTarget}
+        onEditTime={setTimeTarget}
       />
 
       <UndatedDialog
@@ -253,23 +261,40 @@ export function WatchedCalendar({
         filter={filter}
         onClose={() => setUndatedOpen(false)}
         onDelete={setDeleteTarget}
-        onDate={setDateTarget}
+        onDate={setTimeTarget}
       />
 
+      {/* One dialog for both claims: the question is the same, so only the wording and the instant it
+          opens on differ. */}
       <WatchTimeDialog
-        open={dateTarget !== null}
-        onOpenChange={(open) => !open && setDateTarget(null)}
-        heading="When did you watch it?"
+        open={timeTarget !== null}
+        onOpenChange={(open) => !open && setTimeTarget(null)}
+        heading={timeTarget?.watchedAt ? "When did you really watch it?" : "When did you watch it?"}
         description={
-          <>
-            Gives <span className="text-foreground font-medium">{dateTarget?.title}</span> the time this
-            play was missing, and moves it out of this list onto that day. Your play count does not
-            change — the viewing was always recorded.
-          </>
+          timeTarget?.watchedAt ? (
+            <>
+              Moves this play of <span className="text-foreground font-medium">{timeTarget.title}</span>{" "}
+              to another date and time. Nothing is added or removed — your play count does not change.
+            </>
+          ) : (
+            <>
+              Gives <span className="text-foreground font-medium">{timeTarget?.title}</span> the time this
+              play was missing, and moves it out of this list onto that day. Your play count does not
+              change — the viewing was always recorded.
+            </>
+          )
         }
-        confirmLabel="Set time"
+        confirmLabel={timeTarget?.watchedAt ? "Save time" : "Set time"}
+        initialInstant={timeTarget?.watchedAt}
         pending={setTime.isPending}
-        onSubmit={(watchedAt) => dateTarget && setTime.mutate({ entryId: dateTarget.entryId, watchedAt })}
+        onSubmit={(watchedAt) =>
+          timeTarget &&
+          setTime.mutate({
+            entryId: timeTarget.entryId,
+            watchedAt,
+            correction: timeTarget.watchedAt !== null,
+          })
+        }
       />
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
@@ -349,11 +374,13 @@ function DayDetailDialog({
   groups,
   onClose,
   onDelete,
+  onEditTime,
 }: {
   dayKey: string | null;
   groups: WatchedGroup[];
   onClose: () => void;
   onDelete: (target: DeleteTarget) => void;
+  onEditTime: (target: TimeTarget) => void;
 }) {
   const plays = groups.flatMap((group) => group.plays).sort((a, b) => a.watchedAt.localeCompare(b.watchedAt));
 
@@ -371,7 +398,7 @@ function DayDetailDialog({
             <p className="text-muted-foreground px-1.5 text-sm">Nothing is left on this day.</p>
           )}
           {plays.map((event) => (
-            <PlayRow key={event.entryId} event={event} onDelete={onDelete} />
+            <PlayRow key={event.entryId} event={event} onDelete={onDelete} onEditTime={onEditTime} />
           ))}
         </div>
       </DialogContent>
@@ -382,13 +409,16 @@ function DayDetailDialog({
 function PlayRow({
   event,
   onDelete,
+  onEditTime,
 }: {
   event: WatchHistoryCalendarEvent;
   onDelete: (target: DeleteTarget) => void;
+  onEditTime: (target: TimeTarget) => void;
 }) {
   const code = episodeLabel(event);
   const heading = event.kind === "Episode" ? (event.seriesTitle ?? event.title) : event.title;
   const secondary = event.kind === "Episode" ? [code, event.title].filter(Boolean).join(" · ") : null;
+  const label = [heading, secondary, formatTime(event.watchedAt)].filter(Boolean).join(" · ");
 
   return (
     <div className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5">
@@ -410,10 +440,15 @@ function PlayRow({
         <span className="bg-brand h-3 w-0.5 rounded-full" aria-hidden />
         <span className="font-mono text-xs tabular-nums">{formatTime(event.watchedAt)}</span>
       </span>
+      {/* Named down to the timestamp, like the delete control beside it: a day can hold two plays of
+          one movie, and two controls with the same accessible name leave a screen reader unable to
+          say which one it is on. */}
+      <EntryTimeButton
+        label={`Change the time of this play: ${label}`}
+        onClick={() => onEditTime({ entryId: event.entryId, title: label, watchedAt: event.watchedAt })}
+      />
       <DeleteEntryButton
-        // Named down to the timestamp: a day can hold two plays of one movie, and two controls with
-        // the same accessible name leave a screen reader unable to say which one it is on.
-        label={`Delete this play: ${[heading, secondary, formatTime(event.watchedAt)].filter(Boolean).join(" · ")}`}
+        label={`Delete this play: ${label}`}
         onClick={() =>
           onDelete({
             entryId: event.entryId,
@@ -427,8 +462,8 @@ function PlayRow({
 }
 
 /**
- * The one edit this view offers. Always rendered rather than revealed on hover: a touch device has no
- * hover, and a control that only exists on a pointer would be unreachable on the phone agenda.
+ * Always rendered rather than revealed on hover, like the time control beside it: a touch device has
+ * no hover, and a control that only exists on a pointer would be unreachable on the phone agenda.
  */
 function DeleteEntryButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
@@ -460,7 +495,7 @@ function UndatedDialog({
   filter: WatchedKindFilter;
   onClose: () => void;
   onDelete: (target: DeleteTarget) => void;
-  onDate: (target: DateTarget) => void;
+  onDate: (target: TimeTarget) => void;
 }) {
   const kind = filter === "movies" ? "Movie" : filter === "episodes" ? "Episode" : undefined;
   const undated = useQuery({
@@ -513,7 +548,7 @@ function UndatedRow({
 }: {
   entry: WatchHistoryUndatedEntry;
   onDelete: (target: DeleteTarget) => void;
-  onDate: (target: DateTarget) => void;
+  onDate: (target: TimeTarget) => void;
 }) {
   const heading = entry.kind === "Episode" ? (entry.seriesTitle ?? entry.title) : entry.title;
   const secondary =
@@ -542,22 +577,38 @@ function UndatedRow({
       </div>
       {/* Named down to the title, like the delete control beside it: a list of marks with two identical
           accessible names leaves a screen reader unable to say which row it is on. */}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label={`Set the time of this undated mark: ${[heading, secondary].filter(Boolean).join(" · ")}`}
-        className="text-muted-foreground hover:text-foreground size-7 shrink-0"
+      <EntryTimeButton
+        label={`Set the time of this undated mark: ${[heading, secondary].filter(Boolean).join(" · ")}`}
         onClick={() =>
-          onDate({ entryId: entry.entryId, title: [heading, secondary].filter(Boolean).join(" · ") })
+          onDate({
+            entryId: entry.entryId,
+            title: [heading, secondary].filter(Boolean).join(" · "),
+            // Nothing to open the field on: that is what makes this mark undated.
+            watchedAt: null,
+          })
         }
-      >
-        <Clock className="size-3.5" />
-      </Button>
+      />
       <DeleteEntryButton
         label={`Delete this undated mark: ${[heading, secondary].filter(Boolean).join(" · ")}`}
         onClick={() => onDelete({ entryId: entry.entryId, heading, detail: secondary })}
       />
     </div>
+  );
+}
+
+/** Opens the time field on a play: to give a mark the time it never had, or to correct a wrong one. */
+function EntryTimeButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={label}
+      title={label}
+      className="text-muted-foreground hover:text-foreground size-7 shrink-0"
+      onClick={onClick}
+    >
+      <Clock className="size-3.5" />
+    </Button>
   );
 }
 

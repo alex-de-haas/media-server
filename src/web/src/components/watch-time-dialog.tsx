@@ -16,9 +16,10 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
 /**
- * "When did you watch this?" — the one field shared by logging a play by hand and by giving an undated
- * mark its time. Both answer the same question, so they ask it the same way; only the wording and what
- * happens on submit differ, and those are the caller's.
+ * "When did you watch this?" — the one field shared by logging a play by hand, by giving an undated
+ * mark its time, and by correcting a time that is wrong. All three answer the same question, so they
+ * ask it the same way; only the wording, the instant it opens on, and what happens on submit differ,
+ * and those are the caller's.
  *
  * The field is wall-clock local time and the submitted value is a UTC instant: the calendar buckets by
  * the browser's local day, so a play at 00:30 has to land on the day it was watched.
@@ -29,6 +30,7 @@ export function WatchTimeDialog({
   heading,
   description,
   confirmLabel,
+  initialInstant,
   pending,
   onSubmit,
 }: {
@@ -37,6 +39,8 @@ export function WatchTimeDialog({
   heading: string;
   description: ReactNode;
   confirmLabel: string;
+  /** The time to open on. Omitted — logging a play, or dating a mark that never had one — means now. */
+  initialInstant?: string | null;
   pending: boolean;
   onSubmit: (watchedAt: string) => void;
 }) {
@@ -52,6 +56,7 @@ export function WatchTimeDialog({
             having to notice the change and reset itself while rendering. */}
         <WatchTimeFields
           confirmLabel={confirmLabel}
+          initialInstant={initialInstant}
           pending={pending}
           onCancel={() => onOpenChange(false)}
           onSubmit={onSubmit}
@@ -63,20 +68,27 @@ export function WatchTimeDialog({
 
 function WatchTimeFields({
   confirmLabel,
+  initialInstant,
   pending,
   onCancel,
   onSubmit,
 }: {
   confirmLabel: string;
+  initialInstant?: string | null;
   pending: boolean;
   onCancel: () => void;
   onSubmit: (watchedAt: string) => void;
 }) {
   const fieldId = useId();
   // Read once, at mount — which is the moment the dialog opened. Rendering itself never asks the clock,
-  // so two renders of the same open dialog cannot disagree about what "now" was.
+  // so two renders of the same open dialog cannot disagree about what "now" was. It is still read when
+  // the field opens on a recorded time, because the future bound is about now either way.
   const [openedAt] = useState(() => new Date());
-  const [value, setValue] = useState(() => toLocalInputValue(openedAt));
+  // Correcting a time starts from the one on record: the common correction is an hour out, not a
+  // different evening, and starting from "now" would make the user retype a date that was already right.
+  const [value, setValue] = useState(() =>
+    toLocalInputValue(initialInstant ? new Date(initialInstant) : openedAt),
+  );
 
   const instant = toUtcInstant(value);
   // Checked here as well as on the server, so the refusal arrives while the field is still in front of

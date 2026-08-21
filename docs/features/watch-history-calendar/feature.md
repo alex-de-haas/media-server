@@ -1,7 +1,7 @@
 # Watch-History Calendar
 
 Created: 2026-07-24
-Updated: 2026-08-09
+Updated: 2026-08-21
 
 ## Description
 
@@ -11,8 +11,9 @@ and Tracked/Reminders actions. **Watched** is a screening diary over the per-pla
 history in `PlaybackHistoryEntries` — what the signed-in user finished, and when.
 It is a read view with two exceptions: a single play that should not be there can
 be deleted from it (see
-[watch-history-deletion](../watch-history-deletion/feature.md)), and an undated
-mark can be given the time it was missing (see
+[watch-history-deletion](../watch-history-deletion/feature.md)), and a play can be
+put on the day and time it really happened — an undated mark given the time it was
+missing, or a recorded time corrected (see
 [watch-history-manual-entries](../watch-history-manual-entries/feature.md)).
 
 Both modes share a shell that owns the heading, the mode switch, month
@@ -64,11 +65,22 @@ only here — an imported play is labelled `Imported`; the grid treats local and
 imported plays identically, because provenance matters for diagnosis, not for
 the memory.
 
-Each play also carries a delete control, behind a confirmation naming that exact
-play. It is the one edit this view offers, and the day's own card follows it —
-deleting one episode of a binge takes the card from `2 episodes` to `1 episode`.
-The semantics live in
+Each play carries two controls. One deletes it, behind a confirmation naming that
+exact play; the day's own card follows — deleting one episode of a binge takes the
+card from `2 episodes` to `1 episode`. The semantics live in
 [watch-history-deletion](../watch-history-deletion/feature.md).
+
+The other, `Change time…`, moves the play to when it was really watched: a report
+lands at the moment it arrived, which is not always the moment the viewer means —
+a film finished on a player left running, or a viewing logged onto the wrong
+evening. The field opens on the time on record, and the play leaves this day for
+the one it is given; nothing is added or removed, so the play count does not move.
+The semantics live in
+[watch-history-manual-entries](../watch-history-manual-entries/feature.md).
+
+Both controls are named down to the play's timestamp: a day can hold two plays of
+one movie, and two controls with the same accessible name leave a screen reader
+unable to say which one it is on.
 
 ### Filters and undated marks
 
@@ -79,10 +91,10 @@ control, whose count follows the active filter. The counts must come from the
 server per kind: those rows are absent from `events` by design, so a single
 total could not be re-filtered in the browser.
 
-Marks in that list carry two controls. One deletes. The other, `Set time…`, gives
-a mark the time it should have had — for a play that really happened but reached
-the server undated — after which it leaves the list for that day of the grid; the
-semantics live in
+Marks in that list carry the same two controls. One deletes. The other,
+`Set time…`, gives a mark the time it should have had — for a play that really
+happened but reached the server undated — after which it leaves the list for that
+day of the grid; the semantics live in
 [watch-history-manual-entries](../watch-history-manual-entries/feature.md).
 Emptying the list says so in place, because the control that opened the dialog is
 by then gone.
@@ -144,10 +156,9 @@ opens, not with the calendar.
 
 ## Not included
 
-Deliberately out of scope: a combined releases-plus-watched overlay, re-dating a
-play that already carries a time (dating an *undated* mark is the one exception,
-above), deleting a whole day's history at once, viewing-duration or streak
-analytics, and an activity heatmap.
+Deliberately out of scope: a combined releases-plus-watched overlay, moving a play
+to a different item, editing or deleting a whole day's history at once,
+viewing-duration or streak analytics, and an activity heatmap.
 
 ## Testing Expectations
 
@@ -164,8 +175,10 @@ analytics, and an activity heatmap.
   filters, and the filter-following undated count.
 - `calendar.test.ts` covers URL state: the default mode, fallbacks for malformed
   values, and hrefs that omit defaults.
-- `e2e/calendar.spec.ts` also covers giving an undated mark its time, per
-  [watch-history-manual-entries](../watch-history-manual-entries/feature.md).
+- `e2e/calendar.spec.ts` also covers putting a play in time, per
+  [watch-history-manual-entries](../watch-history-manual-entries/feature.md):
+  giving an undated mark its time, and correcting a dated play from the day
+  detail.
 - `e2e/calendar.spec.ts` covers the surface: releases unchanged and default,
   mode switching preserving a non-current month, watched deep links, a binge
   rendering as one card that expands to every episode, the undated count

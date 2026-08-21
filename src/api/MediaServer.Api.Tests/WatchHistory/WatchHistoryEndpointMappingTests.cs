@@ -46,10 +46,9 @@ public sealed class WatchHistoryEndpointMappingTests
     // Unknown and someone else's entry arrive here as the same status, so the route cannot be used to
     // probe for one — the boundary the deletion route already enforces.
     [InlineData(SetWatchedAtStatus.NotFound, StatusCodes.Status404NotFound)]
-    // The state is fine; the request is not. Re-dating a timed play is refused, not silently applied.
-    [InlineData(SetWatchedAtStatus.AlreadyDated, StatusCodes.Status400BadRequest)]
+    // The state is fine; the request is not.
     [InlineData(SetWatchedAtStatus.FutureInstant, StatusCodes.Status400BadRequest)]
-    public void DatingAnUndatedMarkAnswersWithoutRevealingWhoseEntryItIs(SetWatchedAtStatus status, int expected) =>
+    public void SettingAPlaysTimeAnswersWithoutRevealingWhoseEntryItIs(SetWatchedAtStatus status, int expected) =>
         Assert.Equal(expected, StatusOf(WatchHistoryEndpoints.ToResult(status)));
 
     [Theory]

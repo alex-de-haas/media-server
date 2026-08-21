@@ -295,6 +295,53 @@ test("an undated mark is given its time and leaves the list", async ({ page }) =
   await expect(page.getByRole("dialog").getByText("Nothing is left without a date.")).toBeVisible();
 });
 
+test("a play recorded at the wrong time is moved to the right one", async ({ page }) => {
+  // The other half of the same claim as an undated mark: the play happened, and the time on it is not
+  // the one the viewer remembers — a play left running, or a viewing logged onto the wrong evening.
+  const events = watchedHistory.events.map((event) => ({ ...event }));
+  const retimed: Array<{ entryId: string; watchedAt: string }> = [];
+
+  await setupApp(page, {
+    // A function, not the object: the move is only proven by the refetch coming back with the new day.
+    watchHistoryCalendar: () => ({ ...watchedHistory, events }),
+    setWatchHistoryEntryTime: (entryId, watchedAt) => {
+      retimed.push({ entryId, watchedAt });
+      events.find((event) => event.entryId === entryId)!.watchedAt = watchedAt;
+    },
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  const grid = page.getByTestId("calendar-grid");
+  await grid.getByRole("button", { name: /Arrival/ }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: /^Change the time of this play: Arrival/ }).click();
+
+  const timeDialog = page.getByRole("dialog").filter({ hasText: "When did you really watch it?" });
+  const field = timeDialog.getByLabel("Watched at");
+  // Opens on the time on record rather than on now. Compared as an instant, because the field holds
+  // wall-clock text and the machine's zone is not the test's business.
+  const prefilled = await field.inputValue();
+  expect(await page.evaluate((value) => new Date(value).toISOString(), prefilled)).toBe(
+    "2026-07-10T21:00:00.000Z",
+  );
+
+  // Six days earlier, same wall-clock time: a different day in every zone, without the test having to
+  // know which day the recorded instant fell on locally.
+  const corrected = prefilled.replace(/-\d{2}T/, "-04T");
+  await field.fill(corrected);
+  await timeDialog.getByRole("button", { name: "Save time" }).click();
+
+  expect(retimed).toHaveLength(1);
+  expect(retimed[0].entryId).toBe("p3");
+  // Sent as an instant, not as the wall-clock text that was typed.
+  expect(retimed[0].watchedAt).toBe(await page.evaluate((value) => new Date(value).toISOString(), corrected));
+
+  // The day it left is empty; the play itself is still on the calendar, on another day.
+  await expect(dialog.getByText("Nothing is left on this day.")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(grid.getByRole("button", { name: /Arrival/ })).toHaveCount(1);
+});
+
 test("a time in the future is refused before the request is sent", async ({ page }) => {
   const dated: string[] = [];
   await setupApp(page, {

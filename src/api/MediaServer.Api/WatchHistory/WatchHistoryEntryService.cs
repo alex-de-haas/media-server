@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.WatchHistory;
 
 /// <summary>
-/// Deletes individual plays from one user's history.
+/// Edits individual plays in one user's history: when each happened, and whether it happened at all.
 /// </summary>
 /// <remarks>
 /// The counterpart to <see cref="WatchHistoryRecorder"/>'s recording paths, and the only way a dated
@@ -14,16 +14,15 @@ namespace MediaServer.Api.WatchHistory;
 /// </remarks>
 public sealed class WatchHistoryEntryService(MediaServerDbContext database, WatchHistoryRecorder recorder, TimeProvider time)
 {
-    /// <summary>Gives an undated mark the time it should always have had.</summary>
+    /// <summary>Sets when a play happened: a mark that was never timed, or one timed wrongly.</summary>
     /// <remarks>
-    /// A real viewing reaches this app undated whenever it was not observed crossing the watched
-    /// threshold — a client that simply marks an item played, or a server restarted mid-playback, whose
-    /// progress reports never land. The play is real and only its time is missing, so this stamps the
-    /// existing entry rather than recording a new one: nothing is created, nothing is destroyed, and the
-    /// item's play count does not move.
-    ///
-    /// Narrow on purpose. Re-dating a play that already carries a time is a different claim — that the
-    /// recorded time is wrong — and remains out of scope.
+    /// Two claims with the same fix. A real viewing reaches this app undated whenever it was not
+    /// observed crossing the watched threshold — a client that simply marks an item played, or a server
+    /// restarted mid-playback, whose progress reports never land. A dated one carries the instant the
+    /// report arrived, which is not always the instant the viewer remembers: a play left running, or a
+    /// hand-logged viewing given the wrong day. Either way the play is real and only its time is at
+    /// issue, so this stamps the existing entry rather than recording a new one: nothing is created,
+    /// nothing is destroyed, and the item's play count does not move.
     /// </remarks>
     public async Task<SetWatchedAtStatus> SetWatchedAtAsync(
         int appUserId, Guid entryId, DateTimeOffset watchedAt, CancellationToken cancellationToken)
@@ -41,35 +40,73 @@ public sealed class WatchHistoryEntryService(MediaServerDbContext database, Watc
             return SetWatchedAtStatus.NotFound;
         }
 
-        if (entry.WatchedAt is not null)
+        var previous = entry.WatchedAt;
+        if (previous == watchedAt)
         {
-            return SetWatchedAtStatus.AlreadyDated;
+            // Already the instant it carries. Writing it again would be harmless locally but would ask
+            // the provider to retire and re-state the play for a correction nobody made.
+            return SetWatchedAtStatus.Updated;
         }
 
         entry.WatchedAt = watchedAt;
 
-        // The aggregate row learns the time too, but only forwards: an item watched last night and
-        // backfilled with a viewing from 2019 was still last watched last night. A row whose
-        // LastWatchedAt is null is the common case here — a timeless mark never set one.
         var row = await database.UserItemData.FirstOrDefaultAsync(
             data => data.AppUserId == appUserId && data.MediaItemId == entry.MediaItemId, cancellationToken);
-        if (row is not null && (row.LastWatchedAt is null || watchedAt > row.LastWatchedAt))
+        if (row is not null)
         {
-            row.LastWatchedAt = watchedAt;
+            row.LastWatchedAt = await LatestWatchAsync(appUserId, entry, previous, row.LastWatchedAt, watchedAt, cancellationToken);
         }
 
-        // The provider is told, when there is one: it holds this play as timeless, and leaving it that
-        // way would have the next explicit sync import the undated mark straight back. Staged before the
-        // save so the stamped entry and the outbound intent commit together.
+        // The provider is told when there is one and the correction can be stated cleanly — the
+        // recorder decides that, because whether the stale remote claim can be retired is what makes
+        // the difference between correcting a play there and duplicating it. Staged before the save so
+        // the stamped entry and whatever outbound intent it produces commit together.
         var item = await database.MediaItems.FirstOrDefaultAsync(
             media => media.Id == entry.MediaItemId, cancellationToken);
         if (item is not null)
         {
-            await recorder.StageMarkDatedAsync(appUserId, item, row, entry, watchedAt, cancellationToken);
+            await recorder.StageWatchedAtChangedAsync(appUserId, item, row, entry, previous, watchedAt, cancellationToken);
         }
 
         await database.SaveChangesAsync(cancellationToken);
         return SetWatchedAtStatus.Updated;
+    }
+
+    /// <summary>What the item's <c>LastWatchedAt</c> becomes once one of its plays has moved in time.</summary>
+    /// <remarks>
+    /// Forwards-only in general: the row can hold a later viewing this table never received —
+    /// pre-migration history, or a remap that merged aggregates without merging entries — so
+    /// backfilling an old play must not claim the item has gone unwatched since.
+    ///
+    /// The exception is the row pointing at the play being moved. Then it has to follow it, backwards
+    /// included, or the item would keep advertising an instant nothing was watched at. Recomputed from
+    /// the plays that remain rather than simply taking the new instant, because pulling this one back
+    /// can hand the title to another play.
+    /// </remarks>
+    private async Task<DateTimeOffset?> LatestWatchAsync(
+        int appUserId,
+        PlaybackHistoryEntry entry,
+        DateTimeOffset? previous,
+        DateTimeOffset? lastWatchedAt,
+        DateTimeOffset watchedAt,
+        CancellationToken cancellationToken)
+    {
+        if (previous is null || lastWatchedAt != previous)
+        {
+            return lastWatchedAt is null || watchedAt > lastWatchedAt ? watchedAt : lastWatchedAt;
+        }
+
+        // Read from the siblings, not from the whole table: this entry is tracked and unsaved, so the
+        // database still answers with the instant it is being moved away from.
+        var others = await database.PlaybackHistoryEntries
+            .Where(other => other.AppUserId == appUserId
+                && other.MediaItemId == entry.MediaItemId
+                && other.Id != entry.Id
+                && other.WatchedAt != null)
+            .Select(other => other.WatchedAt!.Value)
+            .ToListAsync(cancellationToken);
+
+        return others.Append(watchedAt).Max();
     }
 
     /// <summary>How far ahead of the server's clock a supplied instant may be before it is refused.</summary>
@@ -114,16 +151,13 @@ public sealed class WatchHistoryEntryService(MediaServerDbContext database, Watc
     }
 }
 
-/// <summary>Why an undated mark was or was not given a time, so the endpoint can answer 204/400/404.</summary>
+/// <summary>Why a play was or was not given its time, so the endpoint can answer 204/400/404.</summary>
 public enum SetWatchedAtStatus
 {
     Updated,
 
     /// <summary>Unknown to this user — which is also the answer for someone else's entry.</summary>
     NotFound,
-
-    /// <summary>The entry already carries a time. Correcting one is not what this does.</summary>
-    AlreadyDated,
 
     /// <summary>An instant in the future.</summary>
     FutureInstant,

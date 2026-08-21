@@ -167,22 +167,26 @@ public sealed class WatchHistoryRecorder(
     }
 
     /// <summary>
-    /// Records that an undated mark now has a time: the remote timeless mark this app owns is retired
-    /// and the play is re-stated as an exact one.
+    /// Records that a play's time has changed — a mark given one, or a wrong one corrected: the remote
+    /// entry this app owns is retired and the play is re-stated at the instant it now carries.
     /// </summary>
     /// <remarks>
-    /// Two events rather than one, because "watched, time unknown" and "watched at T" are different
-    /// claims and the provider holds the first. Adding without removing would leave the account with
-    /// the same viewing twice — and the next explicit sync would import that timeless mark straight
-    /// back into the undated list the user just emptied. They are independent (a removal is addressed
-    /// by remote id, an add by identity and instant), so their delivery order does not matter.
+    /// Two events rather than one, because the claim the provider holds — "watched, time unknown", or
+    /// "watched at the old T" — is no longer the claim being made. Adding without removing would leave
+    /// the account with the same viewing twice, and the next explicit sync would import the stale one
+    /// straight back into the list the user just corrected. They are independent (a removal is
+    /// addressed by remote id, an add by identity and instant), so their delivery order does not
+    /// matter.
     ///
     /// The caller has already stamped <paramref name="entry"/>; this clears the link it carried,
     /// because after the removal there is no remote entry left for it to name.
+    ///
+    /// <paramref name="previous"/> is the instant the entry carried before, and null when it carried
+    /// none. It decides whether the stale claim can be left standing: see below.
     /// </remarks>
-    public async Task StageMarkDatedAsync(
-        int appUserId, MediaItem item, UserItemData? row, PlaybackHistoryEntry entry, DateTimeOffset watchedAt,
-        CancellationToken cancellationToken)
+    public async Task StageWatchedAtChangedAsync(
+        int appUserId, MediaItem item, UserItemData? row, PlaybackHistoryEntry entry, DateTimeOffset? previous,
+        DateTimeOffset watchedAt, CancellationToken cancellationToken)
     {
         // An Unresolved link is excluded for the reason it always is: the add committed but its id was
         // never pinned down, and removing on a guess destroys history this app did not create. The
@@ -191,6 +195,33 @@ public sealed class WatchHistoryRecorder(
             && entry.LinkStatus != PlaybackHistoryLinkStatus.Unresolved
                 ? id
                 : null;
+
+        // An add this app queued but has never attempted is a claim the provider has not seen. Dropping
+        // it is how one correction supersedes another cleanly. Anything already attempted is off
+        // limits: a previous attempt may have reached the provider before the process died, which is
+        // the reason delivery re-reads history on a retry rather than blindly re-posting.
+        var untried = await database.WatchHistoryOutboxEvents
+            .Where(queued => queued.AppUserId == appUserId
+                && queued.HistoryEntryId == entry.Id
+                && queued.Operation == WatchHistoryOutboxOperation.AddExactWatch
+                && queued.Status == WatchHistoryOutboxStatus.Pending
+                && queued.Attempts == 0)
+            .ToListAsync(cancellationToken);
+
+        database.WatchHistoryOutboxEvents.RemoveRange(untried);
+
+        if (previous is not null && remoteId is null && untried.Count == 0)
+        {
+            // A play that already had a time, whose remote copy this app can neither address nor recall.
+            // Exact adds never resolve a remote id — only timeless marks do — so there is nothing to
+            // remove and no pending claim to replace. Stating the new time anyway would put a second
+            // viewing of one film on the user's profile, and the next explicit sync would import the
+            // stale one back as another local play: worse than the correction simply not reaching the
+            // provider. So it stays local, which is the limitation a deleted exact play already carries.
+            logger.LogInformation(
+                "Not queueing a corrected time for a play whose remote copy cannot be retired.");
+            return;
+        }
 
         var identity = await identities.MapAsync(item, cancellationToken);
 
@@ -204,18 +235,26 @@ public sealed class WatchHistoryRecorder(
             await StageOutboxAsync(
                 appUserId, item, row, entry: null, WatchHistoryOutboxOperation.RemoveOwnedEntries,
                 identity, occurredAt: null,
-                // Distinct from the add below by operation, and from a later deletion of this same entry
-                // by nothing — but that deletion now finds no owned id to remove and queues nothing at
-                // all, so the two cannot collide.
-                discriminator: entry.Id.ToString("N"),
+                discriminator: WatchedAtKey(entry, watchedAt),
                 cancellationToken,
                 remoteIdSnapshot: JsonSerializer.Serialize(new[] { remoteId }));
         }
 
         await StageOutboxAsync(
             appUserId, item, row, entry, WatchHistoryOutboxOperation.AddExactWatch, identity, watchedAt,
-            discriminator: entry.Id.ToString("N"), cancellationToken);
+            discriminator: WatchedAtKey(entry, watchedAt), cancellationToken);
     }
+
+    /// <summary>Identifies one correction of one entry: the entry it moved, and where it moved to.</summary>
+    /// <remarks>
+    /// The instant is part of the key, not just the entry id. A play whose time is corrected twice is
+    /// two different claims for the provider, and an entry-only key would hash the second to the first
+    /// and have it swallowed as a duplicate — leaving the account holding a time the user has already
+    /// replaced. It also keeps this apart from the entry-keyed events the other paths stage: a logged
+    /// play's add, and a later deletion's removal.
+    /// </remarks>
+    private static string WatchedAtKey(PlaybackHistoryEntry entry, DateTimeOffset watchedAt) =>
+        $"{entry.Id:N}:{watchedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}";
 
     /// <summary>
     /// Records an explicit unwatch: drops the timeless entries this app created, keeps everything
