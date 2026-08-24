@@ -17,7 +17,7 @@ COPY MediaServer.Api/ MediaServer.Api/
 RUN dotnet publish MediaServer.Api/MediaServer.Api.csproj -c Release -o /app/publish --no-restore
 
 # ---- runtime ----
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:a4556ed033fa96f984bb7a8d348851cb2d36b1281dd2420070045f664fbb5f94 AS runtime
 WORKDIR /app
 
 # No ffmpeg. This image used to install the whole package for one binary — ffprobe — which dragged in the
