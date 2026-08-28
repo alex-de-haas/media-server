@@ -269,6 +269,10 @@ where it moved more than seven, and the server's log is almost nothing but playb
 forward through the film a second or two ahead of the play head, with nothing carrying the opening
 minute at all. Seven times less traffic, from deleting one line.
 
+The buffer is still thin — one and a half to two seconds — but it **stopped touching zero**, and zero
+is what a freeze is. It was reaching zero in every earlier run. The cushion did not grow; what grew is
+the room around it, from none to sevenfold.
+
 It is worth recording how long that took. The re-reading was found by the range attribution, and the
 cause by reading those ranges rather than by reasoning about them: four hypotheses came first — the
 tunnel, the container's interleaving, our own sample table, and AVKit's scrubbing filmstrip — and each
