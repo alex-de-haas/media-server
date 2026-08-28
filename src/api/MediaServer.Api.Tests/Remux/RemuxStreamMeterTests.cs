@@ -228,7 +228,7 @@ public sealed class RemuxStreamMeterTests
     }
 
     [Fact]
-    public void A_range_nobody_asked_about_says_so_rather_than_inventing_one()
+    public void Without_a_resolver_the_line_says_so_rather_than_inventing_an_owner()
     {
         var log = new Recorder();
         var clock = new StatedClock();

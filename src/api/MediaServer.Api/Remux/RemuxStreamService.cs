@@ -268,6 +268,22 @@ internal sealed class RemuxStreamService(
                 parts.Add(opened[i]);
             }
 
+            // Where each input lands in the output, which is the only way a served range can be
+            // attributed: a sidecar dub's samples are offsets into a file of its own, and the wrapper
+            // in front of it shifts everything after.
+            var spans = new List<InputSpan>();
+            var at = built.Header.LongLength;
+            for (var i = 0; i < opened.Count; i++)
+            {
+                if (i > 0)
+                {
+                    at += built.Wrappers[i - 1].LongLength;
+                }
+
+                spans.Add(new InputSpan(at, at + opened[i].Length, inputs[i].Index, i));
+                at += opened[i].Length;
+            }
+
             return (
                 new RemuxStream(
                     new SynthesizedMp4Stream(
@@ -276,7 +292,7 @@ internal sealed class RemuxStreamService(
                         settings.PlaybackDiagnosticsEnabled
                             ? new RemuxStreamMeter(
                                 logger, mediaSourceId.ToString("N")[..8], activity,
-                                (from, to) => Whose(index, tracks, built.Header.LongLength, from, to))
+                                (from, to) => Whose(spans, tracks, built.Header.LongLength, from, to))
                             : null),
                     "video/mp4",
                     etag,
@@ -290,6 +306,9 @@ internal sealed class RemuxStreamService(
         }
     }
 
+    /// <summary>Where one input's bytes sit in the output, and the index that describes them.</summary>
+    internal readonly record struct InputSpan(long Start, long End, MatroskaIndex Index, int Input);
+
     /// <summary>
     /// Which of the chosen tracks the bytes in a served range belong to, and what part of the film.
     ///
@@ -297,58 +316,84 @@ internal sealed class RemuxStreamService(
     /// of everything it fetched — but not what it thought it was fetching. A range carrying video from
     /// the opening minute is a player restarting; one carrying no chosen samples at all is a sample
     /// table pointing somewhere nothing lives. Those are different bugs, and this is the line that
-    /// tells them apart.
-    ///
-    /// Only the first input: a sidecar's samples live in a file of their own, and a range that lands
-    /// past the video says so rather than pretending.
+    /// tells them apart — which is exactly why it must not confuse them itself. A range that reaches
+    /// into the header, or past the end of one input into a sidecar, says so rather than reporting the
+    /// silence that means the other fault.
     /// </summary>
-    private static string Whose(
-        MatroskaIndex index,
+    internal static string Whose(
+        IReadOnlyList<InputSpan> spans,
         IReadOnlyList<Mp4Synthesizer.TrackRef> tracks,
         long headerLength,
         long from,
         long to)
     {
-        // The header sits in front of the first input, so the shift between the two is constant.
-        var start = from - headerLength;
-        var end = to - headerLength;
-        if (end <= start || end <= 0)
+        if (to <= from)
         {
-            return "the header";
+            return "nothing";
         }
 
-        var parts = new List<string>();
-        foreach (var reference in tracks.Where(track => track.Input == 0))
+        var described = new List<string>();
+        if (from < headerLength)
         {
-            if (index.Track(reference.Number) is not { } track || track.Samples.Count == 0)
+            described.Add("the header");
+        }
+
+        foreach (var span in spans)
+        {
+            // The part of this range that falls inside this input, in that input's own offsets.
+            var start = Math.Max(from, span.Start) - span.Start;
+            var end = Math.Min(to, span.End) - span.Start;
+            if (end <= start)
             {
                 continue;
             }
 
-            var (count, bytes, first, last) = Span(track, start, end);
-            if (count == 0)
+            var before = described.Count;
+            foreach (var reference in tracks.Where(track => track.Input == span.Input))
             {
-                continue;
+                if (span.Index.Track(reference.Number) is not { } track || track.Samples.Count == 0)
+                {
+                    continue;
+                }
+
+                var (count, bytes, first, last) = Span(track, start, end);
+                if (count == 0)
+                {
+                    continue;
+                }
+
+                // Ticks are the file's own; seconds are what a viewer and a log reader both think in.
+                var seconds = span.Index.TimestampScale / 1_000_000_000d;
+                var where = spans.Count > 1 ? $" (input {span.Input})" : string.Empty;
+                described.Add(string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"{track.Kind.ToString().ToLowerInvariant()}{where} {count} samples {bytes / 1_000_000d:F1} MB at {first * seconds:F0}-{last * seconds:F0}s"));
             }
 
-            // Ticks are the file's own; seconds are what a viewer and a log reader both think in.
-            var seconds = index.TimestampScale / 1_000_000_000d;
-            parts.Add(string.Create(
-                System.Globalization.CultureInfo.InvariantCulture,
-                $"{track.Kind.ToString().ToLowerInvariant()} {count} samples {bytes / 1_000_000d:F1} MB at {first * seconds:F0}-{last * seconds:F0}s"));
+            if (described.Count == before)
+            {
+                // The one answer that means our own header is wrong, so it is never said by accident.
+                described.Add(spans.Count > 1
+                    ? $"nothing we chose in input {span.Input}"
+                    : "nothing we chose");
+            }
         }
 
-        return parts.Count == 0 ? "nothing we chose" : string.Join(", ", parts);
+        // Neither header nor any input: the padding that sits between one file and the next.
+        return described.Count == 0 ? "padding between inputs" : string.Join(", ", described);
     }
 
     /// <summary>
     /// The chosen track's samples inside one byte range: how many, how large, and when they play.
     ///
+    /// A sample straddling an end counts whole. The sample is the unit a player asks in, and a fraction
+    /// of one would read as precision this cannot have.
+    ///
     /// Binary search rather than a walk. A film is hundreds of thousands of samples and a player asks
     /// for a range a hundred times a second — a scan per request would make the diagnostic the slowest
     /// thing in the response it is measuring.
     /// </summary>
-    private static (long Count, long Bytes, long First, long Last) Span(
+    internal static (long Count, long Bytes, long First, long Last) Span(
         IndexedTrack track, long start, long end)
     {
         // Samples of one track run forward through the file, so the first that could overlap is found
@@ -369,7 +414,7 @@ internal sealed class RemuxStreamService(
             }
         }
 
-        long count = 0, bytes = 0, first = 0, last = 0;
+        long count = 0, bytes = 0, first = long.MaxValue, last = long.MinValue;
         for (var i = low; i < track.Samples.Count; i++)
         {
             var sample = track.Samples[i];
@@ -378,17 +423,16 @@ internal sealed class RemuxStreamService(
                 break;
             }
 
-            if (count == 0)
-            {
-                first = sample.Timestamp;
-            }
-
-            last = sample.Timestamp;
+            // Smallest and largest, not first and last. Samples run forward through the file but their
+            // presentation times do not: a reordered video track stores 0, 83, 41, 166, and reading the
+            // ends of that would report a span that runs backwards.
+            first = Math.Min(first, sample.Timestamp);
+            last = Math.Max(last, sample.Timestamp);
             bytes += sample.Size;
             count++;
         }
 
-        return (count, bytes, first, last);
+        return count == 0 ? (0, 0, 0, 0) : (count, bytes, first, last);
     }
 
     /// <summary>
