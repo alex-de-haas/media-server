@@ -231,6 +231,24 @@ the real cost; a seek is not watching either.
 Most of the rest comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls`
 counts what a `playbackStalled` notification can miss.
 
+## The bare player
+
+A second switch in Settings plays through a video layer and nothing else — no transport bar, no skip
+gestures, no track picker.
+
+It is a **measurement, not a preference**. The server's log shows this television reading the film from
+the beginning, at full speed, while it plays: 1.4 GB of re-reading against 60 MB of playback in one
+three-minute window, and the reads carry the opening minute rather than anything near the play head.
+That is what a scrubbing filmstrip looks like — AVKit has nowhere to get one but the film itself.
+
+Take the chrome away and there is nothing left to illustrate. If the re-reading stops, the cause is
+named; if it does not, AVKit is innocent and the next suspect is somewhere else. Either answer is worth
+more than the argument it ends, which had already run through four wrong hypotheses.
+
+It costs everything `AVPlayerViewController` was chosen for, so it is turned on to answer the question
+and off again afterwards. The Menu button is wired by hand, because the controller that normally answers
+it is the one being taken away.
+
 ## The escape hatch
 
 One thing genuinely cannot be detected. `VTIsHardwareDecodeSupported` reports what the

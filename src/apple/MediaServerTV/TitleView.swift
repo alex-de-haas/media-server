@@ -44,11 +44,14 @@ struct TitleView: View {
             }
         }
         .fullScreenCover(item: $playing) { stream in
+            // Read once, when the film starts. This closure runs again on every redraw, and a fresh
+            // diagnostics object per redraw would throw away the run being watched.
+            let preferences = PlaybackPreferencesStore().load()
             PlayerView(
                 stream: stream,
                 startAt: detail?.resumeSeconds ?? 0,
-                diagnostics: PlaybackPreferencesStore().load().showDiagnostics
-                    ? PlaybackDiagnostics() : nil,
+                diagnostics: preferences.showDiagnostics ? PlaybackDiagnostics() : nil,
+                simple: preferences.usesSimplePlayer,
                 onProgress: { position in
                     guard let session else { return }
                     Task { await playback.report(
@@ -59,7 +62,8 @@ struct TitleView: View {
                     Task { await playback.stop(
                         itemId: title.id, playSessionId: session, positionSeconds: position) }
                     self.session = nil
-                })
+                },
+                onExit: { playing = nil })
             .ignoresSafeArea()
         }
     }

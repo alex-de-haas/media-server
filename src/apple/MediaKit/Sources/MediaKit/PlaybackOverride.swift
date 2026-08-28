@@ -47,24 +47,41 @@ public struct PlaybackPreferences: Codable, Equatable, Sendable {
     /// file a viewer can reach, so the only diagnostic that gets used is the one on screen.
     public var showDiagnostics: Bool
 
+    /// Play through a bare video layer instead of `AVPlayerViewController`.
+    ///
+    /// This exists to answer one question with a measurement. The server's log shows the television
+    /// reading the film **from the beginning, at full speed, while it plays** — 1.4 GB of re-reading
+    /// against 60 MB of playback in one three-minute window — and the reads carry the opening minute
+    /// rather than anything near the play head. That is what a scrubbing filmstrip looks like: AVKit
+    /// has nowhere to get one but the film itself.
+    ///
+    /// A bare layer has no transport bar to illustrate, so if the re-reading stops the cause is named.
+    /// It also costs the transport bar, the skip gestures, the track picker and the Siri remote's whole
+    /// vocabulary, which is why it is a diagnostic switch and not a preference anybody should live on.
+    public var usesSimplePlayer: Bool
+
     public init(
         dynamicRange: DynamicRangeOverride = .automatic,
         maxAudioChannels: Int? = nil,
-        showDiagnostics: Bool = false
+        showDiagnostics: Bool = false,
+        usesSimplePlayer: Bool = false
     ) {
         self.dynamicRange = dynamicRange
         self.maxAudioChannels = maxAudioChannels
         self.showDiagnostics = showDiagnostics
+        self.usesSimplePlayer = usesSimplePlayer
     }
 
-    /// Absent in anything written before diagnostics existed, which must read as off rather than as a
-    /// preference that cannot be decoded.
+    /// Absent in anything written before a switch existed, which must read as off rather than as a
+    /// preference that cannot be decoded — losing a viewer's dynamic-range choice, the one control that
+    /// fixes a dark picture, along with it.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         dynamicRange = try container.decodeIfPresent(
             DynamicRangeOverride.self, forKey: .dynamicRange) ?? .automatic
         maxAudioChannels = try container.decodeIfPresent(Int.self, forKey: .maxAudioChannels)
         showDiagnostics = try container.decodeIfPresent(Bool.self, forKey: .showDiagnostics) ?? false
+        usesSimplePlayer = try container.decodeIfPresent(Bool.self, forKey: .usesSimplePlayer) ?? false
     }
 
     /// The profile actually sent: what the device reports, narrowed by what the viewer has chosen.
