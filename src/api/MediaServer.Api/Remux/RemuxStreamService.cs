@@ -274,7 +274,9 @@ internal sealed class RemuxStreamService(
                         built.Header,
                         parts,
                         settings.PlaybackDiagnosticsEnabled
-                            ? new RemuxStreamMeter(logger, mediaSourceId.ToString("N")[..8], activity)
+                            ? new RemuxStreamMeter(
+                                logger, mediaSourceId.ToString("N")[..8], activity,
+                                (from, to) => Whose(index, tracks, built.Header.LongLength, from, to))
                             : null),
                     "video/mp4",
                     etag,
@@ -286,6 +288,107 @@ internal sealed class RemuxStreamService(
             await DisposeAllAsync(opened);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Which of the chosen tracks the bytes in a served range belong to, and what part of the film.
+    ///
+    /// The ranges alone said the player was re-reading the head of the film over and over — nine tenths
+    /// of everything it fetched — but not what it thought it was fetching. A range carrying video from
+    /// the opening minute is a player restarting; one carrying no chosen samples at all is a sample
+    /// table pointing somewhere nothing lives. Those are different bugs, and this is the line that
+    /// tells them apart.
+    ///
+    /// Only the first input: a sidecar's samples live in a file of their own, and a range that lands
+    /// past the video says so rather than pretending.
+    /// </summary>
+    private static string Whose(
+        MatroskaIndex index,
+        IReadOnlyList<Mp4Synthesizer.TrackRef> tracks,
+        long headerLength,
+        long from,
+        long to)
+    {
+        // The header sits in front of the first input, so the shift between the two is constant.
+        var start = from - headerLength;
+        var end = to - headerLength;
+        if (end <= start || end <= 0)
+        {
+            return "the header";
+        }
+
+        var parts = new List<string>();
+        foreach (var reference in tracks.Where(track => track.Input == 0))
+        {
+            if (index.Track(reference.Number) is not { } track || track.Samples.Count == 0)
+            {
+                continue;
+            }
+
+            var (count, bytes, first, last) = Span(track, start, end);
+            if (count == 0)
+            {
+                continue;
+            }
+
+            // Ticks are the file's own; seconds are what a viewer and a log reader both think in.
+            var seconds = index.TimestampScale / 1_000_000_000d;
+            parts.Add(string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{track.Kind.ToString().ToLowerInvariant()} {count} samples {bytes / 1_000_000d:F1} MB at {first * seconds:F0}-{last * seconds:F0}s"));
+        }
+
+        return parts.Count == 0 ? "nothing we chose" : string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// The chosen track's samples inside one byte range: how many, how large, and when they play.
+    ///
+    /// Binary search rather than a walk. A film is hundreds of thousands of samples and a player asks
+    /// for a range a hundred times a second — a scan per request would make the diagnostic the slowest
+    /// thing in the response it is measuring.
+    /// </summary>
+    private static (long Count, long Bytes, long First, long Last) Span(
+        IndexedTrack track, long start, long end)
+    {
+        // Samples of one track run forward through the file, so the first that could overlap is found
+        // rather than searched for.
+        var low = 0;
+        var high = track.Samples.Count;
+        while (low < high)
+        {
+            var middle = (low + high) / 2;
+            var sample = track.Samples[middle];
+            if (sample.Offset + sample.Size <= start)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        long count = 0, bytes = 0, first = 0, last = 0;
+        for (var i = low; i < track.Samples.Count; i++)
+        {
+            var sample = track.Samples[i];
+            if (sample.Offset >= end)
+            {
+                break;
+            }
+
+            if (count == 0)
+            {
+                first = sample.Timestamp;
+            }
+
+            last = sample.Timestamp;
+            bytes += sample.Size;
+            count++;
+        }
+
+        return (count, bytes, first, last);
     }
 
     /// <summary>
