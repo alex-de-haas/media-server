@@ -51,6 +51,9 @@ private final class PlainPlayerController: UIViewController {
     }
 
     @objc private func exit() {
+        // Paused here rather than left to teardown: the cover animates away over a few hundred
+        // milliseconds, and a film that keeps playing through them is heard after it has gone.
+        player.pause()
         onExit()
     }
 }

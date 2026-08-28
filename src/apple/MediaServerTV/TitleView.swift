@@ -20,6 +20,15 @@ struct TitleView: View {
     @State private var session: String?
     @State private var resolving = false
 
+    /// Decided once when a film starts, and held for as long as it plays.
+    ///
+    /// Both of these used to be read inside the cover's builder, which runs again on every redraw. The
+    /// controller is built once, so a second diagnostics object would either replace the one collecting
+    /// the run being watched or — worse, because it looks like nothing — be created and quietly dropped
+    /// every second for the length of a film.
+    @State private var diagnostics: PlaybackDiagnostics?
+    @State private var simplePlayer = false
+
     var body: some View {
         ScrollView {
             if let detail {
@@ -44,14 +53,11 @@ struct TitleView: View {
             }
         }
         .fullScreenCover(item: $playing) { stream in
-            // Read once, when the film starts. This closure runs again on every redraw, and a fresh
-            // diagnostics object per redraw would throw away the run being watched.
-            let preferences = PlaybackPreferencesStore().load()
             PlayerView(
                 stream: stream,
                 startAt: detail?.resumeSeconds ?? 0,
-                diagnostics: preferences.showDiagnostics ? PlaybackDiagnostics() : nil,
-                simple: preferences.usesSimplePlayer,
+                diagnostics: diagnostics,
+                simple: simplePlayer,
                 onProgress: { position in
                     guard let session else { return }
                     Task { await playback.report(
@@ -62,6 +68,7 @@ struct TitleView: View {
                     Task { await playback.stop(
                         itemId: title.id, playSessionId: session, positionSeconds: position) }
                     self.session = nil
+                    diagnostics = nil
                 },
                 onExit: { playing = nil })
             .ignoresSafeArea()
@@ -102,6 +109,12 @@ struct TitleView: View {
                 itemId: title.id,
                 mediaSourceId: stream.mediaSourceId,
                 positionSeconds: detail.resumeSeconds)
+
+            // Read here rather than in the cover's builder, so the run being watched is collected by
+            // one object from beginning to end.
+            let preferences = PlaybackPreferencesStore().load()
+            diagnostics = preferences.showDiagnostics ? PlaybackDiagnostics() : nil
+            simplePlayer = preferences.usesSimplePlayer
             playing = stream
         } catch {
             // Shown on a television, so the sentence Foundation writes rather than the type's whole
