@@ -56,8 +56,15 @@ public struct PlaybackPreferences: Codable, Equatable, Sendable {
     /// has nowhere to get one but the film itself.
     ///
     /// A bare layer has no transport bar to illustrate, so if the re-reading stops the cause is named.
-    /// It also costs the transport bar, the skip gestures, the track picker and the Siri remote's whole
-    /// vocabulary, which is why it is a diagnostic switch and not a preference anybody should live on.
+    ///
+    /// **The answer was no.** With every scrap of AVKit gone the television read the head of the film
+    /// exactly as before, so the filmstrip was never it. The switch is kept because it is the only way
+    /// to ask that question again of the next suspect.
+    ///
+    /// It costs the transport bar, the skip gestures, the track picker and the Siri remote's whole
+    /// vocabulary — and **Dolby Vision**, since the controller is also what negotiates the display mode
+    /// and a bare layer would need `AVDisplayManager` driven by hand. A diagnostic switch, never a
+    /// preference to live on.
     public var usesSimplePlayer: Bool
 
     public init(

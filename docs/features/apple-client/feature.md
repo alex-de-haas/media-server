@@ -241,13 +241,28 @@ the beginning, at full speed, while it plays: 1.4 GB of re-reading against 60 MB
 three-minute window, and the reads carry the opening minute rather than anything near the play head.
 That is what a scrubbing filmstrip looks like — AVKit has nowhere to get one but the film itself.
 
-Take the chrome away and there is nothing left to illustrate. If the re-reading stops, the cause is
-named; if it does not, AVKit is innocent and the next suspect is somewhere else. Either answer is worth
-more than the argument it ends, which had already run through four wrong hypotheses.
+Take the chrome away and there is nothing left to illustrate. **The answer was no**: with every scrap
+of AVKit gone the television read the head of the film exactly as before, so the filmstrip was never it.
+The switch is kept because it is the only way to ask that question again of the next suspect.
 
-It costs everything `AVPlayerViewController` was chosen for, so it is turned on to answer the question
-and off again afterwards. The Menu button is wired by hand, because the controller that normally answers
-it is the one being taken away.
+It costs everything `AVPlayerViewController` was chosen for — and **Dolby Vision** with it, since the
+controller is also what negotiates the display mode and a bare layer would need `AVDisplayManager`
+driven by hand. So it is turned on to answer a question and off again afterwards. The Menu button is
+wired by hand too, because the controller that normally answers it is the one being taken away.
+
+## What asks for sixty seconds gets sixty-one
+
+Every one of those re-reads stops at the same place. They start anywhere — nought, eight, twenty,
+twenty-four, thirty-three, forty-six seconds in — and each runs forward to **sixty-one seconds** and
+stops.
+
+`preferredForwardBufferDuration` was set to 60 in #211, to make the television hold more than two
+seconds of buffer. Two runs later the buffer was still two seconds, so it never did that; and no range
+log exists from before it, because it shipped first. Sixty seconds asked for, sixty-one seconds fetched,
+none of it near the play head.
+
+So the request is gone and the player chooses again, which is what it did before #211 and while
+playback was no worse than it is now.
 
 ## The escape hatch
 

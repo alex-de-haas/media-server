@@ -78,15 +78,18 @@ struct PlayerView: UIViewControllerRepresentable {
     let onExit: () -> Void
 
     func makeUIViewController(context: Context) -> UIViewController {
-        // The item is built here rather than left to `AVPlayer(url:)` for one reason: the read-ahead.
-        // On the television the buffer settled at two or three seconds and stayed there — enough to
-        // play, not enough to survive anything, and every freeze arrived from that ledge. Automatic
-        // buffering picks a byte budget, and a byte budget spent on a 4K container carrying every dub
-        // buys very few seconds. This asks for a cushion in the unit that matters. It is a preference,
-        // not an instruction: the player still narrows it to what it is willing to hold.
+        // No `preferredForwardBufferDuration`, and its removal is a measurement rather than a tidy-up.
+        //
+        // It was set to 60 in #211 to make the television hold more than two seconds of buffer. Two runs
+        // later the buffer was still two seconds, so it never did that. What it did do — and what no
+        // range log before it exists to compare against, since it landed first — is match the one number
+        // the server keeps reporting: every one of those forty-to-seventy-megabyte re-reads of the head
+        // of the film stops at **sixty-one seconds**, from wherever it started. Sixty seconds asked for,
+        // sixty-one seconds fetched, and none of it near the play head.
+        //
+        // So this asks for nothing and lets the player choose, which is what it was doing before #211
+        // and while playback was no worse than it is now.
         let item = AVPlayerItem(asset: AVURLAsset(url: stream.url))
-        item.preferredForwardBufferDuration = 60
-
         let player = AVPlayer(playerItem: item)
 
         if startAt > 1 {
