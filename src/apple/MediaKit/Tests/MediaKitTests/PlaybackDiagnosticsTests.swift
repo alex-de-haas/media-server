@@ -80,6 +80,33 @@ struct DiagnosticsPreferenceTests {
     @Test("A fresh install has it off")
     func defaultsOff() {
         #expect(!PlaybackPreferences().showDiagnostics)
+        #expect(!PlaybackPreferences().usesSimplePlayer)
+    }
+
+    @Test("The bare player survives a round trip beside everything else")
+    func barePlayerRoundTrip() {
+        let store = PlaybackPreferencesStore(
+            defaults: UserDefaults(suiteName: "MediaKitTests.\(UUID().uuidString)")!)
+
+        store.save(PlaybackPreferences(
+            dynamicRange: .sdr, showDiagnostics: true, usesSimplePlayer: true))
+
+        #expect(store.load().usesSimplePlayer)
+        #expect(store.load().showDiagnostics)
+        #expect(store.load().dynamicRange == .sdr)
+    }
+
+    @Test("Something written before the bare player existed reads as off")
+    func legacyWithoutTheBarePlayer() {
+        // Every switch added here has to decode this way, or adding one throws away the viewer's
+        // dynamic-range choice — the control that fixes a dark picture — along with itself.
+        let older = Data(#"{"dynamicRange":"hdr10","showDiagnostics":true}"#.utf8)
+
+        let decoded = try? JSONDecoder.pairing.decode(PlaybackPreferences.self, from: older)
+
+        #expect(decoded?.dynamicRange == .hdr10)
+        #expect(decoded?.showDiagnostics == true)
+        #expect(decoded?.usesSimplePlayer == false)
     }
 }
 
