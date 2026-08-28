@@ -34,7 +34,11 @@ namespace MediaServer.Api.Remux;
 /// machine's mood rather than this arithmetic.
 /// </param>
 internal sealed class RemuxStreamMeter(
-    ILogger logger, string label, RemuxStreamActivity? activity = null, Func<TimeSpan>? clock = null)
+    ILogger logger,
+    string label,
+    RemuxStreamActivity? activity = null,
+    Func<long, long, string>? whose = null,
+    Func<TimeSpan>? clock = null)
 {
     /// <summary>Often enough to see a stretch of film go bad, rare enough that a log stays readable.</summary>
     private static readonly TimeSpan Report = TimeSpan.FromSeconds(10);
@@ -198,7 +202,7 @@ internal sealed class RemuxStreamMeter(
         logger.LogInformation(
             "Remux {Label} {Window}: {Megabytes:F1} MB in {Seconds:F2}s = {Mbps:F0} Mbit/s; "
             + "disk {Disk:F0}%, socket {Socket:F0}%; {Reads} reads of {Kilobytes:F0} KB; "
-            + "idle {Idle} before it; bytes {Range}.",
+            + "idle {Idle} before it; bytes {Range}; carrying {Whose}.",
             label,
             window,
             bytes / 1_000_000d,
@@ -209,6 +213,7 @@ internal sealed class RemuxStreamMeter(
             reads,
             bytes / (double)reads / 1000,
             _idle is { } idle ? $"{idle.TotalMilliseconds:F0} ms" : "nothing",
-            from < 0 ? "unknown" : $"{from}-{to}");
+            from < 0 ? "unknown" : $"{from}-{to}",
+            from < 0 || whose is null ? "not asked" : whose(from, to));
     }
 }

@@ -123,13 +123,13 @@ public sealed class RemuxStreamMeterTests
         var activity = new RemuxStreamActivity();
         var clock = new StatedClock();
 
-        var first = new RemuxStreamMeter(log, "film", activity, () => clock.Now);
+        var first = new RemuxStreamMeter(log, "film", activity, clock: () => clock.Now);
         var began = clock.At(0);
         clock.At(0.5);
         first.Served(began, 1_000_000);
         first.Done();
 
-        var second = new RemuxStreamMeter(log, "film", activity, () => clock.Now);
+        var second = new RemuxStreamMeter(log, "film", activity, clock: () => clock.Now);
         began = clock.At(1);
         clock.At(1.5);
         second.Served(began, 1_000_000);
@@ -205,5 +205,40 @@ public sealed class RemuxStreamMeterTests
         meter.Done();
 
         Assert.Empty(log.Lines);
+    }
+
+    [Fact]
+    public void The_line_says_whose_bytes_a_range_carried()
+    {
+        // The ranges alone showed a player re-reading the head of a film over and over; they could not
+        // say what it thought it was fetching. Video from the opening minute is a player restarting,
+        // and nothing at all is a sample table pointing where nothing lives — different bugs.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(
+            log, "film", whose: (from, to) => $"video from {from} to {to}", clock: () => clock.Now);
+
+        var began = clock.At(0);
+        clock.At(1);
+        meter.Served(began, 1_000, at: 500);
+        meter.Done();
+
+        Assert.Single(log.Lines);
+        Assert.Contains("carrying video from 500 to 1500", log.Lines[0]);
+    }
+
+    [Fact]
+    public void Without_a_resolver_the_line_says_so_rather_than_inventing_an_owner()
+    {
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(log, "film", clock: () => clock.Now);
+
+        var began = clock.At(0);
+        clock.At(1);
+        meter.Served(began, 1_000, at: 500);
+        meter.Done();
+
+        Assert.Contains("carrying not asked", log.Lines[0]);
     }
 }

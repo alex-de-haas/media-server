@@ -463,6 +463,20 @@ The `mdat` is the source as it stands, so a player reading it sequentially fetch
 play two — a film with eleven dubs is paid for in full to hear one. Whether that is worth repairing
 depends entirely on that ratio, which the index already knows.
 
+Each line also names **whose bytes those were**: how many samples of each chosen track fall in the
+range, and what part of the film they play. The ranges alone showed a television re-reading the head of
+a film over and over — nine tenths of everything it fetched — but not what it thought it was fetching,
+and a range carrying video from the opening minute is a different fault from one carrying no chosen
+samples at all. The answer comes from the index by binary search: a player asks a hundred times a second
+and a scan per request would make the diagnostic the slowest thing in the response it measures.
+
+It answers across **every** input, since a chosen dub lives in a file of its own, and a range that
+reaches into the header or into the padding between files says so. That care is the point: `nothing we
+chose` is the one answer meaning our own sample table points where nothing lives, and it must never be
+said by accident. The span is the smallest and largest presentation time in the range rather than the
+first and last, because a reordered video track stores `0, 83, 41, 166` and reading its ends would
+print an interval that runs backwards.
+
 Both are off by default. A film is thousands of reads a second and none of them should pay for a
 stopwatch nobody is reading.
 
