@@ -41,8 +41,13 @@ struct PlayerView: UIViewControllerRepresentable {
 
         let controller = AVPlayerViewController()
         controller.player = player
+
+        // Loaded before asking for the overlay host, because `contentOverlayView` is nil until it is —
+        // and the fallback would then be a view that does not exist either.
+        controller.loadViewIfNeeded()
+
         // Over the player's own chrome, so it survives the transport bar appearing and going.
-        let overlayHost = controller.contentOverlayView ?? controller.view!
+        let overlayHost = controller.contentOverlayView ?? controller.view
 
         if let diagnostics {
             diagnostics.start(observing: item)

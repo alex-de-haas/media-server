@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -231,21 +231,20 @@ the real cost; a seek is not watching either.
 Most of the rest comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls`
 counts what a `playbackStalled` notification can miss.
 
-## What AVKit was cleared of
+## AVKit is the only player
 
-For one measurement a second switch played through a video layer and nothing else — no transport bar,
-no skip gestures, no track picker. The server's log showed this television reading the film from the
-beginning at full speed while it played, and a scrubbing filmstrip is the only thing on that screen
-with a reason to: AVKit has nowhere to get one but the film itself.
+Playback is always `AVPlayerViewController`. There is no alternative presentation and no switch to one,
+and that is a decision rather than an omission: a bare `AVPlayerLayer` costs the transport bar, the skip
+gestures, the track picker, the Siri remote's whole vocabulary and **Dolby Vision**, since the controller
+is also what negotiates the display mode.
 
-**The answer was no.** With every scrap of AVKit gone the television read the head of the film exactly
-as before. The filmstrip was never it, and the switch is gone with the question — a bare layer costs
-the transport bar, the skip gestures, the track picker, the Siri remote's whole vocabulary and **Dolby
-Vision**, since the controller is also what negotiates the display mode. That is not something to leave
-in Settings where it can be turned on by mistake.
+The bare layer existed briefly, to establish that AVKit's scrubbing filmstrip was **not** what read the
+film from the beginning while it played. It was not — that was `preferredForwardBufferDuration`, below —
+and the finding is recorded here so the theory is not proposed again from an empty Settings screen.
 
-Anybody who did turn it on still has `usesSimplePlayer` in their stored preferences, naming nothing. It
-decodes and is ignored, because refusing it would take the viewer's dynamic-range choice down with it.
+`PlaybackPreferences` accordingly decodes and ignores `usesSimplePlayer`, which is still stored on any
+device where the switch was turned on. Refusing an unknown key would take the viewer's dynamic-range
+choice down with it, and that is the one control that fixes a dark picture.
 
 ## What asks for sixty seconds gets sixty-one
 
