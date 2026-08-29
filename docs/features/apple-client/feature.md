@@ -444,9 +444,23 @@ one it can, and one verdict would hide the copy that works. The client takes the
 plays.
 
 Presentation is `AVPlayerViewController` and not a player of our own — the transport bar,
-the skip gestures, the track picker and the Siri remote's whole vocabulary come free. Since
-the container carries every describable track, that picker is a real one: switching a dub
-costs nothing and needs no second request.
+the skip gestures and the Siri remote's whole vocabulary come free.
+
+The one thing it cannot do here is choose a track. The container carries a single dub and a
+single subtitle, which is what made its header small enough to play at all, so AVKit's own
+picker has nothing to choose between. **Ours sits in the transport bar beside it**, built
+from the tracks the title screen already knows, so opening the menu costs no request.
+
+Choosing resolves the same edition with a different `audioStreamId`, replaces the player's
+item and seeks back to where the viewer was — exactly, because landing a second early
+repeats a line of dialogue they just heard. A second of interruption, against a film that
+plays. The edition is pinned across the switch, so changing a dub cannot quietly move a
+viewer to another copy, and a refusal leaves the film playing as it was rather than stopping
+a working film because a menu did not get its way.
+
+The tick goes against **what the server said it chose**, not what was asked for: a stored
+preference answers when nothing was picked, so the first menu already has a row marked that
+nobody selected in this session.
 
 The player item is built rather than left to `AVPlayer(url:)`, for the read-ahead alone.
 Left automatic, the buffer settled at two or three seconds on the television and stayed

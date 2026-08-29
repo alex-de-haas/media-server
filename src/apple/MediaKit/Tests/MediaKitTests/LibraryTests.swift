@@ -402,7 +402,8 @@ struct PlaybackPlanTests {
 
     private func resolution(
         decision: String, url: String? = "/native/v1/media/abc/remux?token=t",
-        transport: String? = "ByteRange", reason: String? = nil, signalling: String? = "dvh1"
+        transport: String? = "ByteRange", reason: String? = nil, signalling: String? = "dvh1",
+        audioStreamId: String? = nil, subtitleStreamId: String? = nil
     ) -> String {
         func field(_ name: String, _ value: String?) -> String {
             guard let value else { return "\"\(name)\":null" }
@@ -418,6 +419,8 @@ struct PlaybackPlanTests {
         parts.append(field("signalling", signalling))
         parts.append(field("sourceDynamicRange", "Dolby Vision"))
         parts.append(field("reason", reason))
+        parts.append(field("audioStreamId", audioStreamId))
+        parts.append(field("subtitleStreamId", subtitleStreamId))
         return "{" + parts.joined(separator: ",") + "}"
     }
 
@@ -512,5 +515,31 @@ struct PlaybackPlanTests {
             Issue.record("expected the second copy to play")
             return
         }
+    }
+
+    @Test("The tracks the server chose come back with the stream")
+    func chosenTracks() throws {
+        // A picker ticks these rather than its own last request: a stored preference answers when
+        // nothing was picked, so the first menu already has a tick against a row nobody selected here.
+        guard case .play(let stream) = try plan(resolution(
+            decision: "Remux", audioStreamId: "rus", subtitleStreamId: "eng")) else {
+            Issue.record("expected a stream")
+            return
+        }
+
+        #expect(stream.audioStreamId == "rus")
+        #expect(stream.subtitleStreamId == "eng")
+    }
+
+    @Test("Direct play names no tracks, because the choice was never the server's")
+    func directPlayNamesNoTracks() throws {
+        guard case .play(let stream) = try plan(resolution(
+            decision: "DirectPlay", url: "/native/v1/media/abc?token=t", signalling: nil)) else {
+            Issue.record("expected a stream")
+            return
+        }
+
+        #expect(stream.audioStreamId == nil)
+        #expect(stream.subtitleStreamId == nil)
     }
 }

@@ -52,10 +52,16 @@ struct TitleView: View {
             }
         }
         .fullScreenCover(item: $playing) { stream in
+            let version = detail?.versions.first { $0.id == stream.mediaSourceId }
             PlayerView(
                 stream: stream,
                 startAt: detail?.resumeSeconds ?? 0,
                 diagnostics: diagnostics,
+                audioTracks: version?.audio ?? [],
+                subtitleTracks: version?.subtitles ?? [],
+                switchTracks: { audioId, subtitleId in
+                    await switchTracks(to: stream, audio: audioId, subtitle: subtitleId)
+                },
                 onProgress: { position in
                     guard let session else { return }
                     Task { await playback.report(
@@ -84,6 +90,27 @@ struct TitleView: View {
             }
         }
         .disabled(resolving)
+    }
+
+    /// The same film with different tracks, or nil when the server would not give it.
+    ///
+    /// Resolved rather than assembled here: which tracks a container can carry is the server's
+    /// question, and a client that edited the URL itself would be answering it from the wrong side.
+    /// The edition is pinned, so switching a dub cannot quietly move a viewer to another copy.
+    private func switchTracks(
+        to stream: PlayableStream, audio: String?, subtitle: String?
+    ) async -> PlayableStream? {
+        guard case .play(let replacement) = try? await playback.plan(
+            for: title.id,
+            preferring: stream.mediaSourceId,
+            audioStreamId: audio,
+            subtitleStreamId: subtitle),
+            replacement.mediaSourceId == stream.mediaSourceId
+        else {
+            return nil
+        }
+
+        return replacement
     }
 
     private func play(_ detail: TitleDetail) async {

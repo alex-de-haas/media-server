@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-10
-Updated: 2026-08-18
+Updated: 2026-08-29
 
 > Phase 2 of the [Apple client](../apple-client/plan.md) epic, and the first
 > release worth using. Every server half it needs is built and verified:
@@ -181,14 +181,14 @@ the pairing screen again if the access token itself has gone.
       user's: 6–8 GB two-track files had always played smoothly, on the same
       hardware and network, before any of that work. Track count predicted the
       failure; size and bitrate predicted nothing.
-- [ ] **A track picker of our own.** The debt from #208. The container now carries
-      one audio track and one subtitle, so `AVPlayerViewController`'s own picker has
-      nothing to choose between: changing a dub means resolving a new URL with
-      `audioStreamId` and re-seating the player at the current position — a second
-      of interruption, against a film that plays at all.
+- [x] **A track picker of our own.** The debt from #208, paid on 2026-08-29. It sits
+      in the transport bar beside AVKit's own controls, and switching resolves the same
+      edition with a different `audioStreamId`, replaces the item and seeks back to
+      where the viewer was.
 
-      Until it exists a viewer gets the track their stored preference names, which
-      is what the resolver has always chosen for them.
+      The stored preference turned out never to have reached this surface at all:
+      `NativeTrackSelector` existed and was called from nowhere, so the URL carried no
+      choice and the packager took whichever audio track came first. It does now.
 - [ ] **Startup on a television.** Ten seconds to first frame on the Apple TV
       against three on a Mac — the difference is the A12 parsing the tables. Left as
       it is on 2026-08-17: the tables are already minimal, and what remains to trim

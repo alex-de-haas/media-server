@@ -100,7 +100,14 @@ public sealed record NativePlaybackResolution(
     string? Signalling,
     /// <summary>The source's own dynamic range, so a client knows what it is about to open.</summary>
     string? SourceDynamicRange,
-    string? Reason);
+    string? Reason,
+    /// <summary>
+    /// The tracks this URL will actually carry, so a picker can tick the row a viewer is hearing rather
+    /// than the one it asked for. Null on <c>directPlay</c>, where the file is served as it stands and
+    /// the choice was never ours to make.
+    /// </summary>
+    Guid? AudioStreamId = null,
+    Guid? SubtitleStreamId = null);
 
 public sealed record NativePlaybackResolutionResponse(
     Guid ItemId,

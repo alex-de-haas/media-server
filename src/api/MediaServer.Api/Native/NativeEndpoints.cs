@@ -104,7 +104,9 @@ public static class NativeEndpoints
                 return Results.Unauthorized();
             }
 
-            var resolved = await resolver.ResolveAsync(body.ItemId, appUserId, body.Profile, cancellationToken);
+            var resolved = await resolver.ResolveAsync(
+                body.ItemId, appUserId, body.Profile, body.AudioStreamId, body.SubtitleStreamId,
+                cancellationToken);
             return resolved is null ? Results.NotFound() : Results.Ok(resolved);
         }).RequireAuthorization()
           .Produces<NativePlaybackResolutionResponse>()
@@ -238,7 +240,15 @@ public static class NativeEndpoints
 }
 
 /// <summary>What to resolve, and for which client.</summary>
-public sealed record NativePlaybackResolveRequest(Guid ItemId, NativeCapabilityProfile Profile);
+/// <param name="AudioStreamId">
+/// The track a viewer has just picked. Absent means "decide for me", and the decision is their stored
+/// preference — so the first resolve of a film needs no choice and a switch mid-film is one field.
+/// </param>
+public sealed record NativePlaybackResolveRequest(
+    Guid ItemId,
+    NativeCapabilityProfile Profile,
+    Guid? AudioStreamId = null,
+    Guid? SubtitleStreamId = null);
 
 public static class NativeSurface
 {

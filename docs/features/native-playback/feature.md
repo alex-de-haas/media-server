@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-08-15
+Updated: 2026-08-29
 
 ## Description
 
@@ -101,6 +101,18 @@ Two rules are easy to get wrong and are pinned by tests:
 `PreferOriginalAudio` beats the language preference when the source has the
 original, and falls back when it does not — the flag for a viewer who normally
 takes a dub but watches one show subtitled.
+
+**`resolve` applies all of this**, and puts the answer in the URL it hands back as
+`audioStreamId` and `subtitleStreamId`. It also reports which tracks it chose, so a
+client's picker ticks what the viewer is hearing rather than what it last asked for.
+
+A request may name tracks itself, and then they win — that is a viewer changing a dub
+mid-film. A named track is honoured **only where it belongs to that edition**: one
+request resolves every edition of a title, and a track id from one names nothing in
+another, so taking it on trust would report a track the source will not carry.
+
+The direct-play path reports neither. The file is served byte for byte, tracks and all,
+so the choice was never ours and the player's own picker is the one that works there.
 
 Preferences ride the [change log](../native-client-api/feature.md#the-change-log)
 as their own entity type, and a sync page carries the scopes that changed —

@@ -1154,6 +1154,10 @@ public enum Components {
             public var sourceDynamicRange: Swift.String?
             /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution/reason`.
             public var reason: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution/audioStreamId`.
+            public var audioStreamId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativePlaybackResolution/subtitleStreamId`.
+            public var subtitleStreamId: Swift.String?
             /// Creates a new `NativePlaybackResolution`.
             ///
             /// - Parameters:
@@ -1165,6 +1169,8 @@ public enum Components {
             ///   - signalling:
             ///   - sourceDynamicRange:
             ///   - reason:
+            ///   - audioStreamId:
+            ///   - subtitleStreamId:
             public init(
                 mediaSourceId: Swift.String,
                 versionName: Swift.String? = nil,
@@ -1173,7 +1179,9 @@ public enum Components {
                 url: Swift.String? = nil,
                 signalling: Swift.String? = nil,
                 sourceDynamicRange: Swift.String? = nil,
-                reason: Swift.String? = nil
+                reason: Swift.String? = nil,
+                audioStreamId: Swift.String? = nil,
+                subtitleStreamId: Swift.String? = nil
             ) {
                 self.mediaSourceId = mediaSourceId
                 self.versionName = versionName
@@ -1183,6 +1191,8 @@ public enum Components {
                 self.signalling = signalling
                 self.sourceDynamicRange = sourceDynamicRange
                 self.reason = reason
+                self.audioStreamId = audioStreamId
+                self.subtitleStreamId = subtitleStreamId
             }
             public enum CodingKeys: String, CodingKey {
                 case mediaSourceId
@@ -1193,6 +1203,8 @@ public enum Components {
                 case signalling
                 case sourceDynamicRange
                 case reason
+                case audioStreamId
+                case subtitleStreamId
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativePlaybackResolutionResponse`.
@@ -1224,21 +1236,33 @@ public enum Components {
             public var itemId: Swift.String
             /// - Remark: Generated from `#/components/schemas/NativePlaybackResolveRequest/profile`.
             public var profile: Components.Schemas.NativeCapabilityProfile
+            /// - Remark: Generated from `#/components/schemas/NativePlaybackResolveRequest/audioStreamId`.
+            public var audioStreamId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativePlaybackResolveRequest/subtitleStreamId`.
+            public var subtitleStreamId: Swift.String?
             /// Creates a new `NativePlaybackResolveRequest`.
             ///
             /// - Parameters:
             ///   - itemId:
             ///   - profile:
+            ///   - audioStreamId:
+            ///   - subtitleStreamId:
             public init(
                 itemId: Swift.String,
-                profile: Components.Schemas.NativeCapabilityProfile
+                profile: Components.Schemas.NativeCapabilityProfile,
+                audioStreamId: Swift.String? = nil,
+                subtitleStreamId: Swift.String? = nil
             ) {
                 self.itemId = itemId
                 self.profile = profile
+                self.audioStreamId = audioStreamId
+                self.subtitleStreamId = subtitleStreamId
             }
             public enum CodingKeys: String, CodingKey {
                 case itemId
                 case profile
+                case audioStreamId
+                case subtitleStreamId
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativePlaybackTransport`.

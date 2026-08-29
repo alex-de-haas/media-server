@@ -69,7 +69,8 @@ public sealed class NativePlaybackResolverTests : IDisposable
     private NativePlaybackResolver Resolver(RemuxReadinessState readiness) =>
         new(_context,
             new NativeUrlTokenService(new NativeUrlSigningKey(new byte[32]), new FixedTime()),
-            new Readiness(readiness));
+            new Readiness(readiness),
+            new NativePreferenceService(_context));
 
     private void AddSource(string container, string videoCodec, string? hdr, params (string Codec, int Channels)[] audio)
     {
@@ -109,7 +110,7 @@ public sealed class NativePlaybackResolverTests : IDisposable
     private async Task<NativePlaybackResolution> ResolveOneAsync(
         NativeCapabilityProfile profile, bool packaging = false)
     {
-        var response = await Resolver(packaging).ResolveAsync(_itemId, UserId, profile, CancellationToken.None);
+        var response = await Resolver(packaging).ResolveAsync(_itemId, UserId, profile, null, null, CancellationToken.None);
         Assert.NotNull(response);
         return Assert.Single(response!.Sources);
     }
@@ -238,7 +239,7 @@ public sealed class NativePlaybackResolverTests : IDisposable
 
         var response = await Resolver(RemuxReadinessState.Pending).ResolveAsync(
             _itemId, UserId, AppleTv() with { VideoCodecs = ["hevc", "h264", "av1"] },
-            CancellationToken.None);
+            null, null, CancellationToken.None);
 
         Assert.Equal(
             NativePlaybackReasons.PackagingUnsupportedVideo, Assert.Single(response!.Sources).Reason);
@@ -283,7 +284,7 @@ public sealed class NativePlaybackResolverTests : IDisposable
         AddSource("mkv", "hevc", "HDR10", ("ac3", 6));
 
         var response = await Resolver(RemuxReadinessState.Pending)
-            .ResolveAsync(_itemId, UserId, AppleTv(), CancellationToken.None);
+            .ResolveAsync(_itemId, UserId, AppleTv(), null, null, CancellationToken.None);
         var resolution = Assert.Single(response!.Sources);
 
         // Waiting helps here, and a client that knows the difference shows "preparing" instead of
@@ -368,6 +369,6 @@ public sealed class NativePlaybackResolverTests : IDisposable
         item.RemovedAt = DateTimeOffset.UtcNow;
         _context.SaveChanges();
 
-        Assert.Null(await Resolver().ResolveAsync(_itemId, UserId, AppleTv(), CancellationToken.None));
+        Assert.Null(await Resolver().ResolveAsync(_itemId, UserId, AppleTv(), null, null, CancellationToken.None));
     }
 }

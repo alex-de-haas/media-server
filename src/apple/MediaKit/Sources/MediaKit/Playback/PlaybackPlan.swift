@@ -28,6 +28,15 @@ public struct PlayableStream: Equatable, Sendable, Identifiable {
 
     /// What the source actually is, as opposed to what is being sent: `Dolby Vision`, `HDR10`, `SDR`.
     public let sourceDynamicRange: String?
+
+    /// The tracks this URL carries, as the server decided them — which is not always what was asked
+    /// for: a stored preference answers when nothing was picked, and a picked track belonging to
+    /// another edition is refused. A picker ticks these rather than its own last request.
+    ///
+    /// Null on the direct-play path, where the file is served as it stands and the choice was never
+    /// the server's to make.
+    public let audioStreamId: String?
+    public let subtitleStreamId: String?
 }
 
 /// Why a title cannot be played, in terms a screen can say out loud.
@@ -129,6 +138,8 @@ extension PlaybackPlan {
             versionName: dto.versionName,
             decision: dto.decision == .directPlay ? .directPlay : .remux,
             signalling: dto.signalling,
-            sourceDynamicRange: dto.sourceDynamicRange))
+            sourceDynamicRange: dto.sourceDynamicRange,
+            audioStreamId: dto.audioStreamId,
+            subtitleStreamId: dto.subtitleStreamId))
     }
 }

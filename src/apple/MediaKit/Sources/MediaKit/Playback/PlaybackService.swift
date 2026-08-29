@@ -27,7 +27,16 @@ public final class PlaybackService {
     }
 
     /// Every copy of a title, each with its own verdict, in the order the server listed them.
-    public func plans(for itemId: String) async throws -> [PlaybackPlan] {
+    ///
+    /// - Parameters:
+    ///   - audioStreamId: the track a viewer has just chosen. Absent means "decide for me", and the
+    ///     server answers with their stored preference — so opening a film asks for nothing and
+    ///     switching a dub is one field.
+    public func plans(
+        for itemId: String,
+        audioStreamId: String? = nil,
+        subtitleStreamId: String? = nil
+    ) async throws -> [PlaybackPlan] {
         let profile = preferences.load().profile(for: device)
         let answer = try await session.api().postNativeV1PlaybackResolve(
             body: .json(.init(itemId: itemId, profile: .init(
@@ -35,7 +44,9 @@ public final class PlaybackService {
                 videoCodecs: profile.videoCodecs,
                 audioCodecs: profile.audioCodecs,
                 hdrFormats: profile.hdrFormats,
-                maxAudioChannels: profile.maxAudioChannels.map(Int32.init)))))
+                maxAudioChannels: profile.maxAudioChannels.map(Int32.init)),
+                audioStreamId: audioStreamId,
+                subtitleStreamId: subtitleStreamId)))
 
         return PlaybackPlan.all(try answer.ok.body.json, server: session.paired.server)
     }
@@ -48,8 +59,14 @@ public final class PlaybackService {
     ///
     /// When nothing plays, the refusal returned is about the copy that was asked for rather than
     /// whichever happened to be listed first.
-    public func plan(for itemId: String, preferring mediaSourceId: String? = nil) async throws -> PlaybackPlan {
-        let plans = try await plans(for: itemId)
+    public func plan(
+        for itemId: String,
+        preferring mediaSourceId: String? = nil,
+        audioStreamId: String? = nil,
+        subtitleStreamId: String? = nil
+    ) async throws -> PlaybackPlan {
+        let plans = try await plans(
+            for: itemId, audioStreamId: audioStreamId, subtitleStreamId: subtitleStreamId)
         let requested = mediaSourceId.flatMap { wanted in
             plans.first { $0.mediaSourceId == wanted }
         }
