@@ -59,17 +59,6 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 900, alignment: .leading)
 
-            Toggle("Play through a bare video layer", isOn: $preferences.usesSimplePlayer)
-
-            Text("A diagnostic, not a preference. The server's log shows this television reading the "
-                + "film from the beginning while it plays, and a scrubbing filmstrip is the only thing "
-                + "on screen with a reason to. Without the chrome there is no filmstrip — so if the "
-                + "re-reading stops, the cause is named. It also takes away the transport bar, the "
-                + "skip gestures and the track picker, so turn it back off afterwards.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 900, alignment: .leading)
-
             Button("Sign out", role: .destructive) { pairing.unpair() }
                 .padding(.top, 24)
         }

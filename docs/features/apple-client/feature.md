@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -231,24 +231,20 @@ the real cost; a seek is not watching either.
 Most of the rest comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls`
 counts what a `playbackStalled` notification can miss.
 
-## The bare player
+## AVKit is the only player
 
-A second switch in Settings plays through a video layer and nothing else — no transport bar, no skip
-gestures, no track picker.
+Playback is always `AVPlayerViewController`. There is no alternative presentation and no switch to one,
+and that is a decision rather than an omission: a bare `AVPlayerLayer` costs the transport bar, the skip
+gestures, the track picker, the Siri remote's whole vocabulary and **Dolby Vision**, since the controller
+is also what negotiates the display mode.
 
-It is a **measurement, not a preference**. The server's log shows this television reading the film from
-the beginning, at full speed, while it plays: 1.4 GB of re-reading against 60 MB of playback in one
-three-minute window, and the reads carry the opening minute rather than anything near the play head.
-That is what a scrubbing filmstrip looks like — AVKit has nowhere to get one but the film itself.
+The bare layer existed briefly, to establish that AVKit's scrubbing filmstrip was **not** what read the
+film from the beginning while it played. It was not — that was `preferredForwardBufferDuration`, below —
+and the finding is recorded here so the theory is not proposed again from an empty Settings screen.
 
-Take the chrome away and there is nothing left to illustrate. **The answer was no**: with every scrap
-of AVKit gone the television read the head of the film exactly as before, so the filmstrip was never it.
-The switch is kept because it is the only way to ask that question again of the next suspect.
-
-It costs everything `AVPlayerViewController` was chosen for — and **Dolby Vision** with it, since the
-controller is also what negotiates the display mode and a bare layer would need `AVDisplayManager`
-driven by hand. So it is turned on to answer a question and off again afterwards. The Menu button is
-wired by hand too, because the controller that normally answers it is the one being taken away.
+`PlaybackPreferences` accordingly decodes and ignores `usesSimplePlayer`, which is still stored on any
+device where the switch was turned on. Refusing an unknown key would take the viewer's dynamic-range
+choice down with it, and that is the one control that fixes a dark picture.
 
 ## What asks for sixty seconds gets sixty-one
 
