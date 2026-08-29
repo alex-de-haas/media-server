@@ -32,10 +32,15 @@ public final class PlaybackService {
     ///   - audioStreamId: the track a viewer has just chosen. Absent means "decide for me", and the
     ///     server answers with their stored preference — so opening a film asks for nothing and
     ///     switching a dub is one field.
+    ///   - subtitleStreamId: the same for words, with the same "absent decides for me".
+    ///   - subtitlesOff: no subtitles, whatever the preference says. A separate field because absent
+    ///     and none cannot be one value: a viewer whose preference names a language would otherwise be
+    ///     handed it straight back, and the Off row in their picker would do nothing at all.
     public func plans(
         for itemId: String,
         audioStreamId: String? = nil,
-        subtitleStreamId: String? = nil
+        subtitleStreamId: String? = nil,
+        subtitlesOff: Bool = false
     ) async throws -> [PlaybackPlan] {
         let profile = preferences.load().profile(for: device)
         let answer = try await session.api().postNativeV1PlaybackResolve(
@@ -46,7 +51,8 @@ public final class PlaybackService {
                 hdrFormats: profile.hdrFormats,
                 maxAudioChannels: profile.maxAudioChannels.map(Int32.init)),
                 audioStreamId: audioStreamId,
-                subtitleStreamId: subtitleStreamId)))
+                subtitleStreamId: subtitleStreamId,
+                subtitlesOff: subtitlesOff)))
 
         return PlaybackPlan.all(try answer.ok.body.json, server: session.paired.server)
     }
@@ -63,10 +69,12 @@ public final class PlaybackService {
         for itemId: String,
         preferring mediaSourceId: String? = nil,
         audioStreamId: String? = nil,
-        subtitleStreamId: String? = nil
+        subtitleStreamId: String? = nil,
+        subtitlesOff: Bool = false
     ) async throws -> PlaybackPlan {
         let plans = try await plans(
-            for: itemId, audioStreamId: audioStreamId, subtitleStreamId: subtitleStreamId)
+            for: itemId, audioStreamId: audioStreamId, subtitleStreamId: subtitleStreamId,
+            subtitlesOff: subtitlesOff)
         let requested = mediaSourceId.flatMap { wanted in
             plans.first { $0.mediaSourceId == wanted }
         }

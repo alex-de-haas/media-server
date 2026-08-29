@@ -25,6 +25,16 @@ internal static class RemuxCodecs
             || probeCodec.Equals("aac", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
+    /// Text subtitles a <c>tx3g</c> track can carry, named as the probe names them.
+    ///
+    /// The bitmap kinds — PGS, DVD, DVB — are absent because MP4 has nowhere to put a picture subtitle
+    /// that any of this library's clients would draw. Offering one would tick a row in a picker against
+    /// words that never appear.
+    /// </summary>
+    internal static bool CanPackageSubtitle(string? probeCodec) => probeCodec?.ToLowerInvariant() is
+        "subrip" or "srt" or "ass" or "ssa" or "webvtt" or "vtt" or "mov_text" or "text";
+
+    /// <summary>
     /// The same answer, for a Matroska <c>CodecID</c> — and stricter for AAC, which is described from
     /// <c>CodecPrivate</c> rather than from a frame.
     ///

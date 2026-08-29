@@ -22,7 +22,17 @@ public sealed class NativePlaybackResolver(
     /// <param name="audioStreamId">
     /// The track a viewer has just chosen, if they have. Absent means "decide for me", and the decision
     /// is the stored preference — the same one every other surface honours. Ignored where it names a
-    /// stream belonging to another source, since a title's editions do not share track ids.
+    /// stream belonging to another source, or one the packager cannot carry, since a title's editions do
+    /// not share track ids and a reported track has to be the one that will actually play.
+    /// </param>
+    /// <param name="subtitleStreamId">
+    /// The same for words. Absent means the stored preference decides, which is <b>not</b> the same as
+    /// asking for none — see <paramref name="subtitlesOff"/>.
+    /// </param>
+    /// <param name="subtitlesOff">
+    /// Turn subtitles off, whatever the preference says. Absent and "none" cannot be the same value: a
+    /// viewer whose preference names a language would otherwise have it handed straight back, and the
+    /// Off row in their picker would do nothing at all.
     /// </param>
     public async Task<NativePlaybackResolutionResponse?> ResolveAsync(
         Guid itemId,
@@ -30,6 +40,7 @@ public sealed class NativePlaybackResolver(
         NativeCapabilityProfile profile,
         Guid? audioStreamId,
         Guid? subtitleStreamId,
+        bool subtitlesOff,
         CancellationToken cancellationToken)
     {
         var item = await database.MediaItems.AsNoTracking()
@@ -77,7 +88,9 @@ public sealed class NativePlaybackResolver(
             .Select(source => Resolve(
                 source.Id, source.VersionName, source.Container, source.Path, source.Streams, appUserId,
                 profile, ready.GetValueOrDefault(source.Id, RemuxReadinessState.Unsupported),
-                Chosen(source.Streams, audioStreamId, subtitleStreamId, preference, item.OriginalLanguage)))
+                Chosen(
+                    source.Streams, audioStreamId, subtitleStreamId, subtitlesOff, preference,
+                    item.OriginalLanguage)))
             .ToList();
 
         return new NativePlaybackResolutionResponse(itemId, resolutions);
@@ -367,11 +380,16 @@ public sealed class NativePlaybackResolver(
         IReadOnlyList<StreamFacts> streams,
         Guid? audioStreamId,
         Guid? subtitleStreamId,
+        bool subtitlesOff,
         PlaybackPreference? preference,
         string? originalLanguage)
     {
+        // Only tracks the packager can actually write. A source may hold DTS beside AC-3 and remux
+        // perfectly well on the AC-3, but a viewer picking the DTS row would be handed the AC-3 anyway
+        // with the menu ticked against DTS — reporting a track nobody is hearing. Filtering here covers
+        // the stored preference too, which could name the same unplayable track.
         var candidates = streams
-            .Where(stream => stream.Id != default)
+            .Where(stream => stream.Id != default && CanCarry(stream))
             .Select(stream => new NativeTrackSelector.TrackCandidate(
                 stream.Id, stream.StreamType, stream.Language, stream.IsDefault, stream.IsForced,
                 stream.IsExternal))
@@ -381,8 +399,17 @@ public sealed class NativePlaybackResolver(
 
         return new NativeTrackSelection(
             Owned(candidates, audioStreamId, StreamType.Audio) ?? stored.AudioStreamId,
-            Owned(candidates, subtitleStreamId, StreamType.Subtitle) ?? stored.SubtitleStreamId);
+            subtitlesOff
+                ? null
+                : Owned(candidates, subtitleStreamId, StreamType.Subtitle) ?? stored.SubtitleStreamId);
     }
+
+    private static bool CanCarry(StreamFacts stream) => stream.StreamType switch
+    {
+        StreamType.Audio => RemuxCodecs.CanPackageAudio(stream.Codec),
+        StreamType.Subtitle => RemuxCodecs.CanPackageSubtitle(stream.Codec),
+        _ => false,
+    };
 
     private static Guid? Owned(
         IReadOnlyList<NativeTrackSelector.TrackCandidate> candidates, Guid? id, StreamType kind) =>

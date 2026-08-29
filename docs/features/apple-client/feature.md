@@ -460,7 +460,15 @@ a working film because a menu did not get its way.
 
 The tick goes against **what the server said it chose**, not what was asked for: a stored
 preference answers when nothing was picked, so the first menu already has a row marked that
-nobody selected in this session.
+nobody selected in this session — and a track the packager cannot write is refused there
+rather than ticked against sound the viewer is not hearing.
+
+The menu appears only on the remux path. Direct play serves the file as it stands, so the
+server reports no tracks and switching would fetch the same complete file again; AVKit's own
+picker is the one that works there.
+
+A switch still in flight is cancelled when the viewer leaves. Without that, a resolve landing
+after the film has gone replaces the item and starts it playing — heard rather than watched.
 
 The player item is built rather than left to `AVPlayer(url:)`, for the read-ahead alone.
 Left automatic, the buffer settled at two or three seconds on the television and stayed

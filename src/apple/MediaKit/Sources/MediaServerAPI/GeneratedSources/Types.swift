@@ -1240,6 +1240,8 @@ public enum Components {
             public var audioStreamId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/NativePlaybackResolveRequest/subtitleStreamId`.
             public var subtitleStreamId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativePlaybackResolveRequest/subtitlesOff`.
+            public var subtitlesOff: Swift.Bool?
             /// Creates a new `NativePlaybackResolveRequest`.
             ///
             /// - Parameters:
@@ -1247,22 +1249,26 @@ public enum Components {
             ///   - profile:
             ///   - audioStreamId:
             ///   - subtitleStreamId:
+            ///   - subtitlesOff:
             public init(
                 itemId: Swift.String,
                 profile: Components.Schemas.NativeCapabilityProfile,
                 audioStreamId: Swift.String? = nil,
-                subtitleStreamId: Swift.String? = nil
+                subtitleStreamId: Swift.String? = nil,
+                subtitlesOff: Swift.Bool? = nil
             ) {
                 self.itemId = itemId
                 self.profile = profile
                 self.audioStreamId = audioStreamId
                 self.subtitleStreamId = subtitleStreamId
+                self.subtitlesOff = subtitlesOff
             }
             public enum CodingKeys: String, CodingKey {
                 case itemId
                 case profile
                 case audioStreamId
                 case subtitleStreamId
+                case subtitlesOff
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativePlaybackTransport`.

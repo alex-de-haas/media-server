@@ -30,7 +30,11 @@ struct PlayerView: UIViewControllerRepresentable {
 
     /// Asks the server for the same film with different tracks. Answers with what to play, or nil when
     /// it could not — in which case the film keeps playing as it was, which is the better failure.
-    let switchTracks: (String?, String?) async -> PlayableStream?
+    ///
+    /// The last argument turns subtitles off, which is not the same as naming none: absent means the
+    /// stored preference decides, and a viewer whose preference names a language would be handed it
+    /// straight back.
+    let switchTracks: (String?, String?, Bool) async -> PlayableStream?
 
     let onProgress: (Double) -> Void
     let onFinished: (Double) -> Void
@@ -80,9 +84,14 @@ struct PlayerView: UIViewControllerRepresentable {
         }
 
         context.coordinator.observe(player, onProgress: onProgress)
-        context.coordinator.present(
-            controller, audio: audioTracks, subtitles: subtitleTracks,
-            chosen: stream, switching: switchTracks, diagnostics: diagnostics)
+        // Only where the choice is ours to make. Direct play serves the file as it stands, so the
+        // server reports no tracks and switching would fetch the same complete file again — every row
+        // unticked and nothing happening. AVKit's own picker is the one that works there.
+        if stream.decision == .remux {
+            context.coordinator.present(
+                controller, audio: audioTracks, subtitles: subtitleTracks,
+                chosen: stream, switching: switchTracks)
+        }
 
         player.play()
         return controller
@@ -107,14 +116,14 @@ struct PlayerView: UIViewControllerRepresentable {
         audio: [TitleTrack],
         subtitles: [TitleTrack],
         chosen: PlayableStream,
-        choose: @escaping (String?, String?) -> Void
+        choose: @escaping (String?, String?, Bool) -> Void
     ) -> [UIMenuElement] {
         var sections: [UIMenuElement] = []
 
         if audio.count > 1 {
             sections.append(UIMenu(title: "Audio", options: .singleSelection, children: audio.map { track in
                 UIAction(title: track.label, state: track.id == chosen.audioStreamId ? .on : .off) { _ in
-                    choose(track.id, chosen.subtitleStreamId)
+                    choose(track.id, chosen.subtitleStreamId, chosen.subtitleStreamId == nil)
                 }
             }))
         }
@@ -123,14 +132,14 @@ struct PlayerView: UIViewControllerRepresentable {
             // "Off" is a row rather than the absence of one: a viewer who turned subtitles on has to be
             // able to turn them off again, and nothing else on this screen does that.
             let off = UIAction(title: "Off", state: chosen.subtitleStreamId == nil ? .on : .off) { _ in
-                choose(chosen.audioStreamId, nil)
+                choose(chosen.audioStreamId, nil, true)
             }
 
             sections.append(UIMenu(
                 title: "Subtitles", options: .singleSelection,
                 children: [off] + subtitles.map { track in
                     UIAction(title: track.label, state: track.id == chosen.subtitleStreamId ? .on : .off) { _ in
-                        choose(chosen.audioStreamId, track.id)
+                        choose(chosen.audioStreamId, track.id, false)
                     }
                 }))
         }
@@ -149,8 +158,13 @@ struct PlayerView: UIViewControllerRepresentable {
         private weak var controller: AVPlayerViewController?
         private var audio: [TitleTrack] = []
         private var subtitles: [TitleTrack] = []
-        private var switching: ((String?, String?) async -> PlayableStream?)?
+        private var switching: ((String?, String?, Bool) async -> PlayableStream?)?
         private var chosen: PlayableStream?
+
+        /// The switch in flight, so leaving the film can stop it. Without this a resolve that lands
+        /// after the player has gone replaces its item and calls `play()` — audio from a film nobody
+        /// is watching any more.
+        private var switchTask: Task<Void, Never>?
 
         init(onFinished: @escaping (Double) -> Void, diagnostics: PlaybackDiagnostics?) {
             self.onFinished = onFinished
@@ -177,8 +191,7 @@ struct PlayerView: UIViewControllerRepresentable {
             audio: [TitleTrack],
             subtitles: [TitleTrack],
             chosen: PlayableStream,
-            switching: @escaping (String?, String?) async -> PlayableStream?,
-            diagnostics: PlaybackDiagnostics?
+            switching: @escaping (String?, String?, Bool) async -> PlayableStream?
         ) {
             self.controller = controller
             self.audio = audio
@@ -192,8 +205,8 @@ struct PlayerView: UIViewControllerRepresentable {
             guard let controller, let chosen else { return }
             controller.transportBarCustomMenuItems = PlayerView.menu(
                 audio: audio, subtitles: subtitles, chosen: chosen
-            ) { [weak self] audioId, subtitleId in
-                self?.switch(audio: audioId, subtitle: subtitleId)
+            ) { [weak self] audioId, subtitleId, off in
+                self?.switch(audio: audioId, subtitle: subtitleId, off: off)
             }
         }
 
@@ -205,28 +218,37 @@ struct PlayerView: UIViewControllerRepresentable {
         ///
         /// A refusal leaves the film playing as it was. That is the better failure: the alternative is
         /// stopping a working film because a menu did not get its way.
-        private func `switch`(audio audioId: String?, subtitle subtitleId: String?) {
+        private func `switch`(audio audioId: String?, subtitle subtitleId: String?, off: Bool) {
             guard let player, let switching else { return }
             let at = player.currentTime()
 
-            Task { @MainActor [weak self] in
-                guard let replacement = await switching(audioId, subtitleId) else { return }
+            switchTask?.cancel()
+            switchTask = Task { @MainActor [weak self] in
+                let replacement = await switching(audioId, subtitleId, off)
+
+                // Checked after every suspension. The viewer may have left in the meantime, and a film
+                // that resumes into a player nobody can see is heard rather than watched.
+                guard !Task.isCancelled, let self, let replacement else { return }
 
                 let item = AVPlayerItem(asset: AVURLAsset(url: replacement.url))
                 player.replaceCurrentItem(with: item)
                 await player.seek(to: at, toleranceBefore: .zero, toleranceAfter: .zero)
+                guard !Task.isCancelled else { return }
 
-                self?.diagnostics?.start(observing: item)
+                self.diagnostics?.start(observing: item)
                 player.play()
 
-                self?.chosen = replacement
-                self?.refreshMenu()
+                self.chosen = replacement
+                self.refreshMenu()
             }
         }
 
         /// The position is read from the player rather than passed in: whichever controller was showing,
         /// this is the one thing that knows where the viewer actually got to.
         func finish() {
+            switchTask?.cancel()
+            switchTask = nil
+
             let position = player?.currentTime().seconds ?? 0
             player?.pause()
 

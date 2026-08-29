@@ -522,13 +522,15 @@ struct PlaybackPlanTests {
         // A picker ticks these rather than its own last request: a stored preference answers when
         // nothing was picked, so the first menu already has a tick against a row nobody selected here.
         guard case .play(let stream) = try plan(resolution(
-            decision: "Remux", audioStreamId: "rus", subtitleStreamId: "eng")) else {
+            decision: "Remux",
+            audioStreamId: "3f2b1c4d-0000-4000-8000-000000000001",
+            subtitleStreamId: "3f2b1c4d-0000-4000-8000-000000000002")) else {
             Issue.record("expected a stream")
             return
         }
 
-        #expect(stream.audioStreamId == "rus")
-        #expect(stream.subtitleStreamId == "eng")
+        #expect(stream.audioStreamId == "3f2b1c4d-0000-4000-8000-000000000001")
+        #expect(stream.subtitleStreamId == "3f2b1c4d-0000-4000-8000-000000000002")
     }
 
     @Test("Direct play names no tracks, because the choice was never the server's")

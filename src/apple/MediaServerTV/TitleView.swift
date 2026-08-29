@@ -59,8 +59,8 @@ struct TitleView: View {
                 diagnostics: diagnostics,
                 audioTracks: version?.audio ?? [],
                 subtitleTracks: version?.subtitles ?? [],
-                switchTracks: { audioId, subtitleId in
-                    await switchTracks(to: stream, audio: audioId, subtitle: subtitleId)
+                switchTracks: { audioId, subtitleId, off in
+                    await switchTracks(to: stream, audio: audioId, subtitle: subtitleId, off: off)
                 },
                 onProgress: { position in
                     guard let session else { return }
@@ -98,13 +98,14 @@ struct TitleView: View {
     /// question, and a client that edited the URL itself would be answering it from the wrong side.
     /// The edition is pinned, so switching a dub cannot quietly move a viewer to another copy.
     private func switchTracks(
-        to stream: PlayableStream, audio: String?, subtitle: String?
+        to stream: PlayableStream, audio: String?, subtitle: String?, off: Bool
     ) async -> PlayableStream? {
         guard case .play(let replacement) = try? await playback.plan(
             for: title.id,
             preferring: stream.mediaSourceId,
             audioStreamId: audio,
-            subtitleStreamId: subtitle),
+            subtitleStreamId: subtitle,
+            subtitlesOff: off),
             replacement.mediaSourceId == stream.mediaSourceId
         else {
             return nil

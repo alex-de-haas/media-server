@@ -1831,6 +1831,10 @@
               "string"
             ],
             "format": "uuid"
+          },
+          "subtitlesOff": {
+            "type": "boolean",
+            "default": false
           }
         }
       },

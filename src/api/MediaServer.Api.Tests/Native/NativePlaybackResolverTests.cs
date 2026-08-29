@@ -110,9 +110,40 @@ public sealed class NativePlaybackResolverTests : IDisposable
     private async Task<NativePlaybackResolution> ResolveOneAsync(
         NativeCapabilityProfile profile, bool packaging = false)
     {
-        var response = await Resolver(packaging).ResolveAsync(_itemId, UserId, profile, null, null, CancellationToken.None);
+        var response = await Resolver(packaging).ResolveAsync(_itemId, UserId, profile, null, null, false, CancellationToken.None);
         Assert.NotNull(response);
         return Assert.Single(response!.Sources);
+    }
+
+    [Fact]
+    public async Task A_remux_url_carries_the_very_tracks_the_answer_reports()
+    {
+        // The picker ticks what the answer names, so if the URL and the answer could disagree a viewer
+        // would be told they are hearing a track the packager was never asked for.
+        AddSource("mkv", "hevc", "HDR10", ("ac3", 6), ("eac3", 6));
+        var second = _context.MediaStreams
+            .Single(stream => stream.StreamType == StreamType.Audio && stream.Codec == "eac3").Id;
+
+        var response = await Resolver(packaging: true).ResolveAsync(
+            _itemId, UserId, AppleTv(), second, null, false, CancellationToken.None);
+
+        var resolution = Assert.Single(response!.Sources);
+        Assert.Equal(NativePlaybackDecision.Remux, resolution.Decision);
+        Assert.Equal(second, resolution.AudioStreamId);
+        Assert.Contains($"audioStreamId={second:D}", resolution.Url);
+        Assert.DoesNotContain("subtitleStreamId", resolution.Url);
+    }
+
+    [Fact]
+    public async Task Direct_play_reports_no_tracks_because_the_choice_was_never_ours()
+    {
+        AddSource("mp4", "hevc", "HDR10", ("eac3", 6));
+
+        var resolution = await ResolveOneAsync(AppleTv());
+
+        Assert.Equal(NativePlaybackDecision.DirectPlay, resolution.Decision);
+        Assert.Null(resolution.AudioStreamId);
+        Assert.Null(resolution.SubtitleStreamId);
     }
 
     [Fact]
@@ -239,7 +270,7 @@ public sealed class NativePlaybackResolverTests : IDisposable
 
         var response = await Resolver(RemuxReadinessState.Pending).ResolveAsync(
             _itemId, UserId, AppleTv() with { VideoCodecs = ["hevc", "h264", "av1"] },
-            null, null, CancellationToken.None);
+            null, null, false, CancellationToken.None);
 
         Assert.Equal(
             NativePlaybackReasons.PackagingUnsupportedVideo, Assert.Single(response!.Sources).Reason);
@@ -284,7 +315,7 @@ public sealed class NativePlaybackResolverTests : IDisposable
         AddSource("mkv", "hevc", "HDR10", ("ac3", 6));
 
         var response = await Resolver(RemuxReadinessState.Pending)
-            .ResolveAsync(_itemId, UserId, AppleTv(), null, null, CancellationToken.None);
+            .ResolveAsync(_itemId, UserId, AppleTv(), null, null, false, CancellationToken.None);
         var resolution = Assert.Single(response!.Sources);
 
         // Waiting helps here, and a client that knows the difference shows "preparing" instead of
@@ -369,6 +400,6 @@ public sealed class NativePlaybackResolverTests : IDisposable
         item.RemovedAt = DateTimeOffset.UtcNow;
         _context.SaveChanges();
 
-        Assert.Null(await Resolver().ResolveAsync(_itemId, UserId, AppleTv(), null, null, CancellationToken.None));
+        Assert.Null(await Resolver().ResolveAsync(_itemId, UserId, AppleTv(), null, null, false, CancellationToken.None));
     }
 }
