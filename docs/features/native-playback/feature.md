@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-08-15
+Updated: 2026-08-29
 
 ## Description
 
@@ -101,6 +101,25 @@ Two rules are easy to get wrong and are pinned by tests:
 `PreferOriginalAudio` beats the language preference when the source has the
 original, and falls back when it does not — the flag for a viewer who normally
 takes a dub but watches one show subtitled.
+
+**`resolve` applies all of this**, and puts the answer in the URL it hands back as
+`audioStreamId` and `subtitleStreamId`. It also reports which tracks it chose, so a
+client's picker ticks what the viewer is hearing rather than what it last asked for.
+
+A request may name tracks itself, and then they win — that is a viewer changing a dub
+mid-film. A named track is honoured **only where it belongs to that edition and the
+packager can write it**: one request resolves every edition of a title, so a track id
+from one names nothing in another; and a source may hold DTS beside AC-3, remux happily
+on the AC-3, and leave a viewer who picked the DTS row hearing the AC-3 with their menu
+ticked against something else. The same filter covers the stored preference, which can
+name the same unplayable track.
+
+**Off is its own field.** Absent and "none" cannot be one value: a viewer whose
+preference names a subtitle language would be handed it straight back, and the Off row
+in their picker would do nothing for precisely the people who need it.
+
+The direct-play path reports neither. The file is served byte for byte, tracks and all,
+so the choice was never ours and the player's own picker is the one that works there.
 
 Preferences ride the [change log](../native-client-api/feature.md#the-change-log)
 as their own entity type, and a sync page carries the scopes that changed —

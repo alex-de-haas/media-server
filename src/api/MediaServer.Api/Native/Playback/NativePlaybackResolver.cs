@@ -14,22 +14,49 @@ namespace MediaServer.Api.Native.Playback;
 public sealed class NativePlaybackResolver(
     MediaServerDbContext database,
     NativeUrlTokenService tokens,
-    IRemuxReadiness readiness)
+    IRemuxReadiness readiness,
+    NativePreferenceService preferences)
 {
     private const string DolbyVision = "Dolby Vision";
 
+    /// <param name="audioStreamId">
+    /// The track a viewer has just chosen, if they have. Absent means "decide for me", and the decision
+    /// is the stored preference — the same one every other surface honours. Ignored where it names a
+    /// stream belonging to another source, or one the packager cannot carry, since a title's editions do
+    /// not share track ids and a reported track has to be the one that will actually play.
+    /// </param>
+    /// <param name="subtitleStreamId">
+    /// The same for words. Absent means the stored preference decides, which is <b>not</b> the same as
+    /// asking for none — see <paramref name="subtitlesOff"/>.
+    /// </param>
+    /// <param name="subtitlesOff">
+    /// Turn subtitles off, whatever the preference says. Absent and "none" cannot be the same value: a
+    /// viewer whose preference names a language would otherwise have it handed straight back, and the
+    /// Off row in their picker would do nothing at all.
+    /// </param>
     public async Task<NativePlaybackResolutionResponse?> ResolveAsync(
-        Guid itemId, int appUserId, NativeCapabilityProfile profile, CancellationToken cancellationToken)
+        Guid itemId,
+        int appUserId,
+        NativeCapabilityProfile profile,
+        Guid? audioStreamId,
+        Guid? subtitleStreamId,
+        bool subtitlesOff,
+        CancellationToken cancellationToken)
     {
         var item = await database.MediaItems.AsNoTracking()
             .Where(candidate => candidate.Id == itemId && candidate.PublicId != null && candidate.RemovedAt == null)
-            .Select(candidate => candidate.Id)
+            .Select(candidate => new { candidate.Id, candidate.SeriesId, candidate.OriginalLanguage })
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (item == Guid.Empty)
+        if (item is null)
         {
             return null;
         }
+
+        // Scoped to the series for an episode, so a dub chosen on one carries to the next — which is
+        // what the preference is for and the whole reason it stores a language rather than an index.
+        var preference = await preferences.ResolveAsync(
+            appUserId, item.SeriesId ?? item.Id, cancellationToken);
 
         var sources = await database.MediaSources.AsNoTracking()
             .Where(source => source.MediaItemId == itemId)
@@ -47,7 +74,8 @@ public sealed class NativePlaybackResolver(
                     // film even is.
                     .OrderBy(stream => stream.Index)
                     .Select(stream => new StreamFacts(
-                        stream.StreamType, stream.Codec, stream.HdrFormat, stream.Channels, stream.IsExternal))
+                        stream.StreamType, stream.Codec, stream.HdrFormat, stream.Channels, stream.IsExternal,
+                        stream.Id, stream.Language, stream.IsDefault, stream.IsForced))
                     .ToList(),
             })
             .ToListAsync(cancellationToken);
@@ -59,7 +87,10 @@ public sealed class NativePlaybackResolver(
         var resolutions = sources
             .Select(source => Resolve(
                 source.Id, source.VersionName, source.Container, source.Path, source.Streams, appUserId,
-                profile, ready.GetValueOrDefault(source.Id, RemuxReadinessState.Unsupported)))
+                profile, ready.GetValueOrDefault(source.Id, RemuxReadinessState.Unsupported),
+                Chosen(
+                    source.Streams, audioStreamId, subtitleStreamId, subtitlesOff, preference,
+                    item.OriginalLanguage)))
             .ToList();
 
         return new NativePlaybackResolutionResponse(itemId, resolutions);
@@ -73,7 +104,8 @@ public sealed class NativePlaybackResolver(
         IReadOnlyList<StreamFacts> streams,
         int appUserId,
         NativeCapabilityProfile profile,
-        RemuxReadinessState readiness)
+        RemuxReadinessState readiness,
+        NativeTrackSelection chosen)
     {
         var verdict = Judge(path, container, streams, profile, readiness);
         var video = Picture(streams);
@@ -93,7 +125,12 @@ public sealed class NativePlaybackResolver(
                     // nothing keeps. The choice exists only where we build the container.
                     Signalling: null,
                     SourceDynamicRange: video?.HdrFormat,
-                    Reason: null);
+                    Reason: null,
+                    // Direct play serves the file as it stands, tracks and all, so there is no choice
+                    // for us to have made and none to report. The player's own picker is the one that
+                    // works here.
+                    AudioStreamId: null,
+                    SubtitleStreamId: null);
 
             case NativePlaybackDecision.Remux:
                 var signalling = SignallingFor(video?.HdrFormat, profile);
@@ -104,11 +141,17 @@ public sealed class NativePlaybackResolver(
                     Transport: NativePlaybackTransport.ByteRange,
                     Url: $"{NativeEndpoints.RoutePrefix}/media/{sourceId:D}/remux?token=" +
                          tokens.Mint(appUserId, sourceId, NativeUrlTokenMethods.Read) +
-                         $"&signalling={signalling}",
+                         $"&signalling={signalling}" +
+                         Query("audioStreamId", chosen.AudioStreamId) +
+                         Query("subtitleStreamId", chosen.SubtitleStreamId),
                     // Here the signalling is ours to choose, because we are the ones writing it.
                     Signalling: signalling,
                     SourceDynamicRange: video?.HdrFormat,
-                    Reason: null);
+                    Reason: null,
+                    // Reported so a client can tick the row a viewer is actually hearing, rather than
+                    // the one it asked for and hope they agree.
+                    AudioStreamId: chosen.AudioStreamId,
+                    SubtitleStreamId: chosen.SubtitleStreamId);
 
             default:
                 return new NativePlaybackResolution(
@@ -323,13 +366,65 @@ public sealed class NativePlaybackResolver(
                !string.IsNullOrWhiteSpace(entry)
                && entry.Trim().Equals(value.Trim(), StringComparison.OrdinalIgnoreCase));
 
+    private static string Query(string name, Guid? id) => id is null ? string.Empty : $"&{name}={id:D}";
+
+    /// <summary>
+    /// The tracks this source will carry: what the viewer just picked, or failing that what they have
+    /// always preferred.
+    ///
+    /// A picked id is honoured only when it belongs to *this* source. The same request resolves every
+    /// edition of a title, and a track id from one names nothing in another — taking it on trust would
+    /// silently hand the other edition its first audio track while reporting the chosen one.
+    /// </summary>
+    internal static NativeTrackSelection Chosen(
+        IReadOnlyList<StreamFacts> streams,
+        Guid? audioStreamId,
+        Guid? subtitleStreamId,
+        bool subtitlesOff,
+        PlaybackPreference? preference,
+        string? originalLanguage)
+    {
+        // Only tracks the packager can actually write. A source may hold DTS beside AC-3 and remux
+        // perfectly well on the AC-3, but a viewer picking the DTS row would be handed the AC-3 anyway
+        // with the menu ticked against DTS — reporting a track nobody is hearing. Filtering here covers
+        // the stored preference too, which could name the same unplayable track.
+        var candidates = streams
+            .Where(stream => stream.Id != default && CanCarry(stream))
+            .Select(stream => new NativeTrackSelector.TrackCandidate(
+                stream.Id, stream.StreamType, stream.Language, stream.IsDefault, stream.IsForced,
+                stream.IsExternal))
+            .ToList();
+
+        var stored = NativeTrackSelector.Select(candidates, preference, originalLanguage);
+
+        return new NativeTrackSelection(
+            Owned(candidates, audioStreamId, StreamType.Audio) ?? stored.AudioStreamId,
+            subtitlesOff
+                ? null
+                : Owned(candidates, subtitleStreamId, StreamType.Subtitle) ?? stored.SubtitleStreamId);
+    }
+
+    private static bool CanCarry(StreamFacts stream) => stream.StreamType switch
+    {
+        StreamType.Audio => RemuxCodecs.CanPackageAudio(stream.Codec),
+        StreamType.Subtitle => RemuxCodecs.CanPackageSubtitle(stream.Codec),
+        _ => false,
+    };
+
+    private static Guid? Owned(
+        IReadOnlyList<NativeTrackSelector.TrackCandidate> candidates, Guid? id, StreamType kind) =>
+        id is { } wanted && candidates.Any(track => track.Id == wanted && track.StreamType == kind)
+            ? wanted
+            : null;
+
     /// <summary>The same choice, over the entity rather than the projection, so a test can make one.</summary>
     internal static StreamFacts? PictureFor(IEnumerable<MediaStream> streams) =>
         Picture([.. streams.OrderBy(stream => stream.Index).Select(stream => new StreamFacts(
             stream.StreamType, stream.Codec, stream.HdrFormat, stream.Channels, stream.IsExternal))]);
 
     internal sealed record StreamFacts(
-        StreamType StreamType, string? Codec, string? HdrFormat, int? Channels, bool IsExternal);
+        StreamType StreamType, string? Codec, string? HdrFormat, int? Channels, bool IsExternal,
+        Guid Id = default, string? Language = null, bool IsDefault = false, bool IsForced = false);
 }
 
 /// <summary>

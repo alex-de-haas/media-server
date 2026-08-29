@@ -1768,6 +1768,20 @@
               "null",
               "string"
             ]
+          },
+          "audioStreamId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "subtitleStreamId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -1803,6 +1817,24 @@
           },
           "profile": {
             "$ref": "#/components/schemas/NativeCapabilityProfile"
+          },
+          "audioStreamId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "subtitleStreamId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "subtitlesOff": {
+            "type": "boolean",
+            "default": false
           }
         }
       },
