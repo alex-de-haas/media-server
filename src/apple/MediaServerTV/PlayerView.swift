@@ -2,85 +2,25 @@ import AVKit
 import MediaKit
 import SwiftUI
 
-/// A view whose layer *is* the video layer, so the picture resizes with it and nothing has to be laid
-/// out by hand.
-private final class PlayerLayerView: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
-
-    // Guaranteed by `layerClass`: UIKit makes the layer this class asks for.
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-}
-
-/// The bare player: a video layer, and nothing else at all.
-///
-/// It exists to answer one question. The server's log shows the television reading the film **from the
-/// beginning, at full speed, while it plays** — and a scrubbing filmstrip is the only thing on that
-/// screen with a reason to. Take the chrome away, and either the re-reading stops and the cause is
-/// named, or it does not and AVKit is innocent.
-private final class PlainPlayerController: UIViewController {
-    private let player: AVPlayer
-    private let onExit: () -> Void
-
-    init(player: AVPlayer, onExit: @escaping () -> Void) {
-        self.player = player
-        self.onExit = onExit
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("Not loaded from a nib.")
-    }
-
-    override func loadView() {
-        let view = PlayerLayerView()
-        view.backgroundColor = .black
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
-        self.view = view
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-
-        // AVKit's controller answers the Menu button itself. This one has to, or the only way out of a
-        // film is to unplug the television.
-        let menu = UITapGestureRecognizer(target: self, action: #selector(exit))
-        menu.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
-        view.addGestureRecognizer(menu)
-    }
-
-    @objc private func exit() {
-        // Paused here rather than left to teardown: the cover animates away over a few hundred
-        // milliseconds, and a film that keeps playing through them is heard after it has gone.
-        player.pause()
-        onExit()
-    }
-}
-
-/// `AVPlayerViewController`, unless a diagnostic says otherwise.
+/// `AVPlayerViewController`, not a player of our own.
 ///
 /// Recorded as a decision in the epic and still the right one: the transport bar, the skip gestures, the
 /// track picker and the Siri remote's whole vocabulary come free and cannot be reimplemented to the same
 /// standard. Since #172 the container carries every describable track, so that picker is a real one —
 /// switching a dub costs nothing and needs no second request.
 ///
-/// The bare alternative is a measurement, not a preference: see `PlaybackPreferences.usesSimplePlayer`.
+/// A bare `AVPlayerLayer` lived here for one measurement, to find out whether AVKit's scrubbing
+/// filmstrip was reading the film. It was not — the re-reading was our own `preferredForwardBufferDuration`
+/// — so the alternative is gone rather than left where somebody could switch to a player with no
+/// transport bar and no Dolby Vision.
 struct PlayerView: UIViewControllerRepresentable {
     let stream: PlayableStream
     let startAt: Double
     let diagnostics: PlaybackDiagnostics?
-
-    /// Play through a bare layer rather than AVKit's controller, to find out what is reading the film.
-    let simple: Bool
-
     let onProgress: (Double) -> Void
     let onFinished: (Double) -> Void
 
-    /// Leaving the film. AVKit does this itself; the bare player has to be told.
-    let onExit: () -> Void
-
-    func makeUIViewController(context: Context) -> UIViewController {
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
         // No `preferredForwardBufferDuration`, and its removal is a measurement rather than a tidy-up.
         //
         // It was set to 60 in #211 to make the television hold more than two seconds of buffer. Two runs
@@ -99,19 +39,10 @@ struct PlayerView: UIViewControllerRepresentable {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
         }
 
-        let controller: UIViewController
-        let overlayHost: UIView
-        if simple {
-            let plain = PlainPlayerController(player: player, onExit: onExit)
-            controller = plain
-            overlayHost = plain.view
-        } else {
-            let chrome = AVPlayerViewController()
-            chrome.player = player
-            controller = chrome
-            // Over the player's own chrome, so it survives the transport bar appearing and going.
-            overlayHost = chrome.contentOverlayView ?? chrome.view
-        }
+        let controller = AVPlayerViewController()
+        controller.player = player
+        // Over the player's own chrome, so it survives the transport bar appearing and going.
+        let overlayHost = controller.contentOverlayView ?? controller.view!
 
         if let diagnostics {
             diagnostics.start(observing: item)
@@ -132,9 +63,9 @@ struct PlayerView: UIViewControllerRepresentable {
         return controller
     }
 
-    func updateUIViewController(_ controller: UIViewController, context: Context) {}
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
 
-    static func dismantleUIViewController(_ controller: UIViewController, coordinator: Coordinator) {
+    static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
         coordinator.finish()
     }
 
