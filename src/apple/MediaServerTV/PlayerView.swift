@@ -46,8 +46,9 @@ struct PlayerView: UIViewControllerRepresentable {
         // and the fallback would then be a view that does not exist either.
         controller.loadViewIfNeeded()
 
-        // Over the player's own chrome, so it survives the transport bar appearing and going.
-        let overlayHost = controller.contentOverlayView ?? controller.view
+        // Over the player's own chrome, so it survives the transport bar appearing and going. Typed,
+        // because `view` is implicitly unwrapped and the coalescing would otherwise stay optional.
+        let overlayHost: UIView = controller.contentOverlayView ?? controller.view
 
         if let diagnostics {
             diagnostics.start(observing: item)
