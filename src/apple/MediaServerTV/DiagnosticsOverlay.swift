@@ -28,6 +28,14 @@ struct DiagnosticsOverlay: View {
 
             Divider().background(.white.opacity(0.3))
 
+            if let resolve = diagnostics.resolveSeconds {
+                row("сервер ответил", String(format: "%.1f с", resolve))
+            }
+
+            if let open = diagnostics.openSeconds {
+                row("первый кадр через", String(format: "%.1f с", open), warn: open > 5)
+            }
+
             row("приток", String(format: "%.0f Мбит/с", diagnostics.inflow))
             row("пик притока", String(format: "%.0f Мбит/с", diagnostics.peakInflow))
             row("нужно фильму", needed)

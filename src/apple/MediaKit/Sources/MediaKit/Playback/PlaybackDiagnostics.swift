@@ -62,6 +62,17 @@ public final class PlaybackDiagnostics {
     /// not watching either, so only an advance small enough to be ordinary playback is counted.
     public private(set) var watched: Double = 0
 
+    /// How long the server took to say what to play, and how long the player then took to show it.
+    ///
+    /// Ten seconds to first frame on the Apple TV against three on a Mac, and the argument about why
+    /// has run on assertions: the tables, the round trips, the tunnel. These two numbers divide it in
+    /// the only place it can be divided — before the URL existed, and after.
+    public private(set) var resolveSeconds: Double?
+    public private(set) var openSeconds: Double?
+
+    private var opened: Date?
+    private var openedFrom: Double = 0
+
     /// Kept short: this is read on a television, at a glance, while something is going wrong.
     private static let keep = 240
 
@@ -73,9 +84,25 @@ public final class PlaybackDiagnostics {
 
     public init() {}
 
-    public func start(observing item: AVPlayerItem) {
+    /// How long the server took to answer, noted by whoever asked it.
+    public func resolved(after seconds: Double) {
+        resolveSeconds = seconds
+    }
+
+    /// - Parameter from: where playback was asked to begin. A resume seeks there **before** the first
+    ///   frame appears, so a play head merely sitting at a non-zero position is not the film starting —
+    ///   and taking it for one would report a resumed film as opening instantly, which is precisely the
+    ///   film somebody would be timing.
+    public func start(observing item: AVPlayerItem, from: Double = 0) {
         // Starting twice would leave the first timer and observer running, doubling every count.
         stop()
+
+        // Only the first item counts. Switching a dub builds another one, and the number a viewer
+        // cares about is how long the film took to appear, not how long a change to it took.
+        if opened == nil {
+            opened = Date()
+            openedFrom = from
+        }
 
         self.item = item
         stallObserver = NotificationCenter.default.addObserver(
@@ -123,6 +150,14 @@ public final class PlaybackDiagnostics {
         let logged = event?.numberOfStalls ?? -1
         if logged > stalls {
             stalls = logged
+        }
+
+        // The first frame is the first moment the play head has **moved from where it was asked to
+        // start**: `readyToPlay` says the player could begin, which is not the same as a viewer seeing
+        // anything, and a resume's seek puts the head at its destination before anything is shown. A
+        // quarter of a second is past any landing jitter and well inside one sample.
+        if openSeconds == nil, let opened, Self.hasStarted(at: position, from: openedFrom) {
+            openSeconds = Date().timeIntervalSince(opened)
         }
 
         if ahead < lowestBuffer, watched > 5 {
@@ -199,6 +234,14 @@ public final class PlaybackDiagnostics {
     nonisolated static func advance(from: Double, to: Double) -> Double {
         let moved = to - from
         return moved > 0 && moved <= 2 ? moved : 0
+    }
+
+    /// Whether the play head has moved from where playback was asked to begin.
+    ///
+    /// A quarter of a second is past any landing jitter from the seek and well inside the one-second
+    /// gap between readings, so a film that opens promptly is not reported as opening a beat late.
+    nonisolated static func hasStarted(at position: Double, from: Double) -> Bool {
+        position > from + 0.25
     }
 
     /// Megabits per second, from the bytes that arrived between two readings.

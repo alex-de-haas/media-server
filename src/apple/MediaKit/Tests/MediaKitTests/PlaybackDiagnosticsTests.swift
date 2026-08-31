@@ -185,3 +185,43 @@ struct AdvanceTests {
         #expect(PlaybackDiagnostics.advance(from: 100, to: 100) == 0)
     }
 }
+
+/// How long a film took to appear, split where it can be split.
+///
+/// Ten seconds to first frame on the television against three on a Mac, and the argument about why has
+/// run on assertions for a fortnight. These two numbers divide it either side of the URL existing.
+@MainActor
+@Suite("Starting a film")
+struct StartupTests {
+    @Test("The server's half is whatever the caller timed")
+    func resolveIsRecorded() {
+        let diagnostics = PlaybackDiagnostics()
+
+        diagnostics.resolved(after: 1.25)
+
+        #expect(diagnostics.resolveSeconds == 1.25)
+    }
+
+    @Test("Nothing is claimed before anything has been measured")
+    func nothingYet() {
+        let diagnostics = PlaybackDiagnostics()
+
+        #expect(diagnostics.resolveSeconds == nil)
+        #expect(diagnostics.openSeconds == nil)
+    }
+
+    @Test("A play head sitting where a resume sent it is not the film starting")
+    func aResumeIsNotAStart() {
+        // The seek lands before the first frame appears. Counting that as the film opening would
+        // report a resumed title — the very one somebody would be timing — as instant.
+        #expect(!PlaybackDiagnostics.hasStarted(at: 3_600, from: 3_600))
+        #expect(!PlaybackDiagnostics.hasStarted(at: 3_600.1, from: 3_600))
+        #expect(PlaybackDiagnostics.hasStarted(at: 3_601, from: 3_600))
+    }
+
+    @Test("From the top, any movement at all is the film starting")
+    func fromTheTop() {
+        #expect(!PlaybackDiagnostics.hasStarted(at: 0, from: 0))
+        #expect(PlaybackDiagnostics.hasStarted(at: 1, from: 0))
+    }
+}

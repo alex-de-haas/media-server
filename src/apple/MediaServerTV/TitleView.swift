@@ -28,6 +28,16 @@ struct TitleView: View {
     /// second for the length of a film.
     @State private var diagnostics: PlaybackDiagnostics?
 
+    /// Which viewing this is. The session opens beside the player now, so its answer can land after the
+    /// viewer has left — and assigning it then would leave a session id belonging to a film nobody is
+    /// watching, for the next film's progress to be filed against.
+    @State private var viewing = 0
+
+    /// Where a viewing ended, when it ended before its session had opened. The session is still open on
+    /// the server by then — the request went out — so the honest thing is to close it as soon as its id
+    /// arrives, rather than leave it open for ever and lose the position with it.
+    @State private var endedAt: (viewing: Int, position: Double)?
+
     var body: some View {
         ScrollView {
             if let detail {
@@ -73,6 +83,10 @@ struct TitleView: View {
                         itemId: title.id, playSessionId: session, positionSeconds: position) }
                     self.session = nil
                     diagnostics = nil
+
+                    // Noted whether or not a session exists: when one is still being opened, this is
+                    // the position it will be closed at the moment its id arrives.
+                    endedAt = (viewing, position)
                 })
             .ignoresSafeArea()
         }
@@ -118,6 +132,8 @@ struct TitleView: View {
         resolving = true
         defer { resolving = false }
 
+        let asked = Date()
+
         do {
             // The version the viewer picked, not whichever the server listed first. A picker that
             // changes what is listed and not what happens is worse than no picker at all.
@@ -126,20 +142,46 @@ struct TitleView: View {
 
             guard case .play(let stream) = answer else { return }
 
-            // Best effort, and deliberately so. Opening it first means a viewer who stops after ten
-            // seconds still leaves a record of having started — but a server that will not open one is
-            // no reason to refuse to play a film. When this fails there is simply no session, and
-            // nothing is reported.
-            session = try? await playback.start(
-                itemId: title.id,
-                mediaSourceId: stream.mediaSourceId,
-                positionSeconds: detail.resumeSeconds)
-
             // Made here rather than in the cover's builder, so the run being watched is collected by
             // one object from beginning to end.
-            diagnostics = PlaybackPreferencesStore().load().showDiagnostics
+            let watching = PlaybackPreferencesStore().load().showDiagnostics
                 ? PlaybackDiagnostics() : nil
+            watching?.resolved(after: Date().timeIntervalSince(asked))
+            diagnostics = watching
+
+            // The film opens now. Everything a viewer is waiting for is in hand, and the only thing
+            // still outstanding — the session a progress report is filed against — was always best
+            // effort: a server that will not open one is no reason to keep somebody watching a
+            // spinner. It was on the critical path for no reason but the order it was written in.
             playing = stream
+
+            // Alongside, not before. Opening it at all is what leaves a record for a viewer who
+            // stops after ten seconds; a report filed a moment late is a report filed.
+            viewing += 1
+            let opening = viewing
+            Task { @MainActor in
+                let opened = try? await playback.start(
+                    itemId: title.id,
+                    mediaSourceId: stream.mediaSourceId,
+                    positionSeconds: detail.resumeSeconds)
+
+                guard let opened else { return }
+
+                // Only if this is still the viewing that asked. Counted rather than compared against
+                // the stream, because leaving a film and starting the same one again is two viewings
+                // and the first one's session must not be filed against the second.
+                if opening == viewing, endedAt?.viewing != opening {
+                    session = opened
+                    return
+                }
+
+                // It ended while this was in flight. The server has an open session either way, so it
+                // is closed here at the position the viewer actually reached instead of being dropped.
+                await playback.stop(
+                    itemId: title.id,
+                    playSessionId: opened,
+                    positionSeconds: endedAt?.viewing == opening ? endedAt?.position ?? 0 : 0)
+            }
         } catch {
             // Shown on a television, so the sentence Foundation writes rather than the type's whole
             // description — a viewer can do nothing with a decoding path.
