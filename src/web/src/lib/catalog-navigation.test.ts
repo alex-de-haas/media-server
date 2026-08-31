@@ -3,7 +3,9 @@ import {
   catalogAppliesToKind,
   catalogBrowseHref,
   catalogSearchParam,
+  removedSearchParam,
   withCatalog,
+  withRemoved,
 } from "@/lib/catalog-navigation";
 
 describe("catalog navigation", () => {
@@ -38,5 +40,19 @@ describe("catalog navigation", () => {
     expect(catalogAppliesToKind("Anime", "Movie")).toBe(false);
     expect(catalogAppliesToKind("Series", "Series")).toBe(true);
     expect(catalogAppliesToKind("Anime", "Series")).toBe(true);
+  });
+});
+
+describe("withRemoved", () => {
+  it("adds and drops the flag while keeping the rest of the query", () => {
+    expect(withRemoved("/movies?catalog=c1", true)).toBe("/movies?catalog=c1&removed=1");
+    expect(withRemoved("/movies?catalog=c1&removed=1", false)).toBe("/movies?catalog=c1");
+  });
+
+  it("reads only the exact flag it writes", () => {
+    expect(removedSearchParam("1")).toBe(true);
+    expect(removedSearchParam(undefined)).toBe(false);
+    expect(removedSearchParam("true")).toBe(false);
+    expect(removedSearchParam(["1"])).toBe(false);
   });
 });

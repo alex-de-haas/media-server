@@ -24,7 +24,8 @@ public sealed class CatalogHealthServiceTests : IDisposable
 
     private CatalogHealthService CreateService(
         IFilesystemInspector filesystem, IHostyCoreClient core, MediaServerSettings? settings = null) =>
-        new(_database, filesystem, settings ?? new MediaServerSettings(), core, NullLogger<CatalogHealthService>.Instance);
+        new(_database, filesystem, new CatalogFileProbe(_database, new CatalogPathSandbox()),
+            settings ?? new MediaServerSettings(), core, NullLogger<CatalogHealthService>.Instance);
 
     private Guid SeedCatalog(string root = "/mnt/movies")
     {
@@ -109,6 +110,26 @@ public sealed class CatalogHealthServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task An_offline_catalog_stays_offline_while_its_root_is_back_but_empty()
+    {
+        // The docker failure this asymmetry exists for: the bind mount lost its host path, so the root
+        // exists and holds nothing. Announcing "back online" here would undo the offline marker a scan
+        // stamped after finding the whole catalog unreadable, and do it again every five minutes.
+        var id = SeedCatalog();
+        SeedLibraryFile(id, "Inception (2010)/Inception.mkv");
+        var filesystem = new FakeFilesystem { Reachable = false };
+        var core = new RecordingCoreClient();
+        var service = CreateService(filesystem, core);
+
+        Assert.Equal(1, await service.CheckAsync(CancellationToken.None));
+
+        filesystem.Reachable = true; // The directory is back; its content is not.
+        Assert.Equal(0, await service.CheckAsync(CancellationToken.None));
+        Assert.NotNull((await Reload(id)).OfflineSince);
+        Assert.Equal(0, core.CountFor($"media-server:catalog-online:{id}"));
+    }
+
+    [Fact]
     public async Task Healthy_catalog_makes_no_changes()
     {
         SeedCatalog();
@@ -118,6 +139,28 @@ public sealed class CatalogHealthServiceTests : IDisposable
 
         Assert.Equal(0, await service.CheckAsync(CancellationToken.None));
         Assert.Empty(core.Notifications);
+    }
+
+    private void SeedLibraryFile(Guid catalogId, string relativePath)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var item = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            PublicId = Guid.NewGuid().ToString("N"),
+            CatalogId = catalogId,
+            Kind = MediaKind.Movie,
+            Title = "Inception",
+            AddedAt = now,
+            UpdatedAt = now,
+        };
+        _database.MediaItems.Add(item);
+        _database.MediaSources.Add(new MediaSource
+        {
+            Id = Guid.NewGuid(), MediaItemId = item.Id, Container = "matroska", Path = relativePath,
+            SizeBytes = 1, DurationTicks = 1, CreatedAt = now,
+        });
+        _database.SaveChanges();
     }
 
     private async Task<Catalog> Reload(Guid id)

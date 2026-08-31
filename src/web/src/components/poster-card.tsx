@@ -30,25 +30,39 @@ export function parsePersonId(id: string): { provider: string; providerId: strin
 
 // A poster tile used in both the library grids and the Home rails. The title sits under the art with
 // the type·year caption beneath it; the amber accent carries the resume bar and the watched badge.
+//
+// It leads somewhere or it does something: `href` makes it a link to a detail page, `onSelect` a button
+// that opens something in place. A removed title takes the second form — it has no page to go to, only
+// the user's own marks left to manage.
 export function PosterCard({
   href,
+  onSelect,
   title,
   subtitle,
   posterUrl,
   userData,
+  badge,
+  dimmed = false,
 }: {
-  href: string;
+  href?: string;
+  onSelect?: () => void;
   title: string;
   subtitle?: string | null;
   posterUrl: string | null;
   userData: UserItemData | null;
+  badge?: string;
+  dimmed?: boolean;
 }) {
   const resume =
     !userData?.played && userData?.playedPercentage ? Math.min(userData.playedPercentage, 100) : null;
 
-  return (
-    <Link href={href} className="group flex w-full flex-col gap-1.5">
-      <div className="bg-secondary relative aspect-[2/3] w-full overflow-hidden rounded-md transition-opacity group-hover:opacity-90">
+  const body = (
+    <>
+      <div
+        className={`bg-secondary relative aspect-[2/3] w-full overflow-hidden rounded-md transition-opacity group-hover:opacity-90${
+          dimmed ? " opacity-60" : ""
+        }`}
+      >
         {posterUrl ? (
           // Decorative: the title below the art already names the link, and an alt repeating it would make
           // a screen reader announce the same name twice.
@@ -77,6 +91,11 @@ export function PosterCard({
             <span className="bg-brand block h-full" style={{ width: `${resume}%` }} />
           </span>
         )}
+        {badge && (
+          <span className="bg-background/85 text-foreground absolute top-1.5 left-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium">
+            {badge}
+          </span>
+        )}
       </div>
       {/* Poster art alone identifies a title only for someone who recognises it, so the name is spelled out
           under the art, with the type·year caption below it. `title` carries the full text for a name the
@@ -87,6 +106,17 @@ export function PosterCard({
         </span>
         {subtitle && <span className="text-muted-foreground truncate text-xs">{subtitle}</span>}
       </div>
+    </>
+  );
+
+  const className = "group flex w-full flex-col gap-1.5";
+  return href ? (
+    <Link href={href} className={className}>
+      {body}
     </Link>
+  ) : (
+    <button type="button" onClick={onSelect} className={`${className} text-left`}>
+      {body}
+    </button>
   );
 }

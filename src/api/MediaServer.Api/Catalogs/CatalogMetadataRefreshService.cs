@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using MediaServer.Api.Data;
 using MediaServer.Api.Jobs;
+using MediaServer.Api.Library;
 using MediaServer.Api.Pipeline;
 using Microsoft.EntityFrameworkCore;
 
@@ -96,6 +97,31 @@ public sealed class CatalogRefreshCoordinator(MediaServerDbContext database, Job
         }
     }
 
+    /// <summary>
+    /// Queues a refresh for every catalog — the Catalogs page's global action. Catalogs already refreshing
+    /// are skipped rather than refused: the operator asked for the library, not for a specific run, and one
+    /// already under way is the outcome they wanted. Returns how many runs this started.
+    /// </summary>
+    public async Task<int> RequestAllAsync(CancellationToken cancellationToken)
+    {
+        var catalogIds = await database.Catalogs.AsNoTracking()
+            .OrderBy(catalog => catalog.Name)
+            .Select(catalog => catalog.Id)
+            .ToListAsync(cancellationToken);
+
+        var started = 0;
+        foreach (var catalogId in catalogIds)
+        {
+            var result = await RequestAsync(catalogId, cancellationToken);
+            if (result.Status == CatalogRefreshRequestStatus.Started)
+            {
+                started++;
+            }
+        }
+
+        return started;
+    }
+
     /// <summary>The catalogs with a refresh currently in flight, with their job id and progress.</summary>
     public async Task<IReadOnlyList<CatalogRefreshStatus>> ListActiveAsync(CancellationToken cancellationToken) =>
         await database.Jobs.AsNoTracking()
@@ -177,10 +203,33 @@ public sealed class CatalogMetadataRefreshService(
             }
         }
 
+        // The file's own data comes last and only where a weaker provider wrote it: same question as the
+        // pass above — what could not be known when these rows were written — asked of the container
+        // rather than of the provider. It was a separate button until this pass absorbed it.
+        var backfill = await BackfillMediaDataAsync(catalogId, cancellationToken);
+
         logger.LogInformation(
-            "Catalog {Catalog} metadata refresh: {Refreshed}/{Total} refreshed, {Failed} failed.",
-            catalogId, refreshed, total, failed);
+            "Catalog {Catalog} metadata refresh: {Refreshed}/{Total} refreshed, {Failed} failed; " +
+            "media data filled in for {Items} item(s) and {Sidecars} sidecar(s).",
+            catalogId, refreshed, total, failed, backfill.ItemsRefreshed, backfill.SidecarsFilled);
         return new CatalogRefreshReport(total, refreshed, failed);
+    }
+
+    private async Task<MediaBackfillReport> BackfillMediaDataAsync(Guid catalogId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var maintenance = scope.ServiceProvider.GetRequiredService<LibraryMaintenanceService>();
+            return await maintenance.BackfillHeaderProbedAsync(catalogId, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // The provider half of the refresh already succeeded; losing the probe half is worth a line in
+            // the log, not a failed job the operator has to re-run.
+            logger.LogWarning(exception, "Catalog {Catalog} refresh: filling in media data failed.", catalogId);
+            return new MediaBackfillReport(0, 0);
+        }
     }
 
     private async Task<EnrichOutcome> EnrichOneAsync(Catalog catalog, Guid itemId, CancellationToken cancellationToken)

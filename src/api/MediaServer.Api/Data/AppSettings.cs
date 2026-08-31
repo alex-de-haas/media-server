@@ -19,5 +19,12 @@ public sealed class AppSettings
     /// </summary>
     public List<string> CustomReleaseGroups { get; set; } = [];
 
+    /// <summary>
+    /// How far the incremental metadata refresh has followed the provider's change list. Null until the
+    /// first nightly pass, which records the instant it started watching rather than reaching backwards
+    /// for a history it was never following.
+    /// </summary>
+    public DateTimeOffset? MetadataChangesSyncedThrough { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; }
 }

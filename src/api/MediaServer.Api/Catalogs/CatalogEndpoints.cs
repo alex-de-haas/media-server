@@ -95,12 +95,26 @@ public static class CatalogEndpoints
             }
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
-        // Import: scan the catalog root for orphan media files and ingest them from the identify stage.
-        group.MapPost("/{id:guid}/scan", async (Guid id, LibraryImportService import, CancellationToken cancellationToken) =>
+        // Sync one catalog with its disk: ingest orphan media files from the identify stage, and remove
+        // the library rows whose files are gone (as tombstones where a user's history is at stake).
+        group.MapPost("/{id:guid}/scan", async (Guid id, CatalogScanService scan, CancellationToken cancellationToken) =>
         {
-            var report = await import.ImportAsync(id, cancellationToken);
+            var report = await scan.ScanAsync(id, cancellationToken);
             return report is null ? Results.NotFound() : Results.Ok(report);
         }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // The same, for every catalog at once — the Catalogs page's global action, and what the nightly
+        // job runs. Sequential: one catalog's disk at a time is plenty, and it paces the pipeline.
+        group.MapPost("/scan", async (CatalogScanService scan, CancellationToken cancellationToken) =>
+            Results.Ok(await scan.ScanAllAsync(cancellationToken)))
+            .RequireAuthorization(AppRoles.AdminPolicy);
+
+        // Refresh every catalog's metadata (admin only). Queued the same way as one catalog's, so they run
+        // one at a time; catalogs already refreshing are left to the run they are in.
+        group.MapPost("/refresh-metadata", async (CatalogRefreshCoordinator coordinator, CancellationToken cancellationToken) =>
+            Results.Accepted("/api/catalogs/refresh-metadata/active",
+                new { started = await coordinator.RequestAllAsync(cancellationToken) }))
+            .RequireAuthorization(AppRoles.AdminPolicy);
 
         // The catalogs with a metadata refresh currently in flight (job id + progress), for the UI.
         group.MapGet("/refresh-metadata/active", async (CatalogRefreshCoordinator coordinator, CancellationToken cancellationToken) =>

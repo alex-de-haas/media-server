@@ -16,12 +16,71 @@ namespace MediaServer.Api.Catalogs;
 public sealed class CatalogHealthService(
     MediaServerDbContext database,
     IFilesystemInspector filesystem,
+    CatalogFileProbe probe,
     MediaServerSettings settings,
     IHostyCoreClient core,
     ILogger<CatalogHealthService> logger)
 {
     /// <summary>Free-space floor below which the operator is warned (5 GiB).</summary>
     public const long LowDiskThresholdBytes = 5L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Stamps a catalog offline and announces it once, on the tracked entity — the caller saves. False
+    /// when it was already marked, so a repeat costs nothing and re-announces nothing.
+    /// </summary>
+    public async Task<bool> MarkOfflineAsync(Catalog catalog, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (catalog.OfflineSince is not null)
+        {
+            return false;
+        }
+
+        catalog.OfflineSince = now;
+
+        // An unanchored catalog is unreachable for a different reason — this runtime provides no mount
+        // holding it — and the operator's fix is to re-anchor it, not to reconnect a volume. The offline
+        // marker is still stamped, so file-backed actions stay blocked, but the "plug the volume back in"
+        // notification would be misleading; those catalogs are announced once by CatalogAnchorService at
+        // startup instead.
+        var unanchored = settings.CatalogMountRoots.Count > 0 &&
+            CatalogRootResolver.ToMountRelative(settings.CatalogMountRoots, catalog.Root) is null;
+
+        logger.LogWarning(
+            unanchored
+                ? "Catalog {Catalog} ({Root}) is offline: no catalog-root mount of this runtime holds it."
+                : "Catalog {Catalog} ({Root}) is offline.",
+            catalog.Name, catalog.Root);
+
+        if (!unanchored)
+        {
+            await core.PublishNotificationAsync(
+                CoreNotificationLevel.Warning,
+                $"Catalog \"{catalog.Name}\" is offline",
+                $"The catalog root {catalog.Root} is unreachable. Downloads and streaming for this catalog are paused until it returns.",
+                link: null,
+                dedupeKey: $"media-server:catalog-offline:{catalog.Id}",
+                cancellationToken: cancellationToken);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Clears the offline marker and announces the recovery once, on the tracked entity — the caller
+    /// saves. Only call it once a file has actually been read from the catalog.
+    /// </summary>
+    public async Task MarkOnlineAsync(Catalog catalog, CancellationToken cancellationToken)
+    {
+        catalog.OfflineSince = null;
+        logger.LogInformation("Catalog {Catalog} ({Root}) is back online.", catalog.Name, catalog.Root);
+        await core.PublishNotificationAsync(
+            CoreNotificationLevel.Success,
+            $"Catalog \"{catalog.Name}\" is back online",
+            $"The catalog root {catalog.Root} is reachable again.",
+            link: null,
+            dedupeKey: $"media-server:catalog-online:{catalog.Id}",
+            cancellationToken: cancellationToken);
+    }
 
     public async Task<int> CheckAsync(CancellationToken cancellationToken)
     {
@@ -35,52 +94,27 @@ public sealed class CatalogHealthService(
 
             if (!reachable)
             {
-                if (catalog.OfflineSince is null)
+                if (await MarkOfflineAsync(catalog, now, cancellationToken))
                 {
-                    catalog.OfflineSince = now;
                     changed++;
-
-                    // An unanchored catalog is unreachable for a different reason — this runtime provides
-                    // no mount holding it — and the operator's fix is to re-anchor it, not to reconnect a
-                    // volume. The offline marker is still stamped, so file-backed actions stay blocked,
-                    // but the "plug the volume back in" notification would be misleading; those catalogs
-                    // are announced once by CatalogAnchorService at startup instead.
-                    var unanchored = settings.CatalogMountRoots.Count > 0 &&
-                        CatalogRootResolver.ToMountRelative(settings.CatalogMountRoots, catalog.Root) is null;
-
-                    logger.LogWarning(
-                        unanchored
-                            ? "Catalog {Catalog} ({Root}) is offline: no catalog-root mount of this runtime holds it."
-                            : "Catalog {Catalog} ({Root}) is offline.",
-                        catalog.Name, catalog.Root);
-
-                    if (!unanchored)
-                    {
-                        await core.PublishNotificationAsync(
-                            CoreNotificationLevel.Warning,
-                            $"Catalog \"{catalog.Name}\" is offline",
-                            $"The catalog root {catalog.Root} is unreachable. Downloads and streaming for this catalog are paused until it returns.",
-                            link: null,
-                            dedupeKey: $"media-server:catalog-offline:{catalog.Id}",
-                            cancellationToken: cancellationToken);
-                    }
                 }
 
                 continue; // Can't inspect free space on an unreachable volume.
             }
 
+            // Recovery is deliberately harder to claim than failure. The root reappearing proves nothing —
+            // an unmounted bind presents as an empty directory — so an offline catalog stays offline until
+            // one of its files can actually be read. Without that asymmetry this tick would keep undoing
+            // the offline marker a scan stamped after finding the whole catalog unreadable.
             if (catalog.OfflineSince is not null)
             {
-                catalog.OfflineSince = null;
+                if (!await probe.AnyFileResolvesAsync(catalog, cancellationToken))
+                {
+                    continue;
+                }
+
+                await MarkOnlineAsync(catalog, cancellationToken);
                 changed++;
-                logger.LogInformation("Catalog {Catalog} ({Root}) is back online.", catalog.Name, catalog.Root);
-                await core.PublishNotificationAsync(
-                    CoreNotificationLevel.Success,
-                    $"Catalog \"{catalog.Name}\" is back online",
-                    $"The catalog root {catalog.Root} is reachable again.",
-                    link: null,
-                    dedupeKey: $"media-server:catalog-online:{catalog.Id}",
-                    cancellationToken: cancellationToken);
             }
 
             var freeBytes = filesystem.GetAvailableFreeBytes(catalog.Root);

@@ -329,6 +329,79 @@ public sealed class LibraryDeleteServiceTests : IDisposable
         Assert.False(await verify.MediaItems.AnyAsync(item => item.Id == movieId));
     }
 
+    [Fact]
+    public async Task A_watched_movie_survives_deletion_on_its_history_alone()
+    {
+        // What keeps a played title alive is the entry, not the counter: the aggregates are a projection
+        // of exactly this row, and every path that marks something watched writes one.
+        var movieId = await AddMovieAsync(favorite: false);
+        await AddHistoryAsync(movieId);
+
+        Assert.True(await Service().DeleteAsync(movieId, deleteFiles: false, deleteUserData: false, CancellationToken.None));
+
+        await using var verify = _db.Create();
+        Assert.NotNull((await verify.MediaItems.SingleAsync(item => item.Id == movieId)).RemovedAt);
+        Assert.True(await verify.PlaybackHistoryEntries.AnyAsync(entry => entry.MediaItemId == movieId));
+    }
+
+    [Fact]
+    public async Task Aggregate_counters_alone_do_not_keep_a_movie_alive()
+    {
+        // A row whose counters drifted from the history they came from — a play whose entry the user
+        // deleted from the calendar, or an import that wrote aggregates and no entries. Nothing here is
+        // a statement about the film, and nothing here can be cleared through the UI, so counting it
+        // would make the ghost immortal.
+        var movieId = await AddMovieAsync(favorite: false);
+        await using (var seed = _db.Create())
+        {
+            seed.UserItemData.Add(new UserItemData
+            {
+                Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = movieId,
+                Played = true, PlayCount = 3, PlaybackPositionTicks = 42,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Assert.True(await Service().DeleteAsync(movieId, deleteFiles: false, deleteUserData: false, CancellationToken.None));
+
+        await using var verify = _db.Create();
+        Assert.False(await verify.MediaItems.AnyAsync(item => item.Id == movieId));
+    }
+
+    [Fact]
+    public async Task An_abandoned_half_watch_does_not_keep_a_movie_alive()
+    {
+        var movieId = await AddMovieAsync(favorite: false);
+        await using (var seed = _db.Create())
+        {
+            seed.UserItemData.Add(new UserItemData
+            {
+                Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = movieId, PlaybackPositionTicks = 90_000_000,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Assert.True(await Service().DeleteAsync(movieId, deleteFiles: false, deleteUserData: false, CancellationToken.None));
+
+        await using var verify = _db.Create();
+        Assert.False(await verify.MediaItems.AnyAsync(item => item.Id == movieId));
+    }
+
+    private async Task AddHistoryAsync(Guid mediaItemId)
+    {
+        await using var seed = _db.Create();
+        seed.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+        {
+            Id = Guid.NewGuid(),
+            AppUserId = _userId,
+            MediaItemId = mediaItemId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            WatchedAt = DateTimeOffset.UtcNow,
+            Origin = PlaybackHistoryOrigin.LocalPlayback,
+        });
+        await seed.SaveChangesAsync();
+    }
+
     private string AbsolutePath(string relative) =>
         Path.Combine(_root, Path.Combine(relative.Split('/')));
 

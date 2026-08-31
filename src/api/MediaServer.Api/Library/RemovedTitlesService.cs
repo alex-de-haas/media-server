@@ -25,7 +25,10 @@ public sealed record RemovedTitleDto(
 /// the ghost subtree, last watched), and clears a favorite on a ghost — the one write the ordinary
 /// favorite endpoint refuses, because it reaches published items only.
 /// </summary>
-public sealed class RemovedTitlesService(MediaServerDbContext database, MediaServerSettings settings)
+public sealed class RemovedTitlesService(
+    MediaServerDbContext database,
+    LibraryDeleteService deleteService,
+    MediaServerSettings settings)
 {
     public async Task<IReadOnlyList<RemovedTitleDto>> ListAsync(int? appUserId, CancellationToken cancellationToken)
     {
@@ -125,6 +128,9 @@ public sealed class RemovedTitlesService(MediaServerDbContext database, MediaSer
         // Tracked update on purpose: SaveChanges bumps StateRevision for the Jellyfin delta sync.
         row.Rating = null;
         await database.SaveChangesAsync(cancellationToken);
+
+        // That may have been the last thing holding the ghost up.
+        await deleteService.PurgeIfUntouchedAsync(mediaItemId, cancellationToken);
         return true;
     }
 
@@ -161,6 +167,9 @@ public sealed class RemovedTitlesService(MediaServerDbContext database, MediaSer
         }
 
         await database.SaveChangesAsync(cancellationToken);
+
+        // That may have been the last thing holding the ghost up.
+        await deleteService.PurgeIfUntouchedAsync(mediaItemId, cancellationToken);
         return true;
     }
 }

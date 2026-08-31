@@ -23,6 +23,10 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
     private readonly FakeMetadataProvider _metadata = new();
     private readonly RecordingCore _core = new();
 
+    /// <summary>The catalog the most recent <see cref="SeedCatalog"/> made — what a catalog-scoped
+    /// backfill is pointed at.</summary>
+    private Guid _catalogId;
+
     public LibraryMaintenanceServiceTests()
     {
         _connection = new SqliteConnection("DataSource=:memory:");
@@ -35,10 +39,8 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
     private LibraryMaintenanceService Service(FakeMediaProbe? probe = null) => new(
         _database,
         new CatalogPathSandbox(),
-        new FilesystemInspector(),
         probe ?? new FakeMediaProbe(),
         new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }, new PersonSyncService(_database), new CollectionSyncService(_database)),
-        _core,
         NullLogger<LibraryMaintenanceService>.Instance);
 
     private Catalog SeedCatalog(string? root = null)
@@ -54,6 +56,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         };
         _database.Catalogs.Add(catalog);
         _database.SaveChanges();
+        _catalogId = catalog.Id;
         return catalog;
     }
 
@@ -83,107 +86,6 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         });
         _database.SaveChanges();
         return item.Id;
-    }
-
-    [Fact]
-    public async Task Scan_reports_missing_library_files()
-    {
-        var catalog = SeedCatalog();
-        // One source exists on disk, one does not.
-        var present = Path.Combine("library", "Present (2020)", "Present.mkv");
-        var absolutePresent = Path.Combine(_root, present);
-        Directory.CreateDirectory(Path.GetDirectoryName(absolutePresent)!);
-        await File.WriteAllBytesAsync(absolutePresent, new byte[16]);
-        SeedItemWithSource(catalog, present);
-        SeedItemWithSource(catalog, Path.Combine("library", "Gone (2019)", "Gone.mkv"));
-
-        var report = await Service().ScanAsync(CancellationToken.None);
-
-        Assert.Equal(1, report.CatalogsScanned);
-        Assert.Equal(2, report.SourcesChecked);
-        Assert.Equal(1, report.MissingFiles);
-        Assert.Contains("Gone", report.MissingPaths.Single());
-        Assert.Equal(1, _core.CountFor("media-server:library-missing"));
-    }
-
-    [Fact]
-    public async Task Scan_audits_titles_published_in_more_than_one_catalog()
-    {
-        // New imports of an identity held elsewhere are refused (IdentifyService's gate), so a pair like
-        // this pre-dates the rule — the audit is how the operator finds and repairs it.
-        var movies = SeedCatalog();
-        var movies4K = SeedCatalog(Path.Combine(_root, "4k"));
-        Directory.CreateDirectory(movies4K.Root);
-        SeedPublishedMovie(movies, "tmdb", "27205", "Inception", 2010);
-        SeedPublishedMovie(movies4K, "tmdb", "27205", "Inception", 2010);
-        // A title held once is not a duplicate, and neither is the same id under a different kind.
-        SeedPublishedMovie(movies, "tmdb", "155", "The Dark Knight", 2008);
-
-        var report = await Service().ScanAsync(CancellationToken.None);
-
-        var duplicate = Assert.Single(report.CrossCatalogDuplicates);
-        Assert.Equal("Inception", duplicate.Title);
-        Assert.Equal(2010, duplicate.Year);
-        Assert.Equal("Movie", duplicate.Kind);
-        Assert.Equal(
-            new[] { movies.Id, movies4K.Id }.OrderBy(id => id),
-            duplicate.Copies.Select(copy => copy.CatalogId).OrderBy(id => id));
-    }
-
-    [Fact]
-    public async Task The_duplicate_audit_ignores_tombstones_and_unpublished_rows()
-    {
-        var movies = SeedCatalog();
-        var movies4K = SeedCatalog(Path.Combine(_root, "4k-ghosts"));
-        Directory.CreateDirectory(movies4K.Root);
-        SeedPublishedMovie(movies, "tmdb", "27205", "Inception", 2010);
-        // A ghost (deleted, history kept) and an in-flight row are not second copies: the first is
-        // adopted back if the title returns, the second has not been published yet.
-        var ghost = SeedPublishedMovie(movies4K, "tmdb", "27205", "Inception", 2010);
-        ghost.PublicId = null;
-        ghost.RemovedAt = DateTimeOffset.UtcNow;
-        var pending = SeedPublishedMovie(movies4K, "tmdb", "27205", "Inception", 2010);
-        pending.PublicId = null;
-        _database.SaveChanges();
-
-        var report = await Service().ScanAsync(CancellationToken.None);
-
-        Assert.Empty(report.CrossCatalogDuplicates);
-    }
-
-    private MediaItem SeedPublishedMovie(Catalog catalog, string provider, string providerId, string title, int year)
-    {
-        var item = new MediaItem
-        {
-            Id = Guid.NewGuid(),
-            PublicId = Guid.NewGuid().ToString("N"),
-            CatalogId = catalog.Id,
-            Kind = MediaKind.Movie,
-            Title = title,
-            Year = year,
-            IdentityProvider = provider,
-            IdentityProviderId = providerId,
-            AddedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-        _database.MediaItems.Add(item);
-        _database.SaveChanges();
-        return item;
-    }
-
-    [Fact]
-    public async Task Scan_skips_offline_catalogs()
-    {
-        var offlineRoot = Path.Combine(Path.GetTempPath(), "ms-offline-" + Guid.NewGuid().ToString("N")); // never created
-        var catalog = SeedCatalog(offlineRoot);
-        SeedItemWithSource(catalog, Path.Combine("library", "X", "x.mkv"));
-
-        var report = await Service().ScanAsync(CancellationToken.None);
-
-        Assert.Equal(0, report.CatalogsScanned);
-        Assert.Equal(0, report.SourcesChecked);
-        Assert.Equal(0, report.MissingFiles);
-        Assert.Empty(_core.Notifications);
     }
 
     [Fact]
@@ -316,7 +218,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         var probe = ProbeAnsweringForSidecars(
             new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, 6, 48000, 640_000, true, false, null));
 
-        var report = await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+        var report = await Service(probe).BackfillHeaderProbedAsync(_catalogId, CancellationToken.None);
 
         Assert.Equal(1, report.SidecarsFilled);
         await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
@@ -333,7 +235,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         var probe = ProbeAnsweringForSidecars(
             new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, null, null, null, true, false, null));
 
-        await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+        await Service(probe).BackfillHeaderProbedAsync(_catalogId, CancellationToken.None);
 
         await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
         var kept = await fresh.MediaStreams.SingleAsync(stream => stream.Id == sidecar.Id);
@@ -357,7 +259,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         var probe = ProbeAnsweringForSidecars(
             new ProbedStream(StreamType.Subtitle, 0, "subrip", null, "rus", null, null, null, null, null, null, null, null, true, false, null));
 
-        var report = await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+        var report = await Service(probe).BackfillHeaderProbedAsync(_catalogId, CancellationToken.None);
 
         Assert.Equal(0, report.SidecarsFilled);
     }
@@ -417,7 +319,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         var probe = ProbeAnsweringForSidecars(
             new ProbedStream(StreamType.Audio, 0, "ac3", null, "rus", null, null, null, null, null, 6, 48000, 640_000, true, false, null));
 
-        var report = await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+        var report = await Service(probe).BackfillHeaderProbedAsync(_catalogId, CancellationToken.None);
 
         Assert.Equal(1, report.SidecarsFilled);
         await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
@@ -438,7 +340,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         var probe = ProbeAnsweringForSidecars(
             new ProbedStream(StreamType.Audio, 0, "ac3", null, "eng", null, null, null, null, null, 6, 48000, null, true, false, "Something else"));
 
-        await Service(probe).BackfillHeaderProbedAsync(CancellationToken.None);
+        await Service(probe).BackfillHeaderProbedAsync(_catalogId, CancellationToken.None);
 
         await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
         var filled = await fresh.MediaStreams.SingleAsync(stream => stream.Id == sidecar.Id);
@@ -453,7 +355,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         // mark the row done and never look at it again once the engine is attached.
         var sidecar = await SeedSidecarWithoutSpecsAsync();
 
-        var report = await Service(ProbeAnsweringForSidecars(null)).BackfillHeaderProbedAsync(CancellationToken.None);
+        var report = await Service(ProbeAnsweringForSidecars(null)).BackfillHeaderProbedAsync(_catalogId, CancellationToken.None);
 
         Assert.Equal(0, report.SidecarsFilled);
         await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);

@@ -30,10 +30,14 @@ public sealed class RemovedTitlesServiceTests : IDisposable
         _context = _db.Create();
     }
 
+    /// <summary>Clearing a ghost's last mark purges it, so the service needs the delete pipeline.</summary>
+    private static LibraryDeleteService Deletes(MediaServerDbContext context) =>
+        new(context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
+
     [Fact]
     public async Task List_returns_only_tombstoned_top_level_titles_with_signal_summary()
     {
-        var titles = await new RemovedTitlesService(_context, TestSettings.English).ListAsync(_userId, CancellationToken.None);
+        var titles = await new RemovedTitlesService(_context, Deletes(_context), TestSettings.English).ListAsync(_userId, CancellationToken.None);
 
         Assert.Equal(2, titles.Count); // the ghost movie and the ghost series; never the published movie
         var movie = Assert.Single(titles, title => title.Id == _ghostMovieId);
@@ -52,7 +56,7 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     [Fact]
     public async Task Clear_favorite_works_on_a_ghost_and_only_on_a_ghost()
     {
-        var service = new RemovedTitlesService(_context, TestSettings.English);
+        var service = new RemovedTitlesService(_context, Deletes(_context), TestSettings.English);
 
         Assert.True(await service.ClearFavoriteAsync(_userId, _ghostMovieId, CancellationToken.None));
         Assert.False(await service.ClearFavoriteAsync(_userId, _ghostMovieId, CancellationToken.None)); // nothing left to clear
@@ -68,13 +72,13 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     {
         // The favorite sits on the ghost episode, not the series row — clearing at the title level
         // must reach it, or the flag would be permanently stuck (the ordinary endpoint refuses ghosts).
-        var service = new RemovedTitlesService(_context, TestSettings.English);
+        var service = new RemovedTitlesService(_context, Deletes(_context), TestSettings.English);
 
         Assert.True(await service.ClearFavoriteAsync(_userId, _ghostSeriesId, CancellationToken.None));
 
         await using var verify = _db.Create();
         Assert.False(await verify.UserItemData.AnyAsync(data => data.MediaItemId == _ghostEpisodeId && data.IsFavorite));
-        Assert.False((await new RemovedTitlesService(verify, TestSettings.English).ListAsync(_userId, CancellationToken.None))
+        Assert.False((await new RemovedTitlesService(verify, Deletes(verify), TestSettings.English).ListAsync(_userId, CancellationToken.None))
             .Single(title => title.Id == _ghostSeriesId).IsFavorite);
     }
 
@@ -83,26 +87,26 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     {
         // Deleting a file does not retract a verdict on a film that was watched, so the two clears are
         // separate gestures. Folding them together would silently discard the judgement.
-        var service = new RemovedTitlesService(_context, TestSettings.English);
+        var service = new RemovedTitlesService(_context, Deletes(_context), TestSettings.English);
 
         Assert.True(await service.ClearFavoriteAsync(_userId, _ghostMovieId, CancellationToken.None));
 
         await using var verify = _db.Create();
-        Assert.Equal(4, (await new RemovedTitlesService(verify, TestSettings.English).ListAsync(_userId, CancellationToken.None))
+        Assert.Equal(4, (await new RemovedTitlesService(verify, Deletes(verify), TestSettings.English).ListAsync(_userId, CancellationToken.None))
             .Single(title => title.Id == _ghostMovieId).UserRating);
     }
 
     [Fact]
     public async Task Clear_rating_works_on_a_ghost_and_only_on_a_ghost()
     {
-        var service = new RemovedTitlesService(_context, TestSettings.English);
+        var service = new RemovedTitlesService(_context, Deletes(_context), TestSettings.English);
 
         Assert.True(await service.ClearRatingAsync(_userId, _ghostMovieId, CancellationToken.None));
         Assert.False(await service.ClearRatingAsync(_userId, _ghostMovieId, CancellationToken.None)); // nothing left
         Assert.False(await service.ClearRatingAsync(_userId, _publishedMovieId, CancellationToken.None));
 
         await using var verify = _db.Create();
-        var title = (await new RemovedTitlesService(verify, TestSettings.English).ListAsync(_userId, CancellationToken.None))
+        var title = (await new RemovedTitlesService(verify, Deletes(verify), TestSettings.English).ListAsync(_userId, CancellationToken.None))
             .Single(entry => entry.Id == _ghostMovieId);
         Assert.Null(title.UserRating);
         Assert.True(title.IsFavorite); // the favorite is a separate statement and survives
@@ -121,6 +125,41 @@ public sealed class RemovedTitlesServiceTests : IDisposable
         // The other ghost and the published movie are untouched.
         Assert.True(await verify.MediaItems.AnyAsync(item => item.Id == _ghostMovieId));
         Assert.True(await verify.MediaItems.AnyAsync(item => item.Id == _publishedMovieId));
+    }
+
+    [Fact]
+    public async Task Clearing_the_last_mark_on_a_ghost_takes_the_ghost_with_it()
+    {
+        // The ghost movie is held up by a favorite and a rating and nothing else. Clearing both leaves a
+        // title nobody can see, play or reach — and, since clearing is the only thing that could ever
+        // empty it, one that could never be removed again.
+        var service = new RemovedTitlesService(_context, Deletes(_context), TestSettings.English);
+
+        await service.ClearFavoriteAsync(_userId, _ghostMovieId, CancellationToken.None);
+        await using (var midway = _db.Create())
+        {
+            Assert.True(await midway.MediaItems.AnyAsync(item => item.Id == _ghostMovieId)); // the rating still holds it
+        }
+
+        await service.ClearRatingAsync(_userId, _ghostMovieId, CancellationToken.None);
+
+        await using var verify = _db.Create();
+        Assert.False(await verify.MediaItems.AnyAsync(item => item.Id == _ghostMovieId));
+        Assert.False(await verify.UserItemData.AnyAsync(data => data.MediaItemId == _ghostMovieId));
+    }
+
+    [Fact]
+    public async Task A_ghost_still_holding_a_play_survives_its_favorite_being_cleared()
+    {
+        // The series' plays are signal of their own: clearing the favorite that also held it up must not
+        // discard the history the tombstone exists to keep.
+        var service = new RemovedTitlesService(_context, Deletes(_context), TestSettings.English);
+
+        Assert.True(await service.ClearFavoriteAsync(_userId, _ghostSeriesId, CancellationToken.None));
+
+        await using var verify = _db.Create();
+        Assert.True(await verify.MediaItems.AnyAsync(item => item.Id == _ghostSeriesId));
+        Assert.True(await verify.PlaybackHistoryEntries.AnyAsync(entry => entry.MediaItemId == _ghostEpisodeId));
     }
 
     [Fact]

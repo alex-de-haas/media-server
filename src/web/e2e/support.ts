@@ -68,7 +68,9 @@ export interface AppMock {
   recommendations?: Record<string, unknown>;
   transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
   transcodeLanguages?: string[]; // GET /transcode/languages — what the language field validates against
-  mediaBackfill?: { itemsRefreshed: number; remaining: number; sidecarsFilled: number }; // POST /library/backfill-media
+  removedTitles?: unknown[]; // GET /library/removed — the signed-in user's ghosts
+  catalogScan?: Record<string, unknown>; // POST /catalogs/{id}/scan — one catalog's scan report
+  libraryScan?: Record<string, unknown>; // POST /catalogs/scan — every catalog's, with totals
   itemImages?: Record<string, unknown[]>; // GET /library/{id}/images — the poster picker's candidates
 }
 
@@ -204,10 +206,17 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/transcode/extract" && method === "POST") {
       return route.fulfill({ status: 201, json: { id: "job-2" } });
     }
-    if (path === "/library/backfill-media" && method === "POST") {
-      return route.fulfill({
-        json: mock.mediaBackfill ?? { itemsRefreshed: 0, remaining: 0, sidecarsFilled: 0 },
-      });
+    if (path === "/library/removed") return route.fulfill({ json: mock.removedTitles ?? [] });
+
+    if (path === "/catalogs/scan" && method === "POST") {
+      return route.fulfill({ json: mock.libraryScan ?? aLibraryScan() });
+    }
+    const scannedCatalogId = method === "POST" ? path.match(/^\/catalogs\/([^/]+)\/scan$/)?.[1] : undefined;
+    if (scannedCatalogId) {
+      return route.fulfill({ json: mock.catalogScan ?? aCatalogScan({ catalogId: scannedCatalogId }) });
+    }
+    if (path === "/catalogs/refresh-metadata" && method === "POST") {
+      return route.fulfill({ status: 202, json: { started: (mock.catalogs ?? []).length } });
     }
 
     if (path === "/metadata/search") return route.fulfill({ json: mock.metadataSearch ?? [] });
@@ -256,6 +265,67 @@ export const aMovie = (id: string, title: string) => ({
   year: 2016,
   posterUrl: null,
   userData: null,
+});
+
+/** A tombstoned title as `GET /library/removed` reports it, with this user's own marks on it. */
+export const aRemovedTitle = (
+  id: string,
+  title: string,
+  overrides: Partial<{
+    kind: "Movie" | "Series";
+    year: number | null;
+    posterUrl: string | null;
+    removedAt: string;
+    isFavorite: boolean;
+    playCount: number;
+    lastWatchedAt: string | null;
+    userRating: number | null;
+  }> = {},
+) => ({
+  id,
+  kind: "Movie",
+  title,
+  year: 2022,
+  posterUrl: null,
+  removedAt: "2026-08-01T12:00:00Z",
+  isFavorite: false,
+  playCount: 0,
+  lastWatchedAt: null,
+  userRating: null,
+  ...overrides,
+});
+
+/** One catalog's scan report. Defaults to the quiet outcome: nothing new, nothing gone. */
+export const aCatalogScan = (overrides: Partial<Record<string, unknown>> = {}) => ({
+  catalogId: "c1",
+  catalogName: "Movies",
+  offline: false,
+  filesScanned: 0,
+  imported: 0,
+  skipped: 0,
+  sourcesChecked: 0,
+  missingFiles: 0,
+  versionsRemoved: 0,
+  sidecarsRemoved: 0,
+  titlesGhosted: 0,
+  titlesPurged: 0,
+  missingPaths: [],
+  ...overrides,
+});
+
+/** Every catalog's scan, with the totals the UI reports. */
+export const aLibraryScan = (overrides: Partial<Record<string, unknown>> = {}) => ({
+  catalogs: [],
+  catalogsScanned: 1,
+  catalogsOffline: 0,
+  imported: 0,
+  sourcesChecked: 0,
+  missingFiles: 0,
+  versionsRemoved: 0,
+  sidecarsRemoved: 0,
+  titlesGhosted: 0,
+  titlesPurged: 0,
+  ...overrides,
 });
 
 export const aSeries = (id: string, title: string) => ({

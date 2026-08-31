@@ -1,7 +1,7 @@
 # Single Catalog per Title
 
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-08-31
 
 A movie or series exists in at most one catalog. The constraint is deliberate
 and temporary: real multi-catalog membership (one record belonging to several
@@ -28,8 +28,8 @@ parked as `NeedsReview` and no item is created. The reason names the catalog:
 > catalog only. Retarget this download to that catalog, or skip it.
 
 Two cases deliberately pass the gate: an identity already present **in this
-catalog** (adding another version is the ordinary path, and a pre-existing
-pair is the audit's business), and a **tombstone elsewhere** (a ghost carries
+catalog** (adding another version is the ordinary path), and a **tombstone
+elsewhere** (a ghost carries
 no files to conflict with and is adopted instead). A tombstone *here* does not
 wave a title through: reviving it while another catalog publishes the same
 identity would mint the very pair the gate exists to prevent.
@@ -79,17 +79,16 @@ catalog from its library page, then retry — instead of a button that would
 always fail. Catalog scans therefore create no duplicate item either: their
 files hit the same gate and park with the same reason.
 
-## The audit
+## The audit is gone
 
-The library scan (`POST /api/library/scan`, and the scheduled worker behind
-it) reports `CrossCatalogDuplicates` beside its missing-file findings: every
-title published in more than one catalog, with each copy and its catalog.
-Published rows only — a tombstone beside a live copy is the adoption path, not
-a duplicate.
+A scan used to report every title published in more than one catalog, and the
+Settings **Library health** section listed each with its repair. Both were
+removed once the gate above had been in place long enough for the library to
+hold none: the audit could only ever find pairs that pre-dated the rule, and
+every path that could mint a new one now goes through the gate.
 
-The **Library health** section on Settings runs the check and lists each
-duplicate with its repair: move one copy into the other's catalog, which
-merges the pair into a single title with two versions.
+Should one appear anyway, the repair is unchanged — move one copy into the
+other's catalog, which merges the pair into a single title with two versions.
 
 ## No database backstop
 
@@ -107,8 +106,8 @@ evidence, and is deliberately absent:
   `AmbiguousLocalIdentity`, recommendations' multi-copy handling) would become
   unreachable code guarding a state the schema forbids.
 
-The rule is therefore enforced where duplicates are born, audited where they
-survive, and tolerated by everything that already handles them.
+The rule is therefore enforced where duplicates are born and tolerated by
+everything that already handles them.
 
 ## Testing Expectations
 
@@ -119,7 +118,5 @@ survive, and tolerated by everything that already handles them.
   staging (clearing mappings the batch already made) and publishes as a
   second version; scan-imported conflicts park, create no item, and report
   `CanRetarget = false`; refusals for unconflicted and unknown items.
-- `LibraryMaintenanceServiceTests` — duplicate detection across catalogs, and
-  that tombstones and unpublished rows are not counted as copies.
 - Web e2e (`activity.spec.ts`) — the conflict banner renders the server's
   reason and its button fires the retarget request.
