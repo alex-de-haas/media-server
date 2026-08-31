@@ -105,9 +105,12 @@ tombstone surfaces nowhere. Two places deliberately know ghosts:
   poster and title from the retained metadata (it never links to item pages).
 - The **Movies** and **Series** grids offer a **Show removed** toggle, which
   appends the signed-in user's ghosts of that kind after the library — dimmed,
-  badged *Removed*, and never mixed into it. The toggle is off by default and
-  absent entirely when this user has none; it lives in the URL (`?removed=1`),
-  like the catalog filter, so the view survives a refresh.
+  badged *Removed*, and never mixed into it. Theirs alone: a tombstone is kept
+  alive by **any** user's signal, so the full set includes titles this user has
+  never touched, and listing those would put someone else's viewing in their
+  grid under an empty summary. The toggle is off by default and absent entirely
+  when this user has none; it lives in the URL (`?removed=1`), like the catalog
+  filter, so the view survives a refresh.
 
 A ghost card opens a dialog rather than a page — there is no page, and nothing
 about it can be played or edited. The dialog shows the user's signal summary
@@ -140,9 +143,10 @@ Clearing the last of those marks purges the ghost outright, as above.
   tombstones instead of purging.
 - `TombstoneLeakRegressionTests` — ghosts leak into no read surface; the
   tracked-title unlink on tombstoning.
-- `RemovedTitlesServiceTests` — list and signal summary, ghost-only favorite
-  and rating clearing, subtree purge and refusals, and the purge that follows
-  the last mark being cleared.
+- `RemovedTitlesServiceTests` — list and signal summary, a ghost held up by
+  another user staying out of this one's list, ghost-only favorite and rating
+  clearing, subtree purge and refusals, and the purge that follows the last
+  mark being cleared.
 - `WatchHistoryEntryServiceTests` — deleting a ghost's last play takes the
   ghost; another user's play keeps it; a published title is untouched.
 - Web e2e (`removed-titles.spec.ts`) — the toggle's default-off, hidden-when-

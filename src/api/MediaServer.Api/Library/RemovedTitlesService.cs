@@ -21,10 +21,16 @@ public sealed record RemovedTitleDto(
 /// <summary>
 /// The window onto ghosts: the watched calendar shows only plays, and a tombstone can carry none at
 /// all — a favorited, never-watched, deleted title would otherwise be invisible and unmanageable.
-/// Lists every tombstoned movie and series with the signed-in user's signal (favorite, plays across
-/// the ghost subtree, last watched), and clears a favorite on a ghost — the one write the ordinary
-/// favorite endpoint refuses, because it reaches published items only.
+/// Lists the signed-in user's tombstoned movies and series with their signal (favorite, rating, plays
+/// across the ghost subtree, last watched), and clears a favorite or a rating on a ghost — the writes
+/// the ordinary endpoints refuse, because they reach published items only.
 /// </summary>
+/// <remarks>
+/// <b>The caller's own ghosts, not every ghost.</b> A tombstone is kept alive by any user's signal, so
+/// the full set includes titles this user has never touched — held only because someone else on the
+/// server watched or rated them. Listing those would put another person's viewing in this one's grid,
+/// under a summary that is empty because none of it is theirs.
+/// </remarks>
 public sealed class RemovedTitlesService(
     MediaServerDbContext database,
     LibraryDeleteService deleteService,
@@ -84,9 +90,20 @@ public sealed class RemovedTitlesService(
                 .ToDictionaryAsync(data => data.MediaItemId, data => data.Rating, cancellationToken)
             : [];
 
-        var posters = await database.BestPosterUrlsAsync(rootIds, settings.PreferredLanguage, cancellationToken);
+        // Only the ghosts this user has a hand in. Everything above is already scoped to them, so a root
+        // none of the three answered for is one somebody else's signal is keeping alive.
+        var mine = roots
+            .Where(root => favoriteSet.Contains(root.Id) || ratings.ContainsKey(root.Id) || playsByRoot.ContainsKey(root.Id))
+            .ToList();
+        if (mine.Count == 0)
+        {
+            return [];
+        }
 
-        return roots.Select(root => new RemovedTitleDto(
+        var posters = await database.BestPosterUrlsAsync(
+            mine.Select(root => root.Id).ToList(), settings.PreferredLanguage, cancellationToken);
+
+        return mine.Select(root => new RemovedTitleDto(
             root.Id,
             root.Kind.ToString(),
             root.Title,

@@ -10,7 +10,9 @@ namespace MediaServer.Api.Catalogs;
 /// True when the pass declined to run: no marker yet (the first night only starts watching), or the
 /// provider could not answer. Neither is evidence that nothing changed.
 /// </param>
-public sealed record IncrementalRefreshReport(bool Skipped, int Changed, int Refreshed, int Failed);
+/// <param name="Due">Library titles this pass owed an enrich: the changed ones plus earlier failures.</param>
+/// <param name="Failed">Enrichments that threw. They are carried to the next run rather than lost.</param>
+public sealed record IncrementalRefreshReport(bool Skipped, int Due, int Refreshed, int Failed);
 
 /// <summary>
 /// Refreshes the titles the provider says it edited, and only those.
@@ -35,6 +37,12 @@ public sealed class IncrementalMetadataRefreshService(
 {
     /// <summary>Paced like the catalog refresh: enrich issues several provider calls per item.</summary>
     private static readonly TimeSpan ItemDelay = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// A ceiling on the carried-over failures. A provider having a bad night must not leave a queue that
+    /// grows without limit; past this the oldest are dropped, having been retried every night since.
+    /// </summary>
+    private const int MaxRetries = 500;
 
     public async Task<IncrementalRefreshReport> RunAsync(CancellationToken cancellationToken)
     {
@@ -70,7 +78,10 @@ public sealed class IncrementalMetadataRefreshService(
         var identities = await LibraryIdentitiesAsync(cancellationToken);
         if (identities.Count == 0)
         {
+            // Nothing is held, so nothing can be owed: any carried-over failure names a title that has
+            // since been deleted, and keeping it would leave a queue nothing could ever drain.
             settings.MetadataChangesSyncedThrough = now;
+            settings.MetadataRefreshRetries = [];
             settings.UpdatedAt = now;
             await database.SaveChangesAsync(cancellationToken);
             return new IncrementalRefreshReport(Skipped: false, 0, 0, 0);
@@ -96,38 +107,48 @@ public sealed class IncrementalMetadataRefreshService(
             }
         }
 
+        // What an earlier night could not enrich is due again, whether or not the provider has touched it
+        // since. An id whose item has been deleted meanwhile simply finds nothing and drops out.
+        var held = identities.Values.SelectMany(ids => ids).ToHashSet();
+        var work = changedItemIds
+            .Concat(settings.MetadataRefreshRetries.Select(id => Guid.TryParse(id, out var value) ? value : Guid.Empty))
+            .Where(held.Contains)
+            .Distinct()
+            .ToList();
+
         var refreshed = 0;
-        var failed = 0;
-        for (var index = 0; index < changedItemIds.Count; index++)
+        var retries = new List<string>();
+        for (var index = 0; index < work.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (await maintenance.RefreshMetadataAsync(changedItemIds[index], cancellationToken))
+                if (await maintenance.RefreshMetadataAsync(work[index], cancellationToken))
                 {
                     refreshed++;
                 }
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                logger.LogWarning(exception, "Incremental metadata refresh: failed to enrich item {Item}.", changedItemIds[index]);
-                failed++;
+                logger.LogWarning(exception, "Incremental metadata refresh: failed to enrich item {Item}; it will be retried.", work[index]);
+                retries.Add(work[index].ToString("N"));
             }
 
-            if (index < changedItemIds.Count - 1)
+            if (index < work.Count - 1)
             {
                 await Task.Delay(ItemDelay, time, cancellationToken);
             }
         }
 
         settings.MetadataChangesSyncedThrough = now;
+        settings.MetadataRefreshRetries = retries.Count > MaxRetries ? retries[^MaxRetries..] : retries;
         settings.UpdatedAt = now;
         await database.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Incremental metadata refresh: {Changed} library title(s) changed since {Since:u}, {Refreshed} refreshed, {Failed} failed.",
-            changedItemIds.Count, since, refreshed, failed);
-        return new IncrementalRefreshReport(Skipped: false, changedItemIds.Count, refreshed, failed);
+            "Incremental metadata refresh: {Work} library title(s) due since {Since:u}, {Refreshed} refreshed, {Failed} held for retry.",
+            work.Count, since, refreshed, retries.Count);
+        return new IncrementalRefreshReport(Skipped: false, work.Count, refreshed, retries.Count);
     }
 
     /// <summary>

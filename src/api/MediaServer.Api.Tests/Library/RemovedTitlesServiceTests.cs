@@ -54,6 +54,49 @@ public sealed class RemovedTitlesServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_ghost_held_up_by_someone_else_is_not_this_users_business()
+    {
+        // A tombstone is kept alive by any user's signal, so the full set includes titles this user has
+        // never touched. Listing those would put another person's viewing in this one's grid, under a
+        // summary that is empty because none of it is theirs.
+        var theirs = await AddGhostForAnotherUserAsync();
+
+        var titles = await new RemovedTitlesService(_context, Deletes(_context), TestSettings.English)
+            .ListAsync(_userId, CancellationToken.None);
+
+        Assert.DoesNotContain(titles, title => title.Id == theirs);
+        Assert.Contains(titles, title => title.Id == _ghostMovieId); // their own is still there
+    }
+
+    /// <summary>A second user, and a tombstone only they have watched.</summary>
+    private async Task<Guid> AddGhostForAnotherUserAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await using var seed = _db.Create();
+        var other = new AppUser
+        {
+            HostUserId = "host-other", DisplayName = "Sam", Role = AppUserRole.User,
+            CreatedAt = now, LastSeenAt = now,
+        };
+        var ghost = new MediaItem
+        {
+            Id = Guid.NewGuid(), CatalogId = _catalogId, Kind = MediaKind.Movie, Title = "Their Film",
+            RemovedAt = now, AddedAt = now, UpdatedAt = now,
+        };
+        seed.AppUsers.Add(other);
+        seed.MediaItems.Add(ghost);
+        await seed.SaveChangesAsync();
+
+        seed.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
+        {
+            Id = Guid.NewGuid(), AppUserId = other.Id, MediaItemId = ghost.Id, CreatedAt = now,
+            WatchedAt = now, Origin = PlaybackHistoryOrigin.LocalPlayback,
+        });
+        await seed.SaveChangesAsync();
+        return ghost.Id;
+    }
+
+    [Fact]
     public async Task Clear_favorite_works_on_a_ghost_and_only_on_a_ghost()
     {
         var service = new RemovedTitlesService(_context, Deletes(_context), TestSettings.English);

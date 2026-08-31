@@ -83,7 +83,7 @@ public sealed class IncrementalMetadataRefreshServiceTests : IDisposable
         var report = await Service().RunAsync(CancellationToken.None);
 
         Assert.False(report.Skipped);
-        Assert.Equal(1, report.Changed);
+        Assert.Equal(1, report.Due);
         Assert.Equal(1, report.Refreshed);
         Assert.Contains("27205", _metadata.Fetched);
         Assert.DoesNotContain("155", _metadata.Fetched);
@@ -135,8 +135,64 @@ public sealed class IncrementalMetadataRefreshServiceTests : IDisposable
 
         var report = await Service().RunAsync(CancellationToken.None);
 
-        Assert.Equal(0, report.Changed);
+        Assert.Equal(0, report.Due);
         Assert.Empty(_metadata.Fetched);
+    }
+
+    [Fact]
+    public async Task An_enrich_that_failed_is_owed_again_the_next_night()
+    {
+        // The marker says "changes up to here have been applied", and a title the provider timed out on
+        // has not been. Holding the marker back instead would grow the window every night until it hit
+        // the provider's limit and re-refreshed a fortnight, forever, over one unreachable title.
+        SeedMovie("27205");
+        await SetMarkerAsync(_time.GetUtcNow().AddDays(-1));
+        _feed.Changed[MediaKind.Movie] = ["27205"];
+        _metadata.OnFetch = _ => throw new HttpRequestException("timed out");
+
+        var first = await Service().RunAsync(CancellationToken.None);
+
+        Assert.Equal(1, first.Failed);
+        Assert.Equal(_time.GetUtcNow(), await MarkerAsync()); // the window still moved on
+
+        // The next night the provider is well again and the title is due even though it changed nothing.
+        _metadata.OnFetch = null;
+        _feed.Changed[MediaKind.Movie] = [];
+        _time.Advance(TimeSpan.FromDays(1));
+
+        var second = await Service().RunAsync(CancellationToken.None);
+
+        Assert.Equal(1, second.Due);
+        Assert.Equal(1, second.Refreshed);
+        Assert.Contains("27205", _metadata.Fetched);
+        Assert.Empty(await RetriesAsync()); // and it is not owed a third time
+    }
+
+    [Fact]
+    public async Task A_retry_for_a_title_that_has_since_gone_is_dropped()
+    {
+        var movieId = SeedMovie("27205");
+        await SetMarkerAsync(_time.GetUtcNow().AddDays(-1));
+        _feed.Changed[MediaKind.Movie] = ["27205"];
+        _metadata.OnFetch = _ => throw new HttpRequestException("timed out");
+        await Service().RunAsync(CancellationToken.None);
+
+        _metadata.OnFetch = null;
+        _feed.Changed[MediaKind.Movie] = [];
+        await _database.MediaItems.Where(item => item.Id == movieId).ExecuteDeleteAsync();
+        _time.Advance(TimeSpan.FromDays(1));
+
+        var report = await Service().RunAsync(CancellationToken.None);
+
+        Assert.Equal(0, report.Due);
+        Assert.Empty(await RetriesAsync());
+    }
+
+    private async Task<IReadOnlyList<string>> RetriesAsync()
+    {
+        await using var verify = new MediaServerDbContext(
+            new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        return (await verify.AppSettings.SingleAsync()).MetadataRefreshRetries;
     }
 
     private Guid SeedMovie(string providerId)

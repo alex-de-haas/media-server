@@ -20,10 +20,12 @@ public sealed class TmdbChangeFeed(
     : IMetadataChangeFeed
 {
     /// <summary>
-    /// A ceiling on paging. The lists are bounded in practice, but an unbounded loop against a remote
-    /// list is the kind of thing that turns a provider hiccup into a night of requests.
+    /// A ceiling on paging, per day. The lists run to tens of pages for a day, so this is far above
+    /// anything real — it is there because an unbounded loop against a remote list is the kind of thing
+    /// that turns a provider hiccup into a night of requests. Hitting it means the day could not be read
+    /// in full, which is reported as no answer rather than as a short one.
     /// </summary>
-    private const int MaxPages = 200;
+    private const int MaxPagesPerDay = 200;
 
     public string Key => "tmdb";
 
@@ -44,30 +46,49 @@ public sealed class TmdbChangeFeed(
             return [];
         }
 
-        // TMDb takes dates, not instants, and treats them as UTC days. A part-day window therefore has to
-        // round outward: asking for the day either end is in, rather than dropping the edges.
-        var start = since.UtcDateTime.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var end = until.UtcDateTime.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-
+        // TMDb takes dates, not instants, and treats them as UTC days, so the window is walked a day at a
+        // time. Asking for the whole span in one query would work, but its paging grows with the span:
+        // a fortnight's catch-up would run to hundreds of pages, and any cap on those turns into titles
+        // silently skipped. A day is the unit the provider actually answers in.
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        for (var page = 1; page <= MaxPages; page++)
+        for (var day = since.UtcDateTime.Date; day <= until.UtcDateTime.Date; day = day.AddDays(1))
+        {
+            var date = day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (await ReadDayAsync(path, date, ids, cancellationToken) is false)
+            {
+                return null;
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// Adds one day's changed ids to <paramref name="ids"/>. False when the day could not be read in
+    /// full — a failed request, an unexpected shape, or more pages than the cap allows. Reporting a
+    /// short answer as a complete one is the one thing this must not do: the caller advances its sync
+    /// marker on the strength of it, and would step over whatever went unread for good.
+    /// </summary>
+    private async Task<bool> ReadDayAsync(
+        string path, string date, HashSet<string> ids, CancellationToken cancellationToken)
+    {
+        for (var page = 1; page <= MaxPagesPerDay; page++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             using var document = await TmdbRequest.GetAsync(
                 httpClientFactory, settings, logger,
-                $"{path}?start_date={start}&end_date={end}&page={page}", cancellationToken);
+                $"{path}?start_date={date}&end_date={date}&page={page}", cancellationToken);
             if (document is null)
             {
-                // A failed page makes the whole answer unreliable: reporting the ids gathered so far as
-                // "everything that changed" would silently skip the rest.
-                logger.LogWarning("TMDb change list {Path} failed at page {Page}; skipping this refresh.", path, page);
-                return null;
+                logger.LogWarning("TMDb change list {Path} failed at page {Page} of {Date}; skipping this refresh.", path, page, date);
+                return false;
             }
 
             if (!document.RootElement.TryGetProperty("results", out var results))
             {
-                return null;
+                logger.LogWarning("TMDb change list {Path} answered without results for {Date}.", path, date);
+                return false;
             }
 
             foreach (var entry in results.EnumerateArray())
@@ -83,17 +104,13 @@ public sealed class TmdbChangeFeed(
                 : page;
             if (page >= totalPages)
             {
-                return ids;
-            }
-
-            if (page == MaxPages)
-            {
-                logger.LogWarning(
-                    "TMDb change list {Path} has more than {MaxPages} pages for {Start}..{End}; refreshing what was read.",
-                    path, MaxPages, start, end);
+                return true;
             }
         }
 
-        return ids;
+        logger.LogWarning(
+            "TMDb change list {Path} has more than {MaxPages} pages for {Date}; skipping this refresh rather than reading part of it.",
+            path, MaxPagesPerDay, date);
+        return false;
     }
 }

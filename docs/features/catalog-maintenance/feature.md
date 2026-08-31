@@ -106,10 +106,17 @@ moved, so the scheduled pass follows TMDb's change lists instead
 - `/movie/changes` and `/tv/changes` name everything the provider edited in a
   date range; the library is intersected with that, and only the titles held
   here are enriched. Removed titles are not: provider calls spent on a ghost buy
-  nothing.
+  nothing. The window is walked a **day at a time**, the unit TMDb answers in —
+  asking for a fortnight at once would run to hundreds of pages, and a day that
+  cannot be read in full is reported as no answer rather than as a short one.
 - `AppSettings.MetadataChangesSyncedThrough` is how far the pass has followed.
   It advances only when a pass completes, so a night the provider was
   unreachable is **retried** rather than stepped over.
+- An individual title whose enrich threw is named in
+  `AppSettings.MetadataRefreshRetries` and is due again the next night, whether
+  or not the provider touches it again. Holding the marker back for it instead
+  would grow the window every night until it clamped, and then re-refresh a
+  fortnight forever over one unreachable title.
 - The first ever run records the instant and refreshes nothing: the library was
   enriched as it was imported, and reaching backwards would refresh titles on no
   evidence.
@@ -133,8 +140,10 @@ hand-written track labels and sidecars all survive it.
 - `LibraryDeleteServiceTests` — the signal definition: history, rating or
   favorite keep a title; aggregate counters and a resume position do not.
 - `IncrementalMetadataRefreshServiceTests` — marker behavior (first run, retry
-  on provider failure, clamped window), intersection with the library, and
-  ghosts excluded.
+  on provider failure, clamped window), intersection with the library, ghosts
+  excluded, and a failed enrich owed again the next night.
+- `TmdbChangeFeedTests` — the window walked day by day, every page of a day
+  read, and a failed day answered as nothing rather than as a short list.
 - `EnrichPreservesManualEditsTests` — the operator's choices survive an
   unattended enrich.
 - `NightlyMaintenanceWorkerTests` — the 03:00 schedule.
