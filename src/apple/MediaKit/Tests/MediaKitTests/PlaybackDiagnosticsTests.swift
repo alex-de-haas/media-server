@@ -209,4 +209,19 @@ struct StartupTests {
         #expect(diagnostics.resolveSeconds == nil)
         #expect(diagnostics.openSeconds == nil)
     }
+
+    @Test("A play head sitting where a resume sent it is not the film starting")
+    func aResumeIsNotAStart() {
+        // The seek lands before the first frame appears. Counting that as the film opening would
+        // report a resumed title — the very one somebody would be timing — as instant.
+        #expect(!PlaybackDiagnostics.hasStarted(at: 3_600, from: 3_600))
+        #expect(!PlaybackDiagnostics.hasStarted(at: 3_600.1, from: 3_600))
+        #expect(PlaybackDiagnostics.hasStarted(at: 3_601, from: 3_600))
+    }
+
+    @Test("From the top, any movement at all is the film starting")
+    func fromTheTop() {
+        #expect(!PlaybackDiagnostics.hasStarted(at: 0, from: 0))
+        #expect(PlaybackDiagnostics.hasStarted(at: 1, from: 0))
+    }
 }

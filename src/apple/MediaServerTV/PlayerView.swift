@@ -70,7 +70,9 @@ struct PlayerView: UIViewControllerRepresentable {
         let overlayHost: UIView = controller.contentOverlayView ?? controller.view
 
         if let diagnostics {
-            diagnostics.start(observing: item)
+            // The same value the seek above used, so a resumed film is not reported as opening the
+            // instant its play head landed where it was sent.
+            diagnostics.start(observing: item, from: startAt > 1 ? startAt : 0)
             let overlay = UIHostingController(rootView: DiagnosticsOverlay(diagnostics: diagnostics))
             overlay.view.backgroundColor = .clear
             // A child of the player, not a loose view inside it: a hosting controller that never joins

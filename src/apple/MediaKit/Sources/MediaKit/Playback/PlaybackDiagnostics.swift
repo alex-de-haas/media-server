@@ -71,6 +71,7 @@ public final class PlaybackDiagnostics {
     public private(set) var openSeconds: Double?
 
     private var opened: Date?
+    private var openedFrom: Double = 0
 
     /// Kept short: this is read on a television, at a glance, while something is going wrong.
     private static let keep = 240
@@ -88,7 +89,11 @@ public final class PlaybackDiagnostics {
         resolveSeconds = seconds
     }
 
-    public func start(observing item: AVPlayerItem) {
+    /// - Parameter from: where playback was asked to begin. A resume seeks there **before** the first
+    ///   frame appears, so a play head merely sitting at a non-zero position is not the film starting —
+    ///   and taking it for one would report a resumed film as opening instantly, which is precisely the
+    ///   film somebody would be timing.
+    public func start(observing item: AVPlayerItem, from: Double = 0) {
         // Starting twice would leave the first timer and observer running, doubling every count.
         stop()
 
@@ -96,6 +101,7 @@ public final class PlaybackDiagnostics {
         // cares about is how long the film took to appear, not how long a change to it took.
         if opened == nil {
             opened = Date()
+            openedFrom = from
         }
 
         self.item = item
@@ -146,9 +152,11 @@ public final class PlaybackDiagnostics {
             stalls = logged
         }
 
-        // The first frame is the first moment the play head has moved: `readyToPlay` says the player
-        // could start, which is not the same as a viewer seeing anything.
-        if openSeconds == nil, let opened, position > 0 {
+        // The first frame is the first moment the play head has **moved from where it was asked to
+        // start**: `readyToPlay` says the player could begin, which is not the same as a viewer seeing
+        // anything, and a resume's seek puts the head at its destination before anything is shown. A
+        // quarter of a second is past any landing jitter and well inside one sample.
+        if openSeconds == nil, let opened, Self.hasStarted(at: position, from: openedFrom) {
             openSeconds = Date().timeIntervalSince(opened)
         }
 
@@ -226,6 +234,14 @@ public final class PlaybackDiagnostics {
     nonisolated static func advance(from: Double, to: Double) -> Double {
         let moved = to - from
         return moved > 0 && moved <= 2 ? moved : 0
+    }
+
+    /// Whether the play head has moved from where playback was asked to begin.
+    ///
+    /// A quarter of a second is past any landing jitter from the seek and well inside the one-second
+    /// gap between readings, so a film that opens promptly is not reported as opening a beat late.
+    nonisolated static func hasStarted(at position: Double, from: Double) -> Bool {
+        position > from + 0.25
     }
 
     /// Megabits per second, from the bytes that arrived between two readings.

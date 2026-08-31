@@ -33,6 +33,11 @@ struct TitleView: View {
     /// watching, for the next film's progress to be filed against.
     @State private var viewing = 0
 
+    /// Where a viewing ended, when it ended before its session had opened. The session is still open on
+    /// the server by then — the request went out — so the honest thing is to close it as soon as its id
+    /// arrives, rather than leave it open for ever and lose the position with it.
+    @State private var endedAt: (viewing: Int, position: Double)?
+
     var body: some View {
         ScrollView {
             if let detail {
@@ -78,6 +83,10 @@ struct TitleView: View {
                         itemId: title.id, playSessionId: session, positionSeconds: position) }
                     self.session = nil
                     diagnostics = nil
+
+                    // Noted whether or not a session exists: when one is still being opened, this is
+                    // the position it will be closed at the moment its id arrives.
+                    endedAt = (viewing, position)
                 })
             .ignoresSafeArea()
         }
@@ -156,11 +165,22 @@ struct TitleView: View {
                     mediaSourceId: stream.mediaSourceId,
                     positionSeconds: detail.resumeSeconds)
 
+                guard let opened else { return }
+
                 // Only if this is still the viewing that asked. Counted rather than compared against
                 // the stream, because leaving a film and starting the same one again is two viewings
                 // and the first one's session must not be filed against the second.
-                guard opening == viewing else { return }
-                session = opened
+                if opening == viewing, endedAt?.viewing != opening {
+                    session = opened
+                    return
+                }
+
+                // It ended while this was in flight. The server has an open session either way, so it
+                // is closed here at the position the viewer actually reached instead of being dropped.
+                await playback.stop(
+                    itemId: title.id,
+                    playSessionId: opened,
+                    positionSeconds: endedAt?.viewing == opening ? endedAt?.position ?? 0 : 0)
             }
         } catch {
             // Shown on a television, so the sentence Foundation writes rather than the type's whole

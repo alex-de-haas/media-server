@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-29
+Updated: 2026-08-31
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -487,7 +487,13 @@ critical path for no reason but the order the code was written in.
 
 Its answer is taken only if the viewing that asked for it is still the one on screen. Counted
 rather than compared against the film, because leaving and starting the same one again is two
-viewings, and the first one's session must not collect the second one's progress.
+viewings, and the first one's session must not collect the second one's progress. When it
+arrives after its viewing ended it is **closed** at the position the viewer reached rather than
+dropped: the request had already gone out, so the session exists on the server either way.
+
+`первый кадр через` measures movement from **where playback was asked to begin**, not from zero.
+A resume seeks to its destination before anything appears, and counting that as the film opening
+would report a resumed title — the very one anybody would be timing — as instant.
 
 What a viewer waits for is now one round trip — `resolve`, which the player needs the URL
 from — and then the player itself. The overlay reports both halves separately, `сервер
