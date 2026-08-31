@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-19
+Updated: 2026-08-31
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -476,6 +476,12 @@ chose` is the one answer meaning our own sample table points where nothing lives
 said by accident. The span is the smallest and largest presentation time in the range rather than the
 first and last, because a reordered video track stores `0, 83, 41, 166` and reading its ends would
 print an interval that runs backwards.
+
+Each line ends by saying whether the response **finished or was cut off**. In a minimal API the
+injected cancellation token is the request's own abort signal, so this separates a response served in
+full from one abandoned — by the client, or by Kestrel itself, which aborts a response of its own accord
+when the reader falls below its minimum data rate. A player whose buffer is full stops reading for
+exactly that long, and until now the log could not tell the two apart.
 
 Both are off by default. A film is thousands of reads a second and none of them should pay for a
 stopwatch nobody is reading.

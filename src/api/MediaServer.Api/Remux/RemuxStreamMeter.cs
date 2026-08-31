@@ -33,11 +33,18 @@ namespace MediaServer.Api.Remux;
 /// figure here is a ratio of durations and a test that has to sleep to produce them measures the build
 /// machine's mood rather than this arithmetic.
 /// </param>
+/// <param name="abandoned">
+/// Whether the client is gone. In a minimal API the injected token <b>is</b> <c>RequestAborted</c>, so
+/// this separates a response that finished from one that was cut off — which is a thing this log has
+/// never been able to say. Kestrel aborts a response of its own accord when the client reads slower
+/// than its minimum data rate, and a player whose buffer is full stops reading for exactly that long.
+/// </param>
 internal sealed class RemuxStreamMeter(
     ILogger logger,
     string label,
     RemuxStreamActivity? activity = null,
     Func<long, long, string>? whose = null,
+    Func<bool>? abandoned = null,
     Func<TimeSpan>? clock = null)
 {
     /// <summary>Often enough to see a stretch of film go bad, rare enough that a log stays readable.</summary>
@@ -202,7 +209,7 @@ internal sealed class RemuxStreamMeter(
         logger.LogInformation(
             "Remux {Label} {Window}: {Megabytes:F1} MB in {Seconds:F2}s = {Mbps:F0} Mbit/s; "
             + "disk {Disk:F0}%, socket {Socket:F0}%; {Reads} reads of {Kilobytes:F0} KB; "
-            + "idle {Idle} before it; bytes {Range}; carrying {Whose}.",
+            + "idle {Idle} before it; bytes {Range}; carrying {Whose}; {Ending}.",
             label,
             window,
             bytes / 1_000_000d,
@@ -214,6 +221,7 @@ internal sealed class RemuxStreamMeter(
             bytes / (double)reads / 1000,
             _idle is { } idle ? $"{idle.TotalMilliseconds:F0} ms" : "nothing",
             from < 0 ? "unknown" : $"{from}-{to}",
-            from < 0 || whose is null ? "not asked" : whose(from, to));
+            from < 0 || whose is null ? "not asked" : whose(from, to),
+            abandoned?.Invoke() == true ? "ABANDONED by the client" : "served in full");
     }
 }

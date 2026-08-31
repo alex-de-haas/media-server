@@ -292,7 +292,11 @@ internal sealed class RemuxStreamService(
                         settings.PlaybackDiagnosticsEnabled
                             ? new RemuxStreamMeter(
                                 logger, mediaSourceId.ToString("N")[..8], activity,
-                                (from, to) => Whose(spans, tracks, built.Header.LongLength, from, to))
+                                (from, to) => Whose(spans, tracks, built.Header.LongLength, from, to),
+                                // In a minimal API this token is the request's own abort signal, so a
+                                // response cut off — by the client, or by Kestrel's minimum data rate
+                                // when a full player stops reading — says so instead of looking served.
+                                () => cancellationToken.IsCancellationRequested)
                             : null),
                     "video/mp4",
                     etag,

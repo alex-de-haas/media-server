@@ -73,6 +73,15 @@ public final class PlaybackDiagnostics {
     private var opened: Date?
     private var openedFrom: Double = 0
 
+    /// What AVFoundation says went wrong, from a journal nobody here had ever opened.
+    ///
+    /// `AVPlayerItemErrorLog` records the failures a player survives — a connection dropped, a request
+    /// refused, a response that stopped — with the HTTP status and the domain behind it. None of them
+    /// reach `AVPlayerItem.status`, which stays `readyToPlay` throughout, so a player that quietly
+    /// stopped asking for anything looks from the outside exactly like a healthy one.
+    public private(set) var lastError: String?
+    public private(set) var errors = 0
+
     /// Kept short: this is read on a television, at a glance, while something is going wrong.
     private static let keep = 240
 
@@ -145,6 +154,8 @@ public final class PlaybackDiagnostics {
         let ahead = Self.bufferAhead(
             in: item.loadedTimeRanges.map(\.timeRangeValue), at: position)
 
+        readErrors(item)
+
         // The access log's own stall count, which counts what the notification can miss.
         let event = item.accessLog()?.events.last
         let logged = event?.numberOfStalls ?? -1
@@ -194,6 +205,26 @@ public final class PlaybackDiagnostics {
         if samples.count > Self.keep {
             samples.removeFirst(samples.count - Self.keep)
         }
+    }
+
+    /// Anything new in the player's own error journal, said out loud.
+    ///
+    /// Read every second rather than waited for: `AVPlayerItemNewErrorLogEntry` exists, but a journal
+    /// polled beside everything else needs no second delivery path and cannot miss an entry that
+    /// arrived before the observer did.
+    private func readErrors(_ item: AVPlayerItem) {
+        guard let events = item.errorLog()?.events, events.count > errors else { return }
+
+        for event in events[errors...] {
+            let status = event.errorStatusCode
+            let domain = event.errorDomain
+            let comment = event.errorComment ?? "no comment"
+            Self.log.error(
+                "Player error: \(domain, privacy: .public) \(status) — \(comment, privacy: .public)")
+            lastError = status == 0 ? "\(domain): \(comment)" : "\(domain) \(status)"
+        }
+
+        errors = events.count
     }
 
     /// How much media is loaded past the play head.
