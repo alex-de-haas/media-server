@@ -485,6 +485,10 @@ what leaves a record for somebody who stops after ten seconds, and it was always
 so a server slow to answer should never have been something a viewer waits on. It was on the
 critical path for no reason but the order the code was written in.
 
+Its answer is taken only if the viewing that asked for it is still the one on screen. Counted
+rather than compared against the film, because leaving and starting the same one again is two
+viewings, and the first one's session must not collect the second one's progress.
+
 What a viewer waits for is now one round trip — `resolve`, which the player needs the URL
 from — and then the player itself. The overlay reports both halves separately, `сервер
 ответил` and `первый кадр через`, because ten seconds to first frame on a television against

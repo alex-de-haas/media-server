@@ -28,6 +28,11 @@ struct TitleView: View {
     /// second for the length of a film.
     @State private var diagnostics: PlaybackDiagnostics?
 
+    /// Which viewing this is. The session opens beside the player now, so its answer can land after the
+    /// viewer has left — and assigning it then would leave a session id belonging to a film nobody is
+    /// watching, for the next film's progress to be filed against.
+    @State private var viewing = 0
+
     var body: some View {
         ScrollView {
             if let detail {
@@ -143,11 +148,19 @@ struct TitleView: View {
 
             // Alongside, not before. Opening it at all is what leaves a record for a viewer who
             // stops after ten seconds; a report filed a moment late is a report filed.
-            Task {
-                session = try? await playback.start(
+            viewing += 1
+            let opening = viewing
+            Task { @MainActor in
+                let opened = try? await playback.start(
                     itemId: title.id,
                     mediaSourceId: stream.mediaSourceId,
                     positionSeconds: detail.resumeSeconds)
+
+                // Only if this is still the viewing that asked. Counted rather than compared against
+                // the stream, because leaving a film and starting the same one again is two viewings
+                // and the first one's session must not be filed against the second.
+                guard opening == viewing else { return }
+                session = opened
             }
         } catch {
             // Shown on a television, so the sentence Foundation writes rather than the type's whole
