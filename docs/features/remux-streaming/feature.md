@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-19
+Updated: 2026-08-31
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -476,6 +476,23 @@ chose` is the one answer meaning our own sample table points where nothing lives
 said by accident. The span is the smallest and largest presentation time in the range rather than the
 first and last, because a reordered video track stores `0, 83, 41, 166` and reading its ends would
 print an interval that runs backwards.
+
+The **closing** line says whether the response finished or was cut off. In a minimal API the injected
+cancellation token is the request's own abort signal, so this separates a response served in full from
+one aborted — a thing this log could never say.
+
+It deliberately names no culprit. Kestrel aborts a response of its own accord when the reader falls
+below its minimum data rate, and a player whose buffer is full stops reading for exactly that long, so
+"the client went away" would be the wrong answer in the very case this was added to find. Periodic lines
+say `still going` and claim nothing: written while the response is open, with the abort signal not yet
+raised, a completion claim there would manufacture the false signal this exists to catch.
+
+Each line also says **how many responses for that source are still open**. A television stops asking
+for anything and never starts again, and restarting the *server* — not merely the film — brings it back
+for a while, which points at something that accumulates and is then swept away. Connections are the
+candidate: a client has a limit per host, and a player holding every one of them in a half-finished
+response has nothing left to ask with. A count that climbs and stays climbed while the picture is
+frozen says so; one that sits at one or two throughout rules the whole family out.
 
 Both are off by default. A film is thousands of reads a second and none of them should pay for a
 stopwatch nobody is reading.

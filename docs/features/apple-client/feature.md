@@ -228,6 +228,16 @@ untouched file, so a source with eleven dubs is paid for in full to hear one. Wa
 starts an hour in and dividing this session's bytes by an hour nobody fetched would report a fraction of
 the real cost; a seek is not watching either.
 
+The overlay also reads **`AVPlayerItemErrorLog`**, which nothing here had ever opened. It records the
+failures a player survives — a connection dropped, a request refused, a response that stopped — with the
+HTTP status and the domain behind each. None of them reach `AVPlayerItem.status`, which stays
+`readyToPlay` throughout, so a player that has quietly stopped asking for anything looks from every
+other angle exactly like a healthy one. If it recorded a reason, that is where it is.
+
+The journal belongs to the **item**, so the read cursor moves with it: carried over from a replaced item
+— switching a dub builds one — it would skip the new item's first entries, or all of them, and failures
+after a track change would vanish from both the overlay and the log.
+
 Most of the rest comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls`
 counts what a `playbackStalled` notification can miss.
 

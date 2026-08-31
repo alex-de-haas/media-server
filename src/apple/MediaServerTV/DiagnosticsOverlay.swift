@@ -26,6 +26,18 @@ struct DiagnosticsOverlay: View {
             row("замираний", "\(diagnostics.stalls)", warn: diagnostics.stalls > 0)
             row("поспевает", diagnostics.keepingUp ? "да" : "НЕТ", warn: !diagnostics.keepingUp)
 
+            // The journal AVFoundation keeps and nothing here used to read. A player that stopped
+            // asking for anything looks healthy from every other angle, so if it recorded a reason
+            // this is where it is.
+            if let error = diagnostics.lastError {
+                row("ошибок плеера", "\(diagnostics.errors)", warn: true)
+                Text(error)
+                    .font(.system(size: 18, design: .monospaced))
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .frame(maxWidth: 900, alignment: .leading)
+            }
+
             Divider().background(.white.opacity(0.3))
 
             if let resolve = diagnostics.resolveSeconds {

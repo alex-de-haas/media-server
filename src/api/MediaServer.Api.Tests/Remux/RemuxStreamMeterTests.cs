@@ -241,4 +241,97 @@ public sealed class RemuxStreamMeterTests
 
         Assert.Contains("carrying not asked", log.Lines[0]);
     }
+
+    [Fact]
+    public void Responses_left_open_are_counted_and_released()
+    {
+        // A television that stops asking for anything, and comes back when the *server* is restarted,
+        // points at something that accumulates until swept away. Connections are the candidate, and a
+        // count that climbs and stays climbed while the picture is frozen would say so.
+        var log = new Recorder();
+        var activity = new RemuxStreamActivity();
+        var clock = new StatedClock();
+
+        var first = new RemuxStreamMeter(log, "film", activity, clock: () => clock.Now);
+        var second = new RemuxStreamMeter(log, "film", activity, clock: () => clock.Now);
+        Assert.Equal(2, activity.Open);
+
+        var began = clock.At(0);
+        clock.At(1);
+        first.Served(began, 1_000);
+        first.Done();
+
+        Assert.Equal(1, activity.Open);
+        Assert.Contains("1 still open", log.Lines[0]);
+
+        second.Served(clock.At(2), 1_000);
+        second.Done();
+        Assert.Equal(0, activity.Open);
+    }
+
+    [Fact]
+    public void Closing_twice_does_not_drive_the_count_below_nothing()
+    {
+        var activity = new RemuxStreamActivity();
+        var meter = new RemuxStreamMeter(new Recorder(), "film", activity, clock: () => TimeSpan.Zero);
+
+        meter.Done();
+        meter.Done();
+
+        Assert.Equal(0, activity.Open);
+    }
+
+    [Fact]
+    public void A_response_that_finished_says_so()
+    {
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(
+            log, "film", abandoned: () => false, clock: () => clock.Now);
+
+        var began = clock.At(0);
+        clock.At(1);
+        meter.Served(began, 1_000);
+        meter.Done();
+
+        Assert.Contains("served in full", log.Lines[0]);
+    }
+
+    [Fact]
+    public void A_response_that_was_cut_off_says_so_without_naming_a_culprit()
+    {
+        // Kestrel aborts a response itself when the reader falls below its minimum rate, and a player
+        // with a full buffer stops reading for exactly that long. Blaming the client here would blame
+        // the wrong party in the case this was added to find.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(
+            log, "film", abandoned: () => true, clock: () => clock.Now);
+
+        var began = clock.At(0);
+        clock.At(1);
+        meter.Served(began, 1_000);
+        meter.Done();
+
+        Assert.Contains("ABORTED mid-response", log.Lines[0]);
+        Assert.DoesNotContain("client", log.Lines[0]);
+    }
+
+    [Fact]
+    public void A_periodic_line_claims_nothing_about_how_the_response_ends()
+    {
+        // It is written while the response is still open, when the abort token is normally false —
+        // so a completion claim there would manufacture the false signal this exists to catch.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(
+            log, "film", abandoned: () => false, clock: () => clock.Now);
+
+        meter.Served(clock.At(0), 1_000);
+        meter.Served(clock.At(11), 1_000);
+
+        Assert.Single(log.Lines);
+        Assert.Contains("still going", log.Lines[0]);
+        Assert.DoesNotContain("served in full", log.Lines[0]);
+    }
 }
