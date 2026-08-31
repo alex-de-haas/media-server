@@ -26,7 +26,7 @@ changes is who decides when to fetch them and how much.
 
 From the production range log, on a 70 GB film at roughly 78 Mbit/s:
 
-| | |
+| Measured over one 13-second window | Rate |
 | --- | --- |
 | Distinct bytes the film needs | ~70 Mbit/s |
 | Bytes actually sent | ~98 Mbit/s (1.39× overlap) |
@@ -45,6 +45,10 @@ one this plan can promise.
 
 ## Target behaviour, as a diff against today
 
+- **On the remux path only.** `PlayerView` builds its asset the same way whichever decision
+  the server returned, so "the player" would mean both; direct play serves a file the server
+  never assembled and is out of scope until the end of this plan. The gate is a deliverable
+  below rather than an assumption here.
 - The player is handed a custom-scheme URL, and a delegate answers its range requests.
 - Answers come from a **window held in memory** wherever possible, filled by a single
   forward-reading connection running ahead of the play head.
@@ -81,6 +85,10 @@ after it is a change of policy rather than a leap.
 - [ ] Answer `contentInformationRequest`: content type, length, byte ranges supported.
       A wrong answer here is "does not play at all" rather than "plays worse".
 - [ ] Answer `dataRequest` by range, including `requestsAllDataToEndOfFile`.
+- [ ] **Only when the decision is remux.** Direct play keeps the plain `AVURLAsset`, so a
+      path the server did not assemble is not routed through a loader that assumes it did.
+- [ ] Unit tests over the range arithmetic: a request satisfied whole, one satisfied in
+      part, one for the end of the file, and one cancelled while outstanding.
 - [ ] Honour cancellation: a request AVFoundation drops must stop our fetch with it.
 - [ ] Verify on the television: plays, seeks, resumes, **Dolby Vision engages**.
 - [ ] Verify against the server log: the request pattern is *the same as today*. A
@@ -105,15 +113,25 @@ arrived — and playback resumed only when the viewer pressed pause and play.
 That is the remedy, and it can be automatic. With the delegate we know something no part
 of the client knows today: that the player has asked for nothing while its buffer drains.
 
-- [ ] Detect it: no delegate request for N seconds while the buffer is falling.
+- [ ] Detect it **by absence of demand and of delivery, not by absence of callbacks**. A
+      healthy player issues one `requestsAllDataToEndOfFile` and leaves it outstanding while
+      we feed it, so seconds without a new callback is what normal playback looks like. The
+      signal is that nothing is outstanding *and* nothing has been consumed — the same pair
+      the server-side log uses, position and bytes, both still.
 - [ ] Re-seat the item at the current position, which is what the viewer does by hand.
 - [ ] Count it where it can be seen, so a fix that fires constantly is not mistaken for
       a fix that works.
+- [ ] Unit tests over the detector: an outstanding request being fed slowly is **not** a
+      wedge, a full buffer consuming nothing is not one either, and both stopped together
+      is. These decide whether a working film gets interrupted, so they come before the
+      remedy is wired to anything.
 
 ### Phase 4 — say what the loader knows
 
 - [ ] The overlay gains what only this layer can report: how full the window is, how far
       ahead of the play head it reaches, and how many requests reached the server.
+- [ ] Unit tests over the window: eviction under its budget, a seek discarding what is no
+      longer ahead, and a refill restarting after the connection was dropped.
 
 ## Open questions
 
@@ -122,7 +140,7 @@ of the client knows today: that the player has asked for nothing while its buffe
    this before anything is built on it.
 2. **How much memory may the window take?** The decoder wants its share of an Apple TV,
    and a 4K film at 78 Mbit/s is ten megabytes a second — a minute of read-ahead is
-   nearly six hundred. To be answered by measurement, starting small.
+   nearly six hundred megabytes. To be answered by measurement, starting small.
 3. **Does the player's request pattern change once answers are instant?** It may ask for
    more, or less, or the same. Phase 2's measurement answers it; the plan assumes
    nothing.
@@ -134,7 +152,11 @@ of the client knows today: that the player has asked for nothing while its buffe
 
 ## Verification steps
 
-The same instruments that found every fault in this area, used the same way:
+`swift test` first, and the phases above each carry their own cases: the range arithmetic,
+the wedge detector, and the window. The detector's are the ones that matter most — they
+decide whether a film that is playing perfectly well gets interrupted.
+
+Then the same instruments that found every fault in this area, used the same way:
 
 - **The server's range log** (`PLAYBACK_DIAGNOSTICS`), compared against the run this
   plan quotes: request count, the isolated audio reads, and the overlap factor.
