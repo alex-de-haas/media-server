@@ -190,10 +190,15 @@ the pairing screen again if the access token itself has gone.
       `NativeTrackSelector` existed and was called from nowhere, so the URL carried no
       choice and the packager took whichever audio track came first. It does now.
 - [ ] **Startup on a television.** Ten seconds to first frame on the Apple TV
-      against three on a Mac — the difference is the A12 parsing the tables. Left as
-      it is on 2026-08-17: the tables are already minimal, and what remains to trim
-      is our own sequence of `resolve` then session-start then player, three round
-      trips through the tunnel that could be two.
+      against three on a Mac. The session start came off the critical path on
+      2026-08-29 — it was always best effort and never something to wait on — so what
+      a viewer waits for is now `resolve` and then the player.
+
+      What remains is unmeasured rather than unfixed, and the overlay now reports the
+      two halves separately so the next attempt starts from a number instead of an
+      assertion. If the server's half is small, the rest is the A12 parsing tables
+      that are already minimal, and the answer is a different transport rather than a
+      trim.
 
 ### Phase 5 — the generated client *(moved ahead of Phase 3 on 2026-08-10)*
 

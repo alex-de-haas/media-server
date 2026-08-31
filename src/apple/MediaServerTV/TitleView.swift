@@ -118,6 +118,8 @@ struct TitleView: View {
         resolving = true
         defer { resolving = false }
 
+        let asked = Date()
+
         do {
             // The version the viewer picked, not whichever the server listed first. A picker that
             // changes what is listed and not what happens is worse than no picker at all.
@@ -126,20 +128,27 @@ struct TitleView: View {
 
             guard case .play(let stream) = answer else { return }
 
-            // Best effort, and deliberately so. Opening it first means a viewer who stops after ten
-            // seconds still leaves a record of having started — but a server that will not open one is
-            // no reason to refuse to play a film. When this fails there is simply no session, and
-            // nothing is reported.
-            session = try? await playback.start(
-                itemId: title.id,
-                mediaSourceId: stream.mediaSourceId,
-                positionSeconds: detail.resumeSeconds)
-
             // Made here rather than in the cover's builder, so the run being watched is collected by
             // one object from beginning to end.
-            diagnostics = PlaybackPreferencesStore().load().showDiagnostics
+            let watching = PlaybackPreferencesStore().load().showDiagnostics
                 ? PlaybackDiagnostics() : nil
+            watching?.resolved(after: Date().timeIntervalSince(asked))
+            diagnostics = watching
+
+            // The film opens now. Everything a viewer is waiting for is in hand, and the only thing
+            // still outstanding — the session a progress report is filed against — was always best
+            // effort: a server that will not open one is no reason to keep somebody watching a
+            // spinner. It was on the critical path for no reason but the order it was written in.
             playing = stream
+
+            // Alongside, not before. Opening it at all is what leaves a record for a viewer who
+            // stops after ten seconds; a report filed a moment late is a report filed.
+            Task {
+                session = try? await playback.start(
+                    itemId: title.id,
+                    mediaSourceId: stream.mediaSourceId,
+                    positionSeconds: detail.resumeSeconds)
+            }
         } catch {
             // Shown on a television, so the sentence Foundation writes rather than the type's whole
             // description — a viewer can do nothing with a decoding path.

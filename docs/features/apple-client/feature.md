@@ -479,9 +479,17 @@ the unit that matters. It is a preference and not an instruction: the player sti
 it to what it will hold.
 
 Progress is reported every ten seconds, which is often enough that a resume lands where the
-viewer left and rare enough that a two-hour film is a few hundred requests. A session opens
-*before* the player, so someone who stops after ten seconds still leaves a record of having
-started, and a failure to report never interrupts what is being watched.
+viewer left and rare enough that a two-hour film is a few hundred requests. The session it is
+filed against opens **alongside** the player rather than in front of it: opening it at all is
+what leaves a record for somebody who stops after ten seconds, and it was always best effort,
+so a server slow to answer should never have been something a viewer waits on. It was on the
+critical path for no reason but the order the code was written in.
+
+What a viewer waits for is now one round trip — `resolve`, which the player needs the URL
+from — and then the player itself. The overlay reports both halves separately, `сервер
+ответил` and `первый кадр через`, because ten seconds to first frame on a television against
+three on a Mac had been argued about on assertions: the tables, the round trips, the tunnel.
+They divide in the one place they can, either side of the URL existing.
 
 **Every refusal is shown as itself.** The server answers with a machine-readable reason
 precisely so a client need not say "cannot play this", and a reason this build has never
