@@ -292,13 +292,6 @@ public static class LibraryEndpoints
             return refreshed ? Results.Accepted() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
-        // Re-probe everything that was read without the transcode engine, now that it is attached (admin
-        // only). Explicit rather than automatic on reconnection: rewriting stored media data on its own the
-        // moment a dependency reappears would be a surprise, and a probe is fast enough to just run.
-        group.MapPost("/backfill-media", async (LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
-            Results.Ok(await maintenance.BackfillHeaderProbedAsync(cancellationToken)))
-            .RequireAuthorization(AppRoles.AdminPolicy);
-
         // Reassign a misidentified leaf (movie/episode) to a corrected identity and rebuild its hardlink (admin only).
         group.MapPost("/{id:guid}/remap", async (Guid id, RemapRequest request, RemapService remap, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
@@ -343,10 +336,6 @@ public static class LibraryEndpoints
             Results.Ok(await coordinator.ListActiveAsync(cancellationToken)))
             .RequireAuthorization(AppRoles.AdminPolicy);
 
-        // Scan all online catalogs for missing library files (admin only); also runs on a timer.
-        group.MapPost("/scan", async (LibraryMaintenanceService maintenance, CancellationToken cancellationToken) =>
-            Results.Ok(await maintenance.ScanAsync(cancellationToken)))
-            .RequireAuthorization(AppRoles.AdminPolicy);
     }
 
     /// <summary>

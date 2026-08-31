@@ -1,16 +1,45 @@
 # Library Item Tombstones
 
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-08-31
 
 Deleting a movie, series, season, or episode no longer erases the user's
-relationship with it. An item some user favorited, watched, holds a resume
-position on, or played at least once survives deletion as a **tombstone**: the
+relationship with it. An item some user favorited, rated, or has at least one
+play of in their history survives deletion as a **tombstone**: the
 `MediaItem` row stays, unpublished (`PublicId` null) and stamped with
 `RemovedAt`, together with its metadata, artwork, person credits,
 `UserItemData`, and every `PlaybackHistoryEntry`. Its sources, streams, and
 (when asked) files are removed exactly as before. An item nobody has touched
 is purged completely — tombstones preserve history, they don't hoard husks.
+
+## What counts as signal
+
+A **history entry**, a **rating**, or a **favorite** — for any user. Nothing
+else, and the exclusions are deliberate:
+
+- `Played` and `PlayCount` are projections of history and state nothing it does
+  not: every path that marks something watched writes an entry
+  (`WatchHistoryRecorder` stages a timeless one for a first manual mark, dated
+  ones for completions, manual logs and provider sync). Reading them as well
+  only made a title immortal when its counters had drifted from the entries they
+  came from — and a drifted counter is not something the UI can clear, so the
+  ghost could never be emptied.
+- A **resume position** is not a relationship: an abandoned half-watch says the
+  viewer did not care.
+
+The same definition decides what a catalog scan does with a title whose files
+vanished (see [Catalog maintenance](../catalog-maintenance/feature.md)).
+
+## The last mark takes the ghost with it
+
+Clearing the last thing that holds a tombstone up purges it, then and there:
+the last rating or favorite cleared from its card, or the last play deleted
+from the watched calendar. Signal is judged across **every** user, so tidying
+up one's own marks never erases someone else's history.
+
+It is immediate rather than swept up later because clearing is the only way to
+empty a ghost: a row left standing with nothing on it is a title nobody can
+see, play, or reach — and one that could never be removed again.
 
 ## Deletion
 
@@ -74,19 +103,35 @@ tombstone surfaces nowhere. Two places deliberately know ghosts:
 
 - The **watched calendar** keeps rendering plays of tombstoned titles with
   poster and title from the retained metadata (it never links to item pages).
-- The **Removed titles** section on Settings lists every tombstoned movie and
-  series with the signed-in user's signal summary (favorite, plays aggregated
-  across the ghost subtree, last watched). It offers clearing one's own
-  favorite — the one favorite write that reaches ghosts; the ordinary
-  endpoint refuses them — and, for admins, **Delete permanently**: the
-  retroactive full purge of the tombstone and its subtree
-  (`DELETE /api/library/removed/{id}`). The section hides while empty.
+- The **Movies** and **Series** grids offer a **Show removed** toggle, which
+  appends the signed-in user's ghosts of that kind after the library — dimmed,
+  badged *Removed*, and never mixed into it. Theirs alone: a tombstone is kept
+  alive by **any** user's signal, so the full set includes titles this user has
+  never touched, and listing those would put someone else's viewing in their
+  grid under an empty summary. The toggle is off by default and absent entirely
+  when this user has none; it lives in the URL (`?removed=1`), like the catalog
+  filter, so the view survives a refresh.
+
+A ghost card opens a dialog rather than a page — there is no page, and nothing
+about it can be played or edited. The dialog shows the user's signal summary
+(favorite, rating, plays aggregated across the ghost subtree, last watched) and
+the only writes that reach a tombstone:
+
+- **Unfavorite**, across the whole ghost subtree — the favorite may sit on an
+  episode that kept the chain alive, and the ordinary endpoint refuses ghosts;
+- **Clear rating** — its own action, because deleting a file does not retract a
+  verdict on a film that was watched;
+- **Delete permanently** (admin), the retroactive full purge of the tombstone
+  and its subtree (`DELETE /api/library/removed/{id}`).
+
+Clearing the last of those marks purges the ghost outright, as above.
 
 ## Testing Expectations
 
 - `LibraryDeleteServiceTests` — tombstone vs purge decision, `deleteUserData`,
   container rules (extras, ghost ancestors), metadata retention,
-  favorite-only movies.
+  favorite-only and rating-only movies, and the exclusions: aggregate counters
+  and a resume position keep nothing alive.
 - `CatalogServiceTests` — catalog-less tombstones with ancestor chains;
   untouched items purge with the catalog.
 - `TombstoneRevivalTests` — end-to-end re-download revival: same internal and
@@ -98,7 +143,14 @@ tombstone surfaces nowhere. Two places deliberately know ghosts:
   tombstones instead of purging.
 - `TombstoneLeakRegressionTests` — ghosts leak into no read surface; the
   tracked-title unlink on tombstoning.
-- `RemovedTitlesServiceTests` — list and signal summary, ghost-only favorite
-  clearing, subtree purge and refusals.
+- `RemovedTitlesServiceTests` — list and signal summary, a ghost held up by
+  another user staying out of this one's list, ghost-only favorite and rating
+  clearing, subtree purge and refusals, and the purge that follows the last
+  mark being cleared.
+- `WatchHistoryEntryServiceTests` — deleting a ghost's last play takes the
+  ghost; another user's play keeps it; a published title is untouched.
+- Web e2e (`removed-titles.spec.ts`) — the toggle's default-off, hidden-when-
+  empty and URL behavior; the dialog's per-mark actions; admin-only permanent
+  delete; a series ghost belonging to the series grid.
 - Web e2e (`detail.spec.ts`) — both delete checkboxes and the query
   parameters they drive.

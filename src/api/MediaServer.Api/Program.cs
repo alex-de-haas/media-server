@@ -102,6 +102,7 @@ builder.Services.AddSingleton<IFilesystemInspector, FilesystemInspector>();
 builder.Services.AddSingleton<ICatalogPathSandbox, CatalogPathSandbox>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<CatalogAnchorService>();
+builder.Services.AddScoped<CatalogFileProbe>();
 builder.Services.AddScoped<CatalogHealthService>();
 builder.Services.AddHostedService<CatalogHealthWorker>();
 builder.Services.AddScoped<IOrganizer, OrganizerService>();
@@ -183,6 +184,9 @@ builder.Services.AddHttpClient(TmdbMetadataProvider.HttpClientName, client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 builder.Services.AddSingleton<IMetadataProvider, TmdbMetadataProvider>();
+// The provider's change list, which the nightly refresh follows instead of re-enriching the library.
+builder.Services.AddSingleton<IMetadataChangeFeed, TmdbChangeFeed>();
+builder.Services.AddScoped<IncrementalMetadataRefreshService>();
 // Scoped: it reads the library and the payload cache through a DbContext.
 builder.Services.AddScoped<TitlePreviewService>();
 
@@ -324,9 +328,12 @@ builder.Services.AddScoped<LibraryMoveService>();
 builder.Services.AddScoped<LibraryMoveGuard>(); // Blocks item/source mutations while their move is in flight.
 builder.Services.AddHostedService<LibraryMoveWorker>();
 
-// Scheduled scans (missing-file drift) + on-demand metadata refresh.
+// On-demand metadata/media refresh for a single item.
 builder.Services.AddScoped<LibraryMaintenanceService>();
-builder.Services.AddHostedService<LibraryScanWorker>();
+
+// Catalog scan: import new media and remove what the disk no longer backs. Runs nightly at 03:00 local.
+builder.Services.AddScoped<CatalogScanService>();
+builder.Services.AddHostedService<NightlyMaintenanceWorker>();
 
 // One-off, idempotent backfill of cast/crew from already-cached metadata for pre-existing items.
 builder.Services.AddScoped<PersonBackfillService>();

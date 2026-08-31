@@ -9,6 +9,22 @@ export function catalogSearchParam(value: string | string[] | undefined): string
 
 /** Adds the catalog browsing context to a list or detail route. */
 export function withCatalog(href: string, catalogId: string | undefined): string {
+  return withParam(href, "catalog", catalogId);
+}
+
+/**
+ * Whether the grid is also showing the user's removed titles. In the URL rather than in local storage,
+ * like the catalog filter: the view survives a refresh, a back button, and being sent to someone else.
+ */
+export function removedSearchParam(value: string | string[] | undefined): boolean {
+  return value === "1";
+}
+
+export function withRemoved(href: string, showRemoved: boolean): string {
+  return withParam(href, "removed", showRemoved ? "1" : undefined);
+}
+
+function withParam(href: string, name: string, value: string | undefined): string {
   const hashIndex = href.indexOf("#");
   const hash = hashIndex >= 0 ? href.slice(hashIndex) : "";
   const pathAndSearch = hashIndex >= 0 ? href.slice(0, hashIndex) : href;
@@ -16,10 +32,10 @@ export function withCatalog(href: string, catalogId: string | undefined): string
   const path = searchIndex >= 0 ? pathAndSearch.slice(0, searchIndex) : pathAndSearch;
   const params = new URLSearchParams(searchIndex >= 0 ? pathAndSearch.slice(searchIndex + 1) : "");
 
-  if (catalogId) {
-    params.set("catalog", catalogId);
+  if (value) {
+    params.set(name, value);
   } else {
-    params.delete("catalog");
+    params.delete(name);
   }
 
   const queryString = params.toString();

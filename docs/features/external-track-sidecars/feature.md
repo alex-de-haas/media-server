@@ -1,7 +1,7 @@
 # External Track Sidecars
 
 Created: 2026-07-27
-Updated: 2026-08-07
+Updated: 2026-08-31
 
 A release's separate audio tracks and subtitles are kept as files beside the
 library file they belong to, and recorded as external streams of its media
@@ -226,8 +226,9 @@ an embedded track render a sidecar once the fields are there.
 They come from the probe the sidecar stage **already runs** to read the file's tags,
 which used to discard everything else it returned. An elementary stream read without
 the engine still answers nothing — a container-header parser has nothing to parse in
-a raw `.ac3` — so those fields stay null until an engine is attached and the backfill
-is run from **Media data** on Settings.
+a raw `.ac3` — so those fields stay null until an engine is attached and the
+catalog's metadata refresh fills them in (see
+[catalog-maintenance](../catalog-maintenance/feature.md)).
 
 The "only plays once merged" caveat sits on the audio heading rather than under
 the whole list, because it is true of audio and false of subtitles.

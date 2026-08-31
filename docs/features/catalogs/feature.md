@@ -1,7 +1,7 @@
 # Catalogs
 
 Created: 2026-06-15
-Updated: 2026-07-27
+Updated: 2026-08-31
 
 ## Description
 
@@ -183,15 +183,16 @@ changing the canonical identity automatically.
 ## Scanning
 
 The database is the **source of truth**. Items are created by the pipeline's
-Publish stage (see [Automation pipeline](../automation-pipeline.md)). Two scan flows
-operate over the catalog root (always excluding `.incoming/`):
+Publish stage (see [Automation pipeline](../automation-pipeline.md)). One scan
+syncs a catalog with its disk in both directions, always excluding `.incoming/`
+— see [Catalog maintenance](../catalog-maintenance/feature.md) for the whole
+action, including what it does about files that are gone:
 
-- a **reconcile** pass that compares published `MediaSource` rows against disk and
-  flags files that have gone missing;
-- an **import** scan (the per-catalog *Scan* action) that ingests media files
-  with no `MediaSource` row through the pipeline from the identify stage, for
-  onboarding a hand-copied collection (see
-  [Torrents and organizer](../torrents-and-organizer/feature.md)).
+- it **imports** media files with no `MediaSource` row through the pipeline from
+  the identify stage, for onboarding a hand-copied collection (see
+  [Torrents and organizer](../torrents-and-organizer/feature.md));
+- it **removes** the rows whose files the disk no longer backs, as tombstones
+  where a user's history is at stake.
 
 - Manual and scheduled scans, constrained to catalog roots.
 - Detect supported formats: `.mp4`, `.m4v`, `.mov`, `.mkv`, `.webm`, `.avi`,
@@ -206,18 +207,24 @@ operate over the catalog root (always excluding `.incoming/`):
 
 ### Offline And Missing Files
 
-- If a catalog `root` is unreachable (unmounted volume), the catalog is marked
-  **Offline** and its items are left untouched — a scan never purges items while
-  the root is unavailable.
+- A catalog is **Offline** when its storage cannot be read: the root directory is
+  gone, or — the case a directory check misses — the root is there and not one of
+  the catalog's library files can be read, which is what an unmounted bind mount
+  looks like from inside a container. Its items are left untouched.
 - An **unanchored** catalog (see [Mount Anchoring](#mount-anchoring)) is also
   marked offline and blocked from file-backed actions, but is reported
   separately and does not raise the "volume is unreachable" operator
   notification: the fix is to re-anchor it, not to reconnect a volume.
-- If the root is reachable but an individual file is gone, the item is marked
-  **Missing/Unavailable** (soft), not deleted, so `UserData`/watched state
-  survives a temporary mount glitch or a rename.
-- Hard deletion of an item happens only by explicit operator action (see
-  [File and directory management](../file-directory-management/feature.md)).
+- Recovery is harder to claim than failure: an offline catalog stays offline
+  until one of its files is actually read, so a root that came back empty does
+  not announce itself as recovered every five minutes.
+- If the catalog is online but an individual file is gone, it really was deleted,
+  and the scan removes what it backed — keeping the title as a tombstone when a
+  user watched, rated or favorited it. See
+  [Catalog maintenance](../catalog-maintenance/feature.md).
+- Deleting the files themselves happens only by explicit operator action (see
+  [File and directory management](../file-directory-management/feature.md)); a
+  scan never erases anything from disk.
 
 ## Testing Expectations
 

@@ -816,33 +816,41 @@ export interface WatchHistoryCalendarResponse {
   latestWatchedAt: string | null;
 }
 
-export interface LibraryScanReport {
-  catalogsScanned: number;
+/**
+ * What one catalog's scan found and did. `offline` means its storage could not be read at all — the
+ * counts are then zero because the scan declined to act, not because there was nothing to do.
+ */
+export interface CatalogScanReport {
+  catalogId: string;
+  catalogName: string;
+  offline: boolean;
+  filesScanned: number;
+  imported: number;
+  skipped: number;
   sourcesChecked: number;
   missingFiles: number;
+  /** Gone files whose item kept another version and survived. */
+  versionsRemoved: number;
+  sidecarsRemoved: number;
+  /** Titles that left the library but kept their watch history as tombstones. */
+  titlesGhosted: number;
+  /** Titles nobody had watched, rated or favorited, deleted outright. */
+  titlesPurged: number;
   missingPaths: string[];
-  crossCatalogDuplicates: CrossCatalogDuplicate[];
 }
 
-/**
- * The outcome of filling in media data that was read without the transcode engine. `remaining` counts the
- * sources still on header-read data afterwards — files the engine could not answer for either, typically
- * because their catalog root is not bound into it.
- */
-export interface MediaBackfillReport {
-  itemsRefreshed: number;
-  remaining: number;
-  /** Sidecar tracks that gained the codec, channel count and sample rate they lacked. */
-  sidecarsFilled: number;
-}
-
-// A title published in two catalogs at once — the shape new imports are refused, so anything here
-// pre-dates that rule. Its copies keep separate watched state and favorites until they are merged.
-export interface CrossCatalogDuplicate {
-  kind: "Movie" | "Series";
-  title: string;
-  year: number | null;
-  copies: { mediaItemId: string; catalogId: string; catalogName: string }[];
+/** Every catalog scanned in one pass, with the totals the UI reports. */
+export interface LibraryScanReport {
+  catalogs: CatalogScanReport[];
+  catalogsScanned: number;
+  catalogsOffline: number;
+  imported: number;
+  sourcesChecked: number;
+  missingFiles: number;
+  versionsRemoved: number;
+  sidecarsRemoved: number;
+  titlesGhosted: number;
+  titlesPurged: number;
 }
 
 // A tombstoned movie/series: deleted from the library but kept because watch history or favorites
@@ -1006,10 +1014,15 @@ export const mediaServer = {
       body: JSON.stringify(input),
     }),
   deleteCatalog: (id: string) => send(`/catalogs/${id}`, "DELETE"),
-  scanCatalog: (id: string) => apiJson<LibraryImportReport>(`${BASE}/catalogs/${id}/scan`, { method: "POST" }),
+  // Sync a catalog with its disk: import new media, and remove the rows whose files are gone (keeping
+  // as tombstones the titles someone watched, rated or favorited). The caller waits for the report.
+  scanCatalog: (id: string) => apiJson<CatalogScanReport>(`${BASE}/catalogs/${id}/scan`, { method: "POST" }),
+  scanAllCatalogs: () => apiJson<LibraryScanReport>(`${BASE}/catalogs/scan`, { method: "POST" }),
   // Kick off a background refresh of every identified item's metadata in the catalog; progress streams over SSE.
   refreshCatalogMetadata: (id: string) =>
     apiJson<{ jobId: string }>(`${BASE}/catalogs/${id}/refresh-metadata`, { method: "POST" }),
+  refreshAllCatalogMetadata: () =>
+    apiJson<{ started: number }>(`${BASE}/catalogs/refresh-metadata`, { method: "POST" }),
   listActiveCatalogRefreshes: () => apiJson<CatalogRefreshJob[]>(`${BASE}/catalogs/refresh-metadata/active`),
 
   listDownloads: () => apiJson<Download[]>(`${BASE}/torrents`),
@@ -1182,10 +1195,6 @@ export const mediaServer = {
     }),
   // In-flight cross-catalog moves; seeds the Activity progress list, then kept live by RealtimeBridge over SSE.
   listActiveMoves: () => apiJson<LibraryMoveJob[]>(`${BASE}/library/move/active`),
-  scanLibrary: () => apiJson<LibraryScanReport>(`${BASE}/library/scan`, { method: "POST" }),
-  // Re-probe what was read without the transcode engine, and fill in the sidecar specs that predate them
-  // being recorded. A foreground pass over the library, so the caller waits for the report.
-  backfillMedia: () => apiJson<MediaBackfillReport>(`${BASE}/library/backfill-media`, { method: "POST" }),
 
   // Person page, keyed by the provider identity its cast members carry (CastMember.provider/providerId).
   getPerson: (provider: string, providerId: string) =>

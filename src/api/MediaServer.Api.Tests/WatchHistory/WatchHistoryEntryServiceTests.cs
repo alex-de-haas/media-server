@@ -1,4 +1,6 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
+using MediaServer.Api.Library;
 using MediaServer.Api.Tests.Jellyfin;
 using MediaServer.Api.WatchHistory;
 using Microsoft.Data.Sqlite;
@@ -690,6 +692,90 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
             (await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync()).WatchedAt);
     }
 
+    // ---- Removed titles ----
+
+    [Fact]
+    public async Task DeletingTheLastPlayOfARemovedTitleTakesTheGhostWithIt()
+    {
+        // A removed title survives on its user signal alone. Once the calendar's last play of it is gone,
+        // nothing is holding the row up and nothing can ever reach it again.
+        var only = AddPlay("2026-08-01T20:00:00Z");
+        AddRow(playCount: 1, played: true, lastWatchedAt: only.WatchedAt);
+        Tombstone();
+
+        Assert.True(await Service().DeleteAsync(_userId, only.Id, CancellationToken.None));
+
+        Assert.False(await _database.MediaItems.AsNoTracking().AnyAsync(item => item.Id == _movie.Id));
+        Assert.False(await _database.UserItemData.AsNoTracking().AnyAsync(row => row.MediaItemId == _movie.Id));
+    }
+
+    [Fact]
+    public async Task ARemovedTitleSomeoneElseWatchedOutlivesThisUsersLastPlay()
+    {
+        // Signal is judged across every user, not the caller alone: purging here would erase someone
+        // else's history because this user tidied up their own.
+        var mine = AddPlay("2026-08-01T20:00:00Z");
+        AddPlay("2026-08-02T20:00:00Z", appUserId: _otherUserId);
+        Tombstone();
+
+        Assert.True(await Service().DeleteAsync(_userId, mine.Id, CancellationToken.None));
+
+        Assert.True(await _database.MediaItems.AsNoTracking().AnyAsync(item => item.Id == _movie.Id));
+    }
+
+    [Fact]
+    public async Task AGhostLeafUnderALiveTitleIsJudgedOnItsOwn()
+    {
+        // A deleted episode of a series that is still published. The series is alive and none of this is
+        // about it, so the ghost's own emptiness is what decides — otherwise the row would linger
+        // forever, invisible and unreachable, until the whole series was deleted.
+        var episodeId = SeedGhostEpisodeUnderALiveSeries(out var seriesId);
+        var only = AddPlay("2026-08-01T20:00:00Z", itemId: episodeId);
+
+        Assert.True(await Service().DeleteAsync(_userId, only.Id, CancellationToken.None));
+
+        Assert.False(await _database.MediaItems.AsNoTracking().AnyAsync(item => item.Id == episodeId));
+        Assert.True(await _database.MediaItems.AsNoTracking().AnyAsync(item => item.Id == seriesId));
+    }
+
+    private Guid SeedGhostEpisodeUnderALiveSeries(out Guid seriesId)
+    {
+        var now = _time.GetUtcNow();
+        var series = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = _movie.CatalogId,
+            Kind = MediaKind.Series, Title = "Dark", AddedAt = now, UpdatedAt = now,
+        };
+        var episode = new MediaItem
+        {
+            Id = Guid.NewGuid(), CatalogId = _movie.CatalogId, Kind = MediaKind.Episode, Title = "Secrets",
+            SeriesId = series.Id, ParentId = series.Id, RemovedAt = now, AddedAt = now, UpdatedAt = now,
+        };
+        _database.MediaItems.AddRange(series, episode);
+        _database.SaveChanges();
+        seriesId = series.Id;
+        return episode.Id;
+    }
+
+    [Fact]
+    public async Task DeletingTheLastPlayOfAPublishedTitleLeavesTheTitleAlone()
+    {
+        var only = AddPlay("2026-08-01T20:00:00Z");
+        AddRow(playCount: 1, played: true, lastWatchedAt: only.WatchedAt);
+
+        Assert.True(await Service().DeleteAsync(_userId, only.Id, CancellationToken.None));
+
+        Assert.True(await _database.MediaItems.AsNoTracking().AnyAsync(item => item.Id == _movie.Id));
+    }
+
+    /// <summary>Turns the seeded movie into a tombstone: unpublished, stamped, sourceless.</summary>
+    private void Tombstone()
+    {
+        _movie.PublicId = null;
+        _movie.RemovedAt = _time.GetUtcNow();
+        _database.SaveChanges();
+    }
+
     // ---- Helpers ----
 
     private WatchHistoryEntryService Service() => new(
@@ -699,6 +785,8 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
             new WatchHistoryIdentityMapper(_database),
             _time,
             NullLogger<WatchHistoryRecorder>.Instance),
+        // Deleting the last play of a removed title takes the tombstone with it.
+        new LibraryDeleteService(_database, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance)),
         _time);
 
     private AppUser NewUser(string hostUserId, string email) => new()

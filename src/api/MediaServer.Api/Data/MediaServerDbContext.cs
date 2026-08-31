@@ -560,6 +560,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         // Single fixed-id row; never auto-generate the key so the upsert always targets row 1.
         appSettings.Property(entity => entity.Id).ValueGeneratedNever();
         appSettings.Property(entity => entity.CustomReleaseGroups).HasJsonListConversion();
+        appSettings.Property(entity => entity.MetadataRefreshRetries).HasJsonListConversion();
     }
 
     private static void ConfigureReleaseTracking(ModelBuilder modelBuilder)

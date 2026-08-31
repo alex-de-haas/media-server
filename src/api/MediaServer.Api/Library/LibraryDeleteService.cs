@@ -9,8 +9,8 @@ namespace MediaServer.Api.Library;
 /// and a rescan can re-publish them) and a remove that also deletes the canonical files from the catalog.
 /// It never touches a download's own staging data — downloads and the library are deleted independently.
 ///
-/// Removal is not always erasure. An item some user has a relationship with — a favorite, watched
-/// state, a resume position, or any play in the history — is kept as a <b>tombstone</b>: the row
+/// Removal is not always erasure. An item some user has a relationship with — a favorite, a rating,
+/// or any play in the history — is kept as a <b>tombstone</b>: the row
 /// survives unpublished (<see cref="MediaItem.PublicId"/> null, <see cref="MediaItem.RemovedAt"/> set)
 /// with its metadata, artwork, credits, and every piece of user data, while its sources, streams, and
 /// (optionally) files are removed exactly as before. Ingest later adopts the tombstone back by
@@ -76,6 +76,56 @@ public sealed class LibraryDeleteService(
     }
 
     /// <summary>
+    /// Purges a tombstone once nothing is keeping it alive — the last rating cleared, the last favorite
+    /// dropped, the last play deleted from the calendar. True when it purged something.
+    /// </summary>
+    /// <remarks>
+    /// A tombstone exists to hold what a deletion could not take with it. When the last of that is gone
+    /// by the user's own hand, so is the reason for the row: leaving it would be a title nobody can see,
+    /// play, or reach — and, since clearing is the only way to empty a ghost, one that could never be
+    /// removed again. Called after the writes that can empty one, rather than swept for later, so the
+    /// clear the user just made is the thing that makes the title disappear.
+    ///
+    /// <paramref name="mediaItemId"/> may name any row of the ghost — an episode whose play was deleted
+    /// resolves to its series, because that is the tombstone a user sees and the unit signal is judged over.
+    /// </remarks>
+    public async Task<bool> PurgeIfUntouchedAsync(Guid mediaItemId, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.AsNoTracking()
+            .Where(candidate => candidate.Id == mediaItemId)
+            .Select(candidate => new { candidate.Id, candidate.SeriesId, candidate.ParentId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (item is null)
+        {
+            return false;
+        }
+
+        // The tombstone is normally the whole title, so the work is what signal is judged over. A ghost
+        // leaf under a title that is still published is judged on its own instead — the series is alive
+        // and none of this is about it.
+        var rootId = item.SeriesId ?? item.ParentId ?? item.Id;
+        var root = await database.MediaItems.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == rootId && candidate.RemovedAt != null, cancellationToken)
+            ?? await database.MediaItems.AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.Id == item.Id && candidate.RemovedAt != null, cancellationToken);
+        if (root is null)
+        {
+            return false; // Still published, or already gone — neither is this method's business.
+        }
+
+        var ids = await CollectItemIdsAsync(root, cancellationToken);
+        if ((await CollectSignalIdsAsync(ids, cancellationToken)).Count > 0)
+        {
+            return false;
+        }
+
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        await RemoveItemsAsync(ids, deleteUserData: true, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
     /// Deletes one published episode from its series, with the same modes as the item-level delete.
     /// Emptied containers are pruned — see <see cref="DeleteWithinSeriesAsync"/>. Returns null when no
     /// such episode exists.
@@ -122,18 +172,41 @@ public sealed class LibraryDeleteService(
 
         var files = deleteFiles ? await GatherLibraryFilesAsync(ids, cancellationToken) : [];
 
+        var (result, _) = await RemoveWithinSeriesAsync(item, kind, ids, deleteUserData, cancellationToken);
+
+        foreach (var (catalog, relativePath) in files)
+        {
+            fileEraser.Erase(catalog, relativePath);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The transactional core shared by the operator's episode/season delete and the scan's repair of a
+    /// leaf whose files vanished: removes <paramref name="ids"/>, then prunes the containers that leaves
+    /// empty — the owning season once nothing published carries it, then the series once nothing
+    /// published is left under it. Reports what was pruned and what became of every row it touched.
+    /// </summary>
+    private async Task<(ChildDeleteResult Result, RemovalOutcome Outcome)> RemoveWithinSeriesAsync(
+        MediaItem item, MediaKind kind, IReadOnlyList<Guid> ids, bool deleteUserData, CancellationToken cancellationToken)
+    {
         var seasonRemoved = kind == MediaKind.Season;
         var seriesRemoved = false;
+        var tombstoned = new List<Guid>();
+        var purged = new List<Guid>();
 
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
-            await RemoveItemsAsync(ids, deleteUserData, cancellationToken);
+            Collect(await RemoveItemsAsync(ids, deleteUserData, cancellationToken));
 
-            if (kind == MediaKind.Episode && item.SeasonId is { } seasonId &&
+            // A season-scoped extra empties its season exactly as an episode does; only a season delete,
+            // which took the season itself, has nothing left to prune here.
+            if (kind != MediaKind.Season && item.SeasonId is { } seasonId &&
                 !await database.MediaItems.AnyAsync(candidate => candidate.SeasonId == seasonId &&
                     candidate.PublicId != null, cancellationToken))
             {
-                await RemoveItemsAsync([seasonId], deleteUserData, cancellationToken);
+                Collect(await RemoveItemsAsync([seasonId], deleteUserData, cancellationToken));
                 seasonRemoved = true;
             }
 
@@ -142,19 +215,54 @@ public sealed class LibraryDeleteService(
                 (candidate.SeriesId == seriesId || candidate.ParentId == seriesId) &&
                 candidate.PublicId != null, cancellationToken))
             {
-                await RemoveItemsAsync([seriesId], deleteUserData, cancellationToken);
+                Collect(await RemoveItemsAsync([seriesId], deleteUserData, cancellationToken));
                 seriesRemoved = true;
             }
 
             await transaction.CommitAsync(cancellationToken);
         }
 
-        foreach (var (catalog, relativePath) in files)
+        return (new ChildDeleteResult(seasonRemoved, seriesRemoved), new RemovalOutcome(tombstoned, purged));
+
+        void Collect(RemovalOutcome outcome)
         {
-            fileEraser.Erase(catalog, relativePath);
+            tombstoned.AddRange(outcome.Tombstoned);
+            purged.AddRange(outcome.Purged);
+        }
+    }
+
+    /// <summary>
+    /// Removes an item whose library files have all vanished from disk — the scan's repair for deletions
+    /// made outside the app. Identical to the operator's own delete with both switches off: the files are
+    /// already gone, so nothing is erased, and user data is kept, so a title someone watched, rated or
+    /// favorited survives as a tombstone while an untouched one is purged. Routed by kind so a leaf still
+    /// prunes the containers it empties. Null when the item is not published — a concurrent delete simply
+    /// wins the race.
+    /// </summary>
+    public async Task<RemovalOutcome?> RemoveVanishedAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.PublicId != null, cancellationToken);
+        if (item is null)
+        {
+            return null;
         }
 
-        return new ChildDeleteResult(seasonRemoved, seriesRemoved);
+        // A leaf inside a series (episode, or an extra hanging off the series or one of its seasons)
+        // takes the container-pruning path; anything else is removed on its own. A movie's extra has no
+        // container to empty — its parent has a file of its own — so it lands in the second branch.
+        if (item.SeriesId is not null && item.Kind is MediaKind.Episode or MediaKind.Video)
+        {
+            var (_, outcome) = await RemoveWithinSeriesAsync(
+                item, item.Kind, [item.Id], deleteUserData: false, cancellationToken);
+            return outcome;
+        }
+
+        var ids = await CollectItemIdsAsync(item, cancellationToken);
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var removal = await RemoveItemsAsync(ids, deleteUserData: false, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return removal;
     }
 
     /// <summary>
@@ -267,6 +375,12 @@ public sealed class LibraryDeleteService(
                         .SetProperty(file => file.AssignmentStatus, SourceFileAssignmentStatus.Unassigned), cancellationToken);
             }
 
+            // The default-version pin cannot outlive the version it names: clear it so the remaining
+            // sources reorder deterministically (oldest first) rather than following a dangling id.
+            await database.MediaItems
+                .Where(candidate => candidate.Id == source.MediaItemId && candidate.DefaultSourceId == sourceId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.DefaultSourceId, (Guid?)null), cancellationToken);
+
             await database.MediaStreams.Where(stream => stream.MediaSourceId == sourceId).ExecuteDeleteAsync(cancellationToken);
             await database.MediaSources.Where(candidate => candidate.Id == sourceId).ExecuteDeleteAsync(cancellationToken);
 
@@ -294,7 +408,7 @@ public sealed class LibraryDeleteService(
     /// self-FK on <see cref="MediaItem.ParentId"/> is <c>Restrict</c>, and because purging a parent
     /// out from under a surviving ghost would orphan the history it exists to preserve.
     /// </summary>
-    internal async Task RemoveItemsAsync(IReadOnlyList<Guid> ids, bool deleteUserData, CancellationToken cancellationToken)
+    internal async Task<RemovalOutcome> RemoveItemsAsync(IReadOnlyList<Guid> ids, bool deleteUserData, CancellationToken cancellationToken)
     {
         var idSet = ids.ToHashSet();
         var tombstoneIds = deleteUserData
@@ -419,6 +533,8 @@ public sealed class LibraryDeleteService(
         // transaction. See docs/features/native-client-api/plan.md.
         await AppendChangeLogAsync(tombstoneIds, ChangeKind.Upsert, cancellationToken);
         await AppendChangeLogAsync(purgeIds, ChangeKind.Delete, cancellationToken);
+
+        return new RemovalOutcome(tombstoneIds.ToList(), purgeIds);
     }
 
     private async Task AppendChangeLogAsync(
@@ -441,16 +557,23 @@ public sealed class LibraryDeleteService(
     }
 
     /// <summary>
-    /// The ids among <paramref name="ids"/> some user has a relationship with: a favorite, a rating,
-    /// watched state, a resume position, a play count, or at least one history entry — for <b>any</b>
-    /// user. These are the items a delete tombstones rather than purges.
+    /// The ids among <paramref name="ids"/> some user has a relationship with: a favorite, a rating, or
+    /// at least one history entry — for <b>any</b> user. These are the items a delete tombstones rather
+    /// than purges.
     /// </summary>
+    /// <remarks>
+    /// The aggregate columns — <see cref="UserItemData.Played"/>, <see cref="UserItemData.PlayCount"/>,
+    /// <see cref="UserItemData.PlaybackPositionTicks"/> — deliberately do not count. The first two are
+    /// projections of history that state nothing history does not: every path that marks something
+    /// watched writes an entry (<c>WatchHistoryRecorder</c> stages a timeless one for a first manual
+    /// mark, dated ones for completions, manual logs and provider sync), so reading them as well only
+    /// makes a title immortal when its counters drift from the entries they came from. A resume
+    /// position is not a relationship at all — an abandoned half-watch says the viewer did not care.
+    /// </remarks>
     internal async Task<HashSet<Guid>> CollectSignalIdsAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken)
     {
         var withUserData = await database.UserItemData.AsNoTracking()
-            .Where(data => ids.Contains(data.MediaItemId) &&
-                (data.IsFavorite || data.Played || data.PlaybackPositionTicks > 0 || data.PlayCount > 0 ||
-                    data.Rating != null))
+            .Where(data => ids.Contains(data.MediaItemId) && (data.IsFavorite || data.Rating != null))
             .Select(data => data.MediaItemId)
             .Distinct()
             .ToListAsync(cancellationToken);
@@ -530,3 +653,6 @@ public sealed class LibraryDeleteService(
 /// was pruned along the way.
 /// </summary>
 public sealed record ChildDeleteResult(bool SeasonRemoved, bool SeriesRemoved);
+
+/// <summary>Which of the removed items survived as tombstones and which were purged outright.</summary>
+public sealed record RemovalOutcome(IReadOnlyList<Guid> Tombstoned, IReadOnlyList<Guid> Purged);

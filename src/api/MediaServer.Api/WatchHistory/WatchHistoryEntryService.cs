@@ -1,4 +1,5 @@
 using MediaServer.Api.Data;
+using MediaServer.Api.Library;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.WatchHistory;
@@ -12,7 +13,11 @@ namespace MediaServer.Api.WatchHistory;
 /// an entry belonging to someone else is indistinguishable from one that does not exist — the same
 /// boundary the rest of the watch-history surface enforces.
 /// </remarks>
-public sealed class WatchHistoryEntryService(MediaServerDbContext database, WatchHistoryRecorder recorder, TimeProvider time)
+public sealed class WatchHistoryEntryService(
+    MediaServerDbContext database,
+    WatchHistoryRecorder recorder,
+    LibraryDeleteService deleteService,
+    TimeProvider time)
 {
     /// <summary>Sets when a play happened: a mark that was never timed, or one timed wrongly.</summary>
     /// <remarks>
@@ -147,6 +152,11 @@ public sealed class WatchHistoryEntryService(MediaServerDbContext database, Watc
         // it removed something remotely that it never queued.
         await recorder.StageEntryDeletionAsync(appUserId, item, data, entry, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
+
+        // A removed title survives on its user signal alone, and this play may have been the last of it.
+        // Deleting the entry then has to take the ghost with it: it is a title nobody can see, play or
+        // reach, and clearing is the only thing that could ever have emptied it.
+        await deleteService.PurgeIfUntouchedAsync(item.Id, cancellationToken);
         return true;
     }
 }

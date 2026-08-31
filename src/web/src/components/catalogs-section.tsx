@@ -3,10 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Anchor, Clapperboard, FolderSearch, MoreVertical, RotateCw, Trash2 } from "lucide-react";
+import { Anchor, Clapperboard, FolderSearch, Loader2, MoreVertical, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type CatalogRefreshJob, type CatalogVolumeUsage } from "@/lib/media-server";
 import { catalogBrowseHref } from "@/lib/catalog-navigation";
+import { count, libraryScanSummary, scanSummary } from "@/lib/catalog-scan";
 import { formatBytes } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +42,7 @@ const SEGMENT_COLORS = [
 ];
 
 export function CatalogsSection() {
+  const queryClient = useQueryClient();
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
   const usage = useQuery({ queryKey: ["catalog-usage"], queryFn: mediaServer.listCatalogUsage });
   // In-flight metadata refreshes, keyed by catalog. Seeded here, then kept live by RealtimeBridge over SSE.
@@ -66,12 +68,44 @@ export function CatalogsSection() {
     return map;
   }, [catalogs.data]);
 
+  // The same two actions the per-catalog menu offers, over every catalog at once. Both also run on
+  // their own — the scan nightly, metadata when a catalog is refreshed — so these are the "now" button.
+  const scanAll = useMutation({
+    mutationFn: () => mediaServer.scanAllCatalogs(),
+    onSuccess: (report) => {
+      queryClient.invalidateQueries({ queryKey: ["ingest"] });
+      queryClient.invalidateQueries({ queryKey: ["catalogs"] });
+      const { title, description } = libraryScanSummary(report);
+      toast.success(title, { description });
+    },
+    onError: (error) => toast.error("Couldn’t scan the catalogs", { description: errorMessage(error) }),
+  });
+
+  const refreshAll = useMutation({
+    mutationFn: () => mediaServer.refreshAllCatalogMetadata(),
+    onSuccess: ({ started }) => {
+      queryClient.invalidateQueries({ queryKey: ["catalog-refresh-jobs"] });
+      toast.success(
+        started > 0 ? `Refreshing ${count(started, "catalog")} — this runs in the background` : "Already refreshing",
+      );
+    },
+    onError: (error) => toast.error("Couldn’t refresh metadata", { description: errorMessage(error) }),
+  });
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Catalogs</CardTitle>
         <CardDescription>Destinations on one filesystem; each holds files/ and library/.</CardDescription>
-        <CardAction>
+        <CardAction className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" disabled={scanAll.isPending} onClick={() => scanAll.mutate()}>
+            {scanAll.isPending ? <Loader2 className="animate-spin" /> : <FolderSearch />}
+            {scanAll.isPending ? "Scanning…" : "Scan all"}
+          </Button>
+          <Button variant="secondary" size="sm" disabled={refreshAll.isPending} onClick={() => refreshAll.mutate()}>
+            {refreshAll.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />}
+            Refresh all metadata
+          </Button>
           <AddCatalogDialog />
         </CardAction>
       </CardHeader>
@@ -206,18 +240,21 @@ function CatalogRow({
     onError: (error) => toast.error("Couldn’t refresh metadata", { description: errorMessage(error) }),
   });
 
-  // Scan the catalog root for media files placed outside the app (a hand-copied collection) and ingest
-  // them from the identify stage. Confident matches publish automatically; the rest land in review.
+  // Sync the catalog with its disk, both ways: media placed outside the app is ingested from the identify
+  // stage (confident matches publish, the rest land in review), and rows whose files are gone are removed —
+  // as tombstones where someone's history is at stake. A catalog whose every file is unreadable is a
+  // volume that went away, and the scan says so instead of emptying the library.
   const scan = useMutation({
     mutationFn: () => mediaServer.scanCatalog(catalog.id),
     onSuccess: (report) => {
       queryClient.invalidateQueries({ queryKey: ["ingest"] });
-      toast.success(
-        report.imported > 0
-          ? `Importing ${report.imported} file${report.imported === 1 ? "" : "s"} — track it on Activity`
-          : "No new media files found",
-        { description: report.skipped > 0 ? `${report.skipped} already in the library` : undefined },
-      );
+      queryClient.invalidateQueries({ queryKey: ["catalogs"] });
+      const { title, description } = scanSummary(report);
+      if (report.offline) {
+        toast.error(title, { description });
+      } else {
+        toast.success(title, { description });
+      }
     },
     onError: (error) => toast.error("Couldn’t scan catalog", { description: errorMessage(error) }),
   });

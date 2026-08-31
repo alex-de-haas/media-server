@@ -18,8 +18,16 @@ public sealed class FakeMetadataProvider : IMetadataProvider
     public Task<IReadOnlyList<MetadataCandidate>> SearchAsync(MediaQuery query, CancellationToken cancellationToken) =>
         Task.FromResult(OnSearch(query));
 
+    /// <summary>The provider ids fetched so far, for tests about <em>which</em> titles were enriched.</summary>
+    public List<string> Fetched { get; } = [];
+
+    /// <summary>Set to make a fetch fail, for tests about what a caller does when the provider is down.</summary>
+    public Action<ProviderRef>? OnFetch { get; set; }
+
     public Task<IReadOnlyList<ProviderMetadata>> FetchAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken)
     {
+        OnFetch?.Invoke(reference);
+        Fetched.Add(reference.Id);
         var records = languages.Select(language => new ProviderMetadata(
             reference, language, $"Title {language}", "Original Title", "en",
             "Overview", "Tagline", ["Drama"], null, 7.5, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(120).Ticks, "{}")).ToList();

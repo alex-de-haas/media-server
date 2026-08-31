@@ -3,6 +3,7 @@ using System;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    partial class MediaServerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260831170837_AddMetadataChangeSyncMarker")]
+    partial class AddMetadataChangeSyncMarker
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -27,10 +30,6 @@ namespace MediaServer.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("MetadataChangesSyncedThrough")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MetadataRefreshRetries")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("UpdatedAt")

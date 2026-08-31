@@ -489,9 +489,10 @@ Re-search by corrected title: `POST /api/ingest/{id}/search` exposes
 `IMetadataProvider.SearchAsync` (kind defaults from the catalog), wired into the
 review panel's existing pick-to-`/match` flow (metadata search only). (6)
 `LibraryMaintenanceService` — scheduled scan for missing library files (skips
-offline catalogs, deduped notification) via `POST /api/library/scan` +
-`LibraryScanWorker`, and on-demand metadata refresh `POST /api/library/{id}/refresh`
-(admin), surfaced as a "Refresh metadata" button on the detail page. (7) Docker
+offline catalogs, deduped notification) and on-demand metadata refresh
+`POST /api/library/{id}/refresh` (admin), surfaced as a "Refresh metadata" button
+on the detail page. The scheduled half has since been folded into the catalog
+scan (see [catalog-maintenance](catalog-maintenance/feature.md)). (7) Docker
 delivery: multi-stage Dockerfiles for `api` (.NET 10 runtime + ffprobe; binds both
 ports via `ASPNETCORE_URLS`) and `web` (pnpm + gated Next standalone output, off by
 default so `next start`/e2e stay clean), `.dockerignore`s, and a `publish.yml` GHCR
