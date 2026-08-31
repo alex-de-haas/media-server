@@ -34,10 +34,14 @@ namespace MediaServer.Api.Remux;
 /// machine's mood rather than this arithmetic.
 /// </param>
 /// <param name="abandoned">
-/// Whether the client is gone. In a minimal API the injected token <b>is</b> <c>RequestAborted</c>, so
-/// this separates a response that finished from one that was cut off — which is a thing this log has
-/// never been able to say. Kestrel aborts a response of its own accord when the client reads slower
-/// than its minimum data rate, and a player whose buffer is full stops reading for exactly that long.
+/// Whether this request has been aborted. In a minimal API the injected token <b>is</b>
+/// <c>RequestAborted</c>, so it separates a response that finished from one that was cut off — a thing
+/// this log has never been able to say.
+///
+/// It does <b>not</b> say by whom, and must not be read as blaming the client: Kestrel aborts a response
+/// of its own accord when the reader falls below its minimum data rate, and a player whose buffer is
+/// full stops reading for exactly that long. Naming a culprit here would name the wrong one in the case
+/// this was added to find.
 /// </param>
 internal sealed class RemuxStreamMeter(
     ILogger logger,
@@ -157,7 +161,7 @@ internal sealed class RemuxStreamMeter(
             if (ended - _reported >= Report)
             {
                 Write("last 10s", _sinceBytes, ended - _reported, _sinceReading, _sinceWriting,
-                    _sinceReads, _sinceFrom, _sinceTo);
+                    _sinceReads, _sinceFrom, _sinceTo, "still going");
                 _reported = ended;
                 _sinceReading = TimeSpan.Zero;
                 _sinceWriting = TimeSpan.Zero;
@@ -200,13 +204,18 @@ internal sealed class RemuxStreamMeter(
             // "socket 0%" — the most misleading answer this meter could give.
             _writing += elapsed - _lastEnded;
 
-            Write("closed", _bytes, elapsed, _reading, _writing, _reads, _from, _to);
+            // Only the closing line may classify the response. A periodic one is written while it is
+            // still open, when the abort token is normally false — so saying "served in full" there
+            // would manufacture the very false completion this exists to catch.
+            Write(
+                "closed", _bytes, elapsed, _reading, _writing, _reads, _from, _to,
+                abandoned?.Invoke() == true ? "ABORTED mid-response" : "served in full");
         }
     }
 
     private void Write(
         string window, long bytes, TimeSpan elapsed, TimeSpan reading, TimeSpan writing, long reads,
-        long from, long to)
+        long from, long to, string ending)
     {
         var seconds = elapsed.TotalSeconds;
         if (seconds <= 0 || reads == 0)
@@ -230,7 +239,7 @@ internal sealed class RemuxStreamMeter(
             _idle is { } idle ? $"{idle.TotalMilliseconds:F0} ms" : "nothing",
             from < 0 ? "unknown" : $"{from}-{to}",
             from < 0 || whose is null ? "not asked" : whose(from, to),
-            abandoned?.Invoke() == true ? "ABANDONED by the client" : "served in full",
+            ending,
             activity?.Open ?? 0);
     }
 }

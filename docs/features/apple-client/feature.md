@@ -234,6 +234,10 @@ HTTP status and the domain behind each. None of them reach `AVPlayerItem.status`
 `readyToPlay` throughout, so a player that has quietly stopped asking for anything looks from every
 other angle exactly like a healthy one. If it recorded a reason, that is where it is.
 
+The journal belongs to the **item**, so the read cursor moves with it: carried over from a replaced item
+— switching a dub builds one — it would skip the new item's first entries, or all of them, and failures
+after a track change would vanish from both the overlay and the log.
+
 Most of the rest comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls`
 counts what a `playbackStalled` notification can miss.
 

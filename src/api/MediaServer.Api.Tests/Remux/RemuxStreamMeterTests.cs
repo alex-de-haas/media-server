@@ -280,4 +280,58 @@ public sealed class RemuxStreamMeterTests
 
         Assert.Equal(0, activity.Open);
     }
+
+    [Fact]
+    public void A_response_that_finished_says_so()
+    {
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(
+            log, "film", abandoned: () => false, clock: () => clock.Now);
+
+        var began = clock.At(0);
+        clock.At(1);
+        meter.Served(began, 1_000);
+        meter.Done();
+
+        Assert.Contains("served in full", log.Lines[0]);
+    }
+
+    [Fact]
+    public void A_response_that_was_cut_off_says_so_without_naming_a_culprit()
+    {
+        // Kestrel aborts a response itself when the reader falls below its minimum rate, and a player
+        // with a full buffer stops reading for exactly that long. Blaming the client here would blame
+        // the wrong party in the case this was added to find.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(
+            log, "film", abandoned: () => true, clock: () => clock.Now);
+
+        var began = clock.At(0);
+        clock.At(1);
+        meter.Served(began, 1_000);
+        meter.Done();
+
+        Assert.Contains("ABORTED mid-response", log.Lines[0]);
+        Assert.DoesNotContain("client", log.Lines[0]);
+    }
+
+    [Fact]
+    public void A_periodic_line_claims_nothing_about_how_the_response_ends()
+    {
+        // It is written while the response is still open, when the abort token is normally false —
+        // so a completion claim there would manufacture the false signal this exists to catch.
+        var log = new Recorder();
+        var clock = new StatedClock();
+        var meter = new RemuxStreamMeter(
+            log, "film", abandoned: () => false, clock: () => clock.Now);
+
+        meter.Served(clock.At(0), 1_000);
+        meter.Served(clock.At(11), 1_000);
+
+        Assert.Single(log.Lines);
+        Assert.Contains("still going", log.Lines[0]);
+        Assert.DoesNotContain("served in full", log.Lines[0]);
+    }
 }

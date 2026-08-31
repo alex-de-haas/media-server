@@ -113,6 +113,12 @@ public final class PlaybackDiagnostics {
             openedFrom = from
         }
 
+        // The error journal belongs to the item, so the cursor has to move with it. Carried over from a
+        // replaced item — a track switch builds one — it would skip the new item's first entries, or
+        // every one of them if its journal never grew past the old count. Failures after a switch would
+        // then vanish from both the overlay and the log, which is the one thing this must not do.
+        errors = 0
+
         self.item = item
         stallObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.playbackStalledNotification, object: item, queue: nil
@@ -213,7 +219,15 @@ public final class PlaybackDiagnostics {
     /// polled beside everything else needs no second delivery path and cannot miss an entry that
     /// arrived before the observer did.
     private func readErrors(_ item: AVPlayerItem) {
-        guard let events = item.errorLog()?.events, events.count > errors else { return }
+        guard let events = item.errorLog()?.events else { return }
+
+        // A journal that shrank is a different journal. Trusting the old cursor would silence every
+        // entry from here on, so it starts again rather than reading past the end of the new one.
+        if events.count < errors {
+            errors = 0
+        }
+
+        guard events.count > errors else { return }
 
         for event in events[errors...] {
             let status = event.errorStatusCode
@@ -221,7 +235,11 @@ public final class PlaybackDiagnostics {
             let comment = event.errorComment ?? "no comment"
             Self.log.error(
                 "Player error: \(domain, privacy: .public) \(status) — \(comment, privacy: .public)")
-            lastError = status == 0 ? "\(domain): \(comment)" : "\(domain) \(status)"
+
+            // The comment is kept whatever the status. It is the half that says what happened —
+            // "Playlist File unchanged", "Connection lost" — and a bare domain and number on a
+            // television is something to photograph and look up rather than something to read.
+            lastError = status == 0 ? "\(domain): \(comment)" : "\(domain) \(status): \(comment)"
         }
 
         errors = events.count

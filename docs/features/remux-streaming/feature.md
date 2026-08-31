@@ -477,11 +477,15 @@ said by accident. The span is the smallest and largest presentation time in the 
 first and last, because a reordered video track stores `0, 83, 41, 166` and reading its ends would
 print an interval that runs backwards.
 
-Each line ends by saying whether the response **finished or was cut off**. In a minimal API the
-injected cancellation token is the request's own abort signal, so this separates a response served in
-full from one abandoned — by the client, or by Kestrel itself, which aborts a response of its own accord
-when the reader falls below its minimum data rate. A player whose buffer is full stops reading for
-exactly that long, and until now the log could not tell the two apart.
+The **closing** line says whether the response finished or was cut off. In a minimal API the injected
+cancellation token is the request's own abort signal, so this separates a response served in full from
+one aborted — a thing this log could never say.
+
+It deliberately names no culprit. Kestrel aborts a response of its own accord when the reader falls
+below its minimum data rate, and a player whose buffer is full stops reading for exactly that long, so
+"the client went away" would be the wrong answer in the very case this was added to find. Periodic lines
+say `still going` and claim nothing: written while the response is open, with the abort signal not yet
+raised, a completion claim there would manufacture the false signal this exists to catch.
 
 Each line also says **how many responses for that source are still open**. A television stops asking
 for anything and never starts again, and restarting the *server* — not merely the film — brings it back
