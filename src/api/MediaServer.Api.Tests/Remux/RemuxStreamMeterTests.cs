@@ -241,4 +241,43 @@ public sealed class RemuxStreamMeterTests
 
         Assert.Contains("carrying not asked", log.Lines[0]);
     }
+
+    [Fact]
+    public void Responses_left_open_are_counted_and_released()
+    {
+        // A television that stops asking for anything, and comes back when the *server* is restarted,
+        // points at something that accumulates until swept away. Connections are the candidate, and a
+        // count that climbs and stays climbed while the picture is frozen would say so.
+        var log = new Recorder();
+        var activity = new RemuxStreamActivity();
+        var clock = new StatedClock();
+
+        var first = new RemuxStreamMeter(log, "film", activity, clock: () => clock.Now);
+        var second = new RemuxStreamMeter(log, "film", activity, clock: () => clock.Now);
+        Assert.Equal(2, activity.Open);
+
+        var began = clock.At(0);
+        clock.At(1);
+        first.Served(began, 1_000);
+        first.Done();
+
+        Assert.Equal(1, activity.Open);
+        Assert.Contains("1 still open", log.Lines[0]);
+
+        second.Served(clock.At(2), 1_000);
+        second.Done();
+        Assert.Equal(0, activity.Open);
+    }
+
+    [Fact]
+    public void Closing_twice_does_not_drive_the_count_below_nothing()
+    {
+        var activity = new RemuxStreamActivity();
+        var meter = new RemuxStreamMeter(new Recorder(), "film", activity, clock: () => TimeSpan.Zero);
+
+        meter.Done();
+        meter.Done();
+
+        Assert.Equal(0, activity.Open);
+    }
 }

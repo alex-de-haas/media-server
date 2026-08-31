@@ -483,6 +483,13 @@ full from one abandoned — by the client, or by Kestrel itself, which aborts a 
 when the reader falls below its minimum data rate. A player whose buffer is full stops reading for
 exactly that long, and until now the log could not tell the two apart.
 
+Each line also says **how many responses for that source are still open**. A television stops asking
+for anything and never starts again, and restarting the *server* — not merely the film — brings it back
+for a while, which points at something that accumulates and is then swept away. Connections are the
+candidate: a client has a limit per host, and a player holding every one of them in a half-finished
+response has nothing left to ask with. A count that climbs and stays climbed while the picture is
+frozen says so; one that sits at one or two throughout rules the whole family out.
+
 Both are off by default. A film is thousands of reads a second and none of them should pay for a
 stopwatch nobody is reading.
 

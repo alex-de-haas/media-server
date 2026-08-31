@@ -177,13 +177,21 @@ internal sealed class RemuxStreamMeter(
             // A stream is disposed by whoever finishes with it, and more than one thing does. Without
             // this every response was logged twice — the second line adding the closing interval to the
             // socket share a second time, so the figure the whole diagnostic exists for was overstated.
-            if (_done || _reads == 0)
+            if (_done)
             {
                 return;
             }
 
             _done = true;
+
+            // Released before the early return below, not after it. A response that read nothing at all
+            // still opened, and leaving it counted would have the leak detector inventing a leak.
             activity?.Closed(label);
+
+            if (_reads == 0)
+            {
+                return;
+            }
 
             var elapsed = _now();
 
@@ -209,7 +217,7 @@ internal sealed class RemuxStreamMeter(
         logger.LogInformation(
             "Remux {Label} {Window}: {Megabytes:F1} MB in {Seconds:F2}s = {Mbps:F0} Mbit/s; "
             + "disk {Disk:F0}%, socket {Socket:F0}%; {Reads} reads of {Kilobytes:F0} KB; "
-            + "idle {Idle} before it; bytes {Range}; carrying {Whose}; {Ending}.",
+            + "idle {Idle} before it; bytes {Range}; carrying {Whose}; {Ending}; {Open} still open.",
             label,
             window,
             bytes / 1_000_000d,
@@ -222,6 +230,7 @@ internal sealed class RemuxStreamMeter(
             _idle is { } idle ? $"{idle.TotalMilliseconds:F0} ms" : "nothing",
             from < 0 ? "unknown" : $"{from}-{to}",
             from < 0 || whose is null ? "not asked" : whose(from, to),
-            abandoned?.Invoke() == true ? "ABANDONED by the client" : "served in full");
+            abandoned?.Invoke() == true ? "ABANDONED by the client" : "served in full",
+            activity?.Open ?? 0);
     }
 }
