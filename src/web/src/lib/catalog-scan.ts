@@ -26,21 +26,26 @@ export function scanSummary(report: CatalogScanReport): { title: string; descrip
   const imported =
     report.imported > 0 ? `Importing ${count(report.imported, "file")} — track it on Activity` : null;
 
-  if (removals.length === 0) {
+  // Sidecars are files too, and they are counted separately from the sources: a scan that removed a
+  // vanished dub and nothing else has `missingFiles` of zero, and would otherwise announce itself as
+  // "0 files gone from disk".
+  const gone = report.missingFiles + report.sidecarsRemoved;
+  if (gone > 0) {
+    const detail = [...removals, imported].filter(Boolean);
     return {
-      title: imported ?? "Nothing changed",
-      description:
-        imported === null
-          ? `${count(report.sourcesChecked, "file")} checked, all present.`
-          : report.skipped > 0
-            ? `${report.skipped} already in the library`
-            : undefined,
+      title: `${count(gone, "file")} gone from disk`,
+      description: detail.length > 0 ? `${detail.join(". ")}.` : undefined,
     };
   }
 
   return {
-    title: `${count(report.missingFiles, "file")} gone from disk`,
-    description: [...removals, imported].filter(Boolean).join(". ") + ".",
+    title: imported ?? "Nothing changed",
+    description:
+      imported === null
+        ? `${count(report.sourcesChecked, "file")} checked, all present.`
+        : report.skipped > 0
+          ? `${report.skipped} already in the library`
+          : undefined,
   };
 }
 

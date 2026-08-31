@@ -47,6 +47,16 @@ export function RemovedTitleDialog({
   const queryClient = useQueryClient();
   const [confirmPurge, setConfirmPurge] = useState(false);
 
+  // The confirmation cannot outlive what it is confirming: left standing after the dialog behind it
+  // closed, it would name a title that is already gone and its button would do nothing.
+  const close = (open: boolean) => {
+    if (!open) {
+      setConfirmPurge(false);
+    }
+
+    onOpenChange(open);
+  };
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["removed-titles"] });
     queryClient.invalidateQueries({ queryKey: ["watch-history-calendar"] });
@@ -56,7 +66,7 @@ export function RemovedTitleDialog({
     mutationFn: (id: string) => mediaServer.clearRemovedFavorite(id),
     onSuccess: () => {
       invalidate();
-      onOpenChange(false);
+      close(false);
       toast.success("Favorite cleared");
     },
     onError: (error) => toast.error("Couldn’t clear favorite", { description: errorMessage(error) }),
@@ -68,7 +78,7 @@ export function RemovedTitleDialog({
     mutationFn: (id: string) => mediaServer.clearRemovedRating(id),
     onSuccess: () => {
       invalidate();
-      onOpenChange(false);
+      close(false);
       toast.success("Rating cleared");
     },
     onError: (error) => toast.error("Couldn’t clear rating", { description: errorMessage(error) }),
@@ -79,7 +89,7 @@ export function RemovedTitleDialog({
     onSuccess: () => {
       setConfirmPurge(false);
       invalidate();
-      onOpenChange(false);
+      close(false);
       toast.success("Removed title deleted for good");
     },
     onError: (error) => toast.error("Couldn’t delete removed title", { description: errorMessage(error) }),
@@ -87,7 +97,7 @@ export function RemovedTitleDialog({
 
   return (
     <>
-      <Dialog open={title !== null} onOpenChange={onOpenChange}>
+      <Dialog open={title !== null} onOpenChange={close}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>

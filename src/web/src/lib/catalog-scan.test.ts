@@ -46,6 +46,15 @@ describe("scanSummary", () => {
     expect(description).toContain("1 version removed from titles that kept another");
   });
 
+  it("counts a vanished sidecar as a file gone from disk", () => {
+    // Sidecars are counted apart from the sources, so a scan that removed only a vanished dub has
+    // `missingFiles` of zero — and must not announce itself as "0 files gone from disk".
+    const { title, description } = scanSummary(report({ missingFiles: 0, sidecarsRemoved: 2 }));
+
+    expect(title).toBe("2 files gone from disk");
+    expect(description).toContain("2 sidecar tracks removed");
+  });
+
   it("says what was imported when nothing was lost", () => {
     const { title, description } = scanSummary(report({ imported: 2, skipped: 5, filesScanned: 7 }));
 

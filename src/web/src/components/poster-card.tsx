@@ -34,6 +34,18 @@ export function parsePersonId(id: string): { provider: string; providerId: strin
 // It leads somewhere or it does something: `href` makes it a link to a detail page, `onSelect` a button
 // that opens something in place. A removed title takes the second form — it has no page to go to, only
 // the user's own marks left to manage.
+//
+// Exactly one of the two, spelled as a union so a card that does nothing at all cannot be written: the
+// tile is the whole hit target, and an inert one looks identical to a working one.
+type PosterCardProps = {
+  title: string;
+  subtitle?: string | null;
+  posterUrl: string | null;
+  userData: UserItemData | null;
+  badge?: string;
+  dimmed?: boolean;
+} & ({ href: string; onSelect?: never } | { href?: never; onSelect: () => void });
+
 export function PosterCard({
   href,
   onSelect,
@@ -43,16 +55,7 @@ export function PosterCard({
   userData,
   badge,
   dimmed = false,
-}: {
-  href?: string;
-  onSelect?: () => void;
-  title: string;
-  subtitle?: string | null;
-  posterUrl: string | null;
-  userData: UserItemData | null;
-  badge?: string;
-  dimmed?: boolean;
-}) {
+}: PosterCardProps) {
   const resume =
     !userData?.played && userData?.playedPercentage ? Math.min(userData.playedPercentage, 100) : null;
 
