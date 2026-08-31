@@ -91,7 +91,13 @@ MEDIASERVER_TEAM=XXXXXXXXXX xcodebuild -project src/apple/MediaServerTV.xcodepro
 ```
 
 `security find-identity -v -p codesigning` names the certificate; the team is the `OU` of its
-subject. `-allowProvisioningUpdates` registers the bundle identifier with the developer account the
+subject.
+
+**Xcode rewrites this line.** Building from the IDE, or from `xcodebuild` with `MEDIASERVER_TEAM` set
+to something it cannot resolve, replaces `$(MEDIASERVER_TEAM)` with whatever it worked out — a real
+team identifier, or an empty string. Both have reached `main` from a `git add -A`. Stage the project
+file by name and read the diff, and prefer the unsigned verification build below, which does not touch
+it. `-allowProvisioningUpdates` registers the bundle identifier with the developer account the
 first time, which is a change to that account rather than to this machine.
 
 **To check that it compiles, and nothing more, turn signing off:**
