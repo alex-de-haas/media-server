@@ -34,7 +34,9 @@ opinionated.
 
 - **"You don't have that film."** Wrong when the catalog was never scanned, when a scan is in
   progress, when the mount is offline, or when the title exists as a tombstone. An empty
-  result must say which kind of nothing it is, or the agent will report absence as fact.
+  result must say which kind of nothing it is, or the agent will report absence as fact. Two
+  of those four have nothing to read today — no scan state is persisted — which is why the
+  deliverables below add it rather than assuming it.
 - **"There are no failures in the pipeline."** Wrong when it means "none in the first fifty
   rows I was given". Every list result carries the window that produced it — `limit`,
   `returned`, `truncated` — and a truncated result means *there was more*, not *that is all*.
@@ -56,7 +58,7 @@ unannotated surface is not a permissive surface — it is an invisible one.
 | Tool | Backed by |
 | --- | --- |
 | `search_library` | a **new** paged, searchable listing (see Deliverables) |
-| `get_title` | `GET /api/library/{id}` and `/{id}/episodes` — seasons, files, sizes, user state |
+| `get_title(id)` | `GET /api/library/{id}` and `GET /api/library/{id}/episodes` — seasons, files, sizes, user state |
 | `list_shelf(kind: recent\|resume\|nextup)` | the three shelf routes |
 
 ### Why something is missing
@@ -67,7 +69,7 @@ what an operator does not notice until they go looking for a film that never app
 | Tool | Backed by |
 | --- | --- |
 | `list_ingest(status?, stage?)` | a **new** filtered, paged listing (see Deliverables) |
-| `get_ingest_item` | `GET /api/ingest/{id}` — stage history and where it stopped |
+| `get_ingest_item(id)` | `GET /api/ingest/{id}` — stage history and where it stopped |
 | `get_server_status` | catalogs, active scans, `GET /api/vpn`, `/api/dht`, counts per ingest status |
 
 ### Acquiring
@@ -77,27 +79,50 @@ what an operator does not notice until they go looking for a film that never app
 | `search_metadata` | `POST /api/metadata/search` — resolves a title to a `providerRef` |
 | `list_downloads` | `GET /api/torrents` |
 | `add_torrent` | `POST /api/torrents/add` — not idempotent, answers "accepted" |
-| `control_download(action: pause\|resume\|stop_seeding)` | the three control routes |
+| `control_download(id, action: pause\|resume\|stop_seeding)` | the three control routes |
 
 ### Repairing an identification
 
 | Tool | Backed by |
 | --- | --- |
-| `match_ingest_item(providerRef)` | `POST /api/ingest/{id}/match` |
-| `advance_ingest_item(action: retry\|skip\|pin\|retarget)` | the remaining stage commands |
+| `match_ingest_item(id, groups)` | `POST /api/ingest/{id}/match` |
+| `advance_ingest_item(id, action: retry\|skip\|pin\|retarget)` | the remaining stage commands |
+
+A single provider reference is not enough, and a tool shaped that way would be unable to
+repair a supported class of `NeedsReview` item. `MatchRequest` carries `Groups`, each with its
+own identity and its own set of source files — that is how a franchise pack resolves into
+several movies — and each file carries an optional season and episode, which is how an episode
+match is expressed at all. The tool therefore takes the same shape the API does: one or more
+groups, each naming an identity and the `SourceFileId`s that belong to it.
+
+This makes `get_ingest_item` a precondition rather than a convenience: the source file ids the
+match refers to come from there, so the agent has to look at the item before it can repair it.
+The tool description should say so, because a model that guesses ids will produce a
+`FileNotFound` outcome that reads like a broken tool.
 
 ### Catalogs and space
 
 | Tool | Backed by |
 | --- | --- |
 | `list_catalogs` | `/`, `/mounts` and `/usage` together, so "how much room is left" is one call |
-| `scan_catalog` / `refresh_metadata` | the scan and refresh routes; both answer "accepted", both report a scan already running rather than starting a second |
+| `refresh_metadata(catalogId?)` | `POST /api/catalogs/refresh-metadata` — already queued: 202 with the started set, 409 when one is running, and `/refresh-metadata/active` to observe it |
+| `scan_catalog(catalogId?)` | `POST /api/catalogs/{id}/scan` — **synchronous today**, see below |
+
+The two are not symmetric, and the first draft of this plan claimed they were. Metadata
+refresh is already an observable background job. A scan is not: `CatalogEndpoints` awaits
+`CatalogScanService.ScanAsync` and returns 200 with a report once it has finished, with no
+guard against a second one starting and no persisted state to ask about.
+
+Over MCP that is worse than untidy. A tool call that blocks for minutes while a disk is walked
+will hit whatever timeout the agent's client applies, and the operator gets a failure for work
+that is in fact running. Giving scan the same coordinator treatment as refresh is Phase 1 work
+below, not something the tool layer can paper over.
 
 ### Personal state
 
 | Tool | Backed by |
 | --- | --- |
-| `set_title_state(watched?, favorite?, rating?)` | six routes behind one call |
+| `set_title_state(id, watched?, favorite?, rating?)` | six routes behind one call |
 | `manage_watchlist(action: list\|add\|remove)` | `/api/watchlist` |
 | `get_release_calendar` | `/api/watchlist/calendar` |
 
@@ -131,6 +156,16 @@ context, or it is cut silently and "not found" stops meaning anything.
       count in the response. Additive: the existing call with no new parameters keeps
       returning what it returns today, so the web client is not broken by this change.
 - [ ] **A filtered, paged ingest listing.** `status` and `stage` filters, same window shape.
+- [ ] **A scan that can be started without being waited for.** `CatalogScanService.ScanAsync`
+      is awaited by the endpoint, so a scan of a large catalog holds the request open for as
+      long as it takes and nothing prevents a second one starting alongside it.
+      `CatalogRefreshCoordinator` already solves exactly this for metadata refresh — queued,
+      202 with what it started, 409 when one is running, and `/refresh-metadata/active` to
+      observe — and a scan coordinator should mirror it rather than invent a second shape.
+      Keep the synchronous route working for the web client if it depends on the report.
+- [ ] **Persisted scan state per catalog** — at least "never scanned", "scanning", and when it
+      last finished. This is what lets an empty search result say which kind of nothing it is;
+      without it that contract is a sentence in a document rather than a behaviour.
 - [ ] **Regenerate the OpenAPI document and the Apple client** so the new parameters reach
       `src/api/openapi` and the generated Swift client rather than drifting from it.
 
@@ -147,8 +182,11 @@ context, or it is cut silently and "not found" stops meaning anything.
 - [ ] **The window contract on every list result** — `limit`, `returned`, `truncated`,
       reported from what actually ran rather than from what was asked for.
 - [ ] **The empty-result contract** — a result with nothing in it says whether the catalog is
-      unscanned, scanning, offline, or genuinely without a match.
-- [ ] **Detached operations answer "accepted"**, with the note saying what was started.
+      unscanned, scanning, offline, or genuinely without a match, reading the scan state added
+      in Phase 1 rather than guessing.
+- [ ] **Detached operations answer "accepted"**, with the note saying what was started — and
+      the ones that are *not* detached say so instead. Whichever contract a route actually has
+      is the one its tool reports.
 - [ ] **User resolution** — the acting Hosty user is carried into every personal-state tool,
       and a call without one is refused rather than answered.
 
@@ -190,4 +228,8 @@ handling. What they cannot cover needs a Core-managed runtime:
 4. Confirm a personal-state tool refuses when the caller carries no Hosty user, beside the
    same call succeeding when it does.
 5. Confirm `scan_catalog` on an already-scanning catalog reports that rather than queueing a
-   second scan.
+   second scan, and that a scan of a catalog large enough to take minutes does not hold the
+   tool call open — the failure this is meant to prevent only appears at that size.
+6. Repair a multi-movie pack through `match_ingest_item` with more than one group, and an
+   episode ingest with per-file season and episode numbers. A single-identity match passing
+   says nothing about either.
