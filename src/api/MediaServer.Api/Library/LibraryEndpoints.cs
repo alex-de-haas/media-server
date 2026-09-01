@@ -24,6 +24,8 @@ public static class LibraryEndpoints
             string? kind,
             string? q,
             bool? watched,
+            string? about,
+            string? genres,
             int? limit,
             int? offset,
             ClaimsPrincipal principal,
@@ -32,13 +34,24 @@ public static class LibraryEndpoints
             CancellationToken cancellationToken) =>
         {
             var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
-            if (string.IsNullOrWhiteSpace(q) && watched is null && limit is null && offset is null)
+            if (string.IsNullOrWhiteSpace(q) && watched is null && limit is null && offset is null
+                && string.IsNullOrWhiteSpace(about) && string.IsNullOrWhiteSpace(genres))
             {
                 return Results.Ok(await library.ListAsync(catalogId, ParseKind(kind), appUserId, cancellationToken));
             }
 
+            // Named rather than positional: the query record grew twice while this was being written,
+            // and both times the positional call silently bound the new argument to the wrong parameter.
             var page = await library.SearchAsync(
-                new LibrarySearchQuery(catalogId, ParseKind(kind), q, watched, limit, offset),
+                new LibrarySearchQuery(
+                    CatalogId: catalogId,
+                    Kind: ParseKind(kind),
+                    Title: q,
+                    Watched: watched,
+                    About: about,
+                    Genres: SplitGenres(genres),
+                    Limit: limit,
+                    Offset: offset),
                 appUserId,
                 cancellationToken);
             return Results.Ok(page.Items);
@@ -445,6 +458,19 @@ public static class LibraryEndpoints
         PinPosterResult.NotFound => Results.NotFound(),
         _ => Results.Problem(),
     };
+
+    /// <summary>Comma-separated genres, blanks dropped. Null when nothing usable was given.</summary>
+    private static IReadOnlyList<string>? SplitGenres(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var parts = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length > 0 ? parts : null;
+    }
+
 }
 
 /// <summary>The instant a viewing happened, as the user states it. Required — a log without a time is the toggle.</summary>

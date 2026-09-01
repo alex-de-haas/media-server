@@ -36,6 +36,10 @@ public sealed record LibrarySearchQuery(
     MediaKind? Kind = null,
     string? Title = null,
     bool? Watched = null,
+    /// <summary>What the title is about: matched against the synopsis and the provider's keywords.</summary>
+    string? About = null,
+    /// <summary>Genres the title must carry — all of them, not any. "an action comedy" is both.</summary>
+    IReadOnlyList<string>? Genres = null,
     int? Limit = null,
     int? Offset = null);
 

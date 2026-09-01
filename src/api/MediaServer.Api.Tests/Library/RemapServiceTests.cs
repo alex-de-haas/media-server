@@ -39,7 +39,7 @@ public sealed class RemapServiceTests : IDisposable
         _remap = new RemapService(
             _database,
             new IdentifyService(_database, new NameParser(), provider, new AppSettingsService(_database), NullLogger<IdentifyService>.Instance),
-            new EnrichService(_database, provider, settings, new PersonSyncService(_database), new CollectionSyncService(_database)),
+            new EnrichService(_database, provider, settings, new PersonSyncService(_database), new CollectionSyncService(_database), new MetadataTagSync(_database, NullLogger<MetadataTagSync>.Instance)),
             sandbox,
             new LibraryDeleteService(_database, new LibraryFileEraser(sandbox, NullLogger<LibraryFileEraser>.Instance)),
             NullLogger<RemapService>.Instance);

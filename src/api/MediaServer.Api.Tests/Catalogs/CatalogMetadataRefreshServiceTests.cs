@@ -37,6 +37,7 @@ public sealed class CatalogMetadataRefreshServiceTests : IDisposable
         services.AddSingleton<ICatalogRefreshQueue>(_queue);
         services.AddScoped<PersonSyncService>();
         services.AddScoped<CollectionSyncService>();
+        services.AddScoped<MetadataTagSync>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
         services.AddScoped<CatalogMetadataRefreshService>();

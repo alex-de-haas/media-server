@@ -63,6 +63,7 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddScoped<IdentifyService>();
         services.AddScoped<PersonSyncService>();
         services.AddScoped<CollectionSyncService>();
+        services.AddScoped<MetadataTagSync>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
         services.AddScoped<DownloadDeletionService>();

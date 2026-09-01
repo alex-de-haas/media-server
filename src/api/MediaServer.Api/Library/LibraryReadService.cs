@@ -91,6 +91,39 @@ public sealed class LibraryReadService(
                     && EF.Functions.Like(record.Title, pattern, LikeEscape)));
         }
 
+        if (!string.IsNullOrWhiteSpace(query.About))
+        {
+            // Two sources, because they fail in opposite directions. A keyword is precise and sparse —
+            // TMDb keeps only a handful per title, so its absence means "not among the ones kept", never
+            // "not about that". The synopsis is complete and vague: it will match a film that merely
+            // mentions the thing. Either alone answers "something about a plane hijacking" badly.
+            var pattern = $"%{EscapeLike(query.About.Trim())}%";
+            filtered = filtered.Where(item => database.MetadataRecords.Any(record =>
+                record.MediaItemId == item.Id
+                && ((record.Overview != null && EF.Functions.Like(record.Overview, pattern, LikeEscape))
+                    || database.MetadataTags.Any(tag =>
+                        tag.MetadataRecordId == record.Id && tag.Kind == MetadataTagKind.Keyword
+                        && EF.Functions.Like(tag.Value, pattern, LikeEscape)))));
+        }
+
+        foreach (var requested in query.Genres ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(requested))
+            {
+                continue;
+            }
+
+            // Each genre narrows separately, so "action comedy" means both and not either. Applied one
+            // predicate at a time rather than as a set operation, which is what makes "all of" the
+            // reading — a single Any() over the list would have quietly meant "any of".
+            var pattern = $"%{EscapeLike(requested.Trim())}%";
+            filtered = filtered.Where(item => database.MetadataRecords.Any(record =>
+                record.MediaItemId == item.Id
+                && database.MetadataTags.Any(tag =>
+                    tag.MetadataRecordId == record.Id && tag.Kind == MetadataTagKind.Genre
+                    && EF.Functions.Like(tag.Value, pattern, LikeEscape))));
+        }
+
         if (query.Watched is { } watched && appUserId is { } userId)
         {
             // A movie owns its played flag. A series does not: its state is a rollup over published

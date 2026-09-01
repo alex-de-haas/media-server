@@ -1,3 +1,4 @@
+using MediaServer.Api.Metadata;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
@@ -40,7 +41,7 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         _database,
         new CatalogPathSandbox(),
         probe ?? new FakeMediaProbe(),
-        new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }, new PersonSyncService(_database), new CollectionSyncService(_database)),
+        new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] }, new PersonSyncService(_database), new CollectionSyncService(_database), new MetadataTagSync(_database, NullLogger<MetadataTagSync>.Instance)),
         NullLogger<LibraryMaintenanceService>.Instance);
 
     private Catalog SeedCatalog(string? root = null)

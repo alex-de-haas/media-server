@@ -243,13 +243,24 @@ context, or it is cut silently and "not found" stops meaning anything.
       called for existed and only the *query* was missing. The title filter above supplies it, and
       progress and ETA stay on `DownloadResponse`, reached by the `DownloadId` the row already
       returns. No new join was built.
-- [ ] **Thematic and genre search over the library.** "Something about a plane hijacking" and
+- [x] **Thematic and genre search over the library.** "Something about a plane hijacking" and
       "an action comedy" are both unanswerable today, and no tool shape fixes that.
       `MetadataRecord` already persists `Overview` and `Genres` as columns, so both are a query
       away. TMDb keywords are parsed already (`TmdbPayload.Keywords`, capped at 16) but live
       only inside the `Raw` JSON — promoting them to something queryable is what turns "plane
       hijacking" from a guess against prose into a match against a tag. Same window contract as
       the rest.
+
+      **Shipped as a `MetadataTag` table**, rebuilt whenever a record is written, because neither
+      source can be filtered on where it lives — genres are a converted JSON list and keywords are
+      inside the raw payload. `about` searches keywords *and* the synopsis, since the two fail in
+      opposite directions: a keyword is precise and sparse, a synopsis complete and vague. Several
+      genres mean all of them, not any.
+
+      A backfill worker projects records written before the table existed; without it a settled
+      library becomes searchable only as titles happen to be re-enriched, which is never. It walks by
+      id cursor rather than by re-querying "records with no tags" — the latter never terminates for a
+      record that yields no tags, which is how the first version behaved.
 - [ ] **A recommendation seeded by a named title.** `RecommendationKind` is only `Movie` or
       `Series`; the engine seeds from what the operator *watched*, and its own note says TMDb
       only answers "what is like X", so the choice of X is the entire personalization. "Suggest

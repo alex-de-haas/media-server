@@ -267,6 +267,8 @@ builder.Services.AddSingleton<IReleaseScheduleProvider, TmdbReleaseScheduleProvi
 builder.Services.AddScoped<IdentifyService>();
 builder.Services.AddScoped<PersonSyncService>();
 builder.Services.AddScoped<CollectionSyncService>();
+builder.Services.AddScoped<MetadataTagSync>();
+builder.Services.AddHostedService<MetadataTagBackfillWorker>();
 builder.Services.AddScoped<EnrichService>();
 builder.Services.AddScoped<JobService>();
 builder.Services.AddScoped<IPipelineStage, IntakeStage>();

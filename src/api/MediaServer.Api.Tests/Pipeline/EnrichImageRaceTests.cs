@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -84,7 +85,7 @@ public sealed class EnrichImageRaceTests : IDisposable
         new FakeMetadataProvider(),
         new MediaServerSettings { SupportedLanguages = ["en-US"] },
         new PersonSyncService(context),
-        new CollectionSyncService(context));
+        new CollectionSyncService(context), new MetadataTagSync(context, NullLogger<MetadataTagSync>.Instance));
 
     public void Dispose() => _db.Dispose();
 }

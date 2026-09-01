@@ -143,12 +143,75 @@ public sealed class LibrarySearchTests : IDisposable
         Assert.Equal(7.5, row.CommunityRating);
     }
 
+    [Fact]
+    public async Task What_a_film_is_about_is_matched_against_both_its_keywords_and_its_synopsis()
+    {
+        // The two sources fail in opposite directions, which is why both are searched. A keyword is
+        // precise and sparse — TMDb keeps only a handful, so its absence is weak evidence — while the
+        // synopsis is complete and vague. Either alone answers "something about a plane hijacking"
+        // badly, so both are asserted here, separately.
+        var byKeyword = AddTagged("Air Force One", keywords: ["aircraft hijacking"]);
+        var bySynopsis = AddTagged("Con Air", overview: "Convicts seize a prisoner transport plane in mid-air.");
+        AddTagged("Barbie", overview: "A doll goes to the real world.", keywords: ["toy"]);
+        await _context.SaveChangesAsync();
+
+        Assert.Equal(byKeyword, Assert.Single((await Search(about: "aircraft hijacking")).Items).Id);
+        Assert.Equal(bySynopsis, Assert.Single((await Search(about: "prisoner transport")).Items).Id);
+        Assert.Empty((await Search(about: "submarine")).Items);
+    }
+
+    [Fact]
+    public async Task Several_genres_mean_all_of_them_and_not_any_of_them()
+    {
+        // "An action comedy" is one film that is both, not two films that are either. A single Any()
+        // over the requested list would have quietly meant "any of" and returned three rows here, all
+        // of them defensible-looking.
+        var both = AddTagged("Rush Hour", genres: ["Action", "Comedy"]);
+        AddTagged("Die Hard", genres: ["Action"]);
+        AddTagged("Airplane!", genres: ["Comedy"]);
+        await _context.SaveChangesAsync();
+
+        Assert.Equal(both, Assert.Single((await Search(genres: ["Action", "Comedy"])).Items).Id);
+
+        // Beside the single-genre case, so a filter that always required everything would fail too.
+        Assert.Equal(2, (await Search(genres: ["Action"])).Items.Count);
+    }
+
     private Task<LibrarySearchPage> Search(
-        string? title = null, bool? watched = null, int? limit = null, int? offset = null) =>
+        string? title = null, bool? watched = null, int? limit = null, int? offset = null,
+        string? about = null, IReadOnlyList<string>? genres = null) =>
         _library.SearchAsync(
-            new LibrarySearchQuery(Title: title, Watched: watched, Limit: limit ?? 50, Offset: offset),
+            new LibrarySearchQuery(
+                Title: title, Watched: watched, About: about, Genres: genres,
+                Limit: limit ?? 50, Offset: offset),
             _userId,
             CancellationToken.None);
+
+    private Guid AddTagged(
+        string title, string? overview = null, IReadOnlyList<string>? genres = null,
+        IReadOnlyList<string>? keywords = null)
+    {
+        var id = AddMovie(title, localized: title, genres: genres);
+        var record = _context.MetadataRecords.Local.Single(entry => entry.MediaItemId == id);
+        record.Overview = overview;
+        foreach (var genre in genres ?? [])
+        {
+            _context.MetadataTags.Add(new MetadataTag
+            {
+                Id = Guid.NewGuid(), MetadataRecordId = record.Id, Kind = MetadataTagKind.Genre, Value = genre,
+            });
+        }
+
+        foreach (var keyword in keywords ?? [])
+        {
+            _context.MetadataTags.Add(new MetadataTag
+            {
+                Id = Guid.NewGuid(), MetadataRecordId = record.Id, Kind = MetadataTagKind.Keyword, Value = keyword,
+            });
+        }
+
+        return id;
+    }
 
     private Guid AddMovie(
         string rawTitle, string localized, IReadOnlyList<string>? genres = null,

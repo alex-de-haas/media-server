@@ -12,6 +12,8 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
     public DbSet<MediaSource> MediaSources => Set<MediaSource>();
     public DbSet<MediaStream> MediaStreams => Set<MediaStream>();
     public DbSet<MetadataRecord> MetadataRecords => Set<MetadataRecord>();
+
+    public DbSet<MetadataTag> MetadataTags => Set<MetadataTag>();
     public DbSet<ImageAsset> ImageAssets => Set<ImageAsset>();
     public DbSet<Person> Persons => Set<Person>();
     public DbSet<MediaItemPerson> MediaItemPersons => Set<MediaItemPerson>();
@@ -67,6 +69,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureMovieCollection(modelBuilder);
         ConfigureMediaSource(modelBuilder);
         ConfigureMetadataRecord(modelBuilder);
+        ConfigureMetadataTag(modelBuilder);
         ConfigureImageAsset(modelBuilder);
         ConfigurePerson(modelBuilder);
         ConfigureDownload(modelBuilder);
@@ -351,6 +354,22 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         record.HasOne(entity => entity.MediaItem)
             .WithMany()
             .HasForeignKey(entity => entity.MediaItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureMetadataTag(ModelBuilder modelBuilder)
+    {
+        var tag = modelBuilder.Entity<MetadataTag>();
+        tag.HasKey(entity => entity.Id);
+        tag.Property(entity => entity.Value).IsRequired();
+        tag.Property(entity => entity.Kind).HasConversion<int>();
+        // The search shape: "which records carry this kind of tag with this value".
+        tag.HasIndex(entity => new { entity.Kind, entity.Value });
+        tag.HasIndex(entity => entity.MetadataRecordId);
+
+        tag.HasOne(entity => entity.MetadataRecord)
+            .WithMany()
+            .HasForeignKey(entity => entity.MetadataRecordId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 
