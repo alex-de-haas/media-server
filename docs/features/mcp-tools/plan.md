@@ -1,6 +1,6 @@
 # MCP Tools — plan
 
-Status: Ready
+Status: In Progress
 Created: 2026-09-01
 Updated: 2026-09-01
 
@@ -201,7 +201,17 @@ context, or it is cut silently and "not found" stops meaning anything.
       without fetching every title one by one. Genres, runtime and community rating belong on
       the row. The poster URL does not belong in the MCP projection at all; a model cannot see
       it, and it is pure weight.
-- [ ] **A filtered, paged ingest listing.** `status` and `stage` filters, same window shape.
+- [x] **A filtered, paged ingest listing.** `status`, `stage` and title filters, with `limit`/`offset`
+      and a total counted before the window. The title filter searches all three names an item can
+      have — the identified title, the pinned target, and the release name — which is what collapses
+      the separate "download answerable by title" deliverable below into this one.
+- [ ] **Case folding outside ASCII.** Measured, not assumed: a Cyrillic title matches `Оппенгеймер`
+      and misses `оппенгеймер`, because SQLite's `LIKE` folds ASCII only. Routing the comparison
+      through SQL `lower()` makes it strictly worse — that function is ASCII-only too, so lowering the
+      term in .NET leaves it matching nothing. The fix is a normalized, case-folded column, which the
+      library search needs regardless; the ingest filter should read the same one. Until then that
+      filter is exact-case for non-Latin titles, which for a Russian-language library is close to
+      useless — this is not a polish item.
 - [ ] **A scan that can be started without being waited for.** `CatalogScanService.ScanAsync`
       is awaited by the endpoint, so a scan of a large catalog holds the request open for as
       long as it takes and nothing prevents a second one starting alongside it.
@@ -209,13 +219,11 @@ context, or it is cut silently and "not found" stops meaning anything.
       202 with what it started, 409 when one is running, and `/refresh-metadata/active` to
       observe — and a scan coordinator should mirror it rather than invent a second shape.
       Keep the synchronous route working for the web client if it depends on the report.
-- [ ] **A download answerable by title.** `DownloadResponse` carries `PercentComplete`,
-      `EtaSeconds` and `State`, but its `Name` is the release name — `Oppenheimer.2023.2160p…`
-      — and nothing in any response maps that to the title the operator said. The link is
-      already in the data: `IngestItem` holds both `DownloadId` and `MediaItemId`. Surface the
-      resolved identity on the download, so "has Oppenheimer finished" is one lookup instead of
-      the agent guessing at release names. This is also what lets the agent volunteer *"it
-      downloaded, but it was never identified"* rather than answering only what was asked.
+- [x] **A download answerable by title.** Smaller than it was written: `IngestItemResponse`
+      already carried `DownloadId`, `DownloadName`, `MediaTitle` and `MediaItemId`, so the join this
+      called for existed and only the *query* was missing. The title filter above supplies it, and
+      progress and ETA stay on `DownloadResponse`, reached by the `DownloadId` the row already
+      returns. No new join was built.
 - [ ] **Thematic and genre search over the library.** "Something about a plane hijacking" and
       "an action comedy" are both unanswerable today, and no tool shape fixes that.
       `MetadataRecord` already persists `Overview` and `Genres` as columns, so both are a query

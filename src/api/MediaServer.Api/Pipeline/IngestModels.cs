@@ -50,6 +50,37 @@ public sealed record IngestSourceFileResponse(
     string? ExtraTitle,
     bool ExtraSuggestSkip);
 
+/// <summary>
+/// Filters and window for an ingest listing. Every filter is optional; the window always applies.
+/// </summary>
+/// <remarks>
+/// The listing exists for the question "why has this not appeared yet", which is asked about one
+/// title out of a pipeline that may hold thousands of rows. Returning all of them and letting the
+/// caller sift is what this replaces: an agent given the newest N with no way to say so reports "no
+/// failures" when it means "none in the rows I was handed".
+/// </remarks>
+public sealed record IngestListQuery(
+    IngestStatus? Status = null,
+    IngestStage? Stage = null,
+    /// <summary>Substring of the identified title, the pinned target title, or the download name.</summary>
+    string? Title = null,
+    int? Limit = null,
+    int? Offset = null);
+
+/// <summary>
+/// One page of ingest items, with the window that produced it.
+/// </summary>
+/// <remarks>
+/// <see cref="Total"/> is the count *before* the window, which is what makes the page honest: a
+/// caller can tell "there are three failures and here they are" from "here are the first three of
+/// ninety". Without it a full page and a complete answer look identical.
+/// </remarks>
+public sealed record IngestListPage(
+    IReadOnlyList<IngestItemResponse> Items,
+    int Total,
+    int Limit,
+    int Offset);
+
 public sealed record IngestItemResponse(
     Guid Id,
     Guid CatalogId,
