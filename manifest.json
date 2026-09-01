@@ -323,5 +323,8 @@
         "path": "/api/mcp"
       }
     ]
+  },
+  "agent": {
+    "skillFile": "docs/agent.md"
   }
 }
