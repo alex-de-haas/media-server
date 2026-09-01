@@ -38,7 +38,7 @@ public sealed class WatchlistLibraryLinkerTests : IDisposable
 
         using var context = WatchlistTestData.NewContext(_connection);
         var service = new WatchlistService(
-            context, new MediaServerSettings(), new RecordingSyncQueue(), new WatchlistLibraryLinker(context, _clock), _clock);
+            context, new MediaServerSettings(), new RecordingSyncQueue(), new WatchlistLibraryLinker(context, _clock), _clock, new FakeScheduleProvider());
         var result = await service.AddAsync(
             userId,
             new AddWatchlistRequest(new ProviderRefBody("tmdb", "27205"), MediaKind.Movie, null, null, null, null, "Inception", 2010, null),

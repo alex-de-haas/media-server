@@ -76,12 +76,34 @@ public sealed class RecommendationFeedService(
     /// </remarks>
     internal const int PerRequestForShelf = 500;
 
-    public async Task<RecommendationFeedDto> BuildAsync(
-        int appUserId, RecommendationKind? kind, int limit, CancellationToken cancellationToken)
+    /// <param name="seedItemId">
+    /// A library item to recommend from, instead of the operator's watch history.
+    /// </param>
+    /// <returns>
+    /// The feed, or <c>null</c> when a seed was asked for and could not be resolved — the item is
+    /// unknown, or carries no TMDb identity, or is neither a movie nor a series. Null rather than the
+    /// ordinary feed on purpose: someone who asked for "something like this film" and silently received
+    /// their usual suggestions has been answered a different question than the one they asked, and has
+    /// no way to tell. An empty feed is still a feed, and comes back as one.
+    /// </returns>
+    public async Task<RecommendationFeedDto?> BuildAsync(
+        int appUserId, RecommendationKind? kind, int limit, CancellationToken cancellationToken,
+        Guid? seedItemId = null)
     {
+        IReadOnlyList<RecommendationSeed>? seedOverride = null;
+        if (seedItemId is { } itemId)
+        {
+            seedOverride = await SeedFromItemAsync(itemId, cancellationToken);
+            if (seedOverride is null)
+            {
+                return null;
+            }
+        }
+
         // Rank generously, then filter: excluding watched and hidden titles afterwards would otherwise
         // eat into the limit and hand back a short feed.
-        var ranked = await engine.RankAsync(appUserId, Math.Max(limit * 4, PerRequest), cancellationToken);
+        var ranked = await engine.RankAsync(
+            appUserId, Math.Max(limit * 4, PerRequest), cancellationToken, seedOverride);
         var items = await ProjectAsync(appUserId, ranked.Candidates, kind, limit, cancellationToken);
 
         var preference = await database.RecommendationPreferences.AsNoTracking()
@@ -90,6 +112,35 @@ public sealed class RecommendationFeedService(
             .FirstOrDefaultAsync(cancellationToken);
 
         return new RecommendationFeedDto(items, preference ?? 0, Rung: ranked.Rung);
+    }
+
+    /// <summary>The single seed a named library item stands for, or null when it cannot stand for one.</summary>
+    /// <remarks>
+    /// Full weight, because there is nothing to weigh it against: recency and rewatch counts exist to
+    /// rank several watched titles against each other, and an explicit request has exactly one.
+    /// </remarks>
+    private async Task<IReadOnlyList<RecommendationSeed>?> SeedFromItemAsync(
+        Guid itemId, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == itemId, cancellationToken);
+        if (item is null || RecommendationSeedSelector.TmdbIdOf(item) is not { } tmdbId)
+        {
+            return null;
+        }
+
+        // Movie and series id spaces overlap at TMDb, so the kind is part of the identity. An episode or
+        // a season cannot seed: TMDb answers "what is like this show", never "like this episode".
+        var kind = item.Kind switch
+        {
+            MediaKind.Movie => RecommendationKind.Movie,
+            MediaKind.Series => RecommendationKind.Series,
+            _ => (RecommendationKind?)null,
+        };
+
+        return kind is { } resolved
+            ? [new RecommendationSeed(new RecommendationIdentity(resolved, tmdbId), 1)]
+            : null;
     }
 
     /// <summary>

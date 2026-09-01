@@ -64,12 +64,18 @@ public sealed class RecommendationFeedServiceTests : IDisposable
 
         public List<TmdbRecommendedTitle> Series { get; } = [];
 
+        /// <summary>The titles TMDb was asked "what is like this" about.</summary>
+        public List<RecommendationIdentity> AskedFor { get; } = [];
+
         public Task<IReadOnlyList<TmdbRecommendedTitle>> ForSeedAsync(
-            RecommendationIdentity seed, TmdbRecommendationGenerator generator, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>(
+            RecommendationIdentity seed, TmdbRecommendationGenerator generator, CancellationToken cancellationToken)
+        {
+            AskedFor.Add(seed);
+            return Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>(
                 generator != TmdbRecommendationGenerator.Seeds
                     ? []
                     : seed.Kind == RecommendationKind.Series ? Series : Movies);
+        }
 
         public Task<IReadOnlyList<TmdbRecommendedTitle>> ForListAsync(
             TmdbRecommendationGenerator generator,
@@ -299,8 +305,11 @@ public sealed class RecommendationFeedServiceTests : IDisposable
 
 
 
-    private Task<RecommendationFeedDto> Build(RecommendationKind? kind = null, int limit = 20) =>
-        Service().BuildAsync(_userId, kind, limit, CancellationToken.None);
+    private async Task<RecommendationFeedDto> Build(RecommendationKind? kind = null, int limit = 20) =>
+        (await Service().BuildAsync(_userId, kind, limit, CancellationToken.None))!;
+
+    private Task<RecommendationFeedDto?> BuildSeeded(Guid seedItemId) =>
+        Service().BuildAsync(_userId, null, 20, CancellationToken.None, seedItemId);
 
     /// <summary>What TMDb suggests for the seed, in order. The engine's only input here.</summary>
     private void Suggest(params string[] tmdbIds)
@@ -322,6 +331,59 @@ public sealed class RecommendationFeedServiceTests : IDisposable
         HostUserId = hostUserId, Email = email, DisplayName = email, Role = AppUserRole.User,
         CreatedAt = _time.GetUtcNow(), LastSeenAt = _time.GetUtcNow(),
     };
+
+    [Fact]
+    public async Task A_named_title_replaces_the_watch_history_as_the_seed()
+    {
+        // TMDb only answers "what is like X", so which X is asked about is the entire difference between
+        // "suggest something" and "suggest something like this film". Asserted by what the provider was
+        // asked, not by what came back — a feed can look right while having been built from the wrong
+        // question.
+        Suggest("900");
+        var namedTitle = AddItem(MediaKind.Movie, "Named", "555");
+
+        var seeded = await BuildSeeded(namedTitle.Id);
+
+        Assert.NotNull(seeded);
+        Assert.Equal([new RecommendationIdentity(RecommendationKind.Movie, "555")], _tmdb.AskedFor);
+
+        // Paired with the unseeded call, which must ask about what was watched instead. Without this a
+        // seed parameter that was silently ignored would still pass the assertion above.
+        _tmdb.AskedFor.Clear();
+        await Build();
+        Assert.DoesNotContain(new RecommendationIdentity(RecommendationKind.Movie, "555"), _tmdb.AskedFor);
+        Assert.NotEmpty(_tmdb.AskedFor);
+    }
+
+    [Fact]
+    public async Task A_title_that_cannot_seed_is_refused_rather_than_answered_with_the_ordinary_feed()
+    {
+        // The failure this prevents is silent: someone asks for "something like this film", the title
+        // has no TMDb identity, and they receive their usual suggestions with no way to tell that a
+        // different question was answered.
+        Suggest("900");
+        var unidentified = AddItem(MediaKind.Movie, "Unidentified", tmdbId: null);
+
+        Assert.Null(await BuildSeeded(unidentified.Id));
+        Assert.Null(await BuildSeeded(Guid.NewGuid()));
+
+        // Beside a feed that is merely empty, which is still an answer and still comes back as one.
+        var empty = await Build(limit: 20);
+        Assert.NotNull(empty);
+    }
+
+    [Fact]
+    public async Task An_episode_cannot_seed_because_the_provider_has_no_such_question()
+    {
+        // TMDb answers "what is like this show", never "like this episode". Accepting the episode and
+        // quietly recommending from its series would be a different answer wearing the right shape.
+        Suggest("900");
+        var series = AddItem(MediaKind.Series, "A show", "777");
+        var episode = AddItem(MediaKind.Episode, "S01E01", "777", seriesId: series.Id);
+
+        Assert.Null(await BuildSeeded(episode.Id));
+        Assert.NotNull(await BuildSeeded(series.Id));
+    }
 
     private MediaItem AddItem(MediaKind kind, string title, string? tmdbId, Guid? seriesId = null)
     {

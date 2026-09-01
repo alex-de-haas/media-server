@@ -1,5 +1,6 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
+using MediaServer.Api.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Watchlist;
@@ -17,8 +18,52 @@ public sealed class WatchlistService(
     MediaServerSettings settings,
     IWatchlistSyncQueue syncQueue,
     WatchlistLibraryLinker libraryLinker,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IReleaseScheduleProvider scheduleProvider)
 {
+    /// <summary>
+    /// What the provider knows about when a title comes out, without tracking it.
+    /// </summary>
+    /// <returns>
+    /// Null when the provider is not the one this instance uses, when the kind cannot have a schedule,
+    /// or when the provider did not answer. Those last two are not distinguished — the provider's own
+    /// contract returns null for "unknown title" and "the call failed" alike, and inventing a
+    /// distinction here would be a claim about which one happened rather than a report of it.
+    /// </returns>
+    public async Task<ReleasePreviewDto?> PreviewScheduleAsync(
+        string provider, string providerId, MediaKind kind, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(provider, scheduleProvider.Key, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(providerId))
+        {
+            return null;
+        }
+
+        if (kind == MediaKind.Movie)
+        {
+            var movie = await scheduleProvider.GetMovieScheduleAsync(
+                providerId, [settings.WatchRegion], cancellationToken);
+            return movie is null
+                ? null
+                : new ReleasePreviewDto(
+                    scheduleProvider.Key, providerId, nameof(MediaKind.Movie),
+                    movie.Title, movie.Year, movie.Status, movie.Dates, null, null);
+        }
+
+        if (kind == MediaKind.Series)
+        {
+            var series = await scheduleProvider.GetSeriesScheduleAsync(providerId, cancellationToken);
+            return series is null
+                ? null
+                : new ReleasePreviewDto(
+                    scheduleProvider.Key, providerId, nameof(MediaKind.Series),
+                    series.Title, series.Year, series.Status, [], series.NextEpisode, series.LastEpisode);
+        }
+
+        // An episode or a season has no schedule of its own to ask about.
+        return null;
+    }
+
     public async Task<IReadOnlyList<WatchlistItemDto>> ListAsync(int userId, CancellationToken cancellationToken)
     {
         var entries = await database.WatchlistEntries.AsNoTracking()

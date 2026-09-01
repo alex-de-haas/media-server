@@ -1,4 +1,5 @@
 using MediaServer.Api.Data;
+using MediaServer.Api.Metadata;
 
 namespace MediaServer.Api.Watchlist;
 
@@ -124,3 +125,25 @@ public sealed record ReminderResolutionDto(ReminderDto Reminder, string State, D
     public const string AlreadyReleased = "alreadyReleased";
     public const string Pending = "pending";
 }
+
+/// <summary>
+/// When a title comes out, for a title nobody is tracking yet.
+/// </summary>
+/// <remarks>
+/// The calendar answers for tracked titles, because that is where the dates are stored — but "when does
+/// it come out" is most often asked about something the operator has *not* added, and answering it is
+/// what prompts them to add it. This is fetched from the provider and not persisted: tracking is what
+/// creates a row, and a question should not.
+/// </remarks>
+public sealed record ReleasePreviewDto(
+    string Provider,
+    string ProviderId,
+    string Kind,
+    string? Title,
+    int? Year,
+    string? Status,
+    /// <summary>Typed, dated releases for the watch region. Empty for a series.</summary>
+    IReadOnlyList<TypedReleaseDate> Dates,
+    /// <summary>The next episode to air, when the provider knows of one. Null for a movie.</summary>
+    EpisodeAirDate? NextEpisode,
+    EpisodeAirDate? LastEpisode);

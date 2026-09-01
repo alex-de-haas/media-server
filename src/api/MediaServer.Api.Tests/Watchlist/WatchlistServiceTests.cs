@@ -281,7 +281,7 @@ public sealed class WatchlistServiceTests : IDisposable
     {
         using var database = WatchlistTestData.NewContext(_connection);
         var service = new WatchlistService(
-            database, new MediaServerSettings { WatchRegion = "US" }, _queue, new WatchlistLibraryLinker(database, _clock), _clock);
+            database, new MediaServerSettings { WatchRegion = "US" }, _queue, new WatchlistLibraryLinker(database, _clock), _clock, new FakeScheduleProvider());
         return await action(service);
     }
 

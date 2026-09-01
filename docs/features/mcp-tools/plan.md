@@ -263,14 +263,23 @@ context, or it is cut silently and "not found" stops meaning anything.
       library becomes searchable only as titles happen to be re-enriched, which is never. It walks by
       id cursor rather than by re-querying "records with no tags" — the latter never terminates for a
       record that yields no tags, which is how the first version behaved.
-- [ ] **A recommendation seeded by a named title.** `RecommendationKind` is only `Movie` or
+- [x] **A recommendation seeded by a named title.** `RecommendationKind` is only `Movie` or
       `Series`; the engine seeds from what the operator *watched*, and its own note says TMDb
       only answers "what is like X", so the choice of X is the entire personalization. "Suggest
       something like this film" is that machinery with the seed supplied instead of inferred —
       a parameter, not a new engine.
-- [ ] **A release date for a title that is not tracked.** `/api/watchlist/calendar` answers for
+
+      A title that cannot seed — unidentified, or an episode, since TMDb answers "what is like this
+      show" and never "like this episode" — is **refused**. Falling back to the ordinary feed would
+      answer a different question than the one asked, with nothing in the response to say so.
+- [x] **A release date for a title that is not tracked.** `/api/watchlist/calendar` answers for
       tracked titles only, but "when does it come out" is most often asked about something the
       operator has *not* added yet — and answering it is what prompts them to add it.
+
+      `GET /api/watchlist/calendar/preview` asks the schedule provider directly and persists nothing:
+      tracking is what creates a row, and a question should not. A title the provider will not answer
+      about is refused rather than reported as undated — "no dates" is a claim about the film, and
+      this one would be a claim about the request.
 - [x] **Persisted scan state per catalog** — at least "never scanned", "scanning", and when it
       last finished. This is what lets an empty search result say which kind of nothing it is;
       without it that contract is a sentence in a document rather than a behaviour.
