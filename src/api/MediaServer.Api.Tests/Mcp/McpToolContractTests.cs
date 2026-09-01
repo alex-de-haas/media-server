@@ -36,7 +36,11 @@ public sealed class McpToolContractTests
         var names = McpToolInvoker.Tools().Select(tool => tool!["name"]!.GetValue<string>()).ToArray();
 
         Assert.Equal(
-            ["search_library", "get_title", "list_ingest", "get_ingest_item", "get_server_status"],
+            [
+                "search_library", "get_title", "list_ingest", "get_ingest_item", "list_shelf",
+                "list_recommendations", "search_ingest_candidates", "search_metadata", "list_downloads",
+                "list_catalogs", "get_release_calendar", "preview_release", "get_server_status",
+            ],
             names);
     }
 
@@ -49,6 +53,30 @@ public sealed class McpToolContractTests
             .Single(tool => tool!["name"]!.GetValue<string>() == "list_ingest")!;
 
         Assert.Contains("NeedsReview", listIngest["description"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_recommendation_tool_says_to_prefer_it_over_ranking_by_hand()
+    {
+        // A model that ranks search results itself will be slower, worse, and inconsistent with what the
+        // web UI shows — the engine already knows what was watched, hidden, and how the operator weighs
+        // popularity. Saying so in the description is the only place that judgement can live.
+        var tool = McpToolInvoker.Tools()
+            .Single(entry => entry!["name"]!.GetValue<string>() == "list_recommendations")!;
+
+        Assert.Contains("rather than ranking", tool["description"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_two_release_tools_say_which_one_answers_for_an_untracked_title()
+    {
+        // They look interchangeable and are not: the calendar reads the watchlist and answers nothing for
+        // a title nobody tracks, which is the case the question is usually about.
+        var tools = McpToolInvoker.Tools().ToDictionary(
+            tool => tool!["name"]!.GetValue<string>(), tool => tool!["description"]!.GetValue<string>());
+
+        Assert.Contains("preview_release", tools["get_release_calendar"], StringComparison.Ordinal);
+        Assert.Contains("nobody is tracking", tools["preview_release"], StringComparison.Ordinal);
     }
 
     [Fact]

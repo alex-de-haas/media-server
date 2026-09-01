@@ -6,7 +6,9 @@ using MediaServer.Api.Jobs;
 using MediaServer.Api.Library;
 using MediaServer.Api.Mcp;
 using MediaServer.Api.Pipeline;
+using MediaServer.Api.Metadata;
 using MediaServer.Api.Realtime;
+using MediaServer.Api.Torrents;
 using MediaServer.Api.Tests.Pipeline;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -36,7 +38,16 @@ public sealed class McpToolInvokerTests : IDisposable
                 new MediaServerSettings { SupportedLanguages = ["en-US"] }),
             _scope.ServiceProvider.GetRequiredService<IngestService>(),
             new CatalogScanCoordinator(
-                _database, new JobService(_database, new NullRealtimeNotifier()), new CatalogScanQueue()));
+                _database, new JobService(_database, new NullRealtimeNotifier()), new CatalogScanQueue()),
+            _scope.ServiceProvider.GetRequiredService<CatalogService>(),
+            // Downloads, recommendations and the watchlist are thin projections over services that have
+            // their own tests, and standing up their dependency trees here would be scaffolding for
+            // behaviour already covered. Those tools are not exercised by this fixture; their
+            // declarations are asserted in McpToolContractTests, which needs no services at all.
+            torrents: null!,
+            recommendations: null!,
+            watchlist: null!,
+            _scope.ServiceProvider.GetRequiredService<IMetadataProvider>());
     }
 
     [Fact]

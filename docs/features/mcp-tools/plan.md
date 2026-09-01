@@ -302,10 +302,14 @@ context, or it is cut silently and "not found" stops meaning anything.
       `tools/list` and `tools/call`. Authenticated by the same scheme as the rest of `/api`: Core
       answers "who is this" and this app answers "what may they do", so an MCP surface with an
       identity system of its own would be a second answer to the first question.
-- [ ] **The read tools**. Shipped so far: `search_library`, `get_title`, `list_ingest`,
-      `get_ingest_item`, `get_server_status`. Still to add: `list_shelf`, `list_recommendations`,
-      `search_ingest_candidates`, `list_downloads`, `list_catalogs`, `search_metadata`,
-      `get_release_calendar`.
+- [x] **The read tools**: `search_library`, `get_title`, `list_ingest`, `get_ingest_item`,
+      `list_shelf`, `list_recommendations`, `search_ingest_candidates`, `search_metadata`,
+      `list_downloads`, `list_catalogs`, `get_release_calendar`, `preview_release`,
+      `get_server_status`. Thirteen rather than the twelve planned: `preview_release` split from the
+      calendar, because the two look interchangeable and are not — the calendar reads the watchlist
+      and answers nothing for a title nobody tracks, which is the case the question is usually about.
+      Each description says so, and a test asserts it, since a model choosing between them by name
+      alone will choose wrong.
 - [ ] **The write tools**: `add_torrent`, `control_download`, `match_ingest_item`,
       `advance_ingest_item`, `scan_catalog`, `refresh_metadata`, `set_title_state`,
       `manage_watchlist`.

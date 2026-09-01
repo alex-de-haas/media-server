@@ -64,6 +64,9 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddScoped<PersonSyncService>();
         services.AddScoped<CollectionSyncService>();
         services.AddScoped<MetadataTagSync>();
+        // The catalog read service, so the MCP invoker's catalog and status tools are built the way
+        // production builds them rather than with a null standing in.
+        services.AddScoped<MediaServer.Api.Catalogs.CatalogService>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
         services.AddScoped<DownloadDeletionService>();

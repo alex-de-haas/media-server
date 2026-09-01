@@ -2,6 +2,10 @@ using System.Text.Json.Nodes;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Metadata;
+using MediaServer.Api.Recommendations;
+using MediaServer.Api.Torrents;
+using MediaServer.Api.Watchlist;
 using MediaServer.Api.Pipeline;
 using Microsoft.EntityFrameworkCore;
 using static MediaServer.Api.Mcp.McpProtocol;
@@ -9,11 +13,20 @@ using static MediaServer.Api.Mcp.McpProtocol;
 namespace MediaServer.Api.Mcp;
 
 /// <summary>Declares the tools and runs them against this server's own services.</summary>
+/// <remarks>
+/// A wide constructor on purpose: this is the one place that fans out to the services behind the
+/// tools, and giving it a facade of its own would only move the list somewhere less obvious.
+/// </remarks>
 public sealed class McpToolInvoker(
     MediaServerDbContext database,
     LibraryReadService library,
     IngestService ingest,
-    CatalogScanCoordinator scans)
+    CatalogScanCoordinator scans,
+    CatalogService catalogs,
+    TorrentService torrents,
+    RecommendationFeedService recommendations,
+    WatchlistService watchlist,
+    IMetadataProvider metadata)
 {
     public static JsonArray Tools() =>
     [
@@ -69,6 +82,88 @@ public sealed class McpToolInvoker(
             new JsonObject { ["id"] = Prop("string", "The ingest item id, as returned by list_ingest.") },
             "id"),
         Tool(
+            "list_shelf",
+            "The ready-made rails: 'recent' is what was added lately, 'resume' is what is part-watched, "
+            + "'nextup' is the next unwatched episode of each series in progress. Prefer these to a "
+            + "search when the question is 'what should I carry on with'.",
+            new JsonObject
+            {
+                ["shelf"] = Prop("string", "recent, resume or nextup."),
+                ["limit"] = Prop("integer", "Maximum rows. Capped at 100; the default is 20."),
+            },
+            "shelf"),
+        Tool(
+            "list_recommendations",
+            "What this server suggests watching, from the operator's own history — or from one named "
+            + "title when `seed` is given, which is how 'something like this film' is answered. Reach "
+            + "for this rather than ranking search results by hand: the engine already knows what was "
+            + "watched, what was hidden, and the operator's popularity bias, and a hand-made ranking "
+            + "will disagree with what the web UI shows.",
+            new JsonObject
+            {
+                ["seed"] = Prop("string", "A library item id to recommend from, instead of watch history."),
+                ["kind"] = Prop("string", "Restrict to 'movie' or 'series'."),
+                ["limit"] = Prop("integer", "Maximum rows. Capped at 100; the default is 20."),
+            }),
+        Tool(
+            "search_ingest_candidates",
+            "Candidate identities for one pipeline item, searched by its own parsed title or by a title "
+            + "you supply. This is the list to show an operator who has to say which film an item is; "
+            + "the reference it returns is what repairs the match.",
+            new JsonObject
+            {
+                ["id"] = Prop("string", "The ingest item id."),
+                ["title"] = Prop("string", "Search this instead of the item's parsed title."),
+                ["year"] = Prop("integer", "A year hint. Not a hard filter."),
+            },
+            "id"),
+        Tool(
+            "search_metadata",
+            "Searches the metadata provider for a title, returning provider references. Use it to turn a "
+            + "name into the reference a watchlist entry or a match needs. This searches the provider, "
+            + "not this library — search_library answers what is held here.",
+            new JsonObject
+            {
+                ["title"] = Prop("string", "The title to look up."),
+                ["kind"] = Prop("string", "movie or series. Defaults to movie."),
+                ["year"] = Prop("integer", "A year hint. Not a hard filter."),
+            },
+            "title"),
+        Tool(
+            "list_downloads",
+            "Downloads and their progress: state, percent complete, estimated seconds remaining, and the "
+            + "catalog each is bound for. A download's name is its release name — to find one by the "
+            + "title someone would say out loud, use list_ingest and follow its downloadId.",
+            new JsonObject
+            {
+                ["limit"] = Prop("integer", "Maximum rows. Capped at 200; the default is 50."),
+            }),
+        Tool(
+            "list_catalogs",
+            "The catalogs this server holds, what each has used on disk, and how much room is left on "
+            + "the volumes behind them — plus whether each has ever been scanned.",
+            []),
+        Tool(
+            "get_release_calendar",
+            "Dated releases for the titles the operator tracks, within a window. For a title that is "
+            + "*not* tracked, use preview_release instead — this answers only for the watchlist.",
+            new JsonObject
+            {
+                ["from"] = Prop("string", "Start date, YYYY-MM-DD. Defaults to today."),
+                ["to"] = Prop("string", "End date, YYYY-MM-DD. Defaults to 90 days out."),
+            }),
+        Tool(
+            "preview_release",
+            "When a title comes out, for a title nobody is tracking yet — the question that usually "
+            + "comes before adding one. Asks the provider directly and records nothing.",
+            new JsonObject
+            {
+                ["provider"] = Prop("string", "Provider key, e.g. tmdb."),
+                ["id"] = Prop("string", "The provider's id for the title."),
+                ["kind"] = Prop("string", "movie or series."),
+            },
+            "provider", "id", "kind"),
+        Tool(
             "get_server_status",
             "What this server is doing and whether it can answer for itself: catalogs and whether each "
             + "has ever been scanned, scans running now, and pipeline items per status. Check it before "
@@ -92,6 +187,14 @@ public sealed class McpToolInvoker(
                 "list_ingest" => Content(id, await ListIngestAsync(arguments, cancellationToken)),
                 "get_ingest_item" => await GetIngestItemAsync(id, arguments, cancellationToken),
                 "get_server_status" => Content(id, await ServerStatusAsync(cancellationToken)),
+                "list_shelf" => Content(id, await ShelfAsync(arguments, appUserId, cancellationToken)),
+                "list_recommendations" => Content(id, await RecommendationsAsync(arguments, appUserId, cancellationToken)),
+                "search_ingest_candidates" => await IngestCandidatesAsync(id, arguments, cancellationToken),
+                "search_metadata" => Content(id, await SearchMetadataAsync(arguments, cancellationToken)),
+                "list_downloads" => Content(id, await DownloadsAsync(arguments, cancellationToken)),
+                "list_catalogs" => Content(id, await CatalogsAsync(cancellationToken)),
+                "get_release_calendar" => Content(id, await CalendarAsync(arguments, appUserId, cancellationToken)),
+                "preview_release" => await PreviewReleaseAsync(id, arguments, cancellationToken),
                 _ => Failure(id, $"Unknown tool: {name}"),
             };
         }
@@ -319,6 +422,299 @@ public sealed class McpToolInvoker(
 
         return new JsonObject { ["catalogs"] = rows, ["pipeline"] = pipeline };
     }
+
+    private async Task<JsonObject> ShelfAsync(
+        JsonNode? arguments, int? appUserId, CancellationToken cancellationToken)
+    {
+        var shelf = (Str(arguments, "shelf") ?? string.Empty).ToLowerInvariant();
+        var limit = Math.Clamp(Int(arguments, "limit") ?? 20, 1, 100);
+
+        // Recent is the library's own order and belongs to nobody. The other two are a person's place in
+        // a story, so answering them without one would be inventing a viewer.
+        if (shelf is "resume" or "nextup" && appUserId is null)
+        {
+            throw new McpRefusedException($"The '{shelf}' shelf is per person, and this call carried no Hosty user.");
+        }
+
+        var rows = new JsonArray();
+        switch (shelf)
+        {
+            case "recent":
+                foreach (var item in await library.GetRecentAsync(limit, appUserId, cancellationToken))
+                {
+                    rows.Add(new JsonObject
+                    {
+                        ["id"] = item.Id, ["kind"] = item.Kind, ["title"] = item.Title, ["year"] = item.Year,
+                    });
+                }
+
+                break;
+            case "resume":
+            case "nextup":
+                var rail = shelf == "resume"
+                    ? await library.GetResumeAsync(appUserId!.Value, limit, cancellationToken)
+                    : await library.GetNextUpAsync(appUserId!.Value, limit, cancellationToken);
+                foreach (var item in rail)
+                {
+                    rows.Add(new JsonObject
+                    {
+                        ["id"] = item.Id, ["kind"] = item.Kind, ["title"] = item.Title,
+                        ["subtitle"] = item.Subtitle, ["seriesId"] = item.NavId,
+                    });
+                }
+
+                break;
+            default:
+                throw new InvalidOperationException($"shelf must be recent, resume or nextup, not '{shelf}'.");
+        }
+
+        // No total to report: a rail is a fixed-length view by definition, not a page of something
+        // larger, so a window here would invent a "rest" that does not exist.
+        return new JsonObject { ["shelf"] = shelf, ["items"] = rows };
+    }
+
+    private async Task<JsonObject> RecommendationsAsync(
+        JsonNode? arguments, int? appUserId, CancellationToken cancellationToken)
+    {
+        if (appUserId is null)
+        {
+            throw new McpRefusedException("Recommendations are per person, and this call carried no Hosty user.");
+        }
+
+        var seed = Id(arguments, "seed");
+        var feed = await recommendations.BuildAsync(
+            appUserId.Value, ParseRecommendationKind(Str(arguments, "kind")),
+            Math.Clamp(Int(arguments, "limit") ?? 20, 1, 100), cancellationToken, seed);
+        if (feed is null)
+        {
+            // Refused rather than answered with the ordinary feed: someone who asked for "something like
+            // this film" and silently got their usual suggestions cannot tell a different question was
+            // answered.
+            throw new McpRefusedException(
+                "That title cannot seed a recommendation — it has no provider identity, or it is an "
+                + "episode, and the provider only answers 'what is like this show'.");
+        }
+
+        var rows = new JsonArray();
+        foreach (var item in feed.Items)
+        {
+            rows.Add(new JsonObject
+            {
+                ["title"] = item.Title,
+                ["year"] = item.Year,
+                ["kind"] = item.Kind.ToString(),
+                ["tmdbId"] = item.TmdbId,
+                ["inLibrary"] = item.InLibrary,
+                ["heldLibraryItemId"] = item.MediaItemId,
+                // The reason is data the client phrases; flattened here so a model can say "because you
+                // watched X" without needing to know the vocabulary.
+                ["reason"] = item.Reason is { } reason
+                    ? new JsonObject
+                    {
+                        ["kind"] = reason.Kind, ["detail"] = reason.Detail, ["rating"] = reason.Rating,
+                    }
+                    : null,
+            });
+        }
+
+        return new JsonObject
+        {
+            ["seededBy"] = seed is null ? "watch history" : "the named title",
+            ["items"] = rows,
+        };
+    }
+
+    private async Task<IResult> IngestCandidatesAsync(
+        JsonNode? id, JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        var itemId = Id(arguments, "id")
+            ?? throw new InvalidOperationException("id must be an ingest item id.");
+        var item = await ingest.GetAsync(itemId, cancellationToken);
+        if (item is null)
+        {
+            return Failure(id, "No ingest item with that id. Ids come from list_ingest.");
+        }
+
+        // The item's own parse is the starting point, which is what makes this better than a bare
+        // provider search: it already reflects what the release name says.
+        var title = Str(arguments, "title") ?? item.MediaTitle ?? item.TargetTitle ?? item.DownloadName;
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return Failure(id, "This item has no title to search by. Pass one explicitly.");
+        }
+
+        var candidates = await ingest.SearchAsync(
+            itemId, new MetadataSearchRequest(title, Int(arguments, "year"), null), cancellationToken);
+        return candidates is null
+            ? Failure(id, "That item is no longer searchable — it may already be organized.")
+            : Content(id, new JsonObject
+            {
+                ["searchedFor"] = title,
+                ["candidates"] = Candidates(candidates),
+            });
+    }
+
+    private async Task<JsonObject> SearchMetadataAsync(JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        var title = Str(arguments, "title")
+            ?? throw new InvalidOperationException("title is required.");
+        var kind = ParseKind(Str(arguments, "kind")) ?? MediaKind.Movie;
+        var year = Int(arguments, "year");
+
+        var results = await metadata.SearchAsync(new MediaQuery(kind, title.Trim(), year), cancellationToken);
+        if (results.Count == 0 && year is not null)
+        {
+            // The year is a hint, not a filter: a title whose release date is unset or disagrees returns
+            // nothing under a year-constrained search, and reporting that as "no such title" would be a
+            // claim about the provider's catalogue rather than about the query.
+            results = await metadata.SearchAsync(new MediaQuery(kind, title.Trim(), null), cancellationToken);
+        }
+
+        return new JsonObject { ["candidates"] = Candidates(results) };
+    }
+
+    private static JsonArray Candidates(IReadOnlyList<MetadataCandidate> candidates) =>
+        [.. candidates.Select(candidate => (JsonNode)new JsonObject
+        {
+            ["provider"] = candidate.Reference.Provider,
+            ["providerId"] = candidate.Reference.Id,
+            ["title"] = candidate.Title,
+            ["year"] = candidate.Year,
+            ["score"] = candidate.Score,
+        })];
+
+    private async Task<JsonObject> DownloadsAsync(JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        var limit = Math.Clamp(Int(arguments, "limit") ?? 50, 1, 200);
+        var all = await torrents.ListAsync(cancellationToken);
+
+        var rows = new JsonArray();
+        foreach (var download in all.Take(limit))
+        {
+            rows.Add(new JsonObject
+            {
+                ["id"] = download.Id,
+                ["name"] = download.Name,
+                ["catalogId"] = download.CatalogId,
+                ["state"] = download.State,
+                ["percentComplete"] = download.PercentComplete,
+                ["etaSeconds"] = download.EtaSeconds,
+                ["sizeBytes"] = download.SizeBytes,
+            });
+        }
+
+        return WithWindow(new JsonObject { ["downloads"] = rows }, rows.Count, all.Count, limit, 0);
+    }
+
+    private async Task<JsonObject> CatalogsAsync(CancellationToken cancellationToken)
+    {
+        var all = await catalogs.ListAsync(cancellationToken);
+        var usage = await catalogs.ListUsageAsync(cancellationToken);
+        var state = await scans.ListStateAsync(cancellationToken);
+
+        var rows = new JsonArray();
+        foreach (var catalog in all)
+        {
+            var scan = state.FirstOrDefault(entry => entry.CatalogId == catalog.Id);
+            var used = usage.SelectMany(volume => volume.Catalogs)
+                .FirstOrDefault(entry => entry.Id == catalog.Id)?.UsedBytes;
+            rows.Add(new JsonObject
+            {
+                ["id"] = catalog.Id,
+                ["name"] = catalog.Name,
+                ["type"] = catalog.Type.ToString(),
+                ["usedBytes"] = used,
+                ["neverScanned"] = scan?.NeverScanned ?? true,
+                ["scanning"] = scan?.Scanning ?? false,
+            });
+        }
+
+        var volumes = new JsonArray([.. usage.Select(volume => (JsonNode)new JsonObject
+        {
+            ["label"] = volume.Label,
+            ["freeBytes"] = volume.FreeBytes,
+        })]);
+
+        return new JsonObject { ["catalogs"] = rows, ["volumes"] = volumes };
+    }
+
+    private async Task<JsonObject> CalendarAsync(
+        JsonNode? arguments, int? appUserId, CancellationToken cancellationToken)
+    {
+        if (appUserId is null)
+        {
+            throw new McpRefusedException("The calendar is per person, and this call carried no Hosty user.");
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var from = ParseDate(Str(arguments, "from")) ?? today;
+        var to = ParseDate(Str(arguments, "to")) ?? today.AddDays(90);
+
+        var events = await watchlist.CalendarAsync(appUserId.Value, from, to, cancellationToken);
+        var rows = new JsonArray([.. events.Select(item => (JsonNode)new JsonObject
+        {
+            ["title"] = item.Title,
+            ["kind"] = item.Kind.ToString(),
+            ["releaseType"] = item.Type.ToString(),
+            ["date"] = item.Date.ToString("yyyy-MM-dd"),
+            ["season"] = item.Season,
+            ["episode"] = item.Episode,
+        })]);
+
+        return WithNote(
+            new JsonObject { ["from"] = from.ToString("yyyy-MM-dd"), ["to"] = to.ToString("yyyy-MM-dd"), ["events"] = rows },
+            rows.Count == 0
+                ? "Nothing dated in this window among the titles being tracked. A title nobody tracks "
+                  + "never appears here however close its release — ask preview_release for one of those."
+                : null);
+    }
+
+    private async Task<IResult> PreviewReleaseAsync(
+        JsonNode? id, JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        var provider = Str(arguments, "provider") ?? throw new InvalidOperationException("provider is required.");
+        var providerId = Str(arguments, "id") ?? throw new InvalidOperationException("id is required.");
+        var kind = ParseKind(Str(arguments, "kind"))
+            ?? throw new InvalidOperationException("kind must be 'movie' or 'series'.");
+
+        var preview = await watchlist.PreviewScheduleAsync(provider, providerId, kind, cancellationToken);
+        if (preview is null)
+        {
+            // "No dates" would be a claim about the title. This is a report about the request.
+            return Failure(id, "The provider gave no schedule for that title — it may be unknown to it, "
+                + "or the lookup failed. This is not the same as the title having no release date.");
+        }
+
+        return Content(id, new JsonObject
+        {
+            ["title"] = preview.Title,
+            ["year"] = preview.Year,
+            ["status"] = preview.Status,
+            ["dates"] = new JsonArray([.. preview.Dates.Select(date => (JsonNode)new JsonObject
+            {
+                ["region"] = date.Region,
+                ["type"] = date.Type.ToString(),
+                ["date"] = date.Date.ToString("yyyy-MM-dd"),
+            })]),
+            ["nextEpisode"] = preview.NextEpisode is { } next
+                ? new JsonObject
+                {
+                    ["season"] = next.Season, ["episode"] = next.Episode,
+                    ["airDate"] = next.AirDate.ToString("yyyy-MM-dd"),
+                }
+                : null,
+        });
+    }
+
+    private static DateOnly? ParseDate(string? value)
+        => DateOnly.TryParse(value, out var parsed) ? parsed : null;
+
+    private static RecommendationKind? ParseRecommendationKind(string? value) => ParseKind(value) switch
+    {
+        MediaKind.Movie => RecommendationKind.Movie,
+        MediaKind.Series => RecommendationKind.Series,
+        _ => null,
+    };
 
     private static MediaKind? ParseKind(string? value) => value?.ToLowerInvariant() switch
     {
