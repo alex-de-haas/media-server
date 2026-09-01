@@ -28,11 +28,70 @@ public sealed class IngestService(
     IFilesystemInspector filesystem,
     ILogger<IngestService> logger)
 {
+    /// <summary>Default and ceiling for a filtered listing's window.</summary>
+    private const int DefaultListLimit = 50;
+    private const int MaxListLimit = 500;
+
+    /// <summary>Every item, unwindowed — what this route has always returned.</summary>
+    /// <remarks>
+    /// Deliberately not <c>ListAsync(new IngestListQuery(Limit: int.MaxValue))</c>: the window clamps to
+    /// <see cref="MaxListLimit"/>, so that spelling would silently cut an existing caller's list to 500
+    /// rows. A path that means "no window" has to say so rather than ask for a very large one.
+    /// </remarks>
     public async Task<IReadOnlyList<IngestItemResponse>> ListAsync(CancellationToken cancellationToken)
+        => (await ListAsync(new IngestListQuery(), windowed: false, cancellationToken)).Items;
+
+    /// <summary>Filtered, windowed listing — the shape an agent (and eventually the UI) queries.</summary>
+    public Task<IngestListPage> ListAsync(IngestListQuery query, CancellationToken cancellationToken)
+        => ListAsync(query, windowed: true, cancellationToken);
+
+    private async Task<IngestListPage> ListAsync(
+        IngestListQuery query, bool windowed, CancellationToken cancellationToken)
     {
-        var items = await database.IngestItems
-            .AsNoTracking()
+        var limit = Math.Clamp(query.Limit ?? DefaultListLimit, 1, MaxListLimit);
+        var offset = Math.Max(0, query.Offset ?? 0);
+
+        var filtered = database.IngestItems.AsNoTracking();
+        if (query.Status is { } status)
+        {
+            filtered = filtered.Where(item => item.Status == status);
+        }
+
+        if (query.Stage is { } stage)
+        {
+            filtered = filtered.Where(item => item.Stage == stage);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Title))
+        {
+            // Case folding is Unicode-wide, and only because this app replaces SQLite's `like()` — see
+            // SqliteUnicodeLike. The built-in one folds A-Z alone, so before that replacement a search
+            // for "оппенгеймер" missed "Оппенгеймер"; anything that removes the replacement brings that
+            // back here and in the Jellyfin searches at the same time.
+            //
+            // Three places a title can live, and the caller knows only the name they would say out loud.
+            // An item identified as "Oppenheimer" is found by that; one still parked in review is found by
+            // the pinned target, or failing that by its release name. Searching only the first would answer
+            // "no such download" for exactly the items worth asking about.
+            var pattern = $"%{Escape(query.Title.Trim())}%";
+            filtered = filtered.Where(item =>
+                (item.TargetTitle != null && EF.Functions.Like(item.TargetTitle, pattern, EscapeChar))
+                || database.MediaItems.Any(media =>
+                    media.Id == item.MediaItemId && EF.Functions.Like(media.Title, pattern, EscapeChar))
+                || database.Downloads.Any(download =>
+                    download.Id == item.DownloadId && download.Name != null
+                    && EF.Functions.Like(download.Name, pattern, EscapeChar)));
+        }
+
+        var total = await filtered.CountAsync(cancellationToken);
+        var items = await filtered
+            // Id breaks ties on CreatedAt. Without it two items stamped in the same tick can order
+            // differently between the count and the page, or between one page and the next, which shows up
+            // as a row appearing twice and another never appearing at all.
             .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
+            .Skip(windowed ? offset : 0)
+            .Take(windowed ? limit : int.MaxValue)
             .ToListAsync(cancellationToken);
 
         var sourceFilesByDownload = await LoadSourceFilesAsync(items, cancellationToken);
@@ -41,12 +100,27 @@ public sealed class IngestService(
         var catalogTypes = await LoadCatalogTypesAsync(items, cancellationToken);
         var releaseGroups = await appSettings.GetCustomReleaseGroupsAsync(cancellationToken);
         var assignedMedia = await LoadAssignedMediaAsync(sourceFilesByDownload.Values.SelectMany(files => files), cancellationToken);
-        return items
+        var responses = items
             .Select(item => IngestItemResponse.From(
                 item, SourceFilesFor(item, sourceFilesByDownload), DownloadNameFor(item, downloadNames), MediaTitleFor(item, mediaTitles),
                 nameParser, CatalogTypeFor(item, catalogTypes), releaseGroups, assignedMedia))
             .ToList();
+        return windowed
+            ? new IngestListPage(responses, total, limit, offset)
+            : new IngestListPage(responses, total, responses.Count, 0);
     }
+
+    /// <summary>LIKE wildcards typed by a caller are data, not syntax.</summary>
+    /// <remarks>
+    /// A title containing <c>%</c> would otherwise match everything, and one containing <c>_</c> would
+    /// match a character it should have spelled — both silently, as extra results rather than an error.
+    /// </remarks>
+    private const string EscapeChar = "\\";
+
+    private static string Escape(string term) => term
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("%", "\\%", StringComparison.Ordinal)
+        .Replace("_", "\\_", StringComparison.Ordinal);
 
     public async Task<IngestItemResponse?> GetAsync(Guid id, CancellationToken cancellationToken)
     {

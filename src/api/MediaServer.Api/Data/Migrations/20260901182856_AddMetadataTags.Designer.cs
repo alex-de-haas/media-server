@@ -3,6 +3,7 @@ using System;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MediaServer.Api.Data.Migrations
 {
     [DbContext(typeof(MediaServerDbContext))]
-    partial class MediaServerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260901182856_AddMetadataTags")]
+    partial class AddMetadataTags
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -91,9 +94,6 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.Property<bool>("DefaultKeepSeeding")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("LastScannedAt")
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("LowDiskSince")
                         .HasColumnType("TEXT");

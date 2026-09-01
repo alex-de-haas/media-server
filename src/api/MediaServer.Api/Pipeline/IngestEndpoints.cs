@@ -10,8 +10,41 @@ public static class IngestEndpoints
     {
         var group = routes.MapGroup("/api/ingest").RequireAuthorization();
 
-        group.MapGet("/", async (IngestService service, CancellationToken cancellationToken) =>
-            Results.Ok(await service.ListAsync(cancellationToken)));
+        // Filters are additive and the shape is unchanged: an existing caller that passes nothing still
+        // receives the whole list as an array. The window's total lives on IngestListPage, which the MCP
+        // surface reads by calling the service in-process rather than through this route — so nothing here
+        // has to grow an envelope the UI would have to be taught.
+        group.MapGet("/", async (
+            string? status,
+            string? stage,
+            string? q,
+            int? limit,
+            int? offset,
+            IngestService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (status is not null && ParseStatus(status) is null)
+            {
+                return Results.BadRequest(new { error = $"Unknown ingest status '{status}'." });
+            }
+
+            if (stage is not null && ParseStage(stage) is null)
+            {
+                return Results.BadRequest(new { error = $"Unknown ingest stage '{stage}'." });
+            }
+
+            // No window asked for and nothing to filter: the original call, returning the original list.
+            // Routing it through the windowed path would cap it at 500 without saying so.
+            if (limit is null && offset is null && status is null && stage is null && string.IsNullOrWhiteSpace(q))
+            {
+                return Results.Ok(await service.ListAsync(cancellationToken));
+            }
+
+            var page = await service.ListAsync(
+                new IngestListQuery(ParseStatus(status), ParseStage(stage), q, limit, offset),
+                cancellationToken);
+            return Results.Ok(page.Items);
+        });
 
         group.MapGet("/{id:guid}", async (Guid id, IngestService service, CancellationToken cancellationToken) =>
         {
@@ -172,4 +205,16 @@ public static class IngestEndpoints
             Results.Ok(new { removed = await service.DeleteCompletedAsync(cancellationToken) }))
             .RequireAuthorization(AppRoles.AdminPolicy);
     }
+
+    /// <summary>
+    /// Parses a status name, case-insensitively. Returns null for anything unrecognized so the caller can
+    /// refuse rather than silently ignore the filter — an unknown status quietly dropped would answer
+    /// "nothing is failing" with a list of everything.
+    /// </summary>
+    private static IngestStatus? ParseStatus(string? value) =>
+        Enum.TryParse<IngestStatus>(value, ignoreCase: true, out var parsed) ? parsed : null;
+
+    private static IngestStage? ParseStage(string? value) =>
+        Enum.TryParse<IngestStage>(value, ignoreCase: true, out var parsed) ? parsed : null;
+
 }

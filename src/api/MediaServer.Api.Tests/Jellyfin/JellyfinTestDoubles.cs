@@ -35,6 +35,10 @@ internal sealed class JellyfinDatabase : IDisposable
     {
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
+        // Same reason as the pipeline harness: EF never opens a connection handed to it already open,
+        // so the interceptor that installs this in production cannot fire here. Without it every LIKE
+        // in these tests would be SQLite's ASCII-only one while production used the replacement.
+        SqliteUnicodeLike.Register(_connection);
         Context = Create();
         Context.Database.Migrate();
     }

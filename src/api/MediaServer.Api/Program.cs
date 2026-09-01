@@ -1,3 +1,4 @@
+using MediaServer.Api.Mcp;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using MediaServer.Api.Catalogs;
@@ -267,6 +268,8 @@ builder.Services.AddSingleton<IReleaseScheduleProvider, TmdbReleaseScheduleProvi
 builder.Services.AddScoped<IdentifyService>();
 builder.Services.AddScoped<PersonSyncService>();
 builder.Services.AddScoped<CollectionSyncService>();
+builder.Services.AddScoped<MetadataTagSync>();
+builder.Services.AddHostedService<MetadataTagBackfillWorker>();
 builder.Services.AddScoped<EnrichService>();
 builder.Services.AddScoped<JobService>();
 builder.Services.AddScoped<IPipelineStage, IntakeStage>();
@@ -300,10 +303,13 @@ builder.Services.AddHostedService<RemuxIndexWorker>();
 // EF Core + SQLite live under the app data directory so Hosty backup/restore covers them.
 Directory.CreateDirectory(hosty.AppDataDir);
 builder.Services.AddSingleton<SqlitePragmaInterceptor>();
+builder.Services.AddSingleton<SqliteUnicodeLikeInterceptor>();
 builder.Services.AddDbContext<MediaServerDbContext>((serviceProvider, options) =>
     options
         .UseSqlite($"Data Source={hosty.DatabasePath}")
-        .AddInterceptors(serviceProvider.GetRequiredService<SqlitePragmaInterceptor>()));
+        .AddInterceptors(
+            serviceProvider.GetRequiredService<SqlitePragmaInterceptor>(),
+            serviceProvider.GetRequiredService<SqliteUnicodeLikeInterceptor>()));
 
 // Periodic online-backup snapshot so scheduled host backups capture a consistent DB copy (no quiesce hook).
 builder.Services.AddSingleton<SqliteSnapshotService>();
@@ -358,6 +364,10 @@ builder.Services.AddScoped<WatchlistLibraryLinker>();
 // Catalog-wide metadata refresh: an admin-triggered background job that re-enriches every identified item.
 builder.Services.AddSingleton<ICatalogRefreshQueue, CatalogRefreshQueue>();
 builder.Services.AddScoped<CatalogRefreshCoordinator>();
+builder.Services.AddSingleton<ICatalogScanQueue, CatalogScanQueue>();
+builder.Services.AddScoped<CatalogScanCoordinator>();
+builder.Services.AddScoped<McpToolInvoker>();
+builder.Services.AddHostedService<CatalogScanWorker>();
 builder.Services.AddScoped<CatalogMetadataRefreshService>();
 builder.Services.AddHostedService<CatalogRefreshWorker>();
 
@@ -573,6 +583,7 @@ app.MapTorrentEndpoints();
 app.MapTranscodeEndpoints();
 app.MapIngestEndpoints();
 app.MapLibraryEndpoints();
+app.MapMcpEndpoints();
 app.MapPersonEndpoints();
 app.MapCollectionEndpoints();
 app.MapMetadataEndpoints();

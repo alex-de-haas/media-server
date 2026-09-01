@@ -31,6 +31,7 @@ public static class RecommendationEndpoints
         group.MapGet("/", async (
             RecommendationKind? kind,
             int? limit,
+            Guid? seed,
             ClaimsPrincipal principal,
             RecommendationFeedService feed,
             MediaServerDbContext database,
@@ -43,7 +44,14 @@ public static class RecommendationEndpoints
             }
 
             var bounded = Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit);
-            return Results.Ok(await feed.BuildAsync(user.Id, kind, bounded, cancellationToken));
+            var built = await feed.BuildAsync(user.Id, kind, bounded, cancellationToken, seed);
+
+            // Refused rather than answered with the ordinary feed. "Something like this film" and "what
+            // should I watch" are different questions, and a caller who cannot tell which one was
+            // answered has been misled by a 200.
+            return built is null
+                ? Results.NotFound(new { error = "That title cannot seed a recommendation." })
+                : Results.Ok(built);
         });
 
         group.MapPost("/hide", async (

@@ -36,6 +36,9 @@ public sealed class PipelineTestHarness : IDisposable
 
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
+        // EF never opens this connection, so the interceptor that does this in production never fires
+        // here. Registered explicitly, or every LIKE in these tests would quietly be SQLite's own.
+        SqliteUnicodeLike.Register(_connection);
 
         MetadataProvider = new FakeMetadataProvider();
         MediaProbe = new FakeMediaProbe();
@@ -60,6 +63,10 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddScoped<IdentifyService>();
         services.AddScoped<PersonSyncService>();
         services.AddScoped<CollectionSyncService>();
+        services.AddScoped<MetadataTagSync>();
+        // The catalog read service, so the MCP invoker's catalog and status tools are built the way
+        // production builds them rather than with a null standing in.
+        services.AddScoped<MediaServer.Api.Catalogs.CatalogService>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
         services.AddScoped<DownloadDeletionService>();

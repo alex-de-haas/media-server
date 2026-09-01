@@ -58,5 +58,20 @@ public sealed class Catalog
 
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>
+    /// When a scan of this catalog last completed, whichever entry point ran it.
+    /// </summary>
+    /// <remarks>
+    /// Stamped by the scan itself rather than by the queue that may have started it. The nightly
+    /// maintenance job and the synchronous route scan without opening a job row, so reading scan state
+    /// from jobs reported a catalog scanned nightly for months as never scanned — and an empty search
+    /// result then says "nothing has looked at this" about a library that is fully read.
+    ///
+    /// Null means no scan has ever finished. An offline catalog does not stamp it: a volume that could
+    /// not be read was not scanned, and saying otherwise turns "the disk is missing" into "the library
+    /// is empty".
+    /// </remarks>
+    public DateTimeOffset? LastScannedAt { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; }
 }

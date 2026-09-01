@@ -53,7 +53,7 @@ public sealed class IncrementalMetadataRefreshServiceTests : IDisposable
             new CatalogPathSandbox(),
             new FakeMediaProbe(),
             new EnrichService(_database, _metadata, new MediaServerSettings { SupportedLanguages = ["en-US"] },
-                new PersonSyncService(_database), new CollectionSyncService(_database)),
+                new PersonSyncService(_database), new CollectionSyncService(_database), new MetadataTagSync(_database, NullLogger<MetadataTagSync>.Instance)),
             NullLogger<LibraryMaintenanceService>.Instance),
         _time,
         NullLogger<IncrementalMetadataRefreshService>.Instance);

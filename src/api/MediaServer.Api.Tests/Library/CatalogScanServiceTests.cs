@@ -19,6 +19,7 @@ namespace MediaServer.Api.Tests.Library;
 /// </summary>
 public sealed class CatalogScanServiceTests : IDisposable
 {
+    private readonly CatalogScanQueue _scanQueue = new();
     private readonly SqliteConnection _connection;
     private readonly MediaServerDbContext _database;
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ms-scan-" + Guid.NewGuid().ToString("N"));
@@ -68,6 +69,7 @@ public sealed class CatalogScanServiceTests : IDisposable
             new LibraryImportService(_database, new PipelineQueue(), NullLogger<LibraryImportService>.Instance),
             new LibraryDeleteService(_database, new LibraryFileEraser(sandbox, NullLogger<LibraryFileEraser>.Instance)),
             _core,
+            _scanQueue,
             NullLogger<CatalogScanService>.Instance);
     }
 
@@ -80,7 +82,7 @@ public sealed class CatalogScanServiceTests : IDisposable
         SeedMovie(catalog, "Inception (2010)/Inception.mkv", favorite: true);
         SeedMovie(catalog, "Heat (1995)/Heat.mkv");
 
-        var report = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         Assert.NotNull(report);
         Assert.True(report!.Offline);
@@ -93,6 +95,61 @@ public sealed class CatalogScanServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_finished_scan_records_when_it_ran()
+    {
+        // Stamped by the scan rather than by whatever started it, because the nightly job and the
+        // synchronous route open no job row: reading scan state from jobs reported a catalog scanned
+        // nightly for months as never scanned, and an empty search result then says "nothing has looked
+        // at this" about a library that is fully read.
+        var catalog = SeedCatalog();
+        SeedMovie(catalog, "Heat (1995)/Heat.mkv");
+        WriteFile("Heat (1995)/Heat.mkv");
+
+        await Service().ScanAsync(catalog.Id, CancellationToken.None);
+
+        await using var verify = Verify();
+        Assert.NotNull((await verify.Catalogs.SingleAsync(entry => entry.Id == catalog.Id)).LastScannedAt);
+    }
+
+    [Fact]
+    public async Task An_offline_catalog_is_not_recorded_as_scanned()
+    {
+        // Paired with the case above, and the reason the stamp is not unconditional: a volume that could
+        // not be read was not scanned, and recording otherwise turns "the disk is missing" into "the
+        // library is empty" — which is exactly the sentence this state exists to prevent.
+        var catalog = SeedCatalog();
+        SeedMovie(catalog, "Inception (2010)/Inception.mkv");
+
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
+        Assert.True(report!.Offline);
+
+        await using var verify = Verify();
+        Assert.Null((await verify.Catalogs.SingleAsync(entry => entry.Id == catalog.Id)).LastScannedAt);
+    }
+
+    [Fact]
+    public async Task A_scan_refuses_to_start_while_another_holds_the_catalog()
+    {
+        // The reservation lives here rather than in the queue that admits MCP requests, because this is
+        // the one point every entry point passes through. Held one level up it protected only the path
+        // that went through it, so the synchronous route and the nightly job could still walk the same
+        // disk at the same time — which is what the guard was advertised to prevent.
+        var catalog = SeedCatalog();
+        WriteFile("Heat (1995)/Heat.mkv");
+        SeedMovie(catalog, "Heat (1995)/Heat.mkv");
+
+        _scanQueue.TryReserve(catalog.Id);
+        var refused = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        Assert.True(refused.AlreadyRunning);
+        Assert.Null(refused.Report);
+
+        // Beside the same call once the hold is released, or a service that refused everything would
+        // pass the assertion above.
+        _scanQueue.Release(catalog.Id);
+        Assert.NotNull((await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report);
+    }
+
+    [Fact]
     public async Task One_surviving_file_proves_the_volume_and_the_rest_really_are_deletions()
     {
         var catalog = SeedCatalog();
@@ -101,7 +158,7 @@ public sealed class CatalogScanServiceTests : IDisposable
         var watched = SeedMovie(catalog, "Inception (2010)/Inception.mkv", favorite: true);
         var untouched = SeedMovie(catalog, "Tenet (2020)/Tenet.mkv");
 
-        var report = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         Assert.NotNull(report);
         Assert.False(report!.Offline);
@@ -127,7 +184,7 @@ public sealed class CatalogScanServiceTests : IDisposable
         WriteFile("Heat (1995)/Heat.mkv");
         var rated = SeedMovie(catalog, "Inception (2010)/Inception.mkv", rating: 4);
 
-        var report = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         Assert.Equal(1, report!.TitlesGhosted);
         await using var verify = Verify();
@@ -147,7 +204,7 @@ public sealed class CatalogScanServiceTests : IDisposable
         await _database.MediaItems.Where(item => item.Id == movieId)
             .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.DefaultSourceId, goneSourceId));
 
-        var report = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         Assert.Equal(1, report!.VersionsRemoved);
         Assert.Equal(0, report.TitlesGhosted);
@@ -174,7 +231,7 @@ public sealed class CatalogScanServiceTests : IDisposable
         });
         await _database.SaveChangesAsync();
 
-        var report = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         Assert.Equal(1, report!.SidecarsRemoved);
         await using var verify = Verify();
@@ -188,7 +245,7 @@ public sealed class CatalogScanServiceTests : IDisposable
         var catalog = SeedCatalog(CatalogType.Series);
         var (seriesId, _, episodeId) = SeedEpisode(catalog, "Show/S01E01.mkv", watched: true);
 
-        var report = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         // Nothing else resolves in this catalog, so the mount rule guards it: the pass must not act.
         Assert.True(report!.Offline);
@@ -196,7 +253,7 @@ public sealed class CatalogScanServiceTests : IDisposable
         // With a second episode still on disk the volume is proven and the gone one is a real deletion.
         WriteFile("Show/S01E02.mkv");
         SeedEpisode(catalog, "Show/S01E02.mkv", watched: false, seriesId: seriesId);
-        var second = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var second = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         Assert.False(second!.Offline);
         Assert.Equal(1, second.MissingFiles);
@@ -210,7 +267,7 @@ public sealed class CatalogScanServiceTests : IDisposable
     {
         var catalog = SeedCatalog();
 
-        var report = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         Assert.False(report!.Offline);
         Assert.Equal(0, report.SourcesChecked);
@@ -224,7 +281,7 @@ public sealed class CatalogScanServiceTests : IDisposable
         var catalog = SeedCatalog(root: Path.Combine(Path.GetTempPath(), "ms-scan-absent-" + Guid.NewGuid().ToString("N")));
         SeedMovie(catalog, "Inception (2010)/Inception.mkv");
 
-        var report = await Service().ScanAsync(catalog.Id, CancellationToken.None);
+        var report = (await Service().ScanAsync(catalog.Id, CancellationToken.None)).Report;
 
         Assert.True(report!.Offline);
         await using var verify = Verify();

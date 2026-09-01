@@ -99,9 +99,49 @@ public static class CatalogEndpoints
         // the library rows whose files are gone (as tombstones where a user's history is at stake).
         group.MapPost("/{id:guid}/scan", async (Guid id, CatalogScanService scan, CancellationToken cancellationToken) =>
         {
-            var report = await scan.ScanAsync(id, cancellationToken);
-            return report is null ? Results.NotFound() : Results.Ok(report);
+            var outcome = await scan.ScanAsync(id, cancellationToken);
+            if (outcome.NotFound)
+            {
+                return Results.NotFound();
+            }
+
+            // 409 rather than a second disk walk. The reservation lives in the scan service now, so this
+            // route sees a run the queued path started and vice versa — the two used to be blind to each
+            // other, which is how two scans of one catalog could overlap.
+            return outcome.AlreadyRunning
+                ? Results.Conflict(new { error = "A scan is already running for this catalog." })
+                : Results.Ok(outcome.Report);
         }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        // The same work, started rather than awaited. The route above answers with the report the
+        // Catalogs page renders, which means holding the request open for the whole disk walk — fine for
+        // a page watching a spinner, useless to anything with a timeout. Kept beside it rather than
+        // replacing it, so the UI is untouched until it chooses to move.
+        group.MapPost("/{id:guid}/scan/queue", async (
+            Guid id, CatalogScanCoordinator coordinator, CancellationToken cancellationToken) =>
+        {
+            var result = await coordinator.RequestAsync(id, cancellationToken);
+            return result.Status switch
+            {
+                CatalogScanRequestStatus.NotFound => Results.NotFound(),
+                CatalogScanRequestStatus.AlreadyRunning =>
+                    Results.Conflict(new { error = "A scan is already running for this catalog." }),
+                _ => Results.Accepted($"/api/catalogs/scan/active", new { jobId = result.JobId }),
+            };
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        group.MapPost("/scan/queue", async (CatalogScanCoordinator coordinator, CancellationToken cancellationToken) =>
+            Results.Accepted("/api/catalogs/scan/active",
+                new { started = await coordinator.RequestAllAsync(cancellationToken) }))
+            .RequireAuthorization(AppRoles.AdminPolicy);
+
+        group.MapGet("/scan/active", async (CatalogScanCoordinator coordinator, CancellationToken cancellationToken) =>
+            Results.Ok(await coordinator.ListActiveAsync(cancellationToken)));
+
+        // Which catalogs have ever been scanned, and which are being scanned now. This is what lets an
+        // empty search result say whether the library is empty or merely unread.
+        group.MapGet("/scan/state", async (CatalogScanCoordinator coordinator, CancellationToken cancellationToken) =>
+            Results.Ok(await coordinator.ListStateAsync(cancellationToken)));
 
         // The same, for every catalog at once — the Catalogs page's global action, and what the nightly
         // job runs. Sequential: one catalog's disk at a time is plenty, and it paces the pipeline.

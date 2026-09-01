@@ -70,6 +70,26 @@ public static class WatchlistEndpoints
             return await service.RemoveAsync(userId, id, cancellationToken) ? Results.NoContent() : Results.NotFound();
         });
 
+        // The same question for a title nobody is tracking. Nothing is persisted: tracking is what
+        // creates a row, and asking when something comes out should not.
+        watchlist.MapGet("/calendar/preview", async (
+            string provider,
+            string id,
+            string kind,
+            WatchlistService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (!Enum.TryParse<MediaKind>(kind, ignoreCase: true, out var parsed))
+            {
+                return Results.BadRequest(new { error = $"Unknown kind '{kind}'." });
+            }
+
+            var preview = await service.PreviewScheduleAsync(provider, id, parsed, cancellationToken);
+            return preview is null
+                ? Results.NotFound(new { error = "No release schedule is available for that title." })
+                : Results.Ok(preview);
+        });
+
         watchlist.MapGet("/calendar", async (
             DateOnly from, DateOnly to, ClaimsPrincipal principal, WatchlistService service, MediaServerDbContext database,
             CancellationToken cancellationToken) =>

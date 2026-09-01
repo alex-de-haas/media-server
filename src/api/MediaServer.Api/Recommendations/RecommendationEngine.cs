@@ -63,10 +63,16 @@ public sealed class RecommendationEngine(
     /// </remarks>
     internal const int PoolFactor = 6;
 
+    /// <param name="seedOverride">
+    /// Seeds to rank from instead of the operator's watch history. TMDb only answers "what is like X",
+    /// so supplying X is the whole of "suggest something like this film" — the taste profile stays the
+    /// operator's, which is why this replaces the seeds and nothing else.
+    /// </param>
     public async Task<EngineResult> RankAsync(
-        int appUserId, int limit, CancellationToken cancellationToken)
+        int appUserId, int limit, CancellationToken cancellationToken,
+        IReadOnlyList<RecommendationSeed>? seedOverride = null)
     {
-        var selected = await seeds.SelectAsync(appUserId, cancellationToken);
+        var selected = seedOverride ?? await seeds.SelectAsync(appUserId, cancellationToken);
         var profile = await profiles.GetAsync(appUserId, database, profileBuilder, cancellationToken);
         var rung = RecommendationRung.History;
 

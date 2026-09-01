@@ -20,7 +20,8 @@ public sealed class EnrichService(
     IMetadataProvider provider,
     MediaServerSettings settings,
     PersonSyncService personSync,
-    CollectionSyncService collectionSync)
+    CollectionSyncService collectionSync,
+    MetadataTagSync tagSync)
 {
     public async Task EnrichAsync(Catalog catalog, MediaItem item, CancellationToken cancellationToken)
     {
@@ -84,6 +85,9 @@ public sealed class EnrichService(
             // Link a movie to its franchise/collection from the same payload (no-op for non-movies). Kept
             // separate from the metadata save so a sync failure can't strand the rest of the enrich.
             await collectionSync.SyncAsync(item.Id, reference.Provider, primary.Raw, cancellationToken);
+            // Genres and keywords projected into rows a query can filter on. Same placement and same
+            // reason as the two above: a tag failure must not strand an otherwise complete enrich.
+            await tagSync.SyncAsync(item.Id, item.Kind, cancellationToken);
         }
     }
 

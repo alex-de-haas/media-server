@@ -43,6 +43,133 @@ public sealed class LibraryReadService(
         return cards.OrderBy(card => card.Title, MetadataLanguage.TitleOrder(settings.PreferredLanguage)).ToList();
     }
 
+    private const int DefaultSearchLimit = 25;
+    private const int MaxSearchLimit = 200;
+
+    /// <summary>
+    /// Filtered, windowed search over browsable items — the shape an agent queries.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="ListAsync"/> rather than a parameter on it, because the two order
+    /// differently and cannot be reconciled. The list sorts *after* projection, by the localized title a
+    /// card renders; a window has to be applied in SQL, and paging one order while sorting another lets
+    /// rows appear on two pages and on none. This path therefore orders in SQL, by the preferred
+    /// language's title where there is one — close to the rendered order, and stable, which is what
+    /// paging actually needs.
+    /// </remarks>
+    public async Task<LibrarySearchPage> SearchAsync(
+        LibrarySearchQuery query, int? appUserId, CancellationToken cancellationToken)
+    {
+        var limit = Math.Clamp(query.Limit ?? DefaultSearchLimit, 1, MaxSearchLimit);
+        var offset = Math.Max(0, query.Offset ?? 0);
+
+        var filtered = database.MediaItems.AsNoTracking().Where(item =>
+            item.PublicId != null && item.ParentId == null &&
+            (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series));
+
+        if (query.CatalogId is { } catalogId)
+        {
+            filtered = filtered.Where(item => item.CatalogId == catalogId);
+        }
+
+        if (query.Kind is { } kind)
+        {
+            filtered = filtered.Where(item => item.Kind == kind);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Title))
+        {
+            // Matched against every language's metadata title, not only the preferred one, plus the
+            // original title and the title the item was matched under. Someone who knows a film by its
+            // English name should find it in a Russian-language library, and the reverse.
+            var pattern = $"%{EscapeLike(query.Title.Trim())}%";
+            filtered = filtered.Where(item =>
+                EF.Functions.Like(item.Title, pattern, LikeEscape)
+                || (item.OriginalTitle != null && EF.Functions.Like(item.OriginalTitle, pattern, LikeEscape))
+                || database.MetadataRecords.Any(record =>
+                    record.MediaItemId == item.Id && record.Title != null
+                    && EF.Functions.Like(record.Title, pattern, LikeEscape)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.About))
+        {
+            // Two sources, because they fail in opposite directions. A keyword is precise and sparse —
+            // TMDb keeps only a handful per title, so its absence means "not among the ones kept", never
+            // "not about that". The synopsis is complete and vague: it will match a film that merely
+            // mentions the thing. Either alone answers "something about a plane hijacking" badly.
+            var pattern = $"%{EscapeLike(query.About.Trim())}%";
+            filtered = filtered.Where(item => database.MetadataRecords.Any(record =>
+                record.MediaItemId == item.Id
+                && ((record.Overview != null && EF.Functions.Like(record.Overview, pattern, LikeEscape))
+                    || database.MetadataTags.Any(tag =>
+                        tag.MetadataRecordId == record.Id && tag.Kind == MetadataTagKind.Keyword
+                        && EF.Functions.Like(tag.Value, pattern, LikeEscape)))));
+        }
+
+        foreach (var requested in query.Genres ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(requested))
+            {
+                continue;
+            }
+
+            // Each genre narrows separately, so "action comedy" means both and not either. Applied one
+            // predicate at a time rather than as a set operation, which is what makes "all of" the
+            // reading — a single Any() over the list would have quietly meant "any of".
+            var pattern = $"%{EscapeLike(requested.Trim())}%";
+            filtered = filtered.Where(item => database.MetadataRecords.Any(record =>
+                record.MediaItemId == item.Id
+                && database.MetadataTags.Any(tag =>
+                    tag.MetadataRecordId == record.Id && tag.Kind == MetadataTagKind.Genre
+                    && EF.Functions.Like(tag.Value, pattern, LikeEscape))));
+        }
+
+        if (query.Watched is { } watched && appUserId is { } userId)
+        {
+            // A movie owns its played flag. A series does not: its state is a rollup over published
+            // episodes, so asking the series row would call a fully-watched series unwatched. The
+            // episode count is required as well, or a series with nothing published would be "watched"
+            // by vacuous truth — no unwatched episode because no episodes at all.
+            filtered = filtered.Where(item => watched == (
+                item.Kind == MediaKind.Movie
+                    ? database.UserItemData.Any(data =>
+                        data.MediaItemId == item.Id && data.AppUserId == userId && data.Played)
+                    : database.MediaItems.Any(episode =>
+                          episode.SeriesId == item.Id && episode.Kind == MediaKind.Episode && episode.PublicId != null)
+                      && !database.MediaItems.Any(episode =>
+                          episode.SeriesId == item.Id && episode.Kind == MediaKind.Episode && episode.PublicId != null
+                          && !database.UserItemData.Any(data =>
+                              data.MediaItemId == episode.Id && data.AppUserId == userId && data.Played))));
+        }
+
+        var total = await filtered.CountAsync(cancellationToken);
+
+        var preferred = settings.PreferredLanguage ?? string.Empty;
+        var items = await filtered
+            .OrderBy(item => database.MetadataRecords
+                .Where(record => record.MediaItemId == item.Id && record.Title != null)
+                .OrderBy(record => record.Language == preferred ? 0 : 1)
+                .Select(record => record.Title)
+                .FirstOrDefault() ?? item.Title)
+            // Id breaks ties, or two items sharing a title can swap places between pages — one shown
+            // twice and one never.
+            .ThenBy(item => item.Id)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        return new LibrarySearchPage(
+            await ProjectItemsAsync(items, appUserId, cancellationToken), total, limit, offset);
+    }
+
+    /// <summary>LIKE wildcards typed by a caller are data, not syntax.</summary>
+    private const string LikeEscape = "\\";
+
+    private static string EscapeLike(string term) => term
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("%", "\\%", StringComparison.Ordinal)
+        .Replace("_", "\\_", StringComparison.Ordinal);
+
     /// <summary>Most recently published top-level items (movies/series), newest first — the Recently Added rail.</summary>
     public async Task<IReadOnlyList<LibraryItemDto>> GetRecentAsync(int limit, int? appUserId, CancellationToken cancellationToken)
     {
@@ -161,7 +288,10 @@ public sealed class LibraryReadService(
                 TitleFor(meta, item.Title),
                 item.Year ?? meta?.ReleaseDate?.Year,
                 posters.GetValueOrDefault(item.Id),
-                userDataByItem.GetValueOrDefault(item.Id));
+                userDataByItem.GetValueOrDefault(item.Id),
+                meta?.Genres,
+                meta?.RuntimeTicks,
+                meta?.CommunityRating);
         }).ToList();
     }
 

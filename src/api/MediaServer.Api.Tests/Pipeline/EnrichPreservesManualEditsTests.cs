@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using MediaServer.Api.Metadata;
 using MediaServer.Api.Collections;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -143,7 +145,7 @@ public sealed class EnrichPreservesManualEditsTests : IDisposable
             new FakeMetadataProvider(),
             new MediaServerSettings { SupportedLanguages = ["en-US"] },
             new PersonSyncService(context),
-            new CollectionSyncService(context));
+            new CollectionSyncService(context), new MetadataTagSync(context, NullLogger<MetadataTagSync>.Instance));
         await enrich.EnrichAsync(_catalog, item, CancellationToken.None);
     }
 
