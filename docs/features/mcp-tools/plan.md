@@ -13,6 +13,29 @@ path, Core authenticates the caller and the app authorizes it, and the `hosty mc
 re-exports the tools to whatever agent the operator is using. Nothing here needs new platform
 work; this plan is about which tools exist and what they are allowed to claim.
 
+## The scenarios this is measured against
+
+Dictated by the operator, and checked against the code rather than against the tool list —
+which is how four of the gaps below were found. A tool set that cannot carry these is not
+short, it is wrong.
+
+1. **"Here is a magnet, download it into this catalog"** — and when the catalog is not named,
+   ask which one. Covered, and the API already insists: `AddTorrentRequest.CatalogId` is
+   required, so the question is not a nicety the agent might skip.
+2. **"Has Oppenheimer finished downloading, and if not, how long?"** — asked by *title*, not by
+   release name. Partly covered; see the download-to-title gap.
+3. **"What went wrong with it?"** — and, unprompted, *"that film never got identified, it needs
+   you"* when the operator asks about a title that silently stalled. Covered by the ingest
+   tools, plus the same join as (2) and the skill in Phase 3.
+4. **"Something about a plane hijacking"**, or "an action comedy". Not covered today; the data
+   is closer than it looks. See thematic search.
+5. **"What did I rate this?"**, **"recommend something like this film"**, **"track this"**, and
+   **"when does it come out / when is the next episode?"** — including for a title that is not
+   tracked yet. Ratings and tracking are covered; the other two are not.
+
+Extending the API is expected rather than avoided: some of what follows will be reachable only
+through MCP at first, and the web UI can catch up to it later.
+
 ## This is not a wrapper over the HTTP API
 
 The API has roughly eighty routes. A tool per route would be a worse interface than none: the
@@ -89,13 +112,14 @@ what an operator does not notice until they go looking for a film that never app
 | --- | --- |
 | `search_metadata` | `POST /api/metadata/search` — resolves a title to a `providerRef` |
 | `list_downloads` | `GET /api/torrents` |
-| `add_torrent` | `POST /api/torrents/add` — not idempotent, answers "accepted" |
+| `add_torrent(catalogId, magnet\|torrentFile, keepSeeding?)` | `POST /api/torrents/add` — not idempotent, answers "accepted". `catalogId` is required by the API, so an agent with no catalog named has to call `list_catalogs` and ask |
 | `control_download(id, action: pause\|resume\|stop_seeding)` | the three control routes |
 
 ### Repairing an identification
 
 | Tool | Backed by |
 | --- | --- |
+| `search_ingest_candidates(id, title?)` | `POST /api/ingest/{id}/search` |
 | `match_ingest_item(id, groups)` | `POST /api/ingest/{id}/match` |
 | `advance_ingest_item(id, action: retry\|skip\|pin\|retarget)` | the remaining stage commands |
 
@@ -105,6 +129,12 @@ own identity and its own set of source files — that is how a franchise pack re
 several movies — and each file carries an optional season and episode, which is how an episode
 match is expressed at all. The tool therefore takes the same shape the API does: one or more
 groups, each naming an identity and the `SourceFileId`s that belong to it.
+
+`search_ingest_candidates` is the other half of the same conversation, and the first draft of
+this plan missed it in favour of the generic `search_metadata`. It re-searches *this item* by
+its parsed title and returns candidates, which is what the operator is answering when they say
+"that one is the 1998 version" — and it beats a generic search because the item's own parse is
+the starting point.
 
 This makes `get_ingest_item` a precondition rather than a convenience: the source file ids the
 match refers to come from there, so the agent has to look at the item before it can repair it.
@@ -155,7 +185,7 @@ operator-initiated by design, and that design should not be quietly relaxed by a
 
 Grouped so that each phase leaves the repository in a shippable state.
 
-### Phase 1 — the two listings the tools need
+### Phase 1 — the API the tools need
 
 The listings the MCP surface depends on today return everything they have. `GET /api/library`
 filters only by `catalogId` and `kind`; `GET /api/ingest` takes no parameters at all. For an
@@ -179,6 +209,28 @@ context, or it is cut silently and "not found" stops meaning anything.
       202 with what it started, 409 when one is running, and `/refresh-metadata/active` to
       observe — and a scan coordinator should mirror it rather than invent a second shape.
       Keep the synchronous route working for the web client if it depends on the report.
+- [ ] **A download answerable by title.** `DownloadResponse` carries `PercentComplete`,
+      `EtaSeconds` and `State`, but its `Name` is the release name — `Oppenheimer.2023.2160p…`
+      — and nothing in any response maps that to the title the operator said. The link is
+      already in the data: `IngestItem` holds both `DownloadId` and `MediaItemId`. Surface the
+      resolved identity on the download, so "has Oppenheimer finished" is one lookup instead of
+      the agent guessing at release names. This is also what lets the agent volunteer *"it
+      downloaded, but it was never identified"* rather than answering only what was asked.
+- [ ] **Thematic and genre search over the library.** "Something about a plane hijacking" and
+      "an action comedy" are both unanswerable today, and no tool shape fixes that.
+      `MetadataRecord` already persists `Overview` and `Genres` as columns, so both are a query
+      away. TMDb keywords are parsed already (`TmdbPayload.Keywords`, capped at 16) but live
+      only inside the `Raw` JSON — promoting them to something queryable is what turns "plane
+      hijacking" from a guess against prose into a match against a tag. Same window contract as
+      the rest.
+- [ ] **A recommendation seeded by a named title.** `RecommendationKind` is only `Movie` or
+      `Series`; the engine seeds from what the operator *watched*, and its own note says TMDb
+      only answers "what is like X", so the choice of X is the entire personalization. "Suggest
+      something like this film" is that machinery with the seed supplied instead of inferred —
+      a parameter, not a new engine.
+- [ ] **A release date for a title that is not tracked.** `/api/watchlist/calendar` answers for
+      tracked titles only, but "when does it come out" is most often asked about something the
+      operator has *not* added yet — and answering it is what prompts them to add it.
 - [ ] **Persisted scan state per catalog** — at least "never scanned", "scanning", and when it
       last finished. This is what lets an empty search result say which kind of nothing it is;
       without it that contract is a sentence in a document rather than a behaviour.
@@ -190,8 +242,9 @@ context, or it is cut silently and "not found" stops meaning anything.
 - [ ] **`interfaces.mcp` in `manifest.json`** and a JSON-RPC endpoint answering `initialize`,
       `tools/list` and `tools/call`.
 - [ ] **The read tools**: `search_library`, `get_title`, `list_shelf`,
-      `list_recommendations`, `list_ingest`, `get_ingest_item`, `get_server_status`,
-      `list_downloads`, `list_catalogs`, `search_metadata`, `get_release_calendar`.
+      `list_recommendations`, `list_ingest`, `get_ingest_item`,
+      `search_ingest_candidates`, `get_server_status`, `list_downloads`, `list_catalogs`,
+      `search_metadata`, `get_release_calendar`.
 - [ ] **The write tools**: `add_torrent`, `control_download`, `match_ingest_item`,
       `advance_ingest_item`, `scan_catalog`, `refresh_metadata`, `set_title_state`,
       `manage_watchlist`.
@@ -259,6 +312,11 @@ handling. What they cannot cover needs a Core-managed runtime:
    `list_recommendations` rather than paging the library — the engine's ranking is the answer,
    and a tool set that invites the model to re-rank by hand has failed even when the answer
    looks reasonable.
-7. Repair a multi-movie pack through `match_ingest_item` with more than one group, and an
+7. Run each dictated scenario end to end against a real host, in the operator's own words
+   rather than as tool calls — a surface that needs the question rephrased into its own
+   vocabulary has not made it. In particular: ask about a download by the film's title and not
+   by its release name, and ask about something that finished downloading but was never
+   identified, which should be volunteered rather than have to be asked for.
+8. Repair a multi-movie pack through `match_ingest_item` with more than one group, and an
    episode ingest with per-file season and episode numbers. A single-identity match passing
    says nothing about either.
