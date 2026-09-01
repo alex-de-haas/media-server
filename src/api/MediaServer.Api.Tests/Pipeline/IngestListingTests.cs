@@ -185,6 +185,53 @@ public sealed class IngestListingTests
         Assert.Equal(50, defaulted.Limit);
     }
 
+    [Fact]
+    public async Task A_title_matches_regardless_of_case_in_any_alphabet()
+    {
+        // Measured before it was fixed: SQLite's own LIKE folds A-Z and nothing else, so this search
+        // returned the row for "Оппенгеймер" and nothing for "оппенгеймер" — and for a Russian-language
+        // library that is the difference between a working search and one that reports absence as fact.
+        using var harness = new PipelineTestHarness();
+        var (cyrillic, catalogId, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Оппенгеймер.2023.WEB-DL", "Оппенгеймер.2023.WEB-DL/movie.mkv");
+        var (latin, _, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Barbie.2023.WEB-DL", "Barbie.2023.WEB-DL/movie.mkv", catalogId);
+
+        using var scope = harness.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+
+        foreach (var term in new[] { "оппенгеймер", "ОППЕНГЕЙМЕР", "ОпПеНгЕйМеР" })
+        {
+            var page = await service.ListAsync(new IngestListQuery(Title: term), CancellationToken.None);
+            Assert.Equal(cyrillic, Assert.Single(page.Items).Id);
+        }
+
+        // Beside a search that must still find nothing, so a LIKE that matched everything would fail here
+        // rather than look like success.
+        Assert.Equal(latin, Assert.Single(
+            (await service.ListAsync(new IngestListQuery(Title: "barbie"), CancellationToken.None)).Items).Id);
+        Assert.Empty((await service.ListAsync(new IngestListQuery(Title: "дюна"), CancellationToken.None)).Items);
+    }
+
+    [Fact]
+    public async Task An_underscore_typed_by_the_caller_is_matched_literally()
+    {
+        // The other LIKE wildcard, and the one easy to forget: unescaped, "_" matches any character, so
+        // a search for "The_Movie" would also return "The Movie" — a wrong row that looks plausible.
+        using var harness = new PipelineTestHarness();
+        var (underscored, catalogId, _) = await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "The_Movie.2021", "The_Movie.2021/movie.mkv");
+        await harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "The Movie.2021", "The Movie.2021/movie.mkv", catalogId);
+
+        using var scope = harness.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IngestService>();
+
+        var page = await service.ListAsync(new IngestListQuery(Title: "The_Movie"), CancellationToken.None);
+
+        Assert.Equal(underscored, Assert.Single(page.Items).Id);
+    }
+
     private static async Task SetStatusAsync(PipelineTestHarness harness, Guid ingestId, IngestStatus status) =>
         await MutateAsync(harness, ingestId, item => item.Status = status);
 

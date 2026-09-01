@@ -36,6 +36,9 @@ public sealed class PipelineTestHarness : IDisposable
 
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
+        // EF never opens this connection, so the interceptor that does this in production never fires
+        // here. Registered explicitly, or every LIKE in these tests would quietly be SQLite's own.
+        SqliteUnicodeLike.Register(_connection);
 
         MetadataProvider = new FakeMetadataProvider();
         MediaProbe = new FakeMediaProbe();

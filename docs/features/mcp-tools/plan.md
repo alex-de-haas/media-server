@@ -205,13 +205,20 @@ context, or it is cut silently and "not found" stops meaning anything.
       and a total counted before the window. The title filter searches all three names an item can
       have — the identified title, the pinned target, and the release name — which is what collapses
       the separate "download answerable by title" deliverable below into this one.
-- [ ] **Case folding outside ASCII.** Measured, not assumed: a Cyrillic title matches `Оппенгеймер`
+- [x] **Case folding outside ASCII.** Measured, not assumed: a Cyrillic title matches `Оппенгеймер`
       and misses `оппенгеймер`, because SQLite's `LIKE` folds ASCII only. Routing the comparison
       through SQL `lower()` makes it strictly worse — that function is ASCII-only too, so lowering the
       term in .NET leaves it matching nothing. The fix is a normalized, case-folded column, which the
       library search needs regardless; the ingest filter should read the same one. Until then that
       filter is exact-case for non-Latin titles, which for a Russian-language library is close to
       useless — this is not a polish item.
+
+      **Done differently than written.** A normalized column would have meant a migration, a backfill,
+      and a write path to keep in step, beside every searchable column. SQLite lets an application
+      replace `like()` outright, so the fold happens in .NET for every LIKE in the app at once — which
+      also fixed the two Jellyfin searches, which had the same bug and no test for it. The cost is
+      SQLite's LIKE-to-range index optimization, which only ever applied to prefix patterns; every
+      pattern here is `%term%` and scans regardless.
 - [ ] **A scan that can be started without being waited for.** `CatalogScanService.ScanAsync`
       is awaited by the endpoint, so a scan of a large catalog holds the request open for as
       long as it takes and nothing prevents a second one starting alongside it.

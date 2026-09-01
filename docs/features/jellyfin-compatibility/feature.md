@@ -1,7 +1,7 @@
 # Jellyfin Compatibility
 
 Created: 2026-06-15
-Updated: 2026-08-15
+Updated: 2026-09-01
 
 ## Description
 
@@ -166,7 +166,10 @@ Library and browsing:
   `SearchTerm`, `StartIndex` and `Limit`. It answers with an empty result rather
   than 404 even when it matches nothing: Infuse's search fans out here first and
   treats a 404 as a hard failure, so a title that *is* in the library would
-  never surface.
+  never surface. Its matching — and the title search behind `SearchTerm` on
+  `/Items` — folds case in every alphabet, not just A-Z: SQLite's own `LIKE`
+  folds ASCII alone, so `оппенгеймер` used to find nothing while `Оппенгеймер`
+  found the film. See `SqliteUnicodeLike`.
 - `GET /MediaSegments/{itemId}`
 - `GET|POST /DisplayPreferences/{displayPreferencesId}`
 

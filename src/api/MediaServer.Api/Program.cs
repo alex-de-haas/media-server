@@ -300,10 +300,13 @@ builder.Services.AddHostedService<RemuxIndexWorker>();
 // EF Core + SQLite live under the app data directory so Hosty backup/restore covers them.
 Directory.CreateDirectory(hosty.AppDataDir);
 builder.Services.AddSingleton<SqlitePragmaInterceptor>();
+builder.Services.AddSingleton<SqliteUnicodeLikeInterceptor>();
 builder.Services.AddDbContext<MediaServerDbContext>((serviceProvider, options) =>
     options
         .UseSqlite($"Data Source={hosty.DatabasePath}")
-        .AddInterceptors(serviceProvider.GetRequiredService<SqlitePragmaInterceptor>()));
+        .AddInterceptors(
+            serviceProvider.GetRequiredService<SqlitePragmaInterceptor>(),
+            serviceProvider.GetRequiredService<SqliteUnicodeLikeInterceptor>()));
 
 // Periodic online-backup snapshot so scheduled host backups capture a consistent DB copy (no quiesce hook).
 builder.Services.AddSingleton<SqliteSnapshotService>();
