@@ -99,8 +99,18 @@ public static class CatalogEndpoints
         // the library rows whose files are gone (as tombstones where a user's history is at stake).
         group.MapPost("/{id:guid}/scan", async (Guid id, CatalogScanService scan, CancellationToken cancellationToken) =>
         {
-            var report = await scan.ScanAsync(id, cancellationToken);
-            return report is null ? Results.NotFound() : Results.Ok(report);
+            var outcome = await scan.ScanAsync(id, cancellationToken);
+            if (outcome.NotFound)
+            {
+                return Results.NotFound();
+            }
+
+            // 409 rather than a second disk walk. The reservation lives in the scan service now, so this
+            // route sees a run the queued path started and vice versa — the two used to be blind to each
+            // other, which is how two scans of one catalog could overlap.
+            return outcome.AlreadyRunning
+                ? Results.Conflict(new { error = "A scan is already running for this catalog." })
+                : Results.Ok(outcome.Report);
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
         // The same work, started rather than awaited. The route above answers with the report the

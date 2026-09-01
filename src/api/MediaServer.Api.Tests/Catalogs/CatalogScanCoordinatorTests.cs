@@ -40,16 +40,19 @@ public sealed class CatalogScanCoordinatorTests : IDisposable
     }
 
     [Fact]
-    public async Task A_second_request_is_refused_while_the_first_is_in_flight_and_admitted_after()
+    public async Task A_request_is_refused_while_a_scan_holds_the_catalog_and_admitted_once_it_lets_go()
     {
-        // The pair is the test: a coordinator that always refused would pass the middle assertion alone,
-        // and one that never refused would pass the first.
+        // The reservation is taken by the scan itself, not by this coordinator — that is what makes it
+        // visible to the synchronous route and the nightly job as well. So the busy state is set up the
+        // way a scan sets it, and the pair is the test: a coordinator that always refused would pass the
+        // middle assertion alone, one that never refused would pass the others.
         var catalogId = AddCatalog();
 
         Assert.Equal(CatalogScanRequestStatus.Started, (await _coordinator.RequestAsync(catalogId, default)).Status);
+
+        _queue.TryReserve(catalogId);
         Assert.Equal(CatalogScanRequestStatus.AlreadyRunning, (await _coordinator.RequestAsync(catalogId, default)).Status);
 
-        // The worker releases the reservation on every path; this stands in for that.
         _queue.Release(catalogId);
         Assert.Equal(CatalogScanRequestStatus.Started, (await _coordinator.RequestAsync(catalogId, default)).Status);
     }
@@ -61,7 +64,7 @@ public sealed class CatalogScanCoordinatorTests : IDisposable
         // library": a run already under way is the outcome the operator wanted.
         var busy = AddCatalog();
         AddCatalog();
-        await _coordinator.RequestAsync(busy, default);
+        _queue.TryReserve(busy);
 
         Assert.Equal(1, await _coordinator.RequestAllAsync(CancellationToken.None));
     }
@@ -74,7 +77,7 @@ public sealed class CatalogScanCoordinatorTests : IDisposable
         var never = AddCatalog();
         var finished = AddCatalog();
         var completedAt = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
-        AddJob(finished, JobStatus.Completed, completedAt);
+        MarkScanned(finished, completedAt);
 
         var state = await _coordinator.ListStateAsync(CancellationToken.None);
 
@@ -85,10 +88,11 @@ public sealed class CatalogScanCoordinatorTests : IDisposable
     }
 
     [Fact]
-    public async Task A_failed_scan_does_not_count_as_having_been_scanned()
+    public async Task A_scan_that_opened_a_job_but_never_finished_does_not_count_as_having_scanned()
     {
-        // Otherwise a catalog whose disk was unreadable reports a last-scanned time, and the empty
-        // result it produces reads as "the library really is empty".
+        // The state is stamped by the scan when it completes, not by the job that started one. A catalog
+        // whose disk was unreadable must not report a last-scanned time, or the empty result it produces
+        // reads as "the library really is empty".
         var catalogId = AddCatalog();
         AddJob(catalogId, JobStatus.Failed, DateTimeOffset.UtcNow);
 
@@ -96,6 +100,31 @@ public sealed class CatalogScanCoordinatorTests : IDisposable
 
         Assert.True(state.NeverScanned);
         Assert.Null(state.LastCompletedAt);
+    }
+
+    [Fact]
+    public async Task A_scan_that_opened_no_job_at_all_still_counts()
+    {
+        // The finding this replaced: reading scan state from job rows reported a catalog scanned nightly
+        // for months as never scanned, because the nightly job and the synchronous route open none.
+        var catalogId = AddCatalog();
+        MarkScanned(catalogId, new DateTimeOffset(2026, 2, 3, 4, 5, 6, TimeSpan.Zero));
+
+        var state = Assert.Single(await _coordinator.ListStateAsync(CancellationToken.None));
+
+        Assert.False(state.NeverScanned);
+        Assert.Empty(await _coordinator.ListActiveAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_scan_holding_the_catalog_without_a_job_still_reads_as_scanning()
+    {
+        // Same gap in the other direction: the synchronous route reserves but opens no job, and
+        // reporting it as idle would let get_server_status contradict what the disk is doing.
+        var catalogId = AddCatalog();
+        _queue.TryReserve(catalogId);
+
+        Assert.True(Assert.Single(await _coordinator.ListStateAsync(CancellationToken.None)).Scanning);
     }
 
     [Fact]
@@ -126,6 +155,13 @@ public sealed class CatalogScanCoordinatorTests : IDisposable
         _context.Catalogs.Add(catalog);
         _context.SaveChanges();
         return catalog.Id;
+    }
+
+    private void MarkScanned(Guid catalogId, DateTimeOffset at)
+    {
+        var catalog = _context.Catalogs.Single(entry => entry.Id == catalogId);
+        catalog.LastScannedAt = at;
+        _context.SaveChanges();
     }
 
     private void AddJob(Guid catalogId, JobStatus status, DateTimeOffset? completedAt)

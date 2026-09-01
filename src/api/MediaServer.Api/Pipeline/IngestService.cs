@@ -64,11 +64,10 @@ public sealed class IngestService(
 
         if (!string.IsNullOrWhiteSpace(query.Title))
         {
-            // Case folding here is ASCII-only, which is SQLite's LIKE and not a choice: measured, a
-            // Cyrillic title matches "Оппенгеймер" and misses "оппенгеймер", and routing the comparison
-            // through SQL `lower()` makes it worse — that function is ASCII-only too, so lowering the term
-            // in .NET leaves it matching nothing at all. The fix is a normalized column, which the library
-            // search needs anyway; until then this filter is exact-case outside ASCII.
+            // Case folding is Unicode-wide, and only because this app replaces SQLite's `like()` — see
+            // SqliteUnicodeLike. The built-in one folds A-Z alone, so before that replacement a search
+            // for "оппенгеймер" missed "Оппенгеймер"; anything that removes the replacement brings that
+            // back here and in the Jellyfin searches at the same time.
             //
             // Three places a title can live, and the caller knows only the name they would say out loud.
             // An item identified as "Oppenheimer" is found by that; one still parked in review is found by

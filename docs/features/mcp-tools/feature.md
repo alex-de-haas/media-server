@@ -48,6 +48,14 @@ about this host.
 - **An unknown filter value is refused, not dropped.** Accepted and ignored, "nothing is failing"
   comes back as a list of everything.
 
+## The App Authorizes
+
+`scan_catalog` and `refresh_metadata` have admin-only HTTP twins, and calling their coordinators
+in-process would walk around that check entirely: the endpoint asks for an authenticated user and
+nothing more, which is right for reading a library and wrong for maintenance. Those two tools are
+gated on the caller's host role, and the list is a list rather than a mood — reading the library is
+the ordinary case and is not an administrator action.
+
 ## Annotations Are A Consent Prompt
 
 Read tools declare `readOnlyHint: true`, write tools declare `false`, through separate helpers so
@@ -76,6 +84,15 @@ give one tool argument shapes that share nothing.
   none is.
 - **Refusals beside acceptances** — an unknown filter value, personal state without a user, a match
   naming no source file, an already-running scan, and a scan of a catalog that does not exist.
+- **The admin gate in both directions** — a non-administrator refused, the same call as an
+  administrator accepted, and an ordinary read left alone. A gate that refused everyone would pass
+  the first assertion alone.
+- **An episode match end to end.** The pipeline branches on `MediaKind.Episode` and sends every
+  other kind through movie resolution, so a tool offering only movie and series resolves each episode
+  file as a film — which succeeds and is wrong. Asserted by what the match creates, not by what it
+  returns.
+- **Scan state stamped by the scan**, with the offline case beside it: a volume that could not be
+  read must not report a last-scanned time.
 - **The skill against the tools.** Every tool name the skill mentions is asserted to exist: the skill
   is prose the model reads before deciding anything, so a stale name sends it to a dead end and
   nothing else notices.

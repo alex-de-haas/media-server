@@ -221,8 +221,9 @@ public sealed class McpToolInvoker(
             "match_ingest_item",
             "Tells the pipeline which title an item is, so it can finish. Read get_ingest_item first: "
             + "the source file ids a match names come from there, and a guessed id fails. One group per "
-            + "identity — a pack holding several films is several groups, and an episode match carries "
-            + "season and episode on each file.",
+            + "identity — a pack holding several films is several groups. For episodes use kind "
+            + "'episode' with the *series* provider id, and give each file its season and episode; "
+            + "'series' means the whole thing is one work, and its files resolve as a movie would.",
             new JsonObject
             {
                 ["id"] = Prop("string", "The ingest item id."),
@@ -237,7 +238,7 @@ public sealed class McpToolInvoker(
                         {
                             ["provider"] = Prop("string", "Provider key, e.g. tmdb."),
                             ["providerId"] = Prop("string", "The provider's id."),
-                            ["kind"] = Prop("string", "movie or series."),
+                            ["kind"] = Prop("string", "movie, series, or episode for a per-episode match."),
                             ["title"] = Prop("string", "Display title."),
                             ["year"] = Prop("integer", "Release year."),
                             ["files"] = new JsonObject
@@ -293,11 +294,33 @@ public sealed class McpToolInvoker(
             []),
     ];
 
-    public async Task<IResult> CallAsync(
-        JsonNode? id, JsonNode? parameters, int? appUserId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Tools whose HTTP twins require <see cref="AppRoles.AdminPolicy"/>.
+    /// </summary>
+    /// <remarks>
+    /// The endpoint requires an authenticated user and nothing more, which is right for reading a
+    /// library and wrong for maintenance: the catalog routes these call are admin-only, and calling the
+    /// coordinators in-process walks around that. Without this list an ordinary host user can start work
+    /// the HTTP surface would refuse them — the app authorizing is the half Core cannot do, and this is
+    /// where it was missing.
+    /// </remarks>
+    private static readonly HashSet<string> AdminOnlyTools = new(StringComparer.Ordinal)
     {
-        var name = parameters?["name"]?.GetValue<string>();
+        "scan_catalog", "refresh_metadata",
+    };
+
+    public async Task<IResult> CallAsync(
+        JsonNode? id, JsonNode? parameters, int? appUserId, bool isAdministrator,
+        CancellationToken cancellationToken)
+    {
+        var name = Str(parameters, "name");
         var arguments = parameters?["arguments"];
+
+        if (name is not null && AdminOnlyTools.Contains(name) && !isAdministrator)
+        {
+            return Failure(id, $"{name} is an administrator action on this server, and the calling user "
+                + "is not one. A host administrator can run it from the web interface.");
+        }
 
         try
         {
@@ -998,7 +1021,7 @@ public sealed class McpToolInvoker(
             }
 
             parsed.Add(new MatchGroupRequest(
-                ParseKind(Str(group, "kind")) ?? throw new InvalidOperationException("each group needs kind 'movie' or 'series'."),
+                ParseGroupKind(Str(group, "kind")),
                 Str(group, "provider") ?? throw new InvalidOperationException("each group needs a provider."),
                 Str(group, "providerId") ?? throw new InvalidOperationException("each group needs a providerId."),
                 Str(group, "title") ?? string.Empty,
@@ -1112,6 +1135,27 @@ public sealed class McpToolInvoker(
             _ => new JsonObject { ["outcome"] = "not-found", ["note"] = "No catalog with that id." },
         };
     }
+
+    /// <summary>
+    /// The kind of one match group, which admits <c>episode</c> where a filter does not.
+    /// </summary>
+    /// <remarks>
+    /// The pipeline branches on exactly this: <c>MatchAsync</c> treats <see cref="MediaKind.Episode"/>
+    /// as the episodic case and sends every other kind through movie resolution. A tool that accepted
+    /// only movie and series could not repair an episode ingest at all — `series` would resolve each
+    /// episode file as a film, which succeeds and is wrong.
+    ///
+    /// The provider id on an episode group is the *series* id. That is how the pipeline addresses
+    /// episodes everywhere, and the tool's description says so, because the pairing reads oddly.
+    /// </remarks>
+    private static MediaKind ParseGroupKind(string? value) => value?.ToLowerInvariant() switch
+    {
+        "movie" or "movies" => MediaKind.Movie,
+        "series" or "show" or "shows" => MediaKind.Series,
+        "episode" or "episodes" => MediaKind.Episode,
+        _ => throw new InvalidOperationException(
+            $"each group needs kind 'movie', 'series' or 'episode', not '{value}'."),
+    };
 
     private static MediaKind? ParseKind(string? value) => value?.ToLowerInvariant() switch
     {

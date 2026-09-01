@@ -65,6 +65,13 @@ public sealed record LibraryScanReport(IReadOnlyList<CatalogScanReport> Catalogs
 /// file's return is picked up by the next scan, and identification adopts the tombstone back under the
 /// same public id, with its history intact.
 /// </remarks>
+/// <summary>What a scan request did, distinguishing the two ways it can decline.</summary>
+/// <remarks>
+/// "No such catalog" and "one is already running" are different answers, and a caller that cannot
+/// tell them apart reports a busy catalog as a missing one.
+/// </remarks>
+public sealed record CatalogScanOutcome(CatalogScanReport? Report, bool NotFound = false, bool AlreadyRunning = false);
+
 public sealed class CatalogScanService(
     MediaServerDbContext database,
     CatalogFileProbe probe,
@@ -73,15 +80,48 @@ public sealed class CatalogScanService(
     LibraryImportService importService,
     LibraryDeleteService deleteService,
     IHostyCoreClient core,
+    ICatalogScanQueue scanQueue,
     ILogger<CatalogScanService> logger)
 {
     private const int MaxMissingReported = 50;
 
-    /// <summary>Scans one catalog. Null when no such catalog exists.</summary>
-    public async Task<CatalogScanReport?> ScanAsync(Guid catalogId, CancellationToken cancellationToken)
+    /// <summary>Scans one catalog, unless one is already running for it.</summary>
+    public async Task<CatalogScanOutcome> ScanAsync(Guid catalogId, CancellationToken cancellationToken)
     {
         var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == catalogId, cancellationToken);
-        return catalog is null ? null : await ScanCatalogAsync(catalog, cancellationToken);
+        if (catalog is null)
+        {
+            return new CatalogScanOutcome(null, NotFound: true);
+        }
+
+        return await ReserveAndScanAsync(catalog, cancellationToken);
+    }
+
+    /// <summary>
+    /// Takes the catalog's scan reservation, runs the scan, and gives it back.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in the coordinator that queues MCP requests, because this is the one point every
+    /// entry point funnels through — the queued worker, the synchronous route the web UI calls, and the
+    /// nightly maintenance job. A guard held one level up protected only the path that went through it,
+    /// so two disk walks over the same catalog remained possible, which is precisely what the guard was
+    /// advertised to prevent.
+    /// </remarks>
+    private async Task<CatalogScanOutcome> ReserveAndScanAsync(Catalog catalog, CancellationToken cancellationToken)
+    {
+        if (!scanQueue.TryReserve(catalog.Id))
+        {
+            return new CatalogScanOutcome(null, AlreadyRunning: true);
+        }
+
+        try
+        {
+            return new CatalogScanOutcome(await ScanCatalogAsync(catalog, cancellationToken));
+        }
+        finally
+        {
+            scanQueue.Release(catalog.Id);
+        }
     }
 
     /// <summary>Scans every catalog, one after another — the global button and the nightly job.</summary>
@@ -92,7 +132,13 @@ public sealed class CatalogScanService(
         foreach (var catalog in catalogs)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            reports.Add(await ScanCatalogAsync(catalog, cancellationToken));
+            // A catalog already being scanned is skipped rather than queued behind: the caller asked for
+            // the library, and a run already under way is the outcome they wanted.
+            var outcome = await ReserveAndScanAsync(catalog, cancellationToken);
+            if (outcome.Report is { } report)
+            {
+                reports.Add(report);
+            }
         }
 
         return new LibraryScanReport(reports);
@@ -104,6 +150,8 @@ public sealed class CatalogScanService(
         if (!filesystem.DirectoryExists(catalog.Root))
         {
             await GoOfflineAsync(catalog, cancellationToken);
+            // Deliberately not stamped as scanned: a volume that could not be read was not scanned, and
+            // recording otherwise turns "the disk is missing" into "the library is empty".
             return OfflineReport(catalog);
         }
 
@@ -153,6 +201,12 @@ public sealed class CatalogScanService(
             removal.TitlesGhosted,
             removal.TitlesPurged,
             missing.Select(source => source.Path).Take(MaxMissingReported).ToList());
+
+        // Stamped here, at the one point every entry point funnels through — the queued worker, the
+        // synchronous route, and the nightly job all reach this line. Recording it anywhere upstream
+        // would leave the paths that skip that upstream reporting a catalog as never scanned.
+        catalog.LastScannedAt = DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync(cancellationToken);
 
         await AnnounceAsync(report, cancellationToken);
         return report;

@@ -36,7 +36,10 @@ public static class McpEndpoints
             CancellationToken cancellationToken) =>
         {
             var id = body?["id"]?.DeepClone();
-            var method = body?["method"]?.GetValue<string>();
+            // Read through the same helper the tool arguments use. `GetValue<string>()` throws when the
+            // member is missing or is not a string, which turns malformed client input into a 500 where
+            // the protocol asks for a JSON-RPC error.
+            var method = McpProtocol.Str(body, "method");
 
             switch (method)
             {
@@ -67,7 +70,11 @@ public static class McpEndpoints
 
                 case "tools/call":
                     var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
-                    return await invoker.CallAsync(id, body?["params"], appUserId, cancellationToken);
+                    // Core said who this is; the app decides what they may do. The maintenance tools have
+                    // admin-only HTTP twins, and calling their services in-process would otherwise walk
+                    // around that check entirely.
+                    return await invoker.CallAsync(
+                        id, body?["params"], appUserId, principal.IsInRole(AppRoles.Admin), cancellationToken);
 
                 default:
                     return Error(id, -32601, $"Method not found: {method}");

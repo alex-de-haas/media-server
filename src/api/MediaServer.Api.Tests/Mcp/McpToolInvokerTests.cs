@@ -10,6 +10,7 @@ using MediaServer.Api.Metadata;
 using MediaServer.Api.Realtime;
 using MediaServer.Api.Torrents;
 using MediaServer.Api.Tests.Pipeline;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace MediaServer.Api.Tests.Mcp;
@@ -24,6 +25,7 @@ public sealed class McpToolInvokerTests : IDisposable
     private readonly PipelineTestHarness _harness = new();
     private readonly IServiceScope _scope;
     private readonly MediaServerDbContext _database;
+    private readonly CatalogScanQueue _queue = new();
     private readonly McpToolInvoker _invoker;
 
     public McpToolInvokerTests()
@@ -38,7 +40,7 @@ public sealed class McpToolInvokerTests : IDisposable
                 new MediaServerSettings { SupportedLanguages = ["en-US"] }),
             _scope.ServiceProvider.GetRequiredService<IngestService>(),
             new CatalogScanCoordinator(
-                _database, new JobService(_database, new NullRealtimeNotifier()), new CatalogScanQueue()),
+                _database, new JobService(_database, new NullRealtimeNotifier()), _queue),
             _scope.ServiceProvider.GetRequiredService<CatalogService>(),
             // Downloads, recommendations and the watchlist are thin projections over services that have
             // their own tests, and standing up their dependency trees here would be scaffolding for
@@ -174,6 +176,10 @@ public sealed class McpToolInvokerTests : IDisposable
         Assert.Equal("accepted", first["outcome"]!.GetValue<string>());
         Assert.NotNull(first["jobId"]);
 
+        // The reservation belongs to the scan, not to the queue that admits requests — which is what
+        // makes it visible to the synchronous route and the nightly job too. Held here the way a running
+        // scan holds it.
+        _queue.TryReserve(catalogId);
         var second = Payload(await CallAsync("scan_catalog", new JsonObject { ["catalogId"] = catalogId.ToString() }));
         Assert.Equal("already-running", second["outcome"]!.GetValue<string>());
     }
@@ -211,29 +217,96 @@ public sealed class McpToolInvokerTests : IDisposable
         Assert.Contains("sourceFileId", Text(result), StringComparison.Ordinal);
     }
 
+    /// <summary>Stamps the catalogs the way a finished scan does, whichever entry point ran it.</summary>
+    [Fact]
+    public async Task A_maintenance_tool_is_refused_for_a_user_who_is_not_an_administrator()
+    {
+        // The endpoint asks only for an authenticated user, which is right for reading a library and
+        // wrong for maintenance: the catalog routes these call are admin-only, and reaching the
+        // coordinators in-process would otherwise walk around that check entirely.
+        await _harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Anything.2021", "Anything.2021/movie.mkv");
+        var catalogId = _database.Catalogs.Select(catalog => catalog.Id).Single();
+        // A fresh argument object per call: a JsonNode cannot be re-parented, so reusing one turns the
+        // second call into an exception rather than the assertion it was written to make.
+        JsonObject Arguments() => new() { ["catalogId"] = catalogId.ToString() };
+
+        var refused = await CallAsync("scan_catalog", Arguments(), isAdministrator: false);
+        Assert.True(refused["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains("administrator", Text(refused), StringComparison.OrdinalIgnoreCase);
+
+        // Beside the same call as an administrator, or a gate that refused everyone would pass too.
+        Assert.Equal("accepted", Payload(await CallAsync("scan_catalog", Arguments()))["outcome"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Reading_the_library_is_not_an_administrator_action()
+    {
+        // The gate must be a list, not a mood. An ordinary host user asking what is in the library is
+        // the ordinary case, and refusing it would make the surface useless to everyone but admins.
+        var payload = Payload(await CallAsync(
+            "search_library", new JsonObject { ["query"] = "anything" }, isAdministrator: false));
+
+        Assert.Empty((JsonArray)payload["titles"]!);
+    }
+
+    [Fact]
+    public async Task An_episode_match_through_the_tool_creates_episodes_and_not_a_film()
+    {
+        // The pipeline branches on MediaKind.Episode and sends every other kind through movie
+        // resolution, so a tool offering only 'movie' and 'series' cannot repair an episode ingest at
+        // all: 'series' resolves each episode file as a film, which succeeds and is wrong. The provider
+        // id on an episode group is the *series* id, which is why this pairing needs a test rather than
+        // a description.
+        var (ingestId, _, _) = await _harness.SeedCompletedDownloadAsync(
+            CatalogType.Series, "Obscure.Show.S01",
+            "Obscure.Show.S01/Obscure.Show.S01E01.mkv",
+            additionalSourceRelativePaths: ["Obscure.Show.S01/Obscure.Show.S01E02.mkv"]);
+        await _harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        var files = await _database.SourceFiles.OrderBy(file => file.RelativePath).ToListAsync();
+        var result = await CallAsync("match_ingest_item", new JsonObject
+        {
+            ["id"] = ingestId.ToString(),
+            ["groups"] = new JsonArray(new JsonObject
+            {
+                ["provider"] = "tmdb",
+                ["providerId"] = "4242",
+                ["kind"] = "episode",
+                ["title"] = "Obscure Show",
+                ["year"] = 2020,
+                ["files"] = new JsonArray(
+                    new JsonObject { ["sourceFileId"] = files[0].Id.ToString(), ["season"] = 1, ["episode"] = 1 },
+                    new JsonObject { ["sourceFileId"] = files[1].Id.ToString(), ["season"] = 1, ["episode"] = 2 }),
+            }),
+        });
+
+        Assert.Equal("accepted", Payload(result)["outcome"]!.GetValue<string>());
+        await _harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+        using var verifyScope = _harness.CreateScope();
+        var verify = verifyScope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var episodes = await verify.MediaItems.Where(item => item.Kind == MediaKind.Episode)
+            .OrderBy(item => item.IndexNumber).ToListAsync();
+        Assert.Equal([1, 2], episodes.Select(episode => episode.IndexNumber ?? 0));
+        Assert.Empty(await verify.MediaItems.Where(item => item.Kind == MediaKind.Movie).ToListAsync());
+    }
+
     private void MarkScanned()
     {
-        foreach (var catalogId in _database.Catalogs.Select(catalog => catalog.Id).ToList())
+        foreach (var catalog in _database.Catalogs.ToList())
         {
-            _database.Jobs.Add(new Job
-            {
-                Id = Guid.NewGuid(),
-                Type = CatalogScanCoordinator.JobType,
-                RelatedType = "catalog",
-                RelatedId = catalogId,
-                Status = JobStatus.Completed,
-                CompletedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            catalog.LastScannedAt = DateTimeOffset.UtcNow;
         }
 
         _database.SaveChanges();
     }
 
-    private async Task<JsonNode> CallAsync(string tool, JsonObject arguments, int? appUserId = 1)
+    private async Task<JsonNode> CallAsync(
+        string tool, JsonObject arguments, int? appUserId = 1, bool isAdministrator = true)
     {
         var parameters = new JsonObject { ["name"] = tool, ["arguments"] = arguments };
-        var result = await _invoker.CallAsync(JsonValue.Create(1), parameters, appUserId, CancellationToken.None);
+        var result = await _invoker.CallAsync(
+            JsonValue.Create(1), parameters, appUserId, isAdministrator, CancellationToken.None);
         return JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(Unwrap(result)))!;
     }
 
