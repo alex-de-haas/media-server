@@ -60,6 +60,17 @@ unannotated surface is not a permissive surface — it is an invisible one.
 | `search_library` | a **new** paged, searchable listing (see Deliverables) |
 | `get_title(id)` | `GET /api/library/{id}` and `GET /api/library/{id}/episodes` — seasons, files, sizes, user state |
 | `list_shelf(kind: recent\|resume\|nextup)` | the three shelf routes |
+| `list_recommendations(kind?, limit?)` | `GET /api/recommendations` — already takes both arguments |
+
+*"Suggest something to watch"* is the question that shapes this group, and the first draft of
+this plan had no tool for it. It must not be answered by pulling titles and reasoning over
+them: the recommendation engine already exists, already knows the operator's popularity bias
+and what they hid, and already pages. An agent that ignores it and ranks a few hundred rows
+from `search_library` will be slower, worse, and inconsistent with what the web UI shows.
+
+What the agent adds on top is filtering by the constraint in the question — an unwatched
+comedy under two hours — which is why `search_library` results carry genres, runtime, rating
+and watched state, and why that is *all* they carry.
 
 ### Why something is missing
 
@@ -155,6 +166,11 @@ context, or it is cut silently and "not found" stops meaning anything.
       `catalogId`/`kind` filters and a watched-state filter, with `limit`/`offset` and a total
       count in the response. Additive: the existing call with no new parameters keeps
       returning what it returns today, so the web client is not broken by this change.
+- [ ] **Enough on a list row to filter a suggestion.** `LibraryItemDto` carries title, year,
+      kind, poster and user data — nothing to answer "an unwatched comedy under two hours"
+      without fetching every title one by one. Genres, runtime and community rating belong on
+      the row. The poster URL does not belong in the MCP projection at all; a model cannot see
+      it, and it is pure weight.
 - [ ] **A filtered, paged ingest listing.** `status` and `stage` filters, same window shape.
 - [ ] **A scan that can be started without being waited for.** `CatalogScanService.ScanAsync`
       is awaited by the endpoint, so a scan of a large catalog holds the request open for as
@@ -173,9 +189,9 @@ context, or it is cut silently and "not found" stops meaning anything.
 
 - [ ] **`interfaces.mcp` in `manifest.json`** and a JSON-RPC endpoint answering `initialize`,
       `tools/list` and `tools/call`.
-- [ ] **The read tools**: `search_library`, `get_title`, `list_shelf`, `list_ingest`,
-      `get_ingest_item`, `get_server_status`, `list_downloads`, `list_catalogs`,
-      `search_metadata`, `get_release_calendar`.
+- [ ] **The read tools**: `search_library`, `get_title`, `list_shelf`,
+      `list_recommendations`, `list_ingest`, `get_ingest_item`, `get_server_status`,
+      `list_downloads`, `list_catalogs`, `search_metadata`, `get_release_calendar`.
 - [ ] **The write tools**: `add_torrent`, `control_download`, `match_ingest_item`,
       `advance_ingest_item`, `scan_catalog`, `refresh_metadata`, `set_title_state`,
       `manage_watchlist`.
@@ -198,20 +214,29 @@ context, or it is cut silently and "not found" stops meaning anything.
       means — a model cannot tell from `list_ingest` whether it is looking at a problem or at
       normal progress.
 
-## Open questions
+## Decisions
 
-- **Does `add_torrent` need an approval gate?** It commits disk and bandwidth on the
-  operator's behalf. The Hosty connector can mark it non-read-only, which surfaces it as an
-  approval in the agent's own client, but that is the client's policy rather than this app's.
-  Recommendation: ship it non-read-only and rely on the client's approval, and revisit only if
-  an operator reports an unwanted grab.
-- **Should `get_server_status` include VPN state?** It is genuinely useful for "why is nothing
-  downloading" and is also the most sensitive field in the app. Recommendation: include
-  whether the VPN is up, never the endpoint or credentials.
-- **How much of a title's detail does `get_title` return?** The full detail record includes
-  every source file and track. Recommendation: summarize by default — sources counted and
-  sized, not enumerated — and let a `verbose` argument ask for the rest, so a series with
-  nine seasons does not fill the context.
+These were open when the plan was written; the answers are the operator's, recorded here with
+what they imply.
+
+- **`add_torrent` gets no approval gate of its own.** It is declared non-read-only, which
+  surfaces it as an approval in whichever agent client the operator is using, and that is
+  where the decision belongs. A second gate inside this app would ask the same question twice
+  and teach the operator to click through both.
+- **`get_server_status` reports whether the VPN is up.** It is the first thing to check when
+  nothing is downloading. It reports up or down and nothing else — never the endpoint,
+  the provider, or any credential.
+- **`get_title` answers with a summary, not a record.** Identity, year, kind, genres, runtime,
+  official and community rating, watched state, season and episode counts, and sources counted
+  and sized. Not the synopsis, not the tagline, not poster, backdrop or logo URLs, not the
+  homepage or external ids, not per-file paths or track lists. `LibraryDetailDto` carries all
+  of those because a detail *page* needs them; a model does not, and a series with nine seasons
+  would spend the operator's context on artwork links it cannot see. A `verbose` argument adds
+  the synopsis and per-source detail for the rare "what is actually in this file" question.
+
+  **People are out entirely.** `/api/persons/{provider}/{id}` is not wrapped: an actor's
+  biography is the clearest example of a payload that is large, always available elsewhere,
+  and never what the operator was asking this server about.
 
 ## Verification steps
 
@@ -230,6 +255,10 @@ handling. What they cannot cover needs a Core-managed runtime:
 5. Confirm `scan_catalog` on an already-scanning catalog reports that rather than queueing a
    second scan, and that a scan of a catalog large enough to take minutes does not hold the
    tool call open — the failure this is meant to prevent only appears at that size.
-6. Repair a multi-movie pack through `match_ingest_item` with more than one group, and an
+6. Ask an agent for something to watch under a real constraint and confirm it reaches for
+   `list_recommendations` rather than paging the library — the engine's ranking is the answer,
+   and a tool set that invites the model to re-rank by hand has failed even when the answer
+   looks reasonable.
+7. Repair a multi-movie pack through `match_ingest_item` with more than one group, and an
    episode ingest with per-file season and episode numbers. A single-identity match passing
    says nothing about either.
