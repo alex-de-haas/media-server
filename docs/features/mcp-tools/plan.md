@@ -192,15 +192,27 @@ filters only by `catalogId` and `kind`; `GET /api/ingest` takes no parameters at
 agent both outcomes are bad in the same way — either the whole library lands in the model's
 context, or it is cut silently and "not found" stops meaning anything.
 
-- [ ] **A paged, searchable library listing.** Title substring search, plus the existing
+- [x] **A paged, searchable library listing.** Title substring search, plus the existing
       `catalogId`/`kind` filters and a watched-state filter, with `limit`/`offset` and a total
       count in the response. Additive: the existing call with no new parameters keeps
       returning what it returns today, so the web client is not broken by this change.
-- [ ] **Enough on a list row to filter a suggestion.** `LibraryItemDto` carries title, year,
+
+      **Search and window live on their own query path**, not as parameters bolted onto the existing
+      one. The two order differently and cannot be reconciled: the list sorts *after* projection, by
+      the localized title a card renders, while a window has to be applied in SQL — and paging one
+      order while sorting another lets a row appear on two pages and on none. The search path orders
+      in SQL by the preferred language's title, which is close to the rendered order and, more to the
+      point, stable.
+
+      Watched state is evaluated the way the library defines it rather than the way the column reads:
+      a movie owns its played flag, a series does not — its state is a rollup over published episodes,
+      and a series with nothing published is not "finished" by vacuous truth.
+- [x] **Enough on a list row to filter a suggestion.** `LibraryItemDto` carries title, year,
       kind, poster and user data — nothing to answer "an unwatched comedy under two hours"
       without fetching every title one by one. Genres, runtime and community rating belong on
-      the row. The poster URL does not belong in the MCP projection at all; a model cannot see
-      it, and it is pure weight.
+      the row. Read from the metadata record the projection already loads, so they cost no extra
+      query. The poster URL stays on the HTTP shape for the UI and is dropped in the MCP projection,
+      where a model cannot see it and it is pure weight.
 - [x] **A filtered, paged ingest listing.** `status`, `stage` and title filters, with `limit`/`offset`
       and a total counted before the window. The title filter searches all three names an item can
       have — the identified title, the pinned target, and the release name — which is what collapses

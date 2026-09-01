@@ -1,3 +1,5 @@
+using MediaServer.Api.Data;
+
 namespace MediaServer.Api.Library;
 
 // UI-facing DTOs for the internal `/api/library` surface. Serialized camelCase by the global JSON
@@ -15,7 +17,34 @@ public sealed record LibraryItemDto(
     string Title,
     int? Year,
     string? PosterUrl,
-    UserItemDataDto? UserData);
+    UserItemDataDto? UserData,
+    // Enough to narrow a suggestion without fetching every title one by one — "an unwatched comedy
+    // under two hours" is three fields, and without them a caller has to read the whole library to
+    // answer it. Read from the metadata record the projection already loads, so they cost no query.
+    IReadOnlyList<string>? Genres = null,
+    long? RuntimeTicks = null,
+    double? CommunityRating = null);
+
+/// <summary>Filters and window for a library search.</summary>
+/// <remarks>
+/// <see cref="Watched"/> is evaluated the way the library defines it rather than the way the column
+/// reads: a movie carries its own played flag, but a series' state is a rollup over its episodes, so
+/// filtering on a series row's flag would report a fully-watched series as unwatched.
+/// </remarks>
+public sealed record LibrarySearchQuery(
+    Guid? CatalogId = null,
+    MediaKind? Kind = null,
+    string? Title = null,
+    bool? Watched = null,
+    int? Limit = null,
+    int? Offset = null);
+
+/// <summary>One page of library items, with the window that produced it.</summary>
+public sealed record LibrarySearchPage(
+    IReadOnlyList<LibraryItemDto> Items,
+    int Total,
+    int Limit,
+    int Offset);
 
 /// <summary>Full detail for a movie or series detail page.</summary>
 public sealed record LibraryDetailDto(

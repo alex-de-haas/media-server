@@ -16,17 +16,32 @@ public static class LibraryEndpoints
     {
         var group = routes.MapGroup("/api/library").RequireAuthorization();
 
+        // Search and window are additive and the shape is unchanged: a caller passing nothing new still
+        // receives the whole list, ordered the way the cards render. Anything else routes through the
+        // SQL-ordered search, whose total the MCP surface reads by calling the service in-process.
         group.MapGet("/", async (
             Guid? catalogId,
             string? kind,
+            string? q,
+            bool? watched,
+            int? limit,
+            int? offset,
             ClaimsPrincipal principal,
             LibraryReadService library,
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
             var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
-            var items = await library.ListAsync(catalogId, ParseKind(kind), appUserId, cancellationToken);
-            return Results.Ok(items);
+            if (string.IsNullOrWhiteSpace(q) && watched is null && limit is null && offset is null)
+            {
+                return Results.Ok(await library.ListAsync(catalogId, ParseKind(kind), appUserId, cancellationToken));
+            }
+
+            var page = await library.SearchAsync(
+                new LibrarySearchQuery(catalogId, ParseKind(kind), q, watched, limit, offset),
+                appUserId,
+                cancellationToken);
+            return Results.Ok(page.Items);
         });
 
         group.MapGet("/{id:guid}", async (
