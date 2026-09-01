@@ -310,9 +310,18 @@ context, or it is cut silently and "not found" stops meaning anything.
       and answers nothing for a title nobody tracks, which is the case the question is usually about.
       Each description says so, and a test asserts it, since a model choosing between them by name
       alone will choose wrong.
-- [ ] **The write tools**: `add_torrent`, `control_download`, `match_ingest_item`,
+- [x] **The write tools**: `add_torrent`, `control_download`, `match_ingest_item`,
       `advance_ingest_item`, `scan_catalog`, `refresh_metadata`, `set_title_state`,
-      `manage_watchlist`.
+      `manage_watchlist`. Annotated through their own helper so read-only is never a default a write
+      tool inherits by forgetting to override it — the annotations are what a client shows the
+      operator before letting a call through, so a wrong one is a wrong consent prompt.
+
+      **Two ingest actions the plan listed are not here.** `pin` and `skip` were to ride inside
+      `advance_ingest_item`'s action list, and they cannot: pin takes a whole provider identity and
+      skip takes a set of file ids, so folding them into an enum gives one tool three argument shapes
+      that share nothing. Skip also discards files from an ingest, which puts it with the deletes this
+      surface excludes. `advance_ingest_item` carries retry and retarget, which need no arguments of
+      their own; a pinning tool can be added on its own terms if the need appears.
 - [x] **The window contract on every list result** — `limit`, `offset`, `returned`, `total` and
       `truncated`, reported from what actually ran. `truncated` is *exact* here rather than the
       "a full page may mean more" other surfaces report: these queries count before they cut, so the
@@ -321,9 +330,9 @@ context, or it is cut silently and "not found" stops meaning anything.
 - [x] **The empty-result contract** — an empty `search_library` says whether catalogs are unscanned
       or being scanned, reading the Phase 1 scan state. Asserted in both directions: a note on every
       empty answer would train the model to skip it.
-- [ ] **Detached operations answer "accepted"**, with the note saying what was started — and
-      the ones that are *not* detached say so instead. Whichever contract a route actually has
-      is the one its tool reports.
+- [x] **Detached operations answer "accepted"**, with the note saying what was started. A scan
+      already under way is reported as such rather than counted as a second start, and a scan of a
+      catalog that does not exist says so rather than accepting work that was never going to happen.
 - [x] **User resolution** — the acting Hosty user is resolved per call and carried into the tools
       that need it. Filtering by watched state without one is refused: answering for "nobody" reports
       every title as unwatched, which reads as a fact about the library rather than about the caller.

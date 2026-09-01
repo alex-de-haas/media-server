@@ -47,7 +47,10 @@ public sealed class McpToolInvokerTests : IDisposable
             torrents: null!,
             recommendations: null!,
             watchlist: null!,
-            _scope.ServiceProvider.GetRequiredService<IMetadataProvider>());
+            _scope.ServiceProvider.GetRequiredService<IMetadataProvider>(),
+            new UserDataService(_database, TimeProvider.System),
+            new CatalogRefreshCoordinator(
+                _database, new JobService(_database, new NullRealtimeNotifier()), new CatalogRefreshQueue()));
     }
 
     [Fact]
@@ -134,6 +137,78 @@ public sealed class McpToolInvokerTests : IDisposable
         Assert.True(catalog["neverScanned"]!.GetValue<bool>());
         Assert.False(catalog["scanning"]!.GetValue<bool>());
         Assert.Equal(1, status["pipeline"]!["Pending"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task Setting_no_field_at_all_is_refused_rather_than_treated_as_clearing_them()
+    {
+        // Nothing asked for is not the same as everything cleared. Writing defaults for the fields the
+        // caller never mentioned would wipe a rating nobody touched.
+        var result = await CallAsync("set_title_state", new JsonObject { ["id"] = Guid.NewGuid().ToString() });
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains("at least one", Text(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Personal_state_cannot_be_written_without_a_user()
+    {
+        var result = await CallAsync(
+            "set_title_state",
+            new JsonObject { ["id"] = Guid.NewGuid().ToString(), ["watched"] = true },
+            appUserId: null);
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains("Hosty user", Text(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_queued_scan_answers_accepted_and_a_second_one_says_it_is_already_running()
+    {
+        // The contract detached work is held to. Reporting an enqueue as a finished scan is a lie the
+        // operator only discovers when the library still looks the same.
+        await _harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Anything.2021", "Anything.2021/movie.mkv");
+        var catalogId = _database.Catalogs.Select(catalog => catalog.Id).Single();
+
+        var first = Payload(await CallAsync("scan_catalog", new JsonObject { ["catalogId"] = catalogId.ToString() }));
+        Assert.Equal("accepted", first["outcome"]!.GetValue<string>());
+        Assert.NotNull(first["jobId"]);
+
+        var second = Payload(await CallAsync("scan_catalog", new JsonObject { ["catalogId"] = catalogId.ToString() }));
+        Assert.Equal("already-running", second["outcome"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task An_unknown_catalog_is_reported_as_such_rather_than_accepted()
+    {
+        // "Accepted" for a catalog that does not exist would have the operator waiting for a scan that
+        // was never going to happen.
+        var payload = Payload(await CallAsync(
+            "scan_catalog", new JsonObject { ["catalogId"] = Guid.NewGuid().ToString() }));
+
+        Assert.Equal("not-found", payload["outcome"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_match_without_a_source_file_is_refused_before_it_reaches_the_pipeline()
+    {
+        // The ids come from get_ingest_item, and a model that guesses produces a FileNotFound outcome
+        // that reads like a broken tool. Refusing here says which step was skipped.
+        var (ingestId, _, _) = await _harness.SeedCompletedDownloadAsync(
+            CatalogType.Movie, "Ambiguous.2021", "Ambiguous.2021/movie.mkv");
+
+        var result = await CallAsync("match_ingest_item", new JsonObject
+        {
+            ["id"] = ingestId.ToString(),
+            ["groups"] = new JsonArray(new JsonObject
+            {
+                ["provider"] = "tmdb", ["providerId"] = "27205", ["kind"] = "movie", ["title"] = "Inception",
+                ["files"] = new JsonArray(new JsonObject()),
+            }),
+        });
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains("sourceFileId", Text(result), StringComparison.Ordinal);
     }
 
     private void MarkScanned()

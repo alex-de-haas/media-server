@@ -85,6 +85,28 @@ internal static class McpProtocol
         };
     }
 
+    /// <summary>A tool that changes something, annotated for what it actually does.</summary>
+    /// <remarks>
+    /// Separate from <see cref="Tool"/> so read-only is never the default a write tool inherits by
+    /// forgetting to override it. The annotations are what a client shows the operator before it lets
+    /// the call through, so a wrong one here is a wrong consent prompt.
+    /// </remarks>
+    public static JsonObject WriteTool(
+        string name, string description, JsonObject properties, bool idempotent, params string[] required)
+    {
+        var tool = Tool(name, description, properties, required);
+        tool["annotations"] = new JsonObject
+        {
+            ["readOnlyHint"] = false,
+            // Nothing here removes content. The tools that would — deleting a title, a season, an
+            // episode, or a download with its files — are deliberately absent: they are irreversible and
+            // this app has no undo, so an agent mistaking one id for another erases the wrong series.
+            ["destructiveHint"] = false,
+            ["idempotentHint"] = idempotent,
+        };
+        return tool;
+    }
+
     public static JsonObject Prop(string type, string description)
         => new() { ["type"] = type, ["description"] = description };
 

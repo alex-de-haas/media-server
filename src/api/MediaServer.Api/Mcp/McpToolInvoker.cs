@@ -26,7 +26,9 @@ public sealed class McpToolInvoker(
     TorrentService torrents,
     RecommendationFeedService recommendations,
     WatchlistService watchlist,
-    IMetadataProvider metadata)
+    IMetadataProvider metadata,
+    UserDataService userData,
+    CatalogRefreshCoordinator refreshes)
 {
     public static JsonArray Tools() =>
     [
@@ -163,6 +165,125 @@ public sealed class McpToolInvoker(
                 ["kind"] = Prop("string", "movie or series."),
             },
             "provider", "id", "kind"),
+        WriteTool(
+            "set_title_state",
+            "Records what the operator did with a title: watched, favourite, or a 1-5 star verdict. Only "
+            + "the fields you pass change; the rest are left alone.",
+            new JsonObject
+            {
+                ["id"] = Prop("string", "The library item id."),
+                ["watched"] = Prop("boolean", "Mark watched or unwatched."),
+                ["favorite"] = Prop("boolean", "Add to or remove from favourites."),
+                ["userRating"] = Prop("integer", "A 1-5 star verdict. Pass 0 to clear it."),
+            },
+            idempotent: true,
+            "id"),
+        WriteTool(
+            "manage_watchlist",
+            "Tracks or stops tracking a title, so its release dates reach the calendar. Adding needs a "
+            + "provider reference — search_metadata turns a name into one.",
+            new JsonObject
+            {
+                ["action"] = Prop("string", "add or remove."),
+                ["provider"] = Prop("string", "Provider key for add, e.g. tmdb."),
+                ["providerId"] = Prop("string", "The provider's id, for add."),
+                ["kind"] = Prop("string", "movie or series, for add."),
+                ["title"] = Prop("string", "Display title, for add."),
+                ["year"] = Prop("integer", "Release year, for add."),
+                ["entryId"] = Prop("string", "The watchlist entry id, for remove."),
+            },
+            idempotent: false,
+            "action"),
+        WriteTool(
+            "add_torrent",
+            "Starts a download into a catalog. The catalog is required and cannot be guessed — call "
+            + "list_catalogs and ask which one if it was not named. Answers 'accepted': the download is "
+            + "queued, not finished, and list_downloads reports its progress.",
+            new JsonObject
+            {
+                ["catalogId"] = Prop("string", "The catalog to download into. Required."),
+                ["magnet"] = Prop("string", "A magnet link."),
+                ["keepSeeding"] = Prop("boolean", "Keep seeding after the download completes."),
+            },
+            idempotent: false,
+            "catalogId", "magnet"),
+        WriteTool(
+            "control_download",
+            "Pauses, resumes, or stops seeding one download.",
+            new JsonObject
+            {
+                ["id"] = Prop("string", "The download id, from list_downloads."),
+                ["action"] = Prop("string", "pause, resume or stop_seeding."),
+            },
+            idempotent: true,
+            "id", "action"),
+        WriteTool(
+            "match_ingest_item",
+            "Tells the pipeline which title an item is, so it can finish. Read get_ingest_item first: "
+            + "the source file ids a match names come from there, and a guessed id fails. One group per "
+            + "identity — a pack holding several films is several groups, and an episode match carries "
+            + "season and episode on each file.",
+            new JsonObject
+            {
+                ["id"] = Prop("string", "The ingest item id."),
+                ["groups"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["description"] = "One entry per identity the item resolves to.",
+                    ["items"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["provider"] = Prop("string", "Provider key, e.g. tmdb."),
+                            ["providerId"] = Prop("string", "The provider's id."),
+                            ["kind"] = Prop("string", "movie or series."),
+                            ["title"] = Prop("string", "Display title."),
+                            ["year"] = Prop("integer", "Release year."),
+                            ["files"] = new JsonObject
+                            {
+                                ["type"] = "array",
+                                ["description"] = "Source files belonging to this identity.",
+                                ["items"] = new JsonObject
+                                {
+                                    ["type"] = "object",
+                                    ["properties"] = new JsonObject
+                                    {
+                                        ["sourceFileId"] = Prop("string", "From get_ingest_item."),
+                                        ["season"] = Prop("integer", "Episode matches only."),
+                                        ["episode"] = Prop("integer", "Episode matches only."),
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            idempotent: false,
+            "id", "groups"),
+        WriteTool(
+            "advance_ingest_item",
+            "Pushes a stalled pipeline item along: 'retry' re-runs the stage that failed, 'retarget' "
+            + "re-homes an item parked over a cross-catalog conflict.",
+            new JsonObject
+            {
+                ["id"] = Prop("string", "The ingest item id."),
+                ["action"] = Prop("string", "retry or retarget."),
+            },
+            idempotent: false,
+            "id", "action"),
+        WriteTool(
+            "scan_catalog",
+            "Starts a catalog scan without waiting for it. Answers 'accepted' with the job, or says a "
+            + "scan is already running rather than starting a second. Omit the catalog to scan every one.",
+            new JsonObject { ["catalogId"] = Prop("string", "One catalog, or omit for all of them.") },
+            idempotent: true),
+        WriteTool(
+            "refresh_metadata",
+            "Re-fetches provider metadata and artwork for a catalog. Answers 'accepted': it runs in the "
+            + "background, and a refresh already under way is reported rather than duplicated.",
+            new JsonObject { ["catalogId"] = Prop("string", "One catalog, or omit for all of them.") },
+            idempotent: true),
         Tool(
             "get_server_status",
             "What this server is doing and whether it can answer for itself: catalogs and whether each "
@@ -195,6 +316,14 @@ public sealed class McpToolInvoker(
                 "list_catalogs" => Content(id, await CatalogsAsync(cancellationToken)),
                 "get_release_calendar" => Content(id, await CalendarAsync(arguments, appUserId, cancellationToken)),
                 "preview_release" => await PreviewReleaseAsync(id, arguments, cancellationToken),
+                "set_title_state" => await SetTitleStateAsync(id, arguments, appUserId, cancellationToken),
+                "manage_watchlist" => await ManageWatchlistAsync(id, arguments, appUserId, cancellationToken),
+                "add_torrent" => await AddTorrentAsync(id, arguments, cancellationToken),
+                "control_download" => await ControlDownloadAsync(id, arguments, cancellationToken),
+                "match_ingest_item" => await MatchIngestAsync(id, arguments, cancellationToken),
+                "advance_ingest_item" => await AdvanceIngestAsync(id, arguments, cancellationToken),
+                "scan_catalog" => Content(id, await ScanAsync(arguments, cancellationToken)),
+                "refresh_metadata" => Content(id, await RefreshAsync(arguments, cancellationToken)),
                 _ => Failure(id, $"Unknown tool: {name}"),
             };
         }
@@ -715,6 +844,274 @@ public sealed class McpToolInvoker(
         MediaKind.Series => RecommendationKind.Series,
         _ => null,
     };
+
+    private async Task<IResult> SetTitleStateAsync(
+        JsonNode? id, JsonNode? arguments, int? appUserId, CancellationToken cancellationToken)
+    {
+        if (appUserId is null)
+        {
+            throw new McpRefusedException("Watch state, favourites and ratings are per person, and this call carried no Hosty user.");
+        }
+
+        var itemId = Id(arguments, "id") ?? throw new InvalidOperationException("id must be a library item id.");
+        var watched = Bool(arguments, "watched");
+        var favorite = Bool(arguments, "favorite");
+        var rating = Int(arguments, "userRating");
+        if (watched is null && favorite is null && rating is null)
+        {
+            // Nothing asked for is not the same as everything cleared. Silently writing defaults would
+            // wipe a rating the caller never mentioned.
+            return Failure(id, "Pass at least one of watched, favorite or userRating.");
+        }
+
+        var changed = new JsonArray();
+        if (watched is { } played)
+        {
+            if (await userData.SetPlayedAsync(appUserId.Value, itemId, played, null, cancellationToken) is null)
+            {
+                return Failure(id, "No title with that id. Ids come from search_library.");
+            }
+
+            changed.Add("watched");
+        }
+
+        if (favorite is { } isFavorite)
+        {
+            await userData.SetFavoriteAsync(appUserId.Value, itemId, isFavorite, cancellationToken);
+            changed.Add("favorite");
+        }
+
+        if (rating is { } stars)
+        {
+            // Zero clears rather than scores: the scale starts at one, so there is no way to say "no
+            // opinion" with a value on it.
+            var result = await userData.SetRatingAsync(appUserId.Value, itemId, stars == 0 ? null : stars, cancellationToken);
+            if (result.Status != SetRatingStatus.Applied)
+            {
+                return Failure(id, $"That rating was refused: {result.Status}. Ratings are 1-5, or 0 to clear.");
+            }
+
+            changed.Add("userRating");
+        }
+
+        return Content(id, new JsonObject { ["id"] = itemId, ["changed"] = changed });
+    }
+
+    private async Task<IResult> ManageWatchlistAsync(
+        JsonNode? id, JsonNode? arguments, int? appUserId, CancellationToken cancellationToken)
+    {
+        if (appUserId is null)
+        {
+            throw new McpRefusedException("A watchlist belongs to a person, and this call carried no Hosty user.");
+        }
+
+        var action = (Str(arguments, "action") ?? string.Empty).ToLowerInvariant();
+        switch (action)
+        {
+            case "add":
+                var provider = Str(arguments, "provider") ?? throw new InvalidOperationException("provider is required to add.");
+                var providerId = Str(arguments, "providerId") ?? throw new InvalidOperationException("providerId is required to add.");
+                var kind = ParseKind(Str(arguments, "kind")) ?? throw new InvalidOperationException("kind must be 'movie' or 'series'.");
+                var added = await watchlist.AddAsync(
+                    appUserId.Value,
+                    new AddWatchlistRequest(
+                        new ProviderRefBody(provider, providerId), kind, null, null, null, null,
+                        Str(arguments, "title"), Int(arguments, "year"), null),
+                    cancellationToken);
+                return Content(id, new JsonObject
+                {
+                    ["action"] = "add",
+                    ["entryId"] = added.Item?.Id,
+                    // Dates arrive from the provider on a background sync, so "tracked" is not yet the
+                    // same as "dated" — saying so keeps the next question ("when does it come out") from
+                    // reading an empty calendar as an answer.
+                    ["note"] = "Tracked. Release dates are fetched in the background, so the calendar may "
+                        + "not show this title for a short while.",
+                });
+            case "remove":
+                var entryId = Id(arguments, "entryId") ?? throw new InvalidOperationException("entryId is required to remove.");
+                return await watchlist.RemoveAsync(appUserId.Value, entryId, cancellationToken)
+                    ? Content(id, new JsonObject { ["action"] = "remove", ["entryId"] = entryId })
+                    : Failure(id, "No watchlist entry with that id for this user.");
+            default:
+                throw new InvalidOperationException($"action must be 'add' or 'remove', not '{action}'.");
+        }
+    }
+
+    private async Task<IResult> AddTorrentAsync(JsonNode? id, JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        var catalogId = Id(arguments, "catalogId")
+            ?? throw new InvalidOperationException("catalogId is required — call list_catalogs and ask which one.");
+        var magnet = Str(arguments, "magnet") ?? throw new InvalidOperationException("magnet is required.");
+
+        var download = await torrents.AddAsync(
+            new AddTorrentRequest(catalogId, magnet, null, Bool(arguments, "keepSeeding")), cancellationToken);
+
+        return Content(id, new JsonObject
+        {
+            // Accepted, not done. Reporting an enqueue as a completed download is a lie the operator
+            // only discovers when the film is not there.
+            ["outcome"] = "accepted",
+            ["downloadId"] = download.Id,
+            ["name"] = download.Name,
+            ["note"] = "Queued. list_downloads reports progress; list_ingest reports what happens after "
+                + "it finishes downloading.",
+        });
+    }
+
+    private async Task<IResult> ControlDownloadAsync(JsonNode? id, JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        var downloadId = Id(arguments, "id") ?? throw new InvalidOperationException("id must be a download id.");
+        var action = (Str(arguments, "action") ?? string.Empty).ToLowerInvariant();
+        var ok = action switch
+        {
+            "pause" => await torrents.PauseAsync(downloadId, cancellationToken),
+            "resume" => await torrents.ResumeAsync(downloadId, cancellationToken),
+            "stop_seeding" => await torrents.StopSeedingAsync(downloadId, cancellationToken),
+            _ => throw new InvalidOperationException($"action must be pause, resume or stop_seeding, not '{action}'."),
+        };
+
+        return ok
+            ? Content(id, new JsonObject { ["id"] = downloadId, ["action"] = action })
+            : Failure(id, "No download with that id, or it is not in a state that action applies to.");
+    }
+
+    private async Task<IResult> MatchIngestAsync(JsonNode? id, JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        var itemId = Id(arguments, "id") ?? throw new InvalidOperationException("id must be an ingest item id.");
+        if (arguments?["groups"] is not JsonArray groups || groups.Count == 0)
+        {
+            throw new InvalidOperationException("groups must name at least one identity.");
+        }
+
+        var parsed = new List<MatchGroupRequest>();
+        foreach (var group in groups)
+        {
+            var files = new List<MatchFileRequest>();
+            foreach (var file in group?["files"] as JsonArray ?? [])
+            {
+                files.Add(new MatchFileRequest(
+                    Id(file, "sourceFileId")
+                        ?? throw new InvalidOperationException("each file needs a sourceFileId from get_ingest_item."),
+                    Int(file, "season"),
+                    Int(file, "episode")));
+            }
+
+            parsed.Add(new MatchGroupRequest(
+                ParseKind(Str(group, "kind")) ?? throw new InvalidOperationException("each group needs kind 'movie' or 'series'."),
+                Str(group, "provider") ?? throw new InvalidOperationException("each group needs a provider."),
+                Str(group, "providerId") ?? throw new InvalidOperationException("each group needs a providerId."),
+                Str(group, "title") ?? string.Empty,
+                Int(group, "year"),
+                files));
+        }
+
+        var first = parsed[0];
+        var outcome = await ingest.MatchAsync(
+            itemId,
+            new MatchRequest(first.Kind, first.Provider, first.ProviderId, first.Title, first.Year, first.Files, parsed),
+            cancellationToken);
+
+        return outcome == MatchOutcome.Matched
+            ? Content(id, new JsonObject
+            {
+                ["outcome"] = "accepted",
+                ["id"] = itemId,
+                ["note"] = "Matched. The item resumes at the stage it was parked in; list_ingest shows it "
+                    + "move, and it is not published until that completes.",
+            })
+            : Failure(id, $"The match was refused: {outcome}.");
+    }
+
+    private async Task<IResult> AdvanceIngestAsync(JsonNode? id, JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        var itemId = Id(arguments, "id") ?? throw new InvalidOperationException("id must be an ingest item id.");
+        var action = (Str(arguments, "action") ?? string.Empty).ToLowerInvariant();
+
+        switch (action)
+        {
+            case "retry":
+                return await ingest.RetryAsync(itemId, cancellationToken)
+                    ? Content(id, Accepted(itemId, "retry", "Re-queued at the stage that failed."))
+                    : Failure(id, "No ingest item with that id, or it is not in a state that can be retried.");
+            case "retarget":
+                var outcome = await ingest.RetargetAsync(itemId, cancellationToken);
+                return outcome == RetargetOutcome.Retargeted
+                    ? Content(id, Accepted(itemId, "retarget", "Re-homed to the catalog that holds the title."))
+                    : Failure(id, $"Retarget was refused: {outcome}.");
+            default:
+                throw new InvalidOperationException($"action must be 'retry' or 'retarget', not '{action}'.");
+        }
+    }
+
+    private static JsonObject Accepted(Guid itemId, string action, string note) => new()
+    {
+        ["outcome"] = "accepted",
+        ["id"] = itemId,
+        ["action"] = action,
+        ["note"] = note + " The pipeline runs it in the background; list_ingest reports where it gets to.",
+    };
+
+    private async Task<JsonObject> ScanAsync(JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        if (Id(arguments, "catalogId") is not { } catalogId)
+        {
+            var started = await scans.RequestAllAsync(cancellationToken);
+            return new JsonObject
+            {
+                ["outcome"] = "accepted",
+                ["started"] = started,
+                ["note"] = "Catalogs already scanning were left to the run they are in.",
+            };
+        }
+
+        var result = await scans.RequestAsync(catalogId, cancellationToken);
+        return result.Status switch
+        {
+            CatalogScanRequestStatus.Started => new JsonObject
+            {
+                ["outcome"] = "accepted",
+                ["jobId"] = result.JobId,
+                ["note"] = "Scanning in the background. get_server_status reports when it finishes.",
+            },
+            CatalogScanRequestStatus.AlreadyRunning => new JsonObject
+            {
+                ["outcome"] = "already-running",
+                ["note"] = "A scan is already under way for that catalog; a second was not started.",
+            },
+            _ => new JsonObject { ["outcome"] = "not-found", ["note"] = "No catalog with that id." },
+        };
+    }
+
+    private async Task<JsonObject> RefreshAsync(JsonNode? arguments, CancellationToken cancellationToken)
+    {
+        if (Id(arguments, "catalogId") is not { } catalogId)
+        {
+            return new JsonObject
+            {
+                ["outcome"] = "accepted",
+                ["started"] = await refreshes.RequestAllAsync(cancellationToken),
+                ["note"] = "Catalogs already refreshing were left to the run they are in.",
+            };
+        }
+
+        var result = await refreshes.RequestAsync(catalogId, cancellationToken);
+        return result.Status switch
+        {
+            CatalogRefreshRequestStatus.Started => new JsonObject
+            {
+                ["outcome"] = "accepted",
+                ["jobId"] = result.JobId,
+                ["note"] = "Refreshing in the background.",
+            },
+            CatalogRefreshRequestStatus.AlreadyRunning => new JsonObject
+            {
+                ["outcome"] = "already-running",
+                ["note"] = "A refresh is already under way for that catalog; a second was not started.",
+            },
+            _ => new JsonObject { ["outcome"] = "not-found", ["note"] = "No catalog with that id." },
+        };
+    }
 
     private static MediaKind? ParseKind(string? value) => value?.ToLowerInvariant() switch
     {

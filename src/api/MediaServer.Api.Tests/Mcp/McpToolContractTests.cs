@@ -13,20 +13,46 @@ namespace MediaServer.Api.Tests.Mcp;
 /// </remarks>
 public sealed class McpToolContractTests
 {
+    /// <summary>The tools that change something. Everything not here must declare itself read-only.</summary>
+    private static readonly string[] WriteTools =
+    [
+        "set_title_state", "manage_watchlist", "add_torrent", "control_download",
+        "match_ingest_item", "advance_ingest_item", "scan_catalog", "refresh_metadata",
+    ];
+
     [Fact]
-    public void Every_tool_declares_itself_read_only()
+    public void A_read_tool_says_so_and_a_write_tool_does_not()
     {
-        // The Hosty connector's filter is fail-closed: a tool with no readOnlyHint is treated as
-        // possibly mutating and is not exported at all. Forgetting one makes it invisible rather than
-        // dangerous, which is why nothing else would notice.
+        // Both directions matter, for opposite reasons. A read tool missing readOnlyHint is not exported
+        // at all — the connector's filter is fail-closed, so forgetting one makes it invisible rather
+        // than dangerous, and nothing else would notice. A write tool that claims to be read-only is the
+        // reverse: exported, and shown to the operator as safe when it is not.
         var tools = McpToolInvoker.Tools();
 
         Assert.NotEmpty(tools);
         foreach (var tool in tools)
         {
-            Assert.True(
-                tool!["annotations"]!["readOnlyHint"]!.GetValue<bool>(),
-                $"{tool["name"]} must declare readOnlyHint");
+            var name = tool!["name"]!.GetValue<string>();
+            Assert.Equal(!WriteTools.Contains(name), tool["annotations"]!["readOnlyHint"]!.GetValue<bool>());
+        }
+
+        // Both classes are non-empty, or the assertion above would hold vacuously for whichever is.
+        var names = tools.Select(tool => tool!["name"]!.GetValue<string>()).ToArray();
+        Assert.All(WriteTools, write => Assert.Contains(write, names));
+        Assert.True(names.Length > WriteTools.Length);
+    }
+
+    [Fact]
+    public void Nothing_declares_itself_destructive_because_nothing_here_removes_anything()
+    {
+        // The deletes — a title, a season, an episode, a download with its files — are deliberately
+        // absent: irreversible, and this app has no undo, so an agent mistaking one id for another
+        // erases the wrong series. If one is ever added this test is what fails, which is the point.
+        foreach (var tool in McpToolInvoker.Tools())
+        {
+            Assert.False(
+                tool!["annotations"]!["destructiveHint"]!.GetValue<bool>(),
+                $"{tool["name"]} claims to be destructive; the v1 surface holds nothing that removes content");
         }
     }
 
@@ -39,7 +65,9 @@ public sealed class McpToolContractTests
             [
                 "search_library", "get_title", "list_ingest", "get_ingest_item", "list_shelf",
                 "list_recommendations", "search_ingest_candidates", "search_metadata", "list_downloads",
-                "list_catalogs", "get_release_calendar", "preview_release", "get_server_status",
+                "list_catalogs", "get_release_calendar", "preview_release", "set_title_state",
+                "manage_watchlist", "add_torrent", "control_download", "match_ingest_item",
+                "advance_ingest_item", "scan_catalog", "refresh_metadata", "get_server_status",
             ],
             names);
     }
@@ -77,6 +105,32 @@ public sealed class McpToolContractTests
 
         Assert.Contains("preview_release", tools["get_release_calendar"], StringComparison.Ordinal);
         Assert.Contains("nobody is tracking", tools["preview_release"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_detached_operation_says_it_was_accepted_rather_than_done()
+    {
+        // Scan, refresh and a torrent add all return before the work does. A description promising the
+        // outcome would have the operator believe a film is downloaded when it is queued — they find out
+        // when it is not there.
+        var tools = McpToolInvoker.Tools().ToDictionary(
+            tool => tool!["name"]!.GetValue<string>(), tool => tool!["description"]!.GetValue<string>());
+
+        foreach (var name in new[] { "add_torrent", "scan_catalog", "refresh_metadata" })
+        {
+            Assert.Contains("accepted", tools[name], StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void The_match_tool_says_to_read_the_item_first()
+    {
+        // The source file ids a match names come from get_ingest_item. A model that guesses them gets a
+        // FileNotFound outcome, which reads like a broken tool rather than a missing step.
+        var match = McpToolInvoker.Tools()
+            .Single(tool => tool!["name"]!.GetValue<string>() == "match_ingest_item")!;
+
+        Assert.Contains("get_ingest_item", match["description"]!.GetValue<string>(), StringComparison.Ordinal);
     }
 
     [Fact]
