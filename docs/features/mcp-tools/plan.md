@@ -1,6 +1,6 @@
 # MCP Tools — plan
 
-Status: Draft
+Status: Ready
 Created: 2026-09-01
 Updated: 2026-09-01
 
