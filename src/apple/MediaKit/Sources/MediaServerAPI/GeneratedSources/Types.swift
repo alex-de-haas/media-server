@@ -792,6 +792,12 @@ public enum Components {
             public var posterUrl: Swift.String?
             /// - Remark: Generated from `#/components/schemas/LibraryItemDto/userData`.
             public var userData: Components.Schemas.UserItemDataDto?
+            /// - Remark: Generated from `#/components/schemas/LibraryItemDto/genres`.
+            public var genres: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/LibraryItemDto/runtimeTicks`.
+            public var runtimeTicks: Swift.Int64?
+            /// - Remark: Generated from `#/components/schemas/LibraryItemDto/communityRating`.
+            public var communityRating: Swift.Double?
             /// Creates a new `LibraryItemDto`.
             ///
             /// - Parameters:
@@ -803,6 +809,9 @@ public enum Components {
             ///   - year:
             ///   - posterUrl:
             ///   - userData:
+            ///   - genres:
+            ///   - runtimeTicks:
+            ///   - communityRating:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
@@ -811,7 +820,10 @@ public enum Components {
                 title: Swift.String,
                 year: Swift.Int32? = nil,
                 posterUrl: Swift.String? = nil,
-                userData: Components.Schemas.UserItemDataDto? = nil
+                userData: Components.Schemas.UserItemDataDto? = nil,
+                genres: [Swift.String]? = nil,
+                runtimeTicks: Swift.Int64? = nil,
+                communityRating: Swift.Double? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
@@ -821,6 +833,9 @@ public enum Components {
                 self.year = year
                 self.posterUrl = posterUrl
                 self.userData = userData
+                self.genres = genres
+                self.runtimeTicks = runtimeTicks
+                self.communityRating = communityRating
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -831,6 +846,9 @@ public enum Components {
                 case year
                 case posterUrl
                 case userData
+                case genres
+                case runtimeTicks
+                case communityRating
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaKind`.

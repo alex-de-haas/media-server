@@ -261,8 +261,12 @@ context, or it is cut silently and "not found" stops meaning anything.
 - [ ] **Persisted scan state per catalog** — at least "never scanned", "scanning", and when it
       last finished. This is what lets an empty search result say which kind of nothing it is;
       without it that contract is a sentence in a document rather than a behaviour.
-- [ ] **Regenerate the OpenAPI document and the Apple client** so the new parameters reach
-      `src/api/openapi` and the generated Swift client rather than drifting from it.
+- [x] **Regenerate the OpenAPI document and the Apple client** so the new fields reach
+      `src/api/openapi` and the generated Swift client rather than drifting from it. CI compares a
+      recorded hash of the document against the generated sources, so this is enforced rather than
+      remembered. The three new fields were checked in the generated Swift by name: the generator
+      skips what it cannot represent and carries on, and a nullable reference is exactly the shape
+      that has silently vanished before.
 
 ### Phase 2 — the MCP surface
 
