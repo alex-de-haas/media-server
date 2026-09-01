@@ -231,13 +231,15 @@ context, or it is cut silently and "not found" stops meaning anything.
       also fixed the two Jellyfin searches, which had the same bug and no test for it. The cost is
       SQLite's LIKE-to-range index optimization, which only ever applied to prefix patterns; every
       pattern here is `%term%` and scans regardless.
-- [ ] **A scan that can be started without being waited for.** `CatalogScanService.ScanAsync`
+- [x] **A scan that can be started without being waited for.** `CatalogScanService.ScanAsync`
       is awaited by the endpoint, so a scan of a large catalog holds the request open for as
       long as it takes and nothing prevents a second one starting alongside it.
       `CatalogRefreshCoordinator` already solves exactly this for metadata refresh — queued,
       202 with what it started, 409 when one is running, and `/refresh-metadata/active` to
       observe — and a scan coordinator should mirror it rather than invent a second shape.
-      Keep the synchronous route working for the web client if it depends on the report.
+      Shipped as `POST /api/catalogs/{id}/scan/queue` **beside** the synchronous route rather than
+      replacing it: the Catalogs page renders the report that route returns, and the operator can move
+      to the queued form whenever the UI does. `/scan/queue` for the library, `/scan/active` to watch.
 - [x] **A download answerable by title.** Smaller than it was written: `IngestItemResponse`
       already carried `DownloadId`, `DownloadName`, `MediaTitle` and `MediaItemId`, so the join this
       called for existed and only the *query* was missing. The title filter above supplies it, and
@@ -269,9 +271,15 @@ context, or it is cut silently and "not found" stops meaning anything.
 - [ ] **A release date for a title that is not tracked.** `/api/watchlist/calendar` answers for
       tracked titles only, but "when does it come out" is most often asked about something the
       operator has *not* added yet — and answering it is what prompts them to add it.
-- [ ] **Persisted scan state per catalog** — at least "never scanned", "scanning", and when it
+- [x] **Persisted scan state per catalog** — at least "never scanned", "scanning", and when it
       last finished. This is what lets an empty search result say which kind of nothing it is;
       without it that contract is a sentence in a document rather than a behaviour.
+
+      **No new column.** Now that a scan is a job, the job rows already record what happened and when,
+      and they are never pruned — `/api/catalogs/scan/state` reads them. A column would be a second
+      source to keep in step, which is how "last scanned" ends up disagreeing with the scan that ran.
+      Only a *completed* job counts: a catalog whose disk was unreadable must not report a
+      last-scanned time, or the empty result it produces reads as "the library really is empty".
 - [x] **Regenerate the OpenAPI document and the Apple client** so the new fields reach
       `src/api/openapi` and the generated Swift client rather than drifting from it. CI compares a
       recorded hash of the document against the generated sources, so this is enforced rather than

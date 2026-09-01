@@ -363,6 +363,9 @@ builder.Services.AddScoped<WatchlistLibraryLinker>();
 // Catalog-wide metadata refresh: an admin-triggered background job that re-enriches every identified item.
 builder.Services.AddSingleton<ICatalogRefreshQueue, CatalogRefreshQueue>();
 builder.Services.AddScoped<CatalogRefreshCoordinator>();
+builder.Services.AddSingleton<ICatalogScanQueue, CatalogScanQueue>();
+builder.Services.AddScoped<CatalogScanCoordinator>();
+builder.Services.AddHostedService<CatalogScanWorker>();
 builder.Services.AddScoped<CatalogMetadataRefreshService>();
 builder.Services.AddHostedService<CatalogRefreshWorker>();
 
