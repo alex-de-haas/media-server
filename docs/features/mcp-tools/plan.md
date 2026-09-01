@@ -298,25 +298,31 @@ context, or it is cut silently and "not found" stops meaning anything.
 
 ### Phase 2 — the MCP surface
 
-- [ ] **`interfaces.mcp` in `manifest.json`** and a JSON-RPC endpoint answering `initialize`,
-      `tools/list` and `tools/call`.
-- [ ] **The read tools**: `search_library`, `get_title`, `list_shelf`,
-      `list_recommendations`, `list_ingest`, `get_ingest_item`,
-      `search_ingest_candidates`, `get_server_status`, `list_downloads`, `list_catalogs`,
-      `search_metadata`, `get_release_calendar`.
+- [x] **`interfaces.mcp` in `manifest.json`** and a JSON-RPC endpoint answering `initialize`,
+      `tools/list` and `tools/call`. Authenticated by the same scheme as the rest of `/api`: Core
+      answers "who is this" and this app answers "what may they do", so an MCP surface with an
+      identity system of its own would be a second answer to the first question.
+- [ ] **The read tools**. Shipped so far: `search_library`, `get_title`, `list_ingest`,
+      `get_ingest_item`, `get_server_status`. Still to add: `list_shelf`, `list_recommendations`,
+      `search_ingest_candidates`, `list_downloads`, `list_catalogs`, `search_metadata`,
+      `get_release_calendar`.
 - [ ] **The write tools**: `add_torrent`, `control_download`, `match_ingest_item`,
       `advance_ingest_item`, `scan_catalog`, `refresh_metadata`, `set_title_state`,
       `manage_watchlist`.
-- [ ] **The window contract on every list result** — `limit`, `returned`, `truncated`,
-      reported from what actually ran rather than from what was asked for.
-- [ ] **The empty-result contract** — a result with nothing in it says whether the catalog is
-      unscanned, scanning, offline, or genuinely without a match, reading the scan state added
-      in Phase 1 rather than guessing.
+- [x] **The window contract on every list result** — `limit`, `offset`, `returned`, `total` and
+      `truncated`, reported from what actually ran. `truncated` is *exact* here rather than the
+      "a full page may mean more" other surfaces report: these queries count before they cut, so the
+      number left behind is known. Inferring it from a full page marks a complete last page as
+      truncated, which a test catches.
+- [x] **The empty-result contract** — an empty `search_library` says whether catalogs are unscanned
+      or being scanned, reading the Phase 1 scan state. Asserted in both directions: a note on every
+      empty answer would train the model to skip it.
 - [ ] **Detached operations answer "accepted"**, with the note saying what was started — and
       the ones that are *not* detached say so instead. Whichever contract a route actually has
       is the one its tool reports.
-- [ ] **User resolution** — the acting Hosty user is carried into every personal-state tool,
-      and a call without one is refused rather than answered.
+- [x] **User resolution** — the acting Hosty user is resolved per call and carried into the tools
+      that need it. Filtering by watched state without one is refused: answering for "nobody" reports
+      every title as unwatched, which reads as a fact about the library rather than about the caller.
 
 ### Phase 3 — the skill
 

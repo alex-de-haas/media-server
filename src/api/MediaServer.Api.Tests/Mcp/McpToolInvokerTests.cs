@@ -1,0 +1,169 @@
+using System.Text.Json.Nodes;
+using MediaServer.Api.Catalogs;
+using MediaServer.Api.Configuration;
+using MediaServer.Api.Data;
+using MediaServer.Api.Jobs;
+using MediaServer.Api.Library;
+using MediaServer.Api.Mcp;
+using MediaServer.Api.Pipeline;
+using MediaServer.Api.Realtime;
+using MediaServer.Api.Tests.Pipeline;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace MediaServer.Api.Tests.Mcp;
+
+/// <summary>
+/// The tools in use. Most of what is asserted here is about answers that would otherwise be
+/// confidently wrong: a "no" that came from an unread catalog, a window that hides the rest, a filter
+/// silently dropped, and watched state answered for nobody in particular.
+/// </summary>
+public sealed class McpToolInvokerTests : IDisposable
+{
+    private readonly PipelineTestHarness _harness = new();
+    private readonly IServiceScope _scope;
+    private readonly MediaServerDbContext _database;
+    private readonly McpToolInvoker _invoker;
+
+    public McpToolInvokerTests()
+    {
+        _scope = _harness.CreateScope();
+        _database = _scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        _invoker = new McpToolInvoker(
+            _database,
+            new LibraryReadService(
+                _database,
+                new UserDataService(_database, TimeProvider.System),
+                new MediaServerSettings { SupportedLanguages = ["en-US"] }),
+            _scope.ServiceProvider.GetRequiredService<IngestService>(),
+            new CatalogScanCoordinator(
+                _database, new JobService(_database, new NullRealtimeNotifier()), new CatalogScanQueue()));
+    }
+
+    [Fact]
+    public async Task An_unknown_tool_fails_as_a_result_rather_than_ending_the_turn()
+    {
+        // isError on a normal result is the protocol's own signal: the model reads why and picks
+        // something else. A JSON-RPC error would end the turn instead.
+        var result = await CallAsync("drop_everything", new JsonObject());
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Null(result["error"]);
+    }
+
+    [Fact]
+    public async Task An_unknown_filter_value_is_refused_rather_than_ignored()
+    {
+        // The worst available outcome: the call succeeds, the filter does not apply, and "nothing is
+        // failing" comes back as a list of everything.
+        var result = await CallAsync("list_ingest", new JsonObject { ["status"] = "Broken" });
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains("NeedsReview", Text(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Watched_state_is_refused_when_the_call_carries_no_user()
+    {
+        // Answering for "nobody" reports every title as unwatched, which reads as a fact about the
+        // library rather than about the missing caller.
+        var result = await CallAsync("search_library", new JsonObject { ["watched"] = false }, appUserId: null);
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains("Hosty user", Text(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_empty_result_says_when_it_is_about_an_unread_catalog_and_not_about_the_library()
+    {
+        // The failure this exists to stop: an agent answering "you don't have that film" when the truth
+        // is that nothing has looked. Paired with a scanned catalog, where no such note belongs — a note
+        // attached to every empty answer would train the model to skip it.
+        await _harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Anything.2021", "Anything.2021/movie.mkv");
+
+        var unscanned = Payload(await CallAsync("search_library", new JsonObject { ["query"] = "nothing" }));
+        Assert.Empty((JsonArray)unscanned["titles"]!);
+        Assert.Contains("never been scanned", unscanned["note"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        MarkScanned();
+        var scanned = Payload(await CallAsync("search_library", new JsonObject { ["query"] = "nothing" }));
+        Assert.Null(scanned["note"]);
+    }
+
+    [Fact]
+    public async Task A_windowed_list_says_how_much_it_left_behind()
+    {
+        Guid? catalogId = null;
+        for (var i = 0; i < 4; i++)
+        {
+            var seeded = await _harness.SeedCompletedDownloadAsync(
+                CatalogType.Movie, $"Release.{i}.2021", $"Release.{i}.2021/movie.mkv", catalogId);
+            catalogId = seeded.CatalogId;
+        }
+
+        var page = Payload(await CallAsync("list_ingest", new JsonObject { ["limit"] = 2 }));
+        var window = page["window"]!;
+
+        Assert.Equal(2, window["returned"]!.GetValue<int>());
+        Assert.Equal(4, window["total"]!.GetValue<int>());
+        Assert.True(window["truncated"]!.GetValue<bool>());
+
+        // Paired: the last page of the same list is not truncated, so the flag means something.
+        var last = Payload(await CallAsync("list_ingest", new JsonObject { ["limit"] = 2, ["offset"] = 2 }));
+        Assert.False(last["window"]!["truncated"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task The_status_tool_reports_a_catalog_nothing_has_scanned()
+    {
+        await _harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Anything.2021", "Anything.2021/movie.mkv");
+
+        var status = Payload(await CallAsync("get_server_status", new JsonObject()));
+
+        var catalog = Assert.Single((JsonArray)status["catalogs"]!)!;
+        Assert.True(catalog["neverScanned"]!.GetValue<bool>());
+        Assert.False(catalog["scanning"]!.GetValue<bool>());
+        Assert.Equal(1, status["pipeline"]!["Pending"]!.GetValue<int>());
+    }
+
+    private void MarkScanned()
+    {
+        foreach (var catalogId in _database.Catalogs.Select(catalog => catalog.Id).ToList())
+        {
+            _database.Jobs.Add(new Job
+            {
+                Id = Guid.NewGuid(),
+                Type = CatalogScanCoordinator.JobType,
+                RelatedType = "catalog",
+                RelatedId = catalogId,
+                Status = JobStatus.Completed,
+                CompletedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            });
+        }
+
+        _database.SaveChanges();
+    }
+
+    private async Task<JsonNode> CallAsync(string tool, JsonObject arguments, int? appUserId = 1)
+    {
+        var parameters = new JsonObject { ["name"] = tool, ["arguments"] = arguments };
+        var result = await _invoker.CallAsync(JsonValue.Create(1), parameters, appUserId, CancellationToken.None);
+        return JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(Unwrap(result)))!;
+    }
+
+    private static object Unwrap(object result)
+        => result.GetType().GetProperty("Value")?.GetValue(result) ?? result;
+
+    /// <summary>The tool's payload, which MCP carries as a JSON string inside the text content.</summary>
+    private static JsonObject Payload(JsonNode result) =>
+        (JsonObject)JsonNode.Parse(Text(result))!;
+
+    private static string Text(JsonNode result) =>
+        result["result"]!["content"]![0]!["text"]!.GetValue<string>();
+
+    public void Dispose()
+    {
+        _scope.Dispose();
+        _harness.Dispose();
+    }
+}
