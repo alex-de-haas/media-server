@@ -1,12 +1,26 @@
 # MCP Tools
 
 Created: 2026-09-01
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 This server's use cases as MCP tools, so an agent on the host can answer *"do I have this?"*,
 *"why has this not appeared?"*, *"get me this"*, and repair a bad identification without the
-operator opening the web UI. `interfaces.mcp` points at `/api/mcp`; `agent.skillFile` hands the
-agent [the skill](../../agent.md) that teaches it this server's vocabulary.
+operator opening the web UI. `agent.skillFile` hands the agent [the skill](../../agent.md) that
+teaches it this server's vocabulary.
+
+## How Core Finds The Surface
+
+`interfaces.mcp` declares the path `/api/mcp` **and the endpoint it hangs off** — `api`, the API
+service's HTTP port. That endpoint exists for this reason: the app publishes `ui` and `jellyfin`, and
+neither is the API. It is deliberately not public, unlike the reference app's equivalent: this is the
+admin-capable surface, and publishing it to widen who can reach a tool is the opposite of the intent.
+
+**The endpoint name is load-bearing and fails quietly.** Core resolves it by exact key, then by a
+`.key` suffix, and then by *the first public endpoint* — so a name matching nothing does not error,
+it answers with whatever is published first. That was this app's `ui`, the Next.js service, which has
+no `/api/mcp` at all: it proxies under `/api/proxy/[...path]`. The result was a surface that started
+clean, passed every test, and could not be called. Both halves of the reference are asserted, because
+nothing in the build or the runtime says a word about either.
 
 ## Authenticated Like Everything Else
 
@@ -93,6 +107,10 @@ give one tool argument shapes that share nothing.
   returns.
 - **Scan state stamped by the scan**, with the offline case beside it: a volume that could not be
   read must not report a last-scanned time.
+- **The manifest against itself**: every `interfaces.mcp` entry names a declared endpoint, and every
+  endpoint names a service and port that exist. Removing the `api` endpoint reproduces the shipped
+  defect, which is the point — nothing else in the build or the suite can see a reference that
+  resolves to the wrong service.
 - **The skill against the tools.** Every tool name the skill mentions is asserted to exist: the skill
   is prose the model reads before deciding anything, so a stale name sends it to a dead end and
   nothing else notices.

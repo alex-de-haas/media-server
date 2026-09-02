@@ -52,8 +52,15 @@ public sealed class ManifestInterfaceTests
 
         foreach (var endpoint in manifest.GetProperty("endpoints").EnumerateArray())
         {
+            var key = endpoint.GetProperty("key").GetString();
             var pair = (endpoint.GetProperty("service").GetString(), endpoint.GetProperty("port").GetString());
-            Assert.Contains(pair, ports);
+            // Named rather than left to the default output: this test exists to diagnose exactly this
+            // class of mistake, and a failure reading "collection did not contain" would make the reader
+            // go looking for which endpoint it meant.
+            Assert.True(
+                ports.Contains(pair),
+                $"endpoint '{key}' names {pair.Item1}.{pair.Item2}, which no service declares. "
+                + $"Declared: {string.Join(", ", ports.Select(port => $"{port.Service}.{port.Port}"))}");
         }
     }
 
