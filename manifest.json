@@ -103,6 +103,12 @@
   ],
   "endpoints": [
     {
+      "key": "api",
+      "service": "api",
+      "port": "internal",
+      "protocol": "http"
+    },
+    {
       "key": "ui",
       "service": "web",
       "port": "http",
