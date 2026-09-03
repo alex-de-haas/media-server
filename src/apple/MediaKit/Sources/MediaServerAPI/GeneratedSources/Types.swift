@@ -2327,25 +2327,31 @@ public enum Components {
             public var undated: Components.Schemas.WatchHistoryUndatedCounts
             /// - Remark: Generated from `#/components/schemas/WatchHistoryCalendarResponse/latestWatchedAt`.
             public var latestWatchedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/WatchHistoryCalendarResponse/truncated`.
+            public var truncated: Swift.Bool?
             /// Creates a new `WatchHistoryCalendarResponse`.
             ///
             /// - Parameters:
             ///   - events:
             ///   - undated:
             ///   - latestWatchedAt:
+            ///   - truncated:
             public init(
                 events: [Components.Schemas.WatchHistoryCalendarEvent],
                 undated: Components.Schemas.WatchHistoryUndatedCounts,
-                latestWatchedAt: Foundation.Date? = nil
+                latestWatchedAt: Foundation.Date? = nil,
+                truncated: Swift.Bool? = nil
             ) {
                 self.events = events
                 self.undated = undated
                 self.latestWatchedAt = latestWatchedAt
+                self.truncated = truncated
             }
             public enum CodingKeys: String, CodingKey {
                 case events
                 case undated
                 case latestWatchedAt
+                case truncated
             }
         }
         /// - Remark: Generated from `#/components/schemas/WatchHistoryUndatedCounts`.
