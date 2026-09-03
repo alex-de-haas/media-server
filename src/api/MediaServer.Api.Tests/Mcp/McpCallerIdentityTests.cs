@@ -130,6 +130,7 @@ public sealed class McpCallerIdentityTests : IDisposable
 
     public void Dispose()
     {
+        _core.Dispose();
         _context.Dispose();
         _db.Dispose();
     }

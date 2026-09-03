@@ -1,11 +1,8 @@
 using System.Text.Json.Nodes;
-using System.Security.Claims;
-using HostySdk.App;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Library;
 using MediaServer.Api.Pipeline;
-using Microsoft.EntityFrameworkCore;
 using static MediaServer.Api.Mcp.McpProtocol;
 
 namespace MediaServer.Api.Mcp;
@@ -27,9 +24,15 @@ namespace MediaServer.Api.Mcp;
 /// </remarks>
 public static class McpEndpoints
 {
+    /// <summary>
+    /// Where the surface lives — referenced by the pipeline, which skips the default authentication
+    /// for it, so the route and that exclusion cannot drift apart.
+    /// </summary>
+    public const string Path = "/api/mcp";
+
     public static void MapMcpEndpoints(this IEndpointRouteBuilder routes)
     {
-        routes.MapPost("/api/mcp", async (
+        routes.MapPost(Path, async (
             JsonNode? body,
             HttpRequest request,
             McpToolInvoker invoker,
