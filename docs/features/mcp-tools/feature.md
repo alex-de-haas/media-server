@@ -1,7 +1,7 @@
 # MCP Tools
 
 Created: 2026-09-01
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 This server's use cases as MCP tools, so an agent on the host can answer *"do I have this?"*,
 *"why has this not appeared?"*, *"get me this"*, and repair a bad identification without the
@@ -22,13 +22,29 @@ no `/api/mcp` at all: it proxies under `/api/proxy/[...path]`. The result was a 
 clean, passed every test, and could not be called. Both halves of the reference are asserted, because
 nothing in the build or the runtime says a word about either.
 
-## Authenticated Like Everything Else
+## Authenticated By The Credential Agents Actually Carry
 
-`/api/mcp` sits behind the same scheme as the rest of `/api`. Core answers "who is this" and this
-app answers "what may they do" — an MCP endpoint with an identity system of its own would be a
-second answer to the first question, and the one more likely to be wrong. The acting Hosty user is
-resolved per call, and the tools that touch personal state refuse without one rather than answering
-for nobody: for nobody, every title is unwatched, which reads as a fact about the library.
+`/api/mcp` authenticates a **delegated token** — the short-TTL credential Core signs for this app when
+an agent calls on an operator's behalf — and nothing else. Core still answers "who is this" and this
+app still answers "what may they do"; the app builds no identity system of its own.
+
+**It does not use the scheme in front of every other route, and that distinction is the whole
+section.** The identity scheme revalidates an *app identity token* against Core, and Core rejects a
+delegated one outright because the credential type is inside the signed input. Authenticating this
+route the ordinary way therefore refused every agent call with a 401 while browser traffic kept
+working — which made a wrong scheme look like a configuration problem for as long as it took to read
+the two credentials apart. Validation is local, against the key Core injects as
+`HOSTY_DELEGATED_TOKEN_PUBLIC_KEY`, so it costs no round trip.
+
+The acting Hosty user is resolved to this app's own account the same way the identity scheme resolves
+it. A Host user with no account here is **authenticated with no account** — a third state, not an
+error: the tools that touch personal state refuse it rather than answering for nobody, because for
+nobody every title is unwatched, which reads as a fact about the library. Administrator is read from
+the token's Host role, since a delegated token never becomes a `ClaimsPrincipal` and has no claim to
+carry the app's mapped role.
+
+Scoped access tokens — the credential an external agent client keeps in its configuration — are not
+accepted yet; that is tracked in [plan.md](plan.md).
 
 ## Twenty-One Tools, Not Eighty Routes
 
@@ -107,6 +123,10 @@ give one tool argument shapes that share nothing.
   returns.
 - **Scan state stamped by the scan**, with the offline case beside it: a volume that could not be
   read must not report a last-scanned time.
+- **The caller, from the token alone**: an operator resolved to their account, a Host user with no
+  account authenticated *without* one, an administrator told apart from an ordinary operator, and
+  refusals for a token minted for another app, an expired one, a missing header, and an app identity
+  token — the credential this route used to demand and the one an agent never has.
 - **The manifest against itself**: every `interfaces.mcp` entry names a declared endpoint, and every
   endpoint names a service and port that exist. Removing the `api` endpoint reproduces the shipped
   defect, which is the point — nothing else in the build or the suite can see a reference that

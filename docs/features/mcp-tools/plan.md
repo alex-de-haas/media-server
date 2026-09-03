@@ -2,13 +2,19 @@
 
 Status: In Progress
 Created: 2026-09-01
-Updated: 2026-09-01
+Updated: 2026-09-03
 
 > Every deliverable this plan defined has shipped — see [feature.md](feature.md). What is left
 > cannot be asserted in a unit test: the project has no integration harness, and the questions below
 > are about what an agent does with the tools, which only a running agent answers.
 
 ## Verification that needs a running host
+
+Also unbuilt: **accepting scoped access tokens** on `/api/mcp`. A delegated token is what the AI
+Gateway carries, and it is what the surface now authenticates; a scoped token is what an external
+agent client keeps in its own configuration, and it is introspected against Core rather than verified
+locally. `HostyScopedTokenClient` arrived with SDK 0.6.0, so the piece exists — what does not is the
+decision about which scopes gate which tools.
 
 Against a Core-managed dev runtime:
 
