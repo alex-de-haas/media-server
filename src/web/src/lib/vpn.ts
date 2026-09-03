@@ -6,7 +6,8 @@ import type { VpnStatus } from "@/lib/media-server";
 export type VpnKind = "up" | "down" | "switching";
 
 export function vpnKind(status: VpnStatus): VpnKind {
-  if (status.pendingProfile) return "switching";
+  // Nullable, not falsy: the engine sends null for "no switch in flight", and the picker keys off the same test.
+  if (status.pendingProfile != null) return "switching";
   return status.connected ? "up" : "down";
 }
 
