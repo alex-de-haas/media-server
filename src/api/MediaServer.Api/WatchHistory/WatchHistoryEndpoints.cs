@@ -199,16 +199,6 @@ public static class WatchHistoryEndpoints
                 return Results.BadRequest(new { error = "'toExclusive' must be after 'from'." });
             }
 
-            // Bounded so one request cannot ask the database to scan a decade of history. The client
-            // asks for the visible grid, which never exceeds six weeks.
-            if (toExclusive - from > WatchHistoryCalendarService.MaxRange)
-            {
-                return Results.BadRequest(new
-                {
-                    error = $"The requested range exceeds {WatchHistoryCalendarService.MaxRange.TotalDays:0} days.",
-                });
-            }
-
             return Results.Ok(await calendar.LoadAsync(user.Id, from, toExclusive, cancellationToken));
         });
 

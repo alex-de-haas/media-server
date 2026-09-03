@@ -316,6 +316,81 @@ public sealed class WatchHistoryCalendarServiceTests : IDisposable
         Language = language, Title = title,
     };
 
+    [Fact]
+    public async Task History_is_searchable_over_any_period_however_far_back()
+    {
+        // The reason this exists. The calendar was capped at 62 days, a number taken from the shape of
+        // a month grid, so "what did I watch five years ago" could not be asked at all — a limit on the
+        // question rather than on the data.
+        var film = AddMovie("Long ago");
+        AddPlay(film.Id, "2021-03-04T20:00:00Z");
+
+        var page = await Service().SearchAsync(
+            _userId,
+            DateTimeOffset.Parse("2021-01-01T00:00:00Z"),
+            DateTimeOffset.Parse("2021-12-31T00:00:00Z"),
+            50, 0, CancellationToken.None);
+
+        Assert.Equal(1, page.Total);
+        Assert.Equal("Long ago", Assert.Single(page.Events).Title);
+    }
+
+    [Fact]
+    public async Task A_page_reports_the_total_behind_it_and_covers_every_play_once()
+    {
+        // A full page and a complete answer look identical without the total, and "you watched three
+        // things" is a different claim from "here are three of them".
+        var film = AddMovie("Watched often");
+        for (var day = 1; day <= 5; day++)
+        {
+            AddPlay(film.Id, $"2026-07-{day:00}T20:00:00Z");
+        }
+
+        var first = await SearchJulyAsync(limit: 2, offset: 0);
+        Assert.Equal(5, first.Total);
+        Assert.Equal(2, first.Events.Count);
+
+        var seen = new List<DateTimeOffset>();
+        for (var offset = 0; offset < 5; offset += 2)
+        {
+            seen.AddRange((await SearchJulyAsync(limit: 2, offset: offset)).Events.Select(play => play.WatchedAt));
+        }
+
+        Assert.Equal(5, seen.Distinct().Count());
+        // Newest first: a question about history is answered from the recent end.
+        Assert.Equal(seen.OrderByDescending(at => at), seen);
+    }
+
+    [Fact]
+    public async Task Undated_plays_are_counted_and_never_placed_in_a_period()
+    {
+        // They carry no date because the provider reported none, and inventing one would put a film in
+        // a week it may not belong to. Counted instead, so an answer about a period can say what it
+        // could not include rather than omitting it silently.
+        var film = AddMovie("Imported");
+        AddPlay(film.Id, watchedAt: null, origin: PlaybackHistoryOrigin.ProviderSync);
+
+        var page = await SearchJulyAsync(limit: 50, offset: 0);
+
+        Assert.Empty(page.Events);
+        Assert.Equal(1, page.UndatedTotal);
+    }
+
+    [Fact]
+    public async Task One_persons_history_is_never_another_persons()
+    {
+        var film = AddMovie("Theirs");
+        AddPlay(film.Id, "2026-07-10T20:00:00Z", appUserId: _otherUserId);
+
+        Assert.Empty((await SearchJulyAsync(limit: 50, offset: 0)).Events);
+    }
+
+    private Task<WatchHistoryPage> SearchJulyAsync(int limit, int offset) => Service().SearchAsync(
+        _userId,
+        DateTimeOffset.Parse("2026-07-01T00:00:00Z"),
+        DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+        limit, offset, CancellationToken.None);
+
     private WatchHistoryCalendarService Service() =>
         new(_database, new MediaServerSettings { SupportedLanguages = ["en-US"] });
 

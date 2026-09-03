@@ -64,7 +64,7 @@ public sealed class McpToolContractTests
         Assert.Equal(
             [
                 "search_library", "get_title", "list_ingest", "get_ingest_item", "list_shelf",
-                "list_recommendations", "search_ingest_candidates", "search_metadata", "list_downloads",
+                "list_watch_history", "list_recommendations", "search_ingest_candidates", "search_metadata", "list_downloads",
                 "list_catalogs", "get_release_calendar", "preview_release", "set_title_state",
                 "manage_watchlist", "add_torrent", "control_download", "match_ingest_item",
                 "advance_ingest_item", "scan_catalog", "refresh_metadata", "get_server_status",

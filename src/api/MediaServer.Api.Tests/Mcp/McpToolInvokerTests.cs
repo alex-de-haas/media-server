@@ -9,6 +9,7 @@ using MediaServer.Api.Pipeline;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Realtime;
 using MediaServer.Api.Torrents;
+using MediaServer.Api.WatchHistory;
 using MediaServer.Api.Tests.Pipeline;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,6 +50,7 @@ public sealed class McpToolInvokerTests : IDisposable
             torrents: null!,
             recommendations: null!,
             watchlist: null!,
+            _scope.ServiceProvider.GetRequiredService<WatchHistoryCalendarService>(),
             _scope.ServiceProvider.GetRequiredService<IMetadataProvider>(),
             new UserDataService(_database, TimeProvider.System),
             new CatalogRefreshCoordinator(

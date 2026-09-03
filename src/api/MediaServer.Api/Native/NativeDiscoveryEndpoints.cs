@@ -120,16 +120,6 @@ public static class NativeDiscoveryEndpoints
                 return Results.BadRequest(new { error = "'toExclusive' must be after 'from'." });
             }
 
-            // The same bound the web route applies: one request must not ask the database to scan a
-            // decade of history.
-            if (toExclusive - from > WatchHistoryCalendarService.MaxRange)
-            {
-                return Results.BadRequest(new
-                {
-                    error = $"The requested range exceeds {WatchHistoryCalendarService.MaxRange.TotalDays:0} days.",
-                });
-            }
-
             return Results.Ok(await calendar.LoadAsync(userId, from, toExclusive, cancellationToken));
         }).RequireAuthorization().Produces<WatchHistoryCalendarResponse>();
 
