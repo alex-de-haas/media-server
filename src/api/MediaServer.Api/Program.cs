@@ -571,7 +571,14 @@ if (settings.PlaybackDiagnosticsEnabled)
 app.UseRouting();
 app.UsePublicSurfaceAllowlist(hosty);
 
-app.UseAuthentication();
+// Everything but the MCP surface. The Hosty scheme is the default one, so this middleware would
+// otherwise revalidate *every* request's bearer against Core — and an agent's delegated token is not
+// an app identity token, so each MCP call would spend a Core round trip being refused before the
+// endpoint validated it locally and succeeded anyway. The refusal is also logged, which would leave a
+// steady stream of "identity token is invalid" beside a surface that works.
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments(McpEndpoints.Path),
+    branch => branch.UseAuthentication());
 app.UseAuthorization();
 app.UseRateLimiter();
 

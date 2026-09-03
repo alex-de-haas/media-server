@@ -2,11 +2,23 @@
 
 Status: In Progress
 Created: 2026-09-01
-Updated: 2026-09-01
+Updated: 2026-09-03
 
-> Every deliverable this plan defined has shipped — see [feature.md](feature.md). What is left
-> cannot be asserted in a unit test: the project has no integration harness, and the questions below
-> are about what an agent does with the tools, which only a running agent answers.
+> Every deliverable this plan originally defined has shipped — see [feature.md](feature.md). One new
+> one is below, and the rest of what is left cannot be asserted in a unit test: the project has no
+> integration harness, and those questions are about what an agent does with the tools, which only a
+> running agent answers.
+
+## Deliverables
+
+- [ ] **Accept scoped access tokens on `/api/mcp`.** A delegated token is what the AI Gateway carries
+      and what the surface authenticates today; a scoped token is what an *external* agent client
+      keeps in its own configuration, introspected against Core on every call rather than verified
+      locally — which is what lets revoking it take effect at once. `HostyScopedTokenClient` arrived
+      with SDK 0.6.0, so the mechanism exists. What does not is the decision this turns on: which
+      scopes gate which tools, and whether a token without `mcp:write` sees the write tools refused
+      or absent. Absent is the safer default and the harder one to explain, so it needs deciding
+      rather than defaulting.
 
 ## Verification that needs a running host
 

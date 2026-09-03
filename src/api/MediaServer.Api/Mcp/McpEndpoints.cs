@@ -1,10 +1,8 @@
 using System.Text.Json.Nodes;
-using System.Security.Claims;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Library;
 using MediaServer.Api.Pipeline;
-using Microsoft.EntityFrameworkCore;
 using static MediaServer.Api.Mcp.McpProtocol;
 
 namespace MediaServer.Api.Mcp;
@@ -26,15 +24,36 @@ namespace MediaServer.Api.Mcp;
 /// </remarks>
 public static class McpEndpoints
 {
+    /// <summary>
+    /// Where the surface lives — referenced by the pipeline, which skips the default authentication
+    /// for it, so the route and that exclusion cannot drift apart.
+    /// </summary>
+    public const string Path = "/api/mcp";
+
     public static void MapMcpEndpoints(this IEndpointRouteBuilder routes)
     {
-        routes.MapPost("/api/mcp", async (
+        routes.MapPost(Path, async (
             JsonNode? body,
-            ClaimsPrincipal principal,
+            HttpRequest request,
             McpToolInvoker invoker,
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
+            // A delegated token, not this app's session. The two are different credentials and the
+            // difference is not cosmetic: an agent calling on an operator's behalf holds a short-TTL
+            // token Core signed for *this* app, while the identity scheme in front of every other route
+            // revalidates an app identity token — which Core rejects outright for a delegated one,
+            // because the type is inside the signed input. Authenticating this route the ordinary way
+            // refused every agent call with a 401 while browser traffic kept working.
+            var caller = await McpCallerIdentity.ResolveAsync(
+                request.Headers.Authorization, database, cancellationToken);
+            if (caller is null)
+            {
+                return Results.Json(
+                    new { error = "unauthorized", message = "A Hosty delegated token is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
             var id = body?["id"]?.DeepClone();
             // Read through the same helper the tool arguments use. `GetValue<string>()` throws when the
             // member is missing or is not a string, which turns malformed client input into a 500 where
@@ -69,16 +88,16 @@ public static class McpEndpoints
                     return Result(id, new JsonObject { ["tools"] = McpToolInvoker.Tools() });
 
                 case "tools/call":
-                    var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
-                    // Core said who this is; the app decides what they may do. The maintenance tools have
-                    // admin-only HTTP twins, and calling their services in-process would otherwise walk
-                    // around that check entirely.
+                    // Core said who this is; the app decides what they may do. The maintenance tools
+                    // have admin-only HTTP twins, and calling their services in-process would otherwise
+                    // walk around that check entirely.
+                    //
                     return await invoker.CallAsync(
-                        id, body?["params"], appUserId, principal.IsInRole(AppRoles.Admin), cancellationToken);
+                        id, body?["params"], caller.AppUserId, caller.IsAdministrator, cancellationToken);
 
                 default:
                     return Error(id, -32601, $"Method not found: {method}");
             }
-        }).RequireAuthorization();
+        });
     }
 }
