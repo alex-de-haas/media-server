@@ -192,9 +192,10 @@ public sealed class RemoteTorrentEngineTests
         Assert.Equal(HttpMethod.Put, handler.Request!.Method);
         Assert.Equal("/vpn/profile", handler.Request.RequestUri!.AbsolutePath);
         Assert.Contains("\"id\":\"de-fra\"", handler.RequestBody);
-        // The engine answers with what runs *now*; the switch itself arrives later over the event stream.
+        // The engine answers with what runs *now*; the switch itself arrives later over the event stream, so the
+        // acknowledgement is returned but never applied to the cache — it must not undo an event that beat it.
         Assert.Equal("nl-ams", status.Profile);
-        Assert.Equal("nl-ams", engine.GetVpnStatus()!.Profile);
+        Assert.Null(engine.GetVpnStatus());
     }
 
     [Fact]

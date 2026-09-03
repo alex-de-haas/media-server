@@ -225,12 +225,12 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
                 detail ?? $"torrent-engine refused the VPN profile switch ({(int)response.StatusCode}).");
         }
 
-        // 202 with the *current* status: the engine records the choice and switches in the background; the
-        // switch reaches us through the `vpn` events. Cache what it answered — it is the freshest we have.
-        var status = await response.Content.ReadFromJsonAsync<VpnStatus>(Json, cts.Token)
+        // 202 with the status the engine runs *now*, i.e. from before the switch it has just accepted. It is
+        // returned to the caller as an acknowledgement only — never applied to the cache: the `vpn` event
+        // carrying the pending or even completed switch can arrive before this response is processed, and
+        // applying the snapshot would then roll the cache (and the UI) back to the old profile.
+        return await response.Content.ReadFromJsonAsync<VpnStatus>(Json, cts.Token)
             ?? throw new InvalidOperationException("torrent-engine returned an empty VPN status.");
-        ApplyVpn(status);
-        return status;
     }
 
     private async Task PostAsync(string path, CancellationToken cancellationToken)
