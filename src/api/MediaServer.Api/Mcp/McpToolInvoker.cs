@@ -649,11 +649,15 @@ public sealed class McpToolInvoker(
             throw new McpRefusedException("Watch history is per person, and this call carried no Hosty user.");
         }
 
-        var today = DateTimeOffset.UtcNow;
-        var from = ToLocalStart(ParseDate(Str(arguments, "from"))) ?? today.AddDays(-30);
+        // Local midnight on both sides, defaults included. Anchoring the defaults to `UtcNow` and
+        // shifting the instant — which is what this did first — contradicts the schema's own
+        // YYYY-MM-DD promise: an evening west of Greenwich is already tomorrow in UTC, so "the last 30
+        // days" silently became a different 30 days than the ones the caller would name.
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var from = RequiredLocalStart(arguments, "from") ?? LocalStart(today.AddDays(-30));
         // Exclusive, and defaulted past today so "what did I watch today" is not an empty answer about
         // a period that ends before the plays it is asking about.
-        var to = ToLocalStart(ParseDate(Str(arguments, "to"))) ?? today.AddDays(1);
+        var to = RequiredLocalStart(arguments, "to") ?? LocalStart(today.AddDays(1));
         var limit = Math.Clamp(Int(arguments, "limit") ?? 50, 1, 200);
         var offset = Math.Max(0, Int(arguments, "offset") ?? 0);
 
@@ -932,15 +936,38 @@ public sealed class McpToolInvoker(
         });
     }
 
-    /// <summary>Midnight of a supplied date, in the server's own zone.</summary>
+    /// <summary>Midnight of a date, in the server's own zone.</summary>
     /// <remarks>
     /// Local rather than UTC on purpose: "yesterday" is a day in the operator's life, not a UTC
     /// interval. Reading the boundary in UTC shifts it by the offset, which for anyone west of
     /// Greenwich quietly moves an evening's viewing into the wrong day.
     /// </remarks>
-    private static DateTimeOffset? ToLocalStart(DateOnly? date) => date is { } value
-        ? new DateTimeOffset(value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local))
-        : null;
+    private static DateTimeOffset LocalStart(DateOnly date)
+        => new(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local));
+
+    /// <summary>
+    /// A supplied date boundary, or null when the argument was absent — but a failure when it was
+    /// present and unreadable.
+    /// </summary>
+    /// <remarks>
+    /// The distinction is the point. Treating an unparseable date as absent falls back to the default
+    /// window, so `from: "2026-13-01"` would answer confidently about the last thirty days instead —
+    /// a wrong answer to a question nobody asked, with nothing in the reply to say so. A typo has to
+    /// be a refusal.
+    /// </remarks>
+    private static DateTimeOffset? RequiredLocalStart(JsonNode? arguments, string name)
+    {
+        var raw = Str(arguments, name);
+        if (raw is null)
+        {
+            return null;
+        }
+
+        return ParseDate(raw) is { } date
+            ? LocalStart(date)
+            : throw new InvalidOperationException(
+                $"'{name}' must be a date as YYYY-MM-DD, not '{raw}'.");
+    }
 
     private static DateOnly? ParseDate(string? value)
         => DateOnly.TryParse(value, out var parsed) ? parsed : null;

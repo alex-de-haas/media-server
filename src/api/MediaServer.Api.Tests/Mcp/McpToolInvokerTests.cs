@@ -303,6 +303,39 @@ public sealed class McpToolInvokerTests : IDisposable
         _database.SaveChanges();
     }
 
+    [Fact]
+    public async Task A_malformed_history_date_is_refused_rather_than_quietly_replaced()
+    {
+        // The failure this prevents is a confident wrong answer: an unreadable `from` used to fall back
+        // to the default thirty days, so a typo produced a real-looking report about a period nobody
+        // asked about, with nothing in the reply to say which period it was.
+        var result = await CallAsync("list_watch_history", new JsonObject { ["from"] = "2026-13-01" });
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains(
+            "YYYY-MM-DD",
+            result["result"]!["content"]![0]!["text"]!.GetValue<string>(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_omitted_history_date_still_uses_the_default_window()
+    {
+        // Paired with the case above, or "refuse anything unreadable" could have been implemented as
+        // "refuse anything absent" and both would look correct from one side.
+        var result = await CallAsync("list_watch_history", new JsonObject());
+
+        Assert.Null(result["result"]!["isError"]);
+    }
+
+    [Fact]
+    public async Task Watch_history_is_refused_when_the_call_carries_no_user()
+    {
+        var result = await CallAsync("list_watch_history", new JsonObject(), appUserId: null);
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+    }
+
     private async Task<JsonNode> CallAsync(
         string tool, JsonObject arguments, int? appUserId = 1, bool isAdministrator = true)
     {

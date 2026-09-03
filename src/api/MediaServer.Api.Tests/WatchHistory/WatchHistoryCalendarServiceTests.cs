@@ -391,14 +391,38 @@ public sealed class WatchHistoryCalendarServiceTests : IDisposable
         DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
         limit, offset, CancellationToken.None);
 
+    [Fact]
+    public async Task A_range_holding_more_than_the_cap_returns_the_cap_and_says_it_was_cut()
+    {
+        // The only bound left. The 62-day range rejections are gone, so if this cap were off by one or
+        // silent, a request for a decade would either materialise it or hand back a short list that
+        // reads as the whole truth.
+        var film = AddMovie("Rewatched");
+        for (var day = 1; day <= 4; day++)
+        {
+            AddPlay(film.Id, $"2026-07-{day:00}T20:00:00Z");
+        }
+
+        var capped = await LoadMonthAsync(maxEvents: 3);
+        Assert.Equal(3, capped.Events.Count);
+        Assert.True(capped.Truncated);
+
+        // Paired at the boundary: exactly the cap is complete, not truncated. An implementation that
+        // reported truncation on a full page would be wrong here and right in the case above.
+        var exact = await LoadMonthAsync(maxEvents: 4);
+        Assert.Equal(4, exact.Events.Count);
+        Assert.False(exact.Truncated);
+    }
+
     private WatchHistoryCalendarService Service() =>
         new(_database, new MediaServerSettings { SupportedLanguages = ["en-US"] });
 
-    private Task<WatchHistoryCalendarResponse> LoadMonthAsync() => Service().LoadAsync(
+    private Task<WatchHistoryCalendarResponse> LoadMonthAsync(int? maxEvents = null) => Service().LoadAsync(
         _userId,
         DateTimeOffset.Parse("2026-07-01T00:00:00Z"),
         DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
-        CancellationToken.None);
+        CancellationToken.None,
+        maxEvents);
 
     private AppUser NewUser(string hostUserId, string email) => new()
     {

@@ -148,9 +148,18 @@ public sealed class WatchHistoryCalendarService(
             total);
     }
 
+    /// <param name="maxEvents">
+    /// Overrides <see cref="MaxEvents"/>. Exists so the cap itself can be asserted: seeding five
+    /// thousand plays to prove a boundary would test the fixture's patience rather than the boundary.
+    /// </param>
     public async Task<WatchHistoryCalendarResponse> LoadAsync(
-        int appUserId, DateTimeOffset from, DateTimeOffset toExclusive, CancellationToken cancellationToken)
+        int appUserId,
+        DateTimeOffset from,
+        DateTimeOffset toExclusive,
+        CancellationToken cancellationToken,
+        int? maxEvents = null)
     {
+        var cap = maxEvents ?? MaxEvents;
         var entries = await database.PlaybackHistoryEntries.AsNoTracking()
             .Where(entry => entry.AppUserId == appUserId
                 && entry.WatchedAt != null
@@ -159,9 +168,9 @@ public sealed class WatchHistoryCalendarService(
             .OrderBy(entry => entry.WatchedAt)
             // One more than the cap, so a full page can be told from a complete one without counting
             // the range twice.
-            .Take(MaxEvents + 1)
+            .Take(cap + 1)
             .ToListAsync(cancellationToken);
-        var truncated = entries.Count > MaxEvents;
+        var truncated = entries.Count > cap;
         if (truncated)
         {
             entries.RemoveAt(entries.Count - 1);
