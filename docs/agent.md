@@ -21,6 +21,10 @@ it applies — read it before answering.
 - **NeedsReview** means the pipeline stopped and is waiting for a person to say which title an item
   is. Nothing surfaces these on its own — an operator finds out when a film they downloaded never
   appears. `list_ingest` with that status is the only way to see them.
+- **Watched** and **watch history** are different things. The flag on a title says it was finished at
+  some point and carries no date; the history is the individual plays, each with the moment it
+  happened. "Have I seen this" is the flag; "what did I watch last week" is the history, and only one
+  of them can answer either.
 - A **download** is named by its *release* — `Oppenheimer.2023.2160p.WEB-DL`, not `Oppenheimer`. To
   find one by the name a person would say, use `list_ingest` with a title and follow its `downloadId`.
 
@@ -32,6 +36,10 @@ it applies — read it before answering.
 - **"Has X downloaded yet?"** — `list_ingest` with the title, then `list_downloads` for progress and
   an estimate. If the item is `NeedsReview`, say so unprompted: it downloaded and is stuck, which is
   the answer the operator actually needs.
+- **"What did I watch last week / yesterday / five years ago?"** — `list_watch_history`. The period is
+  free, so a question about any stretch of time is one call; page with `offset` for a long one. Some
+  plays carry no date at all, imported from a provider that reported none — the answer says how many,
+  because they can never fall inside a period and would otherwise vanish from every one.
 - **"Suggest something."** — `list_recommendations`. Do not rank search results yourself: the engine
   already knows what was watched, what was hidden, and how the operator weighs popularity, and a
   hand-made ranking will disagree with what the web interface shows. For "something like this film",

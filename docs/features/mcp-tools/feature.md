@@ -46,11 +46,17 @@ carry the app's mapped role.
 Scoped access tokens — the credential an external agent client keeps in its configuration — are not
 accepted yet; that is tracked in [plan.md](plan.md).
 
-## Twenty-One Tools, Not Eighty Routes
+## Twenty-Two Tools, Not Eighty Routes
 
 The HTTP surface has roughly eighty routes. Tools are shaped by the question an operator asked, not
 by the route that answers it — `list_shelf` covers three rails, `set_title_state` covers six routes,
-`control_download` covers three. Thirteen read, eight write.
+`control_download` covers three. Fourteen read, eight write.
+
+`list_watch_history` is the one tool with no single route behind it. The watched flag says a title was
+finished at some point and carries no date, so it cannot answer "what did I watch last week"; the
+calendar behind the web UI could, but only 62 days at a time — a number taken from the shape of a
+month grid and, until this feature, the only thing bounding the scan. The bound moved to the rows, and
+the period is free: "yesterday" and "five years ago" differ only in where the window sits.
 
 Two pairs look interchangeable and are not, so each description points at its sibling:
 
@@ -68,6 +74,10 @@ about this host.
   it "there are no failures" can mean "none among the rows I was handed". `truncated` is *exact*
   rather than inferred from a full page: these queries count before they cut, so the number left
   behind is known, and the usual full-page heuristic marks a complete last page as truncated.
+- **Undated plays are counted, never placed.** A play imported from a provider that reported no time
+  carries none, and inventing one would put a film in a week it may not belong to. They can therefore
+  never fall inside a period, so an answer about one says how many it could not include — "you watched
+  nothing that week" and "nothing that week that carries a date" are different statements.
 - **An empty search says which kind of nothing it is.** A catalog nothing has scanned holds files
   this server knows nothing about, so "not in the library" and "not on the disk" are different
   statements. The note fires only when it applies — one attached to every empty answer would train

@@ -54,13 +54,30 @@ public sealed record WatchHistoryUndatedPage(IReadOnlyList<WatchHistoryUndatedEn
 /// </remarks>
 public sealed record WatchHistoryUndatedCounts(int Movies, int Episodes);
 
+/// <summary>One page of dated history, with what the window left out.</summary>
+/// <param name="UndatedTotal">
+/// Plays this user has that carry no date at all — imported from a provider that reported none. They
+/// can never fall inside a period, so an answer about one silently omits them unless it says so.
+/// </param>
+public sealed record WatchHistoryPage(
+    IReadOnlyList<WatchHistoryCalendarEvent> Events,
+    int Total,
+    int Limit,
+    int Offset,
+    int UndatedTotal);
+
 /// <summary>The calendar payload for one visible range.</summary>
 public sealed record WatchHistoryCalendarResponse(
     IReadOnlyList<WatchHistoryCalendarEvent> Events,
     WatchHistoryUndatedCounts Undated,
     /// <summary>The user's most recent dated play, so an empty month can offer a jump without
     /// loading history.</summary>
-    DateTimeOffset? LatestWatchedAt);
+    DateTimeOffset? LatestWatchedAt,
+    /// <summary>
+    /// True when the range held more events than one load returns. A caller that asked for a decade
+    /// gets the earliest slice of it and is told the rest exists, rather than a quietly short list.
+    /// </summary>
+    bool Truncated = false);
 
 /// <summary>
 /// Reads one user's dated play history for a bounded range.
@@ -73,10 +90,16 @@ public sealed class WatchHistoryCalendarService(
     MediaServerDbContext database, MediaServerSettings settings)
 {
     /// <summary>
-    /// The widest range one request may ask for. A month grid spans at most 6 weeks, so 62 days
-    /// leaves room for the adjacent-month cells while keeping the scan bounded.
+    /// The most events one calendar load will materialise.
     /// </summary>
-    internal static readonly TimeSpan MaxRange = TimeSpan.FromDays(62);
+    /// <remarks>
+    /// This replaced a 62-day cap on the *range*. That number came from the shape of a month grid —
+    /// six weeks plus the adjacent-month cells — and it was doing a second job it was never sized for:
+    /// being the only thing that stopped a request scanning a decade. Bounding the rows bounds the
+    /// scan directly, and leaves the range free for questions that are not a calendar, like "what did
+    /// I watch five years ago".
+    /// </remarks>
+    internal const int MaxEvents = 5_000;
 
     /// <summary>The most this list returns at once; it is a reminder of what else was watched, not an
     /// archive browser. The page's <see cref="WatchHistoryUndatedPage.Total"/> reports the rest.</summary>
@@ -125,16 +148,33 @@ public sealed class WatchHistoryCalendarService(
             total);
     }
 
+    /// <param name="maxEvents">
+    /// Overrides <see cref="MaxEvents"/>. Exists so the cap itself can be asserted: seeding five
+    /// thousand plays to prove a boundary would test the fixture's patience rather than the boundary.
+    /// </param>
     public async Task<WatchHistoryCalendarResponse> LoadAsync(
-        int appUserId, DateTimeOffset from, DateTimeOffset toExclusive, CancellationToken cancellationToken)
+        int appUserId,
+        DateTimeOffset from,
+        DateTimeOffset toExclusive,
+        CancellationToken cancellationToken,
+        int? maxEvents = null)
     {
+        var cap = maxEvents ?? MaxEvents;
         var entries = await database.PlaybackHistoryEntries.AsNoTracking()
             .Where(entry => entry.AppUserId == appUserId
                 && entry.WatchedAt != null
                 && entry.WatchedAt >= from
                 && entry.WatchedAt < toExclusive)
             .OrderBy(entry => entry.WatchedAt)
+            // One more than the cap, so a full page can be told from a complete one without counting
+            // the range twice.
+            .Take(cap + 1)
             .ToListAsync(cancellationToken);
+        var truncated = entries.Count > cap;
+        if (truncated)
+        {
+            entries.RemoveAt(entries.Count - 1);
+        }
 
         var events = entries.Count == 0
             ? []
@@ -161,7 +201,53 @@ public sealed class WatchHistoryCalendarService(
             new WatchHistoryUndatedCounts(
                 undated.FirstOrDefault(row => row.Kind == MediaKind.Movie)?.Count ?? 0,
                 undated.FirstOrDefault(row => row.Kind == MediaKind.Episode)?.Count ?? 0),
-            latest);
+            latest,
+            truncated);
+    }
+
+    /// <summary>
+    /// One page of dated history over any period, newest first — the shape a question asks in.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="LoadAsync"/>, which fills a calendar grid: that one is oldest-first,
+    /// returns a whole range at once, and is bounded by the grid the caller is drawing. A question is
+    /// not a grid. "What did I watch yesterday" and "what did I watch five years ago" differ only in
+    /// where the window sits, so the period is free and the page is what is bounded — with the total
+    /// alongside, or a full page and a complete answer would look identical.
+    /// </remarks>
+    public async Task<WatchHistoryPage> SearchAsync(
+        int appUserId,
+        DateTimeOffset from,
+        DateTimeOffset toExclusive,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken)
+    {
+        var matching = database.PlaybackHistoryEntries.AsNoTracking()
+            .Where(entry => entry.AppUserId == appUserId
+                && entry.WatchedAt != null
+                && entry.WatchedAt >= from
+                && entry.WatchedAt < toExclusive);
+
+        var total = await matching.CountAsync(cancellationToken);
+        var entries = await matching
+            .OrderByDescending(entry => entry.WatchedAt)
+            // Id breaks ties: two plays sharing a timestamp could otherwise swap between pages, one
+            // shown twice and one never.
+            .ThenByDescending(entry => entry.Id)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        var undated = await database.PlaybackHistoryEntries.AsNoTracking()
+            .CountAsync(entry => entry.AppUserId == appUserId && entry.WatchedAt == null, cancellationToken);
+
+        return new WatchHistoryPage(
+            entries.Count == 0 ? [] : await ProjectAsync(entries, cancellationToken),
+            total,
+            limit,
+            offset,
+            undated);
     }
 
     private async Task<List<WatchHistoryCalendarEvent>> ProjectAsync(

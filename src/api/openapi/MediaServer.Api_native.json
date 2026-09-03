@@ -2837,6 +2837,10 @@
               "string"
             ],
             "format": "date-time"
+          },
+          "truncated": {
+            "type": "boolean",
+            "default": false
           }
         }
       },

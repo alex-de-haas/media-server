@@ -5,6 +5,7 @@ using MediaServer.Api.Library;
 using MediaServer.Api.Metadata;
 using MediaServer.Api.Recommendations;
 using MediaServer.Api.Torrents;
+using MediaServer.Api.WatchHistory;
 using MediaServer.Api.Watchlist;
 using MediaServer.Api.Pipeline;
 using Microsoft.EntityFrameworkCore;
@@ -26,6 +27,7 @@ public sealed class McpToolInvoker(
     TorrentService torrents,
     RecommendationFeedService recommendations,
     WatchlistService watchlist,
+    WatchHistoryCalendarService watchHistory,
     IMetadataProvider metadata,
     UserDataService userData,
     CatalogRefreshCoordinator refreshes)
@@ -94,6 +96,19 @@ public sealed class McpToolInvoker(
                 ["limit"] = Prop("integer", "Maximum rows. Capped at 100; the default is 20."),
             },
             "shelf"),
+        Tool(
+            "list_watch_history",
+            "What was actually watched, and when. Distinct from the watched flag on a title, which "
+            + "says only that something was finished at some point and carries no date: this answers "
+            + "'what did I watch last week', 'when did I see this', and the same question about any "
+            + "period, however far back. Newest first.",
+            new JsonObject
+            {
+                ["from"] = Prop("string", "Start of the period, YYYY-MM-DD. Defaults to 30 days ago."),
+                ["to"] = Prop("string", "End of the period, exclusive, YYYY-MM-DD. Defaults to tomorrow."),
+                ["limit"] = Prop("integer", "Maximum plays. Capped at 200; the default is 50."),
+                ["offset"] = Prop("integer", "Plays to skip, for paging through a long period."),
+            }),
         Tool(
             "list_recommendations",
             "What this server suggests watching, from the operator's own history — or from one named "
@@ -332,6 +347,7 @@ public sealed class McpToolInvoker(
                 "get_ingest_item" => await GetIngestItemAsync(id, arguments, cancellationToken),
                 "get_server_status" => Content(id, await ServerStatusAsync(cancellationToken)),
                 "list_shelf" => Content(id, await ShelfAsync(arguments, appUserId, cancellationToken)),
+                "list_watch_history" => Content(id, await WatchHistoryAsync(arguments, appUserId, cancellationToken)),
                 "list_recommendations" => Content(id, await RecommendationsAsync(arguments, appUserId, cancellationToken)),
                 "search_ingest_candidates" => await IngestCandidatesAsync(id, arguments, cancellationToken),
                 "search_metadata" => Content(id, await SearchMetadataAsync(arguments, cancellationToken)),
@@ -625,6 +641,68 @@ public sealed class McpToolInvoker(
         return new JsonObject { ["shelf"] = shelf, ["items"] = rows };
     }
 
+    private async Task<JsonObject> WatchHistoryAsync(
+        JsonNode? arguments, int? appUserId, CancellationToken cancellationToken)
+    {
+        if (appUserId is null)
+        {
+            throw new McpRefusedException("Watch history is per person, and this call carried no Hosty user.");
+        }
+
+        // Local midnight on both sides, defaults included. Anchoring the defaults to `UtcNow` and
+        // shifting the instant — which is what this did first — contradicts the schema's own
+        // YYYY-MM-DD promise: an evening west of Greenwich is already tomorrow in UTC, so "the last 30
+        // days" silently became a different 30 days than the ones the caller would name.
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var from = RequiredLocalStart(arguments, "from") ?? LocalStart(today.AddDays(-30));
+        // Exclusive, and defaulted past today so "what did I watch today" is not an empty answer about
+        // a period that ends before the plays it is asking about.
+        var to = RequiredLocalStart(arguments, "to") ?? LocalStart(today.AddDays(1));
+        var limit = Math.Clamp(Int(arguments, "limit") ?? 50, 1, 200);
+        var offset = Math.Max(0, Int(arguments, "offset") ?? 0);
+
+        if (to <= from)
+        {
+            throw new InvalidOperationException("'to' must be after 'from'.");
+        }
+
+        var page = await watchHistory.SearchAsync(appUserId.Value, from, to, limit, offset, cancellationToken);
+
+        var rows = new JsonArray();
+        foreach (var play in page.Events)
+        {
+            rows.Add(new JsonObject
+            {
+                ["watchedAt"] = play.WatchedAt.ToString("O"),
+                ["title"] = play.Title,
+                ["kind"] = play.Kind,
+                ["seriesTitle"] = play.SeriesTitle,
+                ["season"] = play.SeasonNumber,
+                ["episode"] = play.EpisodeNumber,
+                ["libraryItemId"] = play.MediaItemId,
+                // Where the play came from — a local playback or an imported provider history.
+                ["origin"] = play.Origin,
+            });
+        }
+
+        var payload = WithWindow(
+            new JsonObject
+            {
+                ["from"] = from.ToString("O"),
+                ["to"] = to.ToString("O"),
+                ["plays"] = rows,
+            },
+            rows.Count, page.Total, limit, offset);
+
+        // Undated plays can never fall inside a period, so every answer about one omits them. Said
+        // plainly, because "you watched nothing that week" and "you watched nothing that week that
+        // carries a date" are different statements and only the second is true.
+        return WithNote(payload, page.UndatedTotal > 0
+            ? $"{page.UndatedTotal} play(s) in this library carry no date at all — imported from a "
+              + "provider that reported none — and cannot appear in any period, including this one."
+            : null);
+    }
+
     private async Task<JsonObject> RecommendationsAsync(
         JsonNode? arguments, int? appUserId, CancellationToken cancellationToken)
     {
@@ -856,6 +934,39 @@ public sealed class McpToolInvoker(
                 }
                 : null,
         });
+    }
+
+    /// <summary>Midnight of a date, in the server's own zone.</summary>
+    /// <remarks>
+    /// Local rather than UTC on purpose: "yesterday" is a day in the operator's life, not a UTC
+    /// interval. Reading the boundary in UTC shifts it by the offset, which for anyone west of
+    /// Greenwich quietly moves an evening's viewing into the wrong day.
+    /// </remarks>
+    private static DateTimeOffset LocalStart(DateOnly date)
+        => new(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local));
+
+    /// <summary>
+    /// A supplied date boundary, or null when the argument was absent — but a failure when it was
+    /// present and unreadable.
+    /// </summary>
+    /// <remarks>
+    /// The distinction is the point. Treating an unparseable date as absent falls back to the default
+    /// window, so `from: "2026-13-01"` would answer confidently about the last thirty days instead —
+    /// a wrong answer to a question nobody asked, with nothing in the reply to say so. A typo has to
+    /// be a refusal.
+    /// </remarks>
+    private static DateTimeOffset? RequiredLocalStart(JsonNode? arguments, string name)
+    {
+        var raw = Str(arguments, name);
+        if (raw is null)
+        {
+            return null;
+        }
+
+        return ParseDate(raw) is { } date
+            ? LocalStart(date)
+            : throw new InvalidOperationException(
+                $"'{name}' must be a date as YYYY-MM-DD, not '{raw}'.");
     }
 
     private static DateOnly? ParseDate(string? value)
