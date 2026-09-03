@@ -125,6 +125,10 @@ public sealed class DownloadDeletionServiceTests : IDisposable
 
         public VpnStatus? GetVpnStatus() => null;
 
+        public Task<VpnProfiles?> GetVpnProfilesAsync(CancellationToken cancellationToken) => Task.FromResult<VpnProfiles?>(null);
+
+        public Task<VpnStatus> SelectVpnProfileAsync(string id, CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public DhtStatus? GetDhtStatus() => null;
 
         public Task RemoveAsync(string infoHash, bool deleteFiles, CancellationToken cancellationToken)

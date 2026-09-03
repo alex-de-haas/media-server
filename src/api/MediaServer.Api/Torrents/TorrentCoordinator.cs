@@ -174,7 +174,8 @@ public sealed class TorrentCoordinator(
     // stream — no persistence, the UI shows it as a live indicator.
     private void OnVpnStatusChanged(object? sender, VpnStatus status) =>
         RunSafely(() => notifier.VpnStatusChangedAsync(new VpnStatusChanged(
-            status.Connected, status.TunnelInterface, status.TunnelAddress, status.ExitIp, status.ExitCountry, status.CheckedAt)));
+            status.Connected, status.TunnelInterface, status.TunnelAddress, status.ExitIp, status.ExitCountry, status.CheckedAt,
+            status.Profile, status.PendingProfile, status.LastError)));
 
     // DHT health is engine-wide too, and equally not persisted — it is a live indicator only.
     private void OnDhtStatusChanged(object? sender, DhtStatus status) =>

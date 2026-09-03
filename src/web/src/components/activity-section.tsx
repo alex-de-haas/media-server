@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronDown, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type DhtStatus, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatBytes, formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { transferredBytes } from "@/lib/downloads";
 import { dhtKind, dhtLabel, dhtTooltip } from "@/lib/dht";
+import { vpnKind, vpnLabel, vpnTooltip } from "@/lib/vpn";
 import { errorMessage } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
@@ -24,6 +25,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityCard, ActivityCardHeader, ActivityProgress, ActivityQueued, ActivityStats, IconAction } from "@/components/activity-card";
@@ -203,7 +205,7 @@ export function ActivitySection() {
         <CardAction>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <ThroughputBadge downloads={downloads.data ?? []} vpnDown={vpnDown} />
-            <VpnBadge status={vpn.data ?? null} />
+            <VpnBadge status={vpn.data ?? null} canSwitch={role === "admin"} />
             <DhtBadge status={dht.data ?? null} />
             <AddTorrentDialog />
           </div>
@@ -318,48 +320,110 @@ function ThroughputBadge({ downloads, vpnDown }: { downloads: Download[]; vpnDow
 }
 
 // Engine-wide VPN indicator shown in the Activity header. The tunnel is shared by every download, so it
-// belongs here rather than on each card. Hidden entirely when there's no VPN to report (in-process engine).
-function VpnBadge({ status }: { status: VpnStatus | null }) {
+// belongs here rather than on each card. Hidden entirely when there's no VPN to report (downloading
+// disabled). For an admin the pill is also the profile picker (`VpnProfileMenu`); a user gets the tooltip.
+function VpnBadge({ status, canSwitch }: { status: VpnStatus | null; canSwitch: boolean }) {
   if (!status) return null;
 
-  const connected = status.connected;
-  const detail = connected ? (status.exitCountry ?? status.exitIp ?? null) : null;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            tabIndex={0}
-            aria-label={vpnTooltip(status)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              connected
-                ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
-                : "border-destructive/30 text-destructive",
-            )}
-          >
-            <span className={cn("size-1.5 rounded-full", connected ? "bg-emerald-500" : "bg-destructive")} />
-            VPN{connected ? (detail ? ` · ${detail}` : "") : " off"}
-          </span>
-        }
+  const kind = vpnKind(status);
+  const pill = (
+    <span
+      tabIndex={0}
+      aria-label={vpnTooltip(status)}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        kind === "up" && "border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
+        kind === "down" && "border-destructive/30 text-destructive",
+        kind === "switching" && "border-amber-500/30 text-amber-600 dark:text-amber-500",
+        canSwitch && "cursor-pointer",
+      )}
+    >
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          kind === "up" && "bg-emerald-500",
+          kind === "down" && "bg-destructive",
+          kind === "switching" && "animate-pulse bg-amber-500",
+        )}
       />
-      <TooltipContent>{vpnTooltip(status)}</TooltipContent>
-    </Tooltip>
+      {vpnLabel(status)}
+      {canSwitch && <ChevronDown className="size-3 opacity-70" aria-hidden />}
+    </span>
   );
+
+  if (!canSwitch) {
+    return (
+      <Tooltip>
+        <TooltipTrigger render={pill} />
+        <TooltipContent>{vpnTooltip(status)}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return <VpnProfileMenu status={status} trigger={pill} />;
 }
 
-function vpnTooltip(status: VpnStatus): string {
-  if (!status.connected) {
-    return "VPN tunnel is down — torrent traffic is blocked by the killswitch.";
-  }
-  // exitIp and exitCountry can be independently null, so surface whichever is known.
-  const exitValue = [status.exitIp, status.exitCountry].filter(Boolean).join(" · ");
-  const parts = [
-    exitValue ? `exit ${exitValue}` : null,
-    status.tunnelAddress ? `tunnel ${status.tunnelAddress}` : null,
-  ].filter(Boolean);
-  return parts.length > 0 ? `Traffic egresses through the VPN — ${parts.join(", ")}.` : "VPN tunnel is up.";
+// The profile picker behind the VPN pill. The engine keeps a folder of OpenVPN profiles and runs one of them;
+// this lists them with the active one checked and asks the engine to switch. The engine only records the
+// choice (202) and switches in the background — the pill shows the switch through `vpnStatusChanged`
+// (`pendingProfile` → amber "switching", then the new `profile`), so nothing here waits on it.
+function VpnProfileMenu({ status, trigger }: { status: VpnStatus; trigger: ReactElement }) {
+  const [open, setOpen] = useState(false);
+  const queryClient = useQueryClient();
+  // Listed only while the menu is open, and fresh each time: the operator can drop a profile file into the
+  // engine's folder at any moment, and the engine lists that folder live.
+  const profiles = useQuery({
+    queryKey: ["vpn-profiles"],
+    queryFn: mediaServer.listVpnProfiles,
+    enabled: open,
+    staleTime: 0,
+  });
+  const select = useMutation({
+    mutationFn: (id: string) => mediaServer.selectVpnProfile(id),
+    onSuccess: (_status, id) => {
+      toast(`Switching the VPN to ${id}…`);
+      queryClient.invalidateQueries({ queryKey: ["vpn"] });
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+
+  // What runs right now comes from the live status; the list's own `active` only backs it up.
+  const active = status.profile ?? profiles.data?.active ?? null;
+  const switching = status.pendingProfile != null || select.isPending;
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger render={trigger} />
+      <DropdownMenuContent className="min-w-60">
+        <div className="max-w-72 px-2 py-1.5 text-xs text-muted-foreground">{vpnTooltip(status)}</div>
+        <DropdownMenuSeparator />
+        {profiles.isPending ? (
+          <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading profiles…</div>
+        ) : profiles.isError ? (
+          <div className="max-w-72 px-2 py-1.5 text-sm text-destructive">{errorMessage(profiles.error)}</div>
+        ) : !profiles.data || profiles.data.profiles.length === 0 ? (
+          <div className="max-w-72 px-2 py-1.5 text-sm text-muted-foreground">
+            No VPN profiles to choose from — the engine&apos;s profiles folder is empty, or it predates profile
+            switching (torrent-engine 0.8.0).
+          </div>
+        ) : (
+          profiles.data.profiles.map((profile) => (
+            <DropdownMenuItem
+              key={profile.id}
+              disabled={switching || profile.id === active}
+              onClick={() => select.mutate(profile.id)}
+            >
+              <Check className={cn("size-4", profile.id === active ? "opacity-100" : "opacity-0")} aria-hidden />
+              <span className="flex flex-col">
+                <span>{profile.id}</span>
+                {profile.remote && <span className="text-xs text-muted-foreground">{profile.remote}</span>}
+              </span>
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 // Engine-wide DHT indicator, next to the VPN one and for the same reason: peer discovery is shared by

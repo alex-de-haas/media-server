@@ -69,6 +69,10 @@ public sealed class FakeTorrentEngine : ITorrentEngine
 
     public VpnStatus? GetVpnStatus() => null;
 
+    public Task<VpnProfiles?> GetVpnProfilesAsync(CancellationToken cancellationToken) => Task.FromResult<VpnProfiles?>(null);
+
+    public Task<VpnStatus> SelectVpnProfileAsync(string id, CancellationToken cancellationToken) => throw new NotSupportedException();
+
     public DhtStatus? GetDhtStatus() => null;
 
     public TorrentDescriptor Inspect(TorrentSource source) => new("hash", "Name", 0, false, []);

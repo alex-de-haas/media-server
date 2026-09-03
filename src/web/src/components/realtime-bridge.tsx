@@ -97,6 +97,9 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
     case "vpnStatusChanged":
       // Engine-wide status — patch the cache directly (the event payload mirrors VpnStatus).
       queryClient.setQueryData<VpnStatus>(["vpn"], data as VpnStatus);
+      // A switch that lands changes which profile the engine's list marks active; that list is only held
+      // while the picker is open, so an invalidation is all it needs.
+      invalidate(queryClient, ["vpn-profiles"]);
       break;
     case "dhtStatusChanged":
       // Same shape of deal for DHT health (payload mirrors DhtStatus). Typed nullable to match the

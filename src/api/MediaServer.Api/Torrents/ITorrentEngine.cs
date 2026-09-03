@@ -44,14 +44,19 @@ public sealed record TorrentSnapshot(
 
 /// <summary>Status of the VPN tunnel the engine runs behind (engine-wide, not per-torrent).
 /// <see cref="Connected"/> is the primary signal; <see cref="ExitIp"/>/<see cref="ExitCountry"/> are a
-/// best-effort proof of egress and may be <c>null</c>.</summary>
+/// best-effort proof of egress and may be <c>null</c>. The last three are the engine's OpenVPN profile trio
+/// (<c>torrent-engine</c> 0.8.0+): the profile that runs, the one a switch is moving to, and why the last
+/// start or switch failed — all <c>null</c> against an older engine, which does not send them.</summary>
 public sealed record VpnStatus(
     bool Connected,
     string? TunnelInterface,
     string? TunnelAddress,
     string? ExitIp,
     string? ExitCountry,
-    DateTimeOffset CheckedAt);
+    DateTimeOffset CheckedAt,
+    string? Profile = null,
+    string? PendingProfile = null,
+    string? LastError = null);
 
 /// <summary>Health of the engine's BitTorrent DHT (engine-wide, not per-torrent), mirroring the engine's
 /// <c>DhtStatus</c>. Its purpose is telling three look-alike situations apart: DHT switched off, DHT idle
@@ -100,6 +105,17 @@ public interface ITorrentEngine
     /// <summary>Current DHT health, or <c>null</c> when no engine reports one — downloading disabled, or a
     /// <c>torrent-engine</c> older than 0.7.0, which has no <c>/dht</c> endpoint to read.</summary>
     DhtStatus? GetDhtStatus();
+
+    /// <summary>The engine's OpenVPN profiles and the active one, or <c>null</c> when no engine reports them —
+    /// downloading disabled, or a <c>torrent-engine</c> older than 0.8.0, which has no <c>/vpn/profiles</c>.</summary>
+    Task<VpnProfiles?> GetVpnProfilesAsync(CancellationToken cancellationToken);
+
+    /// <summary>Asks the engine to switch to another OpenVPN profile. The engine only records the wish and
+    /// answers with its <i>current</i> status; the switch itself arrives as <see cref="VpnStatusChanged"/>
+    /// events — <c>PendingProfile</c> first, then the new <c>Profile</c>. Throws
+    /// <see cref="EngineRequestException"/> when the engine refuses (an unknown or malformed id) or when there
+    /// is no engine to switch.</summary>
+    Task<VpnStatus> SelectVpnProfileAsync(string id, CancellationToken cancellationToken);
 
     /// <summary>Raised when a magnet's file list becomes available after metadata download.</summary>
     event EventHandler<string>? MetadataReceived;

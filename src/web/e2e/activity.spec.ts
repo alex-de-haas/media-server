@@ -581,3 +581,66 @@ test("a downloading movie pack matches per file ahead of the transfer finishing"
   expect(body.groups.map((group) => group.providerId)).toEqual(["562", "1573"]);
   expect(body.groups.map((group) => group.files.map((file) => file.sourceFileId))).toEqual([["source-1"], ["source-2"]]);
 });
+
+// The VPN pill in the Activity header doubles as the profile picker for an admin: the menu lists the
+// engine's OpenVPN profiles with the active one checked (and disabled), and choosing another asks the API
+// to switch — the switch itself then arrives over SSE, so the click only sends the request.
+test("admin switches the VPN profile from the activity header", async ({ page }) => {
+  await setupApp(page, {
+    role: "admin",
+    vpn: {
+      connected: true,
+      tunnelInterface: "tun0",
+      tunnelAddress: "10.8.0.2",
+      exitIp: "203.0.113.7",
+      exitCountry: "NL",
+      checkedAt: "2026-09-03T10:00:00Z",
+      profile: "nl-ams",
+      pendingProfile: null,
+      lastError: null,
+    },
+    vpnProfiles: {
+      active: "nl-ams",
+      profiles: [
+        { id: "de-fra", remote: "de.example:1194" },
+        { id: "nl-ams", remote: "nl.example:1194" },
+      ],
+    },
+  });
+
+  await page.goto("/activity");
+  await page.getByText("VPN · nl-ams · NL").click();
+
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: /nl-ams/ })).toHaveAttribute("aria-disabled", "true");
+  await expect(menu.getByRole("menuitem", { name: /de-fra/ })).toBeVisible();
+
+  const switchRequest = page.waitForRequest(
+    (request) => request.url().includes("/vpn/profile") && request.method() === "PUT",
+  );
+  await menu.getByRole("menuitem", { name: /de-fra/ }).click();
+  expect((await switchRequest).postDataJSON()).toEqual({ id: "de-fra" });
+});
+
+// A plain user sees the tunnel indicator but gets no picker: where downloads exit is operator configuration.
+test("user sees the VPN indicator without a picker", async ({ page }) => {
+  await setupApp(page, {
+    role: "user",
+    vpn: {
+      connected: false,
+      tunnelInterface: null,
+      tunnelAddress: null,
+      exitIp: null,
+      exitCountry: null,
+      checkedAt: "2026-09-03T10:00:00Z",
+      profile: "nl-ams",
+      pendingProfile: "de-fra",
+      lastError: null,
+    },
+  });
+
+  await page.goto("/activity");
+  await page.getByText("VPN · switching…").click();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+});

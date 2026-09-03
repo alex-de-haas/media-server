@@ -15,6 +15,39 @@ public static class TorrentEndpoints
         // downloading is disabled or the engine predates /dht — the UI hides the indicator either way.
         routes.MapGet("/api/dht", (ITorrentEngine engine) => Results.Ok(engine.GetDhtStatus())).RequireAuthorization();
 
+        // The engine's OpenVPN profiles (torrent-engine 0.8.0+; null when it has none to report) and the switch.
+        // Admin-only: where every download's traffic exits is operator configuration, not a user action.
+        routes.MapGet("/api/vpn/profiles", async (ITorrentEngine engine, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                return Results.Ok(await engine.GetVpnProfilesAsync(cancellationToken));
+            }
+            catch (EngineRequestException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: (int)exception.StatusCode);
+            }
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
+        routes.MapPut("/api/vpn/profile", async (SelectVpnProfileRequest request, ITorrentEngine engine, CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Id))
+            {
+                return Results.Problem("A VPN profile id is required.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            try
+            {
+                // 202, like the engine: it records the choice and switches in the background; the web sees the
+                // switch through `vpnStatusChanged` (pendingProfile, then the new profile).
+                return Results.Accepted(value: await engine.SelectVpnProfileAsync(request.Id.Trim(), cancellationToken));
+            }
+            catch (EngineRequestException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: (int)exception.StatusCode);
+            }
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         var group = routes.MapGroup("/api/torrents").RequireAuthorization();
 
         group.MapGet("/", async (TorrentService service, CancellationToken cancellationToken) =>

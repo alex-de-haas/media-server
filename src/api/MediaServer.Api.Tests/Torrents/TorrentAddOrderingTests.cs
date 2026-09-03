@@ -83,6 +83,10 @@ public sealed class TorrentAddOrderingTests : IDisposable
 
         public VpnStatus? GetVpnStatus() => null;
 
+        public Task<VpnProfiles?> GetVpnProfilesAsync(CancellationToken cancellationToken) => Task.FromResult<VpnProfiles?>(null);
+
+        public Task<VpnStatus> SelectVpnProfileAsync(string id, CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public DhtStatus? GetDhtStatus() => null;
 
         public TorrentDescriptor Inspect(TorrentSource source) =>
