@@ -53,6 +53,7 @@ export interface AppMock {
   downloads?: unknown[];
   ingest?: unknown[];
   vpn?: unknown;
+  vpnProfiles?: unknown; // GET /vpn/profiles — the picker's list (null → nothing to choose from)
   metadataSearch?: unknown[];
   remapTargetId?: string; // id returned by POST /library/{id}/remap
   releaseCalendar?: unknown[]; // GET /watchlist/calendar
@@ -122,6 +123,9 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     if (path === "/torrents") return route.fulfill({ json: mock.downloads ?? [] });
     if (path === "/ingest") return route.fulfill({ json: mock.ingest ?? [] });
     if (path === "/vpn") return route.fulfill({ json: mock.vpn ?? null });
+    if (path === "/vpn/profiles") return route.fulfill({ json: mock.vpnProfiles ?? null });
+    // The engine records the choice and answers 202 with the status it runs *now*; the switch arrives over SSE.
+    if (path === "/vpn/profile" && method === "PUT") return route.fulfill({ status: 202, json: mock.vpn ?? null });
     if (path.endsWith("/played")) return route.fulfill({ json: aUserData({ played: method === "POST" }) });
     // A logged watch carries a body, unlike the played toggle: the instant is the whole point of it.
     const loggedWatchItemId =

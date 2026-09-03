@@ -117,6 +117,25 @@ export interface VpnStatus {
   exitIp: string | null;
   exitCountry: string | null;
   checkedAt: string;
+  // The engine's OpenVPN profile trio (torrent-engine 0.8.0+): the profile that runs, the one a switch is
+  // moving to, and why the last start or switch failed. All null against an older engine.
+  profile: string | null;
+  pendingProfile: string | null;
+  lastError: string | null;
+}
+
+// One OpenVPN profile in the engine's profiles folder: its id (the file name without extension) and the
+// host[:port] of its first `remote` line — a label for the picker, never the file contents.
+export interface VpnProfile {
+  id: string;
+  remote: string | null;
+}
+
+// The engine's profiles and the one it runs. The whole object is null when no engine reports them
+// (downloading disabled, or an engine older than 0.8.0) — the picker then has nothing to offer.
+export interface VpnProfiles {
+  active: string | null;
+  profiles: VpnProfile[];
 }
 
 // Engine-wide DHT health. `enabled` is the engine's setting; `running` means enabled *and* an engine is
@@ -1027,6 +1046,15 @@ export const mediaServer = {
 
   listDownloads: () => apiJson<Download[]>(`${BASE}/torrents`),
   getVpnStatus: () => apiJson<VpnStatus | null>(`${BASE}/vpn`),
+  listVpnProfiles: () => apiJson<VpnProfiles | null>(`${BASE}/vpn/profiles`),
+  // 202: the engine records the choice and switches in the background. The status it returns is still the
+  // current one; the switch itself arrives over SSE (`pendingProfile`, then the new `profile`).
+  selectVpnProfile: (id: string) =>
+    apiJson<VpnStatus>(`${BASE}/vpn/profile`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    }),
   getDhtStatus: () => apiJson<DhtStatus | null>(`${BASE}/dht`),
   addTorrent: (input: AddTorrentInput) =>
     apiJson<Download>(`${BASE}/torrents/add`, {

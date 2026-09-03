@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-08-14
+Updated: 2026-09-03
 
 ## Description
 
@@ -123,6 +123,32 @@ every bootstrap as broken.
 `RemoteTorrentEngine` does not fan out every DHT update: `nodeCount` churns as the
 routing table grows, so it is only reported when it crosses into or out of empty (an
 empty table while running being exactly what a broken DHT looks like).
+
+#### VPN profile picker
+
+`VpnStatus` carries the engine's OpenVPN **profile trio** (`torrent-engine` 0.8.0+;
+`null` against an older engine, which does not send it): `profile` — the profile the
+engine runs, `pendingProfile` — the one a switch is moving to, `lastError` — why the
+last start or switch failed. The pill reads `VPN · <profile> · <exit country>` while
+up, `VPN · switching…` (amber) while a switch is in flight, and `VPN off` while down;
+the tooltip adds the exit IP, the tunnel address, and the last error. The presentation
+rules live in `@/lib/vpn` (`vpnKind` / `vpnLabel` / `vpnTooltip`).
+
+For an **admin** the pill is also a menu. Opening it lists the engine's profiles
+(`GET /api/vpn/profiles`, fetched fresh on every open because the engine lists its
+folder live) with the active one checked and disabled, and choosing another sends
+`PUT /api/vpn/profile`. The engine only records the choice and answers `202` with its
+*current* status; the switch itself arrives over `vpnStatusChanged` — `pendingProfile`
+first, then the new `profile` once the tunnel is back — and every item is disabled
+while one is pending. A user sees the indicator alone: where every download's traffic
+exits is operator configuration, so both endpoints are admin-only. When the engine
+reports no profiles (`null`: downloading disabled, or an engine without
+`/vpn/profiles`) the menu says so instead of listing nothing; a refusal (an unknown
+id, an engine without switching) surfaces the engine's own message as a toast.
+
+`RemoteTorrentEngine` fans a VPN status out when connectivity, the tunnel address, the
+exit IP/country, or the profile trio changes — never on `checkedAt` alone, which ticks
+on every engine poll.
 
 ## Pipeline
 
@@ -340,6 +366,8 @@ POST   /api/torrents/{id}/stop-seeding   # advances a parked, seeding ingest int
 DELETE /api/torrents/{id}
 GET    /api/torrents
 GET    /api/vpn                    # engine-wide VPN tunnel status (null when downloading is disabled)
+GET    /api/vpn/profiles           # the engine's OpenVPN profiles + the active one (admin; null when unavailable)
+PUT    /api/vpn/profile            # { id } → 202 + the current status; the switch arrives over SSE (admin)
 GET    /api/dht                    # engine-wide DHT health (null when unavailable)
 POST   /api/catalogs/{id}/scan     # import orphan media files under the catalog root
 ```
@@ -383,6 +411,16 @@ Backend tests should use xUnit. Required coverage:
   crossing into or out of an empty routing table is, and a state transition
   (`Initialising` vs `NotReady`, the difference between "starting" and "broken") is.
 - `dhtStatusChanged` publishes camelCase JSON carrying MonoTorrent's own state value.
+- VPN status fan-out: the profile trio (`profile`, `pendingProfile`, `lastError`)
+  counts as a change; `checkedAt` alone does not.
+- `RemoteTorrentEngine` against a stubbed engine: `/vpn/profiles` parses, a bare
+  `404` from an older engine reads as `null`, `PUT /vpn/profile` sends `{ id }` and
+  relays the engine's own message on refusal (a bare `404` explains the version gap).
+- `vpnStatusChanged` publishes the profile trio in camelCase.
+- Web (vitest): `vpnKind` / `vpnLabel` / `vpnTooltip` for up, down and switching,
+  with and without a profile, an exit, and a last error. E2E: an admin opens the
+  picker, the active profile is checked and disabled, choosing another sends the
+  `PUT`; a user gets the indicator without a menu.
 - Free-space pre-check refuses oversized `.torrent` downloads and notifies for
   magnets.
 - Progress/speed/ratio are not persisted; only state transitions are written.

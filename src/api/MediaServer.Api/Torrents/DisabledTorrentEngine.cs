@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace MediaServer.Api.Torrents;
 
 /// <summary>
@@ -49,4 +51,11 @@ public sealed class DisabledTorrentEngine : ITorrentEngine
     public VpnStatus? GetVpnStatus() => null;
 
     public DhtStatus? GetDhtStatus() => null;
+
+    public Task<VpnProfiles?> GetVpnProfilesAsync(CancellationToken cancellationToken) => Task.FromResult<VpnProfiles?>(null);
+
+    // The one VPN command: with no engine there is nothing to switch, and the caller should hear why.
+    public Task<VpnStatus> SelectVpnProfileAsync(string id, CancellationToken cancellationToken) =>
+        Task.FromException<VpnStatus>(new EngineRequestException(
+            HttpStatusCode.ServiceUnavailable, $"Cannot switch VPN profiles: {Unavailable}"));
 }

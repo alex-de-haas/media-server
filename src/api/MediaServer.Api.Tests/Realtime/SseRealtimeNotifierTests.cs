@@ -43,6 +43,25 @@ public sealed class SseRealtimeNotifierTests
     }
 
     [Fact]
+    public async Task Publishes_the_vpn_profile_trio_with_camelCase_json()
+    {
+        var notifier = new SseRealtimeNotifier();
+        using var subscription = notifier.Subscribe();
+
+        await notifier.VpnStatusChangedAsync(new VpnStatusChanged(
+            Connected: false, "tun0", null, null, null, DateTimeOffset.UtcNow,
+            Profile: "nl-ams", PendingProfile: "de-fra", LastError: "openvpn exited: AUTH_FAILED"));
+
+        var message = await ReadAsync(subscription);
+
+        using var json = JsonDocument.Parse(message.Data);
+        // The web keys its picker state off these three names; a rename here would silently freeze it.
+        Assert.Equal("nl-ams", json.RootElement.GetProperty("profile").GetString());
+        Assert.Equal("de-fra", json.RootElement.GetProperty("pendingProfile").GetString());
+        Assert.Equal("openvpn exited: AUTH_FAILED", json.RootElement.GetProperty("lastError").GetString());
+    }
+
+    [Fact]
     public async Task Publishes_dht_status_with_camelCase_json()
     {
         var notifier = new SseRealtimeNotifier();

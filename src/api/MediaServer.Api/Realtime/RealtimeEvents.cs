@@ -44,14 +44,18 @@ public sealed record DownloadProgress(
 /// <summary>A persisted torrent state transition (the trigger for downstream pipeline actions).</summary>
 public sealed record DownloadStateChanged(Guid DownloadId, string State, string? Name);
 
-/// <summary>Engine-wide VPN tunnel status for the activity view (mirrors the engine's VpnStatus).</summary>
+/// <summary>Engine-wide VPN tunnel status for the activity view (mirrors the engine's VpnStatus, including the
+/// OpenVPN profile trio: the profile that runs, the one a switch is moving to, the last error).</summary>
 public sealed record VpnStatusChanged(
     bool Connected,
     string? TunnelInterface,
     string? TunnelAddress,
     string? ExitIp,
     string? ExitCountry,
-    DateTimeOffset CheckedAt);
+    DateTimeOffset CheckedAt,
+    string? Profile = null,
+    string? PendingProfile = null,
+    string? LastError = null);
 
 /// <summary>Engine-wide DHT health for the activity view (mirrors the engine's DhtStatus). A consumer
 /// derives "enabled but not working" as Enabled &amp;&amp; Running &amp;&amp; State == "NotReady" — never

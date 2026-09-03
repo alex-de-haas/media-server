@@ -186,6 +186,53 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
 
     public DhtStatus? GetDhtStatus() => _dht;
 
+    public async Task<VpnProfiles?> GetVpnProfilesAsync(CancellationToken cancellationToken)
+    {
+        using var cts = ControlCts(cancellationToken);
+        using var response = await _http.GetAsync("/vpn/profiles", cts.Token);
+        // An engine older than 0.8.0 has no such route: that is "nothing to pick from", not a failure.
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = await ReadEngineErrorAsync(response, cts.Token);
+            throw new EngineRequestException(response.StatusCode,
+                detail ?? $"torrent-engine could not list VPN profiles ({(int)response.StatusCode}).");
+        }
+
+        return await response.Content.ReadFromJsonAsync<VpnProfiles>(Json, cts.Token);
+    }
+
+    public async Task<VpnStatus> SelectVpnProfileAsync(string id, CancellationToken cancellationToken)
+    {
+        using var cts = ControlCts(cancellationToken);
+        using var response = await _http.PutAsJsonAsync("/vpn/profile", new SelectVpnProfileRequest(id), Json, cts.Token);
+        if (!response.IsSuccessStatusCode)
+        {
+            // The engine's 400/404 carry its own operator-facing message (an unknown id lists the known ones).
+            // A bare 404 with no such body is the route missing altogether: an engine older than 0.8.0.
+            var detail = await ReadEngineErrorAsync(response, cts.Token);
+            if (detail is null && response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new EngineRequestException(HttpStatusCode.NotFound,
+                    "torrent-engine has no VPN profile switching (0.8.0 or newer is required).");
+            }
+
+            throw new EngineRequestException(response.StatusCode,
+                detail ?? $"torrent-engine refused the VPN profile switch ({(int)response.StatusCode}).");
+        }
+
+        // 202 with the *current* status: the engine records the choice and switches in the background; the
+        // switch reaches us through the `vpn` events. Cache what it answered — it is the freshest we have.
+        var status = await response.Content.ReadFromJsonAsync<VpnStatus>(Json, cts.Token)
+            ?? throw new InvalidOperationException("torrent-engine returned an empty VPN status.");
+        ApplyVpn(status);
+        return status;
+    }
+
     private async Task PostAsync(string path, CancellationToken cancellationToken)
     {
         using var cts = ControlCts(cancellationToken);
@@ -444,17 +491,26 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     {
         var previous = _vpn;
         _vpn = status;
-        // Only fan out meaningful changes — CheckedAt ticks on every poll, so ignore it for equality.
-        if (previous is null
-            || previous.Connected != status.Connected
-            || previous.TunnelInterface != status.TunnelInterface
-            || previous.TunnelAddress != status.TunnelAddress
-            || previous.ExitIp != status.ExitIp
-            || previous.ExitCountry != status.ExitCountry)
+        if (IsReportableVpnChange(previous, status))
         {
             VpnStatusChanged?.Invoke(this, status);
         }
     }
+
+    /// <summary>Whether a VPN status differs from the previous one in a way worth pushing to the UI: connectivity,
+    /// the tunnel identity, the exit IP/country, or the profile trio — a switch starting (<c>PendingProfile</c>),
+    /// landing (<c>Profile</c>), or failing (<c>LastError</c>). Never <c>CheckedAt</c> alone, which ticks on every
+    /// engine poll.</summary>
+    internal static bool IsReportableVpnChange(VpnStatus? previous, VpnStatus current) =>
+        previous is null
+        || previous.Connected != current.Connected
+        || previous.TunnelInterface != current.TunnelInterface
+        || previous.TunnelAddress != current.TunnelAddress
+        || previous.ExitIp != current.ExitIp
+        || previous.ExitCountry != current.ExitCountry
+        || previous.Profile != current.Profile
+        || previous.PendingProfile != current.PendingProfile
+        || previous.LastError != current.LastError;
 
     public void Dispose()
     {
