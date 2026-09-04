@@ -31,7 +31,7 @@ import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { WatchTimeDialog } from "@/components/watch-time-dialog";
 import { QUERIES_AFFECTED_BY_HISTORY_CHANGE } from "@/lib/watch-history-calendar";
-import { dolbyVisionNote, dynamicRangeBadges, episodeLabel, formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
+import { dolbyVisionNote, dynamicRangeBadges, episodeLabel, formatBytes, formatEta, formatRuntime, formatSpeed, pictureStream } from "@/lib/format";
 import { errorMessage, formatCount, openExternal } from "@/lib/ui";
 import {
   AlertDialog,
@@ -1039,9 +1039,9 @@ function SourceCard({
   const [preselectedSidecars, setPreselectedSidecars] = useState<string[]>([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  // The picture: the first video stream that names a dynamic range. Its badges carry the Dolby Vision profile
-  // when it is recorded, and a dual-layer profile 7 gets the one note a viewer with Apple hardware needs.
-  const picture = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat);
+  // The picture — the film, not a cover a muxer wrote as a video track. Its badges carry the Dolby Vision
+  // profile when it is recorded, and a dual-layer profile 7 gets the one note a viewer with Apple hardware needs.
+  const picture = pictureStream(source.streams);
   const rangeBadges = dynamicRangeBadges(picture?.hdrFormat, picture?.dolbyVision);
   const rangeNote = dolbyVisionNote(picture?.dolbyVision);
 

@@ -105,7 +105,21 @@ export function objectAudioFormat(profile: string | null | undefined): string | 
   return /dts:?x/i.test(profile) ? "DTS:X" : null;
 }
 
-import type { DolbyVisionDetail } from "@/lib/media-server";
+import type { DolbyVisionDetail, MediaStream } from "@/lib/media-server";
+
+/** Codecs a muxer writes cover art as: a real video track in every way that can be seen, and not the film. */
+const STILL_IMAGE_CODECS = new Set(["mjpeg", "png", "bmp", "gif", "webp"]);
+
+/** The stream that is actually the film, by the rule every server surface uses (`NativePlaybackResolver.Picture`):
+ *  the first embedded video track by index that is not a still image, and only then the first video track at all.
+ *  A cover a muxer wrote as a video track sorts first and can carry an SDR range of its own, so picking "the first
+ *  video with a range" would judge the cover and hide the film. */
+export function pictureStream(streams: readonly MediaStream[]): MediaStream | null {
+  const videos = streams
+    .filter((stream) => stream.type === "Video" && !stream.isExternal)
+    .sort((a, b) => a.index - b.index);
+  return videos.find((stream) => !STILL_IMAGE_CODECS.has((stream.codec ?? "").toLowerCase())) ?? videos[0] ?? null;
+}
 
 /** How a Dolby Vision profile is named on a badge: "Dolby Vision 8.1" for profile 8 by its base layer, the
  *  bare profile otherwise ("Dolby Vision 7", "Dolby Vision 5"). The level is left out — it is 6 on nearly
@@ -119,8 +133,9 @@ export function dolbyVisionLabel(detail: DolbyVisionDetail | null | undefined): 
 
 /** The dynamic-range badges for a video stream: one per format the probe named, so a value like
  *  "Dolby Vision · HDR10" (what a profile 8.1 file honestly is) yields two, with the Dolby Vision one
- *  carrying the profile when it is recorded. Nothing for SDR or an unknown range — a missing badge beats a
- *  false one. */
+ *  carrying the profile when it is recorded. Nothing for SDR, and nothing when the probe named no range at
+ *  all — a missing badge beats a false one. The generic "HDR" a header reader reports (PQ, but it cannot
+ *  say which kind) passes through as it is: it is a positive statement, just a coarse one. */
 export function dynamicRangeBadges(hdrFormat: string | null | undefined, detail: DolbyVisionDetail | null | undefined): string[] {
   if (!hdrFormat) {
     return [];

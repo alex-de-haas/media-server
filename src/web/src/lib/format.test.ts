@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dolbyVisionLabel, dolbyVisionNote, dynamicRangeBadges, episodeLabel, objectAudioFormat, reencodeDynamicRangeWarning } from "@/lib/format";
+import { dolbyVisionLabel, dolbyVisionNote, dynamicRangeBadges, episodeLabel, objectAudioFormat, pictureStream, reencodeDynamicRangeWarning } from "@/lib/format";
+import type { MediaStream } from "@/lib/media-server";
 
 describe("objectAudioFormat", () => {
   it("reads the object layer out of the codec profile", () => {
@@ -108,5 +109,34 @@ describe("reencodeDynamicRangeWarning", () => {
     expect(reencodeDynamicRangeWarning("Dolby Vision", null)).toContain("This source is Dolby Vision.");
     expect(reencodeDynamicRangeWarning("HDR10", null)).toContain("won’t carry its HDR metadata");
     expect(reencodeDynamicRangeWarning(null, null)).toBeNull();
+  });
+});
+
+describe("pictureStream", () => {
+  const stream = (over: Partial<MediaStream>): MediaStream => ({
+    id: over.id ?? "s", type: "Video", index: 0, codec: null, language: null, displayTitle: null, title: null,
+    width: null, height: null, hdrFormat: null, dolbyVision: null, channels: null, profile: null, frameRate: null,
+    bitDepth: null, sampleRate: null, bitrate: null, isDefault: false, isForced: false, isExternal: false, fileName: null,
+    ...over,
+  });
+
+  it("passes over cover art a muxer wrote as a video track", () => {
+    // The cover sorts first and can carry an SDR range of its own; judging it would hide the film's Dolby Vision.
+    const cover = stream({ id: "cover", index: 0, codec: "mjpeg", hdrFormat: "SDR" });
+    const film = stream({ id: "film", index: 1, codec: "hevc", hdrFormat: "Dolby Vision" });
+    expect(pictureStream([cover, film])?.id).toBe("film");
+    expect(pictureStream([film, cover])?.id).toBe("film");
+  });
+
+  it("falls back to the first video when every video is a still, and to nothing without one", () => {
+    const cover = stream({ id: "cover", codec: "png" });
+    expect(pictureStream([cover])?.id).toBe("cover");
+    expect(pictureStream([stream({ type: "Audio", codec: "eac3" })])).toBeNull();
+  });
+
+  it("leaves sidecars out: a picture is inside the file", () => {
+    const external = stream({ id: "ext", codec: "hevc", isExternal: true });
+    const film = stream({ id: "film", index: 1, codec: "hevc" });
+    expect(pictureStream([external, film])?.id).toBe("film");
   });
 });

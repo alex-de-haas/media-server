@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Info, Trash2, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
-import { dolbyVisionLabel, formatBytes, formatEta, formatPercent, formatTimeAgo, objectAudioFormat, reencodeDynamicRangeWarning } from "@/lib/format";
+import { dolbyVisionLabel, formatBytes, formatEta, formatPercent, formatTimeAgo, objectAudioFormat, pictureStream, reencodeDynamicRangeWarning } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { ActivityCard, ActivityCardHeader, ActivityProgress, ActivityQueued, ActivityStats, IconAction } from "@/components/activity-card";
 import { Button } from "@/components/ui/button";
@@ -150,7 +150,8 @@ export function TranscodeDialog({
   const audioOutweighsVideo = videoBytes !== null && audioBytes > videoBytes;
   const sourceDefaultAudio = audioStreams.find((stream) => stream.isDefault)?.index ?? audioStreams[0]?.index ?? null;
   const sourceDefaultSubtitle = subtitleStreams.find((stream) => stream.isDefault)?.index ?? null;
-  const picture = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat) ?? null;
+  // The film, not a cover a muxer wrote as a video track — the same rule every server surface uses.
+  const picture = pictureStream(source.streams);
   const hdr = picture?.hdrFormat ?? null;
   // Profile-aware where the profile is recorded: a re-encode of profile 5 wrecks the colours, one of 8.4 lands
   // on HLG, while 7 and 8.1 keep an HDR10 picture and lose only the dynamic layer.
@@ -209,6 +210,7 @@ export function TranscodeDialog({
       setHardware("auto");
       setResolution("source");
       setQuality("high");
+      setConvertDolbyVision(false);
       setAudioReEncoded(new Set());
       setTitles({});
       setLanguages({});
@@ -454,7 +456,7 @@ export function TranscodeDialog({
                 <span className="min-w-0">
                   <span className="block leading-6">Convert Dolby Vision to profile 8.1 (single layer)</span>
                   <span className="text-muted-foreground block text-xs">
-                    This source is {dolbyVisionLabel(picture?.dolbyVision)}, a dual layer no Apple device decodes, so Apple TV and Infuse play its HDR10 base layer. The rewrite keeps every frame of picture, carries the Dolby Vision metadata over as profile 8.1 — which they play as Dolby Vision — and drops the enhancement layer, about 1.6 % of the file.
+                    This source is {dolbyVisionLabel(picture?.dolbyVision)}, a dual layer that no Apple device decodes, so Apple TV and Infuse play its HDR10 base layer. The rewrite keeps every frame of picture, carries the Dolby Vision metadata over as profile 8.1 — which they play as Dolby Vision — and drops the enhancement layer, about 1.6 % of the file.
                   </span>
                 </span>
               </label>

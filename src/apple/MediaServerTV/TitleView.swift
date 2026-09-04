@@ -322,7 +322,8 @@ struct TitleView: View {
     @ViewBuilder
     private func tracks(_ version: TitleVersion) -> some View {
         VStack(alignment: .leading, spacing: 24) {
-            if let picture = version.videos.first(where: { $0.hdrFormat != nil }) {
+            // The film, not a cover a muxer wrote as a video track: the same still-image rule the server uses.
+            if let picture = version.video {
                 dynamicRange(picture)
             }
 
