@@ -1,6 +1,6 @@
 # Apple Client Loading — plan
 
-Status: Ready
+Status: In Progress
 Created: 2026-08-31
 Updated: 2026-09-04
 
@@ -81,15 +81,17 @@ This exists to separate *does the mechanism work* from *does the strategy help*.
 film plays, seeks and engages Dolby Vision with a pass-through delegate, everything
 after it is a change of policy rather than a leap.
 
-- [ ] `mediaserver://` asset, delegate on a serial queue.
-- [ ] Answer `contentInformationRequest`: content type, length, byte ranges supported.
+- [x] `mediaserver-remux://` asset, delegate on a serial queue.
+- [x] Answer `contentInformationRequest`: content type, length, byte ranges supported.
       A wrong answer here is "does not play at all" rather than "plays worse".
-- [ ] Answer `dataRequest` by range, including `requestsAllDataToEndOfFile`.
-- [ ] **Only when the decision is remux.** Direct play keeps the plain `AVURLAsset`, so a
+- [x] Answer `dataRequest` by range, including `requestsAllDataToEndOfResource`.
+- [x] **Only when the decision is remux.** Direct play keeps the plain `AVURLAsset`, so a
       path the server did not assemble is not routed through a loader that assumes it did.
 - [ ] Unit tests over the range arithmetic: a request satisfied whole, one satisfied in
-      part, one for the end of the file, and one cancelled while outstanding.
-- [ ] Honour cancellation: a request AVFoundation drops must stop our fetch with it.
+      part, one for the end of the file, and one cancelled while outstanding. The first
+      three exist; the cancelled one does not, because `AVAssetResourceLoadingRequest`
+      cannot be made outside AVFoundation and the loader has no seam for a stand-in yet.
+- [x] Honour cancellation: a request AVFoundation drops must stop our fetch with it.
 - [ ] Verify on the television: plays, seeks, resumes, **Dolby Vision engages**. This is
       the whole of Phase 1's question — the technique is well-trodden for caching layers
       over `AVPlayer` and unverified here for a progressive MP4 on tvOS — and nothing
@@ -99,10 +101,14 @@ after it is a change of policy rather than a leap.
 
 ### Phase 2 — a window, and one connection filling it
 
-- [ ] A byte window over the synthesised stream, filled forward from a single
-      long-lived request, answering delegate requests from memory when it can.
-- [ ] A seek outside the window restarts the fetch rather than crawling to it.
-- [ ] A bounded budget with an eviction rule. The decoder wants its share of an Apple TV,
+- [x] A byte window over the synthesised stream, filled forward and answering delegate
+      requests from memory when it can. Filled by a few **bounded** requests rather than
+      one open-ended one: a connection left open while the window is full is one nobody
+      reads, and the server aborts a response its reader has stopped taking. Each asks
+      for exactly the room there is, and the next starts once a quarter of the budget
+      has drained.
+- [x] A seek outside the window restarts the fetch rather than crawling to it.
+- [x] A bounded budget with an eviction rule — 128 MB ahead, 8 MB kept behind for a reader that lags. The decoder wants its share of an Apple TV,
       and a 4K film at 78 Mbit/s is ten megabytes a second — a minute of read-ahead is
       nearly six hundred **megabytes**. Start at a fraction of that and let the overlay's
       window figures say whether it is enough; spilling to the app's cache directory is
@@ -111,7 +117,7 @@ after it is a change of policy rather than a leap.
       the same server log this plan was written from. The same log answers whether the
       player's own request pattern changes once answers are instant — it may ask for
       more, or less, or the same, and the plan assumes nothing.
-- [ ] Direct play is left on the plain `AVURLAsset`. It has the same player and the same
+- [x] Direct play is left on the plain `AVURLAsset`. It has the same player and the same
       stalls but no synthesised container, and it earns the loader only once the remux
       path has proved it — as a deliverable of its own, not a widening of this one.
 
@@ -124,25 +130,27 @@ arrived — and playback resumed only when the viewer pressed pause and play.
 That is the remedy, and it can be automatic. With the delegate we know something no part
 of the client knows today: that the player has asked for nothing while its buffer drains.
 
-- [ ] Detect it **by absence of demand and of delivery, not by absence of callbacks**. A
+- [x] Detect it **by absence of demand and of delivery, not by absence of callbacks**. A
       healthy player issues one `requestsAllDataToEndOfFile` and leaves it outstanding while
       we feed it, so seconds without a new callback is what normal playback looks like. The
       signal is that nothing is outstanding *and* nothing has been consumed — the same pair
       the server-side log uses, position and bytes, both still.
-- [ ] Re-seat the item at the current position, which is what the viewer does by hand.
-- [ ] Count it where it can be seen, so a fix that fires constantly is not mistaken for
+- [x] Re-seat the item at the current position, which is what the viewer does by hand.
+- [x] Count it where it can be seen, so a fix that fires constantly is not mistaken for
       a fix that works.
-- [ ] Unit tests over the detector: an outstanding request being fed slowly is **not** a
+- [x] Unit tests over the detector: an outstanding request being fed slowly is **not** a
       wedge, a full buffer consuming nothing is not one either, and both stopped together
       is. These decide whether a working film gets interrupted, so they come before the
       remedy is wired to anything.
 
 ### Phase 4 — say what the loader knows
 
-- [ ] The overlay gains what only this layer can report: how full the window is, how far
+- [x] The overlay gains what only this layer can report: how full the window is, how far
       ahead of the play head it reaches, and how many requests reached the server.
 - [ ] Unit tests over the window: eviction under its budget, a seek discarding what is no
-      longer ahead, and a refill restarting after the connection was dropped.
+      longer ahead, and a refill restarting after the connection was dropped. The first two
+      exist; the refill is the loader's, and needs the same stand-in seam as the cancelled
+      request above.
 
 ## Verification steps
 

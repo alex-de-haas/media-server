@@ -47,14 +47,24 @@ public struct PlaybackPreferences: Codable, Equatable, Sendable {
     /// file a viewer can reach, so the only diagnostic that gets used is the one on screen.
     public var showDiagnostics: Bool
 
+    /// Feed the player its bytes ourselves, from a window read ahead of it, instead of handing it a
+    /// URL and letting AVFoundation's own stack ask in half-megabyte pieces with a separate round trip
+    /// for every handful of audio frames.
+    ///
+    /// On by default, because the measurements say so. Off is an escape hatch while the mechanism is
+    /// new on the hardware: a film that will not play through the loader still plays the old way.
+    public var usesOwnLoader: Bool
+
     public init(
         dynamicRange: DynamicRangeOverride = .automatic,
         maxAudioChannels: Int? = nil,
-        showDiagnostics: Bool = false
+        showDiagnostics: Bool = false,
+        usesOwnLoader: Bool = true
     ) {
         self.dynamicRange = dynamicRange
         self.maxAudioChannels = maxAudioChannels
         self.showDiagnostics = showDiagnostics
+        self.usesOwnLoader = usesOwnLoader
     }
 
     /// Absent in anything written before a switch existed, which must read as off rather than as a
@@ -66,6 +76,7 @@ public struct PlaybackPreferences: Codable, Equatable, Sendable {
             DynamicRangeOverride.self, forKey: .dynamicRange) ?? .automatic
         maxAudioChannels = try container.decodeIfPresent(Int.self, forKey: .maxAudioChannels)
         showDiagnostics = try container.decodeIfPresent(Bool.self, forKey: .showDiagnostics) ?? false
+        usesOwnLoader = try container.decodeIfPresent(Bool.self, forKey: .usesOwnLoader) ?? true
     }
 
     /// The profile actually sent: what the device reports, narrowed by what the viewer has chosen.
