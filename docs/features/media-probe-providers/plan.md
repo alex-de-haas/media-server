@@ -2,7 +2,7 @@
 
 Status: Draft
 Created: 2026-08-04
-Updated: 2026-08-07
+Updated: 2026-09-04
 
 > Gaps found while building
 > [native-client-api](../native-client-api/feature.md), which promised its item DTO
@@ -66,15 +66,33 @@ Two further things a probe sees and discards, both needed by
   distinguishes 8.1 from 8.4 and decides whether a cross-compatible declaration is
   honest.
 
+### Where the detail comes from
+
+Resolved 2026-09-04: from the container header, in both formats, by either provider.
+The 24-byte Dolby Vision configuration record is the payload of `dvcC`/`dvvC` in an MP4
+sample entry, which the header reader already reaches; in Matroska it is **not** in the
+codec private data but in the track's `BlockAdditionMapping` — `BlockAddIDType` dvcC or
+dvvC, the record in `BlockAddIDExtraData` — the element the remux indexer already reads.
+ffprobe's *DOVI configuration record* is this same record, so the engine path reads the
+same bytes through `dv_profile`, `dv_level`, `el_present_flag` and
+`dv_bl_signal_compatibility_id`. Byte 2 and 3 hold profile (7 bits), level (6 bits) and
+the rpu/el/bl flags; the upper nibble of byte 4 is the compatibility id. One consequence:
+the header reader starts reporting `Dolby Vision` for Matroska, which today it never does.
+
 ## Deliverables
 
 - [ ] **Chapter storage** — entity plus migration, populated by the providers that
       can supply them and left empty by those that cannot.
 - [ ] **Provenance on the media source** — which provider answered, plus a
       migration.
-- [ ] **Dynamic-range detail** — the video codec tag, the Dolby Vision profile and
-      its base-layer compatibility id, stored per video stream, plus a migration.
-      A flat `HdrFormat` stays for existing consumers; this sits beside it.
+- [ ] **Dynamic-range detail** — the video codec tag, and the Dolby Vision profile,
+      level, base-layer compatibility id and enhancement-layer flag (`DvProfile`,
+      `DvLevel`, `DvBlSignalCompatibilityId`, `DvElPresent`), stored per video stream,
+      plus a migration and a bounded refresh fill-in for rows already labelled
+      `Dolby Vision` without a profile. A flat `HdrFormat` stays for existing consumers;
+      this sits beside it. Both providers supply the Dolby Vision detail — see *Where the
+      detail comes from*. Consumed by
+      [dolby-vision-profile](../dolby-vision-profile/plan.md).
 - [ ] **Surface all three** in the library projection, so the web detail page and
       `/native/v1/items/{id}` gain them together.
 - [ ] **Unit tests** — a header-probed source yields no chapters and reports the
@@ -87,11 +105,6 @@ Two further things a probe sees and discards, both needed by
 - **Is chapter data worth its migration on its own?** It is only visible once a
   client offers chapter navigation, and no client does yet. It may be better
   sequenced with the Apple client's playback surface than shipped ahead of it.
-- **Can the header reader supply the dynamic-range detail?** `dvcC`/`dvvC` sits in
-  the sample entry, which a container-header parser already reaches in an MP4 — but
-  in Matroska the same information is in the codec private data and may cost more.
-  If only the external engine can answer, the field is null for header-probed
-  sources and provenance is what explains why.
 - **Does this block [remux-streaming](../remux-streaming/plan.md)?** No — that
   feature authors the container and so knows what it wrote. But its index walk
   touches the same headers, so building the two together may be cheaper than
