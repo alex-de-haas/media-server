@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-08-15
+Updated: 2026-09-04
 
 ## Description
 
@@ -103,6 +103,15 @@ section).
 - The app **inherits the Hosty Shell theme** (light/dark) via the Shell theme
   bridge (initial `hosty_theme` URL params + `hosty:shell-theme` postMessage); it
   ships both token sets and does not present its own theme toggle.
+- **`shadcn` is a build-time dependency, never a runtime one.** It lives in
+  `devDependencies` and is used at build time twice: as the scaffolding CLI
+  driven by `components.json`, and as the Tailwind layer that
+  `src/app/globals.css` pulls in with `@import "shadcn/tailwind.css"` (the
+  package ships it at `dist/tailwind.css`). Turbopack resolves that import
+  strictly — the build fails with `Can't resolve` when the package is missing —
+  so an install that skips dev dependencies cannot build the app. The Next
+  standalone bundle traces only what the server actually imports, so the package
+  does not reach the runtime image.
 
 ## Iframe Safety
 
