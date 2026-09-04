@@ -41,7 +41,8 @@ internal sealed record HeaderTrack(
     int? BitDepth,
     HeaderHdr Hdr,
     int? Channels,
-    int? SampleRate)
+    int? SampleRate,
+    DolbyVisionDetail? DolbyVision = null)
 {
     /// <summary>
     /// Stands in for the stream ffprobe synthesizes from embedded artwork. It is reported as video because

@@ -127,6 +127,30 @@ public sealed class JellyfinMappingTests : IDisposable
         Assert.Equal(_primaryTag, movie!.ImageTags?["Primary"]);
     }
 
+    [Theory]
+    [InlineData("SDR", null, null, "SDR")]
+    [InlineData("HDR10", null, null, "HDR10")]
+    [InlineData("HDR", null, null, "HDR10")]
+    // A Dolby Vision stream whose profile is not yet recorded collapses to HDR10, as every one did before.
+    [InlineData("Dolby Vision", null, null, "HDR10")]
+    [InlineData("Dolby Vision", 5, 0, "DOVI")]
+    [InlineData("Dolby Vision", 7, 6, "DOVIWithHDR10")]
+    [InlineData("Dolby Vision", 8, 1, "DOVIWithHDR10")]
+    [InlineData("Dolby Vision", 8, 4, "DOVIWithHLG")]
+    [InlineData("Dolby Vision", 8, 2, "DOVIWithSDR")]
+    [InlineData("Dolby Vision \u00b7 HDR10", 8, 1, "DOVIWithHDR10")]
+    public void Video_range_type_follows_the_dolby_vision_profile(string hdr, int? profile, int? compatibility, string expected) =>
+        Assert.Equal(expected, JellyfinItemMapper.VideoRangeType(hdr, profile, compatibility));
+
+    [Theory]
+    [InlineData(null, null, null)]
+    [InlineData(7, 6, "Dolby Vision Profile 7")]
+    [InlineData(8, 1, "Dolby Vision Profile 8.1")]
+    [InlineData(8, 4, "Dolby Vision Profile 8.4")]
+    [InlineData(5, 0, "Dolby Vision Profile 5")]
+    public void The_dovi_title_names_the_profile_the_way_people_do(int? profile, int? compatibility, string? expected) =>
+        Assert.Equal(expected, JellyfinItemMapper.DolbyVisionTitle(profile, compatibility));
+
     [Fact]
     public async Task Movie_detail_maps_media_sources_and_streams()
     {

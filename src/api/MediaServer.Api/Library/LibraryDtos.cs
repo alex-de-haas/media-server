@@ -170,7 +170,16 @@ public sealed record MediaStreamDto(
     // A sidecar's own file name (with extension), null for an embedded track. Sidecars often carry neither
     // codec nor language, so the name is what actually tells two dubs apart on screen — and it is the file
     // an operator sees in the folder.
-    string? FileName);
+    string? FileName,
+    // The Dolby Vision configuration record's fields, beside the flat HdrFormat: what tells a dual-layer
+    // profile 7 (which Apple TV and Infuse play as HDR10) from a single-layer 8.1 (which they play as Dolby
+    // Vision). Null for anything that is not Dolby Vision, and for a row probed before it was recorded.
+    DolbyVisionDto? DolbyVision = null);
+
+/// <summary>A Dolby Vision configuration record as a client reads it: the profile (5, 7 or 8), its level, the
+/// base-layer compatibility id (1 is HDR10, 2 SDR, 4 HLG, 6 the HDR10 a UHD Blu-ray carries under profile
+/// 7) and whether an enhancement layer is present — the mark of profile 7's dual layer.</summary>
+public sealed record DolbyVisionDto(int Profile, int Level, int BlCompatibilityId, bool EnhancementLayer);
 
 /// <summary>One season of a series, with its episode count and watched rollup.</summary>
 public sealed record SeasonSummaryDto(

@@ -1,7 +1,7 @@
 # Convert Dialog
 
 Created: 2026-07-29
-Updated: 2026-08-07
+Updated: 2026-09-04
 
 The one place a new version of a movie is composed. It submits a single job to the
 transcode engine, and everything that job can carry is decided here: what happens
@@ -132,15 +132,18 @@ larger half, and it must never make that claim on a total it filled in itself.
 
 The warning above the video controls says a re-encode drops the Dolby Vision layer.
 It does **not** mean the result is broken. What survives is the base layer, and on the
-sources this library actually holds — disc remuxes, which are profile 7 — that base
+sources this library mostly holds — disc remuxes, which are profile 7 — that base
 layer is ordinary HEVC Main 10 PQ. The picture stays a valid HDR10 one, its
 mastering-display and MaxCLL metadata come through the encode, and what is lost is the
 per-frame dynamic metadata, nothing else.
 
 That reassurance is not universal, because "Dolby Vision" covers several base layers:
 profile 7 and 8.1 are HDR10-based, 8.4 is HLG-based, 8.2 is SDR-based, and profile 5
-has no viewable base layer at all. The library records only a generic `Dolby Vision`,
-so the dialog cannot say which of these a given source is — the profile table lives in
+has no viewable base layer at all. The library records the profile now
+([dolby-vision-profile](../dolby-vision-profile/feature.md)), so the warning says which:
+a profile 5 re-encode wrecks the colours, an 8.4 lands on HLG, an 8.2 on SDR, and 7
+and 8.1 keep an HDR10 picture. A source whose profile is not yet recorded gets the
+generic warning it always did. The profile table lives in
 [transcode-engine / compression controls](https://github.com/alex-de-haas/transcode-engine/blob/main/docs/features/compression-controls/feature.md#dolby-vision-does-not-survive-a-re-encode).
 
 So on a Dolby Vision source the choice is not "shrink it or keep it watchable", it is
@@ -151,6 +154,35 @@ the same output size for 30–70× the time, buying only the metadata. Dropping 
 profile 7 source's enhancement layer losslessly was measured too and comes to 1.6% of
 the file. Both findings live in
 [transcode-engine / compression controls](https://github.com/alex-de-haas/transcode-engine/blob/main/docs/features/compression-controls/feature.md#dolby-vision-does-not-survive-a-re-encode).
+
+## Converting a disc's Dolby Vision into one Apple hardware plays
+
+A profile 7 source has a third choice beside "drop the layer" and "spend a day of
+CPU". With the video kept, the dialog offers **Convert Dolby Vision to profile 8.1
+(single layer)**: the picture is copied byte for byte, the RPU metadata is rewritten to
+profile 8.1 — the form Apple TV and Infuse play as Dolby Vision — and the enhancement
+layer, the 1.6 % measured above, is dropped. The checkbox appears only on a profile 7
+source, only under "Keep original video", and only when the engine advertises the
+tools for it (`GET /api/transcode/availability` answers `dolbyVisionConversion`), since
+an engine without them refuses the job rather than copying silently. Its copy says what
+happens and what is lost.
+
+The request carries `dolbyVision: toProfile81`. `TranscodeService.ResolveDolbyVision`
+mirrors the engine's rules so a contradictory request fails here, in this app's
+vocabulary: a re-encode is refused (a re-encode drops Dolby Vision whatever is asked),
+so is a version whose picture is profile 8 or 5, one that is not Dolby Vision at all,
+and one whose profile is not yet recorded — that one is sent to the catalog's media
+refresh rather than to an engine that would refuse it three stages in. The picture is
+judged by the rule every other surface uses, so a cover a muxer wrote as a video track
+is passed over.
+
+The version label carries `DV 8.1` after the audio codec and before `Merged` — `Remux
+DV 8.1`, `Remux EAC3 DV 8.1`, `DV 8.1 Merged` — because a rewritten Dolby Vision is a
+different file from a plain copy of the same source and the two must not land on one
+path. The imported version is named the same way from the job rather than from the
+output's record, which says profile 8 for a plain copy of a profile 8 source too. The
+job card reads `Remux DV 8.1`. The engine's four stages and their honesty checks are its
+own ([dolby-vision-conversion](https://github.com/alex-de-haas/transcode-engine/blob/main/docs/features/dolby-vision-conversion/feature.md)).
 
 The order that actually pays on such a file is the one this dialog already leads
 with: audio first — 87.5 GB of that 141.7 GB remux — then the picture if it is still
@@ -254,7 +286,16 @@ it would unlabel a labelled track. Only typed input is refused.
   appending "Merged" after the encode label, and staying plain "Merged" for a copy;
   the quality level carried only when it is not the default; the audio codec carried
   only when tracks are re-encoded, across every copy/encode/merge combination, with
-  repeated codecs collapsed and their order not changing the path.
+  repeated codecs collapsed and their order not changing the path; `DV 8.1` carried
+  after the audio and before "Merged"; `ResolveDolbyVision` — keep and absent as the
+  default, the engine's spelling accepted, an unknown word, a re-encode, profiles 8
+  and 5 by name, an unrecorded profile told from no Dolby Vision, and the picture
+  judged rather than the cover art.
+- `RemoteTranscodeEngineWireTests` — the Dolby Vision mode travelling under the
+  engine's name and null when kept; the tooling read from `GET /hardware`, including an
+  engine from before the `tools` block answering none.
+- Vitest (`format.test.ts`) — the re-encode warning per profile and the generic
+  fallbacks.
 - `StreamMetadataEditTests` — language normalization across the 639-1 pair, the
   terminological spelling, case, whitespace and a BCP-47 region; an unrecognized tag
   refused; a title-only edit leaving the language alone.

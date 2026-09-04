@@ -986,6 +986,44 @@
           }
         }
       },
+      "DolbyVisionDto": {
+        "required": [
+          "profile",
+          "level",
+          "blCompatibilityId",
+          "enhancementLayer"
+        ],
+        "type": "object",
+        "properties": {
+          "profile": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "level": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "blCompatibilityId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "enhancementLayer": {
+            "type": "boolean"
+          }
+        }
+      },
       "LibraryDetailDto": {
         "required": [
           "id",
@@ -1639,6 +1677,9 @@
               "null",
               "string"
             ]
+          },
+          "dolbyVision": {
+            "$ref": "#/components/schemas/DolbyVisionDto"
           }
         }
       },

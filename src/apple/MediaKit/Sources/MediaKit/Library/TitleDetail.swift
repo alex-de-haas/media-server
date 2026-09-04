@@ -52,9 +52,74 @@ public struct TitleTrack: Identifiable, Equatable, Sendable {
     /// as one about a codec is.
     public let hdrFormat: String?
 
+    /// The Dolby Vision configuration record, beside the flat `hdrFormat`: what tells a dual-layer profile 7
+    /// — a UHD Blu-ray remux, which this device plays as HDR10 — from a single-layer 8.1, which it plays as
+    /// Dolby Vision. Nil for anything that is not Dolby Vision, and for a stream the server probed before it
+    /// recorded the profile.
+    public let dolbyVision: DolbyVisionDetail?
+
     /// Beside the video rather than inside it — a dubbed track or a subtitle file this library carries
     /// and no other client of it can play.
     public let isExternal: Bool
+
+    /// The dynamic-range badges the title screen shows for this track: one per format the probe named,
+    /// the Dolby Vision one carrying its profile when recorded. See `DynamicRange.badges`.
+    public var dynamicRangeBadges: [String] {
+        DynamicRange.badges(hdrFormat: hdrFormat, dolbyVision: dolbyVision)
+    }
+
+    /// The one thing a viewer needs to know about a profile 7 file on this device, or nil.
+    public var dolbyVisionNote: String? {
+        DynamicRange.note(for: dolbyVision)
+    }
+}
+
+/// A Dolby Vision configuration record as the server reports it: the profile (5, 7 or 8), its level, the
+/// base-layer compatibility id (1 HDR10, 2 SDR, 4 HLG, 6 a UHD Blu-ray's HDR10 under profile 7) and whether
+/// an enhancement layer is present — the mark of profile 7's dual layer.
+public struct DolbyVisionDetail: Equatable, Sendable {
+    public let profile: Int
+    public let level: Int
+    public let blCompatibilityId: Int
+    public let enhancementLayer: Bool
+
+    public init(profile: Int, level: Int, blCompatibilityId: Int, enhancementLayer: Bool) {
+        self.profile = profile
+        self.level = level
+        self.blCompatibilityId = blCompatibilityId
+        self.enhancementLayer = enhancementLayer
+    }
+}
+
+/// How a stream's dynamic range is shown, kept out of the views so it can be tested.
+public enum DynamicRange {
+    /// "Dolby Vision 8.1" for profile 8 by its base layer, the bare profile otherwise ("Dolby Vision 7"),
+    /// and the bare name while the profile is not recorded. The level is left out: it is 6 on nearly every
+    /// film and tells a viewer nothing the profile does not.
+    public static func label(for detail: DolbyVisionDetail?) -> String {
+        guard let detail else { return "Dolby Vision" }
+        return detail.profile == 8
+            ? "Dolby Vision 8.\(detail.blCompatibilityId)"
+            : "Dolby Vision \(detail.profile)"
+    }
+
+    /// One badge per format the probe named — "Dolby Vision · HDR10", what a profile 8.1 file honestly is,
+    /// yields two — with nothing for SDR or an unknown range: a missing badge beats a false one.
+    public static func badges(hdrFormat: String?, dolbyVision: DolbyVisionDetail?) -> [String] {
+        guard let hdrFormat else { return [] }
+        return hdrFormat
+            .split(whereSeparator: { $0 == "·" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0.uppercased() != "SDR" }
+            .map { $0.localizedCaseInsensitiveContains("Dolby Vision") ? label(for: dolbyVision) : $0 }
+    }
+
+    /// A dual layer is what no Apple device decodes, so this device plays the HDR10 base layer — said on the
+    /// client, which knows what the device does where the server does not.
+    public static func note(for detail: DolbyVisionDetail?) -> String? {
+        guard let detail, detail.profile == 7 || detail.enhancementLayer else { return nil }
+        return "Plays as HDR10 on this device"
+    }
 }
 
 /// Everything a title's own screen shows.
@@ -138,6 +203,11 @@ extension TitleTrack {
         self.language = dto.language
         self.codec = dto.codec
         self.hdrFormat = dto.hdrFormat
+        self.dolbyVision = dto.dolbyVision.map {
+            DolbyVisionDetail(
+                profile: Int($0.profile), level: Int($0.level),
+                blCompatibilityId: Int($0.blCompatibilityId), enhancementLayer: $0.enhancementLayer)
+        }
         self.isExternal = dto.isExternal ?? false
 
         // The server's own title when it has one — "Commentary", "Forced" — and otherwise something

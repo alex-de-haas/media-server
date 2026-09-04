@@ -51,6 +51,57 @@ public sealed class RemoteTranscodeEngineWireTests
     }
 
     [Fact]
+    public async Task The_dolby_vision_mode_travels_under_the_engines_name()
+    {
+        var handler = new StubHandler();
+        using var engine = new RemoteTranscodeEngine(
+            new HttpClient(handler) { BaseAddress = new Uri("http://engine.local/") },
+            new MediaServerSettings(),
+            NullLogger<RemoteTranscodeEngine>.Instance);
+
+        await engine.CreateAsync(
+            new TranscodeJobRequest("movies", "in.mkv", "movies", "out.mkv", "copy", "auto", null, DolbyVision: "toProfile81"),
+            CancellationToken.None);
+
+        Assert.Contains("\"dolbyVision\":\"toProfile81\"", handler.RequestBody);
+    }
+
+    [Fact]
+    public async Task A_job_that_keeps_dolby_vision_sends_null_so_an_older_engine_sees_nothing_new()
+    {
+        var body = await PostAsync();
+
+        Assert.Contains("\"dolbyVision\":null", body);
+    }
+
+    private sealed class HardwareHandler(string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+    }
+
+    [Theory]
+    [InlineData("""{"vaapiAvailable":false,"tools":{"dolbyVisionConversion":true,"doviTool":"2.3.3","mkvtoolnix":"82.0"}}""", true)]
+    [InlineData("""{"vaapiAvailable":false,"tools":{"dolbyVisionConversion":false,"doviTool":null,"mkvtoolnix":null}}""", false)]
+    // An engine from before the tools block reports no tooling rather than failing the read.
+    [InlineData("""{"vaapiAvailable":false,"renderDevices":[]}""", false)]
+    [InlineData("not json", false)]
+    public async Task The_tooling_is_read_from_the_engines_hardware_report(string hardware, bool expected)
+    {
+        using var engine = new RemoteTranscodeEngine(
+            new HttpClient(new HardwareHandler(hardware)) { BaseAddress = new Uri("http://engine.local/") },
+            new MediaServerSettings(),
+            NullLogger<RemoteTranscodeEngine>.Instance);
+
+        var tooling = await engine.GetToolingAsync(CancellationToken.None);
+
+        Assert.Equal(expected, tooling.DolbyVisionConversion);
+    }
+
+    [Fact]
     public async Task An_audio_targets_bitrate_travels_as_bitrate_in_kbps()
     {
         var body = await PostAsync(new EngineAudioTarget(0, 1, "eac3", 640));

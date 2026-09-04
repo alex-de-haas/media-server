@@ -104,3 +104,77 @@ export function objectAudioFormat(profile: string | null | undefined): string | 
   }
   return /dts:?x/i.test(profile) ? "DTS:X" : null;
 }
+
+import type { DolbyVisionDetail, MediaStream } from "@/lib/media-server";
+
+/** Codecs a muxer writes cover art as: a real video track in every way that can be seen, and not the film. */
+const STILL_IMAGE_CODECS = new Set(["mjpeg", "png", "bmp", "gif", "webp"]);
+
+/** The stream that is actually the film, by the rule every server surface uses (`NativePlaybackResolver.Picture`):
+ *  the first embedded video track by index that is not a still image, and only then the first video track at all.
+ *  A cover a muxer wrote as a video track sorts first and can carry an SDR range of its own, so picking "the first
+ *  video with a range" would judge the cover and hide the film. */
+export function pictureStream(streams: readonly MediaStream[]): MediaStream | null {
+  const videos = streams
+    .filter((stream) => stream.type === "Video" && !stream.isExternal)
+    .sort((a, b) => a.index - b.index);
+  return videos.find((stream) => !STILL_IMAGE_CODECS.has((stream.codec ?? "").toLowerCase())) ?? videos[0] ?? null;
+}
+
+/** How a Dolby Vision profile is named on a badge: "Dolby Vision 8.1" for profile 8 by its base layer, the
+ *  bare profile otherwise ("Dolby Vision 7", "Dolby Vision 5"). The level is left out — it is 6 on nearly
+ *  every film and tells a viewer nothing the profile does not. */
+export function dolbyVisionLabel(detail: DolbyVisionDetail | null | undefined): string {
+  if (!detail) {
+    return "Dolby Vision";
+  }
+  return detail.profile === 8 ? `Dolby Vision 8.${detail.blCompatibilityId}` : `Dolby Vision ${detail.profile}`;
+}
+
+/** The dynamic-range badges for a video stream: one per format the probe named, so a value like
+ *  "Dolby Vision · HDR10" (what a profile 8.1 file honestly is) yields two, with the Dolby Vision one
+ *  carrying the profile when it is recorded. Nothing for SDR, and nothing when the probe named no range at
+ *  all — a missing badge beats a false one. The generic "HDR" a header reader reports (PQ, but it cannot
+ *  say which kind) passes through as it is: it is a positive statement, just a coarse one. */
+export function dynamicRangeBadges(hdrFormat: string | null | undefined, detail: DolbyVisionDetail | null | undefined): string[] {
+  if (!hdrFormat) {
+    return [];
+  }
+  return hdrFormat
+    .split(/[·,]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && part.toUpperCase() !== "SDR")
+    .map((part) => (/dolby vision/i.test(part) ? dolbyVisionLabel(detail) : part));
+}
+
+/** The one thing a viewer with Apple hardware needs to know about a profile 7 file, or nothing. A dual layer
+ *  is the mark: no Apple device decodes it, so Apple TV and Infuse play the HDR10 base layer. */
+export function dolbyVisionNote(detail: DolbyVisionDetail | null | undefined): string | null {
+  if (!detail) {
+    return null;
+  }
+  return detail.profile === 7 || detail.enhancementLayer ? "Apple TV and Infuse play its HDR10 base layer" : null;
+}
+
+/** What a re-encode does to this source's dynamic range, said before the operator commits to one. Profile-aware
+ *  where the profile is known: profile 5 has no viewable base layer, 8.4 lands on HLG and 8.2 on SDR, while
+ *  7 and 8.1 keep an HDR10 picture and lose only the dynamic layer. */
+export function reencodeDynamicRangeWarning(hdrFormat: string | null | undefined, detail: DolbyVisionDetail | null | undefined): string | null {
+  if (!hdrFormat) {
+    return null;
+  }
+  if (!/dolby vision/i.test(hdrFormat)) {
+    return `This source is ${hdrFormat}. Re-encoding won’t carry its HDR metadata — choose “Keep original video” to preserve it.`;
+  }
+  const label = dolbyVisionLabel(detail);
+  if (detail?.profile === 5) {
+    return `This source is ${label}. Its base layer is not viewable without the Dolby Vision layer, so a re-encode wrecks the colours — choose “Keep original video”.`;
+  }
+  if (detail?.profile === 8 && detail.blCompatibilityId === 4) {
+    return `This source is ${label}. Re-encoding drops the Dolby Vision layer and lands on its HLG base layer — choose “Keep original video” to preserve it.`;
+  }
+  if (detail?.profile === 8 && detail.blCompatibilityId === 2) {
+    return `This source is ${label}. Re-encoding drops the Dolby Vision layer and lands on its SDR base layer — choose “Keep original video” to preserve it.`;
+  }
+  return `This source is ${label}. Re-encoding drops the Dolby Vision (and any HDR10+) layer and keeps an HDR10 picture — choose “Keep original video” to preserve it.`;
+}

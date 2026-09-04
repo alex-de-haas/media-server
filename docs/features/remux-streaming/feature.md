@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-08-31
+Updated: 2026-09-04
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -31,8 +31,9 @@ seeking past every payload. On production a feature film costs a minute or two.
 Each sample is an offset and a size into the source, because the design references
 samples rather than copying them. Alongside them the index carries what an MP4 sample
 entry needs, all of it taken from the source rather than derived: `CodecPrivate` is
-already the payload of `hvcC` or `avcC`, and the Dolby Vision configuration is already
-the payload of `dvvC`, in a `BlockAdditionMapping` whose type is literally `dvcC`.
+already the payload of `hvcC` or `avcC`, and the Dolby Vision configuration record
+comes verbatim from a `BlockAdditionMapping` — the synthesizer names its box by the
+record's own profile byte.
 
 **Only tracks a sample entry can be written for are walked** — the video codecs
 `Mp4Writer` knows, AC-3, E-AC-3 and AAC, and text subtitles. Every other track is still
@@ -197,8 +198,14 @@ A viewer changing track now pays a second of interruption when they ask for it. 
 alternative was a film that would not play.
 
 - **Dolby Vision** is offered as a `dvh1` sample entry, and only for HEVC that came with
-  a configuration, and only when the client asked. The cross-compatible `hvc1` form
-  still carries `dvvC`, which is what makes a client without Dolby Vision see HDR10.
+  a configuration, only when the client asked, and only when the record describes a
+  single layer. The record goes in the box its profile belongs to — `dvcC` up to 7,
+  `dvvC` from 8 — and the cross-compatible `hvc1` form still carries it, which is what
+  makes a client without Dolby Vision see HDR10. A **profile 7** record, or any with an
+  enhancement layer, is written as plain `hvc1` with no box at all: its RPU lives in
+  per-block `BlockAdditions` this index never carries, so a record would announce
+  metadata the output does not contain. See
+  [dolby-vision-profile](../dolby-vision-profile/feature.md).
 - **H.264** keeps `avc1` whatever is asked for.
 - **The picture is the first video track a sample entry can be written for**, not
   simply the first. A muxer may write cover art as a real video track, and taking that

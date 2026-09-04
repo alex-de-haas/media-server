@@ -34,7 +34,11 @@ public sealed record CreateTranscodeRequest(
     int? DefaultSubtitleStreamIndex = null,
     IReadOnlyList<Guid>? MergeStreamIds = null,
     IReadOnlyList<StreamMetadataEdit>? MetadataEdits = null,
-    IReadOnlyList<AudioTargetEdit>? AudioTargets = null);
+    IReadOnlyList<AudioTargetEdit>? AudioTargets = null,
+    /// <summary><c>keep</c> (default) or <c>toProfile81</c>: rewrite a dual-layer Dolby Vision profile 7
+    /// picture to single-layer profile 8.1 while it is copied — the form Apple TV and Infuse play as Dolby
+    /// Vision. Refused with a re-encode, and on a version whose video is not profile 7.</summary>
+    string? DolbyVision = null);
 
 /// <summary>
 /// Request to write chosen tracks of a movie source out as files beside it — the inverse of merging.
@@ -98,7 +102,9 @@ public sealed record TranscodeJobResponse(
     double? Fps,
     double? Speed,
     double? EtaSeconds,
-    long? OutputSizeBytes)
+    long? OutputSizeBytes,
+    // "toProfile81" when the copy also rewrote the picture's Dolby Vision to profile 8.1; null otherwise.
+    string? DolbyVision = null)
 {
     public static TranscodeJobResponse From(TranscodeJob job, JobSnapshot? snapshot)
     {
@@ -129,7 +135,8 @@ public sealed record TranscodeJobResponse(
             snapshot?.Fps,
             snapshot?.Speed,
             snapshot?.EtaSeconds,
-            snapshot?.OutputSizeBytes);
+            snapshot?.OutputSizeBytes,
+            job.DolbyVision);
     }
 }
 

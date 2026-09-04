@@ -93,6 +93,87 @@ public sealed class TranscodeServiceTests
     public void VersionLabel_PlacesQualityBeforeMerged() =>
         Assert.Equal("HEVC 1080p Small Merged", TranscodeService.VersionLabel("hevc", 1080, isMerge: true, qualityLevel: "small"));
 
+    // A rewritten Dolby Vision is a different file from a plain copy of the same source, so the two must not
+    // land on one path; the label names the profile it was rewritten to, after the audio and before Merged.
+    [Theory]
+    [InlineData(false, null, false, "Remux")]
+    [InlineData(false, null, true, "Remux DV 8.1")]
+    [InlineData(false, new[] { "eac3" }, true, "Remux EAC3 DV 8.1")]
+    [InlineData(true, null, true, "DV 8.1 Merged")]
+    public void VersionLabel_NamesTheDolbyVisionRewrite(bool isMerge, string[]? audioCodecs, bool dolbyVision, string expected) =>
+        Assert.Equal(expected, TranscodeService.VersionLabel("copy", null, isMerge, qualityLevel: null, audioCodecs: audioCodecs, dolbyVision: dolbyVision));
+
+    private static MediaStream Video(int? profile, int? compatibility = null, bool? el = null, string? hdr = "Dolby Vision") => new()
+    {
+        Id = Guid.NewGuid(), StreamType = StreamType.Video, Index = 0, Codec = "hevc", HdrFormat = hdr,
+        DvProfile = profile, DvBlSignalCompatibilityId = compatibility, DvElPresent = el,
+    };
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("keep")]
+    [InlineData("KEEP")]
+    public void ResolveDolbyVision_KeepOrAbsent_IsTheDefault(string? word) =>
+        Assert.Null(TranscodeService.ResolveDolbyVision(Request("copy") with { DolbyVision = word }, "copy", [Video(7, 6, true)]));
+
+    [Fact]
+    public void ResolveDolbyVision_AcceptsAProfile7CopyAndSpellsItTheEnginesWay() =>
+        Assert.Equal("toProfile81", TranscodeService.ResolveDolbyVision(Request("copy") with { DolbyVision = "toProfile81" }, "copy", [Video(7, 6, true)]));
+
+    [Fact]
+    public void ResolveDolbyVision_RefusesAnUnknownWord()
+    {
+        var error = Assert.Throws<TranscodeRequestException>(() =>
+            TranscodeService.ResolveDolbyVision(Request("copy") with { DolbyVision = "profile5" }, "copy", [Video(7, 6, true)]));
+        Assert.Contains("'profile5'", error.Message);
+    }
+
+    [Fact]
+    public void ResolveDolbyVision_RefusesAReencode()
+    {
+        // A re-encode drops Dolby Vision whatever is asked; the conversion rides on a copy.
+        var error = Assert.Throws<TranscodeRequestException>(() =>
+            TranscodeService.ResolveDolbyVision(Request("hevc") with { DolbyVision = "toProfile81" }, "hevc", [Video(7, 6, true)]));
+        Assert.Contains("Keep original video", error.Message);
+    }
+
+    [Theory]
+    [InlineData(8, "profile 8")]
+    [InlineData(5, "profile 5")]
+    public void ResolveDolbyVision_RefusesEveryOtherProfileByName(int profile, string expected)
+    {
+        var error = Assert.Throws<TranscodeRequestException>(() =>
+            TranscodeService.ResolveDolbyVision(Request("copy") with { DolbyVision = "toProfile81" }, "copy", [Video(profile, 1, false)]));
+        Assert.Contains(expected, error.Message);
+    }
+
+    [Fact]
+    public void ResolveDolbyVision_TellsAnUnrecordedProfileFromNoDolbyVision()
+    {
+        // A row labelled Dolby Vision before the record was stored is sent to the refresh pass, not to an
+        // engine that would refuse it three stages in; a plain HDR10 file has nothing to convert at all.
+        var unrecorded = Assert.Throws<TranscodeRequestException>(() =>
+            TranscodeService.ResolveDolbyVision(Request("copy") with { DolbyVision = "toProfile81" }, "copy", [Video(null)]));
+        Assert.Contains("Refresh", unrecorded.Message);
+
+        var hdr10 = Assert.Throws<TranscodeRequestException>(() =>
+            TranscodeService.ResolveDolbyVision(Request("copy") with { DolbyVision = "toProfile81" }, "copy", [Video(null, hdr: "HDR10")]));
+        Assert.Contains("not Dolby Vision", hdr10.Message);
+    }
+
+    [Fact]
+    public void ResolveDolbyVision_JudgesThePictureNotTheCoverArt()
+    {
+        // A muxer may write cover art as a video track that sorts first; the picture is the first video that is
+        // not a still, by the same rule every other surface uses.
+        var cover = new MediaStream { Id = Guid.NewGuid(), StreamType = StreamType.Video, Index = 0, Codec = "mjpeg" };
+        var picture = Video(7, 6, true);
+        picture.Index = 1;
+
+        Assert.Equal("toProfile81", TranscodeService.ResolveDolbyVision(Request("copy") with { DolbyVision = "toProfile81" }, "copy", [cover, picture]));
+    }
+
     // Re-encoded audio has to reach the label too. On a video copy it is the only thing that changes, so
     // without it "shrink the dubs, keep every frame of picture" lands on the path a plain remux already
     // holds and the duplicate check refuses it — which is exactly the cheap conversion this feature exists

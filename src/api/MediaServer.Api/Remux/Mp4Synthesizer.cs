@@ -1,3 +1,4 @@
+using MediaServer.Api.Probe;
 using static MediaServer.Api.Remux.Mp4Writer;
 
 namespace MediaServer.Api.Remux;
@@ -304,9 +305,12 @@ internal static class Mp4Synthesizer
         var entryName = codec.SampleEntry;
         if (signalling == VideoSignalling.DolbyVision
             && codec.ConfigurationBox == "hvcC"
-            && track.DolbyVisionConfiguration is not null)
+            && track.DolbyVisionConfiguration is { } configuration
+            && DolbyVisionBox(configuration) is not null)
         {
-            // Only HEVC carries Dolby Vision, and only a track that came with a configuration can claim it.
+            // Only HEVC carries Dolby Vision, only a track that came with a configuration can claim it, and only
+            // one whose record describes a single layer: a profile 7's RPU lives in BlockAdditions this index
+            // never carries, so a dvh1 entry over it would promise metadata the output does not hold.
             entryName = "dvh1";
         }
 
@@ -675,6 +679,30 @@ internal static class Mp4Synthesizer
         return true;
     }
 
+    /// <summary>
+    /// The box a Dolby Vision record belongs in, or null when the record must not be written at all. The spec
+    /// names the box by profile — <c>dvcC</c> up to profile 7, <c>dvvC</c> from 8 — and the record's own
+    /// profile byte says which, so nothing has to be carried from the source mapping. A profile 7 record, or
+    /// any with an enhancement layer, answers null: the remux copies the base layer alone, its RPU and
+    /// enhancement layer stay behind in the source's <c>BlockAdditions</c>, and a record announcing Dolby Vision
+    /// over a stream that carries none would describe metadata the output does not contain. The viewer sees
+    /// the HDR10 base layer either way; without the record, honestly so.
+    /// </summary>
+    internal static string? DolbyVisionBox(byte[] configuration)
+    {
+        if (DolbyVisionConfiguration.Parse(configuration) is not { } record)
+        {
+            return null;
+        }
+
+        if (record.Profile == 7 || record.ElPresent)
+        {
+            return null;
+        }
+
+        return record.Profile >= 8 ? "dvvC" : "dvcC";
+    }
+
     private static byte[] VideoEntry(IndexedTrack track, string entryName, string configurationBox)
     {
         var extras = new List<byte[]> { Box(configurationBox, track.CodecPrivate!) };
@@ -692,9 +720,9 @@ internal static class Mp4Synthesizer
                 [(byte)(track.FullRange ? 0x80 : 0x00)]));
         }
 
-        if (track.DolbyVisionConfiguration is not null)
+        if (track.DolbyVisionConfiguration is { } configuration && DolbyVisionBox(configuration) is { } box)
         {
-            extras.Add(Box("dvvC", track.DolbyVisionConfiguration));
+            extras.Add(Box(box, configuration));
         }
 
         byte[] body =

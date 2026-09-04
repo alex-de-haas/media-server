@@ -190,7 +190,7 @@ internal static class ContainerHeader
         string? title = null;
         int channels = 0, sampleRate = 0, transfer = 0;
         var enabled = true;
-        var dolbyVision = false;
+        DolbyVisionDetail? dolbyVision = null;
 
         if (FindBox(stream, from, to, "tkhd") is { } tkhd)
         {
@@ -260,9 +260,10 @@ internal static class ContainerHeader
             IsDefault: enabled, IsForced: false,
             width > 0 ? (int)width : null, height > 0 ? (int)height : null,
             null, null,
-            HdrFrom(transfer, dolbyVision),
+            HdrFrom(transfer, dolbyVision is not null),
             channels > 0 ? channels : null,
-            sampleRate > 0 ? sampleRate : null);
+            sampleRate > 0 ? sampleRate : null,
+            dolbyVision);
     }
 
     /// <summary>The packed trio of 5-bit letters in <c>mdhd</c>, or the BCP-47 string in <c>elng</c>.</summary>
@@ -298,11 +299,13 @@ internal static class ContainerHeader
         ]);
     }
 
-    /// <summary>Scans a VisualSampleEntry's children for the colour box and the Dolby Vision record.</summary>
-    private static (int Transfer, bool DolbyVision) Mp4VideoColour(Stream stream, long from, long to)
+    /// <summary>Scans a VisualSampleEntry's children for the colour box and the Dolby Vision record. The record
+    /// is read, not merely noticed: its profile and base-layer compatibility id are what tell a disc's dual
+    /// layer from a stream a single-layer decoder plays, and they are right here in the header.</summary>
+    private static (int Transfer, DolbyVisionDetail? DolbyVision) Mp4VideoColour(Stream stream, long from, long to)
     {
         var transfer = 0;
-        var dolbyVision = false;
+        DolbyVisionDetail? dolbyVision = null;
         var position = from;
         Span<byte> colour = stackalloc byte[10];
         while (position + 8 <= to)
@@ -324,7 +327,11 @@ internal static class ContainerHeader
             }
             else if (box.Type is "dvcC" or "dvvC")
             {
-                dolbyVision = true;
+                var length = (int)Math.Min(DolbyVisionConfiguration.Length, box.End - box.Start);
+                var record = new byte[Math.Max(0, length)];
+                stream.Position = box.Start;
+                stream.ReadExactly(record);
+                dolbyVision = DolbyVisionConfiguration.Parse(record);
             }
 
             position = box.Next;
@@ -393,6 +400,8 @@ internal static class ContainerHeader
     private const ulong IdVideo = 0xE0, IdPixelWidth = 0xB0, IdPixelHeight = 0xBA, IdDefaultDuration = 0x23E383;
     private const ulong IdColour = 0x55B0, IdTransferCharacteristics = 0x55BA, IdBitsPerChannel = 0x55B2;
     private const ulong IdAudio = 0xE1, IdChannels = 0x9F, IdSamplingFrequency = 0xB5;
+    private const ulong IdBlockAdditionMapping = 0x41E4, IdBlockAddIdName = 0x41A4, IdBlockAddIdType = 0x41E7, IdBlockAddIdExtraData = 0x41ED;
+    private const ulong BlockAddIdTypeDvcC = 0x64766343, BlockAddIdTypeDvvC = 0x64767643;
 
     private static TimeSpan? MatroskaDuration(Stream stream)
     {
@@ -463,6 +472,7 @@ internal static class ContainerHeader
         string codec = "?";
         string? language = null;
         string? title = null;
+        DolbyVisionDetail? dolbyVision = null;
 
         var position = from;
         while (position < to)
@@ -474,6 +484,7 @@ internal static class ContainerHeader
 
             switch (element.Id)
             {
+                case IdBlockAdditionMapping: dolbyVision ??= MatroskaDolbyVision(stream, element.Start, element.End); break;
                 case IdTrackType: type = Ebml.ReadUInt(stream, element.Start, element.End); break;
                 case IdCodecId: codec = Ebml.ReadString(stream, element.Start, element.End) ?? "?"; break;
                 case IdLanguage or IdLanguageBcp47: language = Ebml.ReadString(stream, element.Start, element.End) ?? language; break;
@@ -535,9 +546,45 @@ internal static class ContainerHeader
             // DefaultDuration is one frame's length in nanoseconds.
             defaultDuration > 0 ? 1_000_000_000d / defaultDuration : null,
             bitDepth > 0 ? bitDepth : null,
-            HdrFrom(transfer, dolbyVision: false),
+            HdrFrom(transfer, dolbyVision is not null),
             channels > 0 ? (int)channels : null,
-            sampleRate > 0 ? sampleRate : null);
+            sampleRate > 0 ? sampleRate : null,
+            dolbyVision);
+    }
+
+    /// <summary>
+    /// Where Matroska keeps the Dolby Vision configuration record: a <c>BlockAdditionMapping</c> whose type is
+    /// <c>dvcC</c> or <c>dvvC</c> — or, from a muxer that wrote only the name, one called "Dolby Vision
+    /// configuration" — with the record verbatim in its extra data. The same element the remux indexer reads;
+    /// nothing is inferred from the profile and nothing is read out of the bitstream. Null for a mapping of
+    /// some other kind (an alpha channel, say), so the caller keeps looking.
+    /// </summary>
+    private static DolbyVisionDetail? MatroskaDolbyVision(Stream stream, long from, long to)
+    {
+        var isDolbyVision = false;
+        byte[]? extra = null;
+        var position = from;
+        while (position < to)
+        {
+            if (Ebml.Read(stream, position, to) is not { } element) { break; }
+            if (element.Id == IdBlockAddIdType)
+            {
+                var kind = Ebml.ReadUInt(stream, element.Start, element.End);
+                isDolbyVision |= kind is BlockAddIdTypeDvcC or BlockAddIdTypeDvvC;
+            }
+            else if (element.Id == IdBlockAddIdName)
+            {
+                isDolbyVision |= Ebml.ReadString(stream, element.Start, element.End)?.Contains("Dolby Vision", StringComparison.OrdinalIgnoreCase) == true;
+            }
+            else if (element.Id == IdBlockAddIdExtraData)
+            {
+                extra = Ebml.ReadBytes(stream, element.Start, element.End, max: DolbyVisionConfiguration.Length);
+            }
+
+            position = element.End;
+        }
+
+        return isDolbyVision && extra is not null ? DolbyVisionConfiguration.Parse(extra) : null;
     }
 
     // ---- AVI ----

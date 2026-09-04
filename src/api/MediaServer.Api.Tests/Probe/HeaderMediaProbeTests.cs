@@ -120,7 +120,81 @@ public sealed class HeaderMediaProbeTests : IDisposable
         Assert.Equal("Dolby Vision", Probe().TryProbe(file)!.Streams[0].HdrFormat);
     }
 
+    [Fact]
+    public void The_dolby_vision_record_is_read_not_merely_noticed()
+    {
+        // The record's profile and compatibility id are what tell a disc's dual layer from a stream a
+        // single-layer decoder plays, and they sit right here in the sample entry.
+        var file = Write(".mp4", Mp4(
+            Mvhd(1000, 1000),
+            Trak("vide", "hvc1", transferCharacteristics: 16, dolbyVisionRecord: DolbyVisionConfigurationTests.Profile7)));
+
+        var video = Probe().TryProbe(file)!.Streams[0];
+        Assert.Equal("Dolby Vision", video.HdrFormat);
+        Assert.Equal(new DolbyVisionDetail(7, 6, 6, ElPresent: true), video.DolbyVision);
+    }
+
+    [Fact]
+    public void A_stream_without_a_record_has_no_dolby_vision_detail()
+    {
+        var file = Write(".mp4", Mp4(Mvhd(1000, 1000), Trak("vide", "hvc1", transferCharacteristics: 16)));
+
+        Assert.Null(Probe().TryProbe(file)!.Streams[0].DolbyVision);
+    }
+
     // ---- Matroska ----
+
+    [Fact]
+    public void Reads_the_dolby_vision_record_out_of_a_matroska_block_addition_mapping()
+    {
+        // Until now the reader never reported Dolby Vision for Matroska at all: the record is not in the codec
+        // private data but in the track's BlockAdditionMapping, the element the remux indexer reads.
+        var file = Write(".mkv", Matroska(
+            Info(1000),
+            Tracks(TrackEntry(1, "V_MPEGH/ISO/HEVC", transferCharacteristics: 16, dolbyVision: DolbyVisionConfigurationTests.Profile81))));
+
+        var video = Probe().TryProbe(file)!.Streams[0];
+        Assert.Equal("Dolby Vision", video.HdrFormat);
+        Assert.Equal(new DolbyVisionDetail(8, 6, 1, ElPresent: false), video.DolbyVision);
+    }
+
+    [Fact]
+    public void A_mapping_that_names_dolby_vision_without_a_type_still_counts()
+    {
+        var file = Write(".mkv", Matroska(
+            Info(1000),
+            Tracks(TrackEntry(1, "V_MPEGH/ISO/HEVC", transferCharacteristics: 16, dolbyVision: DolbyVisionConfigurationTests.Profile7, nameOnlyMapping: true))));
+
+        Assert.Equal(7, Probe().TryProbe(file)!.Streams[0].DolbyVision!.Profile);
+    }
+
+    [Fact]
+    public void A_mapping_of_another_kind_is_not_dolby_vision()
+    {
+        // An alpha channel is also a BlockAdditionMapping; the transfer function alone says HDR.
+        var entry = TrackEntry(1, "V_MPEGH/ISO/HEVC", transferCharacteristics: 16);
+        var withAlpha = ContainerBuilders.Ebml(0xAE, StripEbmlHeader(entry), AlphaMapping());
+        var file = Write(".mkv", Matroska(Info(1000), Tracks(withAlpha)));
+
+        var video = Probe().TryProbe(file)!.Streams[0];
+        Assert.Equal("HDR", video.HdrFormat);
+        Assert.Null(video.DolbyVision);
+    }
+
+    /// <summary>The children of an EBML element, so a test can append one more to a built track entry.</summary>
+    private static byte[] StripEbmlHeader(byte[] element)
+    {
+        // Id (1 byte for 0xAE) then a size vint; the payload follows.
+        var lengthByte = element[1];
+        var lengthBytes = 1;
+        for (var mask = 0x80; (lengthByte & mask) == 0 && lengthBytes < 8; mask >>= 1)
+        {
+            lengthBytes++;
+        }
+
+        return element[(1 + lengthBytes)..];
+    }
+
 
     [Fact]
     public void Reads_a_matroska_duration_scaled_by_its_timestamp_scale()

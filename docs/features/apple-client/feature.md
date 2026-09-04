@@ -425,6 +425,17 @@ Sign out and the dynamic-range override are a third tab. Both are answers to a s
 wrong server, or a dark picture — and something that fixes a symptom has to be findable
 while looking at it.
 
+### What the title screen says about the picture
+
+Over a version's tracks the title screen shows its dynamic range as capsules — `Dolby
+Vision 8.1`, `HDR10` — one per format the server named, the Dolby Vision one carrying
+the profile when the server recorded it and staying the bare name while it has not. A
+dual-layer profile 7 adds *Plays as HDR10 on this device*: no Apple device decodes it,
+and the client is the one that knows what the device does. The labels and the note are
+computed in `MediaKit` (`DynamicRange`), not in the view, so they are tested. Text marks
+rather than logos — the Dolby Vision mark is licensed, and a capsule reads the same. See
+[dolby-vision-profile](../dolby-vision-profile/feature.md).
+
 ### The credential refreshes on a refusal, not on a clock
 
 The app grant states an `expiresAt` thirty days out — its *absolute* cap — but it also
@@ -591,6 +602,10 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
 
 ## Testing Expectations
 
+- **The dynamic range on the title screen** (`DynamicRangeTests`): the Dolby Vision label
+  naming profile 8 by its base layer and the others by profile, one badge per format the
+  server named and none for SDR, the dual-layer note and nothing else, and a track
+  decoding the server's record and its absence.
 - **The pairing chain**, against a transport of canned answers — because every failure it
   has to handle is a state a real Core will not produce on request. Each poll answer maps to
   its own outcome; `approved` with no token is treated as expired rather than looped on; the

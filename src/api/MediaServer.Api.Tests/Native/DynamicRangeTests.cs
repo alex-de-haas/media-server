@@ -46,6 +46,46 @@ public sealed class DynamicRangeTests
         Assert.True(NativePlaybackResolver.CanPresentFor(null, SdrOnly));
     }
 
+    // ---- signalling by profile ----
+
+    [Theory]
+    [InlineData(5, 0, false)]   // profile 5: Dolby Vision proper, which the television decodes
+    [InlineData(8, 1, false)]   // profile 8.1: single layer over HDR10
+    [InlineData(8, 4, false)]   // profile 8.4: single layer over HLG
+    public void A_single_layer_source_is_signalled_as_dolby_vision_to_a_television(int profile, int compatibility, bool enhancementLayer) =>
+        Assert.Equal("dvh1", NativePlaybackResolver.SignallingForTest("Dolby Vision", profile, compatibility, enhancementLayer, Television));
+
+    [Fact]
+    public void A_profile_7_source_is_never_signalled_as_dolby_vision()
+    {
+        // A UHD Blu-ray's dual layer: no Apple device decodes it, and the remux leaves its enhancement layer
+        // and RPU behind in the source's BlockAdditions. The viewer sees the HDR10 base layer exactly as
+        // before — what changes is that the server stops promising dvh1 over a stream it wrote without
+        // Dolby Vision. Dolby Vision for such a title comes only from the conversion.
+        Assert.Equal("hvc1", NativePlaybackResolver.SignallingForTest("Dolby Vision", 7, 6, true, Television));
+        Assert.Equal("hvc1", NativePlaybackResolver.SignallingForTest("Dolby Vision \u00b7 HDR10", 7, 6, true, Television));
+    }
+
+    [Fact]
+    public void A_profile_8_over_an_sdr_base_is_signalled_cross_compatible() =>
+        Assert.Equal("hvc1", NativePlaybackResolver.SignallingForTest("Dolby Vision", 8, 2, false, Television));
+
+    [Fact]
+    public void A_source_whose_profile_is_not_recorded_keeps_the_label_based_answer()
+    {
+        // Rows written before the record was stored: today's behaviour, so nothing regresses before the
+        // refresh pass has run — every 8.1 film this library holds keeps arriving as dvh1.
+        Assert.Equal("dvh1", NativePlaybackResolver.SignallingForTest("Dolby Vision", null, null, null, Television));
+    }
+
+    [Fact]
+    public void The_profile_changes_nothing_for_a_client_without_dolby_vision()
+    {
+        var hdr10Only = Television with { HdrFormats = ["SDR", "HDR10"] };
+        Assert.Equal("hvc1", NativePlaybackResolver.SignallingForTest("Dolby Vision", 8, 1, false, hdr10Only));
+        Assert.Equal("hvc1", NativePlaybackResolver.SignallingForTest("Dolby Vision", 5, 0, false, hdr10Only));
+    }
+
     [Theory]
     [InlineData("Dolby Vision \u00b7 HDR10")]
     [InlineData("Dolby Vision, HDR10")]

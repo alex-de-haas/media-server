@@ -75,7 +75,8 @@ public sealed class NativePlaybackResolver(
                     .OrderBy(stream => stream.Index)
                     .Select(stream => new StreamFacts(
                         stream.StreamType, stream.Codec, stream.HdrFormat, stream.Channels, stream.IsExternal,
-                        stream.Id, stream.Language, stream.IsDefault, stream.IsForced))
+                        stream.Id, stream.Language, stream.IsDefault, stream.IsForced,
+                        stream.DvProfile, stream.DvBlSignalCompatibilityId, stream.DvElPresent))
                     .ToList(),
             })
             .ToListAsync(cancellationToken);
@@ -133,7 +134,7 @@ public sealed class NativePlaybackResolver(
                     SubtitleStreamId: null);
 
             case NativePlaybackDecision.Remux:
-                var signalling = SignallingFor(video?.HdrFormat, profile);
+                var signalling = SignallingFor(video, profile);
                 return new NativePlaybackResolution(
                     sourceId,
                     versionName,
@@ -308,11 +309,28 @@ public sealed class NativePlaybackResolver(
     /// path: a file served as it is carries whatever signalling it was written with, which nothing here
     /// gets to choose.
     /// </summary>
-    /// <summary>The same question, reachable by a test.</summary>
+    /// <summary>The same question, reachable by a test — for a source whose profile is not recorded.</summary>
     internal static string? SignallingForTest(string? hdrFormat, NativeCapabilityProfile profile) =>
-        SignallingFor(hdrFormat, profile);
+        SignallingFor(hdrFormat, null, null, null, profile);
 
-    private static string? SignallingFor(string? hdrFormat, NativeCapabilityProfile profile)
+    /// <summary>The same question, reachable by a test — for a source whose record is known.</summary>
+    internal static string? SignallingForTest(
+        string? hdrFormat, int? dvProfile, int? dvCompatibility, bool? dvEnhancementLayer, NativeCapabilityProfile profile) =>
+        SignallingFor(hdrFormat, dvProfile, dvCompatibility, dvEnhancementLayer, profile);
+
+    private static string? SignallingFor(StreamFacts? video, NativeCapabilityProfile profile) =>
+        SignallingFor(video?.HdrFormat, video?.DvProfile, video?.DvBlSignalCompatibilityId, video?.DvElPresent, profile);
+
+    /// <summary>
+    /// <c>dvh1</c> engages Dolby Vision and is asked for only when the client reported it <em>and</em> the
+    /// source is a form a single-layer decoder plays: profile 5, or profile 8 with an HDR10 or HLG base layer.
+    /// A profile 7 source — a UHD Blu-ray's dual layer — is never signalled as Dolby Vision: no Apple device
+    /// decodes it, and the remux leaves its enhancement layer and RPU behind anyway, so the viewer sees the
+    /// HDR10 base layer exactly as before and the server stops claiming otherwise. A source whose profile is
+    /// not yet recorded keeps the label-based answer, so nothing regresses before the refresh pass has run.
+    /// </summary>
+    private static string? SignallingFor(
+        string? hdrFormat, int? dvProfile, int? dvCompatibility, bool? dvEnhancementLayer, NativeCapabilityProfile profile)
     {
         if (IsSdr(hdrFormat))
         {
@@ -323,9 +341,20 @@ public sealed class NativePlaybackResolver(
         // "Dolby Vision · HDR10" compared whole against "Dolby Vision" matches nothing, and the film
         // would be signalled as plain HDR10 to a television that can show Dolby Vision — the exact
         // downgrade this whole feature exists to avoid, delivered silently.
-        return Formats(hdrFormat!).Any(format =>
-                   format.Equals(DolbyVision, StringComparison.OrdinalIgnoreCase))
-               && Supports(profile.HdrFormats, DolbyVision)
+        var namesDolbyVision = Formats(hdrFormat!).Any(format =>
+            format.Equals(DolbyVision, StringComparison.OrdinalIgnoreCase));
+        if (!namesDolbyVision || !Supports(profile.HdrFormats, DolbyVision))
+        {
+            return NativeSignalling.CrossCompatible;
+        }
+
+        if (dvProfile is null)
+        {
+            return NativeSignalling.DolbyVision;
+        }
+
+        var detail = new DolbyVisionDetail(dvProfile.Value, 0, dvCompatibility ?? 0, dvEnhancementLayer ?? false);
+        return !detail.ElPresent && DolbyVisionConfiguration.IsSingleLayerPlayable(detail)
             ? NativeSignalling.DolbyVision
             : NativeSignalling.CrossCompatible;
     }
@@ -420,11 +449,13 @@ public sealed class NativePlaybackResolver(
     /// <summary>The same choice, over the entity rather than the projection, so a test can make one.</summary>
     internal static StreamFacts? PictureFor(IEnumerable<MediaStream> streams) =>
         Picture([.. streams.OrderBy(stream => stream.Index).Select(stream => new StreamFacts(
-            stream.StreamType, stream.Codec, stream.HdrFormat, stream.Channels, stream.IsExternal))]);
+            stream.StreamType, stream.Codec, stream.HdrFormat, stream.Channels, stream.IsExternal,
+            DvProfile: stream.DvProfile, DvBlSignalCompatibilityId: stream.DvBlSignalCompatibilityId, DvElPresent: stream.DvElPresent))]);
 
     internal sealed record StreamFacts(
         StreamType StreamType, string? Codec, string? HdrFormat, int? Channels, bool IsExternal,
-        Guid Id = default, string? Language = null, bool IsDefault = false, bool IsForced = false);
+        Guid Id = default, string? Language = null, bool IsDefault = false, bool IsForced = false,
+        int? DvProfile = null, int? DvBlSignalCompatibilityId = null, bool? DvElPresent = null);
 }
 
 /// <summary>

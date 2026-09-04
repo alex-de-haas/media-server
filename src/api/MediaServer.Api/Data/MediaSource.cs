@@ -75,6 +75,16 @@ public sealed class MediaStream
     public int? BitDepth { get; set; }
     public string? HdrFormat { get; set; }
 
+    // The Dolby Vision configuration record, when the video carries one — the same 24 bytes the container
+    // holds in an MP4 dvcC/dvvC box or a Matroska BlockAdditionMapping, and what tells a dual-layer profile
+    // 7 (a UHD Blu-ray remux, which Apple TV and Infuse play as HDR10) from a single-layer 8.1 (which they
+    // play as Dolby Vision). HdrFormat stays the flat label; this sits beside it. All null when the stream
+    // is not Dolby Vision, or was probed before these were recorded — the refresh pass fills the latter in.
+    public int? DvProfile { get; set; }
+    public int? DvLevel { get; set; }
+    public int? DvBlSignalCompatibilityId { get; set; }
+    public bool? DvElPresent { get; set; }
+
     // Audio
     public int? Channels { get; set; }
     public int? SampleRate { get; set; }

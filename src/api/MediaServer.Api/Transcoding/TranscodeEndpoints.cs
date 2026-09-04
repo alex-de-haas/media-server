@@ -16,8 +16,15 @@ public static class TranscodeEndpoints
         // — it lists a title's versions and picks which one plays, neither of which needs an engine — but
         // the conversion controls have nothing to talk to, so the UI hides them rather than offering an
         // action that can only fail.
-        group.MapGet("/availability", (ITranscodeEngine engine) =>
-            Results.Ok(new { available = engine is not DisabledTranscodeEngine }));
+        //
+        // The tooling rides along: the Dolby Vision conversion is offered only when the engine carries the
+        // tools for it, and an engine without them refuses the job rather than copying silently.
+        group.MapGet("/availability", async (ITranscodeEngine engine, CancellationToken cancellationToken) =>
+        {
+            var available = engine is not DisabledTranscodeEngine;
+            var tooling = available ? await engine.GetToolingAsync(cancellationToken) : TranscodeTooling.None;
+            return Results.Ok(new { available, dolbyVisionConversion = tooling.DolbyVisionConversion });
+        });
 
         // Every language tag a track edit may carry — the canonical forms plus the spellings that fold onto
         // them, because a client validating against the canonical set alone would refuse values this service
