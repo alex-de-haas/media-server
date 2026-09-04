@@ -336,6 +336,28 @@ public sealed class McpToolInvokerTests : IDisposable
         Assert.True(result["result"]!["isError"]!.GetValue<bool>());
     }
 
+    [Fact]
+    public async Task Add_torrent_refuses_both_sources_and_refuses_neither()
+    {
+        // The service enforces this too, but only after resolving a catalog. Refusing here keeps the
+        // model from being told "exactly one" by an error that arrives after other work, and keeps a
+        // call carrying both from depending on which one the service happens to prefer.
+        var both = await CallAsync("add_torrent", new JsonObject
+        {
+            ["catalogId"] = Guid.NewGuid().ToString(),
+            ["magnet"] = "magnet:?xt=urn:btih:abc",
+            ["torrentFileBase64"] = "ZA==",
+        });
+        Assert.True(both["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains("exactly one", both["result"]!["content"]![0]!["text"]!.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
+
+        var neither = await CallAsync("add_torrent", new JsonObject
+        {
+            ["catalogId"] = Guid.NewGuid().ToString(),
+        });
+        Assert.True(neither["result"]!["isError"]!.GetValue<bool>());
+    }
+
     private async Task<JsonNode> CallAsync(
         string tool, JsonObject arguments, int? appUserId = 1, bool isAdministrator = true)
     {

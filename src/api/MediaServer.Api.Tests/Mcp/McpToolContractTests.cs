@@ -96,6 +96,24 @@ public sealed class McpToolContractTests
     }
 
     [Fact]
+    public void Add_torrent_takes_a_file_as_well_as_a_magnet_and_requires_neither_by_name()
+    {
+        // An agent handed a .torrent had no way through: the schema offered only `magnet`, and
+        // required it. It converted the file to a magnet instead — which drops the file list, so the
+        // free-space check cannot run until metadata arrives, and the start then depends on reaching
+        // peers to learn what the torrent even is.
+        var tool = McpToolInvoker.Tools()
+            .Single(entry => entry!["name"]!.GetValue<string>() == "add_torrent")!;
+        var properties = tool["inputSchema"]!["properties"]!;
+
+        Assert.NotNull(properties["torrentFileBase64"]);
+        Assert.NotNull(properties["magnet"]);
+        // Only the catalog is required. Requiring either source would make the other unusable.
+        Assert.Equal(["catalogId"], tool["inputSchema"]!["required"]!.AsArray().Select(name => name!.GetValue<string>()));
+        Assert.Contains("do not convert it to a magnet", properties["torrentFileBase64"]!["description"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_two_release_tools_say_which_one_answers_for_an_untracked_title()
     {
         // They look interchangeable and are not: the calendar reads the watchlist and answers nothing for

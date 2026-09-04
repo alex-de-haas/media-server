@@ -1,7 +1,7 @@
 # MCP Tools
 
 Created: 2026-09-01
-Updated: 2026-09-03
+Updated: 2026-09-04
 
 This server's use cases as MCP tools, so an agent on the host can answer *"do I have this?"*,
 *"why has this not appeared?"*, *"get me this"*, and repair a bad identification without the
@@ -64,6 +64,13 @@ Two pairs look interchangeable and are not, so each description points at its si
   the case "when does it come out" is usually about. `preview_release` asks the provider directly and
   records nothing.
 - `search_library` answers what this server holds; `search_metadata` asks the provider by name.
+
+`add_torrent` takes a magnet link **or** a base64 `.torrent` file, exactly one. The file is the
+better source when there is one: it carries the file list and sizes, so the free-space refusal
+happens before the download starts rather than after metadata arrives from peers, and starting does
+not depend on reaching a swarm to learn what the torrent is. The tool offered only magnets at first,
+and an agent holding a `.torrent` converted it to a magnet to get through — a workaround that threw
+away exactly those two properties.
 
 ## What A "No" From This Server Means
 
