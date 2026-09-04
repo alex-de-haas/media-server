@@ -82,6 +82,22 @@ public final class PlaybackDiagnostics {
     public private(set) var lastError: String?
     public private(set) var errors = 0
 
+    /// The loader feeding the player, when one is. Read once a second beside everything else, so the
+    /// overlay can say what only this layer knows: how much is held, how far ahead, and how many
+    /// requests actually reached the server.
+    public weak var loader: RemuxLoader?
+    public private(set) var windowMB: Double?
+    public private(set) var aheadMB: Double?
+    public private(set) var serverRequests: Int?
+
+    /// How many times a stuck player was re-seated. Counted where it can be seen: a remedy that runs
+    /// constantly is a symptom, not a fix.
+    public private(set) var recoveries = 0
+
+    public func recovered() {
+        recoveries += 1
+    }
+
     /// Kept short: this is read on a television, at a glance, while something is going wrong.
     private static let keep = 240
 
@@ -161,6 +177,19 @@ public final class PlaybackDiagnostics {
             in: item.loadedTimeRanges.map(\.timeRangeValue), at: position)
 
         readErrors(item)
+
+        if let loader {
+            let held = loader.makeSnapshot()
+            windowMB = Double(held.windowBytes) / 1_000_000
+            aheadMB = Double(held.aheadBytes) / 1_000_000
+            serverRequests = held.serverRequests
+        } else {
+            // Cleared, not kept: an item that fetches for itself must not wear the previous one's
+            // figures.
+            windowMB = nil
+            aheadMB = nil
+            serverRequests = nil
+        }
 
         // The access log's own stall count, which counts what the notification can miss.
         let event = item.accessLog()?.events.last

@@ -23,6 +23,9 @@ struct PlayerView: UIViewControllerRepresentable {
     let startAt: Double
     let diagnostics: PlaybackDiagnostics?
 
+    /// Feed the player ourselves, from a window read ahead of it. See `RemuxLoader`.
+    let ownLoader: Bool
+
     /// What this edition has to offer, for the menu. Known already from the title screen, so choosing
     /// costs no request until something is chosen.
     let audioTracks: [TitleTrack]
@@ -51,7 +54,7 @@ struct PlayerView: UIViewControllerRepresentable {
         //
         // So this asks for nothing and lets the player choose, which is what it was doing before #211
         // and while playback was no worse than it is now.
-        let item = AVPlayerItem(asset: AVURLAsset(url: stream.url))
+        let item = context.coordinator.feed(stream, ownLoader: ownLoader)
         let player = AVPlayer(playerItem: item)
 
         if startAt > 1 {
@@ -73,6 +76,7 @@ struct PlayerView: UIViewControllerRepresentable {
             // The same value the seek above used, so a resumed film is not reported as opening the
             // instant its play head landed where it was sent.
             diagnostics.start(observing: item, from: startAt > 1 ? startAt : 0)
+            diagnostics.loader = context.coordinator.loader
             let overlay = UIHostingController(rootView: DiagnosticsOverlay(diagnostics: diagnostics))
             overlay.view.backgroundColor = .clear
             // A child of the player, not a loose view inside it: a hosting controller that never joins
@@ -86,6 +90,7 @@ struct PlayerView: UIViewControllerRepresentable {
         }
 
         context.coordinator.observe(player, onProgress: onProgress)
+        context.coordinator.guardPlayback(player)
         // Only where the choice is ours to make. Direct play serves the file as it stands, so the
         // server reports no tracks and switching would fetch the same complete file again — every row
         // unticked and nothing happening. AVKit's own picker is the one that works there.
@@ -168,6 +173,15 @@ struct PlayerView: UIViewControllerRepresentable {
         /// is watching any more.
         private var switchTask: Task<Void, Never>?
 
+        /// The loader feeding the current item, when the film is being fed rather than fetched.
+        private(set) var loader: RemuxLoader?
+        private var ownLoader = true
+        private let guardian = LoaderGuardian()
+
+        /// The re-seat in flight, so leaving the film can stop it — the same hazard as a track switch:
+        /// a seek that lands after the viewer has gone would start a film nobody is watching.
+        private var reseatTask: Task<Void, Never>?
+
         init(onFinished: @escaping (Double) -> Void, diagnostics: PlaybackDiagnostics?) {
             self.onFinished = onFinished
             self.diagnostics = diagnostics
@@ -184,6 +198,57 @@ struct PlayerView: UIViewControllerRepresentable {
                 if seconds.isFinite, seconds > 0 {
                     onProgress(seconds)
                 }
+            }
+        }
+
+        /// The item to play — and, on the remux path with the loader on, the loader feeding it.
+        ///
+        /// Direct play keeps the plain asset. The server never assembled that file, and a loader that
+        /// assumes it did has no business in front of it.
+        func feed(_ stream: PlayableStream, ownLoader: Bool) -> AVPlayerItem {
+            loader?.stop()
+            loader = nil
+            self.ownLoader = ownLoader
+
+            guard ownLoader, stream.decision == .remux else {
+                return AVPlayerItem(asset: AVURLAsset(url: stream.url))
+            }
+
+            let fed = RemuxLoader(origin: stream.url)
+            loader = fed
+            return AVPlayerItem(asset: fed.makeAsset())
+        }
+
+        /// Watches for a player that has stopped asking with bytes in hand, and re-seats it — which
+        /// is what a viewer does with pause and play, done for them.
+        func guardPlayback(_ player: AVPlayer) {
+            guard let loader else {
+                guardian.stop()
+                return
+            }
+
+            guardian.start(watching: player, fedBy: loader) { [weak self] _ in
+                self?.reseat(player)
+            }
+        }
+
+        /// A new item on the same loader. The window survives, so the new item's first requests are
+        /// answered from memory, and the position is restored exactly.
+        private func reseat(_ player: AVPlayer) {
+            guard let loader else { return }
+            diagnostics?.recovered()
+
+            let at = player.currentTime()
+            let item = AVPlayerItem(asset: loader.makeAsset())
+            player.replaceCurrentItem(with: item)
+            guardian.restarted()
+
+            reseatTask?.cancel()
+            reseatTask = Task { @MainActor [weak self] in
+                await player.seek(to: at, toleranceBefore: .zero, toleranceAfter: .zero)
+                guard !Task.isCancelled, let self else { return }
+                self.diagnostics?.start(observing: item, from: at.seconds)
+                player.play()
             }
         }
 
@@ -232,12 +297,14 @@ struct PlayerView: UIViewControllerRepresentable {
                 // that resumes into a player nobody can see is heard rather than watched.
                 guard !Task.isCancelled, let self, let replacement else { return }
 
-                let item = AVPlayerItem(asset: AVURLAsset(url: replacement.url))
+                let item = self.feed(replacement, ownLoader: self.ownLoader)
                 player.replaceCurrentItem(with: item)
                 await player.seek(to: at, toleranceBefore: .zero, toleranceAfter: .zero)
                 guard !Task.isCancelled else { return }
 
                 self.diagnostics?.start(observing: item)
+                self.diagnostics?.loader = self.loader
+                self.guardPlayback(player)
                 player.play()
 
                 self.chosen = replacement
@@ -248,6 +315,11 @@ struct PlayerView: UIViewControllerRepresentable {
         /// The position is read from the player rather than passed in: whichever controller was showing,
         /// this is the one thing that knows where the viewer actually got to.
         func finish() {
+            guardian.stop()
+            loader?.stop()
+            loader = nil
+            reseatTask?.cancel()
+            reseatTask = nil
             switchTask?.cancel()
             switchTask = nil
 

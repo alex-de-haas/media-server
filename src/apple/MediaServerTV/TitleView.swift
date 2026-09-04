@@ -27,6 +27,7 @@ struct TitleView: View {
     /// being watched or — worse, because it looks like nothing — be created and quietly dropped every
     /// second for the length of a film.
     @State private var diagnostics: PlaybackDiagnostics?
+    @State private var ownLoader = true
 
     /// Which viewing this is. The session opens beside the player now, so its answer can land after the
     /// viewer has left — and assigning it then would leave a session id belonging to a film nobody is
@@ -67,6 +68,7 @@ struct TitleView: View {
                 stream: stream,
                 startAt: detail?.resumeSeconds ?? 0,
                 diagnostics: diagnostics,
+                ownLoader: ownLoader,
                 audioTracks: version?.audio ?? [],
                 subtitleTracks: version?.subtitles ?? [],
                 switchTracks: { audioId, subtitleId, off in
@@ -148,6 +150,7 @@ struct TitleView: View {
                 ? PlaybackDiagnostics() : nil
             watching?.resolved(after: Date().timeIntervalSince(asked))
             diagnostics = watching
+            ownLoader = PlaybackPreferencesStore().load().usesOwnLoader
 
             // The film opens now. Everything a viewer is waiting for is in hand, and the only thing
             // still outstanding — the session a progress report is filed against — was always best

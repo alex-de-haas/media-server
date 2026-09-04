@@ -50,6 +50,15 @@ struct SettingsView: View {
             // would find it dark again on the next launch, having already tried the one control offered.
             .onChange(of: preferences) { _, updated in store.save(updated) }
 
+            Toggle("Read ahead with our own loader", isOn: $preferences.usesOwnLoader)
+
+            Text("Fetches the film in large pieces ahead of the player and answers its requests from "
+                + "memory. Turn off only if a film will not play: the player then fetches for itself, "
+                + "as it did before.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 900, alignment: .leading)
+
             Toggle("Show playback diagnostics", isOn: $preferences.showDiagnostics)
 
             Text("Position, buffer, stalls and observed rate, over the picture. Watch the buffer: it "

@@ -24,6 +24,10 @@ struct DiagnosticsOverlay: View {
             row("буфер впереди", String(format: "%.1f с", diagnostics.bufferAhead),
                 warn: diagnostics.bufferAhead < 15)
             row("замираний", "\(diagnostics.stalls)", warn: diagnostics.stalls > 0)
+
+            if diagnostics.recoveries > 0 {
+                row("растормошён", "\(diagnostics.recoveries)", warn: true)
+            }
             row("поспевает", diagnostics.keepingUp ? "да" : "НЕТ", warn: !diagnostics.keepingUp)
 
             // The journal AVFoundation keeps and nothing here used to read. A player that stopped
@@ -52,6 +56,13 @@ struct DiagnosticsOverlay: View {
             row("пик притока", String(format: "%.0f Мбит/с", diagnostics.peakInflow))
             row("нужно фильму", needed)
             row("скачано", String(format: "%.2f ГБ", diagnostics.transferredGB))
+
+            // What only the loader knows. Absent when the player fetches for itself.
+            if let requests = diagnostics.serverRequests {
+                row("окно", String(
+                    format: "%.0f МБ, впереди %.0f МБ", diagnostics.windowMB ?? 0, diagnostics.aheadMB ?? 0))
+                row("запросов к серверу", "\(requests)")
+            }
             row("плеер считает", String(format: "%.0f Мбит/с", diagnostics.observedMbps))
 
             if diagnostics.lowestBuffer.isFinite {

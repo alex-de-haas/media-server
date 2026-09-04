@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-08-31
+Updated: 2026-09-04
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -196,6 +196,48 @@ without hardware. On macOS `presentsHDR` is `false` rather than assumed: the hon
 lives on the screen a window is on, which a synchronous property has no business reaching
 for and which means nothing before there is a window. Under-claiming costs an SDR picture
 that always works; over-claiming breaks one.
+
+## Feeding the player
+
+On the remux path the player is not handed a URL. It is handed an asset on a scheme it cannot fetch —
+`mediaserver-remux://`, the origin with only its scheme swapped so the signed token rides along — and
+`RemuxLoader` answers its byte-range requests instead. Same endpoint, same ranges on the wire, same
+container and decoder, so Dolby Vision is unaffected. What changes is who decides when to fetch and how
+much.
+
+It exists because of what the server's range log showed: the player asking in half-megabyte pieces,
+with a separate 64 KB request for every handful of audio frames — roughly seven extra round trips a
+second — and re-fetching about 1.4 times what it kept. Answers now come from a **window** held in
+memory, 128 MB ahead of the play head with 8 MB kept behind for a reader that lags, filled by a few
+large bounded requests: each asks for exactly the room there is, and the next starts once a quarter of
+the budget has drained. Bounded rather than open-ended because a connection nobody reads is one the
+server aborts. A request farther ahead than the fill will reach, or well behind the start, is a seek
+and restarts the window there; one just behind the start — a reader that lags — is fetched on its own,
+since the window cannot grow backwards and a request left pending there would be pending for ever.
+
+**Delivery to an open-ended request is metered.** A request for everything to the end takes whatever
+it is given, and a loader that kept giving would pull a whole film into the player's memory in minutes,
+its own budget bounding only what it kept rather than what it sent. So `LoaderGuardian` reads once a
+second how far ahead the player already holds, and while that covers more than twenty seconds nothing
+more is handed over; below it, at most sixteen megabytes a second — above any film's rate, so a healthy
+player is never starved by its own meter. This is, at last, a read-ahead in seconds under our control.
+
+The one HEAD before anything plays answers the content-information request from the server rather
+than by assumption, since a wrong length there is "does not play at all".
+
+**It does not make the player ask for more.** AVFoundation still decides what it wants; only how fast
+it is answered changed. What the loader adds is knowledge: whether bytes are being held that the player
+has not asked for. `WedgeDetector` reads that beside the play head and the bytes handed over, once a
+second, and a player that has stopped asking **with the answer in hand** is re-seated on a new item
+from the same loader, at the same position, exactly — which is what a viewer does with pause and play.
+A player being fed slowly is left alone, and so is one that is starving, since re-seating a player the
+server cannot keep up with would change nothing. Each re-seat is counted on the overlay, because a
+remedy that runs constantly is a symptom rather than a fix.
+
+Direct play keeps the plain asset: the server never assembled that file. A switch in Settings turns
+the loader off while the mechanism is new on the hardware, so a film that will not play through it
+still plays the old way. The overlay shows what only this layer knows — how much is held, how far
+ahead, and how many requests actually reached the server.
 
 ## Playback diagnostics
 
