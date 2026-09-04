@@ -211,17 +211,25 @@ public sealed class McpToolInvoker(
             "action"),
         WriteTool(
             "add_torrent",
-            "Starts a download into a catalog. The catalog is required and cannot be guessed — call "
-            + "list_catalogs and ask which one if it was not named. Answers 'accepted': the download is "
-            + "queued, not finished, and list_downloads reports its progress.",
+            "Starts a download into a catalog, from a magnet link or a .torrent file — exactly one of "
+            + "the two. The catalog is required and cannot be guessed: call list_catalogs and ask which "
+            + "one if it was not named. Prefer the file when you have one: it carries the file list and "
+            + "sizes, so the free-space check runs before the download starts rather than after "
+            + "metadata arrives, and it does not depend on reaching peers to learn what it is. Answers "
+            + "'accepted': the download is queued, not finished, and list_downloads reports its "
+            + "progress.",
             new JsonObject
             {
                 ["catalogId"] = Prop("string", "The catalog to download into. Required."),
-                ["magnet"] = Prop("string", "A magnet link."),
+                ["magnet"] = Prop("string", "A magnet link. Give this or torrentFileBase64, not both."),
+                ["torrentFileBase64"] = Prop(
+                    "string",
+                    "The contents of a .torrent file, base64-encoded. Read the file and encode it; do "
+                    + "not convert it to a magnet link first."),
                 ["keepSeeding"] = Prop("boolean", "Keep seeding after the download completes."),
             },
             idempotent: false,
-            "catalogId", "magnet"),
+            "catalogId"),
         WriteTool(
             "control_download",
             "Pauses, resumes, or stops seeding one download.",
@@ -1076,10 +1084,36 @@ public sealed class McpToolInvoker(
     {
         var catalogId = Id(arguments, "catalogId")
             ?? throw new InvalidOperationException("catalogId is required — call list_catalogs and ask which one.");
-        var magnet = Str(arguments, "magnet") ?? throw new InvalidOperationException("magnet is required.");
+        var magnet = Str(arguments, "magnet");
+        var torrentFile = Str(arguments, "torrentFileBase64");
 
-        var download = await torrents.AddAsync(
-            new AddTorrentRequest(catalogId, magnet, null, Bool(arguments, "keepSeeding")), cancellationToken);
+        // `TorrentService.ResolveSource` rejects both-and-neither too, and does it before anything
+        // else. Checked here as well so the model reads the argument names it was given rather than
+        // the service's phrasing of the same rule — and so the message says which two arguments it
+        // means.
+        if (string.IsNullOrWhiteSpace(magnet) == string.IsNullOrWhiteSpace(torrentFile))
+        {
+            throw new InvalidOperationException(
+                "Give exactly one of 'magnet' or 'torrentFileBase64'.");
+        }
+
+        DownloadResponse download;
+        try
+        {
+            download = await torrents.AddAsync(
+                new AddTorrentRequest(catalogId, magnet, torrentFile, Bool(arguments, "keepSeeding")),
+                cancellationToken);
+        }
+        catch (TorrentRequestException refusal)
+        {
+            // Every way this service says no — unreadable base64, a file that is not a torrent, a
+            // catalog that is gone, not enough free space — arrives as this type, which derives from
+            // Exception and so matched none of the invoker's catches. It escaped as a 500 and ended
+            // the caller's turn instead of telling it what was wrong. Accepting `.torrent` files
+            // widened that: the free-space refusal this feature exists to get *earlier* was among
+            // the answers being lost.
+            throw new McpRefusedException(refusal.Message);
+        }
 
         return Content(id, new JsonObject
         {

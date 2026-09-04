@@ -67,6 +67,16 @@ public sealed class PipelineTestHarness : IDisposable
         // The catalog read service, so the MCP invoker's catalog and status tools are built the way
         // production builds them rather than with a null standing in.
         services.AddScoped<MediaServer.Api.Catalogs.CatalogService>();
+        // A real TorrentService, so an add that the service refuses is exercised rather than
+        // described. Its HostyOptions is the only thing the harness lacked.
+        services.AddSingleton(new MediaServer.Api.Hosty.HostyOptions
+        {
+            AppId = "com.haas.media-server",
+            CoreOrigin = "http://127.0.0.1:7070",
+            AppDataDir = Path.Combine(Path.GetTempPath(), $"hosty-mcp-{Guid.NewGuid():N}"),
+        });
+        services.AddScoped<MediaServer.Api.Torrents.DownloadDeletionService>();
+        services.AddScoped<MediaServer.Api.Torrents.TorrentService>();
         services.AddScoped<MediaServer.Api.WatchHistory.WatchHistoryCalendarService>();
         services.AddScoped<EnrichService>();
         services.AddScoped<JobService>();
