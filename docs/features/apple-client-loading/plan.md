@@ -1,8 +1,8 @@
 # Apple Client Loading — plan
 
-Status: Draft
+Status: Ready
 Created: 2026-08-31
-Updated: 2026-08-31
+Updated: 2026-09-04
 
 > Feed the player its bytes ourselves, instead of handing it a URL and hoping.
 > Sits between [apple-client](../apple-client/feature.md) and
@@ -90,7 +90,10 @@ after it is a change of policy rather than a leap.
 - [ ] Unit tests over the range arithmetic: a request satisfied whole, one satisfied in
       part, one for the end of the file, and one cancelled while outstanding.
 - [ ] Honour cancellation: a request AVFoundation drops must stop our fetch with it.
-- [ ] Verify on the television: plays, seeks, resumes, **Dolby Vision engages**.
+- [ ] Verify on the television: plays, seeks, resumes, **Dolby Vision engages**. This is
+      the whole of Phase 1's question — the technique is well-trodden for caching layers
+      over `AVPlayer` and unverified here for a progressive MP4 on tvOS — and nothing
+      after it is built on an assumption that it works.
 - [ ] Verify against the server log: the request pattern is *the same as today*. A
       difference here means the delegate is changing behaviour before any policy has.
 
@@ -99,10 +102,18 @@ after it is a change of policy rather than a leap.
 - [ ] A byte window over the synthesised stream, filled forward from a single
       long-lived request, answering delegate requests from memory when it can.
 - [ ] A seek outside the window restarts the fetch rather than crawling to it.
-- [ ] A bounded budget with an eviction rule, and the number chosen from a measurement
-      rather than a guess — the television has to hold this alongside the decoder.
+- [ ] A bounded budget with an eviction rule. The decoder wants its share of an Apple TV,
+      and a 4K film at 78 Mbit/s is ten megabytes a second — a minute of read-ahead is
+      nearly six hundred **megabytes**. Start at a fraction of that and let the overlay's
+      window figures say whether it is enough; spilling to the app's cache directory is
+      the answer only if memory turns out too small to matter, and is not planned.
 - [ ] Verify: requests per minute of film, and the isolated audio reads, both against
-      the same server log this plan was written from.
+      the same server log this plan was written from. The same log answers whether the
+      player's own request pattern changes once answers are instant — it may ask for
+      more, or less, or the same, and the plan assumes nothing.
+- [ ] Direct play is left on the plain `AVURLAsset`. It has the same player and the same
+      stalls but no synthesised container, and it earns the loader only once the remux
+      path has proved it — as a deliverable of its own, not a widening of this one.
 
 ### Phase 3 — a player that got stuck is re-seated
 
@@ -132,23 +143,6 @@ of the client knows today: that the player has asked for nothing while its buffe
       ahead of the play head it reaches, and how many requests reached the server.
 - [ ] Unit tests over the window: eviction under its budget, a seek discarding what is no
       longer ahead, and a refill restarting after the connection was dropped.
-
-## Open questions
-
-1. **Does it work at all for a progressive MP4 on tvOS?** The technique is well-trodden
-   for caching layers over `AVPlayer`, and unverified here. Phase 1 exists to answer
-   this before anything is built on it.
-2. **How much memory may the window take?** The decoder wants its share of an Apple TV,
-   and a 4K film at 78 Mbit/s is ten megabytes a second — a minute of read-ahead is
-   nearly six hundred megabytes. To be answered by measurement, starting small.
-3. **Does the player's request pattern change once answers are instant?** It may ask for
-   more, or less, or the same. Phase 2's measurement answers it; the plan assumes
-   nothing.
-4. **Does direct play want this too?** It has the same player and the same stalls, but
-   no synthesised container. Probably yes, and deliberately out of scope until the
-   remux path proves it.
-5. **Should the window spill to disk?** The app has a cache directory. Only worth asking
-   if the memory budget in question 2 turns out too small to matter.
 
 ## Verification steps
 
