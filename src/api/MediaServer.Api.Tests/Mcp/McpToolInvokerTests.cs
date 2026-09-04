@@ -43,11 +43,10 @@ public sealed class McpToolInvokerTests : IDisposable
             new CatalogScanCoordinator(
                 _database, new JobService(_database, new NullRealtimeNotifier()), _queue),
             _scope.ServiceProvider.GetRequiredService<CatalogService>(),
-            // Downloads, recommendations and the watchlist are thin projections over services that have
-            // their own tests, and standing up their dependency trees here would be scaffolding for
-            // behaviour already covered. Those tools are not exercised by this fixture; their
-            // declarations are asserted in McpToolContractTests, which needs no services at all.
-            torrents: null!,
+            // Recommendations and the watchlist stay null: thin projections over services with their
+            // own tests, whose dependency trees would be scaffolding here. Torrents is real, because
+            // how this tool reports a *refusal* is the thing under test.
+            _scope.ServiceProvider.GetRequiredService<TorrentService>(),
             recommendations: null!,
             watchlist: null!,
             _scope.ServiceProvider.GetRequiredService<WatchHistoryCalendarService>(),
@@ -337,11 +336,32 @@ public sealed class McpToolInvokerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_torrent_the_service_rejects_is_a_tool_error_and_not_a_crash()
+    {
+        // `TorrentRequestException` derives from `Exception`, and the invoker caught only
+        // `FormatException` and `InvalidOperationException` — so every way this service says no
+        // escaped as a 500 and ended the caller's turn. Accepting `.torrent` files widened that:
+        // "not enough free space", the refusal this feature exists to deliver *earlier*, was among
+        // the answers being lost.
+        var result = await CallAsync("add_torrent", new JsonObject
+        {
+            ["catalogId"] = Guid.NewGuid().ToString(),
+            ["torrentFileBase64"] = "bm90LWEtdG9ycmVudA==",
+        });
+
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Null(result["error"]);
+        // The service's own words reach the model, so it can tell "catalog is gone" from "that is
+        // not a torrent" instead of retrying the same call.
+        Assert.NotEmpty(result["result"]!["content"]![0]!["text"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task Add_torrent_refuses_both_sources_and_refuses_neither()
     {
-        // The service enforces this too, but only after resolving a catalog. Refusing here keeps the
-        // model from being told "exactly one" by an error that arrives after other work, and keeps a
-        // call carrying both from depending on which one the service happens to prefer.
+        // The service enforces this too, first thing in `AddAsync`. Refusing here as well is about
+        // the wording: the model is told which of *its* two arguments to drop, in the names the
+        // schema gave it, rather than the service's phrasing of the same rule.
         var both = await CallAsync("add_torrent", new JsonObject
         {
             ["catalogId"] = Guid.NewGuid().ToString(),

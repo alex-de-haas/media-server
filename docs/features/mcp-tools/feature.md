@@ -72,6 +72,12 @@ not depend on reaching a swarm to learn what the torrent is. The tool offered on
 and an agent holding a `.torrent` converted it to a magnet to get through — a workaround that threw
 away exactly those two properties.
 
+**A refusal from the download service is a tool error, not a crash.** `TorrentRequestException`
+derives from `Exception` and matched none of the invoker's catches, so every way that service says
+no — unreadable base64, a file that is not a torrent, a missing catalog, not enough free space —
+escaped as a 500 and ended the caller's turn. Accepting `.torrent` files widened it: the earlier
+free-space refusal this feature exists to deliver was among the answers being lost.
+
 ## What A "No" From This Server Means
 
 Every rule here exists because a plausible implementation would let an agent state something false

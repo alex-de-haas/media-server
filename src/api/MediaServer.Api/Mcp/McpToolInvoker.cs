@@ -1087,17 +1087,33 @@ public sealed class McpToolInvoker(
         var magnet = Str(arguments, "magnet");
         var torrentFile = Str(arguments, "torrentFileBase64");
 
-        // Exactly one, and the service says so too — but it says so after resolving a catalog, and a
-        // tool that let both through would be asking the model to guess which one won.
+        // `TorrentService.ResolveSource` rejects both-and-neither too, and does it before anything
+        // else. Checked here as well so the model reads the argument names it was given rather than
+        // the service's phrasing of the same rule — and so the message says which two arguments it
+        // means.
         if (string.IsNullOrWhiteSpace(magnet) == string.IsNullOrWhiteSpace(torrentFile))
         {
             throw new InvalidOperationException(
                 "Give exactly one of 'magnet' or 'torrentFileBase64'.");
         }
 
-        var download = await torrents.AddAsync(
-            new AddTorrentRequest(catalogId, magnet, torrentFile, Bool(arguments, "keepSeeding")),
-            cancellationToken);
+        DownloadResponse download;
+        try
+        {
+            download = await torrents.AddAsync(
+                new AddTorrentRequest(catalogId, magnet, torrentFile, Bool(arguments, "keepSeeding")),
+                cancellationToken);
+        }
+        catch (TorrentRequestException refusal)
+        {
+            // Every way this service says no — unreadable base64, a file that is not a torrent, a
+            // catalog that is gone, not enough free space — arrives as this type, which derives from
+            // Exception and so matched none of the invoker's catches. It escaped as a 500 and ended
+            // the caller's turn instead of telling it what was wrong. Accepting `.torrent` files
+            // widened that: the free-space refusal this feature exists to get *earlier* was among
+            // the answers being lost.
+            throw new McpRefusedException(refusal.Message);
+        }
 
         return Content(id, new JsonObject
         {
