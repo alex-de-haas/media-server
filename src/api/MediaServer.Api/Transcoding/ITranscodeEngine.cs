@@ -21,7 +21,18 @@ public sealed record TranscodeJobRequest(
     IReadOnlyList<EngineAdditionalInput>? AdditionalInputs = null,
     IReadOnlyList<EngineMetadataOverride>? MetadataOverrides = null,
     IReadOnlyList<EngineAudioTarget>? AudioTargets = null,
-    IReadOnlyList<EngineExtractionOutput>? Outputs = null);
+    IReadOnlyList<EngineExtractionOutput>? Outputs = null,
+    /// <summary><c>toProfile81</c> asks the engine to rewrite the copied picture's Dolby Vision from the
+    /// dual-layer profile 7 to single-layer 8.1; null keeps it as it is.</summary>
+    string? DolbyVision = null);
+
+/// <summary>What the engine has beyond ffmpeg. <see cref="DolbyVisionConversion"/> is whether it carries the
+/// tools a profile 7 → 8.1 rewrite runs on (<c>dovi_tool</c> and MKVToolNix); a consumer offers the option
+/// only when it does, because an engine without them refuses the job rather than copying silently.</summary>
+public sealed record TranscodeTooling(bool DolbyVisionConversion)
+{
+    public static readonly TranscodeTooling None = new(false);
+}
 
 /// <summary>
 /// One stream of the input written out as its own file — the inverse of an
@@ -114,6 +125,10 @@ public interface ITranscodeEngine
     JobSnapshot? GetSnapshot(string jobId);
 
     IReadOnlyList<JobSnapshot> GetAllSnapshots();
+
+    /// <summary>What the engine can do beyond ffmpeg, read from its <c>GET /hardware</c>; best-effort, so an
+    /// engine that cannot be reached answers <see cref="TranscodeTooling.None"/> rather than failing.</summary>
+    Task<TranscodeTooling> GetToolingAsync(CancellationToken cancellationToken);
 
     /// <summary>Raised when a job transitions from queued to running.</summary>
     event EventHandler<string>? JobStarted;

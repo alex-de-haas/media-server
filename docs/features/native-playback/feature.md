@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-08-29
+Updated: 2026-09-04
 
 ## Description
 
@@ -50,9 +50,15 @@ whatever was put on disk — the response therefore reports `signalling: null` t
 and carries `sourceDynamicRange` instead, so a client knows what it is opening
 without being promised something nothing keeps.
 
-On remux, a DV source is written as `dvh1` for a client that reported DV support and
-as the cross-compatible form otherwise — correct, because profile 8.1's base layer
-is HDR10 by definition.
+On remux, a DV source is written as `dvh1` when the client reported DV support **and**
+the source's recorded profile is one a single-layer decoder plays — 5, or 8 over an
+HDR10 or HLG base layer — and as the cross-compatible form otherwise. A profile 7
+source, a UHD Blu-ray's dual layer, is never signalled as Dolby Vision: no Apple device
+decodes it, and the remux leaves its enhancement layer and RPU behind, so the viewer
+sees the HDR10 base layer exactly as before and the server stops claiming otherwise.
+A source whose profile is not yet recorded keeps the label-based answer, so nothing
+regresses before the refresh pass has run. See
+[dolby-vision-profile](../dolby-vision-profile/feature.md).
 
 Whether a source can be **presented at all** is a separate question and applies
 everywhere: a client with no HDR is refused an HDR source with
@@ -61,8 +67,8 @@ source, since its base layer is HDR10.
 
 One gap follows from this and is not closed here: nothing records a file's stored
 sample entry, so a DV file served by direct play goes out as written, and a client
-without DV may fail to open one tagged `dvh1`. Recording it belongs with the other
-[probe gaps](../media-probe-providers/plan.md).
+without DV may fail to open one tagged `dvh1`. The profile is recorded now; the codec
+tag belongs with the other [probe gaps](../media-probe-providers/plan.md).
 
 ### Packaging
 
@@ -203,7 +209,9 @@ Backend tests use xUnit and Imposter. Required coverage:
   a source with one playable track among several, an undecodable picture, a channel
   ceiling, and an MKV both with and without packaging available.
 - The Dolby Vision decision in both directions — a client that reports DV support
-  and one that does not — and a client with no HDR at all being refused.
+  and one that does not — and a client with no HDR at all being refused; signalling
+  by profile, with 5, 8.1 and 8.4 as `dvh1`, 7 and 8.2 as `hvc1`, and an unrecorded
+  profile keeping the label-based answer.
 - That direct play promises no signalling, and that a ragged capability profile —
   the null and blank entries a client can actually send — is answered rather than
   thrown at.

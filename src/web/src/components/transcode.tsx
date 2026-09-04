@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Info, Trash2, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
-import { formatBytes, formatEta, formatPercent, formatTimeAgo, objectAudioFormat } from "@/lib/format";
+import { dolbyVisionLabel, formatBytes, formatEta, formatPercent, formatTimeAgo, objectAudioFormat, reencodeDynamicRangeWarning } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { ActivityCard, ActivityCardHeader, ActivityProgress, ActivityQueued, ActivityStats, IconAction } from "@/components/activity-card";
 import { Button } from "@/components/ui/button";
@@ -150,10 +150,22 @@ export function TranscodeDialog({
   const audioOutweighsVideo = videoBytes !== null && audioBytes > videoBytes;
   const sourceDefaultAudio = audioStreams.find((stream) => stream.isDefault)?.index ?? audioStreams[0]?.index ?? null;
   const sourceDefaultSubtitle = subtitleStreams.find((stream) => stream.isDefault)?.index ?? null;
-  const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat ?? null;
-  const hdrWarning = hdr?.includes("Dolby Vision")
-    ? `This source is ${hdr}. Re-encoding drops the Dolby Vision (and any HDR10+) layer — choose “Keep original video” to preserve it.`
-    : `This source is ${hdr}. Re-encoding won’t carry its HDR metadata — choose “Keep original video” to preserve it.`;
+  const picture = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat) ?? null;
+  const hdr = picture?.hdrFormat ?? null;
+  // Profile-aware where the profile is recorded: a re-encode of profile 5 wrecks the colours, one of 8.4 lands
+  // on HLG, while 7 and 8.1 keep an HDR10 picture and lose only the dynamic layer.
+  const hdrWarning = reencodeDynamicRangeWarning(hdr, picture?.dolbyVision);
+  // The one Dolby Vision a copy can improve on: a dual-layer profile 7 — a UHD Blu-ray remux, which Apple TV
+  // and Infuse play as HDR10 — rewritten to the single-layer 8.1 they play as Dolby Vision. Offered only
+  // when the engine carries the tools for it; an engine without them refuses the job rather than copying.
+  const profile7 = picture?.dolbyVision?.profile === 7;
+  const { data: availability } = useQuery({
+    queryKey: ["transcode-availability"],
+    queryFn: () => mediaServer.transcodeAvailability(),
+    staleTime: 5 * 60 * 1000,
+    enabled: open && profile7,
+  });
+  const canConvertDolbyVision = profile7 && (availability?.dolbyVisionConversion ?? false);
 
   const queryClient = useQueryClient();
   const modeId = useId();
@@ -171,6 +183,8 @@ export function TranscodeDialog({
   const [hardware, setHardware] = useState("auto");
   const [resolution, setResolution] = useState("source");
   const [quality, setQuality] = useState("high");
+  const [convertDolbyVision, setConvertDolbyVision] = useState(false);
+  const dolbyVisionId = useId();
   // Which kept audio tracks are re-encoded instead of copied, keyed by stream id. Empty is the old
   // behaviour — every track copied byte for byte.
   const [audioReEncoded, setAudioReEncoded] = useState<Set<string>>(() => new Set());
@@ -340,6 +354,8 @@ export function TranscodeDialog({
         // A level is meaningless without an encode, and the API refuses it alongside a copied video.
         qualityLevel: isCopy ? null : quality,
         maxHeight: !isCopy && resolution !== "source" ? Number(resolution) : null,
+        // Only on a copy, only when offered, only when ticked — the API refuses every other combination.
+        dolbyVision: isCopy && canConvertDolbyVision && convertDolbyVision ? "toProfile81" : undefined,
         audioStreamIndexes: audioChanged ? keptAudio : undefined,
         subtitleStreamIndexes: subtitlesChanged ? keptSubtitles : undefined,
         defaultAudioStreamIndex: audioDefaultChanged ? defaultAudio : undefined,
@@ -419,10 +435,29 @@ export function TranscodeDialog({
             </Select>
           </Field>
 
-          {!isCopy && hdr ? (
+          {!isCopy && hdrWarning ? (
             <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-500" role="alert">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               <span>{hdrWarning}</span>
+            </div>
+          ) : null}
+
+          {isCopy && canConvertDolbyVision ? (
+            <div className="rounded-md border p-2">
+              <label htmlFor={dolbyVisionId} className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  id={dolbyVisionId}
+                  checked={convertDolbyVision}
+                  onCheckedChange={(value) => setConvertDolbyVision(value === true)}
+                  className="mt-0.5"
+                />
+                <span className="min-w-0">
+                  <span className="block leading-6">Convert Dolby Vision to profile 8.1 (single layer)</span>
+                  <span className="text-muted-foreground block text-xs">
+                    This source is {dolbyVisionLabel(picture?.dolbyVision)}, a dual layer no Apple device decodes, so Apple TV and Infuse play its HDR10 base layer. The rewrite keeps every frame of picture, carries the Dolby Vision metadata over as profile 8.1 — which they play as Dolby Vision — and drops the enhancement layer, about 1.6 % of the file.
+                  </span>
+                </span>
+              </label>
             </div>
           ) : null}
 
@@ -751,7 +786,7 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
     extraction
       ? [`Extract · ${job.outputPaths.length} ${job.outputPaths.length === 1 ? "file" : "files"}`, age && `added ${age}`]
       : [
-          job.videoCodec === "copy" ? "Remux" : job.videoCodec.toUpperCase(),
+          job.videoCodec === "copy" ? (job.dolbyVision ? "Remux DV 8.1" : "Remux") : job.videoCodec.toUpperCase(),
           job.qualityLevel && job.qualityLevel !== "high" ? job.qualityLevel : null,
           job.reEncodedAudioTracks > 0 ? `${job.reEncodedAudioTracks} audio re-encoded` : null,
           age && `added ${age}`,

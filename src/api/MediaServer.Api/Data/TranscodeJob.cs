@@ -68,6 +68,12 @@ public sealed class TranscodeJob
     /// where its size went without keeping a row per track.</summary>
     public int ReEncodedAudioTracks { get; set; }
 
+    /// <summary><c>toProfile81</c> when this video copy also rewrote the source's Dolby Vision from the
+    /// dual-layer profile 7 to the single-layer 8.1; null otherwise. Stored so the imported version can be
+    /// named for what the job did — the output's own record says profile 8, which a plain copy of a profile
+    /// 8 source says too.</summary>
+    public string? DolbyVision { get; set; }
+
     public TranscodeJobState State { get; set; }
 
     /// <summary>Last broadcast progress; live value is the engine snapshot when available.</summary>

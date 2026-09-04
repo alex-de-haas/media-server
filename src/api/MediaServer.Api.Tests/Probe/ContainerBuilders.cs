@@ -43,7 +43,8 @@ internal static class ContainerBuilders
         int channels = 0,
         int sampleRate = 0,
         int transferCharacteristics = 0,
-        bool dolbyVision = false)
+        bool dolbyVision = false,
+        byte[]? dolbyVisionRecord = null)
     {
         // tkhd v0: version/flags(4) created(4) modified(4) id(4) reserved(4) duration(4) reserved(8)
         //          layer(2) altGroup(2) volume(2) reserved(2) matrix(36) width(4) height(4) = 84 payload
@@ -63,9 +64,12 @@ internal static class ContainerBuilders
             sampleChildren.Add(Box("colr", Encoding.ASCII.GetBytes("nclx"), U16(9), U16((ushort)transferCharacteristics), U16(9), [0]));
         }
 
-        if (dolbyVision)
+        if (dolbyVision || dolbyVisionRecord is not null)
         {
-            sampleChildren.Add(Box("dvcC", new byte[24]));
+            // A real record unless the test says otherwise: a profile 8.1 as a WEB-DL carries it, in the box
+            // its profile belongs to.
+            var record = dolbyVisionRecord ?? DolbyVisionConfigurationTests.Profile81;
+            sampleChildren.Add(Box(record[2] >> 1 >= 8 ? "dvvC" : "dvcC", record));
         }
 
         // VisualSampleEntry / AudioSampleEntry share a 78-byte fixed header before their child boxes; the
@@ -171,7 +175,9 @@ internal static class ContainerBuilders
         ulong height = 0,
         ulong channels = 0,
         int transferCharacteristics = 0,
-        ulong bitsPerChannel = 0)
+        ulong bitsPerChannel = 0,
+        byte[]? dolbyVision = null,
+        bool nameOnlyMapping = false)
     {
         var children = new List<byte[]>
         {
@@ -218,8 +224,27 @@ internal static class ContainerBuilders
             children.Add(Ebml(0xE1, Ebml(0x9F, Uint(channels))));
         }
 
+        // Where Matroska keeps the Dolby Vision record: a BlockAdditionMapping typed dvcC/dvvC (ffmpeg and
+        // mkvmerge both write the name too) with the record verbatim in its extra data. A name-only mapping
+        // stands in for a muxer that wrote no type.
+        if (dolbyVision is not null)
+        {
+            var mapping = new List<byte[]> { Ebml(0x41A4, Str("Dolby Vision configuration")) };
+            if (!nameOnlyMapping)
+            {
+                mapping.Add(Ebml(0x41E7, Uint(dolbyVision[2] >> 1 >= 8 ? 0x64767643u : 0x64766343u)));
+            }
+
+            mapping.Add(Ebml(0x41ED, dolbyVision));
+            children.Add(Ebml(0x41E4, [.. mapping]));
+        }
+
         return Ebml(0xAE, [.. children]);
     }
+
+    /// <summary>A BlockAdditionMapping of some other kind — an alpha channel — which must not read as Dolby Vision.</summary>
+    public static byte[] AlphaMapping() =>
+        Ebml(0x41E4, Ebml(0x41A4, Str("Alpha")), Ebml(0x41E7, Uint(1)), Ebml(0x41ED, new byte[] { 1, 2, 3, 4, 5 }));
 
     public static byte[] Tracks(params byte[][] entries) => Ebml(0x1654AE6B, entries);
 

@@ -32,4 +32,6 @@ public sealed class DisabledTranscodeEngine : ITranscodeEngine
     public JobSnapshot? GetSnapshot(string jobId) => null;
 
     public IReadOnlyList<JobSnapshot> GetAllSnapshots() => [];
+
+    public Task<TranscodeTooling> GetToolingAsync(CancellationToken cancellationToken) => Task.FromResult(TranscodeTooling.None);
 }

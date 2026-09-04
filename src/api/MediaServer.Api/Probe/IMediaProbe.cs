@@ -20,7 +20,10 @@ public sealed record ProbedStream(
     int? Bitrate,
     bool IsDefault,
     bool IsForced,
-    string? Title);
+    string? Title,
+    /// <summary>The Dolby Vision configuration record's fields, when the video carries one. Both providers
+    /// answer it — the record sits in the container header — and both answer null for anything else.</summary>
+    DolbyVisionDetail? DolbyVision = null);
 
 public sealed record ProbeResult(
     string Container,

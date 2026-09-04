@@ -134,6 +134,65 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Backfill_fills_in_the_dolby_vision_record_for_rows_labelled_before_it_was_stored()
+    {
+        // An engine row that says Dolby Vision without a profile: the one place the pass reaches past
+        // provenance, because the label alone cannot tell a disc's profile 7 from a playable 8.1.
+        var catalog = SeedCatalog();
+        var relative = Path.Combine("library", "S", "s.mkv");
+        var absolute = Path.Combine(_root, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        await File.WriteAllBytesAsync(absolute, new byte[16]);
+        var itemId = SeedItemWithSource(catalog, relative);
+        var source = await _database.MediaSources.SingleAsync(s => s.MediaItemId == itemId);
+        _database.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Video, Index = 0,
+            Codec = "hevc", HdrFormat = "Dolby Vision",
+        });
+        await _database.SaveChangesAsync();
+
+        var probe = new FakeMediaProbe
+        {
+            OnProbe = _ => new ProbeResult("mkv", TimeSpan.FromMinutes(120).Ticks, 8_000_000, 1_000_000,
+            [
+                new ProbedStream(StreamType.Video, 0, "hevc", "Main 10", null, 3840, 2160, 23.976, 10, "Dolby Vision", null, null, null, true, false, null,
+                    new DolbyVisionDetail(7, 6, 6, ElPresent: true)),
+            ]),
+        };
+
+        var report = await Service(probe).BackfillHeaderProbedAsync(_catalogId, CancellationToken.None);
+
+        Assert.Equal(1, report.ItemsRefreshed);
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        var video = await fresh.MediaStreams.SingleAsync(stream => stream.MediaSourceId == source.Id);
+        Assert.Equal(7, video.DvProfile);
+        Assert.Equal(6, video.DvLevel);
+        Assert.Equal(6, video.DvBlSignalCompatibilityId);
+        Assert.True(video.DvElPresent);
+    }
+
+    [Fact]
+    public async Task Backfill_leaves_an_engine_row_alone_when_it_has_nothing_to_gain()
+    {
+        // HDR10 from the engine, or Dolby Vision with its record already stored: neither is re-probed, so the
+        // pass stays bounded to what could not be known when the row was written.
+        var catalog = SeedCatalog();
+        var itemId = SeedItemWithSource(catalog, Path.Combine("library", "T", "t.mkv"));
+        var source = await _database.MediaSources.SingleAsync(s => s.MediaItemId == itemId);
+        _database.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Video, Index = 0,
+            Codec = "hevc", HdrFormat = "Dolby Vision", DvProfile = 8, DvLevel = 6, DvBlSignalCompatibilityId = 1, DvElPresent = false,
+        });
+        await _database.SaveChangesAsync();
+
+        var report = await Service().BackfillHeaderProbedAsync(_catalogId, CancellationToken.None);
+
+        Assert.Equal(0, report.ItemsRefreshed);
+    }
+
+    [Fact]
     public async Task RefreshMedia_skips_sources_missing_on_disk_but_still_succeeds()
     {
         var catalog = SeedCatalog();

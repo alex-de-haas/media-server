@@ -2,6 +2,7 @@ using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Native.Playback;
 using MediaServer.Api.Probe;
 using Microsoft.EntityFrameworkCore;
 
@@ -48,6 +49,7 @@ public sealed class TranscodeService(
         var codec = ResolveCodec(request, isMerge);
         var hardware = NormalizeHardware(request.HardwareAcceleration);
         var qualityLevel = codec == "copy" ? null : NormalizeQualityLevel(request.QualityLevel);
+        var dolbyVision = ResolveDolbyVision(request, codec, source.Streams);
 
         // Resolve track selection and target resolution against the source's probed streams.
         var orderedAudio = source.Streams.Where(stream => stream.StreamType == StreamType.Audio)
@@ -91,7 +93,7 @@ public sealed class TranscodeService(
 
         var outputRelative = BuildOutputRelative(
             source.Path,
-            VersionLabel(codec, targetHeight, isMerge, qualityLevel, audioTargets?.Select(target => target.Codec).ToList()));
+            VersionLabel(codec, targetHeight, isMerge, qualityLevel, audioTargets?.Select(target => target.Codec).ToList(), dolbyVision is not null));
         if (!sandbox.TryResolve(catalog, outputRelative, out var outputAbsolute))
         {
             throw new TranscodeRequestException("Could not place the output inside the catalog.");
@@ -130,7 +132,8 @@ public sealed class TranscodeService(
                 new TranscodeJobRequest(
                     input.Label, input.Relative, output.Label, output.Relative, codec, hardware, qualityLevel,
                     targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
-                    additionalInputs, metadataOverrides, audioTargets),
+                    additionalInputs, metadataOverrides, audioTargets,
+                    DolbyVision: dolbyVision),
                 cancellationToken);
         }
         catch (InvalidOperationException exception)
@@ -153,6 +156,7 @@ public sealed class TranscodeService(
             HardwareAcceleration = hardware,
             QualityLevel = qualityLevel,
             ReEncodedAudioTracks = audioTargets?.Count ?? 0,
+            DolbyVision = dolbyVision,
             State = TranscodeJobState.Queued,
             CreatedAt = DateTimeOffset.UtcNow,
         };
@@ -270,6 +274,62 @@ public sealed class TranscodeService(
         return codec;
     }
 
+    /// <summary>The one value <c>dolbyVision</c> takes besides <c>keep</c>, as the engine spells it.</summary>
+    public const string DolbyVisionToProfile81 = "toProfile81";
+
+    /// <summary>What a converted version's label carries: the profile it was rewritten to.</summary>
+    public const string DolbyVisionLabel = "DV 8.1";
+
+    /// <summary>
+    /// Resolves the request's <c>dolbyVision</c>: null (keep, the default) or <see cref="DolbyVisionToProfile81"/>.
+    /// The conversion rides on a video copy — a re-encode drops Dolby Vision whatever is asked — and only a
+    /// dual-layer profile 7 has anything to rewrite: a profile 8 is already what it produces, a profile 5 has
+    /// no HDR10 base layer, and a version whose record is not yet recorded is refused with the step that
+    /// records it, rather than sent to an engine that would refuse it three stages in. Mirrors the engine's
+    /// own rules so a contradictory request fails here, in this app's vocabulary.
+    /// </summary>
+    internal static string? ResolveDolbyVision(CreateTranscodeRequest request, string codec, IEnumerable<MediaStream> streams)
+    {
+        switch (request.DolbyVision?.Trim().ToLowerInvariant())
+        {
+            case null or "" or "keep":
+                return null;
+            case "toprofile81":
+                break;
+            default:
+                throw new TranscodeRequestException($"dolbyVision '{request.DolbyVision}' is not supported (use 'keep' or 'toProfile81').");
+        }
+
+        if (codec != "copy")
+        {
+            throw new TranscodeRequestException(
+                "Converting Dolby Vision to profile 8.1 keeps the picture as it is: a re-encode drops Dolby Vision whatever is asked. Choose “Keep original video”.");
+        }
+
+        // The picture, by the rule every other surface uses: the first video stream by index that is not a
+        // still image, which is how a cover a muxer wrote as a video track is passed over.
+        var video = NativePlaybackResolver.PictureFor(streams.Where(stream => !stream.IsExternal));
+        if (video is null)
+        {
+            throw new TranscodeRequestException("This version has no video stream to convert.");
+        }
+
+        if (video.DvProfile is not { } profile)
+        {
+            throw new TranscodeRequestException(video.HdrFormat?.Contains("Dolby Vision", StringComparison.OrdinalIgnoreCase) == true
+                ? "This version's Dolby Vision profile is not recorded yet. Refresh the catalog's media data, then convert."
+                : "This version's video is not Dolby Vision, so there is nothing to convert.");
+        }
+
+        if (profile != 7)
+        {
+            throw new TranscodeRequestException(
+                $"This version's video is Dolby Vision profile {profile}, not the dual-layer profile 7 this conversion rewrites.");
+        }
+
+        return DolbyVisionToProfile81;
+    }
+
     /// <summary>
     /// The version label used for the output filename: "Remux" for a plain video copy, otherwise the codec
     /// plus the target height when downscaling (e.g. "HEVC 1080p") or just the codec at full resolution.
@@ -286,7 +346,8 @@ public sealed class TranscodeService(
         int? targetHeight,
         bool isMerge = false,
         string? qualityLevel = null,
-        IReadOnlyCollection<string>? audioCodecs = null)
+        IReadOnlyCollection<string>? audioCodecs = null,
+        bool dolbyVision = false)
     {
         var parts = new List<string>(4);
 
@@ -313,6 +374,13 @@ public sealed class TranscodeService(
         if (AudioLabel(audioCodecs) is { } audio)
         {
             parts.Add(audio);
+        }
+
+        // A rewritten Dolby Vision is a different file from a plain copy of the same source, so the two must
+        // not land on one path; named after the audio, before "Merged", like the other things a copy changes.
+        if (dolbyVision)
+        {
+            parts.Add(DolbyVisionLabel);
         }
 
         if (isMerge)

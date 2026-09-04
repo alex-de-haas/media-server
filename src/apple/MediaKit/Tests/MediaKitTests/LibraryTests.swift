@@ -219,7 +219,7 @@ struct TitleVideoTests {
             videos: codecs.enumerated().map { index, codec in
                 TitleTrack(
                     id: "v\(index)", label: codec, language: nil, codec: codec, hdrFormat: nil,
-                    isExternal: false)
+                    dolbyVision: nil, isExternal: false)
             },
             audio: [], subtitles: [])
     }

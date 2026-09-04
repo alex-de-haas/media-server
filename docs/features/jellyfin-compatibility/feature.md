@@ -1,7 +1,7 @@
 # Jellyfin Compatibility
 
 Created: 2026-06-15
-Updated: 2026-09-01
+Updated: 2026-09-04
 
 ## Description
 
@@ -316,6 +316,16 @@ bitrate, video codec/profile/resolution/frame rate/bit depth/HDR, audio streams
 (codec, language, channels, default/forced), subtitle streams (codec, language,
 text/picture, external path, default/forced), and chapters where available. This
 builds the `MediaSourceInfo` / `MediaStream` objects this surface returns.
+
+A Dolby Vision video stream also carries Jellyfin's own fields for its configuration
+record — `DvProfile`, `DvLevel`, `DvBlSignalCompatibilityId`, `RpuPresentFlag`,
+`ElPresentFlag`, `BlPresentFlag` and `VideoDoViTitle` ("Dolby Vision Profile 7",
+"Dolby Vision Profile 8.1") — and its `VideoRangeType` follows the profile: `DOVI` for
+5, `DOVIWithHDR10` for 7 and 8.1, `DOVIWithHLG` for 8.4, `DOVIWithSDR` for 8.2. These
+are the values a Jellyfin 10.9 server sends, so a client reading them has already
+learned them. A Dolby Vision stream whose profile is not yet recorded, and every other
+HDR, stays `HDR10` as before. See
+[dolby-vision-profile](../dolby-vision-profile/feature.md).
 
 This app no longer runs `ffprobe` itself — probing goes through the providers
 described in [media probe providers](../media-probe-providers/feature.md), and

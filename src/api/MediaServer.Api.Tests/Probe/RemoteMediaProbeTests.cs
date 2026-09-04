@@ -62,6 +62,43 @@ public sealed class RemoteMediaProbeTests
         }
         """;
 
+    private const string DolbyVisionVideo = """
+        {
+          "container": "mkv", "durationSeconds": 7506.291, "bitrate": 7699019, "sizeBytes": 7223885097,
+          "streams": [
+            { "index": 0, "kind": "Video", "codec": "hevc", "profile": "Main 10", "language": "eng",
+              "title": null, "isDefault": true, "isForced": false, "bitrate": 7500000,
+              "width": 3840, "height": 2160, "frameRate": 23.976023, "bitDepth": 10, "hdr": "DolbyVision",
+              "channels": null, "sampleRate": null,
+              "dolbyVision": { "profile": 7, "level": 6, "blSignalCompatibilityId": 6,
+                               "rpuPresent": true, "elPresent": true, "blPresent": true } }
+          ]
+        }
+        """;
+
+    [Fact]
+    public async Task Reads_the_dolby_vision_record_the_engine_reports()
+    {
+        var (probe, _) = Probe(HttpStatusCode.OK, DolbyVisionVideo);
+
+        var result = await probe.TryProbeAsync($"{Root}/Starship Troopers (1997)/Starship Troopers (1997).mkv", CancellationToken.None);
+
+        var video = Assert.Single(result!.Streams);
+        Assert.Equal("Dolby Vision", video.HdrFormat);
+        Assert.Equal(new DolbyVisionDetail(7, 6, 6, ElPresent: true), video.DolbyVision);
+    }
+
+    [Fact]
+    public async Task A_stream_without_a_record_has_no_dolby_vision_detail()
+    {
+        // An engine from before the field, or a stream that is not Dolby Vision: the label stands on its own.
+        var (probe, _) = Probe(HttpStatusCode.OK, OneVideo);
+
+        var result = await probe.TryProbeAsync($"{Root}/TRON Legacy (2010)/TRON Legacy (2010).mkv", CancellationToken.None);
+
+        Assert.Null(Assert.Single(result!.Streams).DolbyVision);
+    }
+
     [Fact]
     public async Task Addresses_the_file_by_its_media_mount()
     {

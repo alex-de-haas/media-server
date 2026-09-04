@@ -141,6 +141,47 @@ public sealed class Mp4SynthesizerTests
     }
 
     [Fact]
+    public void A_profile_7_record_is_written_as_plain_hvc1_with_no_dolby_vision_box_even_when_asked_for()
+    {
+        // A UHD Blu-ray's dual layer: its RPU and enhancement layer live in BlockAdditions this index never
+        // carries, so a record announcing Dolby Vision over the copied base layer would describe metadata the
+        // output does not contain. The viewer sees the HDR10 base layer either way; without the record, honestly.
+        var built = Build(VideoAndAudio(dv: DolbyVisionConfigurationTests.Profile7), VideoSignalling.DolbyVision);
+
+        Assert.Equal("hvc1", built.Result.SampleEntries[0]);
+        var stsd = built.Reader.Find("moov/trak/mdia/minf/stbl/stsd").First();
+        var entry = built.Reader.SampleEntry(stsd);
+        var children = built.Reader.Children(entry.Start + 78, entry.End).Select(box => box.Type).ToList();
+        Assert.DoesNotContain("dvvC", children);
+        Assert.DoesNotContain("dvcC", children);
+        Assert.Contains("hvcC", children);
+    }
+
+    [Fact]
+    public void The_record_goes_in_the_box_its_profile_belongs_to()
+    {
+        // dvcC up to profile 7, dvvC from 8 — the spec names the box by profile, and the record's own profile
+        // byte says which, so nothing has to be carried from the source mapping.
+        var profile5 = Build(VideoAndAudio(dv: DolbyVisionConfigurationTests.Profile5), VideoSignalling.DolbyVision);
+        var stsd = profile5.Reader.Find("moov/trak/mdia/minf/stbl/stsd").First();
+        var entry = profile5.Reader.SampleEntry(stsd);
+        var children = profile5.Reader.Children(entry.Start + 78, entry.End).Select(box => box.Type).ToList();
+
+        Assert.Equal("dvh1", profile5.Result.SampleEntries[0]);
+        Assert.Contains("dvcC", children);
+        Assert.DoesNotContain("dvvC", children);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x01, 0x00, 0x10, 0x35, 0x10 }, "dvvC")]   // profile 8.1
+    [InlineData(new byte[] { 0x01, 0x00, 0x0A, 0x35, 0x00 }, "dvcC")]   // profile 5
+    [InlineData(new byte[] { 0x01, 0x00, 0x0E, 0x37, 0x60 }, null)]     // profile 7 with an enhancement layer
+    [InlineData(new byte[] { 0x01, 0x00, 0x0E, 0x35, 0x60 }, null)]     // profile 7 even without the el flag
+    [InlineData(new byte[] { 0x01, 0x00 }, null)]                       // not a record
+    public void DolbyVisionBox_NamesTheBoxOrRefusesToWriteOne(byte[] record, string? expected) =>
+        Assert.Equal(expected, Mp4Synthesizer.DolbyVisionBox(record));
+
+    [Fact]
     public void H264_gets_its_own_configuration_box_and_entry_even_when_dolby_vision_is_asked_for()
     {
         var built = Build(

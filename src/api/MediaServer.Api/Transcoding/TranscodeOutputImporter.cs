@@ -88,6 +88,10 @@ public sealed class TranscodeOutputImporter(
                 FrameRate = stream.FrameRate,
                 BitDepth = stream.BitDepth,
                 HdrFormat = stream.HdrFormat,
+                DvProfile = stream.DolbyVision?.Profile,
+                DvLevel = stream.DolbyVision?.Level,
+                DvBlSignalCompatibilityId = stream.DolbyVision?.BlSignalCompatibilityId,
+                DvElPresent = stream.DolbyVision?.ElPresent,
                 Channels = stream.Channels,
                 SampleRate = stream.SampleRate,
                 Bitrate = stream.Bitrate,
@@ -113,7 +117,12 @@ public sealed class TranscodeOutputImporter(
 
         if (string.Equals(job.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase))
         {
-            return height is { } remuxHeight ? $"Remux {remuxHeight}p" : "Remux";
+            var remux = height is { } remuxHeight ? $"Remux {remuxHeight}p" : "Remux";
+            // The output's own record says profile 8 — but so does a plain copy of a profile 8 source, so the
+            // conversion is named from what the job did rather than from what the file now is.
+            return string.Equals(job.DolbyVision, TranscodeService.DolbyVisionToProfile81, StringComparison.OrdinalIgnoreCase)
+                ? $"{remux} {TranscodeService.DolbyVisionLabel}"
+                : remux;
         }
 
         var codec = string.Equals(video?.Codec, "h264", StringComparison.OrdinalIgnoreCase) ? "H.264" : "HEVC";

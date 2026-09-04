@@ -207,6 +207,16 @@ public sealed record MediaStreamDto
     public bool IsHearingImpaired { get; init; }
     public bool IsTextSubtitleStream { get; init; }
     public string VideoRangeType { get; init; } = "Unknown";
+    // Jellyfin's own Dolby Vision fields, read from the stream's configuration record: what lets a client
+    // tell a dual-layer profile 7 from a single-layer 8.1 before it opens the file. Null where the stream is
+    // not Dolby Vision or the record was not recorded; the flags are Jellyfin's ints, not booleans.
+    public int? DvProfile { get; init; }
+    public int? DvLevel { get; init; }
+    public int? DvBlSignalCompatibilityId { get; init; }
+    public int? RpuPresentFlag { get; init; }
+    public int? ElPresentFlag { get; init; }
+    public int? BlPresentFlag { get; init; }
+    public string? VideoDoViTitle { get; init; }
     public string AudioSpatialFormat { get; init; } = "None";
     public bool SupportsExternalStream { get; init; }
     public string? DeliveryMethod { get; init; }

@@ -108,7 +108,10 @@ public sealed class RemoteMediaProbe(HttpClient http, MediaServerSettings settin
                 stream.Bitrate,
                 stream.IsDefault,
                 stream.IsForced,
-                stream.Title);
+                stream.Title,
+                stream.DolbyVision is { } record
+                    ? new DolbyVisionDetail(record.Profile, record.Level, record.BlSignalCompatibilityId, record.ElPresent)
+                    : null);
     }
 
     /// <summary>The engine's HDR vocabulary, mapped to the labels this library stores. It should never send
@@ -147,5 +150,15 @@ public sealed class RemoteMediaProbe(HttpClient http, MediaServerSettings settin
         string? Hdr,
         int? Channels,
         int? SampleRate,
-        int? Bitrate);
+        int? Bitrate,
+        EngineDolbyVision? DolbyVision = null);
+
+    /// <summary>The engine's <c>dolbyVision</c> object: ffprobe's configuration record, field by field.</summary>
+    private sealed record EngineDolbyVision(
+        int Profile,
+        int Level,
+        int BlSignalCompatibilityId,
+        bool RpuPresent,
+        bool ElPresent,
+        bool BlPresent);
 }

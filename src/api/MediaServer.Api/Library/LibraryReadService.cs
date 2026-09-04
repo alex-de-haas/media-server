@@ -700,7 +700,15 @@ public sealed class LibraryReadService(
         stream.IsDefault,
         stream.IsForced,
         stream.IsExternal,
-        stream.IsExternal ? EmptyToNull(Path.GetFileName(stream.ExternalPath)) : null);
+        stream.IsExternal ? EmptyToNull(Path.GetFileName(stream.ExternalPath)) : null,
+        DolbyVision(stream));
+
+    /// <summary>The record is stored as four columns and read as one object: a stream either has it whole or
+    /// not at all, and a client should not have to ask four times.</summary>
+    internal static DolbyVisionDto? DolbyVision(MediaStream stream) =>
+        stream.DvProfile is { } profile
+            ? new DolbyVisionDto(profile, stream.DvLevel ?? 0, stream.DvBlSignalCompatibilityId ?? 0, stream.DvElPresent ?? false)
+            : null;
 
     private static string? DisplayTitle(MediaStream stream) => stream.StreamType switch
     {

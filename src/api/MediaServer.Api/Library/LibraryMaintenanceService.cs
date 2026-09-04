@@ -131,6 +131,10 @@ public sealed class LibraryMaintenanceService(
                     FrameRate = stream.FrameRate,
                     BitDepth = stream.BitDepth,
                     HdrFormat = stream.HdrFormat,
+                    DvProfile = stream.DolbyVision?.Profile,
+                    DvLevel = stream.DolbyVision?.Level,
+                    DvBlSignalCompatibilityId = stream.DolbyVision?.BlSignalCompatibilityId,
+                    DvElPresent = stream.DolbyVision?.ElPresent,
                     Channels = stream.Channels,
                     SampleRate = stream.SampleRate,
                     Bitrate = stream.Bitrate,
@@ -165,8 +169,13 @@ public sealed class LibraryMaintenanceService(
     /// </summary>
     public async Task<MediaBackfillReport> BackfillHeaderProbedAsync(Guid catalogId, CancellationToken cancellationToken)
     {
+        // Two kinds of row have something to gain: those the header reader wrote, and those labelled Dolby
+        // Vision before the configuration record was recorded — engine rows too, so this is the one place the
+        // pass reaches past provenance. Both are bounded, and both are answered by the same re-probe.
         var itemIds = await database.MediaSources.AsNoTracking()
-            .Where(source => source.ProbeSource == ProbeSource.Header && source.MediaItem!.CatalogId == catalogId)
+            .Where(source => source.MediaItem!.CatalogId == catalogId &&
+                (source.ProbeSource == ProbeSource.Header ||
+                 source.Streams.Any(stream => stream.HdrFormat != null && stream.HdrFormat.Contains("Dolby Vision") && stream.DvProfile == null)))
             .Select(source => source.MediaItemId)
             .Distinct()
             .ToListAsync(cancellationToken);

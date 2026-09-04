@@ -342,6 +342,16 @@ export interface CollectionDetail {
   items: LibraryItem[];
 }
 
+export interface DolbyVisionDetail {
+  /** 5, 7 or 8 in practice. */
+  profile: number;
+  level: number;
+  /** What the base layer is on its own: 1 HDR10 (8.1), 2 SDR (8.2), 4 HLG (8.4), 6 a UHD Blu-ray's HDR10 under profile 7. */
+  blCompatibilityId: number;
+  /** An enhancement layer is present — the mark of profile 7's dual layer. */
+  enhancementLayer: boolean;
+}
+
 export interface MediaStream {
   /** Addressable because a sidecar is a file of its own — it can be merged in or removed independently. */
   id: string;
@@ -354,6 +364,12 @@ export interface MediaStream {
   width: number | null;
   height: number | null;
   hdrFormat: string | null;
+  /**
+   * The Dolby Vision configuration record, beside the flat hdrFormat: what tells a dual-layer profile 7 (a
+   * UHD Blu-ray remux, which Apple TV and Infuse play as HDR10) from a single-layer 8.1 (which they play as
+   * Dolby Vision). Null for anything that is not Dolby Vision, and for a row probed before it was recorded.
+   */
+  dolbyVision: DolbyVisionDetail | null;
   channels: number | null;
   // Secondary specs shown under each track: codec profile, video frame rate, bit depth, audio sample rate (Hz).
   profile: string | null;
@@ -951,6 +967,8 @@ export interface TranscodeJob {
   qualityLevel: string | null;
   /** How many audio tracks this job re-encoded rather than copied. */
   reEncodedAudioTracks: number;
+  /** "toProfile81" when the copy also rewrote the picture's Dolby Vision to profile 8.1; null otherwise. */
+  dolbyVision: string | null;
   state: string;
   percentComplete: number;
   error: string | null;
@@ -993,6 +1011,12 @@ export interface CreateTranscodeInput {
    * metadata alone still rewrites the file, so editing rides along with a job.
    */
   metadataEdits?: { streamId: string; language?: string; title?: string }[];
+  /**
+   * "keep" (default) or "toProfile81": rewrite a dual-layer Dolby Vision profile 7 picture to single-layer
+   * profile 8.1 while it is copied — the form Apple TV and Infuse play as Dolby Vision. Refused with a
+   * re-encode, on a version that is not profile 7, and by an engine without the tools.
+   */
+  dolbyVision?: "keep" | "toProfile81";
   /**
    * Audio tracks to re-encode rather than copy, named by stream id. Per track, because one file's tracks
    * want opposite answers — a lossless multichannel dub is most of a remux's size, while the original
@@ -1070,7 +1094,7 @@ export const mediaServer = {
 
   // Whether the transcode-engine dependency is attached. The Media tab works without it — versions and the
   // default-version pick are database-side — so only the conversion controls key off this.
-  transcodeAvailability: () => apiJson<{ available: boolean }>(`${BASE}/transcode/availability`),
+  transcodeAvailability: () => apiJson<{ available: boolean; dolbyVisionConversion: boolean }>(`${BASE}/transcode/availability`),
   // The language tags a track edit may carry, from the service that validates them — so the dialog cannot
   // accept a value the API then refuses.
   transcodeLanguages: () => apiJson<string[]>(`${BASE}/transcode/languages`),

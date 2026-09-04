@@ -122,7 +122,8 @@ public sealed class HeaderMediaProbe(ILogger<HeaderMediaProbe> logger) : IMediaP
                 null,
                 track.IsDefault,
                 track.IsForced,
-                track.Title);
+                track.Title,
+                track.DolbyVision);
     }
 
     private static string? Hdr(HeaderHdr hdr) => hdr switch

@@ -321,9 +321,40 @@ struct TitleView: View {
 
     @ViewBuilder
     private func tracks(_ version: TitleVersion) -> some View {
-        HStack(alignment: .top, spacing: 80) {
-            trackList("Audio", version.audio)
-            trackList("Subtitles", version.subtitles)
+        VStack(alignment: .leading, spacing: 24) {
+            if let picture = version.videos.first(where: { $0.hdrFormat != nil }) {
+                dynamicRange(picture)
+            }
+
+            HStack(alignment: .top, spacing: 80) {
+                trackList("Audio", version.audio)
+                trackList("Subtitles", version.subtitles)
+            }
+        }
+    }
+
+    /// The picture's dynamic range as capsules — "Dolby Vision 8.1", "HDR10" — with the one note a dual-layer
+    /// profile 7 earns on this device. Text marks rather than logos: the Dolby Vision mark is licensed, and a
+    /// capsule reads the same.
+    @ViewBuilder
+    private func dynamicRange(_ picture: TitleTrack) -> some View {
+        let badges = picture.dynamicRangeBadges
+        if !badges.isEmpty {
+            HStack(spacing: 12) {
+                ForEach(badges, id: \.self) { badge in
+                    Text(badge)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(.secondary.opacity(0.25), in: Capsule())
+                }
+
+                if let note = picture.dolbyVisionNote {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

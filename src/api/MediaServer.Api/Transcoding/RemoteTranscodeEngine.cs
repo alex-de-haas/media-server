@@ -107,7 +107,8 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
             request.Outputs?
                 .Select(entry => new WireOutput(
                     entry.MountLabel, entry.RelativePath, entry.StreamIndex, entry.Codec, entry.Language, entry.Title))
-                .ToList());
+                .ToList(),
+            request.DolbyVision);
 
         using var cts = ControlCts(cancellationToken);
         using var response = await _http.PostAsJsonAsync("/jobs", wire, Json, cts.Token);
@@ -149,6 +150,23 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
     }
 
     public JobSnapshot? GetSnapshot(string jobId) => _snapshots.GetValueOrDefault(jobId);
+
+    public async Task<TranscodeTooling> GetToolingAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cts = ControlCts(cancellationToken);
+            var hardware = await _http.GetFromJsonAsync<WireHardware>("/hardware", Json, cts.Token);
+            return new TranscodeTooling(hardware?.Tools?.DolbyVisionConversion == true);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // Informational: an engine that cannot answer offers no tooling, and the job it would have refused
+            // is simply not offered.
+            _logger.LogDebug(exception, "Could not read the transcode engine's tooling from {Url}.", _settings.TranscodeEngineUrl);
+            return TranscodeTooling.None;
+        }
+    }
 
     public IReadOnlyList<JobSnapshot> GetAllSnapshots() => _snapshots.Values.ToList();
 
@@ -308,7 +326,13 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         IReadOnlyList<WireAdditionalInput>? AdditionalInputs = null,
         IReadOnlyList<WireMetadataOverride>? MetadataOverrides = null,
         IReadOnlyList<WireAudioTarget>? AudioTargets = null,
-        IReadOnlyList<WireOutput>? Outputs = null);
+        IReadOnlyList<WireOutput>? Outputs = null,
+        string? DolbyVision = null);
+
+    /// <summary>The engine's <c>GET /hardware</c>, read for its <c>tools</c> block alone.</summary>
+    private sealed record WireHardware(WireTools? Tools);
+
+    private sealed record WireTools(bool DolbyVisionConversion, string? DoviTool, string? Mkvtoolnix);
 
     /// <summary>The engine's <c>outputs</c> entry — one stream written to its own file. <c>Codec</c> is left
     /// null for a stream copy, which is what every extraction but a text-subtitle conversion asks for.</summary>

@@ -482,6 +482,41 @@ public enum Components {
                 case profileUrl
             }
         }
+        /// - Remark: Generated from `#/components/schemas/DolbyVisionDto`.
+        public struct DolbyVisionDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DolbyVisionDto/profile`.
+            public var profile: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/DolbyVisionDto/level`.
+            public var level: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/DolbyVisionDto/blCompatibilityId`.
+            public var blCompatibilityId: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/DolbyVisionDto/enhancementLayer`.
+            public var enhancementLayer: Swift.Bool
+            /// Creates a new `DolbyVisionDto`.
+            ///
+            /// - Parameters:
+            ///   - profile:
+            ///   - level:
+            ///   - blCompatibilityId:
+            ///   - enhancementLayer:
+            public init(
+                profile: Swift.Int32,
+                level: Swift.Int32,
+                blCompatibilityId: Swift.Int32,
+                enhancementLayer: Swift.Bool
+            ) {
+                self.profile = profile
+                self.level = level
+                self.blCompatibilityId = blCompatibilityId
+                self.enhancementLayer = enhancementLayer
+            }
+            public enum CodingKeys: String, CodingKey {
+                case profile
+                case level
+                case blCompatibilityId
+                case enhancementLayer
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/LibraryDetailDto`.
         public struct LibraryDetailDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/id`.
@@ -960,6 +995,8 @@ public enum Components {
             public var isExternal: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/MediaStreamDto/fileName`.
             public var fileName: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/MediaStreamDto/dolbyVision`.
+            public var dolbyVision: Components.Schemas.DolbyVisionDto?
             /// Creates a new `MediaStreamDto`.
             ///
             /// - Parameters:
@@ -983,6 +1020,7 @@ public enum Components {
             ///   - isForced:
             ///   - isExternal:
             ///   - fileName:
+            ///   - dolbyVision:
             public init(
                 id: Swift.String,
                 _type: Swift.String,
@@ -1003,7 +1041,8 @@ public enum Components {
                 isDefault: Swift.Bool,
                 isForced: Swift.Bool,
                 isExternal: Swift.Bool,
-                fileName: Swift.String? = nil
+                fileName: Swift.String? = nil,
+                dolbyVision: Components.Schemas.DolbyVisionDto? = nil
             ) {
                 self.id = id
                 self._type = _type
@@ -1025,6 +1064,7 @@ public enum Components {
                 self.isForced = isForced
                 self.isExternal = isExternal
                 self.fileName = fileName
+                self.dolbyVision = dolbyVision
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -1047,6 +1087,7 @@ public enum Components {
                 case isForced
                 case isExternal
                 case fileName
+                case dolbyVision
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativeCapabilityProfile`.

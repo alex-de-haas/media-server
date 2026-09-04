@@ -1,7 +1,7 @@
 # Media Probe Providers
 
 Created: 2026-07-27
-Updated: 2026-08-31
+Updated: 2026-09-04
 
 Probing a library file runs through two providers behind one `IMediaProbe`. The
 external `transcode-engine` leads, because it runs `ffprobe` and therefore knows
@@ -97,6 +97,20 @@ transfer 18, a generic `HDR` for transfer 16 (PQ, but a header cannot say which
 kind), `SDR` when colour data is present and says otherwise, and **null** when the
 container carried none at all.
 
+A `Dolby Vision` stream also carries its configuration record, read field by field
+into `DvProfile`, `DvLevel`, `DvBlSignalCompatibilityId` and `DvElPresent` beside the
+label — because the label alone cannot say what a player's behaviour turns on: a
+dual-layer profile 7 (a UHD Blu-ray remux, which Apple TV and Infuse play as HDR10)
+and a single-layer 8.1 (which they play as Dolby Vision) are both `Dolby Vision`. Both
+providers answer it, since the record sits in the container header: the engine from
+ffprobe's `dolbyVision` object, the reader from the MP4 `dvcC`/`dvvC` box it already
+reached and — new — from the Matroska `BlockAdditionMapping` typed `dvcC`/`dvvC` (or
+named "Dolby Vision configuration"), the same element the remux indexer reads. The
+reader therefore reports `Dolby Vision` for Matroska for the first time. A row labelled
+`Dolby Vision` before the record was stored has null detail, and the refresh pass fills
+it in — the one place that pass reaches past provenance. See
+[dolby-vision-profile](../dolby-vision-profile/feature.md).
+
 `SDR` and null are different answers. Null means nobody could tell; `SDR` is a
 positive statement. An HDR badge appears only for a positive HDR value, so the worst
 case is a missing badge rather than a false one — and never an assertion of SDR
@@ -146,7 +160,9 @@ for transcoding itself.
 
 - `HeaderMediaProbeTests` — the reader over containers built byte by byte: MP4
   duration in both header versions, track mapping, embedded cover art shifting later
-  indexes, Dolby Vision outranking the transfer function; Matroska duration scaled by
+  indexes, Dolby Vision outranking the transfer function, the Dolby Vision record read
+  out of an MP4 sample entry and a Matroska `BlockAdditionMapping` (typed, name-only,
+  and one of another kind not counting); Matroska duration scaled by
   its timestamp scale, track flags and names, every HDR case, BCP-47 language
   normalization, an unknown codec id passed through, an absent duration element, the
   writing application, and an `.mka` sidecar read as Matroska; AVI duration and the

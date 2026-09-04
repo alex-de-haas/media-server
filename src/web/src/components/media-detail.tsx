@@ -31,7 +31,7 @@ import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { WatchTimeDialog } from "@/components/watch-time-dialog";
 import { QUERIES_AFFECTED_BY_HISTORY_CHANGE } from "@/lib/watch-history-calendar";
-import { episodeLabel, formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
+import { dolbyVisionNote, dynamicRangeBadges, episodeLabel, formatBytes, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
 import { errorMessage, formatCount, openExternal } from "@/lib/ui";
 import {
   AlertDialog,
@@ -1039,7 +1039,11 @@ function SourceCard({
   const [preselectedSidecars, setPreselectedSidecars] = useState<string[]>([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const hdr = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat)?.hdrFormat;
+  // The picture: the first video stream that names a dynamic range. Its badges carry the Dolby Vision profile
+  // when it is recorded, and a dual-layer profile 7 gets the one note a viewer with Apple hardware needs.
+  const picture = source.streams.find((stream) => stream.type === "Video" && stream.hdrFormat);
+  const rangeBadges = dynamicRangeBadges(picture?.hdrFormat, picture?.dolbyVision);
+  const rangeNote = dolbyVisionNote(picture?.dolbyVision);
 
   // The default only matters when a title has several versions; clients play MediaSources[0].
   const showDefault = hasMultiple;
@@ -1074,11 +1078,12 @@ function SourceCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-mono font-medium break-all">{source.fileName}</p>
-            {hdr ? (
-              <Badge variant="secondary" className="font-normal">
-                {hdr}
+            {rangeBadges.map((badge) => (
+              <Badge key={badge} variant="secondary" className="font-normal">
+                {badge}
               </Badge>
-            ) : null}
+            ))}
+            {rangeNote ? <span className="text-muted-foreground text-xs">{rangeNote}</span> : null}
           </div>
           <p className="text-muted-foreground mt-1 font-mono text-xs">{metaParts.join(" · ")}</p>
         </div>

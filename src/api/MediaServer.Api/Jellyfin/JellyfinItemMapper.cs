@@ -286,7 +286,16 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server, MediaServer
             RealFrameRate = stream.FrameRate,
             BitDepth = stream.BitDepth,
             VideoRange = stream.StreamType == StreamType.Video ? VideoRange(stream.HdrFormat) : null,
-            VideoRangeType = stream.StreamType == StreamType.Video ? VideoRangeType(stream.HdrFormat) : "Unknown",
+            VideoRangeType = stream.StreamType == StreamType.Video ? VideoRangeType(stream.HdrFormat, stream.DvProfile, stream.DvBlSignalCompatibilityId) : "Unknown",
+            DvProfile = stream.StreamType == StreamType.Video ? stream.DvProfile : null,
+            DvLevel = stream.StreamType == StreamType.Video ? stream.DvLevel : null,
+            DvBlSignalCompatibilityId = stream.StreamType == StreamType.Video ? stream.DvBlSignalCompatibilityId : null,
+            // A stored record always has an RPU and a base layer — that is what makes it a record — so the
+            // flags are answered from its presence; only the enhancement layer varies.
+            RpuPresentFlag = stream.StreamType == StreamType.Video && stream.DvProfile is not null ? 1 : null,
+            ElPresentFlag = stream.StreamType == StreamType.Video && stream.DvProfile is not null ? (stream.DvElPresent == true ? 1 : 0) : null,
+            BlPresentFlag = stream.StreamType == StreamType.Video && stream.DvProfile is not null ? 1 : null,
+            VideoDoViTitle = stream.StreamType == StreamType.Video ? DolbyVisionTitle(stream.DvProfile, stream.DvBlSignalCompatibilityId) : null,
             AspectRatio = AspectRatio(stream),
             Channels = stream.Channels,
             SampleRate = stream.SampleRate,
@@ -465,8 +474,39 @@ public sealed class JellyfinItemMapper(JellyfinServerContext server, MediaServer
 
     private static string VideoRange(string? hdrFormat) => IsSdr(hdrFormat) ? "SDR" : "HDR";
 
-    // VideoRangeType is a finer enum than VideoRange ("HDR" is not a member); collapse non-SDR to HDR10.
-    private static string VideoRangeType(string? hdrFormat) => IsSdr(hdrFormat) ? "SDR" : "HDR10";
+    // VideoRangeType is a finer enum than VideoRange ("HDR" is not a member). A Dolby Vision stream whose
+    // profile is known gets Jellyfin's own members for it — the same values a Jellyfin 10.9 server sends, so
+    // a client that reads it has already learned them; one whose profile is not yet recorded, and every other
+    // HDR, collapses to HDR10 as before.
+    internal static string VideoRangeType(string? hdrFormat, int? dvProfile = null, int? dvCompatibility = null)
+    {
+        if (IsSdr(hdrFormat))
+        {
+            return "SDR";
+        }
+
+        return dvProfile switch
+        {
+            5 => "DOVI",
+            7 => "DOVIWithHDR10",
+            8 => dvCompatibility switch
+            {
+                2 => "DOVIWithSDR",
+                4 => "DOVIWithHLG",
+                _ => "DOVIWithHDR10",
+            },
+            _ => "HDR10",
+        };
+    }
+
+    /// <summary>Jellyfin's <c>VideoDoViTitle</c>: the profile, and for profile 8 its base-layer variant, the
+    /// way people name them — "Dolby Vision Profile 7", "Dolby Vision Profile 8.1".</summary>
+    internal static string? DolbyVisionTitle(int? dvProfile, int? dvCompatibility) => dvProfile switch
+    {
+        null => null,
+        8 => $"Dolby Vision Profile 8.{dvCompatibility ?? 1}",
+        var profile => $"Dolby Vision Profile {profile}",
+    };
 
     private static string? AspectRatio(MediaStream stream)
     {

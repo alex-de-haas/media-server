@@ -85,14 +85,17 @@ the header reader starts reporting `Dolby Vision` for Matroska, which today it n
       can supply them and left empty by those that cannot.
 - [ ] **Provenance on the media source** — which provider answered, plus a
       migration.
-- [ ] **Dynamic-range detail** — the video codec tag, and the Dolby Vision profile,
-      level, base-layer compatibility id and enhancement-layer flag (`DvProfile`,
-      `DvLevel`, `DvBlSignalCompatibilityId`, `DvElPresent`), stored per video stream,
-      plus a migration and a bounded refresh fill-in for rows already labelled
-      `Dolby Vision` without a profile. A flat `HdrFormat` stays for existing consumers;
-      this sits beside it. Both providers supply the Dolby Vision detail — see *Where the
-      detail comes from*. Consumed by
-      [dolby-vision-profile](../dolby-vision-profile/plan.md).
+- [x] **Dolby Vision detail** — the profile, level, base-layer compatibility id and
+      enhancement-layer flag (`DvProfile`, `DvLevel`, `DvBlSignalCompatibilityId`,
+      `DvElPresent`), stored per video stream, plus a migration and a bounded refresh
+      fill-in for rows already labelled `Dolby Vision` without a profile. A flat
+      `HdrFormat` stays for existing consumers; this sits beside it. Both providers supply
+      it — see *Where the detail comes from*. Shipped with
+      [dolby-vision-profile](../dolby-vision-profile/feature.md).
+- [ ] **Video codec tag** — `hvc1`, `hev1` or `dvh1` as the file carries it (MP4's sample
+      entry; ffprobe's `codec_tag_string`; Matroska has none), stored per video stream. It
+      is what would let direct play predict the `hev1` Apple rejects; the Dolby Vision
+      detail above was split from it because that one had a title playing wrong today.
 - [ ] **Surface all three** in the library projection, so the web detail page and
       `/native/v1/items/{id}` gain them together.
 - [ ] **Unit tests** — a header-probed source yields no chapters and reports the
