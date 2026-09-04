@@ -17,8 +17,14 @@ import os
 /// What it does not change: AVFoundation still decides what to ask for. A player that stops asking
 /// still stops — but with this in the middle, that moment is visible, and `WedgeDetector` acts on it.
 ///
+/// One thing it must not do is answer an open-ended request at line rate. A request for "everything
+/// to the end" accepts whatever it is given, and a loader that keeps giving would pull a whole film
+/// into the player's memory in minutes with its own budget bounding only what *it* kept. Delivery to
+/// such a request is therefore metered by what the player already holds ahead of the play head —
+/// which is, at last, a read-ahead in seconds under our control.
+///
 /// Every piece of state lives on one serial queue: AVFoundation calls in on it, and the session's
-/// delegate queue is bound to it, so there is nothing to lock except the snapshot the overlay reads.
+/// delegate queue is bound to it, so there is nothing to lock except what other threads read.
 public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
     /// The scheme that makes AVFoundation defer to the delegate. Anything it does not know how to
     /// fetch itself will do; this one says what is behind it.
@@ -44,33 +50,63 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     /// AVFoundation calls the delegate here, and the session delivers here too.
     public let queue = DispatchQueue(label: "com.haas.mediaserver.loader")
 
+    /// How far ahead the player may hold before an open-ended request stops being fed. Twenty seconds
+    /// of a 4K film is a couple of hundred megabytes in the player's own memory, beside the window.
+    public let target: Double
+
     private let origin: URL
     private let tail: Int64
+    private let lag: Int64
     private let relay = Relay()
     private let session: URLSession
+
+    /// How much an open-ended request may be given per second while the player is below `target`.
+    /// Well above any film's rate, so a healthy player is never starved by its own meter.
+    private static let allowancePerSecond = 16 << 20
+
+    /// Before the first reading of the player arrives, so the first frames are not waited for.
+    private static let initialAllowance = 32 << 20
+
+    /// The most a lagging reader is fetched on its own in one go.
+    private static let asideLimit = 8 << 20
 
     // Everything below is touched on `queue` only.
     private var total: Int64?
     private var learning = false
     private var window: ByteWindow
     private var pending: [AVAssetResourceLoadingRequest] = []
+    private var aside: Set<ObjectIdentifier> = []
     private var fetch: URLSessionDataTask?
     private var demand: Int64 = 0
     private var delivered: Int64 = 0
     private var serverRequests = 0
+    private var playerAhead: Double = 0
+    private var allowance = RemuxLoader.initialAllowance
     private var stopped = false
 
-    private let snapshotLock = NSLock()
+    private let shared = NSLock()
     private var snapshot = Snapshot()
+    private var stopping = false
 
     /// - Parameters:
     ///   - budget: how much may be held ahead. A 4K film at 78 Mbit/s is ten megabytes a second, so
     ///     this is a dozen seconds of it — a starting point read off the overlay, not a decision.
-    ///   - tail: how much is kept *behind* the play head, for a reader that lags. The audio reader
-    ///     runs a few megabytes behind the video one and must not find its bytes already dropped.
-    public init(origin: URL, budget: Int = 128 << 20, tail: Int64 = 8 << 20) {
+    ///   - tail: how much is kept *behind* the lowest outstanding request when trimming, for a reader
+    ///     that lags. The audio reader runs a few megabytes behind the video one.
+    ///   - lag: how far below the window's start a request still counts as that lagging reader and is
+    ///     fetched on its own, rather than as a seek that restarts the window.
+    ///   - target: seconds the player may hold ahead before open-ended delivery pauses.
+    public init(
+        origin: URL,
+        budget: Int = 128 << 20,
+        tail: Int64 = 8 << 20,
+        lag: Int64 = 32 << 20,
+        target: Double = 20
+    ) {
         self.origin = origin
         self.tail = tail
+        self.lag = lag
+        self.target = target
         self.window = ByteWindow(start: 0, budget: budget)
         self.assetURL = Self.assetURL(for: origin)
 
@@ -79,7 +115,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         delivery.underlyingQueue = queue
 
         let configuration = URLSessionConfiguration.default
-        configuration.httpMaximumConnectionsPerHost = 2
+        configuration.httpMaximumConnectionsPerHost = 3
         configuration.timeoutIntervalForRequest = 30
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
@@ -105,19 +141,39 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     }
 
     public func makeSnapshot() -> Snapshot {
-        snapshotLock.withLock { snapshot }
+        shared.withLock { snapshot }
+    }
+
+    /// How far ahead of the play head the player already holds, read off it once a second by whoever
+    /// can see it. This is the meter on open-ended delivery: below `target` the request is fed, at or
+    /// above it nothing more is handed over until the player has consumed some.
+    public func playerHolds(seconds: Double) {
+        queue.async {
+            self.playerAhead = seconds
+            self.allowance = seconds < self.target ? Self.allowancePerSecond : 0
+            self.serve()
+        }
     }
 
     /// Ends every fetch and releases the session. The session holds its delegate strongly until it is
     /// invalidated, so a loader that is not stopped is a loader that never goes away.
+    ///
+    /// The refusal is immediate and the teardown asynchronous: a request AVFoundation hands over
+    /// between the two is turned away rather than accepted onto a session about to be invalidated.
     public func stop() {
+        shared.withLock { stopping = true }
         queue.async {
             self.stopped = true
             self.fetch?.cancel()
             self.fetch = nil
             self.pending.removeAll()
+            self.aside.removeAll()
             self.session.invalidateAndCancel()
         }
+    }
+
+    private var isStopping: Bool {
+        shared.withLock { stopping }
     }
 
     // MARK: - AVAssetResourceLoaderDelegate
@@ -126,7 +182,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         _ resourceLoader: AVAssetResourceLoader,
         shouldWaitForLoadingOfRequestedResource request: AVAssetResourceLoadingRequest
     ) -> Bool {
-        guard !stopped else { return false }
+        guard !stopped, !isStopping else { return false }
 
         pending.append(request)
         if total == nil {
@@ -142,6 +198,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         _ resourceLoader: AVAssetResourceLoader, didCancel request: AVAssetResourceLoadingRequest
     ) {
         pending.removeAll { $0 === request }
+        aside.remove(ObjectIdentifier(request))
         publish()
     }
 
@@ -181,19 +238,22 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             request.finishLoading(with: error)
         }
         pending.removeAll()
+        aside.removeAll()
         publish()
     }
 
     // MARK: - Serving
 
-    /// Answers every pending request with whatever the window holds for it, moves the window when a
-    /// request is somewhere else, and keeps the fill running ahead. Called on every event: a new
-    /// request, a chunk arriving, a fetch ending.
+    /// Answers every pending request with whatever the window holds for it, fetches a lagging one on
+    /// its own, moves the window once if a request is somewhere else, and keeps the fill running
+    /// ahead. Called on every event: a new request, a chunk arriving, a fetch ending, a reading of
+    /// the player.
     private func serve() {
         guard let total, !stopped else { return }
 
         var done: [AVAssetResourceLoadingRequest] = []
         var lowest: Int64?
+        var seek: Int64?
 
         for request in pending {
             if let information = request.contentInformationRequest {
@@ -221,28 +281,53 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             }
 
             lowest = min(lowest ?? owed.lowerBound, owed.lowerBound)
-            demand = max(demand, owed.lowerBound)
 
-            if let held = window.read(from: owed.lowerBound, upTo: Int(clamping: owed.count)) {
+            switch window.place(owed.lowerBound, lag: lag) {
+            case .held:
+                var limit = owed.count
+                if data.requestsAllDataToEndOfResource {
+                    // Metered: an open-ended request takes whatever it is given, and the player's
+                    // own buffer is where it would go.
+                    guard allowance > 0 else { continue }
+                    limit = min(limit, allowance)
+                }
+
+                guard let held = window.read(from: owed.lowerBound, upTo: limit) else { continue }
                 data.respond(with: held)
                 delivered += Int64(held.count)
+                if data.requestsAllDataToEndOfResource {
+                    allowance -= held.count
+                }
 
                 if data.currentOffset >= owed.upperBound {
                     request.finishLoading()
                     done.append(request)
                 }
-            } else if !window.reaches(owed.lowerBound, tail: tail) {
-                // Somewhere the fill will not arrive at: a seek. Everything held is for a part of the
-                // film nobody is watching any more.
-                restart(at: owed.lowerBound)
+
+            case .ahead:
+                // The fill will bring it.
+                break
+
+            case .behind:
+                fetchAside(request, owed: owed)
+
+            case .away:
+                // The newest such request wins, and the move happens once, after the loop — moving
+                // mid-loop would judge every later request against a window that had just changed.
+                seek = owed.lowerBound
             }
         }
 
         pending.removeAll { candidate in done.contains { $0 === candidate } }
 
+        if let seek {
+            restart(at: seek)
+        }
+
         // Behind the lowest thing still wanted, minus a tail for a reader that lags. When nothing is
         // pending, the last demand stands in for it.
-        window.trim(keepingFrom: (lowest ?? demand) - tail)
+        demand = lowest ?? demand
+        window.trim(keepingFrom: demand - tail)
         ensureFilling(total: total)
         publish()
     }
@@ -252,6 +337,38 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         fetch = nil
         window.restart(at: offset)
         demand = offset
+    }
+
+    /// A request for bytes just behind the window — a reader that lags — fetched on its own, so the
+    /// window need not restart and the request is not left pending for bytes it will never hold.
+    private func fetchAside(_ request: AVAssetResourceLoadingRequest, owed: Range<Int64>) {
+        let id = ObjectIdentifier(request)
+        guard !aside.contains(id) else { return }
+        aside.insert(id)
+
+        let to = min(owed.upperBound, owed.lowerBound + Int64(Self.asideLimit)) - 1
+        var ranged = URLRequest(url: origin)
+        ranged.setValue("bytes=\(owed.lowerBound)-\(to)", forHTTPHeaderField: "Range")
+        serverRequests += 1
+
+        session.dataTask(with: ranged) { [weak self] data, response, error in
+            guard let self else { return }
+            self.aside.remove(id)
+
+            // Cancelled or finished while this was out: nothing to give it to.
+            guard self.pending.contains(where: { $0 === request }) else { return }
+
+            guard let data, error == nil, (response as? HTTPURLResponse)?.statusCode == 206 else {
+                request.finishLoading(with: error ?? URLError(.badServerResponse))
+                self.pending.removeAll { $0 === request }
+                self.publish()
+                return
+            }
+
+            request.dataRequest?.respond(with: data)
+            self.delivered += Int64(data.count)
+            self.serve()
+        }.resume()
     }
 
     // MARK: - Filling
@@ -289,11 +406,18 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         serve()
     }
 
+    /// Only a 206 is a range answered. A 200 is a server that ignored the range and is sending the
+    /// whole film, which would be appended past any budget; anything else is a refusal. Either way
+    /// the requests waiting on it are told, rather than left waiting on a fetch that is gone.
     fileprivate func responded(_ response: URLResponse, for task: URLSessionDataTask) -> Bool {
         guard task === fetch else { return false }
-        guard let http = response as? HTTPURLResponse, http.statusCode == 206 || http.statusCode == 200 else {
-            Self.log.error("Fetch refused: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 206 else {
+            Self.log.error("Fetch refused with \(status)")
             fetch = nil
+            fail(with: URLError(.badServerResponse))
+            retryFilling(after: 2)
             return false
         }
 
@@ -306,17 +430,21 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
 
         if let error, (error as? URLError)?.code != .cancelled {
             Self.log.warning("Fetch ended early: \(error.localizedDescription)")
-            // A moment later rather than at once: a server that just dropped a connection is not
-            // helped by another one immediately, and the window still has what it has.
-            queue.asyncAfter(deadline: .now() + 1) { [weak self] in
-                guard let self, let total = self.total else { return }
-                self.ensureFilling(total: total)
-            }
+            retryFilling(after: 1)
             return
         }
 
         if let total {
             ensureFilling(total: total)
+        }
+    }
+
+    /// A moment later rather than at once: a server that just dropped a connection is not helped by
+    /// another one immediately, and the window still has what it has.
+    private func retryFilling(after seconds: Double) {
+        queue.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, let total = self.total else { return }
+            self.ensureFilling(total: total)
         }
     }
 
@@ -329,7 +457,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             outstanding: pending.count,
             totalLength: total)
 
-        snapshotLock.withLock { snapshot = copy }
+        shared.withLock { snapshot = copy }
     }
 
     /// The session's delegate, kept apart so the session's strong reference does not pin the loader.

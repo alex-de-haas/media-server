@@ -4,11 +4,31 @@ import Foundation
 ///
 /// Kept as the chunks it arrived in rather than one growing buffer: the front is dropped as the play
 /// head moves on, and dropping a chunk costs nothing where trimming a single `Data` would copy
-/// everything behind it — a hundred megabytes, once a second, for the length of a film.
+/// everything behind it — a hundred megabytes, once a second, for the length of a film. Dropped
+/// chunks are skipped by index rather than removed one at a time, and the array is compacted only
+/// once the dead part outweighs the live one.
 ///
 /// Pure value, so every rule about what it holds is testable without a player or a network.
 public struct ByteWindow: Sendable {
+    /// Where an offset stands relative to what is held.
+    public enum Placement: Equatable, Sendable {
+        /// Readable now.
+        case held
+
+        /// Past the end, but within a budget of it: filling forward will arrive there.
+        case ahead
+
+        /// Below the start, but not by much: a reader that lags behind the one the window follows.
+        /// The window cannot grow backwards, so this is fetched on its own rather than waited for —
+        /// a request left pending here would be pending for ever.
+        case behind
+
+        /// Anywhere else. A seek: the window restarts there.
+        case away
+    }
+
     private var chunks: [Data] = []
+    private var head = 0
 
     /// Offset in the resource of the first byte held.
     public private(set) var start: Int64
@@ -36,10 +56,12 @@ public struct ByteWindow: Sendable {
         offset >= start && offset < end
     }
 
-    /// Whether an offset is close enough that filling forward will reach it, or is already behind
-    /// within the tail kept for a reader that lags. Anything else is a seek.
-    public func reaches(_ offset: Int64, tail: Int64) -> Bool {
-        offset >= start - tail && offset < end + Int64(budget)
+    /// - Parameter lag: how far below the start still counts as a reader that lags rather than a seek.
+    public func place(_ offset: Int64, lag: Int64) -> Placement {
+        if holds(offset) { return .held }
+        if offset >= end && offset < end + Int64(budget) { return .ahead }
+        if offset < start && offset >= start - lag { return .behind }
+        return .away
     }
 
     /// Everything held from `offset` onwards, up to `limit` bytes. Nil when `offset` is not held at
@@ -51,7 +73,7 @@ public struct ByteWindow: Sendable {
         var remaining = min(limit, Int(end - offset))
         var out = Data(capacity: remaining)
 
-        for chunk in chunks {
+        for chunk in chunks[head...] {
             if skip >= chunk.count {
                 skip -= chunk.count
                 continue
@@ -80,16 +102,23 @@ public struct ByteWindow: Sendable {
     /// Drops whole chunks that end at or before `offset`. Never splits a chunk: a few hundred
     /// kilobytes kept longer than necessary is cheaper than copying to be exact.
     public mutating func trim(keepingFrom offset: Int64) {
-        while let first = chunks.first, start + Int64(first.count) <= offset {
-            chunks.removeFirst()
-            start += Int64(first.count)
-            count -= first.count
+        while head < chunks.count, start + Int64(chunks[head].count) <= offset {
+            start += Int64(chunks[head].count)
+            count -= chunks[head].count
+            head += 1
+        }
+
+        // Compacted only when the dead part outweighs the live one, so the copy is rare and small.
+        if head > 64, head * 2 > chunks.count {
+            chunks.removeFirst(head)
+            head = 0
         }
     }
 
     /// Forgets everything and begins again at `offset`. What a seek does.
     public mutating func restart(at offset: Int64) {
         chunks.removeAll()
+        head = 0
         count = 0
         start = offset
     }

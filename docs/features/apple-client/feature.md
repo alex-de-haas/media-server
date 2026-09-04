@@ -211,7 +211,16 @@ second — and re-fetching about 1.4 times what it kept. Answers now come from a
 memory, 128 MB ahead of the play head with 8 MB kept behind for a reader that lags, filled by a few
 large bounded requests: each asks for exactly the room there is, and the next starts once a quarter of
 the budget has drained. Bounded rather than open-ended because a connection nobody reads is one the
-server aborts. A request outside the window's reach is a seek, and restarts it there.
+server aborts. A request farther ahead than the fill will reach, or well behind the start, is a seek
+and restarts the window there; one just behind the start — a reader that lags — is fetched on its own,
+since the window cannot grow backwards and a request left pending there would be pending for ever.
+
+**Delivery to an open-ended request is metered.** A request for everything to the end takes whatever
+it is given, and a loader that kept giving would pull a whole film into the player's memory in minutes,
+its own budget bounding only what it kept rather than what it sent. So `LoaderGuardian` reads once a
+second how far ahead the player already holds, and while that covers more than twenty seconds nothing
+more is handed over; below it, at most sixteen megabytes a second — above any film's rate, so a healthy
+player is never starved by its own meter. This is, at last, a read-ahead in seconds under our control.
 
 The one HEAD before anything plays answers the content-information request from the server rather
 than by assumption, since a wrong length there is "does not play at all".

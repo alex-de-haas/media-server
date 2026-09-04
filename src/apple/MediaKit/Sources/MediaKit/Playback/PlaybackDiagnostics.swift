@@ -183,6 +183,12 @@ public final class PlaybackDiagnostics {
             windowMB = Double(held.windowBytes) / 1_000_000
             aheadMB = Double(held.aheadBytes) / 1_000_000
             serverRequests = held.serverRequests
+        } else {
+            // Cleared, not kept: an item that fetches for itself must not wear the previous one's
+            // figures.
+            windowMB = nil
+            aheadMB = nil
+            serverRequests = nil
         }
 
         // The access log's own stall count, which counts what the notification can miss.

@@ -69,16 +69,40 @@ struct ByteWindowTests {
         #expect(window.read(from: 0, upTo: 1) == nil)
     }
 
-    @Test("Reach covers the fill ahead and the tail behind, and nothing beyond either")
-    func reach() {
+    @Test("Where an offset stands decides whether it is read, waited for, fetched alone, or a seek")
+    func placement() {
         var window = ByteWindow(start: 1_000, budget: 100)
         window.append(bytes(50, 1))
 
-        #expect(window.reaches(1_049, tail: 10))
-        #expect(window.reaches(1_149, tail: 10))       // ahead, within a budget of the end
-        #expect(!window.reaches(1_150, tail: 10))
-        #expect(window.reaches(990, tail: 10))         // behind, within the tail
-        #expect(!window.reaches(989, tail: 10))
+        #expect(window.place(1_049, lag: 10) == .held)
+        #expect(window.place(1_050, lag: 10) == .ahead)   // the fill arrives here next
+        #expect(window.place(1_149, lag: 10) == .ahead)
+        #expect(window.place(1_150, lag: 10) == .away)    // farther than the fill will reach
+        #expect(window.place(999, lag: 10) == .behind)    // a reader that lags: fetched alone
+        #expect(window.place(990, lag: 10) == .behind)
+        #expect(window.place(989, lag: 10) == .away)      // a seek backwards
+    }
+
+    @Test("An empty window at a seek is ahead of nothing, so the first request waits for the fill")
+    func emptyWindow() {
+        let window = ByteWindow(start: 5_000, budget: 100)
+
+        #expect(window.place(5_000, lag: 10) == .ahead)
+        #expect(window.read(from: 5_000, upTo: 1) == nil)
+    }
+
+    @Test("Trimming through many chunks does not cost a copy per chunk")
+    func trimManyChunks() {
+        var window = ByteWindow(start: 0, budget: 1_000_000)
+        for i in 0 ..< 200 {
+            window.append(bytes(10, UInt8(i % 250)))
+        }
+
+        window.trim(keepingFrom: 1_500)
+
+        #expect(window.start == 1_500)
+        #expect(window.count == 500)
+        #expect(window.read(from: 1_500, upTo: 1) == bytes(1, UInt8(150 % 250)))
     }
 
     @Test("Budget and room say when filling should stop")

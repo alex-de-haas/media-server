@@ -178,6 +178,10 @@ struct PlayerView: UIViewControllerRepresentable {
         private var ownLoader = true
         private let guardian = LoaderGuardian()
 
+        /// The re-seat in flight, so leaving the film can stop it — the same hazard as a track switch:
+        /// a seek that lands after the viewer has gone would start a film nobody is watching.
+        private var reseatTask: Task<Void, Never>?
+
         init(onFinished: @escaping (Double) -> Void, diagnostics: PlaybackDiagnostics?) {
             self.onFinished = onFinished
             self.diagnostics = diagnostics
@@ -239,8 +243,10 @@ struct PlayerView: UIViewControllerRepresentable {
             player.replaceCurrentItem(with: item)
             guardian.restarted()
 
-            Task { @MainActor in
+            reseatTask?.cancel()
+            reseatTask = Task { @MainActor [weak self] in
                 await player.seek(to: at, toleranceBefore: .zero, toleranceAfter: .zero)
+                guard !Task.isCancelled, let self else { return }
                 self.diagnostics?.start(observing: item, from: at.seconds)
                 player.play()
             }
@@ -312,6 +318,8 @@ struct PlayerView: UIViewControllerRepresentable {
             guardian.stop()
             loader?.stop()
             loader = nil
+            reseatTask?.cancel()
+            reseatTask = nil
             switchTask?.cancel()
             switchTask = nil
 
