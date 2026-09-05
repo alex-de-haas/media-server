@@ -377,6 +377,8 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         // Behind the lowest reader, minus a tail. With no settled reader the lowest continuing
         // request inside the window stands in — an open-ended request may be the only consumer of the
         // film, and without this its consumed bytes would fill the budget for ever with no refill.
+        // The end is inclusive on purpose: a reader that has consumed everything held stands one
+        // past the last byte, and that is exactly the moment the window must move on from it.
         if let lowest = readers.lowest {
             demand = lowest
         } else if let offset = lowestReader, offset >= window.start, offset <= window.end {
