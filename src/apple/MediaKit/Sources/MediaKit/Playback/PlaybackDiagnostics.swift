@@ -89,6 +89,8 @@ public final class PlaybackDiagnostics {
     public private(set) var windowMB: Double?
     public private(set) var aheadMB: Double?
     public private(set) var serverRequests: Int?
+    public private(set) var windowRestarts = 0
+    public private(set) var asideFetches = 0
 
     /// How many times a stuck player was re-seated. Counted where it can be seen: a remedy that runs
     /// constantly is a symptom, not a fix.
@@ -183,12 +185,16 @@ public final class PlaybackDiagnostics {
             windowMB = Double(held.windowBytes) / 1_000_000
             aheadMB = Double(held.aheadBytes) / 1_000_000
             serverRequests = held.serverRequests
+            windowRestarts = held.restarts
+            asideFetches = held.asides
         } else {
             // Cleared, not kept: an item that fetches for itself must not wear the previous one's
             // figures.
             windowMB = nil
             aheadMB = nil
             serverRequests = nil
+            windowRestarts = 0
+            asideFetches = 0
         }
 
         // The access log's own stall count, which counts what the notification can miss.

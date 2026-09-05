@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-04
+Updated: 2026-09-05
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -211,9 +211,19 @@ second — and re-fetching about 1.4 times what it kept. Answers now come from a
 memory, 128 MB ahead of the play head with 8 MB kept behind for a reader that lags, filled by a few
 large bounded requests: each asks for exactly the room there is, and the next starts once a quarter of
 the budget has drained. Bounded rather than open-ended because a connection nobody reads is one the
-server aborts. A request farther ahead than the fill will reach, or well behind the start, is a seek
-and restarts the window there; one just behind the start — a reader that lags — is fetched on its own,
-since the window cannot grow backwards and a request left pending there would be pending for ever.
+server aborts.
+
+**The window follows the reader at the play head, and only that one.** AVFoundation keeps two: one
+reading what the demuxer wants now, in pieces of a megabyte or less, and a speculative one tens of
+megabytes ahead, in pieces of two to twenty or open-ended. The first television run showed what a
+window that chases the second does — twenty requests a second, and a hundred megabytes held ahead of
+where the film was being read while every real read became a fetch of its own. So only a bounded
+request of a megabyte and a half or less — halfway across the gap the log showed between the two
+readers — may anchor the window or advance the demand it trims behind; the window restarts when
+that reader is somewhere the fill will not reach, which is a seek. A request just behind the start —
+a reader that lags — or farther ahead than the budget is fetched on its own, bounded, and moves
+nothing. The overlay counts both restarts and those separate fetches, because either climbing during
+steady playback means the window is following the wrong reader.
 
 **Delivery to an open-ended request is metered.** A request for everything to the end takes whatever
 it is given, and a loader that kept giving would pull a whole film into the player's memory in minutes,

@@ -234,6 +234,34 @@ struct WedgeDetectorTests {
     }
 }
 
+/// Which reader may move the window. The first television run showed what happens when the wrong
+/// one does: twenty requests a second, and a hundred megabytes held ahead of where the film was read.
+@Suite("Anchoring the window")
+struct AnchorTests {
+    @Test("A read at the play head is demand; a speculative or open-ended one is not")
+    func demand() {
+        #expect(RemuxLoader.isDemand(length: 65_536, toEnd: false))
+        #expect(RemuxLoader.isDemand(length: 1 << 20, toEnd: false))
+        #expect(RemuxLoader.isDemand(length: RemuxLoader.demandLimit, toEnd: false))
+        #expect(!RemuxLoader.isDemand(length: RemuxLoader.demandLimit + 1, toEnd: false))
+        // The smallest speculative read the log showed: two megabytes, and it must not anchor.
+        #expect(!RemuxLoader.isDemand(length: 2_000_000, toEnd: false))
+        #expect(!RemuxLoader.isDemand(length: 1_000, toEnd: true))
+    }
+
+    @Test("The window moves only when the play-head reader is somewhere it cannot reach")
+    func anchor() {
+        var window = ByteWindow(start: 1_000, budget: 100)
+        window.append(Data(repeating: 1, count: 50))
+
+        #expect(RemuxLoader.anchor(1_020, in: window, lag: 10) == nil)      // held
+        #expect(RemuxLoader.anchor(1_120, in: window, lag: 10) == nil)      // the fill reaches it
+        #expect(RemuxLoader.anchor(995, in: window, lag: 10) == nil)        // a lagging reader
+        #expect(RemuxLoader.anchor(5_000, in: window, lag: 10) == 5_000)    // a seek forward
+        #expect(RemuxLoader.anchor(10, in: window, lag: 10) == 10)          // a seek back
+    }
+}
+
 @Suite("The loader's URL")
 struct RemuxLoaderURLTests {
     @Test("Only the scheme changes, so the token rides along and the origin is recoverable")
