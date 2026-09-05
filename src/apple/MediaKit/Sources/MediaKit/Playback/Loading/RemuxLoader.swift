@@ -11,8 +11,9 @@ import os
 /// What it changes, and what the measurements said needed changing: the player asks in pieces of half
 /// a megabyte with a separate 64 KB request for every handful of audio frames, roughly seven extra
 /// round trips a second. Here those are answered from a **window** held in memory, filled by a few
-/// large requests running ahead of the play head. The isolated audio fetches fall inside a window that
-/// already holds them.
+/// large requests running ahead of the play head. The window keeps every reader the `ReaderLedger`
+/// has seen — the one at the play head and the one a few seconds ahead of it taking audio — so the
+/// isolated fetches fall inside a window that already holds them.
 ///
 /// What it does not change: AVFoundation still decides what to ask for. A player that stops asking
 /// still stops — but with this in the middle, that moment is visible, and `WedgeDetector` acts on it.
@@ -47,6 +48,26 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         /// emptied and refilled ahead of where the player read — so they are counted where it shows.
         public var restarts = 0
         public var asides = 0
+        public var asideBehind = 0
+        public var asideAhead = 0
+        public var asideSmall = 0
+        public var asideRequestedBytes: Int64 = 0
+        public var lastRestart: Restart?
+
+        /// The small readers the window is keeping, and how far apart the lowest and highest are.
+        /// Two readers tens of megabytes apart is the shape the third run found; a window that
+        /// follows only one of them is the shape of every run before it.
+        public var readers = 0
+        public var readerSpread: Int64 = 0
+    }
+
+    /// The request that actually discarded the window; no media URL or token is recorded.
+    public struct Restart: Sendable {
+        public let windowStart: Int64
+        public let windowEnd: Int64
+        public let offset: Int64
+        public let requestedLength: Int
+        public let toEnd: Bool
     }
 
     /// The URL to build the asset from: the origin with its scheme swapped and nothing else touched,
@@ -80,14 +101,20 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     private var total: Int64?
     private var learning = false
     private var window: ByteWindow
-    private var pending: [AVAssetResourceLoadingRequest] = []
-    private var aside: Set<ObjectIdentifier> = []
+    private var pending: [any LoadingRequest] = []
+    private var aside: [ObjectIdentifier: URLSessionDataTask] = [:]
     private var fetch: URLSessionDataTask?
+    private var readers = ReaderLedger()
     private var demand: Int64 = 0
     private var delivered: Int64 = 0
     private var serverRequests = 0
     private var restarts = 0
     private var asides = 0
+    private var asideBehind = 0
+    private var asideAhead = 0
+    private var asideSmall = 0
+    private var asideRequestedBytes: Int64 = 0
+    private var lastRestart: Restart?
     private var playerAhead: Double = 0
     private var allowance = RemuxLoader.initialAllowance
     private var stopped = false
@@ -99,18 +126,24 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     /// - Parameters:
     ///   - budget: how much may be held ahead. A 4K film at 78 Mbit/s is ten megabytes a second, so
     ///     this is a dozen seconds of it — a starting point read off the overlay, not a decision.
-    ///   - tail: how much is kept *behind* the lowest outstanding request when trimming, for a reader
-    ///     that lags. The audio reader runs a few megabytes behind the video one.
-    ///   - lag: how far below the window's start a request still counts as that lagging reader and is
-    ///     fetched on its own, rather than as a seek that restarts the window.
+    ///   - tail: how much is kept *behind* the lowest reader when trimming, for a request that
+    ///     re-reads a little of what that reader already had.
+    ///   - lag: how far below the window's start a request is still fetched on its own rather than
+    ///     counted as a seek. Only the shape of the count on the overlay depends on it now.
     ///   - target: seconds the player may hold ahead before open-ended delivery pauses.
-    public init(
+    public convenience init(
         origin: URL,
         budget: Int = 128 << 20,
         tail: Int64 = 8 << 20,
         lag: Int64 = 32 << 20,
         target: Double = 20
     ) {
+        self.init(origin: origin, budget: budget, tail: tail, lag: lag, target: target,
+                  configuration: .default)
+    }
+
+    init(origin: URL, budget: Int, tail: Int64, lag: Int64, target: Double,
+         configuration: URLSessionConfiguration) {
         self.origin = origin
         self.tail = tail
         self.lag = lag
@@ -122,7 +155,6 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         delivery.maxConcurrentOperationCount = 1
         delivery.underlyingQueue = queue
 
-        let configuration = URLSessionConfiguration.default
         configuration.httpMaximumConnectionsPerHost = 3
         configuration.timeoutIntervalForRequest = 30
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -175,7 +207,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             self.fetch?.cancel()
             self.fetch = nil
             self.pending.removeAll()
-            self.aside.removeAll()
+            self.cancelAsides()
             self.session.invalidateAndCancel()
         }
     }
@@ -190,9 +222,19 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         _ resourceLoader: AVAssetResourceLoader,
         shouldWaitForLoadingOfRequestedResource request: AVAssetResourceLoadingRequest
     ) -> Bool {
+        accept(request)
+    }
+
+    // Kept independent of AVFoundation's non-constructible requests for lifecycle regression tests.
+    func accept(_ request: any LoadingRequest) -> Bool {
         guard !stopped, !isStopping else { return false }
 
         pending.append(request)
+        if let data = request.loadingData,
+           Self.isDemand(length: data.requestedLength, toEnd: data.requestsAllDataToEndOfResource) {
+            readers.observe(offset: data.requestedOffset, length: data.requestedLength, at: Self.uptime)
+        }
+
         if total == nil {
             learn()
         } else {
@@ -202,12 +244,24 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         return true
     }
 
+    /// Monotonic, for the ledger's patience; wall-clock time can jump.
+    private static var uptime: TimeInterval { ProcessInfo.processInfo.systemUptime }
+
     public func resourceLoader(
         _ resourceLoader: AVAssetResourceLoader, didCancel request: AVAssetResourceLoadingRequest
     ) {
+        cancel(request)
+    }
+
+    func cancel(_ request: any LoadingRequest) {
         pending.removeAll { $0 === request }
-        aside.remove(ObjectIdentifier(request))
-        publish()
+        aside.removeValue(forKey: ObjectIdentifier(request))?.cancel()
+        serve()
+    }
+
+    private func cancelAsides() {
+        for task in aside.values { task.cancel() }
+        aside.removeAll()
     }
 
     // MARK: - Learning the resource
@@ -246,7 +300,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             request.finishLoading(with: error)
         }
         pending.removeAll()
-        aside.removeAll()
+        cancelAsides()
         publish()
     }
 
@@ -259,18 +313,14 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     private func serve() {
         guard let total, !stopped else { return }
 
-        var done: [AVAssetResourceLoadingRequest] = []
-        var live: [(request: AVAssetResourceLoadingRequest, data: AVAssetResourceLoadingDataRequest, owed: Range<Int64>)] = []
-        var lowestDemand: Int64?
+        var done: [any LoadingRequest] = []
+        var live: [(request: any LoadingRequest, data: any LoadingDataRequest, owed: Range<Int64>)] = []
+        var lowestReader: Int64?
 
         for request in pending {
-            if let information = request.contentInformationRequest {
-                information.contentType = "public.mpeg-4"
-                information.contentLength = total
-                information.isByteRangeAccessSupported = true
-            }
+            request.describe(length: total)
 
-            guard let data = request.dataRequest else {
+            guard let data = request.loadingData else {
                 request.finishLoading()
                 done.append(request)
                 continue
@@ -289,25 +339,57 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             }
 
             live.append((request, data, owed))
-            if Self.isDemand(length: data.requestedLength, toEnd: data.requestsAllDataToEndOfResource) {
-                lowestDemand = min(lowestDemand ?? owed.lowerBound, owed.lowerBound)
+            // Only a reader that started at or behind demand may stand in for the ledger when it
+            // has nothing: a speculative one ahead is not what the window follows.
+            if data.requestedOffset <= demand + tail {
+                lowestReader = min(lowestReader ?? owed.lowerBound, owed.lowerBound)
             }
         }
 
-        // The window is anchored before anything is served, and only ever on the reader at the play
-        // head. AVFoundation keeps a second reader tens of megabytes ahead, and a window that chased
-        // it left the first reader behind: every one of its reads became a fetch of its own, twenty
-        // a second, while a hundred megabytes sat in memory ahead of where the film was being read.
-        if let lowestDemand {
-            if let seek = Self.anchor(lowestDemand, in: window, lag: lag) {
-                restart(at: seek)
-                restarts += 1
-            }
+        // The window is placed before anything is served, and by the ledger rather than by what
+        // happens to be pending: the play-head reader is between reads most of the time, and a window
+        // that followed the pending reads followed the reader ahead of it instead — the third run's
+        // forty megabytes of play-head reads fetched one by one behind a window full of the future.
+        readers.expire(at: Self.uptime)
 
-            demand = lowestDemand
+        // A settled reader the window does not hold and the fill will not reach is a seek, or a reader
+        // the window ran ahead of. Either way the window restarts for it, and only it stays known.
+        let strays = readers.settled.filter { reader in
+            let placement = window.place(reader.last, lag: lag)
+            return placement == .behind || placement == .away
         }
+        if let stray = strays.min(by: { $0.last < $1.last }) {
+            // The reader's own read at that offset, when a speculative one begins there too.
+            let there = live.filter { $0.owed.lowerBound == stray.last }
+            let cause = there.first {
+                Self.isDemand(length: $0.data.requestedLength, toEnd: $0.data.requestsAllDataToEndOfResource)
+            } ?? there.first
+            lastRestart = Restart(
+                windowStart: window.start, windowEnd: window.end, offset: stray.last,
+                requestedLength: cause?.data.requestedLength ?? Int(stray.next - stray.last),
+                toEnd: cause?.data.requestsAllDataToEndOfResource ?? false)
+            Self.log.notice("Window reset: [\(self.window.start), \(self.window.end)) -> \(stray.last) for a reader of \(stray.reads) reads; \(self.readers.settled.count) settled, pending \(self.pending.count)")
+            restart(at: stray.last)
+            restarts += 1
+            readers.keep(only: stray)
+        }
+
+        // Behind the lowest reader, minus a tail. With no settled reader the lowest continuing
+        // request inside the window stands in — an open-ended request may be the only consumer of the
+        // film, and without this its consumed bytes would fill the budget for ever with no refill.
+        if let lowest = readers.lowest {
+            demand = lowest
+        } else if let offset = lowestReader, offset >= window.start, offset <= window.end {
+            demand = offset
+        }
+
+        // Free consumed bytes before deciding whether an ahead request needs a separate fetch.
+        window.trim(keepingFrom: demand - tail)
 
         for (request, data, owed) in live {
+            // One producer owns a request until its HTTP response completes. A window refill or
+            // restart must not advance currentOffset underneath that response.
+            guard aside[ObjectIdentifier(request)] == nil else { continue }
             switch window.place(owed.lowerBound, lag: lag) {
             case .held:
                 var limit = owed.count
@@ -331,8 +413,11 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
                 }
 
             case .ahead:
-                // The fill will bring it.
-                break
+                // A speculative read beyond a full window cannot wait for a fill that has no room.
+                // Fetch it separately rather than moving the window away from the current reader.
+                if fetch == nil, window.room < refillThreshold {
+                    fetchAside(request, owed: owed)
+                }
 
             case .behind, .away:
                 // A lagging reader, or a speculative one farther than the fill will reach: fetched on
@@ -341,32 +426,27 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             }
         }
 
+        for request in done {
+            aside.removeValue(forKey: ObjectIdentifier(request))?.cancel()
+        }
         pending.removeAll { candidate in done.contains { $0 === candidate } }
 
-        // Behind the play-head reader, minus a tail for one that lags. With no such reader pending,
-        // demand stays where it was rather than jumping to whatever else is asking.
-        window.trim(keepingFrom: demand - tail)
         ensureFilling(total: total)
         publish()
     }
 
-    /// Whether a request is the player reading at the play head, as opposed to reading ahead of it.
+    /// Whether a request is one of the readers the window follows, as opposed to the speculative one.
     ///
-    /// Measured, not assumed: the reads that follow the play head were half a megabyte to one, and
-    /// the speculative ones two megabytes to twenty, or open-ended. The line sits halfway across
-    /// that gap, so neither reader can be mistaken for the other by a rounding of its size. Only the
-    /// first kind may anchor the window or advance the demand it trims behind.
+    /// Measured, not assumed: the reads that follow the play head were half a megabyte to one, the
+    /// audio reader's sixty-four kilobytes, and the speculative ones two megabytes to twenty, or
+    /// open-ended. The line sits halfway across that gap. Reads on this side of it are entered in
+    /// the ledger; the ledger, not the pending list, decides where the window stands.
     nonisolated static func isDemand(length: Int, toEnd: Bool) -> Bool {
         !toEnd && length <= Self.demandLimit
     }
 
     /// A megabyte and a half: above every play-head read seen, below every speculative one.
     nonisolated static let demandLimit = 3 << 19
-
-    /// Where the window should restart for the play-head reader, or nil to leave it where it is.
-    nonisolated static func anchor(_ demand: Int64, in window: ByteWindow, lag: Int64) -> Int64? {
-        window.place(demand, lag: lag) == .away ? demand : nil
-    }
 
     private func restart(at offset: Int64) {
         fetch?.cancel()
@@ -377,20 +457,32 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
 
     /// A request for bytes just behind the window — a reader that lags — fetched on its own, so the
     /// window need not restart and the request is not left pending for bytes it will never hold.
-    private func fetchAside(_ request: AVAssetResourceLoadingRequest, owed: Range<Int64>) {
+    private func fetchAside(_ request: any LoadingRequest, owed: Range<Int64>) {
         let id = ObjectIdentifier(request)
-        guard !aside.contains(id) else { return }
-        aside.insert(id)
+        guard aside[id] == nil else { return }
+        var limit = Self.asideLimit
+        if request.loadingData?.requestsAllDataToEndOfResource == true {
+            guard allowance > 0 else { return }
+            limit = min(limit, allowance)
+        }
+        let count = min(owed.count, limit)
+        if request.loadingData?.requestsAllDataToEndOfResource == true {
+            // Reserve the bytes before starting so simultaneous asides cannot bypass the meter.
+            allowance -= count
+        }
         asides += 1
+        if owed.lowerBound < window.start { asideBehind += 1 } else { asideAhead += 1 }
+        if count <= 65_536 { asideSmall += 1 }
+        asideRequestedBytes += Int64(count)
 
-        let to = min(owed.upperBound, owed.lowerBound + Int64(Self.asideLimit)) - 1
+        let to = owed.lowerBound + Int64(count) - 1
         var ranged = URLRequest(url: origin)
         ranged.setValue("bytes=\(owed.lowerBound)-\(to)", forHTTPHeaderField: "Range")
         serverRequests += 1
 
-        session.dataTask(with: ranged) { [weak self] data, response, error in
+        let task = session.dataTask(with: ranged) { [weak self] data, response, error in
             guard let self else { return }
-            self.aside.remove(id)
+            self.aside.removeValue(forKey: id)
 
             // Cancelled or finished while this was out: nothing to give it to.
             guard self.pending.contains(where: { $0 === request }) else { return }
@@ -402,10 +494,16 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
                 return
             }
 
-            request.dataRequest?.respond(with: data)
+            guard request.loadingData?.currentOffset == owed.lowerBound else {
+                self.serve()
+                return
+            }
+            request.loadingData?.respond(with: data)
             self.delivered += Int64(data.count)
             self.serve()
-        }.resume()
+        }
+        aside[id] = task
+        task.resume()
     }
 
     // MARK: - Filling
@@ -471,9 +569,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             return
         }
 
-        if let total {
-            ensureFilling(total: total)
-        }
+        serve()
     }
 
     /// A moment later rather than at once: a server that just dropped a connection is not helped by
@@ -494,7 +590,14 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             outstanding: pending.count,
             totalLength: total,
             restarts: restarts,
-            asides: asides)
+            asides: asides,
+            asideBehind: asideBehind,
+            asideAhead: asideAhead,
+            asideSmall: asideSmall,
+            asideRequestedBytes: asideRequestedBytes,
+            lastRestart: lastRestart,
+            readers: readers.settled.count,
+            readerSpread: readers.spread)
 
         shared.withLock { snapshot = copy }
     }

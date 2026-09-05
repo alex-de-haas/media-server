@@ -20,6 +20,7 @@ struct DiagnosticsOverlay: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            row("клиент", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
             row("позиция", String(format: "%.0f с", diagnostics.position))
             row("буфер впереди", String(format: "%.1f с", diagnostics.bufferAhead),
                 warn: diagnostics.bufferAhead < 15)
@@ -62,6 +63,26 @@ struct DiagnosticsOverlay: View {
                 row("окно", String(
                     format: "%.0f МБ, впереди %.0f МБ", diagnostics.windowMB ?? 0, diagnostics.aheadMB ?? 0))
                 row("запросов к серверу", "\(requests)")
+                if let details = diagnostics.loaderDetails {
+                    // The readers the window keeps, and how far apart they are. Two readers tens of
+                    // megabytes apart is what the third run found; one is a window following the
+                    // wrong thing again.
+                    row("читателей", String(
+                        format: "%d, разнос %.0f МБ", details.readers, Double(details.readerSpread) / 1_000_000),
+                        warn: details.readers < 2)
+                    row("отдельно", "позади \(details.asideBehind), впереди \(details.asideAhead), ≤64К \(details.asideSmall)")
+                    if details.asides > 0 {
+                        row("средний отдельный запрос", String(format: "%.0f КиБ",
+                            Double(details.asideRequestedBytes) / Double(details.asides) / 1024))
+                    }
+                    if let reset = details.lastRestart {
+                        row("последний сброс окна", String(format: "%.0f–%.0f → %.0f МБ; %d Б%@",
+                            Double(reset.windowStart) / 1_000_000,
+                            Double(reset.windowEnd) / 1_000_000,
+                            Double(reset.offset) / 1_000_000, reset.requestedLength,
+                            reset.toEnd ? " до конца" : ""))
+                    }
+                }
                 // The two ways the window can be fought over. Either climbing during steady playback
                 // means it is following the wrong reader.
                 row("окно двигалось", "\(diagnostics.windowRestarts) раз, отдельно \(diagnostics.asideFetches)",
