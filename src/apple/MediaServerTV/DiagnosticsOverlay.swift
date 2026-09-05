@@ -62,6 +62,10 @@ struct DiagnosticsOverlay: View {
                 row("окно", String(
                     format: "%.0f МБ, впереди %.0f МБ", diagnostics.windowMB ?? 0, diagnostics.aheadMB ?? 0))
                 row("запросов к серверу", "\(requests)")
+                // The two ways the window can be fought over. Either climbing during steady playback
+                // means it is following the wrong reader.
+                row("окно двигалось", "\(diagnostics.windowRestarts) раз, отдельно \(diagnostics.asideFetches)",
+                    warn: diagnostics.asideFetches > 20)
             }
             row("плеер считает", String(format: "%.0f Мбит/с", diagnostics.observedMbps))
 

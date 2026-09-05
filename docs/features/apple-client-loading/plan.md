@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-31
-Updated: 2026-09-04
+Updated: 2026-09-05
 
 > Feed the player its bytes ourselves, instead of handing it a URL and hoping.
 > Sits between [apple-client](../apple-client/feature.md) and
@@ -95,7 +95,8 @@ after it is a change of policy rather than a leap.
 - [ ] Verify on the television: plays, seeks, resumes, **Dolby Vision engages**. This is
       the whole of Phase 1's question — the technique is well-trodden for caching layers
       over `AVPlayer` and unverified here for a progressive MP4 on tvOS — and nothing
-      after it is built on an assumption that it works.
+      after it is built on an assumption that it works. **2026-09-05: plays, and Dolby
+      Vision engages.** Seeking and resuming not yet reported.
 - [ ] Verify against the server log: the request pattern is *the same as today*. A
       difference here means the delegate is changing behaviour before any policy has.
 
@@ -116,7 +117,12 @@ after it is a change of policy rather than a leap.
 - [ ] Verify: requests per minute of film, and the isolated audio reads, both against
       the same server log this plan was written from. The same log answers whether the
       player's own request pattern changes once answers are instant — it may ask for
-      more, or less, or the same, and the plan assumes nothing.
+      more, or less, or the same, and the plan assumes nothing. **2026-09-05, first run:
+      worse, not better** — about twenty requests a second and eight stalls in two
+      minutes, because the window anchored on the speculative reader and left the
+      play-head reader fetching on its own. The bytes fetched did halve (57 Mbit/s
+      against 120 for the same film without the loader): the re-fetching is gone. The
+      anchoring is fixed and awaits the next run.
 - [x] Direct play is left on the plain `AVURLAsset`. It has the same player and the same
       stalls but no synthesised container, and it earns the loader only once the remux
       path has proved it — as a deliverable of its own, not a widening of this one.

@@ -41,6 +41,12 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         public var delivered: Int64 = 0
         public var outstanding = 0
         public var totalLength: Int64?
+
+        /// How often the window was moved for a seek, and how often a request was fetched on its own.
+        /// The first television run showed both running wild — twenty requests a second, the window
+        /// emptied and refilled ahead of where the player read — so they are counted where it shows.
+        public var restarts = 0
+        public var asides = 0
     }
 
     /// The URL to build the asset from: the origin with its scheme swapped and nothing else touched,
@@ -80,6 +86,8 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     private var demand: Int64 = 0
     private var delivered: Int64 = 0
     private var serverRequests = 0
+    private var restarts = 0
+    private var asides = 0
     private var playerAhead: Double = 0
     private var allowance = RemuxLoader.initialAllowance
     private var stopped = false
@@ -252,8 +260,8 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         guard let total, !stopped else { return }
 
         var done: [AVAssetResourceLoadingRequest] = []
-        var lowest: Int64?
-        var seek: Int64?
+        var live: [(request: AVAssetResourceLoadingRequest, data: AVAssetResourceLoadingDataRequest, owed: Range<Int64>)] = []
+        var lowestDemand: Int64?
 
         for request in pending {
             if let information = request.contentInformationRequest {
@@ -280,8 +288,26 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
                 continue
             }
 
-            lowest = min(lowest ?? owed.lowerBound, owed.lowerBound)
+            live.append((request, data, owed))
+            if Self.isDemand(length: data.requestedLength, toEnd: data.requestsAllDataToEndOfResource) {
+                lowestDemand = min(lowestDemand ?? owed.lowerBound, owed.lowerBound)
+            }
+        }
 
+        // The window is anchored before anything is served, and only ever on the reader at the play
+        // head. AVFoundation keeps a second reader tens of megabytes ahead, and a window that chased
+        // it left the first reader behind: every one of its reads became a fetch of its own, twenty
+        // a second, while a hundred megabytes sat in memory ahead of where the film was being read.
+        if let lowestDemand {
+            if let seek = Self.anchor(lowestDemand, in: window, lag: lag) {
+                restart(at: seek)
+                restarts += 1
+            }
+
+            demand = lowestDemand
+        }
+
+        for (request, data, owed) in live {
             switch window.place(owed.lowerBound, lag: lag) {
             case .held:
                 var limit = owed.count
@@ -308,28 +334,34 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
                 // The fill will bring it.
                 break
 
-            case .behind:
+            case .behind, .away:
+                // A lagging reader, or a speculative one farther than the fill will reach: fetched on
+                // its own, bounded, so it is neither left pending nor allowed to move the window.
                 fetchAside(request, owed: owed)
-
-            case .away:
-                // The newest such request wins, and the move happens once, after the loop — moving
-                // mid-loop would judge every later request against a window that had just changed.
-                seek = owed.lowerBound
             }
         }
 
         pending.removeAll { candidate in done.contains { $0 === candidate } }
 
-        if let seek {
-            restart(at: seek)
-        }
-
-        // Behind the lowest thing still wanted, minus a tail for a reader that lags. When nothing is
-        // pending, the last demand stands in for it.
-        demand = lowest ?? demand
+        // Behind the play-head reader, minus a tail for one that lags. With no such reader pending,
+        // demand stays where it was rather than jumping to whatever else is asking.
         window.trim(keepingFrom: demand - tail)
         ensureFilling(total: total)
         publish()
+    }
+
+    /// Whether a request is the player reading at the play head, as opposed to reading ahead of it.
+    ///
+    /// Measured, not assumed: the reads that follow the play head were a megabyte or less, and the
+    /// speculative ones two megabytes to twenty, or open-ended. Only the first kind may anchor the
+    /// window or advance the demand it trims behind.
+    nonisolated static func isDemand(length: Int, toEnd: Bool) -> Bool {
+        !toEnd && length <= 4 << 20
+    }
+
+    /// Where the window should restart for the play-head reader, or nil to leave it where it is.
+    nonisolated static func anchor(_ demand: Int64, in window: ByteWindow, lag: Int64) -> Int64? {
+        window.place(demand, lag: lag) == .away ? demand : nil
     }
 
     private func restart(at offset: Int64) {
@@ -345,6 +377,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         let id = ObjectIdentifier(request)
         guard !aside.contains(id) else { return }
         aside.insert(id)
+        asides += 1
 
         let to = min(owed.upperBound, owed.lowerBound + Int64(Self.asideLimit)) - 1
         var ranged = URLRequest(url: origin)
@@ -451,11 +484,13 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     private func publish() {
         let copy = Snapshot(
             windowBytes: window.count,
-            aheadBytes: max(0, window.end - demand),
+            aheadBytes: max(0, window.end - max(demand, window.start)),
             serverRequests: serverRequests,
             delivered: delivered,
             outstanding: pending.count,
-            totalLength: total)
+            totalLength: total,
+            restarts: restarts,
+            asides: asides)
 
         shared.withLock { snapshot = copy }
     }
