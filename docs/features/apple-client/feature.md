@@ -213,24 +213,47 @@ large bounded requests: each asks for exactly the room there is, and the next st
 the budget has drained. Bounded rather than open-ended because a connection nobody reads is one the
 server aborts.
 
-**The window follows the reader at the play head, and only that one.** AVFoundation keeps two: one
-reading what the demuxer wants now, in pieces of a megabyte or less, and a speculative one tens of
-megabytes ahead, in pieces of two to twenty or open-ended. The first television run showed what a
-window that chases the second does — twenty requests a second, and a hundred megabytes held ahead of
-where the film was being read while every real read became a fetch of its own. So only a bounded
-request of a megabyte and a half or less — halfway across the gap the log showed between the two
-readers — may anchor the window or advance the demand it trims behind; the window restarts when
-that reader is somewhere the fill will not reach, which is a seek. A request just behind the start —
-a reader that lags — or farther ahead than the budget is fetched on its own, bounded, and moves
-nothing. The overlay counts both restarts and those separate fetches, because either climbing during
-steady playback means the window is following the wrong reader.
+**The window keeps every reader it has seen, placed by a ledger rather than by what is pending.**
+AVFoundation reads a film with more than one reader: one at the play head, in pieces of a megabyte
+or less, one a few seconds ahead of it taking sixty-four kilobytes of audio frames at a time, and a
+speculative one tens of megabytes ahead in pieces of two to twenty or open-ended. The third
+television run measured what following the pending reads does: the play-head reader is between
+reads most of the time, so the trim followed the audio reader, threw the play head's bytes away,
+and every read at the play head became a fetch of its own — five hundred of them, all behind the
+window, the window itself discarded and refilled forty megabytes back once every two seconds.
+
+So bounded requests of a megabyte and a half or less are entered in a `ReaderLedger`, which tells
+readers apart by continuity: a read beginning within a little of where a known reader stopped is
+that reader continuing, anything else is a new one. The window is trimmed behind the *lowest*
+reader in the ledger, whether or not it is pending at that moment, minus a tail. A single read is
+a probe until it is followed — the end of the file is looked at once when playback starts — and a
+reader not heard from for five seconds is forgotten. When a reader the ledger trusts is somewhere
+the window does not hold and the fill will not reach, that is a seek or a window that ran ahead
+of it, and the window restarts there with only that reader kept. With no reader in the ledger the
+lowest continuing request inside the window stands in, so a film read by one open-ended request
+still moves. A request beyond a full window is fetched separately when no fill can reach it.
+
+**Each request has one data producer at a time.** While a separate HTTP response is outstanding,
+the window does not answer that request, even if a seek or refill makes its bytes available.
+The response is delivered only at the offset it was fetched for. Cancellation cancels that
+request's HTTP task. This prevents a delayed response from appending duplicate bytes after the
+window has already advanced the request. The overlay counts restarts and separate fetches.
+It also reports separate fetches behind and ahead of the window, how many request at most
+64 KiB, and their mean requested size. The last reset records the discarded byte interval,
+the triggering offset, request length, and whether it requests the rest of the resource.
+Each reset is also written to the loader log without URLs or tokens. The overlay identifies
+the running client version. These readings diagnose false resets during continuous playback;
+the size-based request classification does not establish that the viewer actually sought. The
+overlay also shows how many readers the ledger holds and how far apart they are: two, tens of
+megabytes apart, is the measured shape; one is a window following the wrong thing again.
 
 **Delivery to an open-ended request is metered.** A request for everything to the end takes whatever
 it is given, and a loader that kept giving would pull a whole film into the player's memory in minutes,
 its own budget bounding only what it kept rather than what it sent. So `LoaderGuardian` reads once a
 second how far ahead the player already holds, and while that covers more than twenty seconds nothing
 more is handed over; below it, at most sixteen megabytes a second — above any film's rate, so a healthy
-player is never starved by its own meter. This is, at last, a read-ahead in seconds under our control.
+player is never starved by its own meter. Separate HTTP fetches for open-ended requests reserve
+this allowance before starting, so they share the delivery limit with the window.
 
 The one HEAD before anything plays answers the content-information request from the server rather
 than by assumption, since a wrong length there is "does not play at all".
@@ -611,6 +634,17 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
 `src/apple/` leaves the manifest alone.
 
 ## Testing Expectations
+
+- **The reader ledger** (`ReaderLedgerTests`): contiguous reads are one reader and it settles on
+  the second; a read far from every reader is a new one and the lowest is what the window keeps
+  even when the reader ahead read last; a request re-issued for the rest of a range continues its
+  reader; a single read is a probe; a reader unheard within the patience is forgotten; after a
+  restart only the reader it was made for is known.
+- Loader lifecycle tests use controlled HTTP responses and verify byte identity across repeated
+  refills, a delayed separate response overlapping a seek, cancellation of its HTTP task, a
+  speculative request beyond a full window, and preservation of the next small play-head read.
+  A long hardware playback check covers sound continuity, recovery, seeking, and Dolby Vision;
+  package tests do not establish those hardware outcomes.
 
 - **The dynamic range on the title screen** (`DynamicRangeTests`): the Dolby Vision label
   naming profile 8 by its base layer and the others by profile, one badge per format the

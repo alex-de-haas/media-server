@@ -87,10 +87,10 @@ after it is a change of policy rather than a leap.
 - [x] Answer `dataRequest` by range, including `requestsAllDataToEndOfResource`.
 - [x] **Only when the decision is remux.** Direct play keeps the plain `AVURLAsset`, so a
       path the server did not assemble is not routed through a loader that assumes it did.
-- [ ] Unit tests over the range arithmetic: a request satisfied whole, one satisfied in
-      part, one for the end of the file, and one cancelled while outstanding. The first
-      three exist; the cancelled one does not, because `AVAssetResourceLoadingRequest`
-      cannot be made outside AVFoundation and the loader has no seam for a stand-in yet.
+- [x] Unit tests over the range arithmetic: a request satisfied whole, one satisfied in
+      part, one for the end of the file, and one cancelled while outstanding. The loader's
+      request seam and controlled HTTP responses exercise cancellation of a live separate
+      fetch, delayed delivery overlapping a window restart, and continuous window refills.
 - [x] Honour cancellation: a request AVFoundation drops must stop our fetch with it.
 - [ ] Verify on the television: plays, seeks, resumes, **Dolby Vision engages**. This is
       the whole of Phase 1's question — the technique is well-trodden for caching layers
@@ -122,7 +122,23 @@ after it is a change of policy rather than a leap.
       minutes, because the window anchored on the speculative reader and left the
       play-head reader fetching on its own. The bytes fetched did halve (57 Mbit/s
       against 120 for the same film without the loader): the re-fetching is gone. The
-      anchoring is fixed and awaits the next run.
+      anchoring is fixed and awaits the next run. The September 5 follow-up fixes a
+      full-window stall for continuous readers and duplicate delivery from a delayed
+      separate fetch. These have automated regression coverage; hardware verification
+      remains outstanding. **Subsequent hardware run, latest client, no seeks or track
+      changes:** at 76 s there are 402 requests, 353 separate fetches, and 26 resets;
+      at 112 s there are 675 requests, 592 separate fetches, and 47 resets. The player
+      reports a stall and 2.2 s buffered while the loader holds 113 MB. Playback is
+      still not reliable. Version 0.9.3 adds the triggering range and separate-fetch
+      direction/size diagnostics; another request-size threshold is not justified by
+      these aggregate counters. **Third run, 0.9.3, with the server's range log:** every
+      one of 520 separate fetches was *behind* the window, 196 of them sixty-four
+      kilobytes; each window reset went forty megabytes *back*, triggered by a
+      sixty-four-kilobyte read. The window was ahead of the play head. The log shows
+      why: a second small reader — sixty-four kilobytes at each burst of audio frames,
+      a few seconds ahead of the video reader — and a trim that followed whichever small
+      read was pending, which between the play head's reads was that one. 0.9.4 places
+      the window by a ledger of readers rather than by the pending list; awaits the run.
 - [x] Direct play is left on the plain `AVURLAsset`. It has the same player and the same
       stalls but no synthesised container, and it earns the loader only once the remux
       path has proved it — as a deliverable of its own, not a widening of this one.
@@ -155,8 +171,8 @@ of the client knows today: that the player has asked for nothing while its buffe
       ahead of the play head it reaches, and how many requests reached the server.
 - [ ] Unit tests over the window: eviction under its budget, a seek discarding what is no
       longer ahead, and a refill restarting after the connection was dropped. The first two
-      exist; the refill is the loader's, and needs the same stand-in seam as the cancelled
-      request above.
+      exist. Continuous refills have lifecycle coverage; restarting after a dropped
+      connection remains untested.
 
 ## Verification steps
 
