@@ -241,8 +241,11 @@ struct AnchorTests {
     @Test("A read at the play head is demand; a speculative or open-ended one is not")
     func demand() {
         #expect(RemuxLoader.isDemand(length: 65_536, toEnd: false))
-        #expect(RemuxLoader.isDemand(length: 4 << 20, toEnd: false))
-        #expect(!RemuxLoader.isDemand(length: (4 << 20) + 1, toEnd: false))
+        #expect(RemuxLoader.isDemand(length: 1 << 20, toEnd: false))
+        #expect(RemuxLoader.isDemand(length: RemuxLoader.demandLimit, toEnd: false))
+        #expect(!RemuxLoader.isDemand(length: RemuxLoader.demandLimit + 1, toEnd: false))
+        // The smallest speculative read the log showed: two megabytes, and it must not anchor.
+        #expect(!RemuxLoader.isDemand(length: 2_000_000, toEnd: false))
         #expect(!RemuxLoader.isDemand(length: 1_000, toEnd: true))
     }
 

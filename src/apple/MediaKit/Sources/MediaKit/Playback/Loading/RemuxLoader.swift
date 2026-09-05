@@ -352,12 +352,16 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
 
     /// Whether a request is the player reading at the play head, as opposed to reading ahead of it.
     ///
-    /// Measured, not assumed: the reads that follow the play head were a megabyte or less, and the
-    /// speculative ones two megabytes to twenty, or open-ended. Only the first kind may anchor the
-    /// window or advance the demand it trims behind.
+    /// Measured, not assumed: the reads that follow the play head were half a megabyte to one, and
+    /// the speculative ones two megabytes to twenty, or open-ended. The line sits halfway across
+    /// that gap, so neither reader can be mistaken for the other by a rounding of its size. Only the
+    /// first kind may anchor the window or advance the demand it trims behind.
     nonisolated static func isDemand(length: Int, toEnd: Bool) -> Bool {
-        !toEnd && length <= 4 << 20
+        !toEnd && length <= Self.demandLimit
     }
+
+    /// A megabyte and a half: above every play-head read seen, below every speculative one.
+    nonisolated static let demandLimit = 3 << 19
 
     /// Where the window should restart for the play-head reader, or nil to leave it where it is.
     nonisolated static func anchor(_ demand: Int64, in window: ByteWindow, lag: Int64) -> Int64? {

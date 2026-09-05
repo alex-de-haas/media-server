@@ -217,8 +217,9 @@ server aborts.
 reading what the demuxer wants now, in pieces of a megabyte or less, and a speculative one tens of
 megabytes ahead, in pieces of two to twenty or open-ended. The first television run showed what a
 window that chases the second does — twenty requests a second, and a hundred megabytes held ahead of
-where the film was being read while every real read became a fetch of its own. So only a small,
-bounded request may anchor the window or advance the demand it trims behind; the window restarts when
+where the film was being read while every real read became a fetch of its own. So only a bounded
+request of a megabyte and a half or less — halfway across the gap the log showed between the two
+readers — may anchor the window or advance the demand it trims behind; the window restarts when
 that reader is somewhere the fill will not reach, which is a seek. A request just behind the start —
 a reader that lags — or farther ahead than the budget is fetched on its own, bounded, and moves
 nothing. The overlay counts both restarts and those separate fetches, because either climbing during

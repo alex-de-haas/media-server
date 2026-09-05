@@ -193,6 +193,8 @@ public final class PlaybackDiagnostics {
             windowMB = nil
             aheadMB = nil
             serverRequests = nil
+            windowRestarts = 0
+            asideFetches = 0
         }
 
         // The access log's own stall count, which counts what the notification can miss.
