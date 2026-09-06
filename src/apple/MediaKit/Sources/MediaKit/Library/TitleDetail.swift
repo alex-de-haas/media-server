@@ -132,6 +132,13 @@ public struct TitleCastMember: Identifiable, Equatable, Sendable {
     public let profileURL: URL?
 }
 
+public struct TitleCrewMember: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let job: String
+    public let profileURL: URL?
+}
+
 /// Everything a title's own screen shows.
 public struct TitleDetail: Equatable, Sendable {
     public let id: String
@@ -144,6 +151,7 @@ public struct TitleDetail: Equatable, Sendable {
     public let communityRating: Double?
     public let officialRating: String?
     public let cast: [TitleCastMember]
+    public let crew: [TitleCrewMember]
     public let directors: [String]
     public let creators: [String]
 
@@ -180,6 +188,17 @@ extension TitleDetail {
         }
         self.directors = detail.directors
         self.creators = detail.creators
+        var crew = (detail.crew ?? []).map {
+            TitleCrewMember(id: $0.id, name: $0.name, job: $0.job ?? $0.department ?? "Crew",
+                            profileURL: $0.profileUrl.flatMap(URL.init(string:)))
+        }
+        // Older servers and unenriched person records can still provide these name-only credits.
+        for (job, names) in [("Director", detail.directors), ("Creator", detail.creators)] {
+            for name in names where !crew.contains(where: { $0.name == name && $0.job == job }) {
+                crew.append(TitleCrewMember(id: "legacy-\(job)-\(name)", name: name, job: job, profileURL: nil))
+            }
+        }
+        self.crew = crew
         self.resumeSeconds = Double(detail.userData?.playbackPositionTicks ?? 0) / 10_000_000
         self.played = detail.userData?.played ?? false
         self.backdropPath = dto.images.backdrop

@@ -56,8 +56,11 @@ rows lets the remote reach every track, including
 rows below the viewport; empty sections show None. The remote's Back button dismisses it; sheets have no separate Close button. The player, capability negotiation,
 sidecar handling, and resume reporting retain their existing behavior.
 
-Title details group directors and creators in a compact Crew block with role
-labels. Cast appears in a horizontal row of portrait cards with names and
+Title details show Crew in the same horizontal portrait cards as Cast, with
+production jobs beneath names. The optional API `crew` list reads stored person
+credits, including identity, job, department, and portrait URL. Name-only director
+and creator credits remain as fallback cards on older servers or when not present
+in the stored crew list. Cast appears in a horizontal row of portrait cards with names and
 character roles, retaining server billing order and neutral image fallbacks.
 Names use their actual line count, so the role follows directly without reserving
 an empty second name line. Public portrait URLs use a separate loader

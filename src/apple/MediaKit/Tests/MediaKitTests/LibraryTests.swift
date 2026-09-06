@@ -691,6 +691,10 @@ struct TitleCreditTests {
             ["provider": "tmdb", "providerId": "2", "name": "First Actor", "character": "Captain", "profileUrl": "https://images.example/actor.jpg"],
             ["provider": "tmdb", "providerId": "1", "name": "Second Actor"]
         ]
+        detail["crew"] = [
+            ["id": "director-credit", "provider": "tmdb", "providerId": "10", "name": "First Director", "job": "Director", "department": "Directing", "profileUrl": "https://images.example/director.jpg"],
+            ["id": "writer-credit", "provider": "tmdb", "providerId": "11", "name": "Writer", "job": "Screenplay"]
+        ]
         detail["directors"] = ["First Director", "Second Director"]
         detail["creators"] = ["Series Creator"]
         json["detail"] = detail
@@ -703,12 +707,22 @@ struct TitleCreditTests {
         #expect(result.cast.last?.character == nil)
         #expect(result.directors == ["First Director", "Second Director"])
         #expect(result.creators == ["Series Creator"])
+        #expect(result.crew.map(\.name) == ["First Director", "Writer", "Second Director", "Series Creator"])
+        #expect(result.crew.first?.profileURL?.absoluteString == "https://images.example/director.jpg")
+        #expect(result.crew[1].job == "Screenplay")
+        #expect(result.crew[1].profileURL == nil)
+        #expect(result.crew.last?.job == "Creator")
+        detail.removeValue(forKey: "crew")
+        json["detail"] = detail
+        let legacy = TitleDetail(try JSONDecoder().decode(Components.Schemas.NativeItemDto.self,
+            from: JSONSerialization.data(withJSONObject: json)))
+        #expect(legacy.crew.map(\.name) == ["First Director", "Second Director", "Series Creator"])
     }
 
     @Test("Empty credits remain empty")
     func emptyCredits() throws {
         let dto = try JSONDecoder().decode(Components.Schemas.NativeItemDto.self, from: Data(item("film", "Film").utf8))
         let detail = TitleDetail(dto)
-        #expect(detail.cast.isEmpty && detail.directors.isEmpty && detail.creators.isEmpty)
+        #expect(detail.cast.isEmpty && detail.crew.isEmpty && detail.directors.isEmpty && detail.creators.isEmpty)
     }
 }

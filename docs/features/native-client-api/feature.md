@@ -75,6 +75,13 @@ pauses: one that expires between two `Range` requests of one file is a broken
 token. The HMAC key is generated on first use and persisted under the app data
 directory, so a restart does not interrupt a viewer mid-film.
 
+## Crew credits
+
+Item details expose an optional `crew` array projected from stored person credits.
+Each entry carries the credit ID, provider identity, name, job, department, and
+public portrait URL. Cast credits are excluded. Existing `directors` and `creators`
+name arrays remain available for older clients and incomplete enrichment.
+
 ## Delta sync
 
 `GET /native/v1/sync?cursor=…` feeds a client's local mirror, so browsing costs no

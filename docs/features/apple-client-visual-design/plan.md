@@ -159,7 +159,8 @@ order, not separate releases.
 
 - [x] Map existing cast, directors, and creators into title details; show ordered
   cast cards with names, roles, and optional portraits in a horizontal shelf,
-  plus a compact Crew block, with credential-free image loading.
+  plus matching Crew cards backed by stored person credits in the detail API,
+  with credential-free image loading and legacy name-only fallbacks.
   Hide empty sections and make credit rows reachable with the remote. Verify
   mapping/empty data in unit tests and scrolling to credits in the simulator.
 

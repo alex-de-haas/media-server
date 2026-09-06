@@ -341,48 +341,46 @@ struct TitleView: View {
 
     @ViewBuilder
     private func credits(_ detail: TitleDetail) -> some View {
-        if !detail.directors.isEmpty || !detail.creators.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Crew").font(.title2)
-                TechnicalDetailRow {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if !detail.directors.isEmpty {
-                            Text("Director: " + detail.directors.joined(separator: ", "))
-                        }
-                        if !detail.creators.isEmpty {
-                            Text("Creator: " + detail.creators.joined(separator: ", "))
-                        }
-                    }.font(.callout)
+        if !detail.crew.isEmpty {
+            creditShelf("Crew") {
+                ForEach(detail.crew) { person in
+                    creditCard(name: person.name, role: person.job, portrait: person.profileURL)
                 }
             }
         }
         if !detail.cast.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Cast").font(.title2)
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 24) {
-                        ForEach(detail.cast) { person in
-                            TechnicalDetailRow {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    ServerArtwork(url: person.profileURL, loader: portraitLoader, symbol: "person.fill")
-                                        .frame(width: 196, height: 245)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    Text(person.name).font(.callout.weight(.semibold))
-                                        .lineLimit(2)
-                                    Text(person.character ?? " ")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                        .lineLimit(2, reservesSpace: true)
-                                }
-                            }
-                            .frame(width: 220)
-                            .accessibilityElement(children: .combine)
-                        }
-                    }.padding(.vertical, 12)
+            creditShelf("Cast") {
+                ForEach(detail.cast) { person in
+                    creditCard(name: person.name, role: person.character, portrait: person.profileURL)
                 }
-                .scrollClipDisabled()
-                .focusSection()
             }
         }
+    }
+
+    private func creditShelf<Content: View>(_ heading: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(heading).font(.title2)
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 24, content: content).padding(.vertical, 12)
+            }
+            .scrollClipDisabled()
+            .focusSection()
+        }
+    }
+
+    private func creditCard(name: String, role: String?, portrait: URL?) -> some View {
+        TechnicalDetailRow {
+            VStack(alignment: .leading, spacing: 12) {
+                ServerArtwork(url: portrait, loader: portraitLoader, symbol: "person.fill")
+                    .frame(width: 196, height: 245)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                Text(name).font(.callout.weight(.semibold)).lineLimit(2)
+                Text(role ?? " ").font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: true)
+            }
+        }
+        .frame(width: 220)
+        .accessibilityElement(children: .combine)
     }
 
     private func facts(_ detail: TitleDetail) -> String {

@@ -512,6 +512,59 @@ public enum Components {
                 case profileUrl
             }
         }
+        /// - Remark: Generated from `#/components/schemas/CrewMemberDto`.
+        public struct CrewMemberDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/provider`.
+            public var provider: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/providerId`.
+            public var providerId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/name`.
+            public var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/job`.
+            public var job: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/department`.
+            public var department: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/profileUrl`.
+            public var profileUrl: Swift.String?
+            /// Creates a new `CrewMemberDto`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - provider:
+            ///   - providerId:
+            ///   - name:
+            ///   - job:
+            ///   - department:
+            ///   - profileUrl:
+            public init(
+                id: Swift.String,
+                provider: Swift.String,
+                providerId: Swift.String,
+                name: Swift.String,
+                job: Swift.String? = nil,
+                department: Swift.String? = nil,
+                profileUrl: Swift.String? = nil
+            ) {
+                self.id = id
+                self.provider = provider
+                self.providerId = providerId
+                self.name = name
+                self.job = job
+                self.department = department
+                self.profileUrl = profileUrl
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case provider
+                case providerId
+                case name
+                case job
+                case department
+                case profileUrl
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/DolbyVisionDto`.
         public struct DolbyVisionDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/DolbyVisionDto/profile`.
@@ -633,6 +686,8 @@ public enum Components {
             public var studios: [Components.Schemas.StudioDto]
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/keywords`.
             public var keywords: [Swift.String]
+            /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/crew`.
+            public var crew: [Components.Schemas.CrewMemberDto]?
             /// Creates a new `LibraryDetailDto`.
             ///
             /// - Parameters:
@@ -678,6 +733,7 @@ public enum Components {
             ///   - creators:
             ///   - studios:
             ///   - keywords:
+            ///   - crew:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
@@ -720,7 +776,8 @@ public enum Components {
                 directors: [Swift.String],
                 creators: [Swift.String],
                 studios: [Components.Schemas.StudioDto],
-                keywords: [Swift.String]
+                keywords: [Swift.String],
+                crew: [Components.Schemas.CrewMemberDto]? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
@@ -764,6 +821,7 @@ public enum Components {
                 self.creators = creators
                 self.studios = studios
                 self.keywords = keywords
+                self.crew = crew
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -808,6 +866,7 @@ public enum Components {
                 case creators
                 case studios
                 case keywords
+                case crew
             }
         }
         /// - Remark: Generated from `#/components/schemas/LibraryGapDto`.

@@ -1078,6 +1078,51 @@
           }
         }
       },
+      "CrewMemberDto": {
+        "required": [
+          "id",
+          "provider",
+          "providerId",
+          "name",
+          "job",
+          "department",
+          "profileUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "job": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "department": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "profileUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "DolbyVisionDto": {
         "required": [
           "profile",
@@ -1427,6 +1472,15 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "crew": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CrewMemberDto"
             }
           }
         }

@@ -484,6 +484,14 @@ public sealed class LibraryReadServiceTests : IDisposable
 
         var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
 
+        var director = Assert.Single(detail!.Crew!);
+        Assert.Equal("Director", director.Job);
+        Assert.Equal("Directing", director.Department);
+        Assert.Equal("6193", director.ProviderId);
+        Assert.Equal("https://image.tmdb.org/t/p/original/leo.jpg", director.ProfileUrl);
+        var other = await _library.GetDetailAsync(_seriesId, appUserId: null, CancellationToken.None);
+        Assert.Empty(other!.Crew!);
+
         Assert.Collection(
             detail!.Cast,
             member =>

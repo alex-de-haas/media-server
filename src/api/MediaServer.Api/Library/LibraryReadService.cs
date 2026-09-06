@@ -448,6 +448,13 @@ public sealed class LibraryReadService(
             ? rich.Networks.Select(brand => new NetworkDto(brand.Name, brand.LogoUrl)).ToList()
             : null;
         var cast = await LoadCastAsync(item.Id, cancellationToken);
+        var crew = await database.MediaItemPersons.AsNoTracking()
+            .Where(credit => credit.MediaItemId == item.Id && credit.Role == PersonRole.Crew)
+            .OrderBy(credit => credit.Order).ThenBy(credit => credit.Id)
+            .Join(database.Persons.AsNoTracking(), credit => credit.PersonId, person => person.Id,
+                (credit, person) => new CrewMemberDto(credit.Id, person.Provider, person.ProviderId,
+                    person.Name, credit.Job, credit.Department, person.ProfileUrl))
+            .ToListAsync(cancellationToken);
 
         return new LibraryDetailDto(
             item.Id,
@@ -491,7 +498,8 @@ public sealed class LibraryReadService(
             rich.Directors,
             rich.Creators,
             rich.Studios.Select(brand => new StudioDto(brand.Name, brand.LogoUrl)).ToList(),
-            rich.Keywords);
+            rich.Keywords,
+            crew);
     }
 
     /// <summary>
