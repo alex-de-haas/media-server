@@ -68,7 +68,7 @@ public struct TitleTrack: Identifiable, Equatable, Sendable {
         DynamicRange.badges(hdrFormat: hdrFormat, dolbyVision: dolbyVision)
     }
 
-    /// The one thing a viewer needs to know about a profile 7 file on this device, or nil.
+    /// The HDR10 fallback notice for source configurations this client cannot play as Dolby Vision.
     public var dolbyVisionNote: String? {
         DynamicRange.note(for: dolbyVision)
     }
@@ -114,10 +114,12 @@ public enum DynamicRange {
             .map { $0.localizedCaseInsensitiveContains("Dolby Vision") ? label(for: dolbyVision) : $0 }
     }
 
-    /// A dual layer is what no Apple device decodes, so this device plays the HDR10 base layer — said on the
-    /// client, which knows what the device does where the server does not.
+    /// Match the server's HDR10 fallback for profile 7, enhancement layers, and profile 8 with
+    /// compatibility ID 6. The server only signals single-layer profile 8 as Dolby Vision for IDs 1 or 4.
     public static func note(for detail: DolbyVisionDetail?) -> String? {
-        guard let detail, detail.profile == 7 || detail.enhancementLayer else { return nil }
+        guard let detail else { return nil }
+        let profile86 = detail.profile == 8 && detail.blCompatibilityId == 6
+        guard detail.profile == 7 || detail.enhancementLayer || profile86 else { return nil }
         return "Plays as HDR10 on this device"
     }
 }

@@ -40,7 +40,9 @@ fallback. The title, facts, Play/Resume, and expandable synopsis lead. All sourc
 appear as selectable inline rows with a checkmark identifying the playback choice.
 Each row shows the edition name (or Original when unnamed), container, video
 codec, and file size on the left. Available dynamic-range badges (including the
-Dolby Vision profile) and fallback notices sit on the right.
+Dolby Vision profile) and fallback notices sit on the right. The HDR10 fallback
+notice includes profile 8 with compatibility ID 6 even without an enhancement
+layer, matching the server's existing playback signalling.
 Full audio/subtitle lists are revealed separately for the selected source. The player, capability negotiation,
 sidecar handling, and resume reporting retain their existing behavior.
 
