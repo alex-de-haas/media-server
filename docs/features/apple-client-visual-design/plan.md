@@ -70,8 +70,8 @@ Vision profiles in each row so sources can be compared without opening a picker.
 Place format badges and compatibility notices on the right, with name and file
 parameters on the left; label unnamed sources Original.
 Keep compatibility notices such as Plays as HDR10 on this device beside their
-source. Put full audio/subtitle lists in an expandable section for the selected
-version. The version choice must still determine playback; technical presentation
+source. Put full audio/subtitle lists in a separate sheet for the selected
+version, using a native list with focusable rows for remote scrolling. The version choice must still determine playback; technical presentation
 must not change track selection or capability negotiation.
 
 Backdrop refinement: preserve image color with localized left/bottom black
@@ -153,7 +153,7 @@ order, not separate releases.
   SwiftUI previews for long titles and missing images.
 - [ ] Verify bright/dark backdrop previews and contrast with real artwork.
 - [x] Implement the cinematic title header, primary/secondary playback hierarchy,
-  full inline synopsis, inline source rows with format badges, and expandable track details.
+  full inline synopsis, inline source rows with format badges, and track details in a sheet with focusable list rows.
 - [x] Preserve playback refusals, compatibility notices, sidecar identification,
   selected-version semantics, and resume/watched refresh behavior.
 

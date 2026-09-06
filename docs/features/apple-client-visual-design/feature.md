@@ -47,7 +47,9 @@ codec, and file size on the left. Available dynamic-range badges (including the
 Dolby Vision profile) and fallback notices sit on the right. The HDR10 fallback
 notice includes profile 8 with compatibility ID 6 even without an enhancement
 layer, matching the server's existing playback signalling.
-Full audio/subtitle lists are revealed separately for the selected source. The player, capability negotiation,
+The selected source's file, audio, and subtitle details open in a separate sheet.
+A native list with focusable rows lets the remote reach every track, including
+rows below the viewport; empty sections show None. Close or Back dismisses it. The player, capability negotiation,
 sidecar handling, and resume reporting retain their existing behavior.
 
 Settings separates playback from expandable capabilities and diagnostics.
@@ -102,6 +104,6 @@ acceptance checks are tracked in [the plan](plan.md).
   identity/order, route authorization/public metadata, and removal filtering.
   Shared collection and Jellyfin tests guard existing behavior.
 - Build tvOS with Xcode and exercise focus, back navigation, tab switching,
-  full synopsis layout and technical-detail expansion, and visual fallbacks in the simulator.
+  full synopsis layout and technical-detail sheet navigation, and visual fallbacks in the simulator.
 - Validate real artwork, pairing QR scanning, playback, Siri Remote focus, and
   accessibility on Apple TV against a Core-managed instance before acceptance.

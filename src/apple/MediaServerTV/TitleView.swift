@@ -321,12 +321,10 @@ struct TitleView: View {
             if let version = detail.versions.first(where: { $0.id == chosenVersion }) ?? detail.versions.first {
                 VStack(alignment: .leading, spacing: 20) {
                     versions(detail.versions)
-                    Button(showsTechnicalDetails ? "Hide file details" : "Audio, subtitles & file details") {
-                        showsTechnicalDetails.toggle()
+                    Button("Audio, subtitles & file details") {
+                        showsTechnicalDetails = true
                     }
-                    if showsTechnicalDetails {
-                        Text("\(version.container.uppercased()) · \(version.sizeDescription)")
-                            .font(.callout).foregroundStyle(.secondary)
+                    .sheet(isPresented: $showsTechnicalDetails) {
                         tracks(version)
                     }
                 }
@@ -388,16 +386,27 @@ struct TitleView: View {
     @ViewBuilder
     private func tracks(_ version: TitleVersion) -> some View {
         VStack(alignment: .leading, spacing: 24) {
-            // The film, not a cover a muxer wrote as a video track: the same still-image rule the server uses.
-            if let picture = version.video {
-                dynamicRange(picture)
+            HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Audio, subtitles & file details").font(.title2.bold())
+                    Text(version.versionName ?? "Original").foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Close", systemImage: "xmark") { showsTechnicalDetails = false }
             }
-
-            HStack(alignment: .top, spacing: 80) {
+            List {
+                Section("File") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("\(version.container.uppercased()) · \(version.sizeDescription)")
+                        if let picture = version.video { dynamicRange(picture) }
+                    }
+                    .focusable()
+                }
                 trackList("Audio", version.audio)
                 trackList("Subtitles", version.subtitles)
             }
         }
+        .padding(CinemaStyle.inset)
     }
 
     /// The picture's dynamic range as capsules — "Dolby Vision 8.1", "HDR10" — with the one note a dual-layer
@@ -429,11 +438,9 @@ struct TitleView: View {
 
     @ViewBuilder
     private func trackList(_ heading: String, _ tracks: [TitleTrack]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(heading).font(.title3)
-
+        Section(heading) {
             if tracks.isEmpty {
-                Text("None").foregroundStyle(.secondary)
+                Text("None").foregroundStyle(.secondary).focusable()
             } else {
                 ForEach(tracks) { track in
                     HStack(spacing: 8) {
@@ -447,6 +454,7 @@ struct TitleView: View {
                         }
                     }
                     .font(.callout)
+                    .focusable()
                 }
             }
         }
