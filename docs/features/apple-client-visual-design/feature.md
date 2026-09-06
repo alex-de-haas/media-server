@@ -56,11 +56,11 @@ rows lets the remote reach every track, including
 rows below the viewport; empty sections show None. The remote's Back button dismisses it; sheets have no separate Close button. The player, capability negotiation,
 sidecar handling, and resume reporting retain their existing behavior.
 
-Title details also show Directors, Creators, and Cast when provided by the API.
-Cast credits retain server billing order and display names, character roles, and
-portraits with a neutral fallback. Public portrait URLs use a separate loader
-without server credentials. Credit rows accept visible focus so the remote can
-scroll to people below the viewport; they do not open a person detail page.
+Title details group directors and creators in a compact Crew block with role
+labels. Cast appears in a horizontal row of portrait cards with names and
+character roles, retaining server billing order and neutral image fallbacks. Public portrait URLs use a separate loader
+without server credentials. Credit cards accept visible focus so the remote can
+scroll horizontally through the cast; they do not open a person detail page.
 
 Settings separates playback from expandable capabilities and diagnostics.
 Sign out uses a neutral bordered button with an exit symbol and adaptive system

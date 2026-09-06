@@ -341,37 +341,46 @@ struct TitleView: View {
 
     @ViewBuilder
     private func credits(_ detail: TitleDetail) -> some View {
-        if !detail.directors.isEmpty {
+        if !detail.directors.isEmpty || !detail.creators.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Directors").font(.title2)
-                TechnicalDetailRow { Text(detail.directors.joined(separator: ", ")).font(.body) }
-            }
-        }
-        if !detail.creators.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Creators").font(.title2)
-                TechnicalDetailRow { Text(detail.creators.joined(separator: ", ")).font(.body) }
+                Text("Crew").font(.title2)
+                TechnicalDetailRow {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if !detail.directors.isEmpty {
+                            Text("Director: " + detail.directors.joined(separator: ", "))
+                        }
+                        if !detail.creators.isEmpty {
+                            Text("Creator: " + detail.creators.joined(separator: ", "))
+                        }
+                    }.font(.callout)
+                }
             }
         }
         if !detail.cast.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Cast").font(.title2)
-                // Eager rows give the focus engine targets even below the current viewport.
-                ForEach(detail.cast) { person in
-                    TechnicalDetailRow {
-                        HStack(spacing: 24) {
-                            ServerArtwork(url: person.profileURL, loader: portraitLoader, symbol: "person.fill")
-                                .frame(width: 80, height: 100)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(person.name).font(.headline)
-                                if let character = person.character, !character.isEmpty {
-                                    Text(character).font(.callout).foregroundStyle(.secondary)
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 24) {
+                        ForEach(detail.cast) { person in
+                            TechnicalDetailRow {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    ServerArtwork(url: person.profileURL, loader: portraitLoader, symbol: "person.fill")
+                                        .frame(width: 196, height: 245)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    Text(person.name).font(.callout.weight(.semibold))
+                                        .lineLimit(2, reservesSpace: true)
+                                    Text(person.character ?? " ")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                        .lineLimit(2, reservesSpace: true)
                                 }
                             }
+                            .frame(width: 220)
+                            .accessibilityElement(children: .combine)
                         }
-                    }
+                    }.padding(.vertical, 12)
                 }
+                .scrollClipDisabled()
+                .focusSection()
             }
         }
     }

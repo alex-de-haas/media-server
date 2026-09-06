@@ -158,7 +158,8 @@ order, not separate releases.
   selected-version semantics, and resume/watched refresh behavior.
 
 - [x] Map existing cast, directors, and creators into title details; show ordered
-  cast names, roles, and optional portraits with credential-free image loading.
+  cast cards with names, roles, and optional portraits in a horizontal shelf,
+  plus a compact Crew block, with credential-free image loading.
   Hide empty sections and make credit rows reachable with the remote. Verify
   mapping/empty data in unit tests and scrolling to credits in the simulator.
 
