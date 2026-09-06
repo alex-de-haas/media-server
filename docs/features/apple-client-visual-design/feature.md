@@ -15,6 +15,8 @@ a title after playback updates its state in the library and the continue row.
 Series retains the existing poster grid without a series-level resume action.
 When the All Movies grid is below the viewport, Down from Continue Watching
 scrolls to its heading and focuses the first movie after scrolling completes.
+Continue Watching and All Movies use the same 44-point heading-to-poster gap,
+without extra top padding inside the horizontal shelf.
 Poster/caption groups and shelves participate in directional focus navigation;
 the captions remain outside the visual card. The transition respects Reduce Motion.
 

@@ -79,7 +79,7 @@ struct LibraryView: View {
                                                 .frame(width: 250)
                                                 .prefersDefaultFocus(item.id == library.continueWatching.first?.id, in: libraryFocus)
                                         }
-                                    }.padding(.vertical, 30).padding(.horizontal, 20)
+                                    }.padding(.bottom, 30).padding(.horizontal, 20)
                                 }
                                 .scrollClipDisabled()
                                 .focusSection()
