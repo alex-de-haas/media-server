@@ -68,7 +68,7 @@ public struct TitleTrack: Identifiable, Equatable, Sendable {
         DynamicRange.badges(hdrFormat: hdrFormat, dolbyVision: dolbyVision)
     }
 
-    /// The one thing a viewer needs to know about a profile 7 file on this device, or nil.
+    /// The HDR10 fallback notice for source configurations this client cannot play as Dolby Vision.
     public var dolbyVisionNote: String? {
         DynamicRange.note(for: dolbyVision)
     }
@@ -114,12 +114,29 @@ public enum DynamicRange {
             .map { $0.localizedCaseInsensitiveContains("Dolby Vision") ? label(for: dolbyVision) : $0 }
     }
 
-    /// A dual layer is what no Apple device decodes, so this device plays the HDR10 base layer — said on the
-    /// client, which knows what the device does where the server does not.
+    /// Match the server's HDR10 fallback for profile 7, enhancement layers, and profile 8 with
+    /// compatibility ID 6. The server only signals single-layer profile 8 as Dolby Vision for IDs 1 or 4.
     public static func note(for detail: DolbyVisionDetail?) -> String? {
-        guard let detail, detail.profile == 7 || detail.enhancementLayer else { return nil }
+        guard let detail else { return nil }
+        let profile86 = detail.profile == 8 && detail.blCompatibilityId == 6
+        guard detail.profile == 7 || detail.enhancementLayer || profile86 else { return nil }
         return "Plays as HDR10 on this device"
     }
+}
+
+/// A cast credit in the server's billing order.
+public struct TitleCastMember: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let character: String?
+    public let profileURL: URL?
+}
+
+public struct TitleCrewMember: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let job: String
+    public let profileURL: URL?
 }
 
 /// Everything a title's own screen shows.
@@ -133,6 +150,10 @@ public struct TitleDetail: Equatable, Sendable {
     public let runtimeSeconds: Double?
     public let communityRating: Double?
     public let officialRating: String?
+    public let cast: [TitleCastMember]
+    public let crew: [TitleCrewMember]
+    public let directors: [String]
+    public let creators: [String]
 
     public let resumeSeconds: Double
     public let played: Bool
@@ -161,6 +182,23 @@ extension TitleDetail {
         self.runtimeSeconds = detail.runtimeTicks.map { Double($0) / 10_000_000 }
         self.communityRating = detail.communityRating
         self.officialRating = detail.officialRating
+        self.cast = detail.cast.map { credit in
+            TitleCastMember(id: "\(credit.provider):\(credit.providerId)", name: credit.name,
+                            character: credit.character, profileURL: credit.profileUrl.flatMap(URL.init(string:)))
+        }
+        self.directors = detail.directors
+        self.creators = detail.creators
+        var crew = (detail.crew ?? []).map {
+            TitleCrewMember(id: $0.id, name: $0.name, job: $0.job ?? $0.department ?? "Crew",
+                            profileURL: $0.profileUrl.flatMap(URL.init(string:)))
+        }
+        // Older servers and unenriched person records can still provide these name-only credits.
+        for (job, names) in [("Director", detail.directors), ("Creator", detail.creators)] {
+            for name in names where !crew.contains(where: { $0.name == name && $0.job == job }) {
+                crew.append(TitleCrewMember(id: "legacy-\(job)-\(name)", name: name, job: job, profileURL: nil))
+            }
+        }
+        self.crew = crew
         self.resumeSeconds = Double(detail.userData?.playbackPositionTicks ?? 0) / 10_000_000
         self.played = detail.userData?.played ?? false
         self.backdropPath = dto.images.backdrop

@@ -1,3 +1,4 @@
+import CoreImage.CIFilterBuiltins
 import MediaKit
 import SwiftUI
 
@@ -27,6 +28,7 @@ struct PairingView: View {
         }
         .padding(80)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(CinemaStyle.canvas)
     }
 
     private var addressEntry: some View {
@@ -60,8 +62,16 @@ struct PairingView: View {
 
             // The whole point of the screen. Monospaced and enormous, because it is read across a room
             // and typed on a different device.
-            Text(grant.userCode)
-                .font(.system(size: 120, weight: .semibold, design: .monospaced))
+            HStack(spacing: 60) {
+                if let uri = grant.verificationUri, let code = qrCode(uri) {
+                    Image(uiImage: code).interpolation(.none).resizable()
+                        .frame(width: 240, height: 240).padding(20).background(.white)
+                        .accessibilityLabel("Scan with your phone to open device approval")
+                }
+                Text(grant.userCode)
+                    .font(.system(size: 100, weight: .semibold, design: .monospaced))
+                    .accessibilityLabel("Approval code \(grant.userCode)")
+            }
 
             if let uri = grant.verificationUri {
                 Text(uri)
@@ -83,6 +93,15 @@ struct PairingView: View {
         // A poll that outlives its screen is a device quietly asking to be signed in while nobody is
         // looking at it.
         .onDisappear { session.cancel() }
+    }
+
+    private func qrCode(_ uri: String) -> UIImage? {
+        guard let url = URL(string: uri), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(uri.utf8)
+        guard let output = filter.outputImage,
+              let cg = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     private func failure(_ error: PairingError) -> some View {

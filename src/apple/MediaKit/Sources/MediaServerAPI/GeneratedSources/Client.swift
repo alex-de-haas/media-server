@@ -1018,6 +1018,216 @@ public struct Client: APIProtocol {
             }
         )
     }
+    /// - Remark: HTTP `GET /native/v1/collections`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/get(ListNativeCollections)`.
+    public func listNativeCollections(_ input: Operations.ListNativeCollections.Input) async throws -> Operations.ListNativeCollections.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.ListNativeCollections.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/native/v1/collections",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.ListNativeCollections.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            [Components.Schemas.NativeCollectionSummary].self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// - Remark: HTTP `GET /native/v1/collections/{id}`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/{id}/get(GetNativeCollection)`.
+    public func getNativeCollection(_ input: Operations.GetNativeCollection.Input) async throws -> Operations.GetNativeCollection.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.GetNativeCollection.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/native/v1/collections/{}",
+                    parameters: [
+                        input.path.id
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.GetNativeCollection.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.NativeCollectionDetail.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// - Remark: HTTP `GET /native/v1/collections/{id}/images/{imageType}`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)`.
+    public func getNativeCollectionImage(_ input: Operations.GetNativeCollectionImage.Input) async throws -> Operations.GetNativeCollectionImage.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.GetNativeCollectionImage.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/native/v1/collections/{}/images/{}",
+                    parameters: [
+                        input.path.id,
+                        input.path.imageType
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.GetNativeCollectionImage.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "image/jpeg",
+                            "image/png",
+                            "image/webp",
+                            "image/gif"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "image/jpeg":
+                        body = try converter.getResponseBodyAsBinary(
+                            OpenAPIRuntime.HTTPBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .jpeg(value)
+                            }
+                        )
+                    case "image/png":
+                        body = try converter.getResponseBodyAsBinary(
+                            OpenAPIRuntime.HTTPBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .png(value)
+                            }
+                        )
+                    case "image/webp":
+                        body = try converter.getResponseBodyAsBinary(
+                            OpenAPIRuntime.HTTPBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .imageWebp(value)
+                            }
+                        )
+                    case "image/gif":
+                        body = try converter.getResponseBodyAsBinary(
+                            OpenAPIRuntime.HTTPBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .imageGif(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
     /// - Remark: HTTP `GET /native/v1/items/{id}`.
     /// - Remark: Generated from `#/paths//native/v1/items/{id}/get`.
     public func getNativeV1ItemsId(_ input: Operations.GetNativeV1ItemsId.Input) async throws -> Operations.GetNativeV1ItemsId.Output {

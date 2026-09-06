@@ -35,6 +35,23 @@ public sealed class CollectionReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Removed_movies_do_not_count_or_supply_members_and_artwork()
+    {
+        var collection = SeedCollection("removed", "Franchise");
+        var removedId = SeedMovie("Removed", 1990, collection, posterUrl: "https://cdn/removed.jpg");
+        SeedMovie("Visible", 2000, collection);
+        var removed = await _database.MediaItems.FindAsync(removedId);
+        removed!.RemovedAt = DateTimeOffset.UtcNow;
+        await _database.SaveChangesAsync();
+
+        Assert.Empty(await Service().ListAsync(CancellationToken.None));
+        var detail = await Service().GetAsync(collection, null, CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.Equal("Visible", Assert.Single(detail.Items).Title);
+        Assert.Null(detail.PosterUrl);
+    }
+
+    [Fact]
     public async Task List_surfaces_only_collections_with_at_least_two_owned_movies()
     {
         var surfaced = SeedCollection("1", "Surfaced", posterUrl: "https://cdn/own.jpg");

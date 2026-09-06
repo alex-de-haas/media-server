@@ -1,7 +1,7 @@
 # Native Client API
 
 Created: 2026-08-04
-Updated: 2026-08-15
+Updated: 2026-09-06
 
 ## Description
 
@@ -75,10 +75,21 @@ pauses: one that expires between two `Range` requests of one file is a broken
 token. The HMAC key is generated on first use and persisted under the app data
 directory, so a restart does not interrupt a viewer mid-film.
 
+## Crew credits
+
+Item details expose an optional `crew` array projected from stored person credits.
+Each entry carries the credit ID, provider identity, name, job, department, and
+public portrait URL. Cast credits are excluded. Existing `directors` and `creators`
+name arrays remain available for older clients and incomplete enrichment.
+
 ## Delta sync
 
 `GET /native/v1/sync?cursor=…` feeds a client's local mirror, so browsing costs no
-round-trip.
+round-trip. Library cards include optional `videoFormats`: distinct HDR/Dolby Vision
+labels across a movie's video sources, without profiles. SDR, unknown formats,
+audio streams, and embedded cover images do not contribute labels. This is a
+source-format summary, not a device compatibility result; older responses omit
+it. Formats are projected for the page without requesting individual item details.
 
 A sync begins with a bounded keyset snapshot of the published library and then
 rides the change log from the sequence captured **before** that snapshot started.
@@ -172,6 +183,13 @@ refreshing the contract fails the build — the guarantee the generated Swift cl
 depends on. The internal `/api` surface is excluded deliberately: it is a BFF
 contract, not a published one. The document is served at `/openapi/native.json`
 off the public binding, since a client generator reads it at development time.
+
+## Native tvOS visual design and collections
+
+The native Apple TV client exposes Movies, Series, Collections, and Settings.
+The visual layout and authenticated collection list, detail, and artwork routes
+are described in [Apple client visual design](../apple-client-visual-design/feature.md).
+Collection reads exclude removed movies from counts, members, and poster fallbacks.
 
 ## Testing Expectations
 

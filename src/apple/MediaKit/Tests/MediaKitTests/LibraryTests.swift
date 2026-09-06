@@ -583,3 +583,146 @@ struct PlaybackPlanTests {
         #expect(stream.subtitleStreamId == nil)
     }
 }
+
+@Suite("Collection browsing")
+@MainActor
+struct CollectionTests {
+    private func store(_ answers: [String: [SurfaceStub.Answer]]) -> (CollectionStore, SurfaceStub) {
+        let transport = SurfaceStub(answers)
+        return (CollectionStore(session: ServerSession(paired: pairing(), transport: transport)), transport)
+    }
+
+    @Test func distinguishesEmptyUnsupportedAndFailure() async {
+        let (empty, _) = store(["/native/v1/collections": [(200, "[]")]])
+        await empty.load()
+        #expect(empty.state == .loaded)
+        #expect(empty.items.isEmpty)
+        let (old, _) = store(["/native/v1/collections": [(404, "")]])
+        await old.load()
+        #expect(old.state == .unsupported)
+        let (failed, _) = store(["/native/v1/collections": [(503, "")]])
+        await failed.load()
+        guard case .failed = failed.state else { Issue.record("A server error is not an empty list"); return }
+    }
+
+    @Test func decodesCollectionAndUsesBearer() async throws {
+        let (collections, transport) = store([
+            "/native/v1/collections": [(200, #"[{"id":"saga","name":"Saga","posterUrl":"/native/v1/collections/saga/images/primary","itemCount":2}]"#)],
+            "/native/v1/collections/saga": [(200, """
+            {"id":"saga","name":"Saga","items":[\(title("one", "Movie", "First")),\(title("two", "Movie", "Second"))]}
+            """)]
+        ])
+        await collections.load()
+        #expect(collections.items.first?.itemCount == 2)
+        #expect(collections.items.first?.posterPath?.hasPrefix("/native/v1/") == true)
+        let detail = try await collections.detail(id: "saga")
+        #expect(detail.items.map(\.id) == ["one", "two"])
+        #expect(transport.tokensSeen == ["Bearer old-token", "Bearer old-token"])
+    }
+
+    @Test func removedDetailDoesNotMarkServerUnsupported() async {
+        let (collections, _) = store(["/native/v1/collections/gone": [(404, "")]])
+        do {
+            _ = try await collections.detail(id: "gone")
+            Issue.record("Missing collection must throw")
+        } catch CollectionError.missing {} catch { Issue.record("Wrong error: \(error)") }
+        #expect(collections.state != .unsupported)
+    }
+
+    @Test func continueWatchingRefreshesAfterCompletion() async throws {
+        let transport = SurfaceStub([
+            "/native/v1/sync": [(200, page([
+                title("one", "Movie", "Started", ticks: 42_000_000),
+                title("two", "Movie", "Watched", played: true, ticks: 42_000_000),
+                title("three", "Series", "Series", ticks: 42_000_000),
+                title("four", "Movie", "New")
+            ].joined(separator: ","), cursor: "c", hasMore: false))],
+            "/native/v1/items/one": [(200, item("one", "Started", played: true))]
+        ])
+        let library = LibraryStore(session: ServerSession(paired: pairing(), transport: transport))
+        await library.load()
+        #expect(library.continueWatching.map(\.id) == ["one"])
+        _ = try await library.detail(for: "one")
+        #expect(library.continueWatching.isEmpty)
+    }
+
+    @Test func resumeLabelsHandleHoursAndInvalidValues() {
+        #expect(PlaybackPosition.label(2535) == "42:15")
+        #expect(PlaybackPosition.label(3661.9) == "1:01:01")
+        #expect(PlaybackPosition.label(-1) == "0:00")
+        #expect(PlaybackPosition.label(.infinity) == "0:00")
+        #expect(PlaybackPosition.label(.nan) == "0:00")
+    }
+}
+
+@Suite("Library card video formats")
+struct LibraryCardVideoFormatTests {
+    @Test("Formats appear beside the year without fetching detail")
+    func formatCaption() throws {
+        let data = Data(#"{"id":"film","catalogId":"cat","kind":"Movie","title":"Film","year":1997,"videoFormats":["HDR10","Dolby Vision"]}"#.utf8)
+        let dto = try JSONDecoder().decode(Components.Schemas.LibraryItemDto.self, from: data)
+        let card = try #require(LibraryTitle(dto))
+        #expect(card.gridSubtitle == "1997 · HDR10 · Dolby Vision")
+    }
+
+    @Test("Older server responses and absent years remain valid")
+    func olderServer() throws {
+        let data = Data(#"{"id":"film","catalogId":"cat","kind":"Movie","title":"Film","year":1997}"#.utf8)
+        let dto = try JSONDecoder().decode(Components.Schemas.LibraryItemDto.self, from: data)
+        let card = try #require(LibraryTitle(dto))
+        #expect(card.videoFormats.isEmpty)
+        #expect(card.gridSubtitle == "1997")
+        var noYear = dto
+        noYear.year = nil
+        noYear.videoFormats = ["Dolby Vision"]
+        #expect(LibraryTitle(noYear)?.gridSubtitle == "Dolby Vision")
+        noYear.videoFormats = nil
+        #expect(LibraryTitle(noYear)?.gridSubtitle == "")
+    }
+}
+
+@Suite("Title credits")
+struct TitleCreditTests {
+    @Test("Cast order, roles, portraits and crew survive detail mapping")
+    func populatedCredits() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(item("film", "Film").utf8)) as? [String: Any])
+        var detail = try #require(json["detail"] as? [String: Any])
+        detail["cast"] = [
+            ["provider": "tmdb", "providerId": "2", "name": "First Actor", "character": "Captain", "profileUrl": "https://images.example/actor.jpg"],
+            ["provider": "tmdb", "providerId": "1", "name": "Second Actor"]
+        ]
+        detail["crew"] = [
+            ["id": "director-credit", "provider": "tmdb", "providerId": "10", "name": "First Director", "job": "Director", "department": "Directing", "profileUrl": "https://images.example/director.jpg"],
+            ["id": "writer-credit", "provider": "tmdb", "providerId": "11", "name": "Writer", "job": "Screenplay"]
+        ]
+        detail["directors"] = ["First Director", "Second Director"]
+        detail["creators"] = ["Series Creator"]
+        json["detail"] = detail
+        let dto = try JSONDecoder().decode(Components.Schemas.NativeItemDto.self, from: JSONSerialization.data(withJSONObject: json))
+        let result = TitleDetail(dto)
+        #expect(result.cast.map(\.name) == ["First Actor", "Second Actor"])
+        #expect(result.cast.first?.character == "Captain")
+        #expect(result.cast.first?.profileURL?.absoluteString == "https://images.example/actor.jpg")
+        #expect(result.cast.last?.profileURL == nil)
+        #expect(result.cast.last?.character == nil)
+        #expect(result.directors == ["First Director", "Second Director"])
+        #expect(result.creators == ["Series Creator"])
+        #expect(result.crew.map(\.name) == ["First Director", "Writer", "Second Director", "Series Creator"])
+        #expect(result.crew.first?.profileURL?.absoluteString == "https://images.example/director.jpg")
+        #expect(result.crew[1].job == "Screenplay")
+        #expect(result.crew[1].profileURL == nil)
+        #expect(result.crew.last?.job == "Creator")
+        detail.removeValue(forKey: "crew")
+        json["detail"] = detail
+        let legacy = TitleDetail(try JSONDecoder().decode(Components.Schemas.NativeItemDto.self,
+            from: JSONSerialization.data(withJSONObject: json)))
+        #expect(legacy.crew.map(\.name) == ["First Director", "Second Director", "Series Creator"])
+    }
+
+    @Test("Empty credits remain empty")
+    func emptyCredits() throws {
+        let dto = try JSONDecoder().decode(Components.Schemas.NativeItemDto.self, from: Data(item("film", "Film").utf8))
+        let detail = TitleDetail(dto)
+        #expect(detail.cast.isEmpty && detail.crew.isEmpty && detail.directors.isEmpty && detail.creators.isEmpty)
+    }
+}

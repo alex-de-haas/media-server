@@ -30,7 +30,7 @@ public sealed class CollectionReadService(
         // Count owned movies per collection and apply the threshold in SQL (HAVING), so ineligible
         // collections never leave the database.
         var counts = await database.MediaItems.AsNoTracking()
-            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null)
+            .Where(item => item.PublicId != null && item.RemovedAt == null && item.Kind == MediaKind.Movie && item.CollectionId != null)
             .GroupBy(item => item.CollectionId!.Value)
             .Where(group => group.Count() >= MinMovies)
             .Select(group => new { CollectionId = group.Key, Count = group.Count() })
@@ -67,7 +67,7 @@ public sealed class CollectionReadService(
         }
 
         var movies = await database.MediaItems.AsNoTracking()
-            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId == id)
+            .Where(item => item.PublicId != null && item.RemovedAt == null && item.Kind == MediaKind.Movie && item.CollectionId == id)
             .ToListAsync(cancellationToken);
         if (movies.Count == 0)
         {
@@ -78,6 +78,7 @@ public sealed class CollectionReadService(
         var ordered = cards
             .OrderBy(card => card.Year ?? int.MaxValue)
             .ThenBy(card => card.Title, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(card => card.Id)
             .ToList();
 
         var poster = collection.PosterUrl ?? ordered.FirstOrDefault(card => card.PosterUrl != null)?.PosterUrl;
@@ -109,7 +110,7 @@ public sealed class CollectionReadService(
         foreach (var chunk in collectionIds.Chunk(ChunkSize))
         {
             var rows = await database.MediaItems.AsNoTracking()
-                .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie &&
+                .Where(item => item.PublicId != null && item.RemovedAt == null && item.Kind == MediaKind.Movie &&
                     item.CollectionId != null && chunk.Contains(item.CollectionId.Value))
                 .Join(
                     database.ImageAssets.AsNoTracking().Where(image => image.ImageType == ImageType.Primary),

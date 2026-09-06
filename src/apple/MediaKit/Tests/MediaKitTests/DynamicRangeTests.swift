@@ -31,11 +31,22 @@ struct DynamicRangeTests {
         #expect(DynamicRange.badges(hdrFormat: nil, dolbyVision: nil).isEmpty)
     }
 
-    @Test func onlyADualLayerEarnsTheNote() {
+    @Test func hdr10FallbackConfigurationsEarnTheNote() {
         #expect(DynamicRange.note(for: profile7) == "Plays as HDR10 on this device")
         #expect(DynamicRange.note(for: profile81) == nil)
         #expect(DynamicRange.note(for: profile5) == nil)
         #expect(DynamicRange.note(for: nil) == nil)
+    }
+
+    @Test func profile86DisplaysTheHdr10FallbackWithoutAnEnhancementLayer() {
+        let track = TitleTrack(Components.Schemas.MediaStreamDto(
+            id: "v", _type: "Video", index: 0, codec: "hevc", hdrFormat: "Dolby Vision",
+            isDefault: true, isForced: false, isExternal: false,
+            dolbyVision: .init(profile: 8, level: 6, blCompatibilityId: 6, enhancementLayer: false)))
+        #expect(track.dynamicRangeBadges == ["Dolby Vision 8.6"])
+        #expect(track.dolbyVisionNote == "Plays as HDR10 on this device")
+        let profile84 = DolbyVisionDetail(profile: 8, level: 6, blCompatibilityId: 4, enhancementLayer: false)
+        #expect(DynamicRange.note(for: profile84) == nil)
     }
 
     @Test func theTrackDecodesTheRecordAndItsAbsence() {

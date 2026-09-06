@@ -276,6 +276,18 @@ public sealed class LibraryReadService(
         var posters = await PostersAsync(itemIds, cancellationToken);
         var metaByItem = await MetadataByItemAsync(itemIds, cancellationToken);
         var userDataByItem = await userData.LoadAsync(appUserId, items, cancellationToken);
+        // One projection for the whole page, not a detail query per card.
+        var movieIds = items.Where(item => item.Kind == MediaKind.Movie).Select(item => item.Id).ToList();
+        var videoStreams = await database.MediaStreams.AsNoTracking()
+            .Where(stream => stream.StreamType == StreamType.Video &&
+                movieIds.Contains(stream.MediaSource!.MediaItemId))
+            .Select(stream => new { stream.MediaSource!.MediaItemId, stream.Codec, stream.HdrFormat })
+            .ToListAsync(cancellationToken);
+        var formatsByItem = videoStreams
+            .Where(stream => !new[] { "mjpeg", "png", "bmp", "gif", "webp" }
+                .Contains(stream.Codec, StringComparer.OrdinalIgnoreCase))
+            .GroupBy(stream => stream.MediaItemId)
+            .ToDictionary(group => group.Key, group => CardVideoFormats(group.Select(stream => stream.HdrFormat)));
 
         return items.Select(item =>
         {
@@ -291,9 +303,28 @@ public sealed class LibraryReadService(
                 userDataByItem.GetValueOrDefault(item.Id),
                 meta?.Genres,
                 meta?.RuntimeTicks,
-                meta?.CommunityRating);
+                meta?.CommunityRating,
+                formatsByItem.GetValueOrDefault(item.Id) ?? []);
         }).ToList();
     }
+
+    internal static IReadOnlyList<string> CardVideoFormats(IEnumerable<string?> formats) => formats
+        .Where(format => !string.IsNullOrWhiteSpace(format))
+        .SelectMany(format => format!.Split(['·', ','], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        .Select(format => format.ToUpperInvariant() switch
+        {
+            "DOLBY VISION" => "Dolby Vision",
+            "HDR10" => "HDR10",
+            "HDR10+" => "HDR10+",
+            "HDR" => "HDR",
+            "HLG" => "HLG",
+            _ => null,
+        })
+        .OfType<string>()
+        .Distinct(StringComparer.Ordinal)
+        .OrderBy(format => format == "Dolby Vision" ? 1 : 0)
+        .ThenBy(format => format, StringComparer.Ordinal)
+        .ToArray();
 
     private async Task<List<LibraryRailItemDto>> ProjectRailAsync(
         IReadOnlyList<MediaItem> leaves, int appUserId, CancellationToken cancellationToken)
@@ -417,6 +448,13 @@ public sealed class LibraryReadService(
             ? rich.Networks.Select(brand => new NetworkDto(brand.Name, brand.LogoUrl)).ToList()
             : null;
         var cast = await LoadCastAsync(item.Id, cancellationToken);
+        var crew = await database.MediaItemPersons.AsNoTracking()
+            .Where(credit => credit.MediaItemId == item.Id && credit.Role == PersonRole.Crew)
+            .OrderBy(credit => credit.Order).ThenBy(credit => credit.Id)
+            .Join(database.Persons.AsNoTracking(), credit => credit.PersonId, person => person.Id,
+                (credit, person) => new CrewMemberDto(credit.Id, person.Provider, person.ProviderId,
+                    person.Name, credit.Job, credit.Department, person.ProfileUrl))
+            .ToListAsync(cancellationToken);
 
         return new LibraryDetailDto(
             item.Id,
@@ -460,7 +498,8 @@ public sealed class LibraryReadService(
             rich.Directors,
             rich.Creators,
             rich.Studios.Select(brand => new StudioDto(brand.Name, brand.LogoUrl)).ToList(),
-            rich.Keywords);
+            rich.Keywords,
+            crew);
     }
 
     /// <summary>

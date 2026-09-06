@@ -23,7 +23,8 @@ public sealed record LibraryItemDto(
     // answer it. Read from the metadata record the projection already loads, so they cost no query.
     IReadOnlyList<string>? Genres = null,
     long? RuntimeTicks = null,
-    double? CommunityRating = null);
+    double? CommunityRating = null,
+    IReadOnlyList<string>? VideoFormats = null);
 
 /// <summary>Filters and window for a library search.</summary>
 /// <remarks>
@@ -113,13 +114,18 @@ public sealed record LibraryDetailDto(
     // Production companies / studios with their (optional) logos.
     IReadOnlyList<StudioDto> Studios,
     // TMDb keyword tags.
-    IReadOnlyList<string> Keywords);
+    IReadOnlyList<string> Keywords,
+    IReadOnlyList<CrewMemberDto>? Crew = null);
 
 /// <summary>A TV network/distributor with its (optional) logo, surfaced on series detail.</summary>
 public sealed record NetworkDto(string Name, string? LogoUrl);
 
 /// <summary>A production company/studio with its (optional) logo.</summary>
 public sealed record StudioDto(string Name, string? LogoUrl);
+
+/// <summary>A stored crew credit with its person portrait and production role.</summary>
+public sealed record CrewMemberDto(Guid Id, string Provider, string ProviderId, string Name,
+    string? Job, string? Department, string? ProfileUrl);
 
 /// <summary>
 /// A cast member: the stable person identity (<see cref="Provider"/> + <see cref="ProviderId"/>) so the UI

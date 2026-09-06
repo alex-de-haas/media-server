@@ -62,6 +62,15 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /native/v1/events`.
     /// - Remark: Generated from `#/paths//native/v1/events/get`.
     func getNativeV1Events(_ input: Operations.GetNativeV1Events.Input) async throws -> Operations.GetNativeV1Events.Output
+    /// - Remark: HTTP `GET /native/v1/collections`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/get(ListNativeCollections)`.
+    func listNativeCollections(_ input: Operations.ListNativeCollections.Input) async throws -> Operations.ListNativeCollections.Output
+    /// - Remark: HTTP `GET /native/v1/collections/{id}`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/{id}/get(GetNativeCollection)`.
+    func getNativeCollection(_ input: Operations.GetNativeCollection.Input) async throws -> Operations.GetNativeCollection.Output
+    /// - Remark: HTTP `GET /native/v1/collections/{id}/images/{imageType}`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)`.
+    func getNativeCollectionImage(_ input: Operations.GetNativeCollectionImage.Input) async throws -> Operations.GetNativeCollectionImage.Output
     /// - Remark: HTTP `GET /native/v1/items/{id}`.
     /// - Remark: Generated from `#/paths//native/v1/items/{id}/get`.
     func getNativeV1ItemsId(_ input: Operations.GetNativeV1ItemsId.Input) async throws -> Operations.GetNativeV1ItemsId.Output
@@ -249,6 +258,33 @@ extension APIProtocol {
     /// - Remark: Generated from `#/paths//native/v1/events/get`.
     public func getNativeV1Events() async throws -> Operations.GetNativeV1Events.Output {
         try await getNativeV1Events(Operations.GetNativeV1Events.Input())
+    }
+    /// - Remark: HTTP `GET /native/v1/collections`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/get(ListNativeCollections)`.
+    public func listNativeCollections(headers: Operations.ListNativeCollections.Input.Headers = .init()) async throws -> Operations.ListNativeCollections.Output {
+        try await listNativeCollections(Operations.ListNativeCollections.Input(headers: headers))
+    }
+    /// - Remark: HTTP `GET /native/v1/collections/{id}`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/{id}/get(GetNativeCollection)`.
+    public func getNativeCollection(
+        path: Operations.GetNativeCollection.Input.Path,
+        headers: Operations.GetNativeCollection.Input.Headers = .init()
+    ) async throws -> Operations.GetNativeCollection.Output {
+        try await getNativeCollection(Operations.GetNativeCollection.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /native/v1/collections/{id}/images/{imageType}`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)`.
+    public func getNativeCollectionImage(
+        path: Operations.GetNativeCollectionImage.Input.Path,
+        headers: Operations.GetNativeCollectionImage.Input.Headers = .init()
+    ) async throws -> Operations.GetNativeCollectionImage.Output {
+        try await getNativeCollectionImage(Operations.GetNativeCollectionImage.Input(
+            path: path,
+            headers: headers
+        ))
     }
     /// - Remark: HTTP `GET /native/v1/items/{id}`.
     /// - Remark: Generated from `#/paths//native/v1/items/{id}/get`.
@@ -482,6 +518,59 @@ public enum Components {
                 case profileUrl
             }
         }
+        /// - Remark: Generated from `#/components/schemas/CrewMemberDto`.
+        public struct CrewMemberDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/provider`.
+            public var provider: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/providerId`.
+            public var providerId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/name`.
+            public var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/job`.
+            public var job: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/department`.
+            public var department: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/CrewMemberDto/profileUrl`.
+            public var profileUrl: Swift.String?
+            /// Creates a new `CrewMemberDto`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - provider:
+            ///   - providerId:
+            ///   - name:
+            ///   - job:
+            ///   - department:
+            ///   - profileUrl:
+            public init(
+                id: Swift.String,
+                provider: Swift.String,
+                providerId: Swift.String,
+                name: Swift.String,
+                job: Swift.String? = nil,
+                department: Swift.String? = nil,
+                profileUrl: Swift.String? = nil
+            ) {
+                self.id = id
+                self.provider = provider
+                self.providerId = providerId
+                self.name = name
+                self.job = job
+                self.department = department
+                self.profileUrl = profileUrl
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case provider
+                case providerId
+                case name
+                case job
+                case department
+                case profileUrl
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/DolbyVisionDto`.
         public struct DolbyVisionDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/DolbyVisionDto/profile`.
@@ -603,6 +692,8 @@ public enum Components {
             public var studios: [Components.Schemas.StudioDto]
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/keywords`.
             public var keywords: [Swift.String]
+            /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/crew`.
+            public var crew: [Components.Schemas.CrewMemberDto]?
             /// Creates a new `LibraryDetailDto`.
             ///
             /// - Parameters:
@@ -648,6 +739,7 @@ public enum Components {
             ///   - creators:
             ///   - studios:
             ///   - keywords:
+            ///   - crew:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
@@ -690,7 +782,8 @@ public enum Components {
                 directors: [Swift.String],
                 creators: [Swift.String],
                 studios: [Components.Schemas.StudioDto],
-                keywords: [Swift.String]
+                keywords: [Swift.String],
+                crew: [Components.Schemas.CrewMemberDto]? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
@@ -734,6 +827,7 @@ public enum Components {
                 self.creators = creators
                 self.studios = studios
                 self.keywords = keywords
+                self.crew = crew
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -778,6 +872,7 @@ public enum Components {
                 case creators
                 case studios
                 case keywords
+                case crew
             }
         }
         /// - Remark: Generated from `#/components/schemas/LibraryGapDto`.
@@ -833,6 +928,8 @@ public enum Components {
             public var runtimeTicks: Swift.Int64?
             /// - Remark: Generated from `#/components/schemas/LibraryItemDto/communityRating`.
             public var communityRating: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/LibraryItemDto/videoFormats`.
+            public var videoFormats: [Swift.String]?
             /// Creates a new `LibraryItemDto`.
             ///
             /// - Parameters:
@@ -847,6 +944,7 @@ public enum Components {
             ///   - genres:
             ///   - runtimeTicks:
             ///   - communityRating:
+            ///   - videoFormats:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
@@ -858,7 +956,8 @@ public enum Components {
                 userData: Components.Schemas.UserItemDataDto? = nil,
                 genres: [Swift.String]? = nil,
                 runtimeTicks: Swift.Int64? = nil,
-                communityRating: Swift.Double? = nil
+                communityRating: Swift.Double? = nil,
+                videoFormats: [Swift.String]? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
@@ -871,6 +970,7 @@ public enum Components {
                 self.genres = genres
                 self.runtimeTicks = runtimeTicks
                 self.communityRating = communityRating
+                self.videoFormats = videoFormats
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -884,6 +984,7 @@ public enum Components {
                 case genres
                 case runtimeTicks
                 case communityRating
+                case videoFormats
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaKind`.
@@ -1129,6 +1230,82 @@ public enum Components {
                 case audioCodecs
                 case hdrFormats
                 case maxAudioChannels
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/NativeCollectionDetail`.
+        public struct NativeCollectionDetail: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionDetail/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionDetail/name`.
+            public var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionDetail/posterUrl`.
+            public var posterUrl: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionDetail/backdropUrl`.
+            public var backdropUrl: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionDetail/items`.
+            public var items: [Components.Schemas.LibraryItemDto]
+            /// Creates a new `NativeCollectionDetail`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - name:
+            ///   - posterUrl:
+            ///   - backdropUrl:
+            ///   - items:
+            public init(
+                id: Swift.String,
+                name: Swift.String,
+                posterUrl: Swift.String? = nil,
+                backdropUrl: Swift.String? = nil,
+                items: [Components.Schemas.LibraryItemDto]
+            ) {
+                self.id = id
+                self.name = name
+                self.posterUrl = posterUrl
+                self.backdropUrl = backdropUrl
+                self.items = items
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case posterUrl
+                case backdropUrl
+                case items
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/NativeCollectionSummary`.
+        public struct NativeCollectionSummary: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionSummary/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionSummary/name`.
+            public var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionSummary/posterUrl`.
+            public var posterUrl: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativeCollectionSummary/itemCount`.
+            public var itemCount: Swift.Int32
+            /// Creates a new `NativeCollectionSummary`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - name:
+            ///   - posterUrl:
+            ///   - itemCount:
+            public init(
+                id: Swift.String,
+                name: Swift.String,
+                posterUrl: Swift.String? = nil,
+                itemCount: Swift.Int32
+            ) {
+                self.id = id
+                self.name = name
+                self.posterUrl = posterUrl
+                self.itemCount = itemCount
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case posterUrl
+                case itemCount
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativeImagesDto`.
@@ -2183,6 +2360,8 @@ public enum Components {
             case seasons = "Seasons"
             case futureEpisodes = "FutureEpisodes"
         }
+        /// - Remark: Generated from `#/components/schemas/Stream`.
+        public typealias Stream = Swift.String
         /// - Remark: Generated from `#/components/schemas/StudioDto`.
         public struct StudioDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/StudioDto/name`.
@@ -4802,6 +4981,523 @@ public enum Operations {
             ///
             /// A response with a code that is not documented in the OpenAPI document.
             case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+    }
+    /// - Remark: HTTP `GET /native/v1/collections`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/get(ListNativeCollections)`.
+    public enum ListNativeCollections {
+        public static let id: Swift.String = "ListNativeCollections"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/native/v1/collections/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListNativeCollections.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListNativeCollections.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.ListNativeCollections.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            public init(headers: Operations.ListNativeCollections.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/collections/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/collections/GET/responses/200/content/application\/json`.
+                    case json([Components.Schemas.NativeCollectionSummary])
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: [Components.Schemas.NativeCollectionSummary] {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.ListNativeCollections.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.ListNativeCollections.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/collections/get(ListNativeCollections)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.ListNativeCollections.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.ListNativeCollections.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `GET /native/v1/collections/{id}`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/{id}/get(GetNativeCollection)`.
+    public enum GetNativeCollection {
+        public static let id: Swift.String = "GetNativeCollection"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/native/v1/collections/{id}/GET/path`.
+            public struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/collections/{id}/GET/path/id`.
+                public var id: Swift.String
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - id:
+                public init(id: Swift.String) {
+                    self.id = id
+                }
+            }
+            public var path: Operations.GetNativeCollection.Input.Path
+            /// - Remark: Generated from `#/paths/native/v1/collections/{id}/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeCollection.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeCollection.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.GetNativeCollection.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            public init(
+                path: Operations.GetNativeCollection.Input.Path,
+                headers: Operations.GetNativeCollection.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/collections/{id}/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/GET/responses/200/content/application\/json`.
+                    case json(Components.Schemas.NativeCollectionDetail)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.NativeCollectionDetail {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.GetNativeCollection.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.GetNativeCollection.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/collections/{id}/get(GetNativeCollection)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.GetNativeCollection.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.GetNativeCollection.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                public init() {}
+            }
+            /// Not Found
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/collections/{id}/get(GetNativeCollection)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.GetNativeCollection.Output.NotFound)
+            /// Not Found
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/collections/{id}/get(GetNativeCollection)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            public static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            public var notFound: Operations.GetNativeCollection.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `GET /native/v1/collections/{id}/images/{imageType}`.
+    /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)`.
+    public enum GetNativeCollectionImage {
+        public static let id: Swift.String = "GetNativeCollectionImage"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/path`.
+            public struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/path/id`.
+                public var id: Swift.String
+                /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/path/imageType`.
+                public var imageType: Swift.String
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - id:
+                ///   - imageType:
+                public init(
+                    id: Swift.String,
+                    imageType: Swift.String
+                ) {
+                    self.id = id
+                    self.imageType = imageType
+                }
+            }
+            public var path: Operations.GetNativeCollectionImage.Input.Path
+            /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeCollectionImage.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeCollectionImage.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.GetNativeCollectionImage.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            public init(
+                path: Operations.GetNativeCollectionImage.Input.Path,
+                headers: Operations.GetNativeCollectionImage.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content/image\/jpeg`.
+                    case jpeg(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.jpeg`.
+                    ///
+                    /// - Throws: An error if `self` is not `.jpeg`.
+                    /// - SeeAlso: `.jpeg`.
+                    public var jpeg: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .jpeg(body):
+                                return body
+                            default:
+                                try throwUnexpectedResponseBody(
+                                    expectedContent: "image/jpeg",
+                                    body: self
+                                )
+                            }
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content/image\/png`.
+                    case png(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.png`.
+                    ///
+                    /// - Throws: An error if `self` is not `.png`.
+                    /// - SeeAlso: `.png`.
+                    public var png: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .png(body):
+                                return body
+                            default:
+                                try throwUnexpectedResponseBody(
+                                    expectedContent: "image/png",
+                                    body: self
+                                )
+                            }
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content/image\/webp`.
+                    case imageWebp(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.imageWebp`.
+                    ///
+                    /// - Throws: An error if `self` is not `.imageWebp`.
+                    /// - SeeAlso: `.imageWebp`.
+                    public var imageWebp: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .imageWebp(body):
+                                return body
+                            default:
+                                try throwUnexpectedResponseBody(
+                                    expectedContent: "image/webp",
+                                    body: self
+                                )
+                            }
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content/image\/gif`.
+                    case imageGif(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.imageGif`.
+                    ///
+                    /// - Throws: An error if `self` is not `.imageGif`.
+                    /// - SeeAlso: `.imageGif`.
+                    public var imageGif: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .imageGif(body):
+                                return body
+                            default:
+                                try throwUnexpectedResponseBody(
+                                    expectedContent: "image/gif",
+                                    body: self
+                                )
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.GetNativeCollectionImage.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.GetNativeCollectionImage.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.GetNativeCollectionImage.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.GetNativeCollectionImage.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                public init() {}
+            }
+            /// Not Found
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.GetNativeCollectionImage.Output.NotFound)
+            /// Not Found
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            public static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            public var notFound: Operations.GetNativeCollectionImage.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case jpeg
+            case png
+            case imageWebp
+            case imageGif
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "image/jpeg":
+                    self = .jpeg
+                case "image/png":
+                    self = .png
+                case "image/webp":
+                    self = .imageWebp
+                case "image/gif":
+                    self = .imageGif
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .jpeg:
+                    return "image/jpeg"
+                case .png:
+                    return "image/png"
+                case .imageWebp:
+                    return "image/webp"
+                case .imageGif:
+                    return "image/gif"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .jpeg,
+                    .png,
+                    .imageWebp,
+                    .imageGif
+                ]
+            }
         }
     }
     /// - Remark: HTTP `GET /native/v1/items/{id}`.

@@ -11,9 +11,14 @@ struct TitleView: View {
     let loader: ArtworkLoader
     let playback: PlaybackService
 
+    @Environment(\.colorScheme) private var systemColorScheme
+    // Cast portraits are public provider URLs and must never receive the server credential.
+    @State private var portraitLoader = ArtworkLoader(token: { nil })
     @State private var detail: TitleDetail?
     @State private var failure: String?
     @State private var chosenVersion: String?
+    @State private var showsTechnicalDetails = false
+    @FocusState private var focusedPlayPosition: Double?
 
     @State private var plan: PlaybackPlan?
     @State private var playing: PlayableStream?
@@ -57,6 +62,12 @@ struct TitleView: View {
                 ProgressView().padding(120)
             }
         }
+        .background(alignment: .top) {
+            CinemaBackdrop(url: detail?.backdropURL(on: library.server), loader: loader)
+                .frame(height: 850).ignoresSafeArea()
+        }
+        .background(detail?.backdropPath != nil ? Color.black : CinemaStyle.canvas)
+        .environment(\.colorScheme, detail?.backdropPath != nil ? .dark : systemColorScheme)
         .task {
             do {
                 let loaded = try await library.detail(for: title.id)
@@ -121,7 +132,7 @@ struct TitleView: View {
     private func playButtons(_ detail: TitleDetail) -> some View {
         HStack(spacing: 24) {
             if detail.resumeSeconds > 0 {
-                playButton("Resume", detail, from: detail.resumeSeconds)
+                playButton("Resume from \(PlaybackPosition.label(detail.resumeSeconds))", detail, from: detail.resumeSeconds)
                 playButton("From the beginning", detail, from: 0)
             } else {
                 playButton("Play", detail, from: 0)
@@ -138,7 +149,7 @@ struct TitleView: View {
 
     @ViewBuilder
     private func playButton(_ name: LocalizedStringKey, _ detail: TitleDetail, from position: Double) -> some View {
-        Button {
+        let button = Button {
             Task { await play(detail, from: position) }
         } label: {
             if resolvingFrom == position {
@@ -148,6 +159,13 @@ struct TitleView: View {
             }
         }
         .disabled(resolvingFrom != nil)
+        .focused($focusedPlayPosition, equals: position)
+
+        if position == detail.resumeSeconds {
+            button.buttonStyle(.borderedProminent)
+        } else {
+            button.buttonStyle(.bordered)
+        }
     }
 
     /// The same film with different tracks, or nil when the server would not give it.
@@ -287,41 +305,82 @@ struct TitleView: View {
 
     @ViewBuilder
     private func loaded(_ detail: TitleDetail) -> some View {
-        VStack(alignment: .leading, spacing: 40) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(detail.title).font(.largeTitle)
-
-                if let tagline = detail.tagline, !tagline.isEmpty {
-                    Text(tagline).font(.title3).foregroundStyle(.secondary).italic()
-                }
-
-                Text(facts(detail))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(detail.title).font(.system(size: 64, weight: .bold))
+                    .frame(maxWidth: 1000, alignment: .leading)
+                Text(facts(detail)).font(.callout).foregroundStyle(.secondary)
             }
+            playButtons(detail).padding(.vertical, 12)
 
             if let overview = detail.overview, !overview.isEmpty {
-                Text(overview)
-                    .font(.body)
-                    .frame(maxWidth: 1400, alignment: .leading)
+                Text(overview).font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 950, alignment: .leading)
             }
-
-            playButtons(detail)
-
-            if case .refused(let refusal, _) = plan {
-                refusalNotice(refusal)
-            }
-
-            if detail.versions.count > 1 {
-                versions(detail.versions)
-            }
+            if case .refused(let refusal, _) = plan { refusalNotice(refusal) }
 
             if let version = detail.versions.first(where: { $0.id == chosenVersion }) ?? detail.versions.first {
-                tracks(version)
+                VStack(alignment: .leading, spacing: 20) {
+                    versions(detail.versions)
+                    Button("Audio, subtitles & file details") {
+                        showsTechnicalDetails = true
+                    }
+                    .sheet(isPresented: $showsTechnicalDetails) {
+                        tracks(version)
+                    }
+                }
+                .padding(.top, 20)
+            }
+            credits(detail)
+        }
+        .padding(CinemaStyle.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .defaultFocus($focusedPlayPosition, detail.resumeSeconds)
+    }
+
+    @ViewBuilder
+    private func credits(_ detail: TitleDetail) -> some View {
+        if !detail.crew.isEmpty {
+            creditShelf("Crew") {
+                ForEach(detail.crew) { person in
+                    creditCard(name: person.name, role: person.job, portrait: person.profileURL)
+                }
             }
         }
-        .padding(80)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        if !detail.cast.isEmpty {
+            creditShelf("Cast") {
+                ForEach(detail.cast) { person in
+                    creditCard(name: person.name, role: person.character, portrait: person.profileURL)
+                }
+            }
+        }
+    }
+
+    private func creditShelf<Content: View>(_ heading: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(heading).font(.title2)
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 24, content: content).padding(.vertical, 12)
+            }
+            .scrollClipDisabled()
+            .focusSection()
+        }
+    }
+
+    private func creditCard(name: String, role: String?, portrait: URL?) -> some View {
+        TechnicalDetailRow {
+            VStack(alignment: .leading, spacing: 12) {
+                ServerArtwork(url: portrait, loader: portraitLoader, symbol: "person.fill")
+                    .frame(width: 196, height: 245)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                Text(name).font(.callout.weight(.semibold)).lineLimit(2)
+                Text(role ?? " ").font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: true)
+            }
+        }
+        .frame(width: 220)
+        .accessibilityElement(children: .combine)
     }
 
     private func facts(_ detail: TitleDetail) -> String {
@@ -348,17 +407,25 @@ struct TitleView: View {
                 Button {
                     chosenVersion = version.id
                 } label: {
-                    HStack {
+                    HStack(spacing: 20) {
                         Image(systemName: version.id == chosenVersion ? "checkmark.circle.fill" : "circle")
-                        VStack(alignment: .leading) {
-                            Text(version.versionName ?? version.container.uppercased())
-                            Text("\(version.container.uppercased()) · \(version.sizeDescription)")
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(version.versionName.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } ?? "Original")
+                            Text([version.container.uppercased(), version.video?.codec?.uppercased(), version.sizeDescription]
+                                .compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
+                        Spacer(minLength: 32)
+                        if let picture = version.video {
+                            dynamicRange(picture, alignment: .trailing)
+                                .multilineTextAlignment(.trailing)
+                        }
                     }
+                    .padding(.vertical, 8)
                 }
+                .buttonStyle(.bordered)
+                .accessibilityValue(version.id == chosenVersion ? "Selected for playback" : "")
             }
         }
     }
@@ -366,32 +433,43 @@ struct TitleView: View {
     @ViewBuilder
     private func tracks(_ version: TitleVersion) -> some View {
         VStack(alignment: .leading, spacing: 24) {
-            // The film, not a cover a muxer wrote as a video track: the same still-image rule the server uses.
-            if let picture = version.video {
-                dynamicRange(picture)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Audio, subtitles & file details").font(.title2.bold())
+                Text(version.versionName ?? "Original").foregroundStyle(.secondary)
             }
-
-            HStack(alignment: .top, spacing: 80) {
+            List {
+                Section("File") {
+                    TechnicalDetailRow {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("\(version.container.uppercased()) · \(version.sizeDescription)")
+                            if let picture = version.video { dynamicRange(picture) }
+                        }
+                    }
+                }
                 trackList("Audio", version.audio)
                 trackList("Subtitles", version.subtitles)
             }
         }
+        .padding(48)
+        .frame(width: 1280, height: 820)
     }
 
     /// The picture's dynamic range as capsules — "Dolby Vision 8.1", "HDR10" — with the one note a dual-layer
     /// profile 7 earns on this device. Text marks rather than logos: the Dolby Vision mark is licensed, and a
     /// capsule reads the same.
     @ViewBuilder
-    private func dynamicRange(_ picture: TitleTrack) -> some View {
+    private func dynamicRange(_ picture: TitleTrack, alignment: HorizontalAlignment = .leading) -> some View {
         let badges = picture.dynamicRangeBadges
         if !badges.isEmpty {
-            HStack(spacing: 12) {
-                ForEach(badges, id: \.self) { badge in
-                    Text(badge)
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(.secondary.opacity(0.25), in: Capsule())
+            VStack(alignment: alignment, spacing: 8) {
+                HStack(spacing: 12) {
+                    ForEach(badges, id: \.self) { badge in
+                        Text(badge)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(.secondary.opacity(0.25), in: Capsule())
+                    }
                 }
 
                 if let note = picture.dolbyVisionNote {
@@ -405,26 +483,45 @@ struct TitleView: View {
 
     @ViewBuilder
     private func trackList(_ heading: String, _ tracks: [TitleTrack]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(heading).font(.title3)
-
+        Section(heading) {
             if tracks.isEmpty {
-                Text("None").foregroundStyle(.secondary)
+                TechnicalDetailRow { Text("None").foregroundStyle(.secondary) }
             } else {
                 ForEach(tracks) { track in
-                    HStack(spacing: 8) {
-                        Text(track.label.isEmpty ? "Track" : track.label)
-                        // A dub or a subtitle file beside the video is the thing this library holds and
-                        // no other client of it can play, so it is worth pointing at.
-                        if track.isExternal {
-                            Image(systemName: "doc.badge.plus")
-                                .foregroundStyle(.secondary)
-                                .help("Beside the file")
+                    TechnicalDetailRow {
+                        HStack(spacing: 8) {
+                            Text(track.label.isEmpty ? "Track" : track.label)
+                            // A dub or a subtitle file beside the video is the thing this library holds and
+                            // no other client of it can play, so it is worth pointing at.
+                            if track.isExternal {
+                                Image(systemName: "doc.badge.plus")
+                                    .foregroundStyle(.secondary)
+                                    .help("Beside the file")
+                            }
                         }
+                        .font(.callout)
                     }
-                    .font(.callout)
                 }
             }
         }
+    }
+}
+
+/// Information rows need a visible focus target even though selecting them performs no action.
+private struct TechnicalDetailRow<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(.primary.opacity(isFocused ? 0.12 : 0), in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.primary.opacity(isFocused ? 0.6 : 0), lineWidth: 2)
+            }
+            .focusable()
+            .focused($isFocused)
     }
 }

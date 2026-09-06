@@ -603,6 +603,120 @@
         }
       }
     },
+    "/native/v1/collections": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "operationId": "ListNativeCollections",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NativeCollectionSummary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/collections/{id}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "operationId": "GetNativeCollection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCollectionDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/collections/{id}/images/{imageType}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "operationId": "GetNativeCollectionImage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "imageType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/native/v1/items/{id}": {
       "get": {
         "tags": [
@@ -986,6 +1100,51 @@
           }
         }
       },
+      "CrewMemberDto": {
+        "required": [
+          "id",
+          "provider",
+          "providerId",
+          "name",
+          "job",
+          "department",
+          "profileUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "job": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "department": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "profileUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "DolbyVisionDto": {
         "required": [
           "profile",
@@ -1336,6 +1495,15 @@
             "items": {
               "type": "string"
             }
+          },
+          "crew": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CrewMemberDto"
+            }
           }
         }
       },
@@ -1449,6 +1617,15 @@
               "string"
             ],
             "format": "double"
+          },
+          "videoFormats": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -1720,6 +1897,75 @@
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "NativeCollectionDetail": {
+        "required": [
+          "id",
+          "name",
+          "posterUrl",
+          "backdropUrl",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "backdropUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryItemDto"
+            }
+          }
+        }
+      },
+      "NativeCollectionSummary": {
+        "required": [
+          "id",
+          "name",
+          "posterUrl",
+          "itemCount"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "itemCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
               "integer",
               "string"
             ],
@@ -2676,6 +2922,10 @@
           "FutureEpisodes"
         ],
         "type": "string"
+      },
+      "Stream": {
+        "type": "string",
+        "format": "binary"
       },
       "StudioDto": {
         "required": [
