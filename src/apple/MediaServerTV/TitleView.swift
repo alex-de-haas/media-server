@@ -114,7 +114,9 @@ struct TitleView: View {
     }
 
     /// Resume where the viewer left, or start over — both, for a film that was started, because a
-    /// viewer who wants the beginning again had no way to ask for it. One button otherwise.
+    /// viewer who wants the beginning again had no way to ask for it. One button otherwise, and a
+    /// mark beside it for a film watched to the end: the server resets its resume point to zero,
+    /// which would leave it looking exactly like one never started.
     @ViewBuilder
     private func playButtons(_ detail: TitleDetail) -> some View {
         HStack(spacing: 24) {
@@ -123,6 +125,13 @@ struct TitleView: View {
                 playButton("From the beginning", detail, from: 0)
             } else {
                 playButton("Play", detail, from: 0)
+            }
+
+            if detail.played {
+                // Beside the button rather than in it: watched is a fact about the film, and the
+                // button says what pressing it does.
+                Label("Watched", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.secondary)
             }
         }
     }
