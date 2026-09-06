@@ -77,7 +77,6 @@ struct PosterCard<Artwork: View, Destination: View>: View {
     let subtitle: String
     var status = ""
     var showTitle = true
-    var onFocus: () -> Void = {}
     var focus: FocusState<String?>.Binding? = nil
     var focusID = ""
     @ViewBuilder var artwork: () -> Artwork
@@ -106,21 +105,19 @@ struct PosterCard<Artwork: View, Destination: View>: View {
                     .padding(.horizontal, 4)
             }
         }
-        .buttonStyle(PosterFocusStyle(onFocus: onFocus))
+        .buttonStyle(PosterFocusStyle())
         .accessibilityLabel([title, subtitle, status].filter { !$0.isEmpty }.joined(separator: ", "))
     }
 }
 
 private struct PosterFocusStyle: ButtonStyle {
-    var onFocus: () -> Void
 
     func makeBody(configuration: Configuration) -> some View {
-        FocusedPoster(configuration: configuration, onFocus: onFocus)
+        FocusedPoster(configuration: configuration)
     }
 
     private struct FocusedPoster: View {
         let configuration: ButtonStyleConfiguration
-        let onFocus: () -> Void
         @Environment(\.isFocused) private var isFocused
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -129,9 +126,6 @@ private struct PosterFocusStyle: ButtonStyle {
                 .scaleEffect(isFocused ? 1.06 : 1)
                 .opacity(configuration.isPressed ? 0.8 : 1)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
-                .onChange(of: isFocused) { _, focused in
-                    if focused { onFocus() }
-                }
         }
     }
 }
@@ -142,7 +136,6 @@ struct MoviePosterLink: View {
     let loader: ArtworkLoader
     let playback: PlaybackService
     var showResumeTime = false
-    var onFocus: () -> Void = {}
     var focus: FocusState<String?>.Binding? = nil
     var focusID = ""
 
@@ -150,7 +143,7 @@ struct MoviePosterLink: View {
         PosterCard(title: item.title,
                    subtitle: showResumeTime ? "Resume from \(PlaybackPosition.label(item.resumeSeconds))" : item.year.map(String.init) ?? "",
                    status: item.played ? "Watched" : item.resumeSeconds > 0 ? "In progress" : "",
-                   showTitle: false, onFocus: onFocus, focus: focus, focusID: focusID) {
+                   showTitle: false, focus: focus, focusID: focusID) {
             ServerArtwork(url: item.hasArtwork ? item.artworkURL(on: library.server) : nil,
                           loader: loader, symbol: item.kind == .movie ? "film" : "tv", fallbackTitle: item.title)
                 .overlay(alignment: .bottomTrailing) {
@@ -174,24 +167,12 @@ struct LibraryPosterGrid: View {
     let playback: PlaybackService
     var focus: FocusState<String?>.Binding? = nil
 
-    @State private var focusedTitle = ""
-
     var body: some View {
-        LazyVGrid(columns: CinemaStyle.columns, spacing: 40, pinnedViews: [.sectionHeaders]) {
-            Section {
-                ForEach(items) { original in
-                    let item = library.items.first { $0.id == original.id } ?? original
-                    MoviePosterLink(item: item, library: library, loader: loader, playback: playback,
-                                    onFocus: { focusedTitle = item.title },
-                                    focus: focus, focusID: "all-\(item.id)")
-                }
-            } header: {
-                Text(focusedTitle.isEmpty ? " " : focusedTitle)
-                    .font(.title3).lineLimit(2, reservesSpace: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12)
-                    .background(CinemaStyle.canvas)
-                    .accessibilityHidden(true)
+        LazyVGrid(columns: CinemaStyle.columns, spacing: 40) {
+            ForEach(items) { original in
+                let item = library.items.first { $0.id == original.id } ?? original
+                MoviePosterLink(item: item, library: library, loader: loader, playback: playback,
+                                focus: focus, focusID: "all-\(item.id)")
             }
         }
         .focusSection()

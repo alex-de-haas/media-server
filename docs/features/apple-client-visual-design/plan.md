@@ -39,8 +39,8 @@ Keep the ordinary Series grid: episode navigation and next-episode aggregation
 are outside this visual change, so do not imply playable series-level resume.
 
 Movie and series cards show a compact year or resume line below the poster,
-without repeated titles. Show the focused title above the shelf, pinned when
-scrolling the grid, and center it inside the placeholder when artwork is missing.
+without repeated titles or a focused-title header above shelves and grids. Center
+the title inside the placeholder only when artwork is unavailable.
 Scale poster and metadata together on focus with a short gap, retaining the
 accessible title and watched/resume marks. Return from playback updates
 both the row and grid, removing completed movies from Continue Watching.

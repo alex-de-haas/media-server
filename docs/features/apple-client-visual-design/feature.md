@@ -19,8 +19,8 @@ Poster/caption groups and shelves participate in directional focus navigation;
 the captions remain outside the visual card. The transition respects Reduce Motion.
 
 Movie and series cards show only one compact metadata line below the poster:
-year in the library, or the resume position in Continue Watching. The full title
-appears above the focused shelf; the grid title stays pinned while scrolling.
+year in the library, or the resume position in Continue Watching. Titles are not
+repeated above shelves or grids when a card receives focus.
 The poster and metadata scale together on focus, with a shadow confined to the
 poster and a short gap between artwork and metadata. Missing or failed artwork
 shows the title centered inside a neutral poster. VoiceOver retains the title,
