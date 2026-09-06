@@ -58,13 +58,24 @@ struct CinemaBackdrop: View {
 
     var body: some View {
         ZStack {
-            CinemaStyle.canvas
             if url != nil {
+                Color.black
                 ServerArtwork(url: url, loader: loader)
-                LinearGradient(colors: [CinemaStyle.canvas.opacity(0.96), CinemaStyle.canvas.opacity(0.2)],
-                               startPoint: .leading, endPoint: .trailing)
-                LinearGradient(colors: [.clear, CinemaStyle.canvas], startPoint: .top, endPoint: .bottom)
-                if contrast == .increased { CinemaStyle.canvas.opacity(0.35) }
+                LinearGradient(stops: [
+                    .init(color: .black.opacity(0.85), location: 0),
+                    .init(color: .black.opacity(0.65), location: 0.32),
+                    .init(color: .black.opacity(0.15), location: 0.65),
+                    .init(color: .clear, location: 1),
+                ], startPoint: .leading, endPoint: .trailing)
+                LinearGradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .clear, location: 0.4),
+                    .init(color: .black.opacity(0.6), location: 0.75),
+                    .init(color: .black, location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+                if contrast == .increased { Color.black.opacity(0.25) }
+            } else {
+                CinemaStyle.canvas
             }
         }
         .accessibilityHidden(true)

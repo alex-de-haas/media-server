@@ -33,10 +33,12 @@ Artwork loads through the authenticated server loader, retaining the same
 geometry when missing or still loading. Collection member cards reuse the
 library's current state when available.
 
-Title detail uses the existing server backdrop with horizontal and vertical
-theme-adaptive gradients (light in light mode, dark in dark mode),
-stronger coverage for increased contrast, and a neutral
-fallback. The title, facts, Play/Resume, and expandable synopsis lead. All sources
+Title and collection details preserve the server backdrop's color with localized
+black gradients under the left-hand text and along the bottom, without a white
+wash or blur. Detail screens with backdrop artwork use white text and dark
+controls in either system appearance; library and settings retain the system
+theme. Increased contrast strengthens the dark overlay. Details without a
+backdrop use the system-themed neutral background. The title, facts, Play/Resume, and expandable synopsis lead. All sources
 appear as selectable inline rows with a checkmark identifying the playback choice.
 Each row shows the edition name (or Original when unnamed), container, video
 codec, and file size on the left. Available dynamic-range badges (including the

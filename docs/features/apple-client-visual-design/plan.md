@@ -73,6 +73,10 @@ source. Put full audio/subtitle lists in an expandable section for the selected
 version. The version choice must still determine playback; technical presentation
 must not change track selection or capability negotiation.
 
+Backdrop refinement: preserve image color with localized left/bottom black
+gradients. Use dark appearance locally for detail screens with artwork, retaining
+system appearance elsewhere and for details without a backdrop.
+
 ### Collections
 
 Reuse the existing [Collections](../collections/feature.md) domain: TMDb movie

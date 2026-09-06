@@ -11,6 +11,7 @@ struct TitleView: View {
     let loader: ArtworkLoader
     let playback: PlaybackService
 
+    @Environment(\.colorScheme) private var systemColorScheme
     @State private var detail: TitleDetail?
     @State private var failure: String?
     @State private var chosenVersion: String?
@@ -64,6 +65,8 @@ struct TitleView: View {
             CinemaBackdrop(url: detail?.backdropURL(on: library.server), loader: loader)
                 .frame(height: 850).ignoresSafeArea()
         }
+        .background(detail?.backdropPath != nil ? Color.black : CinemaStyle.canvas)
+        .environment(\.colorScheme, detail?.backdropPath != nil ? .dark : systemColorScheme)
         .task {
             do {
                 let loaded = try await library.detail(for: title.id)

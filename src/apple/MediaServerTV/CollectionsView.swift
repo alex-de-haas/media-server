@@ -69,6 +69,7 @@ private struct CollectionDetailView: View {
     let session: ServerSession
     let library: LibraryStore
     let onMissing: () -> Void
+    @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.dismiss) private var dismiss
     @State private var detail: MovieCollectionDetail?
     @State private var failure: String?
@@ -96,6 +97,8 @@ private struct CollectionDetailView: View {
             CinemaBackdrop(url: detail?.backdropPath.flatMap { URL(string: $0, relativeTo: library.server) },
                            loader: session.artwork).frame(height: 700).ignoresSafeArea()
         }
+        .background(detail?.backdropPath != nil ? Color.black : CinemaStyle.canvas)
+        .environment(\.colorScheme, detail?.backdropPath != nil ? .dark : systemColorScheme)
         .task { await load() }
     }
 
