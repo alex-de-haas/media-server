@@ -15,7 +15,6 @@ struct TitleView: View {
     @State private var detail: TitleDetail?
     @State private var failure: String?
     @State private var chosenVersion: String?
-    @State private var showsSynopsis = false
     @State private var showsTechnicalDetails = false
     @FocusState private var focusedPlayPosition: Double?
 
@@ -313,14 +312,9 @@ struct TitleView: View {
             playButtons(detail).padding(.vertical, 12)
 
             if let overview = detail.overview, !overview.isEmpty {
-                Button { showsSynopsis = true } label: {
-                    Text(overview).font(.body)
-                        .lineLimit(5)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: 950, alignment: .leading)
-                }
-                .buttonStyle(SynopsisButtonStyle())
-                .accessibilityHint("Open the full synopsis")
+                Text(overview).font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 950, alignment: .leading)
             }
             if case .refused(let refusal, _) = plan { refusalNotice(refusal) }
 
@@ -342,22 +336,6 @@ struct TitleView: View {
         .padding(CinemaStyle.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .defaultFocus($focusedPlayPosition, detail.resumeSeconds)
-        .sheet(isPresented: $showsSynopsis) {
-            VStack(alignment: .leading, spacing: 32) {
-                HStack {
-                    Text(detail.title).font(.title2.bold())
-                    Spacer()
-                    Button("Close", systemImage: "xmark") { showsSynopsis = false }
-                }
-                ScrollView {
-                    Text(detail.overview ?? "")
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(20)
-                }
-            }
-            .padding(CinemaStyle.inset)
-        }
     }
 
     private func facts(_ detail: TitleDetail) -> String {
@@ -471,29 +449,6 @@ struct TitleView: View {
                     .font(.callout)
                 }
             }
-        }
-    }
-}
-
-/// Quiet at rest; remote focus makes the synopsis itself an obvious action.
-private struct SynopsisButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        SynopsisLabel(configuration: configuration)
-    }
-
-    private struct SynopsisLabel: View {
-        let configuration: ButtonStyleConfiguration
-        @Environment(\.isFocused) private var isFocused
-
-        var body: some View {
-            configuration.label
-                .padding(12)
-                .background(.primary.opacity(isFocused ? 0.14 : 0), in: RoundedRectangle(cornerRadius: 12))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(.primary.opacity(isFocused ? 0.65 : 0), lineWidth: 2)
-                }
-                .opacity(configuration.isPressed ? 0.7 : 1)
         }
     }
 }

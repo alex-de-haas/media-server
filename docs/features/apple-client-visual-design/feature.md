@@ -38,9 +38,9 @@ black gradients under the left-hand text and along the bottom, without a white
 wash or blur. Detail screens with backdrop artwork use white text and dark
 controls in either system appearance; library and settings retain the system
 theme. Increased contrast strengthens the dark overlay. Details without a
-backdrop use the system-themed neutral background. The title, facts, Play/Resume, and a five-line synopsis lead. The synopsis itself
-is focusable and opens the full text in a scrollable sheet with a Close action;
-there is no separate Read synopsis button. All sources
+backdrop use the system-themed neutral background. The title, facts, Play/Resume, and full synopsis lead. The synopsis is ordinary
+text with no line limit, focus highlight, button, or sheet. Long descriptions
+scroll with the detail screen. All sources
 appear as selectable inline rows with a checkmark identifying the playback choice.
 Each row shows the edition name (or Original when unnamed), container, video
 codec, and file size on the left. Available dynamic-range badges (including the
@@ -102,6 +102,6 @@ acceptance checks are tracked in [the plan](plan.md).
   identity/order, route authorization/public metadata, and removal filtering.
   Shared collection and Jellyfin tests guard existing behavior.
 - Build tvOS with Xcode and exercise focus, back navigation, tab switching,
-  synopsis and technical-detail expansion, and visual fallbacks in the simulator.
+  full synopsis layout and technical-detail expansion, and visual fallbacks in the simulator.
 - Validate real artwork, pairing QR scanning, playback, Siri Remote focus, and
   accessibility on Apple TV against a Core-managed instance before acceptance.
