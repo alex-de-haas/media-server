@@ -26,8 +26,17 @@ private struct CinemaPreviewTransport: ClientTransport {
             json = #"[{"id":"saga","name":"The Northern Sea Collection","itemCount":3}]"#
         } else if path.contains("/items/") {
             let index = Int(path.split(separator: "-").last ?? "0") ?? 0
+            let streams = (0..<18).map { track in
+                """
+                {"id":"track-\(track)","type":"\(track < 8 ? "Audio" : "Subtitle")","index":\(track),"codec":"\(track < 8 ? "aac" : "subrip")","title":"\(track < 8 ? "Audio" : "Subtitle") track \(track + 1)","isDefault":false,"isForced":false,"isExternal":false}
+                """
+            }.joined(separator: ",")
+            let source = """
+            {"id":"source-0","fileName":"preview.mkv","container":"mkv","sizeBytes":26000000000,"durationTicks":72000000000,"streams":[\(streams)]}
+            """
+
             json = """
-            {"detail":{"id":"movie-\(index)","catalogId":"films","catalogName":"Films","catalogRoot":"/films","kind":"Movie","title":"\(titles[min(index, 2)])","year":2001,"runtimeTicks":72000000000,"overview":"A lighthouse keeper discovers a letter that draws her across the northern coast. As the seasons change, each village offers another piece of the story. An intimate journey through memory, friendship, and the places we call home. The long description continues so the expanded synopsis can be checked on a television.","genres":["Drama","Adventure"],"mediaSources":[],"cast":[],"directors":[],"creators":[],"studios":[],"keywords":[],"userData":{"key":"0","playbackPositionTicks":25350000000,"playCount":0,"isFavorite":false,"played":false}},"sources":[],"images":{}}
+            {"detail":{"id":"movie-\(index)","catalogId":"films","catalogName":"Films","catalogRoot":"/films","kind":"Movie","title":"\(titles[min(index, 2)])","year":2001,"runtimeTicks":72000000000,"overview":"A lighthouse keeper discovers a letter that draws her across the northern coast. As the seasons change, each village offers another piece of the story. An intimate journey through memory, friendship, and the places we call home. The long description continues so the expanded synopsis can be checked on a television.","genres":["Drama","Adventure"],"mediaSources":[\(source)],"cast":[],"directors":[],"creators":[],"studios":[],"keywords":[],"userData":{"key":"0","playbackPositionTicks":25350000000,"playCount":0,"isFavorite":false,"played":false}},"sources":[],"images":{}}
             """
         } else {
             json = """

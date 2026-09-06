@@ -48,7 +48,9 @@ Dolby Vision profile) and fallback notices sit on the right. The HDR10 fallback
 notice includes profile 8 with compatibility ID 6 even without an enhancement
 layer, matching the server's existing playback signalling.
 The selected source's file, audio, and subtitle details open in a separate sheet.
-A native list with focusable rows lets the remote reach every track, including
+The sheet has an explicit 1280 × 820-point frame so its flexible list cannot
+collapse to the header height. A native list with visibly highlighted focusable
+rows lets the remote reach every track, including
 rows below the viewport; empty sections show None. Close or Back dismisses it. The player, capability negotiation,
 sidecar handling, and resume reporting retain their existing behavior.
 

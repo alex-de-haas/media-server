@@ -396,17 +396,19 @@ struct TitleView: View {
             }
             List {
                 Section("File") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("\(version.container.uppercased()) · \(version.sizeDescription)")
-                        if let picture = version.video { dynamicRange(picture) }
+                    TechnicalDetailRow {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("\(version.container.uppercased()) · \(version.sizeDescription)")
+                            if let picture = version.video { dynamicRange(picture) }
+                        }
                     }
-                    .focusable()
                 }
                 trackList("Audio", version.audio)
                 trackList("Subtitles", version.subtitles)
             }
         }
-        .padding(CinemaStyle.inset)
+        .padding(48)
+        .frame(width: 1280, height: 820)
     }
 
     /// The picture's dynamic range as capsules — "Dolby Vision 8.1", "HDR10" — with the one note a dual-layer
@@ -440,23 +442,43 @@ struct TitleView: View {
     private func trackList(_ heading: String, _ tracks: [TitleTrack]) -> some View {
         Section(heading) {
             if tracks.isEmpty {
-                Text("None").foregroundStyle(.secondary).focusable()
+                TechnicalDetailRow { Text("None").foregroundStyle(.secondary) }
             } else {
                 ForEach(tracks) { track in
-                    HStack(spacing: 8) {
-                        Text(track.label.isEmpty ? "Track" : track.label)
-                        // A dub or a subtitle file beside the video is the thing this library holds and
-                        // no other client of it can play, so it is worth pointing at.
-                        if track.isExternal {
-                            Image(systemName: "doc.badge.plus")
-                                .foregroundStyle(.secondary)
-                                .help("Beside the file")
+                    TechnicalDetailRow {
+                        HStack(spacing: 8) {
+                            Text(track.label.isEmpty ? "Track" : track.label)
+                            // A dub or a subtitle file beside the video is the thing this library holds and
+                            // no other client of it can play, so it is worth pointing at.
+                            if track.isExternal {
+                                Image(systemName: "doc.badge.plus")
+                                    .foregroundStyle(.secondary)
+                                    .help("Beside the file")
+                            }
                         }
+                        .font(.callout)
                     }
-                    .font(.callout)
-                    .focusable()
                 }
             }
         }
+    }
+}
+
+/// Information rows need a visible focus target even though selecting them performs no action.
+private struct TechnicalDetailRow<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(.primary.opacity(isFocused ? 0.12 : 0), in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.primary.opacity(isFocused ? 0.6 : 0), lineWidth: 2)
+            }
+            .focusable()
+            .focused($isFocused)
     }
 }

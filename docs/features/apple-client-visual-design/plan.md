@@ -261,3 +261,10 @@ Continue Watching focus regression: reproduced Down failing while the lazy
 All Movies grid was below the viewport. Added explicit reveal-then-focus
 navigation and focus sections. Simulator verified Down into All Movies and Up
 back to Continue Watching, with poster-only decoration retained.
+
+Technical-details sheet regression: the flexible List collapsed inside the tvOS
+sheet. An explicit presentation frame and visible row focus treatment keep the
+track list usable. Local preview fixtures include eight audio and ten subtitle
+tracks for checking scrolling beyond the first viewport. Simulator verification
+reached the last subtitle row with Down, returned to the top with Up, and closed
+the sheet through Close. Physical Apple TV acceptance remains pending.
