@@ -11,6 +11,8 @@ struct LibraryView: View {
     let pairing: PairingSession
     @State private var library: LibraryStore
     @Namespace private var libraryFocus
+    @FocusState private var focusedMovie: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(session: ServerSession, pairing: PairingSession) {
         self.session = session
@@ -64,27 +66,42 @@ struct LibraryView: View {
             Text(empty).font(.title2).foregroundStyle(.secondary)
         case .loaded:
             NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 44) {
-                        if continues && !library.continueWatching.isEmpty {
-                            Text("Continue Watching").font(.title2.bold())
-                            ScrollView(.horizontal) {
-                                LazyHStack(spacing: 48) {
-                                    ForEach(library.continueWatching) { item in
-                                        MoviePosterLink(item: item, library: library, loader: session.artwork,
-                                                        playback: PlaybackService(session: session), showResumeTime: true)
-                                            .frame(width: 250)
-                                            .prefersDefaultFocus(item.id == library.continueWatching.first?.id, in: libraryFocus)
+                ScrollViewReader { scroll in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 44) {
+                            if continues && !library.continueWatching.isEmpty {
+                                Text("Continue Watching").font(.title2.bold())
+                                ScrollView(.horizontal) {
+                                    LazyHStack(spacing: 48) {
+                                        ForEach(library.continueWatching) { item in
+                                            MoviePosterLink(item: item, library: library, loader: session.artwork,
+                                                            playback: PlaybackService(session: session), showResumeTime: true)
+                                                .frame(width: 250)
+                                                .prefersDefaultFocus(item.id == library.continueWatching.first?.id, in: libraryFocus)
+                                        }
+                                    }.padding(.vertical, 30).padding(.horizontal, 20)
+                                }
+                                .scrollClipDisabled()
+                                .focusSection()
+                                .onMoveCommand { direction in
+                                    guard direction == .down, let first = items.first else { return }
+                                    // The lazy grid can be entirely below the viewport. Reveal its first
+                                    // row before asking the focus engine to select an actual poster.
+                                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                                        scroll.scrollTo("all-titles", anchor: .top)
+                                    } completion: {
+                                        focusedMovie = "all-\(first.id)"
                                     }
-                                }.padding(.vertical, 30).padding(.horizontal, 20)
-                            }.scrollClipDisabled()
-                        }
-                        Text(continues ? "All Movies" : "All Series").font(.title2.bold())
-                        LibraryPosterGrid(items: items, library: library, loader: session.artwork,
-                                          playback: PlaybackService(session: session))
-                    }.padding(CinemaStyle.inset)
+                                }
+                            }
+                            Text(continues ? "All Movies" : "All Series").font(.title2.bold())
+                                .id("all-titles")
+                            LibraryPosterGrid(items: items, library: library, loader: session.artwork,
+                                              playback: PlaybackService(session: session), focus: $focusedMovie)
+                        }.padding(CinemaStyle.inset)
+                    }
+                    .focusScope(libraryFocus)
                 }
-                .focusScope(libraryFocus)
             }
         }
     }

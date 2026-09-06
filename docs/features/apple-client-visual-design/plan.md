@@ -239,3 +239,8 @@ uses a debug-only SwiftUI appearance override). MediaKit: 161 tests passed.
 Sign-out contrast refinement: replaced the destructive red styling with a
 neutral native bordered button and exit symbol. The action still unpairs the
 device. Simulator build and 161 MediaKit tests passed.
+
+Continue Watching focus regression: reproduced Down failing while the lazy
+All Movies grid was below the viewport. Added explicit reveal-then-focus
+navigation and focus sections. Simulator verified Down into All Movies and Up
+back to Continue Watching, with poster-only decoration retained.

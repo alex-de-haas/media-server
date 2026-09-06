@@ -67,18 +67,18 @@ struct PosterCard<Artwork: View, Destination: View>: View {
     let title: String
     let subtitle: String
     var status = ""
+    var focus: FocusState<String?>.Binding? = nil
+    var focusID = ""
     @ViewBuilder var artwork: () -> Artwork
     @ViewBuilder var destination: () -> Destination
 
     var body: some View {
         VStack(alignment: .leading, spacing: 34) {
-            NavigationLink(destination: destination) {
-                artwork()
-                    .aspectRatio(2 / 3, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            if let focus {
+                posterLink.focused(focus, equals: focusID)
+            } else {
+                posterLink
             }
-            .buttonStyle(.card)
-            .accessibilityLabel([title, subtitle, status].filter { !$0.isEmpty }.joined(separator: ", "))
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(title).font(.headline).lineLimit(2, reservesSpace: true)
@@ -89,6 +89,18 @@ struct PosterCard<Artwork: View, Destination: View>: View {
             .padding(.bottom, 8)
             .accessibilityHidden(true)
         }
+        // Include the caption's space in directional navigation without decorating or focusing it.
+        .focusSection()
+    }
+
+    private var posterLink: some View {
+        NavigationLink(destination: destination) {
+            artwork()
+                .aspectRatio(2 / 3, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.card)
+        .accessibilityLabel([title, subtitle, status].filter { !$0.isEmpty }.joined(separator: ", "))
     }
 }
 
@@ -98,11 +110,14 @@ struct MoviePosterLink: View {
     let loader: ArtworkLoader
     let playback: PlaybackService
     var showResumeTime = false
+    var focus: FocusState<String?>.Binding? = nil
+    var focusID = ""
 
     var body: some View {
         PosterCard(title: item.title,
                    subtitle: showResumeTime ? "Resume from \(PlaybackPosition.label(item.resumeSeconds))" : item.year.map(String.init) ?? "",
-                   status: item.played ? "Watched" : item.resumeSeconds > 0 ? "In progress" : "") {
+                   status: item.played ? "Watched" : item.resumeSeconds > 0 ? "In progress" : "",
+                   focus: focus, focusID: focusID) {
             ServerArtwork(url: item.hasArtwork ? item.artworkURL(on: library.server) : nil,
                           loader: loader, symbol: item.kind == .movie ? "film" : "tv")
                 .overlay(alignment: .bottomTrailing) {
@@ -124,13 +139,16 @@ struct LibraryPosterGrid: View {
     let library: LibraryStore
     let loader: ArtworkLoader
     let playback: PlaybackService
+    var focus: FocusState<String?>.Binding? = nil
 
     var body: some View {
         LazyVGrid(columns: CinemaStyle.columns, spacing: 54) {
             ForEach(items) { original in
                 let item = library.items.first { $0.id == original.id } ?? original
-                MoviePosterLink(item: item, library: library, loader: loader, playback: playback)
+                MoviePosterLink(item: item, library: library, loader: loader, playback: playback,
+                                focus: focus, focusID: "all-\(item.id)")
             }
         }
+        .focusSection()
     }
 }

@@ -13,6 +13,10 @@ resume position. The row uses the library's stable ordering and displays a
 timestamp, not a percentage: the client library model has no duration. Reading
 a title after playback updates its state in the library and the continue row.
 Series retains the existing poster grid without a series-level resume action.
+When the All Movies grid is below the viewport, Down from Continue Watching
+scrolls to its heading and focuses the first movie after scrolling completes.
+Poster/caption groups and shelves participate in directional focus navigation;
+the captions remain outside the visual card. The transition respects Reduce Motion.
 
 Only the poster has the native card border, shadow, and focus effect. Captions
 sit below it with horizontal and bottom padding, reserve two lines for titles,
