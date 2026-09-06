@@ -16,8 +16,12 @@ public struct LibraryTitle: Identifiable, Equatable, Sendable {
     public let posterPath: String?
 
     /// Where the viewer got to, in seconds. Zero for something never started.
-    public let resumeSeconds: Double
-    public let played: Bool
+    ///
+    /// Settable by the store alone: the feed is read once at launch, and these two are the only things
+    /// about a title that change while the app is running — every time its own screen is fetched, the
+    /// card is brought up to date with it.
+    public internal(set) var resumeSeconds: Double
+    public internal(set) var played: Bool
 
     /// Artwork **from this instance**, not from the metadata provider's CDN.
     ///
@@ -86,8 +90,19 @@ public final class LibraryStore {
     ///
     /// The sync feed deliberately carries a poster and a name and nothing else — versions, tracks and an
     /// overview for every title in a library would be most of a database sent to browse a grid.
+    ///
+    /// What the card shows of the title is brought up to date with the answer. The feed is read once at
+    /// launch, and a viewer who watched half a film and came back to the grid was shown a card that knew
+    /// nothing of it until the app was relaunched.
     public func detail(for id: String) async throws -> TitleDetail {
-        TitleDetail(try await session.api().getNativeV1ItemsId(path: .init(id: id)).ok.body.json)
+        let detail = TitleDetail(try await session.api().getNativeV1ItemsId(path: .init(id: id)).ok.body.json)
+
+        if let at = items.firstIndex(where: { $0.id == id }) {
+            items[at].resumeSeconds = detail.resumeSeconds
+            items[at].played = detail.played
+        }
+
+        return detail
     }
 
     public func load() async {

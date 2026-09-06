@@ -63,6 +63,17 @@ private func page(_ items: String, cursor: String, hasMore: Bool) -> String {
     """
 }
 
+/// One title in full, as `items/{id}` answers: only what the detail needs to decode.
+private func item(_ id: String, _ name: String, played: Bool = false, ticks: Int = 0) -> String {
+    """
+    {"detail":{"id":"\(id)","catalogId":"cat","catalogName":"Films","catalogRoot":"/films",\
+    "kind":"Movie","title":"\(name)","genres":[],"mediaSources":[],"cast":[],"directors":[],"creators":[],\
+    "studios":[],"keywords":[],\
+    "userData":{"key":"k","playbackPositionTicks":\(ticks),"playCount":0,"isFavorite":false,"played":\(played)}},\
+    "sources":[],"images":{}}
+    """
+}
+
 private func title(_ id: String, _ kind: String, _ name: String, played: Bool = false, ticks: Int = 0) -> String {
     """
     {"id":"\(id)","publicId":"p\(id)","catalogId":"cat","kind":"\(kind)","title":"\(name)",\
@@ -341,6 +352,33 @@ struct LibraryStoreTests {
 
         let url = subject.items[0].artworkURL(on: subject.server)
         #expect(url?.absoluteString == "https://media.example/native/v1/items/abc/images/primary")
+    }
+
+    @Test("Opening a title brings its card up to date, which the feed read at launch cannot")
+    func detailRefreshesTheCard() async throws {
+        // The feed said never started. By the time the title's screen is fetched again — after a
+        // viewing was reported — the server says half an hour in, then watched.
+        let surface = SurfaceStub([
+            "/native/v1/sync": [(200, page(title("1", "Movie", "Alpha"), cursor: "c", hasMore: false))],
+            "/native/v1/items/1": [
+                (200, item("1", "Alpha", ticks: 18_000_000_000)),
+                (200, item("1", "Alpha", played: true)),
+            ],
+        ])
+
+        let subject = store(surface)
+        await subject.load()
+        #expect(subject.items[0].resumeSeconds == 0)
+
+        let started = try await subject.detail(for: "1")
+        #expect(started.resumeSeconds == 1800)
+        #expect(subject.items[0].resumeSeconds == 1800)
+        #expect(subject.items[0].played == false)
+
+        let finished = try await subject.detail(for: "1")
+        #expect(finished.played)
+        #expect(subject.items[0].played)
+        #expect(subject.items[0].resumeSeconds == 0)
     }
 
     @Test("A failure is a state a screen can show, not a crash")

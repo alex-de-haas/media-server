@@ -460,6 +460,19 @@ A started title is marked as started and **not** with a progress bar. The feed c
 resume position but no runtime, so there is no fraction to draw, and a full-width bar for
 something stopped after a minute would be a worse lie than saying nothing.
 
+**A started title offers both ways in**: Resume, from where the viewer left, and From the
+beginning. A film never started has one button. Which was pressed is where the player is
+told to begin and where the session is opened — a viewer who chose the beginning is not
+reported as having skipped to the middle.
+
+**The screen and the card follow the viewing.** The title's screen is fetched when it opens;
+once a viewing has been reported closed it is fetched again, so a film left halfway offers to
+resume and one watched to the end is marked so — the screen used to keep saying "Play" about
+a film the viewer had just left, until they went out to the grid and back. And every fetch of
+a title's screen brings its card in the grid up to date, because the feed the grid was read
+from is read once at launch and would otherwise show a card that knew nothing of the evening
+until the app was relaunched.
+
 Sign out and the dynamic-range override are a third tab. Both are answers to a symptom — the
 wrong server, or a dark picture — and something that fixes a symptom has to be findable
 while looking at it.
@@ -641,6 +654,9 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
 
 ## Testing Expectations
 
+- **The card follows the title screen** (`LibraryStoreTests.detailRefreshesTheCard`): a
+  title the feed called never started shows the resume point and then the tick after its
+  screen is fetched, without the feed being read again.
 - **The reader ledger** (`ReaderLedgerTests`): contiguous reads are one reader and it settles on
   the second; a read far from every reader is a new one and the lowest is what the window keeps
   even when the reader ahead read last; a request re-issued for the rest of a range continues its
