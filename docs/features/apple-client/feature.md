@@ -229,8 +229,11 @@ reader in the ledger, whether or not it is pending at that moment, minus a tail.
 a probe until it is followed — the end of the file is looked at once when playback starts — and a
 reader not heard from for five seconds is forgotten. When a reader the ledger trusts is somewhere
 the window does not hold and the fill will not reach, that is a seek or a window that ran ahead
-of it, and the window restarts there with only that reader kept. With no reader in the ledger the
-lowest continuing request inside the window stands in, so a film read by one open-ended request
+of it, and the window restarts a tail *before* it with only that reader kept. Before rather than
+at, and a reader within a tail behind the start carried by separate fetches rather than restarted
+for, because the fourth run showed how a seek settles: by steps of a megabyte or two backwards, on
+the keyframe before its target, and a window discarded at every step. With no reader in the ledger
+the lowest continuing request inside the window stands in, so a film read by one open-ended request
 still moves. A request beyond a full window is fetched separately when no fill can reach it.
 
 **Each request has one data producer at a time.** While a separate HTTP response is outstanding,
@@ -245,7 +248,10 @@ Each reset is also written to the loader log without URLs or tokens. The overlay
 the running client version. These readings diagnose false resets during continuous playback;
 the size-based request classification does not establish that the viewer actually sought. The
 overlay also shows how many readers the ledger holds and how far apart they are: two, tens of
-megabytes apart, is the measured shape; one is a window following the wrong thing again.
+megabytes apart, is the measured shape; one is a window following the wrong thing again. And it
+keeps the loader's figures — window, ahead, readers, separate fetches — from the instant of the
+last stall and from the buffer's lowest point, because those instants are over before anyone can
+photograph them and the fourth run's stalls were reported from memory.
 
 **Delivery to an open-ended request is metered.** A request for everything to the end takes whatever
 it is given, and a loader that kept giving would pull a whole film into the player's memory in minutes,
@@ -658,7 +664,9 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
   restart only the reader it was made for is known.
 - Loader lifecycle tests use controlled HTTP responses and verify byte identity across repeated
   refills, a delayed separate response overlapping a seek, cancellation of its HTTP task, a
-  speculative request beyond a full window, and preservation of the next small play-head read.
+  speculative request beyond a full window, preservation of the next small play-head read, and a
+  reader a little behind the window carried aside while one farther back restarts it a tail
+  earlier.
   A long hardware playback check covers sound continuity, recovery, seeking, and Dolby Vision;
   package tests do not establish those hardware outcomes.
 

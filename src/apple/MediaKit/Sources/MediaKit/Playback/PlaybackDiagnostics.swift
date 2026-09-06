@@ -39,8 +39,22 @@ public final class PlaybackDiagnostics {
         public let inflow: Double
     }
 
+    /// What everything read at one instant — a stall, or the buffer's lowest point — kept because those
+    /// are the instants nobody photographs in time. The fourth run's stalls were reported from memory.
+    public struct Moment: Sendable {
+        public let position: Double
+        public let bufferAhead: Double
+
+        /// The loader's figures at that instant, or nil when the player fetched for itself.
+        public let window: RemuxLoader.Snapshot?
+    }
+
     public private(set) var samples: [Sample] = []
     public private(set) var stalls = 0
+
+    /// The most recent stall, and the buffer's lowest point, with everything else as it was then.
+    public private(set) var lastStall: Moment?
+    public private(set) var lowestMoment: Moment?
 
     /// When the buffer was at its lowest since playback began, and how low. A run that never dipped
     /// below a minute has a different problem from one that reached zero four times.
@@ -167,7 +181,13 @@ public final class PlaybackDiagnostics {
     private func recordStall() {
         stalls += 1
         let position = item?.currentTime().seconds ?? 0
+        lastStall = moment(at: position)
         Self.log.warning("Playback stalled (#\(self.stalls)) at \(position, format: .fixed(precision: 1))s")
+    }
+
+    private func moment(at position: Double) -> Moment {
+        let ahead = item.map { Self.bufferAhead(in: $0.loadedTimeRanges.map(\.timeRangeValue), at: position) } ?? 0
+        return Moment(position: position, bufferAhead: ahead, window: loader?.makeSnapshot())
     }
 
     private func sample() {
@@ -205,6 +225,7 @@ public final class PlaybackDiagnostics {
         let logged = event?.numberOfStalls ?? -1
         if logged > stalls {
             stalls = logged
+            lastStall = Moment(position: position, bufferAhead: ahead, window: loaderDetails)
         }
 
         // The first frame is the first moment the play head has **moved from where it was asked to
@@ -218,6 +239,7 @@ public final class PlaybackDiagnostics {
         if ahead < lowestBuffer, watched > 5 {
             lowestBuffer = ahead
             lowestAt = position
+            lowestMoment = Moment(position: position, bufferAhead: ahead, window: loaderDetails)
         }
 
         // Every event added up rather than the last one's counter: `numberOfBytesTransferred` is per

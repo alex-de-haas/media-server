@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-31
-Updated: 2026-09-05
+Updated: 2026-09-06
 
 > Feed the player its bytes ourselves, instead of handing it a URL and hoping.
 > Sits between [apple-client](../apple-client/feature.md) and
@@ -92,13 +92,21 @@ after it is a change of policy rather than a leap.
       request seam and controlled HTTP responses exercise cancellation of a live separate
       fetch, delayed delivery overlapping a window restart, and continuous window refills.
 - [x] Honour cancellation: a request AVFoundation drops must stop our fetch with it.
-- [ ] Verify on the television: plays, seeks, resumes, **Dolby Vision engages**. This is
+- [x] Verify on the television: plays, seeks, resumes, **Dolby Vision engages**. This is
       the whole of Phase 1's question — the technique is well-trodden for caching layers
       over `AVPlayer` and unverified here for a progressive MP4 on tvOS — and nothing
       after it is built on an assumption that it works. **2026-09-05: plays, and Dolby
-      Vision engages.** Seeking and resuming not yet reported.
-- [ ] Verify against the server log: the request pattern is *the same as today*. A
+      Vision engages.** **2026-09-06, 0.9.4:** resumes at a minute in and at fourteen,
+      and the server log of that evening shows the transport bar scrubbed back and forth
+      across the whole film — keyframes read at thirty positions — with playback going on
+      after each.
+- [x] Verify against the server log: the request pattern is *the same as today*. A
       difference here means the delegate is changing behaviour before any policy has.
+      **It is not the same**, and it does not need to be: through the delegate the player
+      reads in sixty-four-kilobyte pieces where it read half-megabyte ones directly, and a
+      reader of audio frames appears a few seconds ahead of the play head. The window
+      answers both from memory; what reaches the server is one bounded fill every few
+      seconds.
 
 ### Phase 2 — a window, and one connection filling it
 
@@ -114,7 +122,7 @@ after it is a change of policy rather than a leap.
       nearly six hundred **megabytes**. Start at a fraction of that and let the overlay's
       window figures say whether it is enough; spilling to the app's cache directory is
       the answer only if memory turns out too small to matter, and is not planned.
-- [ ] Verify: requests per minute of film, and the isolated audio reads, both against
+- [x] Verify: requests per minute of film, and the isolated audio reads, both against
       the same server log this plan was written from. The same log answers whether the
       player's own request pattern changes once answers are instant — it may ask for
       more, or less, or the same, and the plan assumes nothing. **2026-09-05, first run:
@@ -138,7 +146,25 @@ after it is a change of policy rather than a leap.
       why: a second small reader — sixty-four kilobytes at each burst of audio frames,
       a few seconds ahead of the video reader — and a trim that followed whichever small
       read was pending, which between the play head's reads was that one. 0.9.4 places
-      the window by a ledger of readers rather than by the pending list; awaits the run.
+      the window by a ledger of readers rather than by the pending list. **Fourth run,
+      0.9.4:** 51 requests in 190 s of film against 1684 the run before; 8 separate
+      fetches against 520, all in the first seconds; the ledger holds three or four
+      readers 46–67 MB apart. The server log is one fill of 33–77 MB every three to eight
+      seconds, served in full, and nothing else; the bytes fetched match what the film
+      needs. What remains is the start: the window discarded eight times in the first
+      seconds, each a step of a megabyte or two *backwards* as the seek settled on the
+      keyframe before its target, and once for a two-read probe AVFoundation makes at the
+      middle of the file. 0.9.6 carries a reader a tail behind the window by separate
+      fetches rather than discarding it, and begins a restart a tail before the reader;
+      the probe's restart stays, one fill of 134 MB per start, measured and accepted.
+      **The first run of that evening stalled twice, long, and went on by itself:** the
+      wedge detector fired both times and re-seated the player. The log's tail of that
+      run shows twenty seconds between fills while the window was full — the player
+      stopped reading with fifteen seconds of film in memory — and then a fill of 75 MB
+      as the re-seated player's readers moved on. That is the original wedge, with the
+      loader now ruling out starvation as its cause. From 0.9.6 the overlay keeps the
+      loader's figures at the instant of a stall and at the buffer's lowest point, since
+      the instant was over before it could be photographed.
 - [x] Direct play is left on the plain `AVURLAsset`. It has the same player and the same
       stalls but no synthesised container, and it earns the loader only once the remux
       path has proved it — as a deliverable of its own, not a widening of this one.
