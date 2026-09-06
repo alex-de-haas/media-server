@@ -654,3 +654,29 @@ struct CollectionTests {
         #expect(PlaybackPosition.label(.nan) == "0:00")
     }
 }
+
+@Suite("Library card video formats")
+struct LibraryCardVideoFormatTests {
+    @Test("Formats appear beside the year without fetching detail")
+    func formatCaption() throws {
+        let data = Data(#"{"id":"film","catalogId":"cat","kind":"Movie","title":"Film","year":1997,"videoFormats":["HDR10","Dolby Vision"]}"#.utf8)
+        let dto = try JSONDecoder().decode(Components.Schemas.LibraryItemDto.self, from: data)
+        let card = try #require(LibraryTitle(dto))
+        #expect(card.gridSubtitle == "1997 · HDR10 · Dolby Vision")
+    }
+
+    @Test("Older server responses and absent years remain valid")
+    func olderServer() throws {
+        let data = Data(#"{"id":"film","catalogId":"cat","kind":"Movie","title":"Film","year":1997}"#.utf8)
+        let dto = try JSONDecoder().decode(Components.Schemas.LibraryItemDto.self, from: data)
+        let card = try #require(LibraryTitle(dto))
+        #expect(card.videoFormats.isEmpty)
+        #expect(card.gridSubtitle == "1997")
+        var noYear = dto
+        noYear.year = nil
+        noYear.videoFormats = ["Dolby Vision"]
+        #expect(LibraryTitle(noYear)?.gridSubtitle == "Dolby Vision")
+        noYear.videoFormats = nil
+        #expect(LibraryTitle(noYear)?.gridSubtitle == "")
+    }
+}

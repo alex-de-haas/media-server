@@ -13,6 +13,12 @@ public struct LibraryTitle: Identifiable, Equatable, Sendable {
     public let kind: LibraryKind
     public let title: String
     public let year: Int?
+    public let videoFormats: [String]
+
+    /// Available source formats, not a promise about this device's playback capabilities.
+    public var gridSubtitle: String {
+        ([year.map(String.init)].compactMap { $0 } + videoFormats).joined(separator: " · ")
+    }
     public let posterPath: String?
 
     /// Where the viewer got to, in seconds. Zero for something never started.
@@ -151,6 +157,7 @@ extension LibraryTitle {
         self.kind = kind
         self.title = dto.title
         self.year = dto.year.map(Int.init)
+        self.videoFormats = dto.videoFormats ?? []
         self.posterPath = dto.posterUrl
 
         // Ticks are hundred-nanosecond units, which is what the library stores and what Jellyfin's

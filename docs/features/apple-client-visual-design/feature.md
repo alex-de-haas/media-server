@@ -19,7 +19,11 @@ Poster/caption groups and shelves participate in directional focus navigation;
 the captions remain outside the visual card. The transition respects Reduce Motion.
 
 Movie and series cards show only one compact metadata line below the poster:
-year in the library, or the resume position in Continue Watching. Titles are not
+year and available HDR/Dolby Vision formats in the library, or the resume position
+in Continue Watching. Formats aggregate the movie's sources without Dolby Vision
+profiles; they describe available files, not device playback support. The server
+projects these labels once per page in `videoFormats`, without detail requests
+per card. Older servers omit the field and the client displays the year alone. Titles are not
 repeated above shelves or grids when a card receives focus.
 The poster and metadata scale together on focus, with a shadow confined to the
 poster and a short gap between artwork and metadata. Missing or failed artwork

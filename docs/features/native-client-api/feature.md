@@ -78,7 +78,11 @@ directory, so a restart does not interrupt a viewer mid-film.
 ## Delta sync
 
 `GET /native/v1/sync?cursor=…` feeds a client's local mirror, so browsing costs no
-round-trip.
+round-trip. Library cards include optional `videoFormats`: distinct HDR/Dolby Vision
+labels across a movie's video sources, without profiles. SDR, unknown formats,
+audio streams, and embedded cover images do not contribute labels. This is a
+source-format summary, not a device compatibility result; older responses omit
+it. Formats are projected for the page without requesting individual item details.
 
 A sync begins with a bounded keyset snapshot of the published library and then
 rides the change log from the sequence captured **before** that snapshot started.

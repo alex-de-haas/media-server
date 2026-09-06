@@ -157,6 +157,14 @@ order, not separate releases.
 - [x] Add the four top-level tabs in the agreed order and preserve navigation,
   scroll, and focus on back navigation and tab switches.
 - [x] Refine poster cards, consistent status marks, spacing, and loading fallbacks.
+- [x] Add a compact HDR/Dolby Vision summary to library card responses and the
+  generated Apple API model, then display it beside the year without Dolby Vision
+  profiles. Server and client contract changes are included in this PR.
+  Summarize available movie sources rather than implying device playback support.
+  Omit SDR/unknown labels and avoid fetching individual title details for the grid.
+  Cover mixed-source aggregation, missing probe data, and older server responses
+  in backend and Apple client tests.
+- [ ] Validate HDR/Dolby Vision card caption readability on Apple TV.
 - [x] Add Continue Watching with honest resume labels, empty-row hiding, and
   refreshed state after playback across all visible instances of a movie.
 

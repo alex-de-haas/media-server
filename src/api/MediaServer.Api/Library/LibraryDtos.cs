@@ -23,7 +23,8 @@ public sealed record LibraryItemDto(
     // answer it. Read from the metadata record the projection already loads, so they cost no query.
     IReadOnlyList<string>? Genres = null,
     long? RuntimeTicks = null,
-    double? CommunityRating = null);
+    double? CommunityRating = null,
+    IReadOnlyList<string>? VideoFormats = null);
 
 /// <summary>Filters and window for a library search.</summary>
 /// <remarks>

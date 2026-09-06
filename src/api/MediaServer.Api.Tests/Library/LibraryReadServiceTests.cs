@@ -37,6 +37,42 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Cards_aggregate_formats_across_sources_without_cover_images_or_audio()
+    {
+        var originalVideo = await _context.MediaStreams.SingleAsync(stream =>
+            stream.MediaSource!.MediaItemId == _movieId && stream.StreamType == StreamType.Video);
+        originalVideo.HdrFormat = "HDR10";
+        var source = new MediaSource
+        {
+            Id = Guid.NewGuid(), MediaItemId = _movieId, Container = "mkv", Path = "/films/alternate.mkv",
+        };
+        _context.MediaSources.Add(source);
+        _context.MediaStreams.AddRange(
+            new MediaStream { Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Video,
+                Codec = "hevc", HdrFormat = "Dolby Vision · Dolby Vision", DvProfile = 8 },
+            new MediaStream { Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Video,
+                Codec = "mjpeg", HdrFormat = "HDR10+" },
+            new MediaStream { Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Audio,
+                Codec = "aac", HdrFormat = "HLG" });
+        await _context.SaveChangesAsync();
+
+        var cards = await _library.ListAsync(null, null, null, CancellationToken.None);
+
+        Assert.Equal(new[] { "HDR10", "Dolby Vision" }, cards.Single(card => card.Id == _movieId).VideoFormats);
+        Assert.Empty(cards.Single(card => card.Id == _seriesId).VideoFormats!);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("SDR")]
+    [InlineData("Unknown")]
+    public void Unprobed_or_standard_range_formats_do_not_produce_badges(string? format)
+    {
+        Assert.Empty(LibraryReadService.CardVideoFormats([format]));
+    }
+
+    [Fact]
     public async Task List_returns_published_top_level_items_with_localized_titles_and_user_data()
     {
         SeedUserData(_movieId, played: true);

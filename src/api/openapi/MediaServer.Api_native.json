@@ -1541,6 +1541,15 @@
               "string"
             ],
             "format": "double"
+          },
+          "videoFormats": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

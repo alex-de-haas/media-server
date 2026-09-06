@@ -863,6 +863,8 @@ public enum Components {
             public var runtimeTicks: Swift.Int64?
             /// - Remark: Generated from `#/components/schemas/LibraryItemDto/communityRating`.
             public var communityRating: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/LibraryItemDto/videoFormats`.
+            public var videoFormats: [Swift.String]?
             /// Creates a new `LibraryItemDto`.
             ///
             /// - Parameters:
@@ -877,6 +879,7 @@ public enum Components {
             ///   - genres:
             ///   - runtimeTicks:
             ///   - communityRating:
+            ///   - videoFormats:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
@@ -888,7 +891,8 @@ public enum Components {
                 userData: Components.Schemas.UserItemDataDto? = nil,
                 genres: [Swift.String]? = nil,
                 runtimeTicks: Swift.Int64? = nil,
-                communityRating: Swift.Double? = nil
+                communityRating: Swift.Double? = nil,
+                videoFormats: [Swift.String]? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
@@ -901,6 +905,7 @@ public enum Components {
                 self.genres = genres
                 self.runtimeTicks = runtimeTicks
                 self.communityRating = communityRating
+                self.videoFormats = videoFormats
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -914,6 +919,7 @@ public enum Components {
                 case genres
                 case runtimeTicks
                 case communityRating
+                case videoFormats
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaKind`.

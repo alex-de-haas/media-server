@@ -102,6 +102,7 @@ struct PosterCard<Artwork: View, Destination: View>: View {
                 if showTitle { Text(title).font(.caption).lineLimit(2) }
                 Text(subtitle.isEmpty ? " " : subtitle)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .minimumScaleFactor(0.65)
                     .padding(.horizontal, 4)
             }
         }
@@ -141,7 +142,7 @@ struct MoviePosterLink: View {
 
     var body: some View {
         PosterCard(title: item.title,
-                   subtitle: showResumeTime ? "Resume from \(PlaybackPosition.label(item.resumeSeconds))" : item.year.map(String.init) ?? "",
+                   subtitle: showResumeTime ? "Resume from \(PlaybackPosition.label(item.resumeSeconds))" : item.gridSubtitle,
                    status: item.played ? "Watched" : item.resumeSeconds > 0 ? "In progress" : "",
                    showTitle: false, focus: focus, focusID: focusID) {
             ServerArtwork(url: item.hasArtwork ? item.artworkURL(on: library.server) : nil,
