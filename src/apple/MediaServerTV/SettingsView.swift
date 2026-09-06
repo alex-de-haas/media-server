@@ -8,77 +8,102 @@ import SwiftUI
 /// picture, or the wrong server — and something that fixes a symptom has to be findable while looking
 /// at it.
 struct SettingsView: View {
-    let paired: PairedServer
-    let pairing: PairingSession
+  let paired: PairedServer
+  let pairing: PairingSession
 
-    private let store = PlaybackPreferencesStore()
+  private let store = PlaybackPreferencesStore()
 
-    @State private var preferences: PlaybackPreferences
+  @State private var preferences: PlaybackPreferences
+  @State private var showCapabilities = false
+  @State private var showDiagnostics = false
 
-    init(paired: PairedServer, pairing: PairingSession) {
-        self.paired = paired
-        self.pairing = pairing
-        _preferences = State(initialValue: PlaybackPreferencesStore().load())
-    }
+  init(paired: PairedServer, pairing: PairingSession) {
+    self.paired = paired
+    self.pairing = pairing
+    _preferences = State(initialValue: PlaybackPreferencesStore().load())
+  }
 
-    private var profile: CapabilityProfile { preferences.profile() }
+  private var profile: CapabilityProfile { preferences.profile() }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(paired.serverName)
-                    .font(.largeTitle)
-                Text(paired.server.absoluteString)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-
-            Grid(alignment: .leading, horizontalSpacing: 40, verticalSpacing: 16) {
-                row("Containers", profile.containers)
-                row("Video", profile.videoCodecs)
-                row("Audio", profile.audioCodecs)
-                row("Dynamic range", profile.hdrFormats)
-            }
-
-            Picker("Dynamic range", selection: $preferences.dynamicRange) {
-                ForEach(DynamicRangeOverride.allCases, id: \.self) { override in
-                    Text(override.rawValue.uppercased()).tag(override)
-                }
-            }
-            .pickerStyle(.segmented)
-            // A switch that forgets is worse than no switch: a viewer who set SDR to fix a dark picture
-            // would find it dark again on the next launch, having already tried the one control offered.
-            .onChange(of: preferences) { _, updated in store.save(updated) }
-
-            Toggle("Read ahead with our own loader", isOn: $preferences.usesOwnLoader)
-
-            Text("Fetches the film in large pieces ahead of the player and answers its requests from "
-                + "memory. Turn off only if a film will not play: the player then fetches for itself, "
-                + "as it did before.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 900, alignment: .leading)
-
-            Toggle("Show playback diagnostics", isOn: $preferences.showDiagnostics)
-
-            Text("Position, buffer, stalls and observed rate, over the picture. Watch the buffer: it "
-                + "falls a second per second whenever nothing is being fetched, so a freeze it predicts "
-                + "is starvation and one it does not is something else.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 900, alignment: .leading)
-
-            Button("Sign out", role: .destructive) { pairing.unpair() }
-                .padding(.top, 24)
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 32) {
+        VStack(alignment: .leading, spacing: 8) {
+          Text(paired.serverName)
+            .font(.largeTitle)
+          Text(paired.server.absoluteString)
+            .font(.title3)
+            .foregroundStyle(.secondary)
         }
-        .padding(80)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
 
-    private func row(_ label: String, _ values: [String]) -> some View {
-        GridRow {
-            Text(label).foregroundStyle(.secondary)
-            Text(values.joined(separator: ", ")).monospaced()
+        Text("Playback").font(.title2.bold())
+        Button(showCapabilities ? "Hide device capabilities" : "Device capabilities") {
+          showCapabilities.toggle()
         }
+        if showCapabilities {
+          Grid(alignment: .leading, horizontalSpacing: 40, verticalSpacing: 16) {
+            row("Containers", profile.containers)
+            row("Video", profile.videoCodecs)
+            row("Audio", profile.audioCodecs)
+            row("Dynamic range", profile.hdrFormats)
+          }
+
+        }
+
+        Picker("Dynamic range", selection: $preferences.dynamicRange) {
+          ForEach(DynamicRangeOverride.allCases, id: \.self) { override in
+            Text(override.rawValue.uppercased()).tag(override)
+          }
+        }
+        .pickerStyle(.segmented)
+        // A switch that forgets is worse than no switch: a viewer who set SDR to fix a dark picture
+        // would find it dark again on the next launch, having already tried the one control offered.
+        .onChange(of: preferences) { _, updated in store.save(updated) }
+
+        Text("Diagnostics").font(.title2.bold()).padding(.top, 20)
+        Button(showDiagnostics ? "Hide diagnostics settings" : "Diagnostics settings") {
+          showDiagnostics.toggle()
+        }
+        if showDiagnostics {
+          Toggle("Read ahead with our own loader", isOn: $preferences.usesOwnLoader)
+
+          Text(
+            "Fetches the film in large pieces ahead of the player and answers its requests from "
+              + "memory. Turn off only if a film will not play: the player then fetches for itself, "
+              + "as it did before."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: 900, alignment: .leading)
+
+          Toggle("Show playback diagnostics", isOn: $preferences.showDiagnostics)
+
+          Text(
+            "Position, buffer, stalls and observed rate, over the picture. Watch the buffer: it "
+              + "falls a second per second whenever nothing is being fetched, so a freeze it predicts "
+              + "is starvation and one it does not is something else."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: 900, alignment: .leading)
+
+        }
+
+        Button { pairing.unpair() } label: {
+          Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+        }
+          .buttonStyle(.bordered)
+          .padding(.top, 24)
+      }
+      .padding(80)
+      .frame(maxWidth: .infinity, alignment: .topLeading)
     }
+  }
+
+  private func row(_ label: String, _ values: [String]) -> some View {
+    GridRow {
+      Text(label).foregroundStyle(.secondary)
+      Text(values.joined(separator: ", ")).monospaced()
+    }
+  }
 }

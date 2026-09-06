@@ -1,7 +1,7 @@
 # Native Client API
 
 Created: 2026-08-04
-Updated: 2026-08-15
+Updated: 2026-09-06
 
 ## Description
 
@@ -172,6 +172,13 @@ refreshing the contract fails the build — the guarantee the generated Swift cl
 depends on. The internal `/api` surface is excluded deliberately: it is a BFF
 contract, not a published one. The document is served at `/openapi/native.json`
 off the public binding, since a client generator reads it at development time.
+
+## Native tvOS visual design and collections
+
+The native Apple TV client exposes Movies, Series, Collections, and Settings.
+The visual layout and authenticated collection list, detail, and artwork routes
+are described in [Apple client visual design](../apple-client-visual-design/feature.md).
+Collection reads exclude removed movies from counts, members, and poster fallbacks.
 
 ## Testing Expectations
 

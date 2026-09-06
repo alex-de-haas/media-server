@@ -652,6 +652,13 @@ The clients ship through TestFlight rather than through Core, so `MARKETING_VERS
 Xcode project is theirs and `manifest.json` is the server's. A change touching only
 `src/apple/` leaves the manifest alone.
 
+## Native tvOS visual design and collections
+
+The native Apple TV client exposes Movies, Series, Collections, and Settings.
+The visual layout and authenticated collection list, detail, and artwork routes
+are described in [Apple client visual design](../apple-client-visual-design/feature.md).
+Collection reads exclude removed movies from counts, members, and poster fallbacks.
+
 ## Testing Expectations
 
 - **The card follows the title screen** (`LibraryStoreTests.detailRefreshesTheCard`): a

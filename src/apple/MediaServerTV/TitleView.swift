@@ -14,6 +14,10 @@ struct TitleView: View {
     @State private var detail: TitleDetail?
     @State private var failure: String?
     @State private var chosenVersion: String?
+    @State private var expandedSynopsis = false
+    @State private var showsTechnicalDetails = false
+    @State private var showsVersions = false
+    @FocusState private var focusedPlayPosition: Double?
 
     @State private var plan: PlaybackPlan?
     @State private var playing: PlayableStream?
@@ -56,6 +60,10 @@ struct TitleView: View {
             } else {
                 ProgressView().padding(120)
             }
+        }
+        .background(alignment: .top) {
+            CinemaBackdrop(url: detail?.backdropURL(on: library.server), loader: loader)
+                .frame(height: 850).ignoresSafeArea()
         }
         .task {
             do {
@@ -121,7 +129,7 @@ struct TitleView: View {
     private func playButtons(_ detail: TitleDetail) -> some View {
         HStack(spacing: 24) {
             if detail.resumeSeconds > 0 {
-                playButton("Resume", detail, from: detail.resumeSeconds)
+                playButton("Resume from \(PlaybackPosition.label(detail.resumeSeconds))", detail, from: detail.resumeSeconds)
                 playButton("From the beginning", detail, from: 0)
             } else {
                 playButton("Play", detail, from: 0)
@@ -138,7 +146,7 @@ struct TitleView: View {
 
     @ViewBuilder
     private func playButton(_ name: LocalizedStringKey, _ detail: TitleDetail, from position: Double) -> some View {
-        Button {
+        let button = Button {
             Task { await play(detail, from: position) }
         } label: {
             if resolvingFrom == position {
@@ -148,6 +156,13 @@ struct TitleView: View {
             }
         }
         .disabled(resolvingFrom != nil)
+        .focused($focusedPlayPosition, equals: position)
+
+        if position == detail.resumeSeconds {
+            button.buttonStyle(.borderedProminent)
+        } else {
+            button.buttonStyle(.bordered)
+        }
     }
 
     /// The same film with different tracks, or nil when the server would not give it.
@@ -287,41 +302,61 @@ struct TitleView: View {
 
     @ViewBuilder
     private func loaded(_ detail: TitleDetail) -> some View {
-        VStack(alignment: .leading, spacing: 40) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(detail.title).font(.largeTitle)
-
-                if let tagline = detail.tagline, !tagline.isEmpty {
-                    Text(tagline).font(.title3).foregroundStyle(.secondary).italic()
-                }
-
-                Text(facts(detail))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(detail.title).font(.system(size: 64, weight: .bold))
+                    .frame(maxWidth: 1000, alignment: .leading)
+                Text(facts(detail)).font(.callout).foregroundStyle(.secondary)
             }
+            playButtons(detail).padding(.vertical, 12)
 
             if let overview = detail.overview, !overview.isEmpty {
-                Text(overview)
-                    .font(.body)
-                    .frame(maxWidth: 1400, alignment: .leading)
+                Text(overview).font(.body)
+                    .lineLimit(expandedSynopsis ? nil : 3)
+                    .frame(maxWidth: 950, alignment: .leading)
+                Button(expandedSynopsis ? "Less" : "Read synopsis") {
+                    expandedSynopsis.toggle()
+                }.font(.callout)
             }
-
-            playButtons(detail)
-
-            if case .refused(let refusal, _) = plan {
-                refusalNotice(refusal)
-            }
-
-            if detail.versions.count > 1 {
-                versions(detail.versions)
-            }
+            if case .refused(let refusal, _) = plan { refusalNotice(refusal) }
 
             if let version = detail.versions.first(where: { $0.id == chosenVersion }) ?? detail.versions.first {
-                tracks(version)
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 24) {
+                        if detail.versions.count > 1 {
+                            Button {
+                                showsVersions = true
+                            } label: {
+                                Label(version.versionName ?? "Choose version", systemImage: "square.stack")
+                            }
+                        } else if let name = version.versionName {
+                            Text(name).font(.headline)
+                        }
+                        if let picture = version.video { dynamicRange(picture) }
+                    }
+                    Button(showsTechnicalDetails ? "Hide file details" : "Audio, subtitles & file details") {
+                        showsTechnicalDetails.toggle()
+                    }
+                    if showsTechnicalDetails {
+                        Text("\(version.container.uppercased()) · \(version.sizeDescription)")
+                            .font(.callout).foregroundStyle(.secondary)
+                        tracks(version)
+                    }
+                }
+                .padding(.top, 20)
             }
         }
-        .padding(80)
+        .padding(CinemaStyle.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .defaultFocus($focusedPlayPosition, detail.resumeSeconds)
+        .sheet(isPresented: $showsVersions) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 32) {
+                    versions(detail.versions)
+                    Button("Done") { showsVersions = false }
+                }.padding(CinemaStyle.inset)
+            }
+        }
     }
 
     private func facts(_ detail: TitleDetail) -> String {
@@ -347,6 +382,7 @@ struct TitleView: View {
             ForEach(versions) { version in
                 Button {
                     chosenVersion = version.id
+                    showsVersions = false
                 } label: {
                     HStack {
                         Image(systemName: version.id == chosenVersion ? "checkmark.circle.fill" : "circle")

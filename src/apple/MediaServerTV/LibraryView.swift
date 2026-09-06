@@ -10,6 +10,7 @@ struct LibraryView: View {
     let session: ServerSession
     let pairing: PairingSession
     @State private var library: LibraryStore
+    @Namespace private var libraryFocus
 
     init(session: ServerSession, pairing: PairingSession) {
         self.session = session
@@ -20,11 +21,17 @@ struct LibraryView: View {
     var body: some View {
         TabView {
             Tab("Movies", systemImage: "film") {
-                shelf(library.movies, empty: "No films yet.")
+                shelf(library.movies, continues: true, empty: "No films yet.")
             }
 
             Tab("Series", systemImage: "tv") {
                 shelf(library.series, empty: "No series yet.")
+            }
+
+            Tab("Collections", systemImage: "square.stack") {
+                NavigationStack {
+                    CollectionsView(session: session, library: library)
+                }
             }
 
             // Sign out and the dynamic-range override live here. They were on the screen this replaced,
@@ -34,11 +41,12 @@ struct LibraryView: View {
                 SettingsView(paired: session.paired, pairing: pairing)
             }
         }
+        .background(CinemaStyle.canvas)
         .task { await library.load() }
     }
 
     @ViewBuilder
-    private func shelf(_ items: [LibraryTitle], empty: String) -> some View {
+    private func shelf(_ items: [LibraryTitle], continues: Bool = false, empty: String) -> some View {
         switch library.state {
         case .idle, .loading:
             ProgressView("Reading the library")
@@ -56,108 +64,28 @@ struct LibraryView: View {
             Text(empty).font(.title2).foregroundStyle(.secondary)
         case .loaded:
             NavigationStack {
-                PosterGrid(
-                    items: items, library: library, loader: session.artwork,
-                    playback: PlaybackService(session: session))
-            }
-        }
-    }
-}
-
-/// A focus-driven grid, which is the only kind a television has.
-private struct PosterGrid: View {
-    let items: [LibraryTitle]
-    let library: LibraryStore
-    let loader: ArtworkLoader
-    let playback: PlaybackService
-
-    private let columns = [GridItem(.adaptive(minimum: 260, maximum: 320), spacing: 48)]
-
-    var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 64) {
-                ForEach(items) { item in
-                    NavigationLink {
-                        TitleView(title: item, library: library, loader: loader, playback: playback)
-                    } label: {
-                        PosterCell(item: item, server: library.server, loader: loader)
-                    }
-                    .buttonStyle(.card)
-                }
-            }
-            .padding(60)
-        }
-    }
-}
-
-private struct PosterCell: View {
-    let item: LibraryTitle
-    let server: URL
-    let loader: ArtworkLoader
-
-    /// Decoded once when it arrives. Decoding inside `body` would decompress the same JPEG every time
-    /// SwiftUI re-evaluated the tree, which on a grid of a hundred posters is felt.
-    @State private var poster: Image?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ZStack {
-                if let poster {
-                    poster
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    // The same shape whether the artwork is still arriving or was never there, so the
-                    // grid does not reflow under the viewer as posters land.
-                    Rectangle()
-                        .fill(.quaternary)
-                        .overlay {
-                            Image(systemName: item.kind == .movie ? "film" : "tv")
-                                .font(.system(size: 48))
-                                .foregroundStyle(.tertiary)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 44) {
+                        if continues && !library.continueWatching.isEmpty {
+                            Text("Continue Watching").font(.title2.bold())
+                            ScrollView(.horizontal) {
+                                LazyHStack(spacing: 48) {
+                                    ForEach(library.continueWatching) { item in
+                                        MoviePosterLink(item: item, library: library, loader: session.artwork,
+                                                        playback: PlaybackService(session: session), showResumeTime: true)
+                                            .frame(width: 250)
+                                            .prefersDefaultFocus(item.id == library.continueWatching.first?.id, in: libraryFocus)
+                                    }
+                                }.padding(.vertical, 30).padding(.horizontal, 20)
+                            }.scrollClipDisabled()
                         }
+                        Text(continues ? "All Movies" : "All Series").font(.title2.bold())
+                        LibraryPosterGrid(items: items, library: library, loader: session.artwork,
+                                          playback: PlaybackService(session: session))
+                    }.padding(CinemaStyle.inset)
                 }
+                .focusScope(libraryFocus)
             }
-            .aspectRatio(2 / 3, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(alignment: .bottom) { progress }
-
-            Text(item.title)
-                .font(.caption)
-                .lineLimit(1)
-            if let year = item.year {
-                Text(String(year))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .task {
-            guard item.hasArtwork, let url = item.artworkURL(on: server) else { return }
-            guard let data = await loader.image(at: url), let decoded = UIImage(data: data) else { return }
-            poster = Image(uiImage: decoded)
-        }
-    }
-
-    /// Where the viewer got to. A finished title says so with a tick instead of a full bar, because a
-    /// bar at 100 % reads as "nearly done".
-    @ViewBuilder
-    private var progress: some View {
-        if item.played {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.title2)
-                .foregroundStyle(.white, .green)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        } else if item.resumeSeconds > 0 {
-            // Not a progress bar. The sync feed carries a resume position but no runtime, so there is
-            // no fraction to draw — and a full-width bar for a title stopped after one minute would be
-            // a worse lie than saying nothing. It says "started", which is all that is known here.
-            Label("Resume", systemImage: "play.circle.fill")
-                .labelStyle(.iconOnly)
-                .font(.title2)
-                .foregroundStyle(.white, .black.opacity(0.6))
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

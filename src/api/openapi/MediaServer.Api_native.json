@@ -603,6 +603,98 @@
         }
       }
     },
+    "/native/v1/collections": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "operationId": "ListNativeCollections",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NativeCollectionSummary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/collections/{id}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "operationId": "GetNativeCollection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCollectionDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/native/v1/collections/{id}/images/{imageType}": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "operationId": "GetNativeCollectionImage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "imageType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/native/v1/items/{id}": {
       "get": {
         "tags": [
@@ -1720,6 +1812,75 @@
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "NativeCollectionDetail": {
+        "required": [
+          "id",
+          "name",
+          "posterUrl",
+          "backdropUrl",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "backdropUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryItemDto"
+            }
+          }
+        }
+      },
+      "NativeCollectionSummary": {
+        "required": [
+          "id",
+          "name",
+          "posterUrl",
+          "itemCount"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "itemCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
               "integer",
               "string"
             ],

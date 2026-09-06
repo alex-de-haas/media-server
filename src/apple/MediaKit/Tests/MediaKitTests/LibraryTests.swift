@@ -583,3 +583,74 @@ struct PlaybackPlanTests {
         #expect(stream.subtitleStreamId == nil)
     }
 }
+
+@Suite("Collection browsing")
+@MainActor
+struct CollectionTests {
+    private func store(_ answers: [String: [SurfaceStub.Answer]]) -> (CollectionStore, SurfaceStub) {
+        let transport = SurfaceStub(answers)
+        return (CollectionStore(session: ServerSession(paired: pairing(), transport: transport)), transport)
+    }
+
+    @Test func distinguishesEmptyUnsupportedAndFailure() async {
+        let (empty, _) = store(["/native/v1/collections": [(200, "[]")]])
+        await empty.load()
+        #expect(empty.state == .loaded)
+        #expect(empty.items.isEmpty)
+        let (old, _) = store(["/native/v1/collections": [(404, "")]])
+        await old.load()
+        #expect(old.state == .unsupported)
+        let (failed, _) = store(["/native/v1/collections": [(503, "")]])
+        await failed.load()
+        guard case .failed = failed.state else { Issue.record("A server error is not an empty list"); return }
+    }
+
+    @Test func decodesCollectionAndUsesBearer() async throws {
+        let (collections, transport) = store([
+            "/native/v1/collections": [(200, #"[{"id":"saga","name":"Saga","posterUrl":"/native/v1/collections/saga/images/primary","itemCount":2}]"#)],
+            "/native/v1/collections/saga": [(200, """
+            {"id":"saga","name":"Saga","items":[\(title("one", "Movie", "First")),\(title("two", "Movie", "Second"))]}
+            """)]
+        ])
+        await collections.load()
+        #expect(collections.items.first?.itemCount == 2)
+        #expect(collections.items.first?.posterPath?.hasPrefix("/native/v1/") == true)
+        let detail = try await collections.detail(id: "saga")
+        #expect(detail.items.map(\.id) == ["one", "two"])
+        #expect(transport.tokensSeen == ["Bearer old-token", "Bearer old-token"])
+    }
+
+    @Test func removedDetailDoesNotMarkServerUnsupported() async {
+        let (collections, _) = store(["/native/v1/collections/gone": [(404, "")]])
+        do {
+            _ = try await collections.detail(id: "gone")
+            Issue.record("Missing collection must throw")
+        } catch CollectionError.missing {} catch { Issue.record("Wrong error: \(error)") }
+        #expect(collections.state != .unsupported)
+    }
+
+    @Test func continueWatchingRefreshesAfterCompletion() async throws {
+        let transport = SurfaceStub([
+            "/native/v1/sync": [(200, page([
+                title("one", "Movie", "Started", ticks: 42_000_000),
+                title("two", "Movie", "Watched", played: true, ticks: 42_000_000),
+                title("three", "Series", "Series", ticks: 42_000_000),
+                title("four", "Movie", "New")
+            ].joined(separator: ","), cursor: "c", hasMore: false))],
+            "/native/v1/items/one": [(200, item("one", "Started", played: true))]
+        ])
+        let library = LibraryStore(session: ServerSession(paired: pairing(), transport: transport))
+        await library.load()
+        #expect(library.continueWatching.map(\.id) == ["one"])
+        _ = try await library.detail(for: "one")
+        #expect(library.continueWatching.isEmpty)
+    }
+
+    @Test func resumeLabelsHandleHoursAndInvalidValues() {
+        #expect(PlaybackPosition.label(2535) == "42:15")
+        #expect(PlaybackPosition.label(3661.9) == "1:01:01")
+        #expect(PlaybackPosition.label(-1) == "0:00")
+        #expect(PlaybackPosition.label(.infinity) == "0:00")
+        #expect(PlaybackPosition.label(.nan) == "0:00")
+    }
+}

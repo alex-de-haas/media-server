@@ -24,7 +24,7 @@ public sealed class JellyfinCollectionService(MediaServerDbContext database)
     /// </summary>
     public async Task<bool> AnyEligibleAsync(CancellationToken cancellationToken) =>
         await database.MediaItems.AsNoTracking()
-            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null)
+            .Where(item => item.PublicId != null && item.RemovedAt == null && item.Kind == MediaKind.Movie && item.CollectionId != null)
             .GroupBy(item => item.CollectionId!.Value)
             .Where(group => group.Count() >= CollectionMetadata.MinOwnedMovies)
             .Select(group => group.Key)
@@ -38,7 +38,7 @@ public sealed class JellyfinCollectionService(MediaServerDbContext database)
     {
         // One grouping yields both the eligible ids and their counts.
         var counts = await database.MediaItems.AsNoTracking()
-            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null)
+            .Where(item => item.PublicId != null && item.RemovedAt == null && item.Kind == MediaKind.Movie && item.CollectionId != null)
             .GroupBy(item => item.CollectionId!.Value)
             .Where(group => group.Count() >= CollectionMetadata.MinOwnedMovies)
             .Select(group => new { CollectionId = group.Key, Count = group.Count() })
@@ -74,7 +74,7 @@ public sealed class JellyfinCollectionService(MediaServerDbContext database)
     public async Task<MovieCollection?> CoverAsync(CancellationToken cancellationToken)
     {
         var coverId = await database.MediaItems.AsNoTracking()
-            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId != null
+            .Where(item => item.PublicId != null && item.RemovedAt == null && item.Kind == MediaKind.Movie && item.CollectionId != null
                 && (item.Collection!.BackdropUrl != null || item.Collection.PosterUrl != null))
             .GroupBy(item => item.CollectionId!.Value)
             .Where(group => group.Count() >= CollectionMetadata.MinOwnedMovies)
@@ -101,12 +101,12 @@ public sealed class JellyfinCollectionService(MediaServerDbContext database)
     /// </summary>
     public IQueryable<MediaItem> MemberMovies(Guid collectionId) =>
         database.MediaItems.AsNoTracking()
-            .Where(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId == collectionId);
+            .Where(item => item.PublicId != null && item.RemovedAt == null && item.Kind == MediaKind.Movie && item.CollectionId == collectionId);
 
     /// <summary>How many published movies a collection has in the library.</summary>
     public async Task<int> MemberCountAsync(Guid collectionId, CancellationToken cancellationToken) =>
         await database.MediaItems.AsNoTracking()
-            .CountAsync(item => item.PublicId != null && item.Kind == MediaKind.Movie && item.CollectionId == collectionId, cancellationToken);
+            .CountAsync(item => item.PublicId != null && item.RemovedAt == null && item.Kind == MediaKind.Movie && item.CollectionId == collectionId, cancellationToken);
 
     /// <summary>Resolves a BoxSet public id back to its collection, or null if it is not one.</summary>
     public async Task<MovieCollection?> ResolveAsync(string publicId, CancellationToken cancellationToken)

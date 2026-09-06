@@ -84,6 +84,8 @@ public final class LibraryStore {
     public var movies: [LibraryTitle] { items.filter { $0.kind == .movie } }
     public var series: [LibraryTitle] { items.filter { $0.kind == .series } }
 
+    public var continueWatching: [LibraryTitle] { movies.filter { !$0.played && $0.resumeSeconds > 0 } }
+
     public var server: URL { session.paired.server }
 
     /// One title in full, fetched when its screen opens rather than carried by the feed.
