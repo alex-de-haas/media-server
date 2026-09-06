@@ -18,6 +18,19 @@ import SwiftUI
 struct DiagnosticsOverlay: View {
     let diagnostics: PlaybackDiagnostics
 
+    /// What the loader held at an instant that was over before anyone could photograph it: whether
+    /// the window was empty, ahead of the wrong reader, or full — which tells a starved player from
+    /// one that stopped for reasons of its own.
+    private func describe(_ moment: PlaybackDiagnostics.Moment) -> String {
+        guard let window = moment.window else {
+            return String(format: "на %.0f с, без загрузчика", moment.position)
+        }
+        return String(
+            format: "на %.0f с: окно %.0f МБ, впереди %.0f, читателей %d, отдельно %d",
+            moment.position, Double(window.windowBytes) / 1_000_000, Double(window.aheadBytes) / 1_000_000,
+            window.readers, window.asides)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             row("клиент", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
@@ -25,6 +38,9 @@ struct DiagnosticsOverlay: View {
             row("буфер впереди", String(format: "%.1f с", diagnostics.bufferAhead),
                 warn: diagnostics.bufferAhead < 15)
             row("замираний", "\(diagnostics.stalls)", warn: diagnostics.stalls > 0)
+            if let moment = diagnostics.lastStall {
+                row("при замирании", describe(moment), warn: true)
+            }
 
             if diagnostics.recoveries > 0 {
                 row("растормошён", "\(diagnostics.recoveries)", warn: true)
@@ -94,6 +110,9 @@ struct DiagnosticsOverlay: View {
                 row("минимум буфера",
                     String(format: "%.1f с на %.0f с", diagnostics.lowestBuffer, diagnostics.lowestAt),
                     warn: diagnostics.lowestBuffer < 15)
+                if let moment = diagnostics.lowestMoment {
+                    row("в тот момент", describe(moment))
+                }
             }
 
             // The shape of the last minute, which is what says whether a dip was gradual or sudden.

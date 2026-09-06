@@ -87,6 +87,46 @@ struct RemuxLoaderTests {
         #expect(fixture.loader.makeSnapshot().restarts == 0)
     }
 
+    @Test("A reader a little behind the window is carried aside; one farther back restarts it a tail earlier")
+    func stepsBackward() async throws {
+        // The window keeps sixteen bytes behind the lowest reader. A reader settling at 208, out of
+        // the initial window's reach, restarts it a tail before: [192, 256).
+        let fixture = Fixture(total: 1_024, budget: 64, tail: 16)
+        defer { fixture.loader.stop() }
+        let probe = Request(offset: 200, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(probe) }
+        let alone = try await fixture.network.range(start: 200)
+        alone.answer(total: 1_024, start: 200, count: 8)
+        try await fixture.until { probe.finished }
+        let settling = Request(offset: 208, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(settling) }
+        let fill = try await fixture.network.range(start: 192)
+        fill.answer(total: 1_024, start: 192, count: 64)
+        try await fixture.until { settling.finished }
+        #expect(fixture.loader.makeSnapshot().restarts == 1)
+
+        // A step back of eight bytes — within the tail — is fetched on its own, and the window stays.
+        let step = Request(offset: 184, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(step) }
+        let aside = try await fixture.network.range(start: 184)
+        aside.answer(total: 1_024, start: 184, count: 8)
+        try await fixture.until { step.finished }
+        let stepped = await fixture.onQueue { step.bytes }
+        #expect(stepped == payload(start: 184, count: 8))
+        #expect(fixture.loader.makeSnapshot().restarts == 1)
+
+        // A step back past the tail is a seek: the window restarts, a tail before the reader.
+        let seek = Request(offset: 100, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(seek) }
+        let refill = try await fixture.network.range(start: 84)
+        refill.answer(total: 1_024, start: 84, count: 64)
+        try await fixture.until { seek.finished }
+        let sought = await fixture.onQueue { seek.bytes }
+        #expect(sought == payload(start: 100, count: 8))
+        #expect(fixture.loader.makeSnapshot().restarts == 2)
+        #expect(fixture.loader.makeSnapshot().lastRestart?.offset == 100)
+    }
+
     @Test("Cancelling an aside cancels its HTTP task and prevents delivery")
     func cancellation() async throws {
         let fixture = Fixture(total: 1_024)
@@ -165,14 +205,14 @@ private final class Fixture: @unchecked Sendable {
     let loader: RemuxLoader
     let network: Network
     private let host: String
-    init(total: Int, budget: Int = 64) {
+    init(total: Int, budget: Int = 64, tail: Int64 = 0) {
         network = Network(total: total)
         host = UUID().uuidString.lowercased()
         Stub.register(network, host: host)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [Stub.self]
         loader = RemuxLoader(origin: URL(string: "https://\(host)/film")!, budget: budget,
-                             tail: 0, lag: 32, target: 20, configuration: configuration)
+                             tail: tail, lag: 32, target: 20, configuration: configuration)
     }
     deinit { Stub.unregister(host: host) }
     func onQueue<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {

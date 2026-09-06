@@ -353,10 +353,15 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         readers.expire(at: Self.uptime)
 
         // A settled reader the window does not hold and the fill will not reach is a seek, or a reader
-        // the window ran ahead of. Either way the window restarts for it, and only it stays known.
+        // the window ran ahead of. Either way the window restarts for it, and only it stays known. One
+        // a little behind the start is not a stray: the fourth run showed a seek settling by steps of
+        // a megabyte or two *backwards* — the keyframe before the target — and a window discarded at
+        // every step. Within a tail, the separate fetches carry it the short way instead.
         let strays = readers.settled.filter { reader in
-            let placement = window.place(reader.last, lag: lag)
-            return placement == .behind || placement == .away
+            if window.holds(reader.last) { return false }
+            let behind = window.start - reader.last
+            if behind > 0, behind <= tail { return false }
+            return window.place(reader.last, lag: lag) != .ahead
         }
         if let stray = strays.min(by: { $0.last < $1.last }) {
             // The reader's own read at that offset, when a speculative one begins there too.
@@ -369,7 +374,9 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
                 requestedLength: cause?.data.requestedLength ?? Int(stray.next - stray.last),
                 toEnd: cause?.data.requestsAllDataToEndOfResource ?? false)
             Self.log.notice("Window reset: [\(self.window.start), \(self.window.end)) -> \(stray.last) for a reader of \(stray.reads) reads; \(self.readers.settled.count) settled, pending \(self.pending.count)")
-            restart(at: stray.last)
+            // A tail before the reader rather than at it, for the same backward steps: a seek's first
+            // read is at the target, and the ones that follow are at the keyframe before it.
+            restart(at: max(0, stray.last - tail))
             restarts += 1
             readers.keep(only: stray)
         }
