@@ -18,16 +18,18 @@ import SwiftUI
 struct DiagnosticsOverlay: View {
     let diagnostics: PlaybackDiagnostics
 
-    /// What the loader held at an instant that was over before anyone could photograph it: whether
-    /// the window was empty, ahead of the wrong reader, or full — which tells a starved player from
-    /// one that stopped for reasons of its own.
+    /// What the player held and what the loader held at an instant that was over before anyone could
+    /// photograph it: whether the player's own buffer was empty, and whether the window was empty,
+    /// ahead of the wrong reader, or full — which tells a starved player from one that stopped for
+    /// reasons of its own.
     private func describe(_ moment: PlaybackDiagnostics.Moment) -> String {
+        let player = String(format: "на %.0f с: буфер %.1f с", moment.position, moment.bufferAhead)
         guard let window = moment.window else {
-            return String(format: "на %.0f с, без загрузчика", moment.position)
+            return player + ", без загрузчика"
         }
-        return String(
-            format: "на %.0f с: окно %.0f МБ, впереди %.0f, читателей %d, отдельно %d",
-            moment.position, Double(window.windowBytes) / 1_000_000, Double(window.aheadBytes) / 1_000_000,
+        return player + String(
+            format: ", окно %.0f МБ, впереди %.0f МБ, читателей %d, отдельно %d",
+            Double(window.windowBytes) / 1_000_000, Double(window.aheadBytes) / 1_000_000,
             window.readers, window.asides)
     }
 
