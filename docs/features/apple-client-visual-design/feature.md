@@ -53,7 +53,7 @@ The selected source's file, audio, and subtitle details open in a separate sheet
 The sheet has an explicit 1280 × 820-point frame so its flexible list cannot
 collapse to the header height. A native list with visibly highlighted focusable
 rows lets the remote reach every track, including
-rows below the viewport; empty sections show None. Close or Back dismisses it. The player, capability negotiation,
+rows below the viewport; empty sections show None. The remote's Back button dismisses it; sheets have no separate Close button. The player, capability negotiation,
 sidecar handling, and resume reporting retain their existing behavior.
 
 Settings separates playback from expandable capabilities and diagnostics.

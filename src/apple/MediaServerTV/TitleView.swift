@@ -386,13 +386,9 @@ struct TitleView: View {
     @ViewBuilder
     private func tracks(_ version: TitleVersion) -> some View {
         VStack(alignment: .leading, spacing: 24) {
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Audio, subtitles & file details").font(.title2.bold())
-                    Text(version.versionName ?? "Original").foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Close", systemImage: "xmark") { showsTechnicalDetails = false }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Audio, subtitles & file details").font(.title2.bold())
+                Text(version.versionName ?? "Original").foregroundStyle(.secondary)
             }
             List {
                 Section("File") {

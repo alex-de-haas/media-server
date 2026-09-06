@@ -266,5 +266,5 @@ Technical-details sheet regression: the flexible List collapsed inside the tvOS
 sheet. An explicit presentation frame and visible row focus treatment keep the
 track list usable. Local preview fixtures include eight audio and ten subtitle
 tracks for checking scrolling beyond the first viewport. Simulator verification
-reached the last subtitle row with Down, returned to the top with Up, and closed
-the sheet through Close. Physical Apple TV acceptance remains pending.
+reached the last subtitle row with Down, returned to the top with Up, and dismissed
+the sheet with Back (Escape in the simulator). Sheets have no Close button. Physical Apple TV acceptance remains pending.
