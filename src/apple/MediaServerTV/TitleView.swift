@@ -18,7 +18,11 @@ struct TitleView: View {
     @State private var plan: PlaybackPlan?
     @State private var playing: PlayableStream?
     @State private var session: String?
-    @State private var resolving = false
+
+    /// Where the viewing about to open begins — the resume point, or zero for a film started over —
+    /// and, while the server is being asked, which button is waiting on it.
+    @State private var startAt: Double = 0
+    @State private var resolvingFrom: Double?
 
     /// Decided once when a film starts, and held for as long as it plays.
     ///
@@ -66,7 +70,7 @@ struct TitleView: View {
             let version = detail?.versions.first { $0.id == stream.mediaSourceId }
             PlayerView(
                 stream: stream,
-                startAt: detail?.resumeSeconds ?? 0,
+                startAt: startAt,
                 diagnostics: diagnostics,
                 ownLoader: ownLoader,
                 audioTracks: version?.audio ?? [],
@@ -80,32 +84,70 @@ struct TitleView: View {
                         itemId: title.id, playSessionId: session, positionSeconds: position) }
                 },
                 onFinished: { position in
-                    guard let session else { return }
-                    Task { await playback.stop(
-                        itemId: title.id, playSessionId: session, positionSeconds: position) }
-                    self.session = nil
+                    let ended = session
+                    session = nil
                     diagnostics = nil
 
                     // Noted whether or not a session exists: when one is still being opened, this is
                     // the position it will be closed at the moment its id arrives.
                     endedAt = (viewing, position)
+
+                    guard let ended else { return }
+                    Task {
+                        await playback.stop(itemId: title.id, playSessionId: ended, positionSeconds: position)
+                        await refresh()
+                    }
                 })
             .ignoresSafeArea()
         }
     }
 
+    /// Reads the title again once a viewing has been reported, so the screen says what the server now
+    /// knows: a film left halfway offers to resume, one watched to the end is marked so. The screen was
+    /// fetched once when it opened and kept saying "Play" about a film the viewer had just left.
+    private func refresh() async {
+        guard let loaded = try? await library.detail(for: title.id) else { return }
+        detail = loaded
+        if !loaded.versions.contains(where: { $0.id == chosenVersion }) {
+            chosenVersion = loaded.versions.first?.id
+        }
+    }
+
+    /// Resume where the viewer left, or start over — both, for a film that was started, because a
+    /// viewer who wants the beginning again had no way to ask for it. One button otherwise, and a
+    /// mark beside it for a film watched to the end: the server resets its resume point to zero,
+    /// which would leave it looking exactly like one never started.
     @ViewBuilder
-    private func playButton(_ detail: TitleDetail) -> some View {
-        Button {
-            Task { await play(detail) }
-        } label: {
-            if resolving {
-                ProgressView()
+    private func playButtons(_ detail: TitleDetail) -> some View {
+        HStack(spacing: 24) {
+            if detail.resumeSeconds > 0 {
+                playButton("Resume", detail, from: detail.resumeSeconds)
+                playButton("From the beginning", detail, from: 0)
             } else {
-                Label(detail.resumeSeconds > 0 ? "Resume" : "Play", systemImage: "play.fill")
+                playButton("Play", detail, from: 0)
+            }
+
+            if detail.played {
+                // Beside the button rather than in it: watched is a fact about the film, and the
+                // button says what pressing it does.
+                Label("Watched", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.secondary)
             }
         }
-        .disabled(resolving)
+    }
+
+    @ViewBuilder
+    private func playButton(_ name: LocalizedStringKey, _ detail: TitleDetail, from position: Double) -> some View {
+        Button {
+            Task { await play(detail, from: position) }
+        } label: {
+            if resolvingFrom == position {
+                ProgressView()
+            } else {
+                Label(name, systemImage: "play.fill")
+            }
+        }
+        .disabled(resolvingFrom != nil)
     }
 
     /// The same film with different tracks, or nil when the server would not give it.
@@ -130,9 +172,9 @@ struct TitleView: View {
         return replacement
     }
 
-    private func play(_ detail: TitleDetail) async {
-        resolving = true
-        defer { resolving = false }
+    private func play(_ detail: TitleDetail, from position: Double) async {
+        resolvingFrom = position
+        defer { resolvingFrom = nil }
 
         let asked = Date()
 
@@ -156,6 +198,7 @@ struct TitleView: View {
             // still outstanding — the session a progress report is filed against — was always best
             // effort: a server that will not open one is no reason to keep somebody watching a
             // spinner. It was on the critical path for no reason but the order it was written in.
+            startAt = position
             playing = stream
 
             // Alongside, not before. Opening it at all is what leaves a record for a viewer who
@@ -166,7 +209,7 @@ struct TitleView: View {
                 let opened = try? await playback.start(
                     itemId: title.id,
                     mediaSourceId: stream.mediaSourceId,
-                    positionSeconds: detail.resumeSeconds)
+                    positionSeconds: position)
 
                 guard let opened else { return }
 
@@ -184,6 +227,7 @@ struct TitleView: View {
                     itemId: title.id,
                     playSessionId: opened,
                     positionSeconds: endedAt?.viewing == opening ? endedAt?.position ?? 0 : 0)
+                await refresh()
             }
         } catch {
             // Shown on a television, so the sentence Foundation writes rather than the type's whole
@@ -262,7 +306,7 @@ struct TitleView: View {
                     .frame(maxWidth: 1400, alignment: .leading)
             }
 
-            playButton(detail)
+            playButtons(detail)
 
             if case .refused(let refusal, _) = plan {
                 refusalNotice(refusal)
