@@ -18,9 +18,13 @@ scrolls to its heading and focuses the first movie after scrolling completes.
 Poster/caption groups and shelves participate in directional focus navigation;
 the captions remain outside the visual card. The transition respects Reduce Motion.
 
-Only the poster has the native card border, shadow, and focus effect. Captions
-sit below it with horizontal and bottom padding, reserve two lines for titles,
-and use consistent watched/resume marks.
+Movie and series cards show only one compact metadata line below the poster:
+year in the library, or the resume position in Continue Watching. The full title
+appears above the focused shelf; the grid title stays pinned while scrolling.
+The poster and metadata scale together on focus, with a shadow confined to the
+poster and a short gap between artwork and metadata. Missing or failed artwork
+shows the title centered inside a neutral poster. VoiceOver retains the title,
+metadata, and watched/resume status. Collection cards retain their names.
 Artwork loads through the authenticated server loader, retaining the same
 geometry when missing or still loading. Collection member cards reuse the
 library's current state when available.

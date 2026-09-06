@@ -20,7 +20,7 @@ Versions and full track lists share the main detail screen. Pairing shows an
 address/code; Settings combines playback preferences with technical diagnostics.
 
 The target is native tvOS navigation with cinematic artwork and restrained
-chrome. Keep standard SF typography and system card focus behavior. Follow the system light/dark appearance with an adaptive
+chrome. Keep standard SF typography and a clear focus treatment. Follow the system light/dark appearance with an adaptive
 neutral canvas, high-contrast primary text, quieter secondary text, and artwork
 as the source of color. Avoid ambient animation and automatic video previews.
 Check contrast over both bright and dark artwork, including increased-contrast
@@ -38,10 +38,11 @@ order; do not imply recency without a timestamp. Hide the row when empty.
 Keep the ordinary Series grid: episode navigation and next-episode aggregation
 are outside this visual change, so do not imply playable series-level resume.
 
-Poster cards apply native focus decoration only to the 2:3 image. Captions
-sit outside the card with generous spacing and padding, and reserve space for two title lines and a quieter
-year, and place watched/resume marks consistently. Leave room for the system
-focus expansion without clipping adjacent rows. Return from playback updates
+Movie and series cards show a compact year or resume line below the poster,
+without repeated titles. Show the focused title above the shelf, pinned when
+scrolling the grid, and center it inside the placeholder when artwork is missing.
+Scale poster and metadata together on focus with a short gap, retaining the
+accessible title and watched/resume marks. Return from playback updates
 both the row and grid, removing completed movies from Continue Watching.
 
 Show a textual resume position rather than inventing a progress fraction:

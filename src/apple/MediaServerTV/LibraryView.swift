@@ -9,6 +9,7 @@ import SwiftUI
 struct LibraryView: View {
     let session: ServerSession
     let pairing: PairingSession
+    @State private var continueTitle = ""
     @State private var library: LibraryStore
     @Namespace private var libraryFocus
     @FocusState private var focusedMovie: String?
@@ -71,11 +72,15 @@ struct LibraryView: View {
                         VStack(alignment: .leading, spacing: 44) {
                             if continues && !library.continueWatching.isEmpty {
                                 Text("Continue Watching").font(.title2.bold())
+                                Text(continueTitle.isEmpty ? " " : continueTitle)
+                                    .font(.title3).lineLimit(2, reservesSpace: true)
+                                    .accessibilityHidden(true)
                                 ScrollView(.horizontal) {
                                     LazyHStack(spacing: 48) {
                                         ForEach(library.continueWatching) { item in
                                             MoviePosterLink(item: item, library: library, loader: session.artwork,
-                                                            playback: PlaybackService(session: session), showResumeTime: true)
+                                                            playback: PlaybackService(session: session), showResumeTime: true,
+                                                            onFocus: { continueTitle = item.title })
                                                 .frame(width: 250)
                                                 .prefersDefaultFocus(item.id == library.continueWatching.first?.id, in: libraryFocus)
                                         }

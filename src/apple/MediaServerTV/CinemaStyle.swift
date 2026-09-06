@@ -16,6 +16,7 @@ struct ServerArtwork: View {
     let url: URL?
     let loader: ArtworkLoader
     var symbol = "film"
+    var fallbackTitle: String?
     @State private var image: Image?
 
     var body: some View {
@@ -25,6 +26,14 @@ struct ServerArtwork: View {
                 if let image {
                     image.resizable().scaledToFill()
                         .frame(width: geometry.size.width, height: geometry.size.height)
+                } else if let fallbackTitle {
+                    Text(fallbackTitle)
+                        .font(.title3.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(6)
+                        .minimumScaleFactor(0.7)
+                        .padding(24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Image(systemName: symbol).font(.system(size: 48)).foregroundStyle(.secondary)
                 }
@@ -62,45 +71,68 @@ struct CinemaBackdrop: View {
     }
 }
 
-/// Only the artwork is the focusable card. Captions sit outside its border and shadow.
+/// Artwork and metadata move together, while only the poster receives a shadow.
 struct PosterCard<Artwork: View, Destination: View>: View {
     let title: String
     let subtitle: String
     var status = ""
+    var showTitle = true
+    var onFocus: () -> Void = {}
     var focus: FocusState<String?>.Binding? = nil
     var focusID = ""
     @ViewBuilder var artwork: () -> Artwork
     @ViewBuilder var destination: () -> Destination
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 34) {
+        Group {
             if let focus {
                 posterLink.focused(focus, equals: focusID)
             } else {
                 posterLink
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title).font(.headline).lineLimit(2, reservesSpace: true)
-                Text(subtitle.isEmpty ? " " : subtitle)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 8)
-            .accessibilityHidden(true)
-        }
-        // Include the caption's space in directional navigation without decorating or focusing it.
-        .focusSection()
+        }.focusSection()
     }
 
     private var posterLink: some View {
         NavigationLink(destination: destination) {
-            artwork()
-                .aspectRatio(2 / 3, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 10) {
+                artwork()
+                    .aspectRatio(2 / 3, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                if showTitle { Text(title).font(.caption).lineLimit(2) }
+                Text(subtitle.isEmpty ? " " : subtitle)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .padding(.horizontal, 4)
+            }
         }
-        .buttonStyle(.card)
+        .buttonStyle(PosterFocusStyle(onFocus: onFocus))
         .accessibilityLabel([title, subtitle, status].filter { !$0.isEmpty }.joined(separator: ", "))
+    }
+}
+
+private struct PosterFocusStyle: ButtonStyle {
+    var onFocus: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        FocusedPoster(configuration: configuration, onFocus: onFocus)
+    }
+
+    private struct FocusedPoster: View {
+        let configuration: ButtonStyleConfiguration
+        let onFocus: () -> Void
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(isFocused ? 1.06 : 1)
+                .opacity(configuration.isPressed ? 0.8 : 1)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
+                .onChange(of: isFocused) { _, focused in
+                    if focused { onFocus() }
+                }
+        }
     }
 }
 
@@ -110,6 +142,7 @@ struct MoviePosterLink: View {
     let loader: ArtworkLoader
     let playback: PlaybackService
     var showResumeTime = false
+    var onFocus: () -> Void = {}
     var focus: FocusState<String?>.Binding? = nil
     var focusID = ""
 
@@ -117,9 +150,9 @@ struct MoviePosterLink: View {
         PosterCard(title: item.title,
                    subtitle: showResumeTime ? "Resume from \(PlaybackPosition.label(item.resumeSeconds))" : item.year.map(String.init) ?? "",
                    status: item.played ? "Watched" : item.resumeSeconds > 0 ? "In progress" : "",
-                   focus: focus, focusID: focusID) {
+                   showTitle: false, onFocus: onFocus, focus: focus, focusID: focusID) {
             ServerArtwork(url: item.hasArtwork ? item.artworkURL(on: library.server) : nil,
-                          loader: loader, symbol: item.kind == .movie ? "film" : "tv")
+                          loader: loader, symbol: item.kind == .movie ? "film" : "tv", fallbackTitle: item.title)
                 .overlay(alignment: .bottomTrailing) {
                     if item.played || item.resumeSeconds > 0 {
                         Image(systemName: item.played ? "checkmark" : "play.fill")
@@ -141,12 +174,24 @@ struct LibraryPosterGrid: View {
     let playback: PlaybackService
     var focus: FocusState<String?>.Binding? = nil
 
+    @State private var focusedTitle = ""
+
     var body: some View {
-        LazyVGrid(columns: CinemaStyle.columns, spacing: 54) {
-            ForEach(items) { original in
-                let item = library.items.first { $0.id == original.id } ?? original
-                MoviePosterLink(item: item, library: library, loader: loader, playback: playback,
-                                focus: focus, focusID: "all-\(item.id)")
+        LazyVGrid(columns: CinemaStyle.columns, spacing: 40, pinnedViews: [.sectionHeaders]) {
+            Section {
+                ForEach(items) { original in
+                    let item = library.items.first { $0.id == original.id } ?? original
+                    MoviePosterLink(item: item, library: library, loader: loader, playback: playback,
+                                    onFocus: { focusedTitle = item.title },
+                                    focus: focus, focusID: "all-\(item.id)")
+                }
+            } header: {
+                Text(focusedTitle.isEmpty ? " " : focusedTitle)
+                    .font(.title3).lineLimit(2, reservesSpace: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                    .background(CinemaStyle.canvas)
+                    .accessibilityHidden(true)
             }
         }
         .focusSection()
