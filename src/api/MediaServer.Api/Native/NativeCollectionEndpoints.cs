@@ -55,7 +55,8 @@ public static class NativeCollectionEndpoints
             return payload is null ? Results.NotFound() : Results.File(payload.Content, payload.ContentType,
                 entityTag: new EntityTagHeaderValue($"\"{payload.Tag}\""));
         }).WithName("GetNativeCollectionImage").RequireAuthorization()
-          .Produces(StatusCodes.Status200OK, contentType: "image/jpeg")
+          .Produces<Stream>(StatusCodes.Status200OK, contentType: "image/jpeg",
+              additionalContentTypes: ["image/png", "image/webp", "image/gif"])
           .Produces(StatusCodes.Status404NotFound);
     }
 

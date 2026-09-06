@@ -687,7 +687,29 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
           },
           "404": {
             "description": "Not Found"
@@ -2900,6 +2922,10 @@
           "FutureEpisodes"
         ],
         "type": "string"
+      },
+      "Stream": {
+        "type": "string",
+        "format": "binary"
       },
       "StudioDto": {
         "required": [

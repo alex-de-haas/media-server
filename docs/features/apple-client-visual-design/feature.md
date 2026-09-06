@@ -33,7 +33,9 @@ shows the title centered inside a neutral poster. VoiceOver retains the title,
 metadata, and watched/resume status. Collection cards retain their names.
 Artwork loads through the authenticated server loader, retaining the same
 geometry when missing or still loading. Collection member cards reuse the
-library's current state when available.
+library's current state when available, using a single ID lookup built per grid
+update. The collection artwork endpoint advertises JPEG, PNG, WebP, and GIF
+response formats in the native OpenAPI contract.
 
 Title and collection details preserve the server backdrop's color with localized
 black gradients under the left-hand text and along the bottom, without a white

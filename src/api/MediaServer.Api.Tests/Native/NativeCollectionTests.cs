@@ -6,6 +6,7 @@ using MediaServer.Api.Jellyfin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace MediaServer.Api.Tests.Native;
@@ -23,6 +24,14 @@ public sealed class NativeCollectionTests
         app.MapGroup(NativeEndpoints.RoutePrefix).AllowPublic().MapNativeCollectionEndpoints();
         var endpoints = ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints).ToArray();
         Assert.Equal(3, endpoints.Length);
+        var imageEndpoint = Assert.Single(endpoints.OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText!.EndsWith("/images/{imageType}"));
+        var imageResponse = Assert.Single(
+            imageEndpoint.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>(),
+            response => response.StatusCode == 200);
+        Assert.Equal(typeof(Stream), imageResponse.Type);
+        Assert.Equal(new[] { "image/gif", "image/jpeg", "image/png", "image/webp" },
+            imageResponse.ContentTypes.OrderBy(contentType => contentType));
         foreach (var endpoint in endpoints)
         {
             Assert.NotEmpty(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>());

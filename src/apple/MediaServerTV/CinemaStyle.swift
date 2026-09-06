@@ -180,9 +180,11 @@ struct LibraryPosterGrid: View {
     var focus: FocusState<String?>.Binding? = nil
 
     var body: some View {
+        let currentItems = Dictionary(library.items.map { ($0.id, $0) },
+                                      uniquingKeysWith: { first, _ in first })
         LazyVGrid(columns: CinemaStyle.columns, spacing: 40) {
             ForEach(items) { original in
-                let item = library.items.first { $0.id == original.id } ?? original
+                let item = currentItems[original.id] ?? original
                 MoviePosterLink(item: item, library: library, loader: loader, playback: playback,
                                 focus: focus, focusID: "all-\(item.id)")
             }

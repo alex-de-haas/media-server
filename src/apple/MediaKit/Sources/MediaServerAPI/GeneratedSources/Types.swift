@@ -277,8 +277,14 @@ extension APIProtocol {
     }
     /// - Remark: HTTP `GET /native/v1/collections/{id}/images/{imageType}`.
     /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)`.
-    public func getNativeCollectionImage(path: Operations.GetNativeCollectionImage.Input.Path) async throws -> Operations.GetNativeCollectionImage.Output {
-        try await getNativeCollectionImage(Operations.GetNativeCollectionImage.Input(path: path))
+    public func getNativeCollectionImage(
+        path: Operations.GetNativeCollectionImage.Input.Path,
+        headers: Operations.GetNativeCollectionImage.Input.Headers = .init()
+    ) async throws -> Operations.GetNativeCollectionImage.Output {
+        try await getNativeCollectionImage(Operations.GetNativeCollectionImage.Input(
+            path: path,
+            headers: headers
+        ))
     }
     /// - Remark: HTTP `GET /native/v1/items/{id}`.
     /// - Remark: Generated from `#/paths//native/v1/items/{id}/get`.
@@ -2354,6 +2360,8 @@ public enum Components {
             case seasons = "Seasons"
             case futureEpisodes = "FutureEpisodes"
         }
+        /// - Remark: Generated from `#/components/schemas/Stream`.
+        public typealias Stream = Swift.String
         /// - Remark: Generated from `#/components/schemas/StudioDto`.
         public struct StudioDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/StudioDto/name`.
@@ -5269,18 +5277,121 @@ public enum Operations {
                 }
             }
             public var path: Operations.GetNativeCollectionImage.Input.Path
+            /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeCollectionImage.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeCollectionImage.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.GetNativeCollectionImage.Input.Headers
             /// Creates a new `Input`.
             ///
             /// - Parameters:
             ///   - path:
-            public init(path: Operations.GetNativeCollectionImage.Input.Path) {
+            ///   - headers:
+            public init(
+                path: Operations.GetNativeCollectionImage.Input.Path,
+                headers: Operations.GetNativeCollectionImage.Input.Headers = .init()
+            ) {
                 self.path = path
+                self.headers = headers
             }
         }
         @frozen public enum Output: Sendable, Hashable {
             public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content/image\/jpeg`.
+                    case jpeg(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.jpeg`.
+                    ///
+                    /// - Throws: An error if `self` is not `.jpeg`.
+                    /// - SeeAlso: `.jpeg`.
+                    public var jpeg: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .jpeg(body):
+                                return body
+                            default:
+                                try throwUnexpectedResponseBody(
+                                    expectedContent: "image/jpeg",
+                                    body: self
+                                )
+                            }
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content/image\/png`.
+                    case png(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.png`.
+                    ///
+                    /// - Throws: An error if `self` is not `.png`.
+                    /// - SeeAlso: `.png`.
+                    public var png: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .png(body):
+                                return body
+                            default:
+                                try throwUnexpectedResponseBody(
+                                    expectedContent: "image/png",
+                                    body: self
+                                )
+                            }
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content/image\/webp`.
+                    case imageWebp(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.imageWebp`.
+                    ///
+                    /// - Throws: An error if `self` is not `.imageWebp`.
+                    /// - SeeAlso: `.imageWebp`.
+                    public var imageWebp: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .imageWebp(body):
+                                return body
+                            default:
+                                try throwUnexpectedResponseBody(
+                                    expectedContent: "image/webp",
+                                    body: self
+                                )
+                            }
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/native/v1/collections/{id}/images/{imageType}/GET/responses/200/content/image\/gif`.
+                    case imageGif(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.imageGif`.
+                    ///
+                    /// - Throws: An error if `self` is not `.imageGif`.
+                    /// - SeeAlso: `.imageGif`.
+                    public var imageGif: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .imageGif(body):
+                                return body
+                            default:
+                                try throwUnexpectedResponseBody(
+                                    expectedContent: "image/gif",
+                                    body: self
+                                )
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.GetNativeCollectionImage.Output.Ok.Body
                 /// Creates a new `Ok`.
-                public init() {}
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.GetNativeCollectionImage.Output.Ok.Body) {
+                    self.body = body
+                }
             }
             /// OK
             ///
@@ -5288,14 +5399,6 @@ public enum Operations {
             ///
             /// HTTP response code: `200 ok`.
             case ok(Operations.GetNativeCollectionImage.Output.Ok)
-            /// OK
-            ///
-            /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)/responses/200`.
-            ///
-            /// HTTP response code: `200 ok`.
-            public static var ok: Self {
-                .ok(.init())
-            }
             /// The associated value of the enum case if `self` is `.ok`.
             ///
             /// - Throws: An error if `self` is not `.ok`.
@@ -5352,6 +5455,49 @@ public enum Operations {
             ///
             /// A response with a code that is not documented in the OpenAPI document.
             case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case jpeg
+            case png
+            case imageWebp
+            case imageGif
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "image/jpeg":
+                    self = .jpeg
+                case "image/png":
+                    self = .png
+                case "image/webp":
+                    self = .imageWebp
+                case "image/gif":
+                    self = .imageGif
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .jpeg:
+                    return "image/jpeg"
+                case .png:
+                    return "image/png"
+                case .imageWebp:
+                    return "image/webp"
+                case .imageGif:
+                    return "image/gif"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .jpeg,
+                    .png,
+                    .imageWebp,
+                    .imageGif
+                ]
+            }
         }
     }
     /// - Remark: HTTP `GET /native/v1/items/{id}`.
