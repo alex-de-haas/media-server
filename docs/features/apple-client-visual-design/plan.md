@@ -62,12 +62,13 @@ when applicable, a short synopsis, and the selected version summary. Limit the
 synopsis to 3–4 lines with an explicit expansion action for longer descriptions.
 Preserve the watched mark, playback preparation state, and actionable refusals.
 
-Keep named editions discoverable through a compact version selector, with the
-current choice and its dynamic-range badges visible. Put container, size, full
-audio/subtitle lists, and detailed format information in a secondary panel or
-section. Keep compatibility notices such as Plays as HDR10 on this device next
-to the chosen version. The version choice must still determine playback;
-technical presentation must not change track selection or capability negotiation.
+Show all editions as selectable inline rows with a checkmark for the playback
+choice. Include container, video codec, size, dynamic-range badges and Dolby
+Vision profiles in each row so sources can be compared without opening a picker.
+Keep compatibility notices such as Plays as HDR10 on this device beside their
+source. Put full audio/subtitle lists in an expandable section for the selected
+version. The version choice must still determine playback; technical presentation
+must not change track selection or capability negotiation.
 
 ### Collections
 
@@ -144,7 +145,7 @@ order, not separate releases.
   SwiftUI previews for long titles and missing images.
 - [ ] Verify bright/dark backdrop previews and contrast with real artwork.
 - [x] Implement the cinematic title header, primary/secondary playback hierarchy,
-  synopsis expansion, and compact version/technical-detail presentation.
+  synopsis expansion, inline source rows with format badges, and expandable track details.
 - [x] Preserve playback refusals, compatibility notices, sidecar identification,
   selected-version semantics, and resume/watched refresh behavior.
 

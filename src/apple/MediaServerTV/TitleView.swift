@@ -16,7 +16,6 @@ struct TitleView: View {
     @State private var chosenVersion: String?
     @State private var expandedSynopsis = false
     @State private var showsTechnicalDetails = false
-    @State private var showsVersions = false
     @FocusState private var focusedPlayPosition: Double?
 
     @State private var plan: PlaybackPlan?
@@ -322,18 +321,7 @@ struct TitleView: View {
 
             if let version = detail.versions.first(where: { $0.id == chosenVersion }) ?? detail.versions.first {
                 VStack(alignment: .leading, spacing: 20) {
-                    HStack(spacing: 24) {
-                        if detail.versions.count > 1 {
-                            Button {
-                                showsVersions = true
-                            } label: {
-                                Label(version.versionName ?? "Choose version", systemImage: "square.stack")
-                            }
-                        } else if let name = version.versionName {
-                            Text(name).font(.headline)
-                        }
-                        if let picture = version.video { dynamicRange(picture) }
-                    }
+                    versions(detail.versions)
                     Button(showsTechnicalDetails ? "Hide file details" : "Audio, subtitles & file details") {
                         showsTechnicalDetails.toggle()
                     }
@@ -349,14 +337,6 @@ struct TitleView: View {
         .padding(CinemaStyle.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .defaultFocus($focusedPlayPosition, detail.resumeSeconds)
-        .sheet(isPresented: $showsVersions) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 32) {
-                    versions(detail.versions)
-                    Button("Done") { showsVersions = false }
-                }.padding(CinemaStyle.inset)
-            }
-        }
     }
 
     private func facts(_ detail: TitleDetail) -> String {
@@ -382,19 +362,23 @@ struct TitleView: View {
             ForEach(versions) { version in
                 Button {
                     chosenVersion = version.id
-                    showsVersions = false
                 } label: {
-                    HStack {
+                    HStack(spacing: 20) {
                         Image(systemName: version.id == chosenVersion ? "checkmark.circle.fill" : "circle")
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 10) {
                             Text(version.versionName ?? version.container.uppercased())
-                            Text("\(version.container.uppercased()) · \(version.sizeDescription)")
+                            Text([version.container.uppercased(), version.video?.codec?.uppercased(), version.sizeDescription]
+                                .compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if let picture = version.video { dynamicRange(picture) }
                         }
                         Spacer()
                     }
+                    .padding(.vertical, 8)
                 }
+                .buttonStyle(.bordered)
+                .accessibilityValue(version.id == chosenVersion ? "Selected for playback" : "")
             }
         }
     }

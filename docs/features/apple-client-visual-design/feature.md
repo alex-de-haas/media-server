@@ -28,10 +28,11 @@ library's current state when available.
 Title detail uses the existing server backdrop with horizontal and vertical
 theme-adaptive gradients (light in light mode, dark in dark mode),
 stronger coverage for increased contrast, and a neutral
-fallback. The title, facts, Play/Resume, and expandable synopsis lead. A compact
-version selector opens the existing editions list; full audio/subtitle lists,
-container, and size are revealed separately. Dynamic-range badges and fallback
-notices remain beside the current edition. The player, capability negotiation,
+fallback. The title, facts, Play/Resume, and expandable synopsis lead. All sources
+appear as selectable inline rows with a checkmark identifying the playback choice.
+Each row shows the edition name, container, video codec, file size, and available
+dynamic-range badges (including the Dolby Vision profile) and fallback notices.
+Full audio/subtitle lists are revealed separately for the selected source. The player, capability negotiation,
 sidecar handling, and resume reporting retain their existing behavior.
 
 Settings separates playback from expandable capabilities and diagnostics.
