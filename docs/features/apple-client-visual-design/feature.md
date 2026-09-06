@@ -58,7 +58,9 @@ sidecar handling, and resume reporting retain their existing behavior.
 
 Title details group directors and creators in a compact Crew block with role
 labels. Cast appears in a horizontal row of portrait cards with names and
-character roles, retaining server billing order and neutral image fallbacks. Public portrait URLs use a separate loader
+character roles, retaining server billing order and neutral image fallbacks.
+Names use their actual line count, so the role follows directly without reserving
+an empty second name line. Public portrait URLs use a separate loader
 without server credentials. Credit cards accept visible focus so the remote can
 scroll horizontally through the cast; they do not open a person detail page.
 

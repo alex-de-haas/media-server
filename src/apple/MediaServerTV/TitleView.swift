@@ -368,7 +368,7 @@ struct TitleView: View {
                                         .frame(width: 196, height: 245)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
                                     Text(person.name).font(.callout.weight(.semibold))
-                                        .lineLimit(2, reservesSpace: true)
+                                        .lineLimit(2)
                                     Text(person.character ?? " ")
                                         .font(.caption).foregroundStyle(.secondary)
                                         .lineLimit(2, reservesSpace: true)
