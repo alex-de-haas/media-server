@@ -124,6 +124,14 @@ public enum DynamicRange {
     }
 }
 
+/// A cast credit in the server's billing order.
+public struct TitleCastMember: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let character: String?
+    public let profileURL: URL?
+}
+
 /// Everything a title's own screen shows.
 public struct TitleDetail: Equatable, Sendable {
     public let id: String
@@ -135,6 +143,9 @@ public struct TitleDetail: Equatable, Sendable {
     public let runtimeSeconds: Double?
     public let communityRating: Double?
     public let officialRating: String?
+    public let cast: [TitleCastMember]
+    public let directors: [String]
+    public let creators: [String]
 
     public let resumeSeconds: Double
     public let played: Bool
@@ -163,6 +174,12 @@ extension TitleDetail {
         self.runtimeSeconds = detail.runtimeTicks.map { Double($0) / 10_000_000 }
         self.communityRating = detail.communityRating
         self.officialRating = detail.officialRating
+        self.cast = detail.cast.map { credit in
+            TitleCastMember(id: "\(credit.provider):\(credit.providerId)", name: credit.name,
+                            character: credit.character, profileURL: credit.profileUrl.flatMap(URL.init(string:)))
+        }
+        self.directors = detail.directors
+        self.creators = detail.creators
         self.resumeSeconds = Double(detail.userData?.playbackPositionTicks ?? 0) / 10_000_000
         self.played = detail.userData?.played ?? false
         self.backdropPath = dto.images.backdrop

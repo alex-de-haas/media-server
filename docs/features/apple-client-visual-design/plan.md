@@ -157,6 +157,11 @@ order, not separate releases.
 - [x] Preserve playback refusals, compatibility notices, sidecar identification,
   selected-version semantics, and resume/watched refresh behavior.
 
+- [x] Map existing cast, directors, and creators into title details; show ordered
+  cast names, roles, and optional portraits with credential-free image loading.
+  Hide empty sections and make credit rows reachable with the remote. Verify
+  mapping/empty data in unit tests and scrolling to credits in the simulator.
+
 ### Phase 2 — library and navigation
 
 - [x] Add the four top-level tabs in the agreed order and preserve navigation,

@@ -12,6 +12,8 @@ struct TitleView: View {
     let playback: PlaybackService
 
     @Environment(\.colorScheme) private var systemColorScheme
+    // Cast portraits are public provider URLs and must never receive the server credential.
+    @State private var portraitLoader = ArtworkLoader(token: { nil })
     @State private var detail: TitleDetail?
     @State private var failure: String?
     @State private var chosenVersion: String?
@@ -330,10 +332,48 @@ struct TitleView: View {
                 }
                 .padding(.top, 20)
             }
+            credits(detail)
         }
         .padding(CinemaStyle.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .defaultFocus($focusedPlayPosition, detail.resumeSeconds)
+    }
+
+    @ViewBuilder
+    private func credits(_ detail: TitleDetail) -> some View {
+        if !detail.directors.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Directors").font(.title2)
+                TechnicalDetailRow { Text(detail.directors.joined(separator: ", ")).font(.body) }
+            }
+        }
+        if !detail.creators.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Creators").font(.title2)
+                TechnicalDetailRow { Text(detail.creators.joined(separator: ", ")).font(.body) }
+            }
+        }
+        if !detail.cast.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Cast").font(.title2)
+                // Eager rows give the focus engine targets even below the current viewport.
+                ForEach(detail.cast) { person in
+                    TechnicalDetailRow {
+                        HStack(spacing: 24) {
+                            ServerArtwork(url: person.profileURL, loader: portraitLoader, symbol: "person.fill")
+                                .frame(width: 80, height: 100)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(person.name).font(.headline)
+                                if let character = person.character, !character.isEmpty {
+                                    Text(character).font(.callout).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func facts(_ detail: TitleDetail) -> String {

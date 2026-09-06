@@ -680,3 +680,35 @@ struct LibraryCardVideoFormatTests {
         #expect(LibraryTitle(noYear)?.gridSubtitle == "")
     }
 }
+
+@Suite("Title credits")
+struct TitleCreditTests {
+    @Test("Cast order, roles, portraits and crew survive detail mapping")
+    func populatedCredits() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(item("film", "Film").utf8)) as? [String: Any])
+        var detail = try #require(json["detail"] as? [String: Any])
+        detail["cast"] = [
+            ["provider": "tmdb", "providerId": "2", "name": "First Actor", "character": "Captain", "profileUrl": "https://images.example/actor.jpg"],
+            ["provider": "tmdb", "providerId": "1", "name": "Second Actor"]
+        ]
+        detail["directors"] = ["First Director", "Second Director"]
+        detail["creators"] = ["Series Creator"]
+        json["detail"] = detail
+        let dto = try JSONDecoder().decode(Components.Schemas.NativeItemDto.self, from: JSONSerialization.data(withJSONObject: json))
+        let result = TitleDetail(dto)
+        #expect(result.cast.map(\.name) == ["First Actor", "Second Actor"])
+        #expect(result.cast.first?.character == "Captain")
+        #expect(result.cast.first?.profileURL?.absoluteString == "https://images.example/actor.jpg")
+        #expect(result.cast.last?.profileURL == nil)
+        #expect(result.cast.last?.character == nil)
+        #expect(result.directors == ["First Director", "Second Director"])
+        #expect(result.creators == ["Series Creator"])
+    }
+
+    @Test("Empty credits remain empty")
+    func emptyCredits() throws {
+        let dto = try JSONDecoder().decode(Components.Schemas.NativeItemDto.self, from: Data(item("film", "Film").utf8))
+        let detail = TitleDetail(dto)
+        #expect(detail.cast.isEmpty && detail.directors.isEmpty && detail.creators.isEmpty)
+    }
+}
