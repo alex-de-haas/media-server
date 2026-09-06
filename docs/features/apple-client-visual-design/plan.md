@@ -60,7 +60,8 @@ Do not stretch a poster into a backdrop.
 The first viewport contains the title, compact year/runtime/rating facts,
 primary Play or Resume from [time] action, a secondary From the Beginning action
 when applicable, a short synopsis, and the selected version summary. Limit the
-synopsis to 3–4 lines with an explicit expansion action for longer descriptions.
+synopsis to five lines. Make the text focusable and open the full description
+in a scrollable sheet on selection, without a separate Read synopsis button.
 Preserve the watched mark, playback preparation state, and actionable refusals.
 
 Show all editions as selectable inline rows with a checkmark for the playback
@@ -152,7 +153,7 @@ order, not separate releases.
   SwiftUI previews for long titles and missing images.
 - [ ] Verify bright/dark backdrop previews and contrast with real artwork.
 - [x] Implement the cinematic title header, primary/secondary playback hierarchy,
-  synopsis expansion, inline source rows with format badges, and expandable track details.
+  focusable synopsis with a full-text sheet, inline source rows with format badges, and expandable track details.
 - [x] Preserve playback refusals, compatibility notices, sidecar identification,
   selected-version semantics, and resume/watched refresh behavior.
 

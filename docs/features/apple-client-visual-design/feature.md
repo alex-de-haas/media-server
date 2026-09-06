@@ -38,7 +38,9 @@ black gradients under the left-hand text and along the bottom, without a white
 wash or blur. Detail screens with backdrop artwork use white text and dark
 controls in either system appearance; library and settings retain the system
 theme. Increased contrast strengthens the dark overlay. Details without a
-backdrop use the system-themed neutral background. The title, facts, Play/Resume, and expandable synopsis lead. All sources
+backdrop use the system-themed neutral background. The title, facts, Play/Resume, and a five-line synopsis lead. The synopsis itself
+is focusable and opens the full text in a scrollable sheet with a Close action;
+there is no separate Read synopsis button. All sources
 appear as selectable inline rows with a checkmark identifying the playback choice.
 Each row shows the edition name (or Original when unnamed), container, video
 codec, and file size on the left. Available dynamic-range badges (including the
