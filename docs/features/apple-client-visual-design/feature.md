@@ -34,8 +34,9 @@ theme-adaptive gradients (light in light mode, dark in dark mode),
 stronger coverage for increased contrast, and a neutral
 fallback. The title, facts, Play/Resume, and expandable synopsis lead. All sources
 appear as selectable inline rows with a checkmark identifying the playback choice.
-Each row shows the edition name, container, video codec, file size, and available
-dynamic-range badges (including the Dolby Vision profile) and fallback notices.
+Each row shows the edition name (or Original when unnamed), container, video
+codec, and file size on the left. Available dynamic-range badges (including the
+Dolby Vision profile) and fallback notices sit on the right.
 Full audio/subtitle lists are revealed separately for the selected source. The player, capability negotiation,
 sidecar handling, and resume reporting retain their existing behavior.
 

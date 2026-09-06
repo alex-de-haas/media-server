@@ -66,6 +66,8 @@ Preserve the watched mark, playback preparation state, and actionable refusals.
 Show all editions as selectable inline rows with a checkmark for the playback
 choice. Include container, video codec, size, dynamic-range badges and Dolby
 Vision profiles in each row so sources can be compared without opening a picker.
+Place format badges and compatibility notices on the right, with name and file
+parameters on the left; label unnamed sources Original.
 Keep compatibility notices such as Plays as HDR10 on this device beside their
 source. Put full audio/subtitle lists in an expandable section for the selected
 version. The version choice must still determine playback; technical presentation

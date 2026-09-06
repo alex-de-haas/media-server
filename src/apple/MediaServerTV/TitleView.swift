@@ -366,14 +366,17 @@ struct TitleView: View {
                     HStack(spacing: 20) {
                         Image(systemName: version.id == chosenVersion ? "checkmark.circle.fill" : "circle")
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(version.versionName ?? version.container.uppercased())
+                            Text(version.versionName.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } ?? "Original")
                             Text([version.container.uppercased(), version.video?.codec?.uppercased(), version.sizeDescription]
                                 .compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            if let picture = version.video { dynamicRange(picture) }
                         }
-                        Spacer()
+                        Spacer(minLength: 32)
+                        if let picture = version.video {
+                            dynamicRange(picture, alignment: .trailing)
+                                .multilineTextAlignment(.trailing)
+                        }
                     }
                     .padding(.vertical, 8)
                 }
@@ -402,16 +405,18 @@ struct TitleView: View {
     /// profile 7 earns on this device. Text marks rather than logos: the Dolby Vision mark is licensed, and a
     /// capsule reads the same.
     @ViewBuilder
-    private func dynamicRange(_ picture: TitleTrack) -> some View {
+    private func dynamicRange(_ picture: TitleTrack, alignment: HorizontalAlignment = .leading) -> some View {
         let badges = picture.dynamicRangeBadges
         if !badges.isEmpty {
-            HStack(spacing: 12) {
-                ForEach(badges, id: \.self) { badge in
-                    Text(badge)
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(.secondary.opacity(0.25), in: Capsule())
+            VStack(alignment: alignment, spacing: 8) {
+                HStack(spacing: 12) {
+                    ForEach(badges, id: \.self) { badge in
+                        Text(badge)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(.secondary.opacity(0.25), in: Capsule())
+                    }
                 }
 
                 if let note = picture.dolbyVisionNote {
