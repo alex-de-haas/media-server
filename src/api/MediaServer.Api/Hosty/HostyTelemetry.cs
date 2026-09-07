@@ -1,3 +1,4 @@
+using MediaServer.Api.Library;
 using OpenTelemetry;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
@@ -42,6 +43,7 @@ internal static class HostyTelemetry
             .WithTracing(tracing => tracing
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
+                .AddSource(LibraryDiagnostics.SourceName)
                 .AddOtlpExporter())
             .WithMetrics(metrics => metrics
                 .AddAspNetCoreInstrumentation()
