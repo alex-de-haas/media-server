@@ -54,9 +54,9 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         public var asideRequestedBytes: Int64 = 0
         public var lastRestart: Restart?
 
-        /// The small readers the window is keeping, and how far apart the lowest and highest are.
-        /// Two readers tens of megabytes apart is the shape the third run found; a window that
-        /// follows only one of them is the shape of every run before it.
+        /// The readers still reading, and how far apart the lowest and highest are. Two readers tens
+        /// of megabytes apart is the shape the third run found; a window that follows only one of them
+        /// is the shape of every run before it.
         public var readers = 0
         public var readerSpread: Int64 = 0
     }
@@ -84,6 +84,11 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     private let origin: URL
     private let tail: Int64
     private let lag: Int64
+
+    /// How long after its last read a reader still counts as reading. A reader that has fallen
+    /// quiet this long is not consulted about where the window goes: after a forward seek, the
+    /// reader left behind stops, and the one at the new place takes over once it has.
+    private let quiet: TimeInterval
     private let relay = Relay()
     private let session: URLSession
 
@@ -143,11 +148,14 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     }
 
     init(origin: URL, budget: Int, tail: Int64, lag: Int64, target: Double,
-         configuration: URLSessionConfiguration) {
+         configuration: URLSessionConfiguration, readers: ReaderLedger = ReaderLedger(),
+         quiet: TimeInterval = 2) {
         self.origin = origin
         self.tail = tail
         self.lag = lag
         self.target = target
+        self.readers = readers
+        self.quiet = quiet
         self.window = ByteWindow(start: 0, budget: budget)
         self.assetURL = Self.assetURL(for: origin)
 
@@ -230,8 +238,9 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         guard !stopped, !isStopping else { return false }
 
         pending.append(request)
-        if let data = request.loadingData,
-           Self.isDemand(length: data.requestedLength, toEnd: data.requestsAllDataToEndOfResource) {
+        // Every bounded read is a reader's footprint, whatever its size. An open-ended one is not: it
+        // begins somewhere and takes whatever it is given, which says nothing about where it reads.
+        if let data = request.loadingData, !data.requestsAllDataToEndOfResource {
             readers.observe(offset: data.requestedOffset, length: data.requestedLength, at: Self.uptime)
         }
 
@@ -350,30 +359,37 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         // happens to be pending: the play-head reader is between reads most of the time, and a window
         // that followed the pending reads followed the reader ahead of it instead — the third run's
         // forty megabytes of play-head reads fetched one by one behind a window full of the future.
-        readers.expire(at: Self.uptime)
+        let now = Self.uptime
+        readers.expire(at: now)
 
-        // A settled reader the window does not hold and the fill will not reach is a seek, or a reader
-        // the window ran ahead of. Either way the window restarts for it, and only it stays known. One
-        // a little behind the start is not a stray: the fourth run showed a seek settling by steps of
-        // a megabyte or two *backwards* — the keyframe before the target — and a window discarded at
-        // every step. Within a tail, the separate fetches carry it the short way instead.
-        let strays = readers.settled.filter { reader in
-            if window.holds(reader.last) { return false }
-            let behind = window.start - reader.last
-            if behind > 0, behind <= tail { return false }
-            return window.place(reader.last, lag: lag) != .ahead
-        }
-        if let stray = strays.min(by: { $0.last < $1.last }) {
-            // The reader's own read at that offset, when a speculative one begins there too.
+        // A settled reader somewhere the window does not hold and the fill will not reach is a seek,
+        // or a window that ran ahead of the play head, and the window restarts for it — unless a
+        // reader below it is still reading from the window, settled or not. A stray far *above* one
+        // the window serves is the speculative reader or the probe AVFoundation makes at the middle
+        // of a film — the fifth run counted the window sent to the middle of a sixty-gigabyte file
+        // on a spinning disk once per re-seat — and its reads are fetched on their own instead. The
+        // play head at the start of a film is served from its first read, so a speculative reader
+        // that settles first still waits. The same probe made past the middle is *below* the play
+        // head and never restarts anything: the ledger does not settle a reader on a probe's two
+        // reads, and a seek shows itself by reading on. After a forward seek the reader left behind
+        // falls quiet, and the reader at the new place has nothing served below it; a backward seek
+        // has nothing below it at all, and restarts at once. One a little behind the start is not a
+        // stray in the first place: the fourth run showed a seek settling by steps of a megabyte or
+        // two *backwards*, on the keyframe before its target, and a window discarded at every step.
+        // Within a tail, the separate fetches carry it the short way.
+        let waiting = Set(live.map { $0.data.requestedOffset })
+        let reading = readers.reading(at: now, quiet: quiet, waiting: waiting)
+        let served = reading.filter { !isStray($0) }.map(\.last).min()
+        let strays = reading.filter { $0.reads > ReaderLedger.probeReads && isStray($0) }
+        if let stray = strays.min(by: { $0.last < $1.last }), served.map({ stray.last < $0 }) ?? true {
+            // The reader's own read at that offset, when a bigger one begins there too.
             let there = live.filter { $0.owed.lowerBound == stray.last }
-            let cause = there.first {
-                Self.isDemand(length: $0.data.requestedLength, toEnd: $0.data.requestsAllDataToEndOfResource)
-            } ?? there.first
+            let cause = there.min { $0.data.requestedLength < $1.data.requestedLength }
             lastRestart = Restart(
                 windowStart: window.start, windowEnd: window.end, offset: stray.last,
                 requestedLength: cause?.data.requestedLength ?? Int(stray.next - stray.last),
                 toEnd: cause?.data.requestsAllDataToEndOfResource ?? false)
-            Self.log.notice("Window reset: [\(self.window.start), \(self.window.end)) -> \(stray.last) for a reader of \(stray.reads) reads; \(self.readers.settled.count) settled, pending \(self.pending.count)")
+            Self.log.notice("Window reset: [\(self.window.start), \(self.window.end)) -> \(stray.last) for a reader of \(stray.reads) reads; \(reading.count) reading, pending \(self.pending.count)")
             // A tail before the reader rather than at it, for the same backward steps: a seek's first
             // read is at the target, and the ones that follow are at the keyframe before it.
             restart(at: max(0, stray.last - tail))
@@ -381,12 +397,14 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             readers.keep(only: stray)
         }
 
-        // Behind the lowest reader, minus a tail. With no settled reader the lowest continuing
-        // request inside the window stands in — an open-ended request may be the only consumer of the
-        // film, and without this its consumed bytes would fill the budget for ever with no refill.
-        // The end is inclusive on purpose: a reader that has consumed everything held stands one
-        // past the last byte, and that is exactly the moment the window must move on from it.
-        if let lowest = readers.lowest {
+        // Behind the lowest reader the window can still serve, minus a tail: one farther below the
+        // start than that is a probe of a place passed, or is about to restart the window itself.
+        // With no reader known the lowest continuing request inside the window stands in — an
+        // open-ended request may be the only consumer of the film, and without this its consumed
+        // bytes would fill the budget for ever with no refill. The end is inclusive on purpose: a
+        // reader that has consumed everything held stands one past the last byte, and that is
+        // exactly the moment the window must move on from it.
+        if let lowest = readers.lowest(atOrAbove: window.start - tail) {
             demand = lowest
         } else if let offset = lowestReader, offset >= window.start, offset <= window.end {
             demand = offset
@@ -444,18 +462,14 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         publish()
     }
 
-    /// Whether a request is one of the readers the window follows, as opposed to the speculative one.
-    ///
-    /// Measured, not assumed: the reads that follow the play head were half a megabyte to one, the
-    /// audio reader's sixty-four kilobytes, and the speculative ones two megabytes to twenty, or
-    /// open-ended. The line sits halfway across that gap. Reads on this side of it are entered in
-    /// the ledger; the ledger, not the pending list, decides where the window stands.
-    nonisolated static func isDemand(length: Int, toEnd: Bool) -> Bool {
-        !toEnd && length <= Self.demandLimit
+    /// Whether a reader is somewhere the window neither holds nor will reach by filling, and not
+    /// merely a little behind the start.
+    private func isStray(_ reader: ReaderLedger.Reader) -> Bool {
+        if window.holds(reader.last) { return false }
+        let behind = window.start - reader.last
+        if behind > 0, behind <= tail { return false }
+        return window.place(reader.last, lag: lag) != .ahead
     }
-
-    /// A megabyte and a half: above every play-head read seen, below every speculative one.
-    nonisolated static let demandLimit = 3 << 19
 
     private func restart(at offset: Int64) {
         fetch?.cancel()
@@ -591,6 +605,8 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
     }
 
     private func publish() {
+        let waiting = Set(pending.compactMap { $0.loadingData?.requestedOffset })
+        let reading = readers.active(at: Self.uptime, quiet: quiet, waiting: waiting)
         let copy = Snapshot(
             windowBytes: window.count,
             aheadBytes: max(0, window.end - max(demand, window.start)),
@@ -605,8 +621,8 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
             asideSmall: asideSmall,
             asideRequestedBytes: asideRequestedBytes,
             lastRestart: lastRestart,
-            readers: readers.settled.count,
-            readerSpread: readers.spread)
+            readers: reading.count,
+            readerSpread: (reading.map(\.last).max() ?? 0) - (reading.map(\.last).min() ?? 0))
 
         shared.withLock { snapshot = copy }
     }

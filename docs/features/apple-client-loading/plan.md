@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-31
-Updated: 2026-09-06
+Updated: 2026-09-07
 
 > Feed the player its bytes ourselves, instead of handing it a URL and hoping.
 > Sits between [apple-client](../apple-client/feature.md) and
@@ -164,7 +164,21 @@ after it is a change of policy rather than a leap.
       as the re-seated player's readers moved on. That is the original wedge, with the
       loader now ruling out starvation as its cause. From 0.9.6 the overlay keeps the
       loader's figures at the instant of a stall and at the buffer's lowest point, since
-      the instant was over before it could be photographed.
+      the instant was over before it could be photographed. **Fifth run, 0.10.2, a
+      different film — a 60.7 GB remux with EAC3 audio on the server's spinning disk:**
+      unwatchable, stalls throughout, and with the loader off it did not play at all.
+      The play head read this film in pieces of two to four megabytes, above the
+      megabyte-and-a-half line that told readers apart by the size of their reads, so
+      the ledger held the audio reader alone — one sixty-four-kilobyte read per EAC3
+      frame, thirty a second — and the window followed it: 275 separate fetches
+      averaging two to four megabytes, a hundred behind the window, and the window sent
+      to the exact middle of the file at every re-seat, where AVFoundation's two-read
+      probe had settled as a reader. The server log also shows the disk itself stalling:
+      five episodes of about ten seconds at "disk 100%" in ten minutes, which no client
+      rule reaches, and which a window placed at the play head rides through where direct
+      reads cannot. 0.10.3 enters every bounded read in the ledger, settles a reader on
+      its third read so the probe never counts, moves the window only for the lowest
+      reader still reading, and trims behind the lowest reader the window can still serve.
 - [x] Direct play is left on the plain `AVURLAsset`. It has the same player and the same
       stalls but no synthesised container, and it earns the loader only once the remux
       path has proved it — as a deliverable of its own, not a widening of this one.

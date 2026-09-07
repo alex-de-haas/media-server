@@ -214,27 +214,42 @@ the budget has drained. Bounded rather than open-ended because a connection nobo
 server aborts.
 
 **The window keeps every reader it has seen, placed by a ledger rather than by what is pending.**
-AVFoundation reads a film with more than one reader: one at the play head, in pieces of a megabyte
-or less, one a few seconds ahead of it taking sixty-four kilobytes of audio frames at a time, and a
-speculative one tens of megabytes ahead in pieces of two to twenty or open-ended. The third
-television run measured what following the pending reads does: the play-head reader is between
-reads most of the time, so the trim followed the audio reader, threw the play head's bytes away,
-and every read at the play head became a fetch of its own — five hundred of them, all behind the
-window, the window itself discarded and refilled forty megabytes back once every two seconds.
+AVFoundation reads a film with more than one reader: one at the play head, one a few seconds
+ahead of it taking sixty-four kilobytes of audio frames at a time, and a speculative one tens of
+megabytes ahead in bigger pieces or open-ended. The third television run measured what following
+the pending reads does: the play-head reader is between reads most of the time, so the trim
+followed the audio reader, threw the play head's bytes away, and every read at the play head
+became a fetch of its own — five hundred of them, all behind the window, the window itself
+discarded and refilled forty megabytes back once every two seconds. The fifth run measured what
+telling the readers apart by the size of their reads does: on one film the play head read in
+pieces of half a megabyte to one, on the next in pieces of two to four, and on the second film
+the rule took the play head for the speculative reader and the window followed the audio again.
 
-So bounded requests of a megabyte and a half or less are entered in a `ReaderLedger`, which tells
-readers apart by continuity: a read beginning within a little of where a known reader stopped is
-that reader continuing, anything else is a new one. The window is trimmed behind the *lowest*
-reader in the ledger, whether or not it is pending at that moment, minus a tail. A single read is
-a probe until it is followed — the end of the file is looked at once when playback starts — and a
-reader not heard from for five seconds is forgotten. When a reader the ledger trusts is somewhere
-the window does not hold and the fill will not reach, that is a seek or a window that ran ahead
-of it, and the window restarts a tail *before* it with only that reader kept. Before rather than
-at, and a reader within a tail behind the start carried by separate fetches rather than restarted
-for, because the fourth run showed how a seek settles: by steps of a megabyte or two backwards, on
-the keyframe before its target, and a window discarded at every step. With no reader in the ledger
-the lowest continuing request inside the window stands in, so a film read by one open-ended request
-still moves. A request beyond a full window is fetched separately when no fill can reach it.
+So every bounded request, whatever its size, is entered in a `ReaderLedger`, which tells readers
+apart by continuity: a read beginning within a little of where a known reader stopped is that
+reader continuing, anything else is a new one. A reader is a probe until it has read three
+times, because AVFoundation looks at the end of the file once when playback starts and at the
+exact middle twice, at the start and after every re-seat, and the window never goes to a probe.
+A reader not heard from for five seconds is forgotten. The window is trimmed behind the *lowest*
+reader it can still serve — at or above a tail below its start — probe or not, and whether or not
+that reader is pending at the moment, minus a tail: the play head at the start of a film has read
+once, and its bytes are the last to throw away. One farther below the start is a probe of a place
+passed, or about to restart the window itself.
+
+A settled reader somewhere the window does not hold and the fill will not reach is a seek, or a
+window that ran ahead of it, and the window restarts a tail *before* it with only that reader
+kept — unless a reader below it is *still reading* from the window, settled or not: one heard from
+within two seconds, or with a read outstanding. A stray far above one the window serves is the
+speculative reader or the probe, and its reads are fetched separately instead; the fifth run
+counted the window sent to the middle of a sixty-gigabyte file on a spinning disk at every re-seat
+under the rule before this one. After a forward seek the reader left behind falls quiet and the
+reader at the new place has nothing served below it; a backward seek has nothing below it at all
+and restarts at once. Before rather than at, and a reader within a tail behind the start
+carried by separate fetches rather than restarted for, because the fourth run showed how a seek
+settles: by steps of a megabyte or two backwards, on the keyframe before its target, and a window
+discarded at every step. With no reader in the ledger the lowest continuing request inside the
+window stands in, so a film read by one open-ended request still moves. A request beyond a full
+window is fetched separately when no fill can reach it.
 
 **Each request has one data producer at a time.** While a separate HTTP response is outstanding,
 the window does not answer that request, even if a seek or refill makes its bytes available.
@@ -246,8 +261,8 @@ It also reports separate fetches behind and ahead of the window, how many reques
 the triggering offset, request length, and whether it requests the rest of the resource.
 Each reset is also written to the loader log without URLs or tokens. The overlay identifies
 the running client version. These readings diagnose false resets during continuous playback;
-the size-based request classification does not establish that the viewer actually sought. The
-overlay also shows how many readers the ledger holds and how far apart they are: two, tens of
+a reset alone does not establish that the viewer actually sought. The
+overlay also shows how many readers are still reading and how far apart they are: two, tens of
 megabytes apart, is the measured shape; one is a window following the wrong thing again. And it
 keeps the loader's figures — window, ahead, readers, separate fetches — from the instant of the
 last stall and from the buffer's lowest point, because those instants are over before anyone can
@@ -709,16 +724,21 @@ Collection reads exclude removed movies from counts, members, and poster fallbac
 - **The card follows the title screen** (`LibraryStoreTests.detailRefreshesTheCard`): a
   title the feed called never started shows the resume point and then the tick after its
   screen is fetched, without the feed being read again.
-- **The reader ledger** (`ReaderLedgerTests`): contiguous reads are one reader and it settles on
-  the second; a read far from every reader is a new one and the lowest is what the window keeps
-  even when the reader ahead read last; a request re-issued for the rest of a range continues its
-  reader; a single read is a probe; a reader unheard within the patience is forgotten; after a
-  restart only the reader it was made for is known.
+- **The reader ledger** (`ReaderLedgerTests`): contiguous reads are one reader and it settles once
+  it has read more than a probe does; a read far from every reader is a new one and the lowest is
+  what the window keeps even when the reader ahead read last; a request re-issued for the rest of
+  a range continues its reader; one or two reads are a probe; a reader unheard within the patience
+  is forgotten; after a restart only the reader it was made for is known; only readers heard from
+  lately or still waiting for an answer are reading, and only the settled ones among them may move
+  the window; the lowest at or above a floor counts a probe and ignores a reader far below the
+  window.
 - Loader lifecycle tests use controlled HTTP responses and verify byte identity across repeated
   refills, a delayed separate response overlapping a seek, cancellation of its HTTP task, a
-  speculative request beyond a full window, preservation of the next small play-head read, and a
+  speculative request beyond a full window, preservation of the next small play-head read, a
   reader a little behind the window carried aside while one farther back restarts it a tail
-  earlier.
+  earlier, a settled reader far ahead and a probe far behind each fetched separately without moving
+  the window, a play head of one read keeping the window while a speculative reader settles ahead
+  of it, and a forward seek restarting the window only once the reader it left falls quiet.
   A long hardware playback check covers sound continuity, recovery, seeking, and Dolby Vision;
   package tests do not establish those hardware outcomes.
 

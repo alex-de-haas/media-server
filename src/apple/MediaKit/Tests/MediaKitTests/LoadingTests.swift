@@ -234,63 +234,54 @@ struct WedgeDetectorTests {
     }
 }
 
-/// Which reads enter the ledger. The first television run showed what happens when the speculative
-/// reader moves the window: twenty requests a second, a hundred megabytes held ahead of the film.
-@Suite("Telling the readers apart")
-struct DemandTests {
-    @Test("A read at the play head or of audio is a reader's; a speculative or open-ended one is not")
-    func demand() {
-        #expect(RemuxLoader.isDemand(length: 65_536, toEnd: false))
-        #expect(RemuxLoader.isDemand(length: 1 << 20, toEnd: false))
-        #expect(RemuxLoader.isDemand(length: RemuxLoader.demandLimit, toEnd: false))
-        #expect(!RemuxLoader.isDemand(length: RemuxLoader.demandLimit + 1, toEnd: false))
-        // The smallest speculative read the log showed: two megabytes, and it must not anchor.
-        #expect(!RemuxLoader.isDemand(length: 2_000_000, toEnd: false))
-        #expect(!RemuxLoader.isDemand(length: 1_000, toEnd: true))
-    }
-}
-
 /// The ledger the window is placed by. The third television run measured why the pending list is
 /// not enough: the play-head reader is between reads most of the time, and the trim followed the
 /// audio reader forty megabytes ahead of it.
 @Suite("The reader ledger")
 struct ReaderLedgerTests {
     /// Byte-sized slack and patience, so the arithmetic is legible. The slack behind covers the
-    /// longest read here, as the loader's covers its largest small read.
+    /// longest read here, as the loader's covers the reads at the play head.
     private func ledger() -> ReaderLedger {
         ReaderLedger(slackBehind: 16, slackAhead: 8, patience: 5)
     }
 
-    @Test("Contiguous reads are one reader, and it settles on the second")
+    /// A reader of three reads from `offset`, each of `length`, the first at `time`.
+    private func settle(_ ledger: inout ReaderLedger, at offset: Int64, length: Int, from time: TimeInterval) {
+        for step in 0..<3 {
+            ledger.observe(offset: offset + Int64(step * length), length: length, at: time + Double(step) / 10)
+        }
+    }
+
+    @Test("Contiguous reads are one reader, and it settles once it has read more than a probe does")
     func oneReader() {
         var ledger = ledger()
         ledger.observe(offset: 100, length: 10, at: 0)
+        ledger.observe(offset: 110, length: 10, at: 0.1)
+        #expect(ledger.readers.count == 1)
         #expect(ledger.settled.isEmpty)
         #expect(ledger.lowest == nil)
 
-        ledger.observe(offset: 110, length: 10, at: 0.1)
+        ledger.observe(offset: 120, length: 10, at: 0.2)
         #expect(ledger.readers.count == 1)
         #expect(ledger.settled.count == 1)
-        #expect(ledger.lowest == 110)
+        #expect(ledger.lowest == 120)
     }
 
     @Test("A read far from every reader is a new one, and the lowest is what the window keeps")
     func twoReaders() {
         var ledger = ledger()
-        ledger.observe(offset: 100, length: 10, at: 0)
-        ledger.observe(offset: 110, length: 10, at: 0.1)
-        ledger.observe(offset: 500, length: 2, at: 0.2)      // audio, well ahead
-        ledger.observe(offset: 506, length: 2, at: 0.3)      // the next burst, within the slack
-        ledger.observe(offset: 120, length: 10, at: 0.4)     // the play head again
+        settle(&ledger, at: 100, length: 10, from: 0)
+        settle(&ledger, at: 500, length: 2, from: 1)          // audio, well ahead, in bursts
+        ledger.observe(offset: 130, length: 10, at: 2)        // the play head again
 
         #expect(ledger.readers.count == 2)
         #expect(ledger.settled.count == 2)
-        #expect(ledger.lowest == 120)
-        #expect(ledger.spread == 506 - 120)
+        #expect(ledger.lowest == 130)
+        #expect(ledger.spread == 504 - 130)
 
         // The reader ahead reading last does not move what the window keeps.
-        ledger.observe(offset: 512, length: 2, at: 0.5)
-        #expect(ledger.lowest == 120)
+        ledger.observe(offset: 512, length: 2, at: 2.1)
+        #expect(ledger.lowest == 130)
     }
 
     @Test("A request re-issued for the rest of a range continues its reader rather than starting one")
@@ -300,51 +291,81 @@ struct ReaderLedgerTests {
         ledger.observe(offset: 102, length: 13, at: 0.1)    // asked again for 102..<115
 
         #expect(ledger.readers.count == 1)
-        #expect(ledger.lowest == 102)
+        #expect(ledger.readers.first?.last == 102)
     }
 
-    @Test("A single read is a probe: it neither settles nor moves the lowest")
+    @Test("One or two reads are a probe: they neither settle nor move the lowest")
     func probe() {
         var ledger = ledger()
-        ledger.observe(offset: 100, length: 10, at: 0)
-        ledger.observe(offset: 110, length: 10, at: 0.1)
-        ledger.observe(offset: 9_000, length: 2, at: 0.2)   // the end of the file, looked at once
+        settle(&ledger, at: 100, length: 10, from: 0)
+        ledger.observe(offset: 9_000, length: 2, at: 1)     // the end of the file, looked at once
+        ledger.observe(offset: 4_500, length: 2, at: 1.1)   // the middle, looked at twice
+        ledger.observe(offset: 4_502, length: 2, at: 1.2)
 
+        #expect(ledger.readers.count == 3)
         #expect(ledger.settled.count == 1)
-        #expect(ledger.lowest == 110)
+        #expect(ledger.lowest == 120)
         #expect(ledger.spread == 0)
     }
 
     @Test("A reader not heard from within the patience is forgotten")
     func patience() {
         var ledger = ledger()
-        ledger.observe(offset: 100, length: 10, at: 0)
-        ledger.observe(offset: 110, length: 10, at: 0.1)
-        ledger.observe(offset: 500, length: 2, at: 0.2)
-        ledger.observe(offset: 506, length: 2, at: 0.3)
+        settle(&ledger, at: 100, length: 10, from: 0)
+        settle(&ledger, at: 500, length: 2, from: 0.5)
 
         ledger.expire(at: 4)
         #expect(ledger.settled.count == 2)
 
-        ledger.observe(offset: 512, length: 2, at: 4.5)
+        ledger.observe(offset: 506, length: 2, at: 4.5)
         ledger.expire(at: 6)
         #expect(ledger.settled.count == 1)
-        #expect(ledger.lowest == 512)
+        #expect(ledger.lowest == 506)
     }
 
     @Test("After a restart only the reader it was made for is still known")
     func keepOnly() {
         var ledger = ledger()
-        ledger.observe(offset: 100, length: 10, at: 0)
-        ledger.observe(offset: 110, length: 10, at: 0.1)
-        ledger.observe(offset: 5_000, length: 10, at: 0.2)  // a seek
-        ledger.observe(offset: 5_010, length: 10, at: 0.3)
+        settle(&ledger, at: 100, length: 10, from: 0)
+        settle(&ledger, at: 5_000, length: 10, from: 1)     // a seek
 
-        let seek = ledger.settled.first { $0.last == 5_010 }!
+        let seek = ledger.settled.first { $0.last == 5_020 }!
         ledger.keep(only: seek)
 
         #expect(ledger.readers.count == 1)
-        #expect(ledger.lowest == 5_010)
+        #expect(ledger.lowest == 5_020)
+    }
+
+    @Test("Only readers heard from lately, or still waiting for an answer, are reading")
+    func reading() {
+        var ledger = ledger()
+        settle(&ledger, at: 100, length: 10, from: 0)
+        settle(&ledger, at: 500, length: 2, from: 2)
+        ledger.observe(offset: 9_000, length: 2, at: 2.25)  // a probe, this moment
+
+        #expect(ledger.reading(at: 2.3, quiet: 1).map(\.last) == [504, 9_000])
+        #expect(ledger.reading(at: 2.3, quiet: 1, waiting: [120]).map(\.last) == [120, 504, 9_000])
+        // Only the settled ones may move the window.
+        #expect(ledger.active(at: 2.3, quiet: 1, waiting: [120]).map(\.last) == [120, 504])
+        // The quiet reader is still the one the window keeps behind.
+        #expect(ledger.lowest == 120)
+    }
+
+    @Test("The window keeps behind the lowest reader it can still serve, probe or not, but not one far below it")
+    func lowestAbove() {
+        var ledger = ledger()
+        settle(&ledger, at: 100, length: 10, from: 0)
+        settle(&ledger, at: 5_000, length: 10, from: 1)
+
+        #expect(ledger.lowest == 120)
+        #expect(ledger.lowest(atOrAbove: 4_000) == 5_020)
+        #expect(ledger.lowest(atOrAbove: 120) == 120)
+        #expect(ledger.lowest(atOrAbove: 6_000) == nil)
+
+        // The play head at the start of a film has read once; its bytes are kept all the same.
+        ledger.observe(offset: 0, length: 10, at: 2)
+        #expect(ledger.lowest == 120)
+        #expect(ledger.lowest(atOrAbove: 0) == 0)
     }
 }
 
