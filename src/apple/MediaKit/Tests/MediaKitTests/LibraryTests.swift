@@ -605,6 +605,21 @@ struct CollectionTests {
         guard case .failed = failed.state else { Issue.record("A server error is not an empty list"); return }
     }
 
+    @Test func reloadRecoversAfterServerUpgrade() async {
+        let (collections, transport) = store([
+            "/native/v1/collections": [
+                (404, ""),
+                (200, #"[{"id":"saga","name":"Saga","itemCount":2}]"#)
+            ]
+        ])
+        await collections.load()
+        #expect(collections.state == .unsupported)
+        await collections.load()
+        #expect(collections.state == .loaded)
+        #expect(collections.items.map(\.id) == ["saga"])
+        #expect(transport.tokensSeen.count == 2)
+    }
+
     @Test func decodesCollectionAndUsesBearer() async throws {
         let (collections, transport) = store([
             "/native/v1/collections": [(200, #"[{"id":"saga","name":"Saga","posterUrl":"/native/v1/collections/saga/images/primary","itemCount":2}]"#)],
