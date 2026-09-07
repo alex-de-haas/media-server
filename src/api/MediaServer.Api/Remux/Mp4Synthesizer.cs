@@ -628,8 +628,8 @@ internal static class Mp4Synthesizer
             0x01, 0xFF,                                         // horizontal centred, vertical bottom
             0x00, 0x00, 0x00, 0x00,                             // transparent background
             .. new byte[8],                                     // box record: the whole frame
-            .. new byte[8],                                     // style record: defaults
-            .. U32(0x00FFFFFF), 0xFF,                           // white text
+            .. U16(0), .. U16(0), .. U16(1), 0, 24,             // style: range, font ID, face, size
+            0xFF, 0xFF, 0xFF, 0xFF,                            // opaque white RGBA
         ];
 
         // A font table is required even when it says only "use something ordinary".
@@ -807,7 +807,9 @@ internal static class Mp4Synthesizer
             U64(0), U64(0), U32((uint)prepared.Timescale), U64((ulong)prepared.Duration),
             U16(PackedLanguage(track.Language)), U16(0));
 
-        var handler = isVideo ? "vide"u8.ToArray() : isText ? "text"u8.ToArray() : "soun"u8.ToArray();
+        // tx3g is an MPEG-4 subtitle track. The QuickTime "text" handler is discoverable
+        // in AVFoundation but does not deliver these samples to its subtitle renderer.
+        var handler = isVideo ? "vide"u8.ToArray() : isText ? "sbtl"u8.ToArray() : "soun"u8.ToArray();
         var hdlr = Full("hdlr", 0, 0, new byte[4], handler, new byte[12], [.. "MediaServer"u8, 0]);
 
         var mediaHeader = isVideo

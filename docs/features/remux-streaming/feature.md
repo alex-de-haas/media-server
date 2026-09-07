@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-09-04
+Updated: 2026-09-07
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -229,6 +229,12 @@ A SubRip or ASS sample is not a valid MP4 subtitle sample: `tx3g` wants a
 length-prefixed string, and the gaps between cues need empty samples that exist nowhere
 in Matroska. So the text is converted and carried in a **second `mdat` inside the
 header** — a film's dialogue is a hundred kilobytes against a source of gigabytes.
+The text track uses the MPEG-4 `sbtl` handler with a `tx3g` sample entry. Its default
+style names font 1 from the font table, uses a nonzero font size and opaque white RGBA,
+and keeps the 12-byte style record aligned with the following font table. AVFoundation
+can discover the legacy QuickTime `text` handler without delivering these subtitle cues.
+The stream ETag includes a representation revision so cached ranges from the older
+subtitle layout are not reused after this change.
 
 A subtitle **beside** the video joins the same path. It has no index and needs none —
 a film's dialogue is a hundred kilobytes, so a `.srt`, `.ass` or `.vtt` is parsed per
@@ -526,6 +532,10 @@ On a fast disc this changes nothing measurable: 8,800 reads there are millisecon
 disk this is for, where the same reads are seconds and playback stopped rather than played.
 
 ## Testing Expectations
+
+- Subtitle sample entries use the `sbtl` handler, a 12-byte visible style record and an
+  aligned font table. The Apple package also decodes a generated remux fixture through
+  AVPlayer and checks the emitted text and nonzero font size.
 
 - **The indexer**, over Matroska written by hand rather than remuxed — ffmpeg never
   laces, so the case that matters most cannot be produced any other way. All three

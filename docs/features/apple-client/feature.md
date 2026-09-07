@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-06
+Updated: 2026-09-07
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -16,7 +16,7 @@ First frame takes about ten seconds there against three on a Mac — the televis
 parsing the container's tables — and that is left as it is for now.
 
 What remains is planned in [`apple-client-core`](../apple-client-core/plan.md) and tracked by
-the [epic](plan.md): a track picker of our own, and the local mirror that was deliberately
+the [epic](plan.md): the local mirror that was deliberately
 deferred.
 
 ## Layout
@@ -565,6 +565,23 @@ The one thing it cannot do here is choose a track. The container carries a singl
 single subtitle, which is what made its header small enough to play at all, so AVKit's own
 picker has nothing to choose between. **Ours sits in the transport bar beside it**, built
 from the tracks the title screen already knows, so opening the menu costs no request.
+The custom **Audio Tracks** button uses a globe icon and appears when the edition has more
+than one audio track. The **Subtitles** button uses a captions bubble icon and appears
+when the edition has subtitle tracks; its menu includes **Off**. These buttons list
+the edition's tracks, while AVKit's built-in menus only see the tracks in the current stream.
+The globe distinguishes track selection from AVKit's waveform button for audio adjustments
+such as dialogue enhancement and loud-sound reduction.
+Both track menus lead each row with the language name in the device's locale and retain
+the source track title, distinguishing entries such as "Russian · full" and "English · full".
+Missing or undefined language is shown as "Unknown language". Audio rows also show the
+codec and channel count in a secondary line, for example "E-AC-3 · 6 ch". Missing details
+are omitted, and a channel count is not treated as evidence of a speaker layout.
+
+For remux playback the client explicitly selects the delivered subtitle option in
+AVFoundation after opening or replacing an item, including loader recovery. **Off** explicitly
+deselects it. This overrides automatic subtitle preferences that can otherwise leave a
+server-selected track hidden. Pending selection is cancelled when an item is replaced or
+playback ends. Direct play retains AVKit's own selection behavior.
 
 Choosing resolves the same edition with a different `audioStreamId`, replaces the player's
 item and seeks back to where the viewer was — exactly, because landing a second early
@@ -660,6 +677,17 @@ are described in [Apple client visual design](../apple-client-visual-design/feat
 Collection reads exclude removed movies from counts, members, and poster fallbacks.
 
 ## Testing Expectations
+
+- `TrackMenuTests` covers language and title combinations, localized language names,
+  codec formatting, channel counts and missing metadata without duplicated fallback labels.
+
+- `RemuxSubtitlesTests` exercises explicit selection, Off, cancellation and AVPlayer text
+  delivery from the server-generated `Fixtures/remux-subtitle.mp4`. The fixture contains
+  three seconds of generated black H.264 video and one English cue, "Visible subtitle",
+  from 0.5 to 2.5 seconds (after video dimensions become available),
+  remuxed by `MatroskaIndexer` and `Mp4Synthesizer` with `SubtitleDefault.Embedded`.
+  This verifies decoding on macOS; visible placement and switching on Apple TV require
+  a device check.
 
 - **The card follows the title screen** (`LibraryStoreTests.detailRefreshesTheCard`): a
   title the feed called never started shows the resume point and then the tick after its

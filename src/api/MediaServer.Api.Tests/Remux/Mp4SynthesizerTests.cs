@@ -781,6 +781,30 @@ public sealed class Mp4SynthesizerTests
     }
 
     [Fact]
+    public void Timed_text_uses_the_subtitle_handler_AVFoundation_renders()
+    {
+        var built = Build(WithSubtitles(), tracks: [1, 3]);
+        var handler = built.Reader.Find("moov/trak/mdia/hdlr").Last();
+
+        Assert.Equal("sbtl", Encoding.ASCII.GetString(built.Result.Header, handler.Start + 8, 4));
+    }
+
+    [Fact]
+    public void Timed_text_has_a_visible_style_and_an_aligned_font_table()
+    {
+        var built = Build(WithSubtitles(), tracks: [1, 3]);
+        var entry = built.Reader.SampleEntry(built.Reader.Find("moov/trak/mdia/minf/stbl/stsd").Last());
+        var bytes = built.Result.Header;
+
+        // tx3g has 38 fixed bytes: the 12-byte style record starts at byte 26.
+        Assert.Equal(new byte[] { 0, 0, 0, 0, 0, 1, 0, 24, 255, 255, 255, 255 },
+            bytes.AsSpan(entry.Start + 26, 12).ToArray());
+        var fontTable = Assert.Single(built.Reader.Children(entry.Start + 38, entry.End));
+        Assert.Equal("ftab", fontTable.Type);
+        Assert.Equal(new byte[] { 0, 1, 0, 1 }, bytes.AsSpan(fontTable.Start, 4).ToArray());
+    }
+
+    [Fact]
     public void Timed_text_samples_are_carried_in_the_header_rather_than_pointed_at()
     {
         var file = WithSubtitles();
