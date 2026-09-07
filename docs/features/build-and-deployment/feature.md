@@ -1,8 +1,7 @@
 # Build and Deployment
 
-Status: Implemented
 Created: 2026-06-15
-Updated: 2026-08-13
+Updated: 2026-09-07
 
 ## Description
 
@@ -53,8 +52,8 @@ hosty apps logs com.haas.media-server
   and tests against; both move together in one change.
 - `docker` is the default install profile; `dev` is used for local development.
   Catalog roots are bound through Hosty external host-path mounts (see
-  [Storage and data](storage-and-data/feature.md)). Image build/publish lands in M4 (see
-  [Implementation plan](implementation-plan.md)).
+  [Storage and data](../storage-and-data/feature.md)). Image build/publish lands in M4 (see
+  [Implementation plan](../implementation-plan.md)).
 
 ### Base images
 
@@ -81,7 +80,7 @@ The two services differ, and the difference is a property of what they touch:
 Dropping privileges in `api` therefore needs a uid/gid or supplementary-group
 contract from Hosty Core, which does not exist today — Core sets no `--user` and
 injects no uid. Recorded as a platform request (see
-[Hosty platform requests](hosty-platform-requests/feature.md), item 16). Until it lands, a
+[Hosty platform requests](../hosty-platform-requests/feature.md), item 16). Until it lands, a
 non-root `api` would fail to organize, ingest or mux on any catalog root it does
 not happen to own.
 
@@ -122,6 +121,22 @@ November 2028, while 3.x lists no released AspNetCore OpenAPI as supported. Unde
 `OpenApiXmlCommentSupport.generated.cs` fails with `CS0200`. The bound lifts when
 a released `Microsoft.AspNetCore.OpenApi` adopts 3.x.
 
+### Pull request review
+
+`.github/workflows/claude-code-review.yml` runs the Claude Code `code-review` plugin
+once per pull request - when the PR is opened as a non-draft, or when a draft is marked
+ready for review - and posts its findings as inline comments. It is advisory: the check is
+not required, and it does not run on later pushes; a fresh review needs the PR converted
+back to draft and marked ready again. The job is skipped, not failed, for drafts, fork
+PRs, and bot-authored PRs such as Dependabot's, because GitHub withholds repository
+secrets from the latter two.
+
+It authenticates with the `CLAUDE_CODE_OAUTH_TOKEN` repository secret, a Claude
+subscription token, and posts through a Claude GitHub App token obtained via OIDC, so the
+workflow's own `GITHUB_TOKEN` stays read-only. The action refuses to run when the workflow
+file differs from the copy on `main`, so a PR that changes the workflow itself gets no
+review.
+
 ## Manifest Update Discipline
 
 Keep stable across releases: app id, service keys (`api`, `web`), endpoint keys
@@ -142,3 +157,6 @@ ports/endpoints, settings, app data layout, UI navigation, and dependencies.
 
 Backend tests use xUnit and Imposter. CI must build both services and run the
 backend test suite. Image build and GHCR publish land with M4 (Docker delivery).
+The Claude review job runs only on eligible pull requests (non-draft, same-repository,
+human-authored) and is skipped rather than failed otherwise; it is advisory and not a
+required check.
