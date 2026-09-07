@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { launchModeBootstrapScript } from "@hosty-sdk/app";
-import { HostLaunchBridge } from "@hosty-sdk/app/react";
+import { HostLaunchBridge, HostThemeBridge } from "@hosty-sdk/app/react";
+import { themeBootstrapScript } from "@hosty-sdk/app/theme";
 import { Providers } from "@/components/providers";
-import { HostThemeBridge } from "@/components/host-theme-bridge";
 import { AppShell } from "@/components/app-shell";
 
 // Inter for everything the app renders — chrome, data-dense console, and media titles alike; Geist
@@ -36,8 +36,10 @@ export default function RootLayout({
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
-        {/* Ahead of any body markup, so chrome a shell already renders is never painted. */}
+        {/* Ahead of any body markup, so chrome a shell already renders is never painted, and the
+            first paint is already in the shell's theme. */}
         <script dangerouslySetInnerHTML={{ __html: launchModeBootstrapScript }} />
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
       </head>
       <body className="bg-background text-foreground min-h-full">
         <HostThemeBridge />

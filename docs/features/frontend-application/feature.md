@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-09-04
+Updated: 2026-09-07
 
 ## Description
 
@@ -100,9 +100,11 @@ section).
   players (e.g. Infuse) that sits *beside* the UI, not beneath it, and may be
   swapped for another protocol later. Both surfaces project from a shared,
   surface-neutral domain/read layer — they are siblings, not a dependency chain.
-- The app **inherits the Hosty Shell theme** (light/dark) via the Shell theme
-  bridge (initial `hosty_theme` URL params + `hosty:shell-theme` postMessage); it
-  ships both token sets and does not present its own theme toggle.
+- The app **inherits the Hosty Shell theme** (light/dark) through the SDK's theme
+  slice — `HostThemeBridge` from `@hosty-sdk/app/react` plus the
+  `themeBootstrapScript` in the root layout's head, which read the `hosty_theme`
+  launch params first and the `hosty:shell-theme` postMessage for later changes;
+  it ships both token sets and does not present its own theme toggle.
 - **`shadcn` is a build-time dependency, never a runtime one.** It lives in
   `devDependencies` and is used at build time twice: as the scaffolding CLI
   driven by `components.json`, and as the Tailwind layer that
