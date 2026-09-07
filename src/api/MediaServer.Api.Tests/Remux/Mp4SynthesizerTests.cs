@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using MediaServer.Api.Remux;
 using MediaServer.Api.Tests.Probe;
@@ -802,6 +803,34 @@ public sealed class Mp4SynthesizerTests
         var fontTable = Assert.Single(built.Reader.Children(entry.Start + 38, entry.End));
         Assert.Equal("ftab", fontTable.Type);
         Assert.Equal(new byte[] { 0, 1, 0, 1 }, bytes.AsSpan(fontTable.Start, 4).ToArray());
+    }
+
+    [Fact]
+    public void Timed_text_is_given_the_picture_to_be_drawn_in()
+    {
+        var built = Build(WithSubtitles(), tracks: [1, 3]);
+        var video = built.Index.Tracks.First(track => track.Kind == IndexedTrackKind.Video);
+        var width = (ushort)(video.DisplayWidth > 0 ? video.DisplayWidth : video.Width);
+        var height = (ushort)(video.DisplayHeight > 0 ? video.DisplayHeight : video.Height);
+        var bytes = built.Result.Header;
+
+        Assert.True(width > 0 && height > 0);
+
+        // A subtitle states no size of its own, and a track of no size is one a renderer draws nothing
+        // in — which the handler and the style record, both now correct, do nothing about. The last two
+        // fields of tkhd are the width and height, as 16.16.
+        var tkhd = built.Reader.Find("moov/trak/tkhd").Last();
+        Assert.Equal(
+            (uint)width << 16, BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(tkhd.End - 8, 4)));
+        Assert.Equal(
+            (uint)height << 16, BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(tkhd.End - 4, 4)));
+
+        // And the same again for the box the words go in: top, left, bottom, right at byte 18, where
+        // all-zero is an empty rectangle rather than the whole frame.
+        var entry = built.Reader.SampleEntry(built.Reader.Find("moov/trak/mdia/minf/stbl/stsd").Last());
+        Assert.Equal([0, 0, 0, 0], bytes.AsSpan(entry.Start + 18, 4).ToArray());
+        Assert.Equal(height, BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(entry.Start + 22, 2)));
+        Assert.Equal(width, BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(entry.Start + 24, 2)));
     }
 
     [Fact]

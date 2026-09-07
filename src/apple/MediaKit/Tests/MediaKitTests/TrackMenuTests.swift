@@ -30,7 +30,7 @@ struct TrackMenuTests {
         #expect(track(language: "eng", title: "full").menuTitle(locale: english) == "English · full")
     }
 
-    @Test("Untitled tracks do not repeat the legacy language-and-codec fallback")
+    @Test("An untitled track is named by its language alone, with the codec kept to the detail line")
     func untitled() {
         let audio = track(language: "eng", codec: "aac", channels: 2)
         #expect(audio.menuTitle(locale: english) == "English")
@@ -50,6 +50,14 @@ struct TrackMenuTests {
 
     @Test("Language names follow the display locale")
     func localizedLanguage() {
-        #expect(track(language: "en").menuTitle(locale: Locale(identifier: "ru")) == "английский")
+        // Against the locale's own answer rather than a spelling: ICU rewords and re-capitalises
+        // display names between OS releases, and a test that pins one fails on a new Xcode for no
+        // reason of ours. What this feature promises is that the name is the *locale's*, not the code.
+        let russian = Locale(identifier: "ru")
+        let name = track(language: "en").menuTitle(locale: russian)
+
+        #expect(name == russian.localizedString(forIdentifier: "en"))
+        #expect(name != "en")
+        #expect(name != track(language: "en").menuTitle(locale: english))
     }
 }

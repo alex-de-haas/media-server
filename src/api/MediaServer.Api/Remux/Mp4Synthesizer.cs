@@ -50,6 +50,17 @@ internal static class Mp4Synthesizer
     private const int MdatHeaderLength = 16;
 
     /// <summary>
+    /// The revision of the layout this class writes. It leads the stream's ETag and its cache key, so
+    /// <strong>any change to the bytes emitted here must bump it</strong>.
+    ///
+    /// Without that, a client holding cached ranges of the previous header mixes them with the new one
+    /// under the same tag and plays a container that is neither. The tag's other parts describe the
+    /// *source* — its length, its modification time, the tracks chosen — and none of them move when the
+    /// synthesiser's own output does, which is exactly the case this exists for.
+    /// </summary>
+    internal const string Revision = "mp4-v2";
+
+    /// <summary>
     /// One file whose samples may appear in the output. There is more than one when a sidecar is carried:
     /// an external dub is a second file, and its samples join the video's in the same container.
     /// </summary>
@@ -605,8 +616,10 @@ internal static class Mp4Synthesizer
             return null;
         }
 
+        // A placeholder entry: <see cref="Trak"/> rewrites it once the picture's size is known, which is
+        // not here — an external subtitle is prepared after every referenced track.
         return new Prepared(
-            track, "tx3g", TextEntry(), deltas, null, null, deltas.Sum(), placements,
+            track, "tx3g", TextEntry(default), deltas, null, null, deltas.Sum(), placements,
             InHeader: true, Input: 0, Timescale: timescale);
     }
 
@@ -619,7 +632,9 @@ internal static class Mp4Synthesizer
         return at;
     }
 
-    private static byte[] TextEntry()
+    /// <param name="frame">The picture's size. All-zero here is an <em>empty</em> rectangle rather than
+    /// a full one, and a renderer that honours it draws nothing — so the box is stated outright.</param>
+    private static byte[] TextEntry((ushort Width, ushort Height) frame)
     {
         byte[] body =
         [
@@ -627,9 +642,10 @@ internal static class Mp4Synthesizer
             .. U32(0),                                          // display flags
             0x01, 0xFF,                                         // horizontal centred, vertical bottom
             0x00, 0x00, 0x00, 0x00,                             // transparent background
-            .. new byte[8],                                     // box record: the whole frame
+            .. U16(0), .. U16(0),                               // box record top, left
+            .. U16(frame.Height), .. U16(frame.Width),          // box record bottom, right: the frame
             .. U16(0), .. U16(0), .. U16(1), 0, 24,             // style: range, font ID, face, size
-            0xFF, 0xFF, 0xFF, 0xFF,                            // opaque white RGBA
+            0xFF, 0xFF, 0xFF, 0xFF,                             // opaque white RGBA
         ];
 
         // A font table is required even when it says only "use something ordinary".
@@ -761,12 +777,15 @@ internal static class Mp4Synthesizer
     private static byte[] Assemble(
         IReadOnlyList<Prepared> tracks, long movieDuration, long textBase, IReadOnlyList<long> bases)
     {
+        // Found once and handed to every track: a subtitle is laid out in the picture's coordinates.
+        var frame = Frame(tracks);
+
         var traks = new List<byte[]>();
         for (var i = 0; i < tracks.Count; i++)
         {
             // Rewritten text lives in the header; everything else lives in the file it came from.
             var at = tracks[i].InHeader ? textBase : bases[tracks[i].Input];
-            traks.Add(Trak(tracks[i], i + 1, movieDuration, at));
+            traks.Add(Trak(tracks[i], i + 1, movieDuration, at, frame));
         }
 
         var mvhd = Full("mvhd", 1, 0,
@@ -777,7 +796,34 @@ internal static class Mp4Synthesizer
         return Box("moov", [mvhd, .. traks]);
     }
 
-    private static byte[] Trak(Prepared prepared, int id, long movieDuration, long sampleBase)
+    /// <summary>
+    /// The picture's size, which a subtitle track has to be told: it states none of its own, and both the
+    /// place its words go and the size they are drawn at are measured against the track's display region.
+    /// A track of no size therefore shows nothing at all — the defect that survived giving <c>tx3g</c> the
+    /// right handler and a visible style.
+    ///
+    /// Falls back to a 16:9 frame, which is only reachable for an output with no picture in it.
+    /// </summary>
+    private static (ushort Width, ushort Height) Frame(IReadOnlyList<Prepared> tracks)
+    {
+        foreach (var one in tracks.Where(one => one.Track.Kind == IndexedTrackKind.Video))
+        {
+            var width = one.Track.DisplayWidth > 0 ? one.Track.DisplayWidth : one.Track.Width;
+            var height = one.Track.DisplayHeight > 0 ? one.Track.DisplayHeight : one.Track.Height;
+
+            // The box record's fields are signed sixteen-bit, so a size that cannot be stated is no
+            // better than none. Nothing real comes close: 8K is 7680 wide.
+            if (width is > 0 and <= short.MaxValue && height is > 0 and <= short.MaxValue)
+            {
+                return ((ushort)width, (ushort)height);
+            }
+        }
+
+        return (1920, 1080);
+    }
+
+    private static byte[] Trak(
+        Prepared prepared, int id, long movieDuration, long sampleBase, (ushort Width, ushort Height) frame)
     {
         var track = prepared.Track;
         var isVideo = track.Kind == IndexedTrackKind.Video;
@@ -800,8 +846,14 @@ internal static class Mp4Synthesizer
             U16(0), U16((ushort)alternateGroup),
             U16((ushort)(isVideo || isText ? 0 : 0x0100)), new byte[2],
             UnityMatrix(),
-            U32(isVideo ? (uint)(track.DisplayWidth > 0 ? track.DisplayWidth : track.Width) << 16 : 0),
-            U32(isVideo ? (uint)(track.DisplayHeight > 0 ? track.DisplayHeight : track.Height) << 16 : 0));
+            // Text takes the picture's, because it is laid out inside the region this states and has
+            // none to state for itself. Audio keeps zero, which is what a track with nothing to show is.
+            U32(isVideo
+                ? (uint)(track.DisplayWidth > 0 ? track.DisplayWidth : track.Width) << 16
+                : isText ? (uint)frame.Width << 16 : 0),
+            U32(isVideo
+                ? (uint)(track.DisplayHeight > 0 ? track.DisplayHeight : track.Height) << 16
+                : isText ? (uint)frame.Height << 16 : 0));
 
         var mdhd = Full("mdhd", 1, 0,
             U64(0), U64(0), U32((uint)prepared.Timescale), U64((ulong)prepared.Duration),
@@ -819,7 +871,11 @@ internal static class Mp4Synthesizer
                 : Box("smhd", new byte[8]);
 
         var dinf = Box("dinf", Full("dref", 0, 0, U32(1), Full("url ", 0, 1)));
-        var minf = Box("minf", mediaHeader, dinf, Stbl(prepared, sampleBase));
+        // The sample entry's text box is measured in the same coordinates the track header just stated,
+        // so it is written here rather than when the cues were laid out — which is before the picture
+        // this belongs to is necessarily known, an external subtitle being prepared last of all.
+        var stbl = Stbl(isText ? prepared with { Entry = TextEntry(frame) } : prepared, sampleBase);
+        var minf = Box("minf", mediaHeader, dinf, stbl);
 
         // An edit list only appears where something has to be skipped, which is the AAC priming and
         // nothing else. Writing one that starts at zero would say the same as writing none at all.

@@ -233,8 +233,14 @@ The text track uses the MPEG-4 `sbtl` handler with a `tx3g` sample entry. Its de
 style names font 1 from the font table, uses a nonzero font size and opaque white RGBA,
 and keeps the 12-byte style record aligned with the following font table. AVFoundation
 can discover the legacy QuickTime `text` handler without delivering these subtitle cues.
-The stream ETag includes a representation revision so cached ranges from the older
-subtitle layout are not reused after this change.
+A subtitle states no size of its own, so **it is given the picture's**: the track header
+carries the video's width and height, and the sample entry's box record names that same
+rectangle. All-zero there is an empty rectangle rather than a full one, which is a region
+a renderer draws nothing in and a font size with nothing to scale against.
+The stream ETag leads with `Mp4Synthesizer.Revision`, a constant beside the layout it
+versions: bumping it retires every range a client cached of the previous representation,
+which nothing else in the tag does — the rest of it describes the source, and the source
+does not move when the synthesiser's output does.
 
 A subtitle **beside** the video joins the same path. It has no index and needs none —
 a film's dialogue is a hundred kilobytes, so a `.srt`, `.ass` or `.vtt` is parsed per
@@ -533,9 +539,14 @@ disk this is for, where the same reads are seconds and playback stopped rather t
 
 ## Testing Expectations
 
-- Subtitle sample entries use the `sbtl` handler, a 12-byte visible style record and an
-  aligned font table. The Apple package also decodes a generated remux fixture through
-  AVPlayer and checks the emitted text and nonzero font size.
+- Subtitle sample entries use the `sbtl` handler, a 12-byte visible style record, an
+  aligned font table, and the picture's dimensions in both the track header and the box
+  record. The stream's ETag leads with the synthesiser's revision.
+
+- `AppleSubtitleFixtureTests` rebuilds the Apple package's playable fixture from its
+  committed Matroska source and compares it byte for byte, so the file that package plays
+  through AVPlayer is this synthesiser's output and not a snapshot of an older one.
+  Regenerate it with `MEDIASERVER_WRITE_FIXTURES=1` after a deliberate change here.
 
 - **The indexer**, over Matroska written by hand rather than remuxed — ffmpeg never
   laces, so the case that matters most cannot be produced any other way. All three

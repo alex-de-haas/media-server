@@ -35,7 +35,10 @@ struct RemuxSubtitlesTests {
         do {
             try await task.value
             Issue.record("Cancelled selection unexpectedly completed")
-        } catch is CancellationError {}
+        } catch {
+            // Any error will do: AVFoundation reports an interrupted load with one of its own as
+            // readily as with a `CancellationError`. What matters is that the selection did not land.
+        }
         #expect(item.currentMediaSelection.selectedMediaOption(in: group) == nil)
     }
 

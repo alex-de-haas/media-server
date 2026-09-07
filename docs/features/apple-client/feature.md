@@ -576,12 +576,19 @@ the source track title, distinguishing entries such as "Russian · full" and "En
 Missing or undefined language is shown as "Unknown language". Audio rows also show the
 codec and channel count in a secondary line, for example "E-AC-3 · 6 ch". Missing details
 are omitted, and a channel count is not treated as evidence of a speaker layout.
+**The title screen's track lists read the same way**, from the same `menuTitle()`, so a
+viewer who opens the menu a moment later recognises the row they have already seen. There
+is one name for a track, not one per screen.
 
 For remux playback the client explicitly selects the delivered subtitle option in
 AVFoundation after opening or replacing an item, including loader recovery. **Off** explicitly
 deselects it. This overrides automatic subtitle preferences that can otherwise leave a
-server-selected track hidden. Pending selection is cancelled when an item is replaced or
-playback ends. Direct play retains AVKit's own selection behavior.
+server-selected track hidden — and the player is told to stop applying those preferences at
+all (`appliesMediaSelectionCriteriaAutomatically` off), so the device's own "Subtitles Off"
+cannot be put back over the choice when the current item changes. Pending selection is
+cancelled when an item is replaced or playback ends, and a cancelled one is silent whether
+AVFoundation reports it as a cancellation or as an error of its own. Direct play retains
+AVKit's own selection behavior.
 
 Choosing resolves the same edition with a different `audioStreamId`, replaces the player's
 item and seeks back to where the viewer was — exactly, because landing a second early
@@ -679,15 +686,16 @@ Collection reads exclude removed movies from counts, members, and poster fallbac
 ## Testing Expectations
 
 - `TrackMenuTests` covers language and title combinations, localized language names,
-  codec formatting, channel counts and missing metadata without duplicated fallback labels.
+  codec formatting, channel counts and missing metadata. An untitled track is named by its
+  language alone, the codec staying on the detail line rather than joining the name.
 
 - `RemuxSubtitlesTests` exercises explicit selection, Off, cancellation and AVPlayer text
-  delivery from the server-generated `Fixtures/remux-subtitle.mp4`. The fixture contains
-  three seconds of generated black H.264 video and one English cue, "Visible subtitle",
-  from 0.5 to 2.5 seconds (after video dimensions become available),
-  remuxed by `MatroskaIndexer` and `Mp4Synthesizer` with `SubtitleDefault.Embedded`.
-  This verifies decoding on macOS; visible placement and switching on Apple TV require
-  a device check.
+  delivery from `Fixtures/remux-subtitle.mp4`. Its source, `Fixtures/remux-subtitle.mkv`,
+  holds three seconds of generated black H.264 video and one English cue, "Visible
+  subtitle", from 0.5 to 2.5 seconds. The `.mp4` beside it is output rather than a
+  fixture: the server rebuilds it from that source on every run and compares it byte for
+  byte (`AppleSubtitleFixtureTests`), so it cannot drift away from the synthesiser it
+  came from.
 
 - **The card follows the title screen** (`LibraryStoreTests.detailRefreshesTheCard`): a
   title the feed called never started shows the resume point and then the tick after its

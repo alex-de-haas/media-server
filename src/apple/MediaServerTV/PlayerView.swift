@@ -1,6 +1,7 @@
 import AVKit
 import MediaKit
 import SwiftUI
+import os
 
 /// `AVPlayerViewController`, not a player of our own.
 ///
@@ -56,6 +57,16 @@ struct PlayerView: UIViewControllerRepresentable {
         // and while playback was no worse than it is now.
         let item = context.coordinator.feed(stream, ownLoader: ownLoader)
         let player = AVPlayer(playerItem: item)
+
+        // The server already chose the subtitle and the coordinator applies that choice to the item
+        // itself. Left on, this would let the player put the *device's* preference back over it
+        // whenever the current item changes or its selection is re-evaluated — which is the
+        // "Subtitles Off" setting that hid a server-selected track in the first place. Only on the
+        // remux path: direct play has no choice of ours to defend, and AVKit's own picker is what
+        // works there.
+        if stream.decision == .remux {
+            player.appliesMediaSelectionCriteriaAutomatically = false
+        }
 
         if startAt > 1 {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
@@ -160,6 +171,8 @@ struct PlayerView: UIViewControllerRepresentable {
 
     @MainActor
     final class Coordinator {
+        private static let log = Logger(subsystem: "com.haas.mediaserver", category: "playback")
+
         private let onFinished: (Double) -> Void
         private let diagnostics: PlaybackDiagnostics?
         private var token: Any?
@@ -224,9 +237,15 @@ struct PlayerView: UIViewControllerRepresentable {
             } else {
                 item = AVPlayerItem(asset: AVURLAsset(url: stream.url))
             }
-            subtitleTask?.cancel()
             subtitlesEnabled = stream.subtitleStreamId != nil
-            if stream.decision == .remux { selectSubtitles(on: item) }
+            if stream.decision == .remux {
+                selectSubtitles(on: item)
+            } else {
+                // Direct play is AVKit's to decide, so nothing is scheduled — but a selection still in
+                // flight for the item being replaced must not land on a player that has moved on.
+                subtitleTask?.cancel()
+                subtitleTask = nil
+            }
             return item
         }
 
@@ -236,10 +255,13 @@ struct PlayerView: UIViewControllerRepresentable {
             subtitleTask = Task { @MainActor in
                 do {
                     try await RemuxSubtitles.apply(to: item, enabled: enabled)
-                } catch is CancellationError {
-                    // Replaced items and dismissed players must not receive a late selection.
                 } catch {
-                    NSLog("Subtitle selection failed: %@", String(describing: error))
+                    // Replaced items and dismissed players must not receive a late selection, and
+                    // every track switch and loader recovery cancels one. AVFoundation does not always
+                    // report an interrupted load as a `CancellationError` — it has its own — so the
+                    // task's own state is what says whether this was expected.
+                    guard !Task.isCancelled else { return }
+                    Self.log.error("Subtitle selection failed: \(String(describing: error), privacy: .public)")
                 }
             }
         }

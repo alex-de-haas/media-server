@@ -263,7 +263,7 @@ struct TitleVideoTests {
             id: "s", versionName: nil, container: "mkv", sizeBytes: 1, durationSeconds: 1,
             videos: codecs.enumerated().map { index, codec in
                 TitleTrack(
-                    id: "v\(index)", label: codec, language: nil, codec: codec, title: nil, channels: nil, hdrFormat: nil,
+                    id: "v\(index)", language: nil, codec: codec, title: nil, channels: nil, hdrFormat: nil,
                     dolbyVision: nil, isExternal: false)
             },
             audio: [], subtitles: [])

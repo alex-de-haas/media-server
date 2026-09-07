@@ -11,10 +11,11 @@ namespace MediaServer.Api.Remux;
 /// and it paid them again on every byte-range request, of which a player makes one after another for as
 /// long as it is playing. On a spinning disk that is not slow, it is stopped.
 ///
-/// The header is a pure function of the source, the tracks chosen and the signalling asked for, so it
-/// can simply be kept. The key is the same string the ETag is built from — it already carries every
-/// file's length and modification time, so a replaced dub or an edited subtitle file lands on a
-/// different entry rather than a stale one.
+/// The header is a pure function of the source, the tracks chosen, the signalling asked for and
+/// <see cref="Mp4Synthesizer.Revision"/> — the synthesiser's own layout, which moves when its output
+/// does — so it can simply be kept. The key is the same string the ETag is built from: it carries all
+/// four, plus every file's length and modification time, so a replaced dub, an edited subtitle file or
+/// a rewritten sample entry lands on a different entry rather than a stale one.
 ///
 /// This does not make the *first* request cheap; only every one after it. Moving the subtitle text and
 /// the audio frame size into the index, which is built in the background precisely so that playback

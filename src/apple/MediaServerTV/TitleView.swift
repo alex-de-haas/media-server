@@ -446,8 +446,8 @@ struct TitleView: View {
                         }
                     }
                 }
-                trackList("Audio", version.audio)
-                trackList("Subtitles", version.subtitles)
+                trackList("Audio", version.audio, details: true)
+                trackList("Subtitles", version.subtitles, details: false)
             }
         }
         .padding(48)
@@ -481,8 +481,12 @@ struct TitleView: View {
         }
     }
 
+    /// The same names the player's track menu gives these tracks, so a viewer who opens the menu a
+    /// moment later reads the row they have already seen rather than a second description of it.
+    /// Codec and channel count belong to the audio list alone: a subtitle's codec is a delivery detail
+    /// nobody chooses by.
     @ViewBuilder
-    private func trackList(_ heading: String, _ tracks: [TitleTrack]) -> some View {
+    private func trackList(_ heading: String, _ tracks: [TitleTrack], details: Bool) -> some View {
         Section(heading) {
             if tracks.isEmpty {
                 TechnicalDetailRow { Text("None").foregroundStyle(.secondary) }
@@ -490,7 +494,10 @@ struct TitleView: View {
                 ForEach(tracks) { track in
                     TechnicalDetailRow {
                         HStack(spacing: 8) {
-                            Text(track.label.isEmpty ? "Track" : track.label)
+                            Text(track.menuTitle())
+                            if details, let extra = track.audioMenuDetails {
+                                Text(extra).foregroundStyle(.secondary)
+                            }
                             // A dub or a subtitle file beside the video is the thing this library holds and
                             // no other client of it can play, so it is worth pointing at.
                             if track.isExternal {
