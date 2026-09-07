@@ -556,7 +556,9 @@ listed and not what happens is worse than no picker. The server decides, and it 
 **per copy**: `resolve` answers with a verdict for every
 media source a title has, because a 4K copy this device cannot open can sit beside a 1080p
 one it can, and one verdict would hide the copy that works. Without an explicit version
-selection, the client takes the first playable copy. An explicitly selected version keeps
+selection, the client takes the first playable copy. Opening or refreshing the title screen
+does not select a version; only activating a version row pins playback to that source.
+An explicitly selected version keeps
 its own verdict: pending indexing displays “Indexing in progress” and does not open the
 player or substitute another copy. A selected source absent from the response is reported
 as missing. Retrying playback resolves its readiness again.

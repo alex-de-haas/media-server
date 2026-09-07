@@ -16,6 +16,7 @@ struct TitleView: View {
     @State private var portraitLoader = ArtworkLoader(token: { nil })
     @State private var detail: TitleDetail?
     @State private var failure: String?
+    // Nil keeps automatic playback selection until the viewer chooses a version.
     @State private var chosenVersion: String?
     @State private var showsTechnicalDetails = false
     @FocusState private var focusedPlayPosition: Double?
@@ -72,7 +73,6 @@ struct TitleView: View {
             do {
                 let loaded = try await library.detail(for: title.id)
                 detail = loaded
-                chosenVersion = loaded.versions.first?.id
             } catch {
                 failure = String(describing: error)
             }
@@ -119,9 +119,6 @@ struct TitleView: View {
     private func refresh() async {
         guard let loaded = try? await library.detail(for: title.id) else { return }
         detail = loaded
-        if !loaded.versions.contains(where: { $0.id == chosenVersion }) {
-            chosenVersion = loaded.versions.first?.id
-        }
     }
 
     /// Resume where the viewer left, or start over — both, for a film that was started, because a

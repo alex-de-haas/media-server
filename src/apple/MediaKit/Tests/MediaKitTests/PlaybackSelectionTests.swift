@@ -32,9 +32,10 @@ struct PlaybackSelectionTests {
         #expect(PlaybackPlan.select(from: [original, ready], preferring: "remux") == ready)
     }
 
-    @Test("Automatic selection skips a pending copy")
-    func automaticSelection() {
-        let pending = PlaybackPlan.refused(.packagingPending, source: "remux")
+    @Test("Automatic selection skips a pending or unsupported first copy",
+          arguments: [PlaybackRefusal.packagingPending, .unsupportedAudioCodec])
+    func automaticSelection(reason: PlaybackRefusal) {
+        let pending = PlaybackPlan.refused(reason, source: "remux")
         #expect(PlaybackPlan.select(from: [pending, original], preferring: nil) == original)
         #expect(PlaybackPlan.select(from: [pending], preferring: nil) == pending)
         #expect(PlaybackPlan.select(from: [], preferring: nil) == .refused(.noFile, source: ""))
