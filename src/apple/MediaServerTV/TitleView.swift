@@ -272,7 +272,7 @@ struct TitleView: View {
 
     private func refusalTitle(_ refusal: PlaybackRefusal) -> String {
         switch refusal {
-        case .packagingPending: "Still preparing"
+        case .packagingPending: "Indexing in progress"
         case .unsupportedVideoCodec, .packagingUnsupportedVideo: "This picture cannot be played here"
         case .unsupportedAudioCodec, .packagingUnsupportedAudio: "This soundtrack cannot be played here"
         case .unsupportedDynamicRange: "This needs a display this one is not"
@@ -285,7 +285,7 @@ struct TitleView: View {
     private func refusalDetail(_ refusal: PlaybackRefusal) -> String {
         switch refusal {
         case .packagingPending:
-            "The server is still reading this file. It takes a few minutes for a film, and only happens once — try again shortly."
+            "This version is waiting for indexing to finish before it can play. Try again shortly."
         case .unsupportedVideoCodec, .packagingUnsupportedVideo:
             "The video is in a format this device cannot decode and the server cannot repackage."
         case .unsupportedAudioCodec, .packagingUnsupportedAudio:
