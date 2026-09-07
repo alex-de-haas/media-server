@@ -1,19 +1,23 @@
 import Foundation
 
-/// The small readers seen lately, told apart by where each left off.
+/// The readers seen lately, told apart by where each left off.
 ///
 /// AVFoundation reads a film with more than one reader at once, and the window must keep every one
-/// of them: the one at the play head, in pieces of a megabyte or less, and another a few seconds
-/// ahead of it, taking a handful of audio frames at a time. The third television run measured what
-/// following only the *pending* reads does — the play-head reader is between reads most of the time,
-/// so the trim followed the one ahead, threw the play head's bytes away, and every read at the play
-/// head became a fetch of its own, forty megabytes behind the window.
+/// of them: the one at the play head, another a few seconds ahead of it taking audio frames, and a
+/// speculative one farther ahead in bigger pieces. The third television run measured what following
+/// only the *pending* reads does — the play-head reader is between reads most of the time, so the
+/// trim followed the one ahead, threw the play head's bytes away, and every read at the play head
+/// became a fetch of its own, forty megabytes behind the window. The fifth run measured what telling
+/// readers apart by the size of their reads does — on a film where the play head reads in pieces of
+/// two to four megabytes it was not a reader at all, and the window followed the audio again. So
+/// every bounded read is entered, whatever its size, and the window keeps behind the lowest reader.
 ///
 /// Readers are not named by AVFoundation, so they are told apart by continuity: a read that begins
 /// within a little of where a known reader stopped is that reader continuing, anything else is a new
-/// one. A single read is a probe until it is followed — the end of the file is looked at once when
-/// playback starts, and that must not become somewhere the window keeps. Readers not heard from for
-/// a while are forgotten, so a reader AVFoundation abandoned does not pin the window for ever.
+/// one. A reader is a probe until it has read more times than a probe does — the end of the file is
+/// looked at once when playback starts, and the exact middle twice, at the start and after every
+/// re-seat — and a probe is not somewhere the window keeps or goes. Readers not heard from for a
+/// while are forgotten, so a reader AVFoundation abandoned does not pin the window for ever.
 ///
 /// Pure value, so the rules are testable without a player or a network.
 public struct ReaderLedger: Sendable {
@@ -31,8 +35,10 @@ public struct ReaderLedger: Sendable {
     public private(set) var readers: [Reader] = []
 
     /// How far before where a reader left off a read may begin and still be that reader: a request
-    /// AVFoundation re-issues for the rest of a range starts a little after the original did, so this
-    /// must cover the longest read entered — `RemuxLoader.demandLimit`, a megabyte and a half.
+    /// AVFoundation re-issues for the rest of a range starts a little after the original did, and a
+    /// seek settles by a step or two *backwards* from its target, so this covers the reads seen at
+    /// the play head. A bigger read re-issued becomes a reader of its own for a moment, which costs
+    /// nothing: it settles on its next read, and the one it left behind is forgotten in `patience`.
     public let slackBehind: Int64
 
     /// How far past where a reader left off: the audio reader skips between bursts of frames.
@@ -40,6 +46,11 @@ public struct ReaderLedger: Sendable {
 
     /// How long a reader is remembered after its last read.
     public let patience: TimeInterval
+
+    /// How many reads AVFoundation's probe of a far place makes: measured on the fifth television run
+    /// as two of sixty-four kilobytes at the exact middle of the file. A reader with no more reads
+    /// than that has not shown itself to be reading; a seek shows itself by reading on.
+    public static let probeReads = 2
 
     public init(slackBehind: Int64 = 4 << 20, slackAhead: Int64 = 8 << 20, patience: TimeInterval = 5) {
         self.slackBehind = slackBehind
@@ -68,9 +79,10 @@ public struct ReaderLedger: Sendable {
         readers.removeAll { now - $0.seen > patience }
     }
 
-    /// Readers that have read more than once. A single read is a probe until it is followed.
+    /// Readers that have read more times than a probe does: the ones the window keeps behind and may
+    /// move for.
     public var settled: [Reader] {
-        readers.filter { $0.reads > 1 }
+        readers.filter { $0.reads > Self.probeReads }
     }
 
     /// Where the lowest settled reader last read: what the window must keep. Nil until one settles.
@@ -78,11 +90,28 @@ public struct ReaderLedger: Sendable {
         settled.map(\.last).min()
     }
 
+    /// The lowest settled reader at or above `floor`: what the window must keep of what it can still
+    /// serve. A reader far below the window's start is either about to restart the window or a probe
+    /// of a place long passed — the middle of the film, looked at twice after a re-seat — and
+    /// neither should stop the trim behind the readers the window does hold.
+    public func lowest(atOrAbove floor: Int64) -> Int64? {
+        settled.map(\.last).filter { $0 >= floor }.min()
+    }
+
     /// How far apart the settled readers are, lowest to highest. Zero with fewer than two.
     public var spread: Int64 {
         let lasts = settled.map(\.last)
         guard let low = lasts.min(), let high = lasts.max() else { return 0 }
         return high - low
+    }
+
+    /// The settled readers still reading: heard from within `quiet`, or with their latest read
+    /// among `waiting` — the offsets of reads not yet answered, since a reader kept waiting on a
+    /// slow disk is reading however long ago it asked. Only the lowest of them may move the window:
+    /// a reader far ahead of one still reading is speculative or a probe, and a reader below every
+    /// other, or alone, is where the film is being read now.
+    public func active(at now: TimeInterval, quiet: TimeInterval, waiting: Set<Int64> = []) -> [Reader] {
+        settled.filter { now - $0.seen <= quiet || waiting.contains($0.last) }
     }
 
     /// After the window restarts for one reader, only that reader is still known to be where it was.
