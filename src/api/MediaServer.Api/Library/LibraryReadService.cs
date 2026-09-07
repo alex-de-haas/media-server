@@ -654,7 +654,8 @@ public sealed class LibraryReadService(
                 .Where(record => chunk.Contains(record.MediaItemId))
                 .ToListAsync(cancellationToken));
         }
-        if (System.Diagnostics.Activity.Current is { OperationName: "library.metadata" } metadataActivity)
+        if (System.Diagnostics.Activity.Current is
+            { OperationName: "library.metadata", Source.Name: LibraryDiagnostics.SourceName } metadataActivity)
         {
             metadataActivity.SetTag("library.metadata.record_count", records.Count);
         }

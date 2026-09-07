@@ -75,6 +75,27 @@ public sealed class LibraryReadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Metadata_does_not_tag_another_sources_span_with_the_same_name()
+    {
+        using var source = new ActivitySource("test.foreign.library");
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = candidate => ReferenceEquals(candidate, source),
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var foreign = source.StartActivity("library.metadata");
+        Assert.NotNull(foreign);
+
+        // Episode metadata uses the same loader without starting a library.metadata span.
+        var episodes = await _library.GetEpisodesAsync(_seriesId, null, _userId, CancellationToken.None);
+
+        Assert.NotEmpty(episodes);
+        Assert.Null(foreign.GetTagItem("library.metadata.record_count"));
+        Assert.Same(foreign, Activity.Current);
+    }
+
+    [Fact]
     public async Task Timing_marks_failed_stage_and_preserves_exception_without_recording_message()
     {
         using var request = new Activity("test.library.failure").Start();

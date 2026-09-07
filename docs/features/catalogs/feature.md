@@ -239,7 +239,9 @@ These timings include database reads and materialization within each stage; they
 are not individual SQL timings. The HTTP span additionally includes middleware
 and response serialization/writing. Shared card stages also appear for search
 and recent-item requests. No titles, IDs, query text, paths, or provider payloads
-are added to spans. Failed async stages report the exception type only.
+are added to spans. Failed async stages report the exception type only through the standard span
+attribute `error.type`. Metadata record counts only annotate spans from the
+`MediaServer.Library` source, even when another source uses the same span name.
 Without a telemetry listener, no activities are allocated.
 
 ## Links
@@ -269,4 +271,4 @@ Backend tests should use xUnit and Imposter. Required coverage:
 - Stable public ID assignment from canonical provider identity across rescans.
 - Catalog-to-Jellyfin `CollectionFolder` mapping.
 
-- Library timing tests verify stage parenting, counts, failure reporting, and unchanged results.
+- Library timing tests verify stage parenting, counts, failure reporting, source isolation, and unchanged results.

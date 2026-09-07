@@ -23,6 +23,8 @@ internal static class LibraryDiagnostics
         catch (Exception exception)
         {
             activity?.SetStatus(ActivityStatusCode.Error);
+            // Span failures use error.type; exception.type belongs to an exception record/event.
+            // https://opentelemetry.io/docs/specs/otel/trace/exceptions/
             activity?.SetTag("error.type", exception.GetType().FullName);
             throw;
         }
