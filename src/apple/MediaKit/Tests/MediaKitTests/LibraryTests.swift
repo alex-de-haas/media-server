@@ -658,16 +658,16 @@ struct CollectionTests {
         #expect(collections.state == .loaded)
     }
 
-    @Test func reloadRecoversAfterServerUpgrade() async {
+    @Test func screenReappearanceRecoversAfterServerUpgrade() async {
         let (collections, transport) = store([
             "/native/v1/collections": [
                 (404, ""),
                 (200, #"[{"id":"saga","name":"Saga","itemCount":2}]"#)
             ]
         ])
-        await collections.load()
+        await collections.screenAppeared()
         #expect(collections.state == .unsupported)
-        await collections.load()
+        await collections.screenAppeared()
         #expect(collections.state == .loaded)
         #expect(collections.items.map(\.id) == ["saga"])
         #expect(transport.tokensSeen.count == 2)

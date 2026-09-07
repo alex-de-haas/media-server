@@ -33,6 +33,11 @@ public final class CollectionStore {
 
     public init(session: ServerSession) { self.session = session }
 
+    /// Revalidate on every screen appearance, including an earlier unsupported or empty result.
+    public func screenAppeared() async {
+        await load()
+    }
+
     public func load() async {
         guard !isLoading else { return }
         isLoading = true

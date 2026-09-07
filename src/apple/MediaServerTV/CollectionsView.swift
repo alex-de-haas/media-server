@@ -57,7 +57,7 @@ struct CollectionsView: View {
                 }
             }
         }
-        .task { await store.load() }
+        .task { await store.screenAppeared() }
         .alert("Collection unavailable", isPresented: Binding(
             get: { notice != nil }, set: { if !$0 { notice = nil } }
         )) {
