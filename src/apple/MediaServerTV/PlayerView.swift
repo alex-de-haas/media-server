@@ -1,6 +1,7 @@
 import AVKit
 import MediaKit
 import SwiftUI
+import os
 
 /// `AVPlayerViewController`, not a player of our own.
 ///
@@ -56,6 +57,16 @@ struct PlayerView: UIViewControllerRepresentable {
         // and while playback was no worse than it is now.
         let item = context.coordinator.feed(stream, ownLoader: ownLoader)
         let player = AVPlayer(playerItem: item)
+
+        // The server already chose the subtitle and the coordinator applies that choice to the item
+        // itself. Left on, this would let the player put the *device's* preference back over it
+        // whenever the current item changes or its selection is re-evaluated — which is the
+        // "Subtitles Off" setting that hid a server-selected track in the first place. Only on the
+        // remux path: direct play has no choice of ours to defend, and AVKit's own picker is what
+        // works there.
+        if stream.decision == .remux {
+            player.appliesMediaSelectionCriteriaAutomatically = false
+        }
 
         if startAt > 1 {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
@@ -127,11 +138,15 @@ struct PlayerView: UIViewControllerRepresentable {
     ) -> [UIMenuElement] {
         var sections: [UIMenuElement] = []
 
+        // The transport bar presents these menus as icon buttons. Titles label the menus,
+        // but do not give viewers a visible button for opening them.
         if audio.count > 1 {
-            sections.append(UIMenu(title: "Audio", options: .singleSelection, children: audio.map { track in
-                UIAction(title: track.label, state: track.id == chosen.audioStreamId ? .on : .off) { _ in
+            sections.append(UIMenu(title: "Audio Tracks", image: UIImage(systemName: "globe"), options: .singleSelection, children: audio.map { track in
+                let action = UIAction(title: track.menuTitle(), state: track.id == chosen.audioStreamId ? .on : .off) { _ in
                     choose(track.id, chosen.subtitleStreamId, chosen.subtitleStreamId == nil)
                 }
+                action.subtitle = track.audioMenuDetails
+                return action
             }))
         }
 
@@ -143,9 +158,9 @@ struct PlayerView: UIViewControllerRepresentable {
             }
 
             sections.append(UIMenu(
-                title: "Subtitles", options: .singleSelection,
+                title: "Subtitles", image: UIImage(systemName: "captions.bubble"), options: .singleSelection,
                 children: [off] + subtitles.map { track in
-                    UIAction(title: track.label, state: track.id == chosen.subtitleStreamId ? .on : .off) { _ in
+                    UIAction(title: track.menuTitle(), state: track.id == chosen.subtitleStreamId ? .on : .off) { _ in
                         choose(chosen.audioStreamId, track.id, false)
                     }
                 }))
@@ -156,6 +171,8 @@ struct PlayerView: UIViewControllerRepresentable {
 
     @MainActor
     final class Coordinator {
+        private static let log = Logger(subsystem: "com.haas.mediaserver", category: "playback")
+
         private let onFinished: (Double) -> Void
         private let diagnostics: PlaybackDiagnostics?
         private var token: Any?
@@ -181,6 +198,8 @@ struct PlayerView: UIViewControllerRepresentable {
         /// The re-seat in flight, so leaving the film can stop it — the same hazard as a track switch:
         /// a seek that lands after the viewer has gone would start a film nobody is watching.
         private var reseatTask: Task<Void, Never>?
+        private var subtitleTask: Task<Void, Never>?
+        private var subtitlesEnabled = false
 
         init(onFinished: @escaping (Double) -> Void, diagnostics: PlaybackDiagnostics?) {
             self.onFinished = onFinished
@@ -210,13 +229,41 @@ struct PlayerView: UIViewControllerRepresentable {
             loader = nil
             self.ownLoader = ownLoader
 
-            guard ownLoader, stream.decision == .remux else {
-                return AVPlayerItem(asset: AVURLAsset(url: stream.url))
+            let item: AVPlayerItem
+            if ownLoader, stream.decision == .remux {
+                let fed = RemuxLoader(origin: stream.url)
+                loader = fed
+                item = AVPlayerItem(asset: fed.makeAsset())
+            } else {
+                item = AVPlayerItem(asset: AVURLAsset(url: stream.url))
             }
+            subtitlesEnabled = stream.subtitleStreamId != nil
+            if stream.decision == .remux {
+                selectSubtitles(on: item)
+            } else {
+                // Direct play is AVKit's to decide, so nothing is scheduled — but a selection still in
+                // flight for the item being replaced must not land on a player that has moved on.
+                subtitleTask?.cancel()
+                subtitleTask = nil
+            }
+            return item
+        }
 
-            let fed = RemuxLoader(origin: stream.url)
-            loader = fed
-            return AVPlayerItem(asset: fed.makeAsset())
+        private func selectSubtitles(on item: AVPlayerItem) {
+            subtitleTask?.cancel()
+            let enabled = subtitlesEnabled
+            subtitleTask = Task { @MainActor in
+                do {
+                    try await RemuxSubtitles.apply(to: item, enabled: enabled)
+                } catch {
+                    // Replaced items and dismissed players must not receive a late selection, and
+                    // every track switch and loader recovery cancels one. AVFoundation does not always
+                    // report an interrupted load as a `CancellationError` — it has its own — so the
+                    // task's own state is what says whether this was expected.
+                    guard !Task.isCancelled else { return }
+                    Self.log.error("Subtitle selection failed: \(String(describing: error), privacy: .public)")
+                }
+            }
         }
 
         /// Watches for a player that has stopped asking with bytes in hand, and re-seats it — which
@@ -241,6 +288,7 @@ struct PlayerView: UIViewControllerRepresentable {
             let at = player.currentTime()
             let item = AVPlayerItem(asset: loader.makeAsset())
             player.replaceCurrentItem(with: item)
+            selectSubtitles(on: item)
             guardian.restarted()
 
             reseatTask?.cancel()
@@ -322,6 +370,8 @@ struct PlayerView: UIViewControllerRepresentable {
             reseatTask = nil
             switchTask?.cancel()
             switchTask = nil
+            subtitleTask?.cancel()
+            subtitleTask = nil
 
             let position = player?.currentTime().seconds ?? 0
             player?.pause()

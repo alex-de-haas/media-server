@@ -228,6 +228,23 @@ public sealed class RemuxStreamServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task The_tag_leads_with_the_synthesisers_revision()
+    {
+        var id = Seed();
+
+        var (opened, _) = await OpenAsync(id);
+
+        Assert.NotNull(opened);
+        using var content = opened.Content;
+
+        // Bumping Mp4Synthesizer.Revision is the only thing that retires ranges a client cached of a
+        // previous representation — the rest of the tag describes the source, which does not move when
+        // the synthesiser's own output does. This fails if the tag stops carrying it.
+        Assert.StartsWith(
+            $"\"{Mp4Synthesizer.Revision}-", opened.ETag.Tag.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task The_tag_changes_when_the_chosen_tracks_change()
     {
         var id = Seed();

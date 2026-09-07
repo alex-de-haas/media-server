@@ -36,6 +36,6 @@ let package = Package(
             ]
         ),
         .target(name: "MediaKit", dependencies: ["MediaServerAPI"]),
-        .testTarget(name: "MediaKitTests", dependencies: ["MediaKit"]),
+        .testTarget(name: "MediaKitTests", dependencies: ["MediaKit"], resources: [.copy("Fixtures")]),
     ]
 )

@@ -38,9 +38,40 @@ public struct TitleTrack: Identifiable, Equatable, Sendable {
     static let stillImages: Set<String> = ["mjpeg", "png", "bmp", "gif", "webp"]
 
     public let id: String
-    public let label: String
     public let language: String?
     public let codec: String?
+    public let title: String?
+    public let channels: Int?
+
+    /// Language leads so identically named "full" or "forced" tracks remain distinguishable.
+    public func menuTitle(locale: Locale = .current) -> String {
+        let code = language?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let languageName: String
+        if let code, !code.isEmpty, code.lowercased() != "und" {
+            languageName = locale.localizedString(forIdentifier: code.replacingOccurrences(of: "_", with: "-")) ?? code
+        } else {
+            languageName = "Unknown language"
+        }
+        guard let title, !title.isEmpty,
+              title.caseInsensitiveCompare(languageName) != .orderedSame,
+              title.caseInsensitiveCompare(code ?? "") != .orderedSame else { return languageName }
+        return "\(languageName) · \(title)"
+    }
+
+    /// Channel count alone does not establish a layout such as 5.1 or 7.1.
+    public var audioMenuDetails: String? {
+        let rawCodec = codec?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let codecName = rawCodec.map { name in
+            switch name {
+            case "ac3": "AC-3"
+            case "eac3": "E-AC-3"
+            default: name.uppercased()
+            }
+        }
+        let channelCount = channels.flatMap { $0 > 0 ? "\($0) ch" : nil }
+        let parts = [codecName, channelCount].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     /// What the probe said this stream's dynamic range is.
     ///
@@ -240,6 +271,8 @@ extension TitleTrack {
         self.id = dto.id
         self.language = dto.language
         self.codec = dto.codec
+        self.title = dto.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.channels = dto.channels.map(Int.init)
         self.hdrFormat = dto.hdrFormat
         self.dolbyVision = dto.dolbyVision.map {
             DolbyVisionDetail(
@@ -247,16 +280,5 @@ extension TitleTrack {
                 blCompatibilityId: Int($0.blCompatibilityId), enhancementLayer: $0.enhancementLayer)
         }
         self.isExternal = dto.isExternal ?? false
-
-        // The server's own title when it has one — "Commentary", "Forced" — and otherwise something
-        // assembled, because a list of blank rows is not a choice.
-        if let title = dto.title, !title.isEmpty {
-            self.label = title
-        } else {
-            self.label = [dto.language, dto.codec]
-                .compactMap { $0 }
-                .filter { !$0.isEmpty }
-                .joined(separator: " · ")
-        }
     }
 }

@@ -206,7 +206,7 @@ struct LivePairingCheck {
                 + "video=[\(version.videos.map { "\($0.codec ?? "?")/\($0.hdrFormat ?? "?")" }.joined(separator: ", "))], "
                 + "\(version.audio.count) audio, \(version.subtitles.count) subtitle")
             for track in version.audio where track.isExternal {
-                say("      beside the file: \(track.label)")
+                say("      beside the file: \(track.menuTitle())")
             }
         }
 

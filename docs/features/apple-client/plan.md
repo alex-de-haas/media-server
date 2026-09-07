@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-02
-Updated: 2026-09-06
+Updated: 2026-09-07
 
 > **Umbrella epic.** This document owns the decisions, the platform split, and the
 > playback spike that everything else depends on. The features it spans keep their
@@ -291,6 +291,12 @@ throwaway spike, on real hardware and real files, before any surface is designed
 - [ ] **Higher-bitrate headroom** — the 4K sample is 26.5 Mbit/s and played with
       room to spare, but the 60–80 Mbit/s remux this deliverable originally named
       was never tried.
+- [ ] **Subtitles on the panel** — the `tx3g` track decodes: `RemuxSubtitlesTests`
+      plays a synthesised file through AVPlayer on macOS and reads the cue back out
+      of it. What that cannot answer is what the *television* draws — where the words
+      land, at what size, and whether switching between tracks and Off holds — because
+      `AVPlayerItemLegibleOutput` hands over text without ever rendering it. The
+      richer menu labels want the same look.
 > **Dropped with HLS.** The master-playlist, segment-boundary and HLS session
 > deliverables this phase originally carried no longer describe any work: without
 > segments there is no keyframe index to build, no playlist to declare, and no

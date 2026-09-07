@@ -211,7 +211,11 @@ internal sealed class RemuxStreamService(
             // different body, and so does one whose subtitle file was edited — both must get a different
             // tag, or a conditional request is answered 304 with the old audio or the old words.
             var validator = new System.Text.StringBuilder()
-                .Append(mediaSourceId.ToString("N"))
+                // Leads with the synthesiser's own revision, so a change to the bytes it writes retires
+                // every cached range of the previous representation even though the source file and the
+                // tracks chosen are identical. The constant lives beside the layout it versions.
+                .Append(Mp4Synthesizer.Revision)
+                .Append('-').Append(mediaSourceId.ToString("N"))
                 .Append('-').Append(file.Length.ToString("x"))
                 .Append('-').Append(file.LastWriteTimeUtc.Ticks.ToString("x"))
                 .Append('-').Append(string.Join('.', tracks.Select(track => $"{track.Input}:{track.Number}")))
