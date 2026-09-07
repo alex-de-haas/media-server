@@ -29,10 +29,14 @@ public final class CollectionStore {
     public private(set) var items: [MovieCollection] = []
     public private(set) var state: CollectionLoadState = .loading
     private let session: ServerSession
+    @ObservationIgnored private var isLoading = false
 
     public init(session: ServerSession) { self.session = session }
 
     public func load() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
         state = .loading
         do {
             switch try await session.api().listNativeCollections() {

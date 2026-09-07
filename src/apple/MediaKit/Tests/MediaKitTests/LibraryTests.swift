@@ -41,6 +41,40 @@ private final class SurfaceStub: ClientTransport, @unchecked Sendable {
     }
 }
 
+/// Holds the first response until the test has attempted a concurrent refresh.
+private actor GatedCollectionTransport: ClientTransport {
+    private let firstStatus: Int
+    private var responseGate: CheckedContinuation<Void, Never>?
+    private var requestGate: CheckedContinuation<Void, Never>?
+    private(set) var calls = 0
+
+    init(firstStatus: Int) { self.firstStatus = firstStatus }
+
+    func waitForRequest() async {
+        if calls > 0 { return }
+        await withCheckedContinuation { requestGate = $0 }
+    }
+
+    func release() { responseGate?.resume(); responseGate = nil }
+
+    func send(
+        _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
+    ) async throws -> (HTTPResponse, HTTPBody?) {
+        calls += 1
+        let status = calls == 1 ? firstStatus : 200
+        if calls == 1 {
+            await withCheckedContinuation { continuation in
+                responseGate = continuation
+                requestGate?.resume()
+                requestGate = nil
+            }
+        }
+        var response = HTTPResponse(status: .init(code: status))
+        response.headerFields[.contentType] = "application/json"
+        return (response, HTTPBody("[]"))
+    }
+}
+
 private func pairing(token: String = "old-token") -> PairedServer {
     PairedServer(
         server: URL(string: "https://media.example")!,
@@ -603,6 +637,25 @@ struct CollectionTests {
         let (failed, _) = store(["/native/v1/collections": [(503, "")]])
         await failed.load()
         guard case .failed = failed.state else { Issue.record("A server error is not an empty list"); return }
+    }
+
+    @Test(arguments: [200, 404, 503])
+    func ignoresOverlappingLoadsAndAllowsLaterRefresh(firstStatus: Int) async {
+        let transport = GatedCollectionTransport(firstStatus: firstStatus)
+        let collections = CollectionStore(session: ServerSession(paired: pairing(), transport: transport))
+        let firstLoad = Task { await collections.load() }
+        await transport.waitForRequest()
+        await collections.load()
+        #expect(await transport.calls == 1)
+        #expect(collections.state == .loading)
+        await transport.release()
+        await firstLoad.value
+        if firstStatus == 200 { #expect(collections.state == .loaded) }
+        if firstStatus == 404 { #expect(collections.state == .unsupported) }
+        if firstStatus == 503 { #expect(collections.state == .failed("The server returned HTTP 503.")) }
+        await collections.load()
+        #expect(await transport.calls == 2)
+        #expect(collections.state == .loaded)
     }
 
     @Test func reloadRecoversAfterServerUpgrade() async {
