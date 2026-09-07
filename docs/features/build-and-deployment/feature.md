@@ -1,6 +1,5 @@
 # Build and Deployment
 
-Status: Implemented
 Created: 2026-06-15
 Updated: 2026-09-07
 
@@ -53,8 +52,8 @@ hosty apps logs com.haas.media-server
   and tests against; both move together in one change.
 - `docker` is the default install profile; `dev` is used for local development.
   Catalog roots are bound through Hosty external host-path mounts (see
-  [Storage and data](storage-and-data/feature.md)). Image build/publish lands in M4 (see
-  [Implementation plan](implementation-plan.md)).
+  [Storage and data](../storage-and-data/feature.md)). Image build/publish lands in M4 (see
+  [Implementation plan](../implementation-plan.md)).
 
 ### Base images
 
@@ -81,7 +80,7 @@ The two services differ, and the difference is a property of what they touch:
 Dropping privileges in `api` therefore needs a uid/gid or supplementary-group
 contract from Hosty Core, which does not exist today — Core sets no `--user` and
 injects no uid. Recorded as a platform request (see
-[Hosty platform requests](hosty-platform-requests/feature.md), item 16). Until it lands, a
+[Hosty platform requests](../hosty-platform-requests/feature.md), item 16). Until it lands, a
 non-root `api` would fail to organize, ingest or mux on any catalog root it does
 not happen to own.
 
