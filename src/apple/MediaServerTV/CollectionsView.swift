@@ -18,8 +18,11 @@ struct CollectionsView: View {
             switch store.state {
             case .loading: ProgressView("Reading collections")
             case .unsupported:
-                ContentUnavailableView("Update your server", systemImage: "arrow.up.circle",
-                    description: Text("This server does not support native collections yet."))
+                VStack(spacing: 24) {
+                    ContentUnavailableView("Update your server", systemImage: "arrow.up.circle",
+                        description: Text("This server does not support native collections yet."))
+                    Button("Try again") { Task { await store.load() } }
+                }
             case .failed(let reason):
                 VStack(spacing: 24) {
                     Text("Could not read collections").font(.title)
@@ -54,7 +57,7 @@ struct CollectionsView: View {
                 }
             }
         }
-        .task { if store.state == .loading { await store.load() } }
+        .task { await store.screenAppeared() }
         .alert("Collection unavailable", isPresented: Binding(
             get: { notice != nil }, set: { if !$0 { notice = nil } }
         )) {

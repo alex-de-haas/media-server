@@ -1,7 +1,13 @@
 # Apple Client Visual Design and Collections
 
 Created: 2026-09-06
-Updated: 2026-09-06
+Updated: 2026-09-07
+
+Collections reload through the store’s screen-appearance handler whenever the
+collection screen appears. The unsupported-server
+message offers a retry so a server upgrade can be detected without restarting
+the client. Overlapping collection refresh attempts are ignored while a request
+is in flight; subsequent refreshes remain available after success or failure.
 
 ## Presentation
 
