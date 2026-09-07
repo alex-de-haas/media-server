@@ -555,8 +555,13 @@ A viewer who picks a version gets that one when it plays: a picker that changes 
 listed and not what happens is worse than no picker. The server decides, and it decides
 **per copy**: `resolve` answers with a verdict for every
 media source a title has, because a 4K copy this device cannot open can sit beside a 1080p
-one it can, and one verdict would hide the copy that works. The client takes the first that
-plays.
+one it can, and one verdict would hide the copy that works. Without an explicit version
+selection, the client takes the first playable copy. Opening or refreshing the title screen
+does not select a version; only activating a version row pins playback to that source.
+An explicitly selected version keeps
+its own verdict: pending indexing displays “Indexing in progress” and does not open the
+player or substitute another copy. A selected source absent from the response is reported
+as missing. Retrying playback resolves its readiness again.
 
 Presentation is `AVPlayerViewController` and not a player of our own — the transport bar,
 the skip gestures and the Siri remote's whole vocabulary come free.
@@ -684,6 +689,10 @@ are described in [Apple client visual design](../apple-client-visual-design/feat
 Collection reads exclude removed movies from counts, members, and poster fallbacks.
 
 ## Testing Expectations
+
+- Explicit version selection preserves pending and unsupported refusals even when another
+  copy plays; missing selected sources do not fall back, and automatic selection still
+  chooses the first playable copy.
 
 - `TrackMenuTests` covers language and title combinations, localized language names,
   codec formatting, channel counts and missing metadata. An untitled track is named by its

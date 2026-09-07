@@ -59,12 +59,11 @@ public final class PlaybackService {
 
     /// The copy to play.
     ///
-    /// A viewer who picked a version gets that one when it plays — a picker that changes what is listed
-    /// and not what happens is worse than no picker. Otherwise the first copy the server said it could
+    /// A viewer who picked a version gets its exact verdict, including pending or missing.
+    /// Otherwise the first copy the server said it could
     /// deliver, because a title can hold a 4K copy this device cannot open beside a 1080p one it can.
     ///
-    /// When nothing plays, the refusal returned is about the copy that was asked for rather than
-    /// whichever happened to be listed first.
+    /// An explicit choice never falls back to another copy, even when that other copy plays.
     public func plan(
         for itemId: String,
         preferring mediaSourceId: String? = nil,
@@ -75,19 +74,7 @@ public final class PlaybackService {
         let plans = try await plans(
             for: itemId, audioStreamId: audioStreamId, subtitleStreamId: subtitleStreamId,
             subtitlesOff: subtitlesOff)
-        let requested = mediaSourceId.flatMap { wanted in
-            plans.first { $0.mediaSourceId == wanted }
-        }
-
-        if let requested, requested.isPlayable {
-            return requested
-        }
-
-        if let anyPlayable = plans.first(where: \.isPlayable) {
-            return anyPlayable
-        }
-
-        return requested ?? plans.first ?? .refused(.noFile, source: "")
+        return PlaybackPlan.select(from: plans, preferring: mediaSourceId)
     }
 
     /// Opens a playback session. The id it returns is what progress and stop are reported against.

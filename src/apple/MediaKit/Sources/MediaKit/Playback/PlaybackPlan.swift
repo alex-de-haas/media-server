@@ -102,6 +102,15 @@ public enum PlaybackPlan: Equatable, Sendable {
 }
 
 extension PlaybackPlan {
+    /// An explicit choice keeps its verdict, including pending or missing, without substituting a copy.
+    static func select(from plans: [PlaybackPlan], preferring mediaSourceId: String?) -> PlaybackPlan {
+        if let mediaSourceId {
+            return plans.first { $0.mediaSourceId == mediaSourceId }
+                ?? .refused(.noFile, source: mediaSourceId)
+        }
+        return plans.first(where: \.isPlayable) ?? plans.first ?? .refused(.noFile, source: "")
+    }
+
     /// The plan for each of a title's copies, in the order the server listed them.
     ///
     /// `resolve` answers **per source**, not once: a title can hold a 4K copy this device cannot open
