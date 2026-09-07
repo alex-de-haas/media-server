@@ -362,22 +362,26 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
         let now = Self.uptime
         readers.expire(at: now)
 
-        // Only the lowest reader still reading may move the window, and only when the window does not
-        // hold it and the fill will not reach it: that is a seek, or a window that ran ahead of the
-        // play head. A settled reader far *above* one still reading is the speculative reader or the
-        // probe AVFoundation makes at the middle of a film — the fifth run counted the window sent
-        // to the middle of a sixty-gigabyte file on a spinning disk once per re-seat — and its reads
-        // are fetched on their own instead. The same probe made past the middle is *below* the play
-        // head, and does not count either: the ledger does not settle a reader on a probe's two reads,
-        // and a seek shows itself by reading on. After a forward seek the reader left behind falls
-        // quiet, and the reader at the new place is the lowest still reading; a backward seek is the
-        // lowest as soon as the reader it left is quiet. One a little behind the start is not a stray
-        // at all: the fourth run showed a seek settling by steps of a megabyte or two *backwards*, on
-        // the keyframe before its target, and a window discarded at every step. Within a tail, the
-        // separate fetches carry it the short way.
+        // A settled reader somewhere the window does not hold and the fill will not reach is a seek,
+        // or a window that ran ahead of the play head, and the window restarts for it — unless a
+        // reader below it is still reading from the window, settled or not. A stray far *above* one
+        // the window serves is the speculative reader or the probe AVFoundation makes at the middle
+        // of a film — the fifth run counted the window sent to the middle of a sixty-gigabyte file
+        // on a spinning disk once per re-seat — and its reads are fetched on their own instead. The
+        // play head at the start of a film is served from its first read, so a speculative reader
+        // that settles first still waits. The same probe made past the middle is *below* the play
+        // head and never restarts anything: the ledger does not settle a reader on a probe's two
+        // reads, and a seek shows itself by reading on. After a forward seek the reader left behind
+        // falls quiet, and the reader at the new place has nothing served below it; a backward seek
+        // has nothing below it at all, and restarts at once. One a little behind the start is not a
+        // stray in the first place: the fourth run showed a seek settling by steps of a megabyte or
+        // two *backwards*, on the keyframe before its target, and a window discarded at every step.
+        // Within a tail, the separate fetches carry it the short way.
         let waiting = Set(live.map { $0.data.requestedOffset })
-        let active = readers.active(at: now, quiet: quiet, waiting: waiting)
-        if let stray = active.min(by: { $0.last < $1.last }), isStray(stray) {
+        let reading = readers.reading(at: now, quiet: quiet, waiting: waiting)
+        let served = reading.filter { !isStray($0) }.map(\.last).min()
+        let strays = reading.filter { $0.reads > ReaderLedger.probeReads && isStray($0) }
+        if let stray = strays.min(by: { $0.last < $1.last }), served.map({ stray.last < $0 }) ?? true {
             // The reader's own read at that offset, when a bigger one begins there too.
             let there = live.filter { $0.owed.lowerBound == stray.last }
             let cause = there.min { $0.data.requestedLength < $1.data.requestedLength }
@@ -385,7 +389,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
                 windowStart: window.start, windowEnd: window.end, offset: stray.last,
                 requestedLength: cause?.data.requestedLength ?? Int(stray.next - stray.last),
                 toEnd: cause?.data.requestsAllDataToEndOfResource ?? false)
-            Self.log.notice("Window reset: [\(self.window.start), \(self.window.end)) -> \(stray.last) for a reader of \(stray.reads) reads; \(active.count) reading, pending \(self.pending.count)")
+            Self.log.notice("Window reset: [\(self.window.start), \(self.window.end)) -> \(stray.last) for a reader of \(stray.reads) reads; \(reading.count) reading, pending \(self.pending.count)")
             // A tail before the reader rather than at it, for the same backward steps: a seek's first
             // read is at the target, and the ones that follow are at the keyframe before it.
             restart(at: max(0, stray.last - tail))
@@ -395,7 +399,7 @@ public final class RemuxLoader: NSObject, AVAssetResourceLoaderDelegate, @unchec
 
         // Behind the lowest reader the window can still serve, minus a tail: one farther below the
         // start than that is a probe of a place passed, or is about to restart the window itself.
-        // With no settled reader the lowest continuing request inside the window stands in — an
+        // With no reader known the lowest continuing request inside the window stands in — an
         // open-ended request may be the only consumer of the film, and without this its consumed
         // bytes would fill the budget for ever with no refill. The end is inclusive on purpose: a
         // reader that has consumed everything held stands one past the last byte, and that is

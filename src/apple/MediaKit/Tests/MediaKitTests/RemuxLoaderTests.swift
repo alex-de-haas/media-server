@@ -28,7 +28,7 @@ struct RemuxLoaderTests {
 
     @Test("A late aside response cannot duplicate bytes already served by a moved window")
     func asideOwnsDelivery() async throws {
-        let fixture = Fixture(total: 1_024)
+        let fixture = Fixture(total: 1_024, quiet: 0.1)
         defer { fixture.loader.stop() }
         let initial = Request(offset: 0, length: 8)
         await fixture.onQueue { _ = fixture.loader.accept(initial) }
@@ -42,9 +42,10 @@ struct RemuxLoaderTests {
         let aside = try await fixture.network.range(start: 200)
         #expect(fixture.loader.makeSnapshot().restarts == 0)
 
-        // The viewer seeks to the same area: two reads look like a probe and are fetched on their
-        // own, the third shows a reader there, and the window restarts for it. It arrives before the
-        // aside does.
+        // The viewer seeks to the same area, and the reader at the start falls quiet: two reads look
+        // like a probe and are fetched on their own, the third shows a reader there, and the window
+        // restarts for it. It arrives before the aside does.
+        try await Task.sleep(for: .milliseconds(200))
         for (offset, occurrence) in [(200, 1), (208, 0)] {
             let read = Request(offset: Int64(offset), length: 8)
             await fixture.onQueue { _ = fixture.loader.accept(read) }
@@ -222,6 +223,40 @@ struct RemuxLoaderTests {
         // The probe never settled: the play head is the only reader.
         #expect(details.readers == 1)
         #expect(details.readerSpread == 0)
+    }
+
+    @Test("A reader the window serves keeps it there before it has settled, whoever settles first")
+    func youngReaderKeepsTheWindow() async throws {
+        let fixture = Fixture(total: 2_048, budget: 64)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let fill = try await fixture.network.range(start: 0)
+        fill.answer(total: 2_048, start: 0, count: 64)
+        try await fixture.until { first.finished }
+
+        // The speculative reader settles far ahead while the play head has read only once.
+        for offset in [1_000, 1_008, 1_016] {
+            let read = Request(offset: Int64(offset), length: 8)
+            await fixture.onQueue { _ = fixture.loader.accept(read) }
+            let alone = try await fixture.network.range(start: offset)
+            alone.answer(total: 2_048, start: offset, count: 8)
+            try await fixture.until { read.finished }
+        }
+        #expect(fixture.loader.makeSnapshot().restarts == 0)
+        #expect(fixture.loader.makeSnapshot().windowBytes == 64)
+
+        // The play head's second read is still answered from the window, which was neither moved
+        // nor trimmed past it: no separate fetch behind, none more ahead.
+        let second = Request(offset: 8, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(second) }
+        try await fixture.until { second.finished }
+        let bytes = await fixture.onQueue { second.bytes }
+        #expect(bytes == payload(start: 8, count: 8))
+        let details = fixture.loader.makeSnapshot()
+        #expect(details.restarts == 0)
+        #expect(details.asideBehind == 0)
+        #expect(details.asideAhead == 3)
     }
 
     @Test("A forward seek restarts the window once the reader it left behind falls quiet")

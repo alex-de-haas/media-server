@@ -337,18 +337,21 @@ struct ReaderLedgerTests {
     }
 
     @Test("Only readers heard from lately, or still waiting for an answer, are reading")
-    func active() {
+    func reading() {
         var ledger = ledger()
         settle(&ledger, at: 100, length: 10, from: 0)
         settle(&ledger, at: 500, length: 2, from: 2)
+        ledger.observe(offset: 9_000, length: 2, at: 2.25)  // a probe, this moment
 
-        #expect(ledger.active(at: 2.3, quiet: 1).map(\.last) == [504])
+        #expect(ledger.reading(at: 2.3, quiet: 1).map(\.last) == [504, 9_000])
+        #expect(ledger.reading(at: 2.3, quiet: 1, waiting: [120]).map(\.last) == [120, 504, 9_000])
+        // Only the settled ones may move the window.
         #expect(ledger.active(at: 2.3, quiet: 1, waiting: [120]).map(\.last) == [120, 504])
         // The quiet reader is still the one the window keeps behind.
         #expect(ledger.lowest == 120)
     }
 
-    @Test("The window keeps behind the lowest reader it can still serve, not one far below it")
+    @Test("The window keeps behind the lowest reader it can still serve, probe or not, but not one far below it")
     func lowestAbove() {
         var ledger = ledger()
         settle(&ledger, at: 100, length: 10, from: 0)
@@ -358,6 +361,11 @@ struct ReaderLedgerTests {
         #expect(ledger.lowest(atOrAbove: 4_000) == 5_020)
         #expect(ledger.lowest(atOrAbove: 120) == 120)
         #expect(ledger.lowest(atOrAbove: 6_000) == nil)
+
+        // The play head at the start of a film has read once; its bytes are kept all the same.
+        ledger.observe(offset: 0, length: 10, at: 2)
+        #expect(ledger.lowest == 120)
+        #expect(ledger.lowest(atOrAbove: 0) == 0)
     }
 }
 

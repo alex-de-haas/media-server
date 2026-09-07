@@ -16,8 +16,10 @@ import Foundation
 /// within a little of where a known reader stopped is that reader continuing, anything else is a new
 /// one. A reader is a probe until it has read more times than a probe does — the end of the file is
 /// looked at once when playback starts, and the exact middle twice, at the start and after every
-/// re-seat — and a probe is not somewhere the window keeps or goes. Readers not heard from for a
-/// while are forgotten, so a reader AVFoundation abandoned does not pin the window for ever.
+/// re-seat — and the window never goes to a probe. It does keep behind one, as behind any reader it
+/// can serve: the bytes a reader just took are next to the bytes it takes next, and whether it has
+/// read three times yet says nothing about that. Readers not heard from for a while are forgotten,
+/// so a reader AVFoundation abandoned does not pin the window for ever.
 ///
 /// Pure value, so the rules are testable without a player or a network.
 public struct ReaderLedger: Sendable {
@@ -38,7 +40,8 @@ public struct ReaderLedger: Sendable {
     /// AVFoundation re-issues for the rest of a range starts a little after the original did, and a
     /// seek settles by a step or two *backwards* from its target, so this covers the reads seen at
     /// the play head. A bigger read re-issued becomes a reader of its own for a moment, which costs
-    /// nothing: it settles on its next read, and the one it left behind is forgotten in `patience`.
+    /// nothing: the window keeps behind it from its first read, it settles as it reads on, and the
+    /// one it left behind is forgotten in `patience`.
     public let slackBehind: Int64
 
     /// How far past where a reader left off: the audio reader skips between bursts of frames.
@@ -90,12 +93,14 @@ public struct ReaderLedger: Sendable {
         settled.map(\.last).min()
     }
 
-    /// The lowest settled reader at or above `floor`: what the window must keep of what it can still
-    /// serve. A reader far below the window's start is either about to restart the window or a probe
-    /// of a place long passed — the middle of the film, looked at twice after a re-seat — and
-    /// neither should stop the trim behind the readers the window does hold.
+    /// The lowest reader of any age at or above `floor`: what the window must keep of what it can
+    /// still serve. Probes count here — the play head at the start of a film is one until its third
+    /// read, and its bytes are the last the window should throw away. A reader far below the
+    /// window's start is either about to restart the window or a probe of a place long passed — the
+    /// middle of the film, looked at twice after a re-seat — and neither should stop the trim behind
+    /// the readers the window does hold.
     public func lowest(atOrAbove floor: Int64) -> Int64? {
-        settled.map(\.last).filter { $0 >= floor }.min()
+        readers.map(\.last).filter { $0 >= floor }.min()
     }
 
     /// How far apart the settled readers are, lowest to highest. Zero with fewer than two.
@@ -105,13 +110,17 @@ public struct ReaderLedger: Sendable {
         return high - low
     }
 
-    /// The settled readers still reading: heard from within `quiet`, or with their latest read
+    /// The readers of any age still reading: heard from within `quiet`, or with their latest read
     /// among `waiting` — the offsets of reads not yet answered, since a reader kept waiting on a
-    /// slow disk is reading however long ago it asked. Only the lowest of them may move the window:
-    /// a reader far ahead of one still reading is speculative or a probe, and a reader below every
-    /// other, or alone, is where the film is being read now.
+    /// slow disk is reading however long ago it asked. A reader still reading from the window holds
+    /// it there, settled or not.
+    public func reading(at now: TimeInterval, quiet: TimeInterval, waiting: Set<Int64> = []) -> [Reader] {
+        readers.filter { now - $0.seen <= quiet || waiting.contains($0.last) }
+    }
+
+    /// The settled readers still reading: the ones that may move the window, and the ones counted.
     public func active(at now: TimeInterval, quiet: TimeInterval, waiting: Set<Int64> = []) -> [Reader] {
-        settled.filter { now - $0.seen <= quiet || waiting.contains($0.last) }
+        reading(at: now, quiet: quiet, waiting: waiting).filter { $0.reads > Self.probeReads }
     }
 
     /// After the window restarts for one reader, only that reader is still known to be where it was.
