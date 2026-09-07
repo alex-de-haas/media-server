@@ -21,6 +21,8 @@ public sealed class LibraryReadService(
     public async Task<IReadOnlyList<LibraryItemDto>> ListAsync(
         Guid? catalogId, MediaKind? kind, int? appUserId, CancellationToken cancellationToken)
     {
+        using var activity = LibraryDiagnostics.Source.StartActivity("library.list");
+        activity?.SetTag("library.kind", kind?.ToString() ?? "All");
         var query = database.MediaItems.AsNoTracking().Where(item =>
             item.PublicId != null && item.ParentId == null &&
             (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series));
@@ -38,8 +40,11 @@ public sealed class LibraryReadService(
         // Ordered after projection, not in SQL: the card renders the localized metadata title, while
         // MediaItem.Title is whatever language the item was matched in at ingest. Sorting the raw column
         // would leave the list in an order the rendered names do not explain.
-        var items = await query.ToListAsync(cancellationToken);
+        var items = await LibraryDiagnostics.MeasureAsync("library.items",
+            () => query.ToListAsync(cancellationToken), rows => rows.Count);
+        activity?.SetTag("library.item.count", items.Count);
         var cards = await ProjectItemsAsync(items, appUserId, cancellationToken);
+        using var sorting = LibraryDiagnostics.Source.StartActivity("library.sort");
         return cards.OrderBy(card => card.Title, MetadataLanguage.TitleOrder(settings.PreferredLanguage)).ToList();
     }
 
@@ -273,16 +278,21 @@ public sealed class LibraryReadService(
         }
 
         var itemIds = items.Select(item => item.Id).ToList();
-        var posters = await PostersAsync(itemIds, cancellationToken);
-        var metaByItem = await MetadataByItemAsync(itemIds, cancellationToken);
-        var userDataByItem = await userData.LoadAsync(appUserId, items, cancellationToken);
+        var posters = await LibraryDiagnostics.MeasureAsync("library.posters",
+            () => PostersAsync(itemIds, cancellationToken), rows => rows.Count);
+        var metaByItem = await LibraryDiagnostics.MeasureAsync("library.metadata",
+            () => MetadataByItemAsync(itemIds, cancellationToken), rows => rows.Count);
+        var userDataByItem = await LibraryDiagnostics.MeasureAsync("library.user_data",
+            () => userData.LoadAsync(appUserId, items, cancellationToken), rows => rows.Count);
         // One projection for the whole page, not a detail query per card.
         var movieIds = items.Where(item => item.Kind == MediaKind.Movie).Select(item => item.Id).ToList();
-        var videoStreams = await database.MediaStreams.AsNoTracking()
+        var videoStreams = await LibraryDiagnostics.MeasureAsync("library.video_formats",
+            () => database.MediaStreams.AsNoTracking()
             .Where(stream => stream.StreamType == StreamType.Video &&
                 movieIds.Contains(stream.MediaSource!.MediaItemId))
             .Select(stream => new { stream.MediaSource!.MediaItemId, stream.Codec, stream.HdrFormat })
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken), rows => rows.Count);
+        using var projection = LibraryDiagnostics.Source.StartActivity("library.project_cards");
         var formatsByItem = videoStreams
             .Where(stream => !new[] { "mjpeg", "png", "bmp", "gif", "webp" }
                 .Contains(stream.Codec, StringComparer.OrdinalIgnoreCase))
@@ -643,6 +653,11 @@ public sealed class LibraryReadService(
             records.AddRange(await database.MetadataRecords.AsNoTracking()
                 .Where(record => chunk.Contains(record.MediaItemId))
                 .ToListAsync(cancellationToken));
+        }
+        if (System.Diagnostics.Activity.Current is
+            { OperationName: "library.metadata", Source.Name: LibraryDiagnostics.SourceName } metadataActivity)
+        {
+            metadataActivity.SetTag("library.metadata.record_count", records.Count);
         }
         return records.GroupBy(record => record.MediaItemId)
             .ToDictionary(group => group.Key, group => PickLanguage(group.ToList()));

@@ -33,7 +33,8 @@ public static class LibraryEndpoints
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
+            var appUserId = await LibraryDiagnostics.MeasureAsync("library.resolve_user",
+                () => principal.ResolveAppUserIdAsync(database, cancellationToken));
             if (string.IsNullOrWhiteSpace(q) && watched is null && limit is null && offset is null
                 && string.IsNullOrWhiteSpace(about) && string.IsNullOrWhiteSpace(genres))
             {

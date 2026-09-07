@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Collections.Concurrent;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -34,6 +36,91 @@ public sealed class LibraryReadServiceTests : IDisposable
         _context = _db.Create();
         var settings = new MediaServerSettings { SupportedLanguages = ["en-US"] };
         _library = new LibraryReadService(_context, new UserDataService(_context, TimeProvider.System), settings);
+    }
+
+    [Fact]
+    public async Task List_timing_records_stages_counts_and_parenting_without_changing_cards()
+    {
+        var expected = await _library.ListAsync(null, MediaKind.Movie, _userId, CancellationToken.None);
+        using var request = new Activity("test.library.request").Start();
+        var spans = new ConcurrentBag<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == LibraryDiagnostics.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = activity =>
+            {
+                if (activity.TraceId == request.TraceId) spans.Add(activity);
+            },
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        var actual = await _library.ListAsync(null, MediaKind.Movie, _userId, CancellationToken.None);
+
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(expected), System.Text.Json.JsonSerializer.Serialize(actual));
+        var root = Assert.Single(spans, span => span.OperationName == "library.list");
+        Assert.Equal(request.SpanId, root.ParentSpanId);
+        Assert.Equal(actual.Count, root.GetTagItem("library.item.count"));
+        Assert.Equal("Movie", root.GetTagItem("library.kind"));
+        foreach (var name in new[] { "items", "posters", "metadata", "user_data", "video_formats", "project_cards", "sort" })
+        {
+            var stage = Assert.Single(spans, span => span.OperationName == $"library.{name}");
+            Assert.Equal(root.SpanId, stage.ParentSpanId);
+            Assert.True(stage.Duration >= TimeSpan.Zero);
+        }
+        var metadata = Assert.Single(spans, span => span.OperationName == "library.metadata");
+        Assert.Equal(actual.Count, metadata.GetTagItem("library.result.count"));
+        Assert.True((int)metadata.GetTagItem("library.metadata.record_count")! >= actual.Count);
+        Assert.Same(request, Activity.Current);
+    }
+
+    [Fact]
+    public async Task Metadata_does_not_tag_another_sources_span_with_the_same_name()
+    {
+        using var source = new ActivitySource("test.foreign.library");
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = candidate => ReferenceEquals(candidate, source),
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var foreign = source.StartActivity("library.metadata");
+        Assert.NotNull(foreign);
+
+        // Episode metadata uses the same loader without starting a library.metadata span.
+        var episodes = await _library.GetEpisodesAsync(_seriesId, null, _userId, CancellationToken.None);
+
+        Assert.NotEmpty(episodes);
+        Assert.Null(foreign.GetTagItem("library.metadata.record_count"));
+        Assert.Same(foreign, Activity.Current);
+    }
+
+    [Fact]
+    public async Task Timing_marks_failed_stage_and_preserves_exception_without_recording_message()
+    {
+        using var request = new Activity("test.library.failure").Start();
+        Activity? stopped = null;
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == LibraryDiagnostics.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = activity =>
+            {
+                if (activity.TraceId == request.TraceId) stopped = activity;
+            },
+        };
+        ActivitySource.AddActivityListener(listener);
+        var failure = new InvalidOperationException("private library content");
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            LibraryDiagnostics.MeasureAsync<int>("library.items", () => Task.FromException<int>(failure)));
+
+        Assert.Same(failure, thrown);
+        Assert.NotNull(stopped);
+        Assert.Equal(ActivityStatusCode.Error, stopped.Status);
+        Assert.Equal(typeof(InvalidOperationException).FullName, stopped.GetTagItem("error.type"));
+        Assert.DoesNotContain(stopped.TagObjects, tag => tag.Value?.ToString()?.Contains(failure.Message) == true);
+        Assert.Same(request, Activity.Current);
     }
 
     [Fact]

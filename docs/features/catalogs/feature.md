@@ -1,7 +1,7 @@
 # Catalogs
 
 Created: 2026-06-15
-Updated: 2026-08-31
+Updated: 2026-09-07
 
 ## Description
 
@@ -226,6 +226,29 @@ action, including what it does about files that are gone:
   [File and directory management](../file-directory-management/feature.md)); a
   scan never erases anything from disk.
 
+## Library request timing
+
+With Hosty telemetry enabled, `MediaServer.Library` emits child spans beneath the
+library HTTP request. The browse path measures user resolution, item loading,
+poster selection, metadata loading, user playback data, video formats, card
+projection, and sorting. `library.list` carries the requested media kind and
+returned item count; stage spans carry result counts where applicable. Metadata
+loading also records the number of language/provider records read.
+
+These timings include database reads and materialization within each stage; they
+are not individual SQL timings. The HTTP span additionally includes middleware
+and response serialization/writing. Shared card stages also appear for search
+and recent-item requests. No titles, IDs, query text, paths, or provider payloads
+are added to spans. Failed async stages report the exception type only through the standard span
+attribute `error.type`. Metadata record counts only annotate spans from the
+`MediaServer.Library` source, even when another source uses the same span name.
+Without a telemetry listener, no activities are allocated.
+
+## Links
+
+- [Catalog library browsing idea](../../ideas/catalog-library-browsing.md)
+- [Frontend application](../frontend-application/feature.md)
+
 ## Testing Expectations
 
 Backend tests should use xUnit and Imposter. Required coverage:
@@ -248,7 +271,4 @@ Backend tests should use xUnit and Imposter. Required coverage:
 - Stable public ID assignment from canonical provider identity across rescans.
 - Catalog-to-Jellyfin `CollectionFolder` mapping.
 
-## Links
-
-- [Catalog library browsing idea](../../ideas/catalog-library-browsing.md)
-- [Frontend application](../frontend-application/feature.md)
+- Library timing tests verify stage parenting, counts, failure reporting, source isolation, and unchanged results.
