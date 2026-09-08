@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-07
+Updated: 2026-09-08
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -452,7 +452,7 @@ title was mid-watch, so the resume marker was never drawn from real data, and th
 opened had no track beside the file, so the sidecar mark is still only under test.
 
 
-Two tabs, Movies and Series, over a poster grid. Catalogs are mixed rather than shown as a
+Movies and Series tabs provide poster grids beside the separate Home tab. Catalogs are mixed rather than shown as a
 level of their own — whether a film sits on the SSD or the spinning disk is an operator's
 concern, not a viewer's — and `catalogId` travels on every title so a filter can be laid
 over this later.
@@ -698,7 +698,8 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
 
 ## Native tvOS visual design and collections
 
-The native Apple TV client exposes Movies, Series, Collections, and Settings.
+The native Apple TV client exposes Home, Movies, Series, Collections, and Settings.
+[Apple TV Home](../apple-tv-home/feature.md) owns resume, next-up, and held recommendations.
 The visual layout and authenticated collection list, detail, and artwork routes
 are described in [Apple client visual design](../apple-client-visual-design/feature.md).
 Collection reads exclude removed movies from counts, members, and poster fallbacks.

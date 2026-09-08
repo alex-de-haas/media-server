@@ -374,7 +374,9 @@ public sealed class LibraryReadService(
                     TitleFor(seriesMeta.GetValueOrDefault(series.Id), series.Title),
                     $"{label} · {episodeTitle}",
                     seriesPosters.GetValueOrDefault(series.Id) ?? leafPosters.GetValueOrDefault(leaf.Id),
-                    userDataByLeaf.GetValueOrDefault(leaf.Id)));
+                    userDataByLeaf.GetValueOrDefault(leaf.Id),
+                    seriesPosters.ContainsKey(series.Id) ? series.Id
+                        : leafPosters.ContainsKey(leaf.Id) ? leaf.Id : null));
             }
             else
             {
@@ -383,7 +385,8 @@ public sealed class LibraryReadService(
                     TitleFor(metaByLeaf.GetValueOrDefault(leaf.Id), leaf.Title),
                     null,
                     leafPosters.GetValueOrDefault(leaf.Id),
-                    userDataByLeaf.GetValueOrDefault(leaf.Id)));
+                    userDataByLeaf.GetValueOrDefault(leaf.Id),
+                    leafPosters.ContainsKey(leaf.Id) ? leaf.Id : null));
             }
         }
 

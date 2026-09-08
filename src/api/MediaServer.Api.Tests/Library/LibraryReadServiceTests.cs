@@ -720,6 +720,34 @@ public sealed class LibraryReadServiceTests : IDisposable
         Assert.Contains(recent, item => item.Id == _seriesId);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Episode_rails_preserve_artwork_owner_independently_of_navigation(bool nextUp, bool seriesPoster)
+    {
+        var episodeId = nextUp ? _episode2Id : _episodeId;
+        _context.ImageAssets.RemoveRange(await _context.ImageAssets
+            .Where(image => image.MediaItemId == _seriesId || image.MediaItemId == episodeId).ToListAsync());
+        _context.ImageAssets.Add(new ImageAsset { Id = Guid.NewGuid(), MediaItemId = episodeId,
+            ImageType = ImageType.Primary, Provider = "tmdb", RemotePath = "https://cdn/episode.jpg", Tag = "episode" });
+        if (seriesPoster)
+            _context.ImageAssets.Add(new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _seriesId,
+                ImageType = ImageType.Primary, Provider = "tmdb", RemotePath = "https://cdn/series.jpg", Tag = "series" });
+        await _context.SaveChangesAsync();
+        if (nextUp) SeedUserData(_episodeId, played: true);
+        else SeedUserData(_episodeId, position: TimeSpan.FromMinutes(5).Ticks);
+
+        var rows = nextUp
+            ? await _library.GetNextUpAsync(_userId, 10, CancellationToken.None)
+            : await _library.GetResumeAsync(_userId, 10, CancellationToken.None);
+        var card = Assert.Single(rows, row => row.Id == episodeId);
+        Assert.Equal(_seriesId, card.NavId);
+        Assert.Equal(seriesPoster ? _seriesId : episodeId, card.PosterItemId);
+        Assert.Equal(seriesPoster ? "https://cdn/series.jpg" : "https://cdn/episode.jpg", card.PosterUrl);
+    }
+
     [Fact]
     public async Task Resume_returns_in_progress_leaves_with_navigation_targets()
     {

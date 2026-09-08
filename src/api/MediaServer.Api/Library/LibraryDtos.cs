@@ -229,4 +229,6 @@ public sealed record LibraryRailItemDto(
     string Title,
     string? Subtitle,
     string? PosterUrl,
-    UserItemDataDto? UserData);
+    UserItemDataDto? UserData,
+    // The selected poster can belong to the episode even when navigation targets its series.
+    Guid? PosterItemId = null);

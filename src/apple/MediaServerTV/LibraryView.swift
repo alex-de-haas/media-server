@@ -12,7 +12,6 @@ struct LibraryView: View {
     @State private var library: LibraryStore
     @Namespace private var libraryFocus
     @FocusState private var focusedMovie: String?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(session: ServerSession, pairing: PairingSession) {
         self.session = session
@@ -22,12 +21,16 @@ struct LibraryView: View {
 
     var body: some View {
         TabView {
+            Tab("Home", systemImage: "house") {
+                NavigationStack { HomeView(session: session, library: library) }
+            }
+
             Tab("Movies", systemImage: "film") {
-                shelf(library.movies, continues: true, empty: "No films yet.")
+                shelf(library.movies, heading: "All Movies", empty: "No films yet.")
             }
 
             Tab("Series", systemImage: "tv") {
-                shelf(library.series, empty: "No series yet.")
+                shelf(library.series, heading: "All Series", empty: "No series yet.")
             }
 
             Tab("Collections", systemImage: "square.stack") {
@@ -48,7 +51,7 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func shelf(_ items: [LibraryTitle], continues: Bool = false, empty: String) -> some View {
+    private func shelf(_ items: [LibraryTitle], heading: String, empty: String) -> some View {
         switch library.state {
         case .idle, .loading:
             ProgressView("Reading the library")
@@ -69,32 +72,7 @@ struct LibraryView: View {
                 ScrollViewReader { scroll in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 44) {
-                            if continues && !library.continueWatching.isEmpty {
-                                Text("Continue Watching").font(.title2.bold())
-                                ScrollView(.horizontal) {
-                                    LazyHStack(spacing: 48) {
-                                        ForEach(library.continueWatching) { item in
-                                            MoviePosterLink(item: item, library: library, loader: session.artwork,
-                                                            playback: PlaybackService(session: session), showResumeTime: true)
-                                                .frame(width: 250)
-                                                .prefersDefaultFocus(item.id == library.continueWatching.first?.id, in: libraryFocus)
-                                        }
-                                    }.padding(.bottom, 30).padding(.horizontal, 20)
-                                }
-                                .scrollClipDisabled()
-                                .focusSection()
-                                .onMoveCommand { direction in
-                                    guard direction == .down, let first = items.first else { return }
-                                    // The lazy grid can be entirely below the viewport. Reveal its first
-                                    // row before asking the focus engine to select an actual poster.
-                                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                                        scroll.scrollTo("all-titles", anchor: .top)
-                                    } completion: {
-                                        focusedMovie = "all-\(first.id)"
-                                    }
-                                }
-                            }
-                            Text(continues ? "All Movies" : "All Series").font(.title2.bold())
+                            Text(heading).font(.title2.bold())
                                 .id("all-titles")
                             LibraryPosterGrid(items: items, library: library, loader: session.artwork,
                                               playback: PlaybackService(session: session), focus: $focusedMovie)

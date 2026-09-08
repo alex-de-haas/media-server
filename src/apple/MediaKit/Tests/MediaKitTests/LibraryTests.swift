@@ -794,3 +794,133 @@ struct TitleCreditTests {
         #expect(detail.cast.isEmpty && detail.crew.isEmpty && detail.directors.isEmpty && detail.creators.isEmpty)
     }
 }
+
+@Suite("Home rails") @MainActor
+struct HomeStoreTests {
+    private let episode = """
+    [{"id":"episode","kind":"Episode","navId":"series","navKind":"Series","title":"The Show",
+      "subtitle":"S01E02 · Second","posterUrl":"https://cdn/poster.jpg",
+      "userData":{"key":"e","playbackPositionTicks":600000000,"playCount":0,"isFavorite":false,"played":false}}]
+    """
+
+    @Test("A failed rail retries independently; episodes navigate to their series; discovery stays out")
+    func independentRetryAndMapping() async {
+        let stub = SurfaceStub([
+            "/native/v1/home/resume": [(500, ""), (200, episode)],
+            "/native/v1/home/nextup": [(404, "")],
+            "/native/v1/recommendations": [(200, """
+              {"items":[
+                {"kind":"Movie","tmdbId":"1","title":"Held","year":1997,"inLibrary":true,"mediaItemId":"held",
+                 "reason":{"kind":"seed","detail":"Arrival"}},
+                {"kind":"Movie","tmdbId":"2","title":"Discovery","inLibrary":false},
+                {"kind":"Movie","tmdbId":"3","title":"Missing ID","inLibrary":true}
+              ],"popularityBias":0,"maxPopularityBias":1}
+              """)],
+        ])
+        let session = ServerSession(paired: pairing(), transport: stub)
+        let store = HomeStore(session: session)
+        await store.load()
+        guard case .failed = store.rails[.continueWatching]?.state else { Issue.record("Expected a failed resume rail"); return }
+        #expect(store.rails[.nextUp]?.state == .unsupported)
+        #expect(store.rails[.recommendations]?.items.map(\.id) == ["held"])
+        #expect(store.rails[.recommendations]?.items.first?.subtitle == "Because you watched Arrival")
+        await store.load(.continueWatching)
+        #expect(store.rails[.continueWatching]?.state == .loaded)
+        let card = store.rails[.continueWatching]?.items.first
+        #expect(card?.id == "episode")
+        #expect(card?.destination.id == "series")
+        #expect(card?.destination.kind == .series)
+        #expect(card?.subtitle.contains("S01E02") == true)
+        #expect(card?.subtitle.contains("Resume from") == true)
+        #expect(stub.requests.filter { $0.path == "/native/v1/recommendations" }.count == 1)
+    }
+
+    @Test("Empty results are loaded and a later appearance revalidates")
+    func emptyAndRefresh() async {
+        let stub = SurfaceStub([
+            "/native/v1/home/resume": [(200, "[]"), (200, episode)],
+            "/native/v1/home/nextup": [(200, "[]")],
+            "/native/v1/recommendations": [(200, "{\"items\":[],\"popularityBias\":0,\"maxPopularityBias\":1}")],
+        ])
+        let store = HomeStore(session: ServerSession(paired: pairing(), transport: stub))
+        await store.load()
+        for section in HomeSection.allCases {
+            #expect(store.rails[section]?.state == .loaded)
+            #expect(store.rails[section]?.items.isEmpty == true)
+        }
+        await store.load()
+        #expect(store.rails[.continueWatching]?.items.count == 1)
+    }
+}
+
+private actor SlowHomeRecommendations: ClientTransport {
+    private var release: CheckedContinuation<Void, Never>?
+    private var started: CheckedContinuation<Void, Never>?
+    private var waiting = false
+
+    func waitUntilBlocked() async {
+        if waiting { return }
+        await withCheckedContinuation { started = $0 }
+    }
+
+    func finish() { release?.resume(); release = nil }
+
+    func send(_ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String)
+        async throws -> (HTTPResponse, HTTPBody?) {
+        let recommendations = request.path?.contains("/recommendations") == true
+        if recommendations {
+            await withCheckedContinuation { continuation in
+                release = continuation
+                waiting = true
+                started?.resume(); started = nil
+            }
+        }
+        var response = HTTPResponse(status: .ok)
+        response.headerFields[.contentType] = "application/json"
+        return (response, HTTPBody(recommendations
+            ? "{\"items\":[],\"popularityBias\":0,\"maxPopularityBias\":1}" : "[]"))
+    }
+}
+
+extension HomeStoreTests {
+    @Test("A slow recommendation request does not block resume or next-up")
+    func slowRecommendationsDoNotBlockPlaybackRows() async {
+        let transport = SlowHomeRecommendations()
+        let store = HomeStore(session: ServerSession(paired: pairing(), transport: transport))
+        let recommendations = Task { await store.load(.recommendations) }
+        await transport.waitUntilBlocked()
+        await store.load(.continueWatching)
+        await store.load(.nextUp)
+        #expect(store.rails[.continueWatching]?.state == .loaded)
+        #expect(store.rails[.nextUp]?.state == .loaded)
+        #expect(store.rails[.recommendations]?.state == .loading)
+        await transport.finish()
+        await recommendations.value
+        #expect(store.rails[.recommendations]?.state == .loaded)
+    }
+}
+
+
+extension HomeStoreTests {
+    @Test("Episode artwork owner is independent of its series navigation target")
+    func episodeArtworkOwnership() throws {
+        let server = URL(string: "https://media.example/")!
+        let decoder = JSONDecoder()
+        func card(_ extra: String, poster: String = "\"https://cdn/episode.jpg\"") throws -> HomeCard {
+            let json = """
+            {"id":"episode","kind":"Episode","navId":"series","navKind":"Series","title":"Show",
+             "posterUrl":\(poster)\(extra)}
+            """
+            return try #require(HomeCard(decoder.decode(Components.Schemas.LibraryRailItemDto.self, from: Data(json.utf8))))
+        }
+        let episode = try card(",\"posterItemId\":\"episode\"")
+        #expect(episode.destination.id == "series")
+        #expect(episode.artworkURL(on: server)?.path == "/native/v1/items/episode/images/primary")
+        let series = try card(",\"posterItemId\":\"series\"")
+        #expect(series.artworkURL(on: server)?.path == "/native/v1/items/series/images/primary")
+        let oldServer = try card("")
+        #expect(oldServer.artworkURL(on: server)?.path == "/native/v1/items/series/images/primary")
+        let missing = try card("", poster: "null")
+        #expect(missing.artworkURL(on: server) == nil)
+    }
+}
