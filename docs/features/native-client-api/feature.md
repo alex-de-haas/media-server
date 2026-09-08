@@ -230,13 +230,23 @@ host, the same `/api/torrents` against the loopback `api` binding answers 401. T
 route is therefore alive internally and merely unpublished — the 404/401 pair is the
 whole distinction, and nothing but the binding differs between them.
 
-**Middleware ordering.** On that same run the three allowlisted native routes
-answered 401 while a bogus route under the same prefix answered 404, and the app's
-log carried exactly three Hosty authentication challenges — one per allowlisted
-route, none for either `/api` request. Authentication ran only where the allowlist
-had already admitted the request, and the allowlist told a real native route from a
-bogus one, so it decides on the matched route. Allowlist after routing, before
-authentication.
+**Middleware ordering.** The ordering itself is settled by the registration in
+`Program.cs` — `UseRouting()`, then `UsePublicSurfaceAllowlist(hosty)`, then
+`UseAuthentication()` inside its `UseWhen` branch, then `UseAuthorization()` — so an
+unpublished route is refused before authentication looks at a credential, and no
+bearer for such a route is ever validated against Core. That is the claim, and it is
+a property of the pipeline rather than of any one request.
+
+What the live run adds is that the assembled pipeline behaves that way on a real
+second binding: the three allowlisted native routes answered 401 while a bogus route
+under the same prefix answered 404, and the app's log carried exactly three Hosty
+authentication challenges — one per allowlisted route, none for either `/api`
+request. Taken alone those observations would be weaker than they look, since an
+unauthenticated request produces no challenge whichever side of the allowlist
+authentication sits on; they corroborate the registration order rather than
+establish it. What they do establish on their own is that the allowlist tells a real
+native route from a bogus one under the same prefix, so it decides on the matched
+route and therefore runs after routing.
 
 **Route parity.** With an app identity token the native read surfaces answer with
 data. Parity itself is structural rather than observed: each handler is
