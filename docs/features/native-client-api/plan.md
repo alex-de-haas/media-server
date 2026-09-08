@@ -18,12 +18,10 @@ harness, and `WebApplicationFactory` would not supply one for the first two —
 a `TestServer` has no real ports, so it cannot exercise a check that keys off which
 binding a request arrived on.
 
-- [ ] **The public binding under real ports** — `/native/v1/server/public` answers,
-      `/api/torrents` 404s there and still works internally. **Half-confirmed on
-      2026-09-08** against the production host: the two halves that face outward
-      both hold. The internal half is unobserved — `api` binds
-      `http://127.0.0.1:32261`, reachable only from the host itself — so it needs
-      one probe run there.
+- [x] **The public binding under real ports** — `/native/v1/server/public` answers,
+      `/api/torrents` 404s there and still works internally. **Confirmed on
+      2026-09-08** against the production host, the outward halves from off the
+      host and the internal one from a probe on it; the evidence is recorded below.
 - [x] **Middleware ordering** — the allowlist runs after routing and before
       authentication. **Confirmed on 2026-09-08** against the production host; the
       evidence is recorded below.
@@ -53,6 +51,18 @@ read-only.
 | `/api/library` | 404, empty body |
 | `/System/Info/Public` | 200 — the Jellyfin surface still answers |
 
+On the host itself, against the loopback `api` binding `http://127.0.0.1:32261`:
+
+| Request | Result |
+| --- | --- |
+| `/api/torrents` | 401 |
+
+That one request is what separates "not published here" from "broken": the same path
+answers 404 off the published binding and 401 off the internal one, so internally the
+allowlist admits it and only authentication refuses. It is also the check a
+`TestServer` cannot stand in for, since the two answers differ by nothing except which
+binding the request arrived on.
+
 The app's own log carries exactly three `HostyAuthenticationHandler[12]
 AuthenticationScheme: Hosty was challenged.` entries for that run, one per
 allowlisted route, and none for either `/api/*` request. Authentication therefore
@@ -62,8 +72,8 @@ bogus one under the same prefix (404), so it decides on the matched route rather
 than on a path prefix, which puts it after routing. Both halves of the ordering
 claim hold.
 
-What this run could not reach: the loopback `api` binding, and anything needing a
-credential — route parity and a live event stream both do.
+What this run could not reach: anything needing a credential — route parity and a live
+event stream both do.
 
 ## Verification steps
 
