@@ -1,5 +1,9 @@
 "use client";
 
+import Link from "next/link";
+import { AlertTriangle } from "lucide-react";
+import { useSession } from "@/components/app-shell";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { useEffect, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -31,6 +35,7 @@ const ALL_CATALOGS = "__all_catalogs__";
  * appears when this user has some of this kind; for most libraries it is never there at all.
  */
 export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: LibraryKind; catalogId?: string }) {
+  const { role } = useSession();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -38,9 +43,11 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
   const currentHref = search ? `${pathname}?${search}` : pathname;
   const showRemoved = removedSearchParam(searchParams.get("removed") ?? undefined);
   const [navigationPending, startNavigation] = useTransition();
-  const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
+  const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs, refetchInterval: 5000 });
   const applicableCatalogs = (catalogs.data ?? []).filter((catalog) => catalogAppliesToKind(catalog.type, kind));
   const selectedCatalog = applicableCatalogs.find((catalog) => catalog.id === catalogId);
+  const unavailableCatalogs = (selectedCatalog ? [selectedCatalog] : applicableCatalogs)
+    .filter((catalog) => !catalog.online || catalog.unanchored);
   const catalogIsValid = !catalogId || selectedCatalog !== undefined;
 
   // Old bookmarks can reference a deleted catalog or one of the wrong media type. Once the catalog list
@@ -130,6 +137,24 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
           )}
         </div>
       </div>
+
+      {unavailableCatalogs.length > 0 && (
+        <Alert variant="destructive">
+          <AlertTriangle aria-hidden />
+          <AlertTitle>Storage unavailable</AlertTitle>
+          <AlertDescription>
+            <ul className="mb-2 list-inside list-disc">
+              {unavailableCatalogs.map((catalog) => (
+                <li key={catalog.id}>
+                  {catalog.name}: {catalog.unanchored ? "storage location needs to be reconnected." : "storage is offline."}
+                </li>
+              ))}
+            </ul>
+            <p>You can browse these titles, but their media files are currently unavailable.</p>
+            {role === "admin" && <Link href="/settings?tab=catalogs">Manage catalogs</Link>}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <QueryState query={library} empty={emptyMessage} pending={<PosterGridSkeleton />}>
         {(items) => (

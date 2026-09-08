@@ -4,7 +4,7 @@ import { createContext, useContext } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, CalendarDays, Film, FolderTree, Home, Layers, Settings, Tv, type LucideIcon } from "lucide-react";
+import { Activity, CalendarDays, Film, Home, Layers, Settings, Tv, type LucideIcon } from "lucide-react";
 import { apiJson, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RealtimeBridge } from "@/components/realtime-bridge";
@@ -32,8 +32,7 @@ export function useSession(): Session {
 
 /**
  * App-wide chrome: resolves the session once, gates rendering on it, and renders the top tab bar
- * around the active page. Catalogs is admin-only (gated here and enforced server-side via
- * `AppRoles.AdminPolicy`); Settings is available to every user (it holds the per-user Infuse credential).
+ * around the active page. Settings is available to every user; its Catalogs tab is admin-only.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const session = useQuery({
@@ -70,7 +69,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           horizontal scrollbar. `clip` (not `hidden`) doesn't create a scroll container, so the sticky
           TabBar below keeps sticking to the viewport. */}
       <div className="flex min-h-full flex-col overflow-x-clip">
-        <TabBar isAdmin={session.data.role === "admin"} />
+        <TabBar />
         <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">{children}</main>
       </div>
     </SessionContext.Provider>
@@ -118,7 +117,7 @@ const PRIMARY_TABS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/activity", label: "Activity", icon: Activity },
 ];
 
-function TabBar({ isAdmin }: { isAdmin: boolean }) {
+function TabBar() {
   const pathname = usePathname();
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
@@ -132,7 +131,6 @@ function TabBar({ isAdmin }: { isAdmin: boolean }) {
           <TabLink key={tab.href} href={tab.href} label={tab.label} icon={tab.icon} active={isActive(tab.href)} />
         ))}
         <span className="ml-auto flex items-center gap-5">
-          {isAdmin && <TabLink href="/catalogs" label="Catalogs" icon={FolderTree} active={isActive("/catalogs")} />}
           <TabLink href="/settings" label="Settings" icon={Settings} active={isActive("/settings")} />
         </span>
       </nav>

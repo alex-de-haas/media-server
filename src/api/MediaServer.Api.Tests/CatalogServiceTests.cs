@@ -39,6 +39,59 @@ public sealed class CatalogServiceTests : IDisposable
     private static CreateCatalogRequest MountRequest(string label, string? relativePath) =>
         new("Movies", CatalogType.Movie, null, label, relativePath, null, false, null);
 
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    public async Task Reads_report_online_only_when_root_exists_and_no_offline_marker(
+        bool rootExists, bool markedOffline, bool expectedOnline)
+    {
+        var catalog = new Catalog
+        {
+            Id = Guid.NewGuid(),
+            Name = "Movies",
+            Type = CatalogType.Movie,
+            Root = rootExists ? _tempRoot : Path.Combine(_tempRoot, "missing"),
+            OfflineSince = markedOffline ? DateTimeOffset.UtcNow : null,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        _database.Catalogs.Add(catalog);
+        await _database.SaveChangesAsync();
+        var service = CreateService();
+
+        var listed = Assert.Single(await service.ListAsync(CancellationToken.None));
+        var fetched = Assert.IsType<CatalogResponse>(await service.GetAsync(catalog.Id, CancellationToken.None));
+
+        Assert.Equal(expectedOnline, listed.Online);
+        Assert.Equal(expectedOnline, fetched.Online);
+        if (!expectedOnline)
+        {
+            Assert.Equal(0, listed.FreeBytes);
+            Assert.Equal(0, fetched.FreeBytes);
+        }
+    }
+
+    [Fact]
+    public async Task Reads_report_recovery_after_persisted_offline_marker_is_cleared()
+    {
+        var service = CreateService();
+        var created = await service.CreateAsync(Request(_tempRoot), CancellationToken.None);
+        var catalog = await _database.Catalogs.SingleAsync();
+        catalog.OfflineSince = DateTimeOffset.UtcNow;
+        await _database.SaveChangesAsync();
+
+        Assert.False(Assert.Single(await service.ListAsync(CancellationToken.None)).Online);
+
+        // Health checks or a successful scan clear the marker after verifying storage recovery.
+        catalog.OfflineSince = null;
+        await _database.SaveChangesAsync();
+
+        Assert.True(Assert.Single(await service.ListAsync(CancellationToken.None)).Online);
+        Assert.True((await service.GetAsync(created.Id, CancellationToken.None))!.Online);
+    }
+
     [Fact]
     public async Task Creates_catalog_with_incoming_staging_dir()
     {

@@ -1,16 +1,13 @@
-import { InfuseAccessSection } from "@/components/infuse-access-section";
-import { ReleaseGroupSettingsSection } from "@/components/release-group-settings-section";
-import { WatchHistorySection } from "@/components/watch-history-section";
+import { Suspense } from "react";
+import { SettingsTabs } from "@/components/settings-tabs";
 
 export default function SettingsPage() {
   return (
     <>
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-      <div className="flex flex-col gap-6">
-        <ReleaseGroupSettingsSection />
-        <InfuseAccessSection />
-        <WatchHistorySection />
-      </div>
+      <Suspense fallback={<p className="text-muted-foreground text-sm">Loading settings…</p>}>
+        <SettingsTabs />
+      </Suspense>
     </>
   );
 }

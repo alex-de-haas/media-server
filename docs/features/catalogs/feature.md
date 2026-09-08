@@ -71,7 +71,7 @@ media        /srv/media                /mnt/catalogRoots/media
   and never anchored — is reported as **unanchored**. Its `root` is left exactly
   as stored (no path is guessed at), file-backed actions are unavailable as when
   offline, and the operator re-anchors it onto a configured mount from the
-  Catalogs page (`POST /api/catalogs/{id}/anchor`). Media files are never moved
+  Settings → Catalogs tab (`POST /api/catalogs/{id}/anchor`). Media files are never moved
   by anchoring; only the record of where the catalog lives changes. For a
   catalog that has a label, this is decided by whether that label resolves, not
   by where its root happens to sit: a mount renamed while keeping its path
@@ -154,8 +154,18 @@ for the pre-download space check (see
   to the grid.
 - Offline catalogs remain selectable and are labelled `Offline`; their published
   database items remain browsable even while file-backed actions may be unavailable.
-- The admin Catalogs page keeps its configuration role and provides a
+- The admin-only Settings → Catalogs tab (`/settings?tab=catalogs`) provides a
   `Browse media` action that opens the matching filtered Movies or Series page.
+- Catalog management is absent from primary navigation and the Hosty navigation
+  manifest. The former `/catalogs` page returns 404, without a redirect.
+- Movies and Series display a storage alert for offline or unanchored catalogs
+  matching the media kind and active catalog filter, even when there is only one
+  catalog. Titles remain browsable. Admins receive a link to Settings → Catalogs;
+  regular users see the explanation without management controls. Catalog health
+  refreshes every five seconds. The API reports a catalog online only when its
+  root exists and its persisted `OfflineSince` marker is clear. An empty root
+  left by a missing bind mount does not clear the alert; recovery waits for the
+  health check or scan to verify storage and clear that marker.
 
 ## Item Model
 
@@ -258,6 +268,9 @@ and other callers of the shared card projection keep the same DTO and language
 fallback. Detail and episode metadata reads retain their existing fields.
 
 ## Testing Expectations
+
+- Browser coverage for Settings tab selection/history, admin-only management, the
+  removed standalone route, media-kind/filter-scoped storage alerts, and recovery.
 
 Backend tests should use xUnit and Imposter. Required coverage:
 

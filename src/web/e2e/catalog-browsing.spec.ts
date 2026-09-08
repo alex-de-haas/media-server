@@ -105,7 +105,7 @@ test("admin opens a catalog directly in its matching media page", async ({ page 
     catalogs: [aCatalog(ANIME, "Anime Archive", "Anime")],
   });
 
-  await page.goto("/catalogs");
+  await page.goto("/settings?tab=catalogs");
   await page.getByRole("button", { name: "Catalog actions" }).click();
   await page.getByRole("menuitem", { name: "Browse media" }).click();
 
@@ -131,4 +131,45 @@ test("library posters use compact accessible captions and preserve artwork fallb
   const series = page.getByRole("link", { name: /Severance/ });
   await expect(series).toContainText("2022");
   await expect(series).not.toContainText(" · ");
+});
+
+test("storage alerts follow the selected catalog and link admins to settings", async ({ page }) => {
+  await setupApp(page, {
+    role: "admin",
+    catalogs: [aCatalog(MOVIES_HD, "Movies HD", "Movie", false), aCatalog(MOVIES_4K, "Movies 4K", "Movie"),
+      aCatalog(SERIES, "Drama", "Series", false)],
+    library: [{ ...aMovie("m1", "Arrival"), catalogId: MOVIES_HD }],
+  });
+  await page.goto("/movies");
+  const alert = page.getByRole("alert").filter({ hasText: "Storage unavailable" });
+  await expect(alert).toContainText("Movies HD: storage is offline.");
+  await expect(alert).not.toContainText("Drama");
+  await expect(page.getByRole("link", { name: /Arrival/ })).toBeVisible();
+  await alert.getByRole("link", { name: "Manage catalogs" }).click();
+  await expect(page).toHaveURL("/settings?tab=catalogs");
+  await expect(page.getByRole("button", { name: "Scan all", exact: true })).toBeVisible();
+  await page.goto(`/movies?catalog=${MOVIES_4K}`);
+  await expect(page.getByRole("combobox", { name: "Filter movies by catalog" })).toContainText("Movies 4K");
+  await expect(alert).toHaveCount(0);
+});
+
+test("a single unanchored anime catalog alerts regular users and clears on recovery", async ({ page }) => {
+  const catalog = { ...aCatalog(ANIME, "Anime Archive", "Anime", false), unanchored: true };
+  await setupApp(page, { role: "user", catalogs: [catalog] });
+  await page.goto("/series");
+  const alert = page.getByRole("alert").filter({ hasText: "Storage unavailable" });
+  await expect(alert).toContainText("Anime Archive: storage location needs to be reconnected.");
+  await expect(alert.getByRole("link", { name: "Manage catalogs" })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Filter series by catalog" })).toHaveCount(0);
+  await page.route("**/api/proxy/api/catalogs", route => route.fulfill({ json: [{ ...catalog, online: true, unanchored: false }] }));
+  await expect(alert).toHaveCount(0, { timeout: 12000 });
+});
+
+test("storage alert fits a narrow screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setupApp(page, { role: "admin", catalogs: [aCatalog(MOVIES_HD, "Movies HD", "Movie", false)] });
+  await page.goto("/movies");
+  await expect(page.getByRole("alert").filter({ hasText: "Storage unavailable" })).toBeVisible();
+  expect(await page.getByRole("main").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: "/tmp/media-server-storage-alert.png", fullPage: true });
 });

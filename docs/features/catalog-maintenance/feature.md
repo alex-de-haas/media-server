@@ -1,7 +1,7 @@
 # Catalog Maintenance
 
 Created: 2026-08-31
-Updated: 2026-08-31
+Updated: 2026-09-08
 
 The library keeps itself in step with two actions, both offered per catalog and
 over every catalog at once, and both also run on their own:
@@ -9,8 +9,8 @@ over every catalog at once, and both also run on their own:
 - **Scan for media** syncs a catalog with its disk, in both directions.
 - **Refresh metadata** syncs stored metadata with its sources.
 
-They live on the Catalogs page, where the storage they act on lives. Settings
-carries no upkeep controls.
+They live in Settings → Catalogs, where the storage they act on lives. The
+General tab carries no library upkeep controls.
 
 ## Scan for media
 
@@ -150,4 +150,4 @@ hand-written track labels and sidecars all survive it.
 - Web unit (`catalog-scan.test.ts`) — every shape of scan summary, including the
   offline one that must not read as a clean bill of health.
 - Web e2e (`catalogs.spec.ts`, `settings.spec.ts`) — the per-catalog and global
-  scan outcomes, the offline report, and Settings carrying no upkeep controls.
+  scan outcomes, the offline report, and the General settings tab carrying no library upkeep controls.
