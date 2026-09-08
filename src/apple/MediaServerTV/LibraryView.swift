@@ -29,16 +29,8 @@ struct LibraryView: View {
                 shelf(library.movies, heading: "All Movies", empty: "No films yet.")
             }
 
-            Tab {
+            Tab("Series", systemImage: "tv") {
                 shelf(library.series, heading: "All Series", empty: "No series yet.")
-            } label: {
-                Label {
-                    Text("Series")
-                } icon: {
-                    Image(systemName: "tv")
-                        .renderingMode(.template)
-                        .symbolRenderingMode(.monochrome)
-                }
             }
 
             Tab("Collections", systemImage: "square.stack") {

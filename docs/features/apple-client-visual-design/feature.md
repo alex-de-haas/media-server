@@ -13,8 +13,6 @@ is in flight; subsequent refreshes remain available after success or failure.
 
 The tvOS client follows the system light/dark appearance with an adaptive neutral canvas, system typography, and native card
 focus. Its top-level tabs are Home, Movies, Series, Collections, and Settings.
-The Series tab renders its TV symbol as a monochrome template so the tab bar
-controls its tint in both light and dark appearances.
 
 [Home](../apple-tv-home/feature.md) owns Continue Watching, Next Up, and held
 recommendations. Movies and Series retain complete poster grids. Home refreshes
@@ -24,9 +22,8 @@ Poster/caption groups and shelves participate in directional focus navigation;
 the captions remain outside the visual card. The transition respects Reduce Motion.
 
 Movie and series cards show only one compact metadata line below the poster:
-year and available HDR/Dolby Vision formats in the library. Home cards use the same
-poster presentation without separate titles, with resume, episode, or recommendation
-captions in the compact metadata line. Formats aggregate the movie's sources without Dolby Vision
+year and available HDR/Dolby Vision formats in the library. Home cards retain
+visible titles and resume, episode, or recommendation captions. Formats aggregate the movie's sources without Dolby Vision
 profiles; they describe available files, not device playback support. The server
 projects these labels once per page in `videoFormats`, without detail requests
 per card. Older servers omit the field and the client displays the year alone. Titles are not
