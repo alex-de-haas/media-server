@@ -1358,6 +1358,75 @@ public struct Client: APIProtocol {
             }
         )
     }
+    /// - Remark: HTTP `GET /native/v1/items/{id}/episodes`.
+    /// - Remark: Generated from `#/paths//native/v1/items/{id}/episodes/get(getNativeEpisodes)`.
+    public func getNativeEpisodes(_ input: Operations.GetNativeEpisodes.Input) async throws -> Operations.GetNativeEpisodes.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.GetNativeEpisodes.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/native/v1/items/{}/episodes",
+                    parameters: [
+                        input.path.id
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: true,
+                    name: "seasonId",
+                    value: input.query.seasonId
+                )
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.GetNativeEpisodes.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            [Components.Schemas.NativeEpisodeDto].self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
     /// - Remark: HTTP `GET /native/v1/items/{id}`.
     /// - Remark: Generated from `#/paths//native/v1/items/{id}/get`.
     public func getNativeV1ItemsId(_ input: Operations.GetNativeV1ItemsId.Input) async throws -> Operations.GetNativeV1ItemsId.Output {

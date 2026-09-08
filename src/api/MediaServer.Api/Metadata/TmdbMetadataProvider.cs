@@ -132,6 +132,31 @@ public sealed class TmdbMetadataProvider(IHttpClientFactory httpClientFactory, M
         return images;
     }
 
+    public async Task<IReadOnlyList<ProviderMetadata>> FetchEpisodeAsync(
+        ProviderRef series, int season, int episode, IReadOnlyList<string> languages, CancellationToken cancellationToken)
+    {
+        var records = new List<ProviderMetadata>();
+        foreach (var language in languages)
+        {
+            using var document = await GetAsync(
+                $"tv/{series.Id}/season/{season}/episode/{episode}?language={Uri.EscapeDataString(language)}&append_to_response=credits",
+                cancellationToken);
+            if (document is not null)
+                records.Add(TmdbPayload.MapDetails(series, language, MediaKind.Episode, document.RootElement));
+        }
+        return records;
+    }
+
+    public async Task<IReadOnlyList<RemoteImage>> GetEpisodeImagesAsync(
+        ProviderRef series, int season, int episode, IReadOnlyList<string> languages, CancellationToken cancellationToken)
+    {
+        using var document = await GetAsync($"tv/{series.Id}/season/{season}/episode/{episode}/images", cancellationToken);
+        var images = new List<RemoteImage>();
+        if (document is not null)
+            AppendImages(document.RootElement, "stills", ImageType.Backdrop, images);
+        return images;
+    }
+
     public async Task<PersonDetails?> FetchPersonAsync(ProviderRef reference, string language, CancellationToken cancellationToken)
     {
         // Person biography/birth fields are not part of the media credits payload, so they need their own

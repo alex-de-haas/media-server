@@ -113,6 +113,12 @@ public final class LibraryStore {
         return detail
     }
 
+    public func episodes(for seriesID: String, seasonID: String) async throws -> [TitleEpisode] {
+        let response = try await session.api().getNativeEpisodes(path: .init(id: seriesID), query: .init(seasonId: seasonID))
+        if case .notFound = response { throw EpisodeLoadError.missingOrUnsupported }
+        return try response.ok.body.json.map(TitleEpisode.init)
+    }
+
     public func load() async {
         guard state != .loading else { return }
         state = .loading

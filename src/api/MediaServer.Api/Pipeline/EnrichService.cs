@@ -33,7 +33,12 @@ public sealed class EnrichService(
         var reference = new ProviderRef(item.IdentityProvider, item.IdentityProviderId);
         var languages = ResolveLanguages(catalog);
 
-        var records = await provider.FetchAsync(reference, item.Kind, languages, cancellationToken);
+        if (item.Kind == MediaKind.Episode && ((item.IdentitySeasonNumber ?? item.ParentIndexNumber) is null || (item.IdentityEpisodeNumber ?? item.IndexNumber) is null))
+            return;
+
+        var records = item.Kind == MediaKind.Episode
+            ? await provider.FetchEpisodeAsync(reference, (item.IdentitySeasonNumber ?? item.ParentIndexNumber)!.Value, (item.IdentityEpisodeNumber ?? item.IndexNumber)!.Value, languages, cancellationToken)
+            : await provider.FetchAsync(reference, item.Kind, languages, cancellationToken);
         var existing = await database.MetadataRecords
             .Where(record => record.MediaItemId == item.Id && record.Provider == reference.Provider)
             .ToListAsync(cancellationToken);
@@ -93,7 +98,9 @@ public sealed class EnrichService(
 
     private async Task UpsertImagesAsync(MediaItem item, ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken)
     {
-        var images = await provider.GetImagesAsync(reference, item.Kind, languages, cancellationToken);
+        var images = item.Kind == MediaKind.Episode
+            ? await provider.GetEpisodeImagesAsync(reference, (item.IdentitySeasonNumber ?? item.ParentIndexNumber)!.Value, (item.IdentityEpisodeNumber ?? item.IndexNumber)!.Value, languages, cancellationToken)
+            : await provider.GetImagesAsync(reference, item.Kind, languages, cancellationToken);
         if (images.Count == 0)
         {
             return;

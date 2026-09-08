@@ -1,7 +1,7 @@
 # Metadata
 
 Created: 2026-06-15
-Updated: 2026-08-15
+Updated: 2026-09-08
 
 ## Description
 
@@ -180,6 +180,14 @@ published library items, split into cast and crew (crew grouped by department).
   refresh runs per catalog at a time, and a run stranded by a restart is reconciled
   to failed on startup.
 - Scheduled refresh can update changed records.
+
+## Episode details and stills
+
+Episode enrichment uses the series provider identity plus season/episode
+coordinates to fetch episode-specific metadata and Backdrop still assets. New
+imports include episodes in enrichment; catalog metadata refresh updates existing
+episodes through the same path. See
+[Apple series browsing](../apple-series-browsing/feature.md).
 
 ## Testing Expectations
 

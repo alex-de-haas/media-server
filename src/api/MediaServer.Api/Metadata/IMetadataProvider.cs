@@ -58,6 +58,15 @@ public interface IMetadataProvider
 
     Task<IReadOnlyList<RemoteImage>> GetImagesAsync(ProviderRef reference, MediaKind kind, IReadOnlyList<string> languages, CancellationToken cancellationToken);
 
+    // Providers without episode support must not return the series metadata for an episode.
+    Task<IReadOnlyList<ProviderMetadata>> FetchEpisodeAsync(ProviderRef series, int season, int episode,
+        IReadOnlyList<string> languages, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<ProviderMetadata>>([]);
+
+    Task<IReadOnlyList<RemoteImage>> GetEpisodeImagesAsync(ProviderRef series, int season, int episode,
+        IReadOnlyList<string> languages, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<RemoteImage>>([]);
+
     /// <summary>
     /// Fetches person-level details (biography, birth/death, place of birth, …) for a single person, localized
     /// to <paramref name="language"/>. Returns null when the provider has no such person or the call fails.

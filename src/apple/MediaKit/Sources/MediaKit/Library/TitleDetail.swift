@@ -172,6 +172,9 @@ public struct TitleCrewMember: Identifiable, Equatable, Sendable {
 
 /// Everything a title's own screen shows.
 public struct TitleDetail: Equatable, Sendable {
+    public let kind: String
+    public let seasons: [TitleSeason]
+    public var isSeries: Bool { kind == "Series" }
     public let id: String
     public let title: String
     public let year: Int?
@@ -204,6 +207,10 @@ public struct TitleDetail: Equatable, Sendable {
 extension TitleDetail {
     init(_ dto: Components.Schemas.NativeItemDto) {
         let detail = dto.detail
+        self.kind = detail.kind
+        self.seasons = (detail.seasons ?? []).filter { $0.episodeCount > 0 }.map {
+            TitleSeason(id: $0.id, number: $0.seasonNumber.map(Int.init), title: $0.title, episodeCount: Int($0.episodeCount))
+        }.sorted { ($0.number ?? Int.max, $0.id) < ($1.number ?? Int.max, $1.id) }
         self.id = detail.id
         self.title = detail.title
         self.year = detail.year.map(Int.init)

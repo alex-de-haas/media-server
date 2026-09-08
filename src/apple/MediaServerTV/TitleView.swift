@@ -6,16 +6,28 @@ import SwiftUI
 /// Versions come first among the details because they are the only choice that changes what is played
 /// rather than how — a 4K copy and a 1080p one are different films as far as an evening is concerned.
 struct TitleView: View {
-    let title: LibraryTitle
+    let itemID: String
     let library: LibraryStore
     let loader: ArtworkLoader
     let playback: PlaybackService
+
+    init(title: LibraryTitle, library: LibraryStore, loader: ArtworkLoader, playback: PlaybackService) {
+        self.init(itemID: title.id, library: library, loader: loader, playback: playback)
+    }
+
+    init(itemID: String, library: LibraryStore, loader: ArtworkLoader, playback: PlaybackService) {
+        self.itemID = itemID
+        self.library = library
+        self.loader = loader
+        self.playback = playback
+    }
 
     @Environment(\.colorScheme) private var systemColorScheme
     // Cast portraits are public provider URLs and must never receive the server credential.
     @State private var portraitLoader = ArtworkLoader(token: { nil })
     @State private var detail: TitleDetail?
     @State private var failure: String?
+    @State private var detailRetry = 0
     // Nil keeps automatic playback selection until the viewer chooses a version.
     @State private var chosenVersion: String?
     @State private var showsTechnicalDetails = false
@@ -57,6 +69,7 @@ struct TitleView: View {
                 VStack(spacing: 16) {
                     Text("Could not open this title").font(.title)
                     Text(failure).font(.callout).foregroundStyle(.secondary)
+                    Button("Retry") { detailRetry += 1 }
                 }
                 .padding(80)
             } else {
@@ -69,9 +82,10 @@ struct TitleView: View {
         }
         .background(detail?.backdropPath != nil ? Color.black : CinemaStyle.canvas)
         .environment(\.colorScheme, detail?.backdropPath != nil ? .dark : systemColorScheme)
-        .task {
+        .task(id: detailRetry) {
+            failure = nil
             do {
-                let loaded = try await library.detail(for: title.id)
+                let loaded = try await library.detail(for: itemID)
                 detail = loaded
             } catch {
                 failure = String(describing: error)
@@ -92,7 +106,7 @@ struct TitleView: View {
                 onProgress: { position in
                     guard let session else { return }
                     Task { await playback.report(
-                        itemId: title.id, playSessionId: session, positionSeconds: position) }
+                        itemId: itemID, playSessionId: session, positionSeconds: position) }
                 },
                 onFinished: { position in
                     let ended = session
@@ -105,7 +119,7 @@ struct TitleView: View {
 
                     guard let ended else { return }
                     Task {
-                        await playback.stop(itemId: title.id, playSessionId: ended, positionSeconds: position)
+                        await playback.stop(itemId: itemID, playSessionId: ended, positionSeconds: position)
                         await refresh()
                     }
                 })
@@ -117,7 +131,7 @@ struct TitleView: View {
     /// knows: a film left halfway offers to resume, one watched to the end is marked so. The screen was
     /// fetched once when it opened and kept saying "Play" about a film the viewer had just left.
     private func refresh() async {
-        guard let loaded = try? await library.detail(for: title.id) else { return }
+        guard let loaded = try? await library.detail(for: itemID) else { return }
         detail = loaded
     }
 
@@ -174,7 +188,7 @@ struct TitleView: View {
         to stream: PlayableStream, audio: String?, subtitle: String?, off: Bool
     ) async -> PlayableStream? {
         guard case .play(let replacement) = try? await playback.plan(
-            for: title.id,
+            for: itemID,
             preferring: stream.mediaSourceId,
             audioStreamId: audio,
             subtitleStreamId: subtitle,
@@ -196,7 +210,7 @@ struct TitleView: View {
         do {
             // The version the viewer picked, not whichever the server listed first. A picker that
             // changes what is listed and not what happens is worse than no picker at all.
-            let answer = try await playback.plan(for: title.id, preferring: chosenVersion)
+            let answer = try await playback.plan(for: itemID, preferring: chosenVersion)
             plan = answer
 
             guard case .play(let stream) = answer else { return }
@@ -222,7 +236,7 @@ struct TitleView: View {
             let opening = viewing
             Task { @MainActor in
                 let opened = try? await playback.start(
-                    itemId: title.id,
+                    itemId: itemID,
                     mediaSourceId: stream.mediaSourceId,
                     positionSeconds: position)
 
@@ -239,7 +253,7 @@ struct TitleView: View {
                 // It ended while this was in flight. The server has an open session either way, so it
                 // is closed here at the position the viewer actually reached instead of being dropped.
                 await playback.stop(
-                    itemId: title.id,
+                    itemId: itemID,
                     playSessionId: opened,
                     positionSeconds: endedAt?.viewing == opening ? endedAt?.position ?? 0 : 0)
                 await refresh()
@@ -308,7 +322,10 @@ struct TitleView: View {
                     .frame(maxWidth: 1000, alignment: .leading)
                 Text(facts(detail)).font(.callout).foregroundStyle(.secondary)
             }
-            playButtons(detail).padding(.vertical, 12)
+            if !detail.isSeries { playButtons(detail).padding(.vertical, 12) }
+            if detail.isSeries {
+                SeriesEpisodesView(detail: detail, library: library, loader: loader, playback: playback)
+            }
 
             if let overview = detail.overview, !overview.isEmpty {
                 Text(overview).font(.body)
@@ -527,5 +544,130 @@ private struct TechnicalDetailRow<Content: View>: View {
             }
             .focusable()
             .focused($isFocused)
+    }
+}
+
+private struct SeriesEpisodesView: View {
+    let detail: TitleDetail
+    let library: LibraryStore
+    let loader: ArtworkLoader
+    let playback: PlaybackService
+    @State private var store: SeriesEpisodeStore
+    @State private var selectedSeason: String?
+    @State private var retry = 0
+    @FocusState private var focusedSeason: String?
+    @FocusState private var focusedEpisode: String?
+
+    init(detail: TitleDetail, library: LibraryStore, loader: ArtworkLoader, playback: PlaybackService) {
+        self.detail = detail
+        self.library = library
+        self.loader = loader
+        self.playback = playback
+        _selectedSeason = State(initialValue: detail.seasons.first?.id)
+        _store = State(initialValue: SeriesEpisodeStore { season in
+            try await library.episodes(for: detail.id, seasonID: season)
+        })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            if detail.seasons.isEmpty {
+                Text("No episodes available").foregroundStyle(.secondary)
+            } else {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 24) {
+                        ForEach(detail.seasons) { season in
+                            Button { selectedSeason = season.id } label: {
+                                Text(season.label)
+                                    .foregroundStyle(selectedSeason == season.id ? Color.black : Color.white)
+                                    .padding(.horizontal, 22).padding(.vertical, 12)
+                                    .background(selectedSeason == season.id ? Color.white : Color.clear, in: Capsule())
+                            }
+                                .buttonStyle(PosterFocusStyle())
+                                .focused($focusedSeason, equals: season.id)
+                                .accessibilityAddTraits(selectedSeason == season.id ? .isSelected : [])
+                        }
+                    }
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 20)
+                }
+                .scrollIndicators(.hidden)
+                .focusSection()
+                .onChange(of: focusedSeason) { _, season in
+                    if let season { selectedSeason = season }
+                }
+
+                if !store.episodes.isEmpty {
+                    ScrollView(.horizontal) {
+                        LazyHStack(alignment: .top, spacing: 32) {
+                            ForEach(store.episodes) { episode in
+                                NavigationLink {
+                                    TitleView(itemID: episode.id, library: library, loader: loader, playback: playback)
+                                } label: {
+                                    episodeCard(episode)
+                                }
+                                .buttonStyle(PosterFocusStyle())
+                                .focused($focusedEpisode, equals: episode.id)
+                                .accessibilityLabel("\(episode.numberLabel), \(episode.title)\(episode.played ? ", watched" : "")")
+                            }
+                        }
+                        .padding(20)
+                    }
+                    .scrollIndicators(.hidden)
+                    .focusSection()
+                }
+                switch store.state {
+                case .loading:
+                    ProgressView().frame(height: store.episodes.isEmpty ? 260 : 40)
+                case .loaded:
+                    if store.episodes.isEmpty { Text("No episodes available in this season").foregroundStyle(.secondary) }
+                case .missingOrUnsupported:
+                    Text("Episodes are unavailable. Reload the series or update your server to support episode browsing.")
+                    Button("Retry") { retry += 1 }
+                case .failed(let message):
+                    Text("Could not load episodes").font(.headline)
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                    Button("Retry") { retry += 1 }
+                }
+            }
+        }
+        .task(id: "\(selectedSeason ?? "")-\(retry)") {
+            if let selectedSeason { await store.select(selectedSeason) }
+        }
+    }
+
+    private func episodeCard(_ episode: TitleEpisode) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ServerArtwork(url: episode.artworkURL(on: library.server, fallback: detail.backdropURL(on: library.server)),
+                          loader: loader, symbol: "tv", fallbackTitle: episode.title)
+                .frame(width: 340, height: 191)
+                .overlay(alignment: .bottomLeading) {
+                    if let seconds = episode.durationSeconds {
+                        Text(Duration.seconds(seconds).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))
+                            .font(.caption2.weight(.semibold))
+                            .padding(8).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
+                            .padding(10)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if episode.progress > 0 {
+                        ProgressView(value: episode.progress).tint(.white).padding(.horizontal, 10).padding(.bottom, 4)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            HStack {
+                Text(episode.numberLabel.uppercased())
+                if episode.played { Image(systemName: "checkmark.circle.fill") }
+            }.font(.caption2).foregroundStyle(.secondary)
+            Text(episode.title).font(.headline).lineLimit(1)
+            if let overview = episode.overview, !overview.isEmpty {
+                Text(overview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            if let date = episode.airDate {
+                Text(date, format: Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: TimeZone(secondsFromGMT: 0)!))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 340, alignment: .leading)
     }
 }

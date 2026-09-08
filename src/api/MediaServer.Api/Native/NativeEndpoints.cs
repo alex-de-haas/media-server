@@ -69,6 +69,7 @@ public static class NativeEndpoints
         group.MapNativeDiscoveryEndpoints();
         group.MapNativeCollectionEndpoints();
         group.MapNativeHomeEndpoints();
+        group.MapNativeEpisodeEndpoints();
 
         group.MapGet("/items/{id:guid}", async (
             Guid id,
@@ -89,6 +90,9 @@ public static class NativeEndpoints
             {
                 return Results.NotFound();
             }
+
+            if (detail.Seasons is { } seasons)
+                detail = detail with { Seasons = await NativeEpisodeEndpoints.AvailableSeasonsAsync(id, seasons, database, cancellationToken) };
 
             var images = await NativeImageEndpoints.BuildAsync(database, id, settings.PreferredLanguage, cancellationToken);
             return Results.Ok(new NativeItemDto(detail, NativeItemUrls.Build(detail, appUserId, tokens), images));
