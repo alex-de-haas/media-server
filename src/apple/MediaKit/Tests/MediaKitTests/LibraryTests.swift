@@ -924,3 +924,112 @@ extension HomeStoreTests {
         #expect(missing.artworkURL(on: server) == nil)
     }
 }
+
+@Suite("Series episode browsing")
+@MainActor
+struct SeriesEpisodeTests {
+    private func episode(_ id: String, number: Int = 1) throws -> TitleEpisode {
+        let json = """
+        {"episode":{"id":"\(id)","title":"Episode title","episodeNumber":\(number),"episodeNumberEnd":3,
+        "overview":"Episode synopsis","airDate":"2026-09-01T00:00:00Z",
+        "userData":{"key":"k","playbackPositionTicks":1200000000,"playCount":0,"isFavorite":false,"played":false}},
+        "still":"/native/v1/items/\(id)/images/backdrop?tag=frame","durationTicks":2400000000}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return TitleEpisode(try decoder.decode(Components.Schemas.NativeEpisodeDto.self, from: Data(json.utf8)))
+    }
+
+    @Test func mapsEpisodeIdentityArtworkAndProgress() throws {
+        let value = try episode("episode-id", number: 2)
+        #expect(value.id == "episode-id")
+        #expect(value.numberLabel == "Episodes 2–3")
+        #expect(value.progress == 0.5)
+        #expect(value.airDate != nil)
+        #expect(value.artworkURL(on: URL(string: "https://media.example")!, fallback: nil)?.absoluteString ==
+                "https://media.example/native/v1/items/episode-id/images/backdrop?tag=frame")
+        let absent = TitleEpisode(try JSONDecoder().decode(Components.Schemas.NativeEpisodeDto.self,
+            from: Data(#"{"episode":{"id":"x","title":"Unknown"}}"#.utf8)))
+        let fallback = URL(string: "https://media.example/backdrop")!
+        #expect(absent.artworkURL(on: fallback, fallback: fallback) == fallback)
+        #expect(absent.progress == 0)
+        #expect(absent.durationSeconds == nil)
+    }
+
+    @Test func preservesSeriesAndOrdersAvailableSeasons() throws {
+        let json = item("series", "Show").replacingOccurrences(of: #""kind":"Movie""#, with: #""kind":"Series","seasons":[{"id":"s2","title":"Second","seasonNumber":2,"episodeCount":1},{"id":"empty","title":"Empty","seasonNumber":1,"episodeCount":0},{"id":"s0","title":"Zero","seasonNumber":0,"episodeCount":1}]"#)
+        let detail = TitleDetail(try JSONDecoder().decode(Components.Schemas.NativeItemDto.self, from: Data(json.utf8)))
+        #expect(detail.isSeries)
+        #expect(detail.seasons.map(\.id) == ["s0", "s2"])
+        #expect(detail.seasons.first?.label == "Specials")
+    }
+
+    @Test func onlyLatestSeasonCanPublishAndReturningRefreshesProgress() async throws {
+        var held: CheckedContinuation<[TitleEpisode], any Error>?
+        let old = try episode("old")
+        let current = try episode("current", number: 2)
+        let first = try episode("first")
+        var calls = 0
+        let store = SeriesEpisodeStore { season in
+            calls += 1
+            if season == "old" { return try await withCheckedThrowingContinuation { held = $0 } }
+            return [current, first]
+        }
+        let request = Task { await store.select("old") }
+        while held == nil { await Task.yield() }
+        await store.select("new")
+        held?.resume(returning: [old])
+        await request.value
+        #expect(store.selectedSeasonID == "new")
+        #expect(store.episodes.map(\.id) == ["first", "current"])
+        await store.select("new")
+        #expect(calls == 3)
+    }
+
+    @Test func emptyMissingAndRetryAreExplicit() async {
+        var attempts = 0
+        let store = SeriesEpisodeStore { _ in
+            attempts += 1
+            if attempts == 1 { throw EpisodeLoadError.missingOrUnsupported }
+            return []
+        }
+        await store.select("s1")
+        #expect(store.state == .missingOrUnsupported)
+        await store.select("s1")
+        #expect(store.state == .loaded)
+        #expect(store.episodes.isEmpty)
+    }
+
+    @Test func nativeEndpointUsesAuthenticationAndDoesNotPopulateTheLibraryGrid() async throws {
+        let surface = SurfaceStub(["/native/v1/items/series/episodes": [(200, #"[{"episode":{"id":"episode","title":"Pilot","episodeNumber":1}}]"#)]])
+        let session = ServerSession(paired: pairing(), store: InMemoryCredentialStore(), transport: surface)
+        let library = LibraryStore(session: session)
+        #expect(try await library.episodes(for: "series", seasonID: "season").first?.id == "episode")
+        #expect(library.items.isEmpty)
+        #expect(surface.tokensSeen == ["Bearer old-token"])
+    }
+}
+
+private actor EpisodePlaybackTransport: ClientTransport {
+    private(set) var itemID: String?
+    func send(_ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String) async throws -> (HTTPResponse, HTTPBody?) {
+        if let body {
+            let data = try await Data(collecting: body, upTo: 100_000)
+            itemID = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["itemId"] as? String
+        }
+        var response = HTTPResponse(status: .ok)
+        response.headerFields[.contentType] = "application/json"
+        return (response, HTTPBody(#"{"itemId":"episode-id","sources":[]}"#))
+    }
+}
+
+@Suite("Episode playback identity")
+@MainActor
+struct EpisodePlaybackIdentityTests {
+    @Test func resolvesTheEpisodeRatherThanTheOwningSeries() async throws {
+        let transport = EpisodePlaybackTransport()
+        let session = ServerSession(paired: pairing(), store: InMemoryCredentialStore(), transport: transport)
+        _ = try await PlaybackService(session: session).plans(for: "episode-id")
+        #expect(await transport.itemID == "episode-id")
+    }
+}

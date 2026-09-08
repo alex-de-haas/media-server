@@ -714,6 +714,13 @@ The visual layout and authenticated collection list, detail, and artwork routes
 are described in [Apple client visual design](../apple-client-visual-design/feature.md).
 Collection reads exclude removed movies from counts, members, and poster fallbacks.
 
+## Series detail
+
+Series show a season selector and episode cards. Focusing a season changes the
+rail below it; selecting an episode opens its versions and playback controls.
+There is no series-level Play action. See
+[Apple series browsing](../apple-series-browsing/feature.md).
+
 ## Testing Expectations
 
 - Explicit version selection preserves pending and unsupported refusals even when another

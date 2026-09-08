@@ -288,7 +288,7 @@ public sealed class EnrichStage(EnrichService enrichService, MediaServerDbContex
     {
         var graph = await IngestGraph.LoadAsync(database, context.Item.Id, cancellationToken);
 
-        foreach (var item in graph.All.Where(item => item.Kind is MediaKind.Movie or MediaKind.Series))
+        foreach (var item in graph.All.Where(item => item.Kind is MediaKind.Movie or MediaKind.Series or MediaKind.Episode))
         {
             await enrichService.EnrichAsync(context.Catalog, item, cancellationToken);
         }

@@ -191,6 +191,14 @@ The visual layout and authenticated collection list, detail, and artwork routes
 are described in [Apple client visual design](../apple-client-visual-design/feature.md).
 Collection reads exclude removed movies from counts, members, and poster fallbacks.
 
+## Episode browsing
+
+The authenticated `/native/v1/items/{id}/episodes` route lists available episodes
+with per-user progress and cached landscape artwork. Native series details filter
+season summaries to those with visible episodes and media sources. See
+[Apple series browsing](../apple-series-browsing/feature.md) for the contract and
+visibility rules.
+
 ## Testing Expectations
 
 Backend tests use xUnit and Imposter. Required coverage:

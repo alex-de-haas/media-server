@@ -140,7 +140,7 @@ public static class TmdbPayload
             genres.AddRange(genreArray.EnumerateArray().Select(genre => JsonText(genre, "name")).OfType<string>());
         }
 
-        long? runtimeTicks = movie
+        long? runtimeTicks = movie || kind == MediaKind.Episode
             ? JsonInt(root, "runtime") is { } minutes ? minutes * TimeSpan.TicksPerMinute : null
             : FirstEpisodeRuntimeTicks(root);
 
@@ -155,7 +155,7 @@ public static class TmdbPayload
             genres,
             OfficialRating: ParseOfficialRating(root, movie, PreferredRegion(language)),
             CommunityRating: JsonDouble(root, "vote_average"),
-            ReleaseDate: ParseDate(JsonText(root, movie ? "release_date" : "first_air_date")),
+            ReleaseDate: ParseDate(JsonText(root, movie ? "release_date" : kind == MediaKind.Episode ? "air_date" : "first_air_date")),
             RuntimeTicks: runtimeTicks,
             Raw: root.GetRawText());
     }

@@ -791,6 +791,51 @@
         }
       }
     },
+    "/native/v1/items/{id}/episodes": {
+      "get": {
+        "tags": [
+          "NativeEpisodeEndpoints"
+        ],
+        "operationId": "getNativeEpisodes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "seasonId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NativeEpisodeDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/native/v1/items/{id}": {
       "get": {
         "tags": [
@@ -1254,6 +1299,163 @@
           },
           "enhancementLayer": {
             "type": "boolean"
+          }
+        }
+      },
+      "EpisodeDto": {
+        "required": [
+          "id",
+          "publicId",
+          "seriesTmdbId",
+          "seasonId",
+          "seasonNumber",
+          "episodeNumber",
+          "episodeNumberEnd",
+          "title",
+          "overview",
+          "runtimeTicks",
+          "posterUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publicId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "seriesTmdbId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "seasonId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "seasonNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "episodeNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "episodeNumberEnd": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "title": {
+            "type": "string"
+          },
+          "overview": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "runtimeTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userData": {
+            "$ref": "#/components/schemas/UserItemDataDto"
+          },
+          "media": {
+            "$ref": "#/components/schemas/EpisodeMediaSummaryDto"
+          },
+          "airDate": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "EpisodeMediaSummaryDto": {
+        "required": [
+          "versionCount",
+          "videoCodec",
+          "height",
+          "hdrFormat",
+          "sizeBytes"
+        ],
+        "type": "object",
+        "properties": {
+          "versionCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "videoCodec": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "height": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "hdrFormat": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "dolbyVision": {
+            "$ref": "#/components/schemas/DolbyVisionDto"
+          },
+          "sizeBytes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -2097,6 +2299,34 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "NativeEpisodeDto": {
+        "required": [
+          "episode",
+          "still",
+          "durationTicks"
+        ],
+        "type": "object",
+        "properties": {
+          "episode": {
+            "$ref": "#/components/schemas/EpisodeDto"
+          },
+          "still": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "durationTicks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -3506,6 +3736,9 @@
     },
     {
       "name": "SseEndpoints"
+    },
+    {
+      "name": "NativeEpisodeEndpoints"
     }
   ]
 }

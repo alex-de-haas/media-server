@@ -216,7 +216,8 @@ public sealed record EpisodeDto(
     string? PosterUrl,
     UserItemDataDto? UserData,
     // What is on disk for this episode — the Episodes tab's summary line. Null when it has no source.
-    EpisodeMediaSummaryDto? Media);
+    EpisodeMediaSummaryDto? Media,
+    DateTimeOffset? AirDate = null);
 
 /// <summary>
 /// An episode's media at a glance. The codec, height, dynamic range and size are the <b>default</b>

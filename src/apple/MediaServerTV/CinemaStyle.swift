@@ -122,7 +122,7 @@ struct PosterCard<Artwork: View, Destination: View>: View {
     }
 }
 
-private struct PosterFocusStyle: ButtonStyle {
+struct PosterFocusStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         FocusedPoster(configuration: configuration)

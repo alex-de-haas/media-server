@@ -30,6 +30,15 @@ private struct CinemaPreviewTransport: ClientTransport {
             """
         } else if path.contains("/collections") {
             json = #"[{"id":"saga","name":"The Northern Sea Collection","itemCount":3}]"#
+        } else if path.contains("/episodes") {
+            let season = path.contains("season-2") ? 2 : path.contains("season-0") ? 0 : 1
+            json = "[" + (1...18).map { number in
+                """
+                {"episode":{"id":"episode-\(season)-\(number)","title":"\(number == 1 ? "The Lighthouse · S\(season)" : "The Northern Passage \(number)")","seasonNumber":\(season),"episodeNumber":\(number),"overview":"A mysterious signal reaches the coast. The crew follows its trail across the northern sea.","userData":{"key":"e\(number)","playbackPositionTicks":\(number == 1 ? 12000000000 : 0),"playCount":0,"isFavorite":false,"played":\(number == 2)}},"durationTicks":28800000000}
+                """
+            }.joined(separator: ",") + "]"
+        } else if path.contains("/items/series-0") {
+            json = #"{"detail":{"id":"series-0","catalogId":"tv","catalogName":"TV","catalogRoot":"/tv","kind":"Series","title":"The Northern Sea","genres":[],"mediaSources":[],"overview":"A journey through memory, friendship, and the places we call home.","cast":[],"directors":[],"creators":[],"studios":[],"keywords":[],"seasons":[{"id":"season-0","title":"Specials","seasonNumber":0,"episodeCount":18},{"id":"season-1","title":"Season 1","seasonNumber":1,"episodeCount":18},{"id":"season-2","title":"Season 2","seasonNumber":2,"episodeCount":18}]},"sources":[],"images":{}}"#
         } else if path.contains("/items/") {
             let index = Int(path.split(separator: "-").last ?? "0") ?? 0
             let streams = (0..<18).map { track in
@@ -41,8 +50,14 @@ private struct CinemaPreviewTransport: ClientTransport {
             {"id":"source-0","fileName":"preview.mkv","container":"mkv","sizeBytes":26000000000,"durationTicks":72000000000,"streams":[\(streams)]}
             """
 
+            let episodeID = path.split(separator: "/").last.map(String.init) ?? ""
+            let isEpisode = episodeID.hasPrefix("episode-")
+            let sources = isEpisode
+                ? source + "," + source.replacingOccurrences(of: "source-0", with: "source-1")
+                    .replacingOccurrences(of: "\"fileName\"", with: "\"versionName\":\"1080p\",\"fileName\"")
+                : source
             json = """
-            {"detail":{"id":"movie-\(index)","catalogId":"films","catalogName":"Films","catalogRoot":"/films","kind":"Movie","title":"\(titles[min(index, 2)])","year":2001,"runtimeTicks":72000000000,"overview":"A lighthouse keeper discovers a letter that draws her across the northern coast. As the seasons change, each village offers another piece of the story. An intimate journey through memory, friendship, and the places we call home. The long description continues so the expanded synopsis can be checked on a television.","genres":["Drama","Adventure"],"mediaSources":[\(source)],"cast":[{"provider":"preview","providerId":"1","name":"Alex Morgan","character":"The lighthouse keeper"},{"provider":"preview","providerId":"2","name":"Taylor Reed","character":"The captain"}],"crew":[{"id":"crew-1","provider":"preview","providerId":"10","name":"Jordan Quinn","job":"Director"},{"id":"crew-2","provider":"preview","providerId":"11","name":"Casey Lane","job":"Screenplay"}],"directors":["Jordan Quinn"],"creators":[],"studios":[],"keywords":[],"userData":{"key":"0","playbackPositionTicks":25350000000,"playCount":0,"isFavorite":false,"played":false}},"sources":[],"images":{}}
+            {"detail":{"id":"\(isEpisode ? episodeID : "movie-\(index)")","catalogId":"films","catalogName":"Films","catalogRoot":"/films","kind":"\(isEpisode ? "Episode" : "Movie")","title":"\(isEpisode ? "The Lighthouse" : titles[min(index, 2)])","year":2001,"runtimeTicks":72000000000,"overview":"A lighthouse keeper discovers a letter that draws her across the northern coast. As the seasons change, each village offers another piece of the story. An intimate journey through memory, friendship, and the places we call home. The long description continues so the expanded synopsis can be checked on a television.","genres":["Drama","Adventure"],"mediaSources":[\(sources)],"cast":[{"provider":"preview","providerId":"1","name":"Alex Morgan","character":"The lighthouse keeper"},{"provider":"preview","providerId":"2","name":"Taylor Reed","character":"The captain"}],"crew":[{"id":"crew-1","provider":"preview","providerId":"10","name":"Jordan Quinn","job":"Director"},{"id":"crew-2","provider":"preview","providerId":"11","name":"Casey Lane","job":"Screenplay"}],"directors":["Jordan Quinn"],"creators":[],"studios":[],"keywords":[],"userData":{"key":"0","playbackPositionTicks":25350000000,"playCount":0,"isFavorite":false,"played":false}},"sources":[],"images":{}}
             """
         } else {
             json = """
@@ -64,7 +79,16 @@ struct CinemaPreview: View {
     @State private var pairing = PairingSession(store: InMemoryCredentialStore())
 
     var body: some View {
-        LibraryView(session: session, pairing: pairing)
+        Group {
+            if ProcessInfo.processInfo.arguments.contains("--series-preview") {
+                NavigationStack {
+                    TitleView(itemID: "series-0", library: LibraryStore(session: session),
+                              loader: session.artwork, playback: PlaybackService(session: session))
+                }
+            } else {
+                LibraryView(session: session, pairing: pairing)
+            }
+        }
             .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("--preview-light") ? .light : nil)
     }
 }

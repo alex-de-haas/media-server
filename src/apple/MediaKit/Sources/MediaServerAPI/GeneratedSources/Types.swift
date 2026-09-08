@@ -77,6 +77,9 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /native/v1/home/nextup`.
     /// - Remark: Generated from `#/paths//native/v1/home/nextup/get(getNativeHomeNextUp)`.
     func getNativeHomeNextUp(_ input: Operations.GetNativeHomeNextUp.Input) async throws -> Operations.GetNativeHomeNextUp.Output
+    /// - Remark: HTTP `GET /native/v1/items/{id}/episodes`.
+    /// - Remark: Generated from `#/paths//native/v1/items/{id}/episodes/get(getNativeEpisodes)`.
+    func getNativeEpisodes(_ input: Operations.GetNativeEpisodes.Input) async throws -> Operations.GetNativeEpisodes.Output
     /// - Remark: HTTP `GET /native/v1/items/{id}`.
     /// - Remark: Generated from `#/paths//native/v1/items/{id}/get`.
     func getNativeV1ItemsId(_ input: Operations.GetNativeV1ItemsId.Input) async throws -> Operations.GetNativeV1ItemsId.Output
@@ -310,6 +313,19 @@ extension APIProtocol {
         headers: Operations.GetNativeHomeNextUp.Input.Headers = .init()
     ) async throws -> Operations.GetNativeHomeNextUp.Output {
         try await getNativeHomeNextUp(Operations.GetNativeHomeNextUp.Input(
+            query: query,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /native/v1/items/{id}/episodes`.
+    /// - Remark: Generated from `#/paths//native/v1/items/{id}/episodes/get(getNativeEpisodes)`.
+    public func getNativeEpisodes(
+        path: Operations.GetNativeEpisodes.Input.Path,
+        query: Operations.GetNativeEpisodes.Input.Query = .init(),
+        headers: Operations.GetNativeEpisodes.Input.Headers = .init()
+    ) async throws -> Operations.GetNativeEpisodes.Output {
+        try await getNativeEpisodes(Operations.GetNativeEpisodes.Input(
+            path: path,
             query: query,
             headers: headers
         ))
@@ -632,6 +648,148 @@ public enum Components {
                 case level
                 case blCompatibilityId
                 case enhancementLayer
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/EpisodeDto`.
+        public struct EpisodeDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/publicId`.
+            public var publicId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/seriesTmdbId`.
+            public var seriesTmdbId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/seasonId`.
+            public var seasonId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/seasonNumber`.
+            public var seasonNumber: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/episodeNumber`.
+            public var episodeNumber: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/episodeNumberEnd`.
+            public var episodeNumberEnd: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/title`.
+            public var title: Swift.String
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/overview`.
+            public var overview: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/runtimeTicks`.
+            public var runtimeTicks: Swift.Int64?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/posterUrl`.
+            public var posterUrl: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/userData`.
+            public var userData: Components.Schemas.UserItemDataDto?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/media`.
+            public var media: Components.Schemas.EpisodeMediaSummaryDto?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/airDate`.
+            public var airDate: Foundation.Date?
+            /// Creates a new `EpisodeDto`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - publicId:
+            ///   - seriesTmdbId:
+            ///   - seasonId:
+            ///   - seasonNumber:
+            ///   - episodeNumber:
+            ///   - episodeNumberEnd:
+            ///   - title:
+            ///   - overview:
+            ///   - runtimeTicks:
+            ///   - posterUrl:
+            ///   - userData:
+            ///   - media:
+            ///   - airDate:
+            public init(
+                id: Swift.String,
+                publicId: Swift.String? = nil,
+                seriesTmdbId: Swift.String? = nil,
+                seasonId: Swift.String? = nil,
+                seasonNumber: Swift.Int32? = nil,
+                episodeNumber: Swift.Int32? = nil,
+                episodeNumberEnd: Swift.Int32? = nil,
+                title: Swift.String,
+                overview: Swift.String? = nil,
+                runtimeTicks: Swift.Int64? = nil,
+                posterUrl: Swift.String? = nil,
+                userData: Components.Schemas.UserItemDataDto? = nil,
+                media: Components.Schemas.EpisodeMediaSummaryDto? = nil,
+                airDate: Foundation.Date? = nil
+            ) {
+                self.id = id
+                self.publicId = publicId
+                self.seriesTmdbId = seriesTmdbId
+                self.seasonId = seasonId
+                self.seasonNumber = seasonNumber
+                self.episodeNumber = episodeNumber
+                self.episodeNumberEnd = episodeNumberEnd
+                self.title = title
+                self.overview = overview
+                self.runtimeTicks = runtimeTicks
+                self.posterUrl = posterUrl
+                self.userData = userData
+                self.media = media
+                self.airDate = airDate
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case publicId
+                case seriesTmdbId
+                case seasonId
+                case seasonNumber
+                case episodeNumber
+                case episodeNumberEnd
+                case title
+                case overview
+                case runtimeTicks
+                case posterUrl
+                case userData
+                case media
+                case airDate
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto`.
+        public struct EpisodeMediaSummaryDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/versionCount`.
+            public var versionCount: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/videoCodec`.
+            public var videoCodec: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/height`.
+            public var height: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/hdrFormat`.
+            public var hdrFormat: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/dolbyVision`.
+            public var dolbyVision: Components.Schemas.DolbyVisionDto?
+            /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/sizeBytes`.
+            public var sizeBytes: Swift.Int64
+            /// Creates a new `EpisodeMediaSummaryDto`.
+            ///
+            /// - Parameters:
+            ///   - versionCount:
+            ///   - videoCodec:
+            ///   - height:
+            ///   - hdrFormat:
+            ///   - dolbyVision:
+            ///   - sizeBytes:
+            public init(
+                versionCount: Swift.Int32,
+                videoCodec: Swift.String? = nil,
+                height: Swift.Int32? = nil,
+                hdrFormat: Swift.String? = nil,
+                dolbyVision: Components.Schemas.DolbyVisionDto? = nil,
+                sizeBytes: Swift.Int64
+            ) {
+                self.versionCount = versionCount
+                self.videoCodec = videoCodec
+                self.height = height
+                self.hdrFormat = hdrFormat
+                self.dolbyVision = dolbyVision
+                self.sizeBytes = sizeBytes
+            }
+            public enum CodingKeys: String, CodingKey {
+                case versionCount
+                case videoCodec
+                case height
+                case hdrFormat
+                case dolbyVision
+                case sizeBytes
             }
         }
         /// - Remark: Generated from `#/components/schemas/LibraryDetailDto`.
@@ -1399,6 +1557,35 @@ public enum Components {
                 case name
                 case posterUrl
                 case itemCount
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/NativeEpisodeDto`.
+        public struct NativeEpisodeDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/NativeEpisodeDto/episode`.
+            public var episode: Components.Schemas.EpisodeDto
+            /// - Remark: Generated from `#/components/schemas/NativeEpisodeDto/still`.
+            public var still: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/NativeEpisodeDto/durationTicks`.
+            public var durationTicks: Swift.Int64?
+            /// Creates a new `NativeEpisodeDto`.
+            ///
+            /// - Parameters:
+            ///   - episode:
+            ///   - still:
+            ///   - durationTicks:
+            public init(
+                episode: Components.Schemas.EpisodeDto,
+                still: Swift.String? = nil,
+                durationTicks: Swift.Int64? = nil
+            ) {
+                self.episode = episode
+                self.still = still
+                self.durationTicks = durationTicks
+            }
+            public enum CodingKeys: String, CodingKey {
+                case episode
+                case still
+                case durationTicks
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativeImagesDto`.
@@ -5809,6 +5996,183 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `GET /native/v1/items/{id}/episodes`.
+    /// - Remark: Generated from `#/paths//native/v1/items/{id}/episodes/get(getNativeEpisodes)`.
+    public enum GetNativeEpisodes {
+        public static let id: Swift.String = "getNativeEpisodes"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/native/v1/items/{id}/episodes/GET/path`.
+            public struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/items/{id}/episodes/GET/path/id`.
+                public var id: Swift.String
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - id:
+                public init(id: Swift.String) {
+                    self.id = id
+                }
+            }
+            public var path: Operations.GetNativeEpisodes.Input.Path
+            /// - Remark: Generated from `#/paths/native/v1/items/{id}/episodes/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/items/{id}/episodes/GET/query/seasonId`.
+                public var seasonId: Swift.String?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - seasonId:
+                public init(seasonId: Swift.String? = nil) {
+                    self.seasonId = seasonId
+                }
+            }
+            public var query: Operations.GetNativeEpisodes.Input.Query
+            /// - Remark: Generated from `#/paths/native/v1/items/{id}/episodes/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeEpisodes.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeEpisodes.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.GetNativeEpisodes.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - query:
+            ///   - headers:
+            public init(
+                path: Operations.GetNativeEpisodes.Input.Path,
+                query: Operations.GetNativeEpisodes.Input.Query = .init(),
+                headers: Operations.GetNativeEpisodes.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.query = query
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/items/{id}/episodes/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/items/{id}/episodes/GET/responses/200/content/application\/json`.
+                    case json([Components.Schemas.NativeEpisodeDto])
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: [Components.Schemas.NativeEpisodeDto] {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.GetNativeEpisodes.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.GetNativeEpisodes.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/items/{id}/episodes/get(getNativeEpisodes)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.GetNativeEpisodes.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.GetNativeEpisodes.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                public init() {}
+            }
+            /// Not Found
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/items/{id}/episodes/get(getNativeEpisodes)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.GetNativeEpisodes.Output.NotFound)
+            /// Not Found
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/items/{id}/episodes/get(getNativeEpisodes)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            public static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            public var notFound: Operations.GetNativeEpisodes.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
                             response: self
                         )
                     }

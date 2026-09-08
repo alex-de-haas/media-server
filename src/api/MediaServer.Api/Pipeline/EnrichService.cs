@@ -33,7 +33,12 @@ public sealed class EnrichService(
         var reference = new ProviderRef(item.IdentityProvider, item.IdentityProviderId);
         var languages = ResolveLanguages(catalog);
 
-        var records = await provider.FetchAsync(reference, item.Kind, languages, cancellationToken);
+        if (item.Kind == MediaKind.Episode && ((item.IdentitySeasonNumber ?? item.ParentIndexNumber) is null || (item.IdentityEpisodeNumber ?? item.IndexNumber) is null))
+            return;
+
+        var records = item.Kind == MediaKind.Episode
+            ? await provider.FetchEpisodeAsync(reference, (item.IdentitySeasonNumber ?? item.ParentIndexNumber)!.Value, (item.IdentityEpisodeNumber ?? item.IndexNumber)!.Value, languages, cancellationToken)
+            : await provider.FetchAsync(reference, item.Kind, languages, cancellationToken);
         var existing = await database.MetadataRecords
             .Where(record => record.MediaItemId == item.Id && record.Provider == reference.Provider)
             .ToListAsync(cancellationToken);
@@ -93,13 +98,15 @@ public sealed class EnrichService(
 
     private async Task UpsertImagesAsync(MediaItem item, ProviderRef reference, IReadOnlyList<string> languages, CancellationToken cancellationToken)
     {
-        var images = await provider.GetImagesAsync(reference, item.Kind, languages, cancellationToken);
+        var images = item.Kind == MediaKind.Episode
+            ? await provider.GetEpisodeImagesAsync(reference, (item.IdentitySeasonNumber ?? item.ParentIndexNumber)!.Value, (item.IdentityEpisodeNumber ?? item.IndexNumber)!.Value, languages, cancellationToken)
+            : await provider.GetImagesAsync(reference, item.Kind, languages, cancellationToken);
         if (images.Count == 0)
         {
             return;
         }
 
-        var existing = await database.ImageAssets.Where(image => image.MediaItemId == item.Id).ToListAsync(cancellationToken);
+        var existing = await database.ImageAssets.AsNoTracking().Where(image => image.MediaItemId == item.Id).ToListAsync(cancellationToken);
         // A set rather than a dictionary keyed by remote path: ToDictionary throws on a duplicate, and two
         // enriches of one item can race (a manual refresh alongside a catalog-wide one — the coordinator
         // serializes catalogs, not items), which would leave that item permanently un-enrichable.
@@ -128,11 +135,6 @@ public sealed class EnrichService(
             database.ImageAssets.Add(asset);
         }
 
-        if (added.Count == 0)
-        {
-            return;
-        }
-
         // The check above only sees what this context read, so two enriches discovering the same new image
         // can both get past it and the second insert then violates the unique (MediaItemId, RemotePath)
         // index. That is a race the loser should shrug off rather than fail on: the rows are identical —
@@ -141,7 +143,8 @@ public sealed class EnrichService(
         // the caller's save.
         try
         {
-            await database.SaveChangesAsync(cancellationToken);
+            if (added.Count > 0)
+                await database.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException exception) when (IsUniqueViolation(exception))
         {
@@ -149,6 +152,18 @@ public sealed class EnrichService(
             {
                 database.Entry(asset).State = EntityState.Detached;
             }
+        }
+        // Older refreshes cached the whole show's backdrops on episodes. Only retire those
+        // after a non-empty still response has been persisted (or already exists). Empty/error
+        // responses keep the previous artwork. Other providers and poster pins are untouched.
+        if (item.Kind == MediaKind.Episode)
+        {
+            var stillPaths = images.Where(image => image.Type == ImageType.Backdrop)
+                .Select(image => image.RemotePath).ToList();
+            if (stillPaths.Count > 0)
+                await database.ImageAssets.Where(image => image.MediaItemId == item.Id &&
+                    image.Provider == reference.Provider && image.ImageType == ImageType.Backdrop &&
+                    !stillPaths.Contains(image.RemotePath)).ExecuteDeleteAsync(cancellationToken);
         }
     }
 

@@ -625,7 +625,8 @@ public sealed class LibraryReadService(
                 meta?.RuntimeTicks,
                 posters.GetValueOrDefault(episode.Id),
                 userDataByItem.GetValueOrDefault(episode.Id),
-                mediaByItem.GetValueOrDefault(episode.Id));
+                mediaByItem.GetValueOrDefault(episode.Id),
+                meta?.ReleaseDate);
         }).ToList();
     }
 
