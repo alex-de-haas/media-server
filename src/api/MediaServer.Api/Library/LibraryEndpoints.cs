@@ -264,8 +264,8 @@ public static class LibraryEndpoints
             return ok ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
-        // Rename (or clear, with versionName=null) a single movie source's version — renaming the file on disk
-        // to "Title (Year) - {version}.ext" and syncing the stored label (admin only).
+        // Rename (or clear, with versionName=null) a single movie or episode source's version — renaming the
+        // file on disk to "<canonical stem> - {version}.ext" and syncing the stored label (admin only).
         group.MapPut("/sources/{sourceId:guid}/version", async (Guid sourceId, SetVersionRequest request, LibrarySourceService sources, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
         {
             if (await moveGuard.IsSourceMovingAsync(sourceId, cancellationToken))

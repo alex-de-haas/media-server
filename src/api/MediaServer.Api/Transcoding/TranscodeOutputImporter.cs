@@ -6,11 +6,11 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.Transcoding;
 
 /// <summary>
-/// Turns a completed transcode output into a new <see cref="MediaSource"/> version of the same movie:
+/// Turns a completed transcode output into a new <see cref="MediaSource"/> version of the same title:
 /// probes the output file and attaches a source (+ streams) to the original's media item, so the smaller
 /// re-encode appears in the client's version picker for the operator to verify before deleting the original.
 /// Mirrors how <see cref="Pipeline.Stages.ProbeStage"/> builds sources, but for one already-known item — no
-/// re-identify, so the output can never be mistaken for a new movie. The source carries no
+/// re-identify, so the output can never be mistaken for a new title. The source carries no
 /// <see cref="MediaSource.SourceFileId"/> (it is not produced by an ingest/scan).
 /// </summary>
 public sealed class TranscodeOutputImporter(
@@ -19,7 +19,7 @@ public sealed class TranscodeOutputImporter(
     IMediaProbe probe,
     ILogger<TranscodeOutputImporter> logger)
 {
-    /// <summary>Probes the job's output and attaches it as a new movie version. Returns false when the
+    /// <summary>Probes the job's output and attaches it as a new version of the job's item. Returns false when the
     /// output file is missing on disk (the caller should mark the job failed). Idempotent: a second call for
     /// the same output is a no-op.</summary>
     public async Task<bool> ImportAsync(TranscodeJob job, CancellationToken cancellationToken)

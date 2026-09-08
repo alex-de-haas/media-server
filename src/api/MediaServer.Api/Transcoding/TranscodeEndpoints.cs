@@ -45,7 +45,7 @@ public static class TranscodeEndpoints
             }
             catch (TranscodeConflictException exception)
             {
-                // Concurrent state (the movie is mid-move), not a bad request — 409 like the move-locking surface.
+                // Concurrent state (the title is mid-move), not a bad request — 409 like the move-locking surface.
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status409Conflict);
             }
             catch (TranscodeRequestException exception)

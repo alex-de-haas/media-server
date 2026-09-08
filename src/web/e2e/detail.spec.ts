@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { anEpisode, aMovie, aSeason, aSeries, aUserData, movieDetail, seriesDetail, setupApp } from "./support";
+import { anEpisode, aMovie, aSeason, aSeries, aTranscodeJob, aUserData, episodeDetail, movieDetail, seriesDetail, setupApp } from "./support";
 
 test("opens a movie detail page and marks it watched", async ({ page }) => {
   await setupApp(page, {
@@ -907,4 +907,128 @@ test("pins a poster from the detail page when the automatic choice is ambiguous"
   // The candidates are labelled by the language of their text, which is what the choice is about.
   await page.getByRole("button", { name: /^EN/ }).click();
   expect((await pinned).postDataJSON()).toEqual({ tag: "en1" });
+});
+
+// ── Episodes: the media surface a movie has, on every row ────────────────────────────────────────
+
+// Two versions of the pilot, as `GET /library/e1` answers once the row is opened.
+const pilotDetail = () => ({
+  ...episodeDetail("e1", "Good News About Hell"),
+  mediaSources: [
+    {
+      id: "source-1",
+      versionName: null,
+      fileName: "Severance S01E01.mkv",
+      container: "mkv",
+      sizeBytes: 4_100_000_000,
+      bitrate: null,
+      durationTicks: 33_600_000_000,
+      streams: [
+        { id: "v0", type: "Video", index: 0, codec: "hevc", language: null, displayTitle: "2160p HEVC", title: null, isExternal: false, fileName: null },
+        { id: "a0", type: "Audio", index: 1, codec: "eac3", language: "eng", displayTitle: "eng EAC3 5.1", title: null, channels: 6, isExternal: false, fileName: null },
+      ],
+    },
+    {
+      id: "source-2",
+      versionName: "HEVC 1080p",
+      fileName: "Severance S01E01 - HEVC 1080p.mkv",
+      container: "mkv",
+      sizeBytes: 900_000_000,
+      bitrate: null,
+      durationTicks: 33_600_000_000,
+      streams: [{ id: "v1", type: "Video", index: 0, codec: "hevc", language: null, displayTitle: "1080p HEVC", title: null, isExternal: false, fileName: null }],
+    },
+  ],
+});
+
+// What the listing says about the pilot without anyone opening it: the default version's picture and size.
+const pilotSummary = {
+  versionCount: 2,
+  videoCodec: "hevc",
+  height: 2160,
+  hdrFormat: "Dolby Vision · HDR10",
+  dolbyVision: { profile: 7, level: 6, blCompatibilityId: 6, enhancementLayer: true },
+  sizeBytes: 4_100_000_000,
+};
+
+test("an episode row summarises what is on disk and expands onto the media surface a movie has", async ({ page }) => {
+  let detailRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/proxy/api/library/e1")) detailRequests++;
+  });
+  await setupApp(page, {
+    role: "user",
+    library: [aSeries("s1", "Severance")],
+    detail: { s1: seriesDetail("s1", "Severance", "95396"), e1: pilotDetail() },
+    episodes: {
+      s1: [anEpisode("e1", 1, 1, "Good News About Hell", null, { media: pilotSummary }), anEpisode("e2", 1, 2, "Half Loop")],
+    },
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  // The season reads at a glance; an episode with no file says so rather than showing nothing.
+  await expect(page.getByText("HEVC 2160p · Dolby Vision 7 · HDR10 · 3.8 GB · 2 versions")).toBeVisible();
+  await expect(page.getByText("No file")).toBeVisible();
+  // Nothing is fetched for a row until it is opened — a long season must not carry every stream list.
+  expect(detailRequests).toBe(0);
+
+  await page.getByRole("button", { name: "Show media of S01E01" }).click();
+  await expect(page.getByText("Severance S01E01 - HEVC 1080p.mkv")).toBeVisible();
+  await expect(page.getByText("2160p HEVC")).toBeVisible();
+  await expect(page.getByText("eng EAC3 5.1")).toBeVisible();
+  expect(detailRequests).toBe(1);
+
+  // A viewer sees the media and none of the controls.
+  await expect(page.getByRole("button", { name: "Rename version" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Convert to a smaller version" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Delete this version" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Hide media of S01E01" }).click();
+  await expect(page.getByText("2160p HEVC")).toHaveCount(0);
+});
+
+test("an admin converts and extracts from an episode version, and sees its job above the seasons", async ({ page }) => {
+  await setupApp(page, {
+    role: "admin",
+    library: [aSeries("s1", "Severance")],
+    detail: { s1: seriesDetail("s1", "Severance", "95396"), e1: pilotDetail() },
+    episodes: { s1: [anEpisode("e1", 1, 1, "Good News About Hell", null, { media: pilotSummary })] },
+    transcodeAvailable: true,
+    transcodeJobs: [aTranscodeJob("job-9", "e1", "Severance S01E01 - Remux.mkv")],
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  // Every episode's jobs in one place, above the seasons: the card is named by its output file, which
+  // carries the episode code, so no per-row block is needed.
+  await expect(page.getByText("Conversions")).toBeVisible();
+  await expect(page.getByText("Severance S01E01 - Remux.mkv")).toBeVisible();
+
+  await page.getByRole("button", { name: "Show media of S01E01" }).click();
+  const cards = page.getByRole("button", { name: "Convert to a smaller version" });
+  await expect(cards).toHaveCount(2);
+
+  // The same dialogs a movie's version card opens, on the episode's — with copy that fits either.
+  await cards.first().click();
+  const convert = page.getByRole("dialog");
+  await expect(convert.getByRole("heading", { name: "Convert version" })).toBeVisible();
+  await expect(convert.getByText("Create a new version of this title.")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(convert).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Extract tracks to files" }).first().click();
+  const extract = page.getByRole("dialog");
+  await expect(extract.getByRole("heading", { name: "Extract tracks to files" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(extract).toHaveCount(0);
+
+  // Renaming previews the episode's own stem — the show and its episode code — not a title and year.
+  await page.getByRole("button", { name: "Rename version" }).nth(1).click();
+  const rename = page.getByRole("dialog");
+  await expect(rename.getByText("Severance S01E01 - HEVC 1080p.mkv")).toBeVisible();
+  await rename.getByLabel("Version").fill("Remux");
+  await expect(rename.getByText("Severance S01E01 - Remux.mkv")).toBeVisible();
 });

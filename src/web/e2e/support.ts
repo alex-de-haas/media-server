@@ -68,6 +68,7 @@ export interface AppMock {
   // about and still gets a well-formed feed.
   recommendations?: Record<string, unknown>;
   transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
+  transcodeJobs?: unknown[]; // GET /transcode — the Conversions block above a movie's versions or a series' seasons
   transcodeLanguages?: string[]; // GET /transcode/languages — what the language field validates against
   removedTitles?: unknown[]; // GET /library/removed — the signed-in user's ghosts
   catalogScan?: Record<string, unknown>; // POST /catalogs/{id}/scan — one catalog's scan report
@@ -204,6 +205,9 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     }
     if (path === "/transcode" && method === "POST") {
       return route.fulfill({ status: 201, json: { id: "job-1" } });
+    }
+    if (path === "/transcode" && method === "GET") {
+      return route.fulfill({ json: mock.transcodeJobs ?? [] });
     }
     // Extraction is its own route: it shares no field with a conversion, so the two request shapes never
     // meet on the wire either.
@@ -466,13 +470,15 @@ export const aSeason = (id: string, seasonNumber: number, episodeCount: number) 
   userData: null,
 });
 
-// `episodeNumberEnd` is set only for a file that holds a consecutive range (a "double episode").
+// `episodeNumberEnd` is set only for a file that holds a consecutive range (a "double episode"). `media` is
+// the row's summary of what is on disk; null is an episode with no file.
 export const anEpisode = (
   id: string,
   seasonNumber: number,
   episodeNumber: number,
   title: string,
   episodeNumberEnd: number | null = null,
+  overrides: Record<string, unknown> = {},
 ) => ({
   id,
   publicId: id,
@@ -486,4 +492,41 @@ export const anEpisode = (
   runtimeTicks: 2_400_000_000,
   posterUrl: null,
   userData: null,
+  media: null,
+  ...overrides,
+});
+
+// What `GET /library/{episodeId}` answers: the same shape as a movie's detail, carrying the episode's versions.
+export const episodeDetail = (id: string, title: string) => ({
+  ...movieDetail(id, title),
+  kind: "Episode",
+  indexNumber: 1,
+  parentIndexNumber: 1,
+});
+
+// A finished or running conversion as `GET /transcode` lists it, attached to one movie or episode.
+export const aTranscodeJob = (id: string, mediaItemId: string, name: string, state = "Running") => ({
+  id,
+  engineJobId: `engine-${id}`,
+  mediaSourceId: "source-1",
+  mediaItemId,
+  kind: "Convert",
+  name,
+  inputPath: `Show/${name}`,
+  outputPath: `Show/${name}`,
+  outputPaths: [`Show/${name}`],
+  videoCodec: "hevc",
+  hardwareAcceleration: "auto",
+  qualityLevel: "high",
+  reEncodedAudioTracks: 0,
+  dolbyVision: null,
+  state,
+  percentComplete: state === "Completed" ? 100 : 42,
+  error: null,
+  createdAt: "2026-09-08T10:00:00Z",
+  completedAt: state === "Completed" ? "2026-09-08T11:00:00Z" : null,
+  fps: null,
+  speed: null,
+  etaSeconds: null,
+  outputSizeBytes: null,
 });

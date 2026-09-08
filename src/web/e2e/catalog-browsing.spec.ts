@@ -117,7 +117,9 @@ test("library posters use compact accessible captions and preserve artwork fallb
   await setupApp(page, { library: [
     { ...aMovie("m1", "Arrival"), posterUrl: "/poster.svg", videoFormats: ["HDR10", "Dolby Vision"] },
     { ...aMovie("m2", "Missing artwork"), year: null, videoFormats: [] },
-    { ...aSeries("s1", "Severance"), videoFormats: [] },
+    // A series' badges are the union of its episodes'; one whose episodes were never probed has none.
+    { ...aSeries("s1", "Severance"), videoFormats: ["HDR10"] },
+    { ...aSeries("s2", "Unprobed"), videoFormats: [] },
   ] });
   await page.route("**/poster.svg", route => route.fulfill({ contentType: "image/svg+xml",
     body: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#345"/></svg>' }));
@@ -128,9 +130,10 @@ test("library posters use compact accessible captions and preserve artwork fallb
   await expect(card.getByText("Arrival", { exact: true })).toHaveClass("sr-only");
   await expect(page.getByRole("link", { name: /Missing artwork/ }).locator('[aria-hidden]')).toContainText("Missing artwork");
   await page.goto("/series");
-  const series = page.getByRole("link", { name: /Severance/ });
-  await expect(series).toContainText("2022");
-  await expect(series).not.toContainText(" · ");
+  await expect(page.getByRole("link", { name: /Severance/ })).toContainText("2022 · HDR10");
+  const unprobed = page.getByRole("link", { name: /Unprobed/ });
+  await expect(unprobed).toContainText("2022");
+  await expect(unprobed).not.toContainText(" · ");
 });
 
 test("storage alerts follow the selected catalog and link admins to settings", async ({ page }) => {

@@ -1,7 +1,7 @@
 # External Track Sidecars
 
 Created: 2026-07-27
-Updated: 2026-08-31
+Updated: 2026-09-08
 
 A release's separate audio tracks and subtitles are kept as files beside the
 library file they belong to, and recorded as external streams of its media
@@ -172,8 +172,8 @@ between dropping the entry and erasing the file. It is its own operation and not
 call into `DeleteSourceAsync` because a sidecar is a `MediaStream` on a source, not
 a `MediaSource` — there is no version to drop.
 
-**Deleting what a sidecar hangs off takes it along.** Removing a movie or a single
-version with "delete files" erases the sidecars beside that video too, and their
+**Deleting what a sidecar hangs off takes it along.** Removing a movie, an episode or
+a single version with "delete files" erases the sidecars beside that video too, and their
 staged rows go back to unassigned. A sidecar is a file of its own but not an item
 of its own: it exists only as an external stream of a source, so once that source
 is gone nothing in the library refers to it. Leaving them behind stranded a dub

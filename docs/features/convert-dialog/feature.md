@@ -1,9 +1,10 @@
 # Convert Dialog
 
 Created: 2026-07-29
-Updated: 2026-09-04
+Updated: 2026-09-08
 
-The one place a new version of a movie is composed. It submits a single job to the
+The one place a new version of a title — a movie's or an episode's — is composed. It
+submits a single job to the
 transcode engine, and everything that job can carry is decided here: what happens
 to the video, which of the container's tracks survive, which files beside it are
 folded in, and what each resulting track is called and tagged as.
@@ -20,8 +21,11 @@ one wins the next time the button is pressed — after the dialog's own selectio
 moved on.
 
 The whole surface follows the engine's availability, since it has nothing to talk to
-without it. The Media tab itself does not: listing versions and picking which one
-plays is database-side and works with no engine attached.
+without it. The media surface itself does not: listing versions and picking which one
+plays is database-side and works with no engine attached. The surface is one component
+for a movie's Media tab and an episode's expanded row
+([episode-media](../episode-media/feature.md)), so the dialog is reached the same way
+from either.
 
 ## What it composes
 

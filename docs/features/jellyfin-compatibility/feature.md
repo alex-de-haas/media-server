@@ -1,7 +1,7 @@
 # Jellyfin Compatibility
 
 Created: 2026-06-15
-Updated: 2026-09-04
+Updated: 2026-09-08
 
 ## Description
 
@@ -274,7 +274,9 @@ Playback state:
 links, `ProductionYear`/`PremiereDate`/`RunTimeTicks`, `Overview`/`Genres`/
 `OfficialRating`/`CommunityRating`, image tags, `UserData`
 (`PlaybackPositionTicks`, `Played`, `IsFavorite`, `PlayedPercentage`), and
-`MediaSources` when requested with `fields=MediaSources`.
+`MediaSources` when requested with `fields=MediaSources` — on the items listing and on
+`GET /Shows/{seriesId}/Episodes` alike, so a client that builds its version picker from
+the episode listing sees an episode's versions.
 
 ## People
 

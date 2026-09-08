@@ -9,9 +9,9 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.Transcoding;
 
 /// <summary>
-/// Operator-facing transcode commands: create (resolve a movie source → engine job + persisted row),
-/// list, cancel, remove. Delegates the actual encode to the external transcode-engine app; persists only
-/// durable facts and state transitions — live progress stays in the engine. Scoped to movies for now.
+/// Operator-facing transcode commands: create (resolve a movie's or an episode's source → engine job +
+/// persisted row), list, cancel, remove. Delegates the actual encode to the external transcode-engine app;
+/// persists only durable facts and state transitions — live progress stays in the engine.
 /// </summary>
 public sealed class TranscodeService(
     MediaServerDbContext database,
@@ -31,13 +31,11 @@ public sealed class TranscodeService(
             ?? throw new TranscodeRequestException("Media source not found.");
 
         var item = source.MediaItem ?? throw new TranscodeRequestException("Source is not attached to a media item.");
-        if (item.Kind != MediaKind.Movie)
-        {
-            throw new TranscodeRequestException("Only movies can be transcoded for now.");
-        }
+        TranscodeTargets.RequireMovieOrEpisode(item, "can be converted");
 
-        // The mirror of the move coordinator's transcode check: a move is relocating this movie's files, so
-        // an encode reading them (and writing a sibling into the old catalog) would break both.
+        // The mirror of the move coordinator's transcode check: a move is relocating this title's files (an
+        // episode's move is its series'), so an encode reading them (and writing a sibling into the old
+        // catalog) would break both.
         if (await moveGuard.IsItemMovingAsync(item.Id, cancellationToken))
         {
             throw new TranscodeConflictException(LibraryMoveGuard.MoveInProgressError);
@@ -106,7 +104,7 @@ public sealed class TranscodeService(
                 candidate => candidate.MediaItemId == item.Id && candidate.Path == outputRelative, cancellationToken))
         {
             throw new TranscodeRequestException(
-                $"This movie already has a version at '{outputRelative}'. Delete that version first, or change the settings.");
+                $"This title already has a version at '{outputRelative}'. Delete that version first, or change the settings.");
         }
 
         if (await database.TranscodeJobs.AnyAsync(

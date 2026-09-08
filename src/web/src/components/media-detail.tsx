@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, AudioLines, CalendarPlus, Captions, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FileOutput, FileQuestion, Film, FolderInput, Heart, Image as ImageIcon, Link2, MoreVertical, Pencil, Play, RefreshCw, Shrink, Star, Trash2, User, Wand2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FolderInput, Heart, Image as ImageIcon, Link2, MoreVertical, Play, RefreshCw, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -12,16 +12,12 @@ import {
   type ChildDeleteResult,
   type Episode,
   type LibraryDetail,
-  type LibraryMediaSource,
   type LibraryMoveJob,
-  type MediaStream,
   type Network,
   type SeasonSummary,
   type Studio,
-  type TranscodeJob,
 } from "@/lib/media-server";
-import { ExtractDialog } from "@/components/extract-dialog";
-import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
+import { Conversions, MediaSources } from "@/components/media-sources";
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
 import { PosterPickerDialog } from "@/components/poster-picker-dialog";
@@ -31,7 +27,7 @@ import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { WatchTimeDialog } from "@/components/watch-time-dialog";
 import { QUERIES_AFFECTED_BY_HISTORY_CHANGE } from "@/lib/watch-history-calendar";
-import { dolbyVisionNote, dynamicRangeBadges, episodeLabel, formatBytes, formatEta, formatRuntime, formatSpeed, pictureStream } from "@/lib/format";
+import { episodeLabel, episodeMediaLine, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
 import { errorMessage, formatCount, openExternal } from "@/lib/ui";
 import {
   AlertDialog,
@@ -46,17 +42,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -64,7 +50,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
 
-/** Movie or series detail page. Branches on `kind`: movies show media streams, series show episodes. */
+/** Movie or series detail page. Branches on `kind`: a movie's Media tab lists its versions; a series lists its
+ * episodes, each of which opens onto the same media surface. */
 export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref: string; backLabel: string }) {
   const detail = useQuery({ queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id) });
 
@@ -117,7 +104,7 @@ function DetailTabs({ item, backHref }: { item: LibraryDetail; backHref: string 
           {item.kind === "Series" ? (
             <SeriesEpisodes seriesId={item.id} seasons={item.seasons} backHref={backHref} />
           ) : (
-            <MediaInfo item={item} />
+            <MovieMedia item={item} />
           )}
         </div>
       </TabsContent>
@@ -125,6 +112,19 @@ function DetailTabs({ item, backHref }: { item: LibraryDetail; backHref: string 
         <KeywordTags keywords={item.keywords} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+// A movie's Media tab: the shared media surface, owned by the movie and locked while it moves.
+function MovieMedia({ item }: { item: LibraryDetail }) {
+  const moving = useActiveMove(item.id) !== undefined;
+  return (
+    <MediaSources
+      owner={{ id: item.id, kind: item.kind, title: item.title }}
+      sources={item.mediaSources}
+      defaultSourceId={item.defaultSourceId}
+      moving={moving}
+    />
   );
 }
 
@@ -267,11 +267,13 @@ function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; tit
   });
 
   // Re-probes the file(s) with ffprobe and rewrites the stored streams — picks up media data (codecs,
-  // languages, track titles) that wasn't captured at import time, without a full library rescan.
+  // languages, track titles) that wasn't captured at import time, without a full library rescan. Asked of
+  // a series, the server fans out over its episodes, so their summary lines are refreshed too.
   const refreshMedia = useMutation({
     mutationFn: () => mediaServer.refreshMedia(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
+      queryClient.invalidateQueries({ queryKey: ["library-detail"] });
+      queryClient.invalidateQueries({ queryKey: ["episodes", id] });
       toast.success("Media data refreshed");
     },
     onError: (error) => toast.error("Couldn’t refresh media data", { description: errorMessage(error) }),
@@ -322,13 +324,10 @@ function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; tit
                 <RefreshCw className={cn(refresh.isPending && "animate-spin")} aria-hidden />
                 Refresh metadata
               </DropdownMenuItem>
-              {/* Media sources live on the leaf (movie/episode), not the series row. */}
-              {kind !== "Series" && (
-                <DropdownMenuItem disabled={refreshMedia.isPending || moving} onClick={() => refreshMedia.mutate()}>
-                  <Clapperboard className={cn(refreshMedia.isPending && "animate-pulse")} aria-hidden />
-                  Refresh media data
-                </DropdownMenuItem>
-              )}
+              <DropdownMenuItem disabled={refreshMedia.isPending || moving} onClick={() => refreshMedia.mutate()}>
+                <Clapperboard className={cn(refreshMedia.isPending && "animate-pulse")} aria-hidden />
+                Refresh media data
+              </DropdownMenuItem>
               {/* The artwork ranking prefers a poster that carries a title, but TMDb does not always have
                   one — this is where the operator overrides it for a title that came out ambiguous. */}
               <DropdownMenuItem onClick={() => setPosterOpen(true)}>
@@ -822,711 +821,6 @@ async function copyInfuseLink(deepLink: string) {
   }
 }
 
-function MediaInfo({ item }: { item: LibraryDetail }) {
-  const { role } = useSession();
-  const moving = useActiveMove(item.id) !== undefined;
-  // Transcoding ("shrink a movie source into a smaller version") is movies-only and admin-only for now.
-  // Source management (convert/rename/pin/delete) is locked while a move is relocating these very files —
-  // the API rejects those calls with a 409, so don't offer them (the MoveProgress bar above explains why).
-  const admin = item.kind === "Movie" && role === "admin";
-  const canManage = admin && !moving;
-  const sources = item.mediaSources;
-
-  if (!sources.length && !canManage) {
-    return <EmptyDetailPanel>No media sources available.</EmptyDetailPanel>;
-  }
-
-  return (
-    <section className="flex flex-col gap-3">
-      {admin && <MovieConversions itemId={item.id} />}
-      {sources.length ? (
-        sources.map((source) => (
-          <SourceCard
-            key={source.id}
-            source={source}
-            itemId={item.id}
-            title={item.title}
-            year={item.year}
-            canManage={canManage}
-            isDefault={source.id === item.defaultSourceId}
-            hasMultiple={sources.length > 1}
-          />
-        ))
-      ) : (
-        <EmptyDetailPanel>No media sources available.</EmptyDetailPanel>
-      )}
-    </section>
-  );
-}
-
-// Stream types we know how to order/label; anything else falls through in its original order with its raw
-// type name. "Subtitle" reads better pluralised once it heads a group of them.
-const STREAM_TYPE_ORDER = ["Video", "Audio", "Subtitle"];
-const STREAM_TYPE_LABELS: Record<string, string> = { Subtitle: "Subtitles" };
-
-type StreamGroup = { type: string; label: string; streams: MediaStream[]; defaultIndex: number | null };
-
-// Group a stream list by type, preserving each individual track (no dedup) and container order. Types we
-// don't know sort last under their raw name.
-function groupByType(streams: MediaStream[]): { type: string; label: string; streams: MediaStream[] }[] {
-  const byType = new Map<string, MediaStream[]>();
-  for (const stream of streams) {
-    const list = byType.get(stream.type) ?? [];
-    list.push(stream);
-    byType.set(stream.type, list);
-  }
-
-  const rank = (type: string) => {
-    const index = STREAM_TYPE_ORDER.indexOf(type);
-    return index === -1 ? STREAM_TYPE_ORDER.length : index;
-  };
-
-  return [...byType.keys()]
-    .sort((a, b) => rank(a) - rank(b))
-    .map((type) => ({ type, label: STREAM_TYPE_LABELS[type] ?? type, streams: byType.get(type)! }));
-}
-
-// The container's own tracks. `defaultIndex` is the track a player treats as default — an explicitly
-// flagged track, or (audio only) the first track when none is flagged; subtitles stay off unless flagged.
-// Matches the Convert dialog. External tracks are sidecar files beside the video, not tracks inside it:
-// they are listed separately, with their own actions, so they are left out here.
-function groupStreams(streams: MediaStream[]): StreamGroup[] {
-  return groupByType(streams.filter((stream) => !stream.isExternal)).map((group) => {
-    const flagged = group.streams.find((stream) => stream.isDefault)?.index;
-    const defaultIndex = flagged ?? (group.type === "Audio" ? group.streams[0]?.index : undefined) ?? null;
-    return { ...group, defaultIndex };
-  });
-}
-
-// Secondary technical specs shown muted after a track: video → profile · bit depth · frame rate; audio →
-// profile · sample rate. Only what the probe captured; "" when nothing to add. Numbers are trimmed of
-// trailing zeros.
-//
-// Audio carries its profile for one fact in particular: Atmos and DTS:X live there and nowhere else — the
-// codec reads `truehd` either way — and they are what decides whether a track may be re-encoded at all.
-function streamSpecs(stream: MediaStream): string {
-  const parts: string[] = [];
-  if (stream.type === "Video") {
-    if (stream.profile) parts.push(stream.profile);
-    if (stream.bitDepth) parts.push(`${stream.bitDepth}-bit`);
-    if (stream.frameRate) parts.push(`${Number(stream.frameRate.toFixed(3))} fps`);
-  } else if (stream.type === "Audio") {
-    if (stream.profile) parts.push(stream.profile);
-    if (stream.sampleRate) parts.push(`${Number((stream.sampleRate / 1000).toFixed(1))} kHz`);
-  }
-  return parts.join(" · ");
-}
-
-// The per-track summary text, its optional container label ("Director's Commentary", "SDH") — dropping a
-// label that just restates the summary — and the muted secondary specs.
-//
-// `titleLeads` is for sidecars, which routinely have neither language nor codec: an `.ac3` dub named only
-// after its voice-over group has nothing else to head the row, and `— "Гаврилов"` says less than
-// `Гаврилов` does. When the label leads, it stops being repeated as a trailing quote on its own.
-function TrackText({ stream, titleLeads = false }: { stream: MediaStream; titleLeads?: boolean }) {
-  const raw = stream.title?.trim() || null;
-  const text = stream.displayTitle ?? stream.codec ?? (titleLeads ? raw : null) ?? "—";
-  const title = raw && raw.toLowerCase() !== text.toLowerCase() ? raw : null;
-  const specs = streamSpecs(stream);
-  return (
-    <>
-      {text}
-      {title ? <span className="text-muted-foreground"> “{title}”</span> : null}
-      {specs ? <span className="text-muted-foreground"> · {specs}</span> : null}
-    </>
-  );
-}
-
-// What each kind of track is, at a glance — the same mark on the container's own tracks and on the sidecars
-// below them, so the two lists read as one vocabulary. A type the probe reports that isn't one of these gets
-// the fallback rather than a guess.
-const STREAM_ICONS: Record<string, LucideIcon> = { Video: Film, Audio: AudioLines, Subtitle: Captions };
-
-// The type's icon and name, as the left column of a track row. Wide enough for "Subtitles" beside an icon.
-function StreamTypeLabel({ type, label }: { type: string; label: string }) {
-  const Icon = STREAM_ICONS[type] ?? FileQuestion;
-  return (
-    <dt className="text-muted-foreground flex w-24 shrink-0 items-center gap-1.5 pt-px text-xs leading-5">
-      <Icon className="size-3.5 shrink-0" />
-      <span className="truncate">{label}</span>
-    </dt>
-  );
-}
-
-// One "Video/Audio/Subtitles" section. A single track shows inline; a section with several collapses into a
-// toggle ("N tracks") that expands to list every track, marking the default one.
-function StreamSection({ group }: { group: StreamGroup }) {
-  const [open, setOpen] = useState(false);
-
-  if (group.streams.length <= 1) {
-    const stream = group.streams[0];
-    return (
-      <div className="flex gap-2">
-        <StreamTypeLabel type={group.type} label={group.label} />
-        <dd className="leading-5">{stream ? <TrackText stream={stream} /> : "—"}</dd>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex gap-2">
-      <StreamTypeLabel type={group.type} label={group.label} />
-      <dd className="min-w-0 flex-1">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-          className="text-muted-foreground hover:text-foreground flex items-center gap-1 leading-5"
-        >
-          <ChevronDown className={cn("size-3.5 transition-transform", open ? "" : "-rotate-90")} />
-          <span>{group.streams.length} tracks</span>
-        </button>
-        {open ? (
-          <div className="mt-0.5 flex flex-col gap-0.5">
-            {group.streams.map((stream) => (
-              <span key={stream.index} className="flex items-center gap-1.5 leading-5">
-                <span>
-                  <TrackText stream={stream} />
-                </span>
-                {stream.index === group.defaultIndex ? (
-                  <Check className="text-primary size-3.5 shrink-0" aria-label="Default track" />
-                ) : null}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </dd>
-    </div>
-  );
-}
-
-// One source/version card. The file name (title + year part) is read-only; the editable label is the
-// version (shown in players' version pickers) and an admin can pin which version plays by default. For
-// movies an admin can also convert it into a smaller version or delete it (the "verify then replace"
-// flow: convert → check the new version → delete the original).
-function SourceCard({
-  source,
-  itemId,
-  title,
-  year,
-  canManage,
-  isDefault,
-  hasMultiple,
-}: {
-  source: LibraryMediaSource;
-  itemId: string;
-  title: string;
-  year: number | null;
-  canManage: boolean;
-  isDefault: boolean;
-  hasMultiple: boolean;
-}) {
-  const queryClient = useQueryClient();
-  // The engine is an optional dependency. Everything else on this tab — the version list, renaming, the
-  // default-version pick — is database-side and works without it, so only the convert control keys off this.
-  const { data: transcode } = useQuery({
-    queryKey: ["transcode-availability"],
-    queryFn: () => mediaServer.transcodeAvailability(),
-    staleTime: 5 * 60 * 1000,
-    // The endpoint is admin-only, and only an admin sees the controls it gates — asking as a plain viewer
-    // would just be a 401 on every version card.
-    enabled: canManage,
-  });
-  const canConvert = canManage && (transcode?.available ?? false);
-  const [convertOpen, setConvertOpen] = useState(false);
-  const [extractOpen, setExtractOpen] = useState(false);
-  // Sidecars the Convert dialog opens with already checked — set when it is reached through Merge below.
-  const [preselectedSidecars, setPreselectedSidecars] = useState<string[]>([]);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  // The picture — the film, not a cover a muxer wrote as a video track. Its badges carry the Dolby Vision
-  // profile when it is recorded, and a dual-layer profile 7 gets the one note a viewer with Apple hardware needs.
-  const picture = pictureStream(source.streams);
-  const rangeBadges = dynamicRangeBadges(picture?.hdrFormat, picture?.dolbyVision);
-  const rangeNote = dolbyVisionNote(picture?.dolbyVision);
-
-  // The default only matters when a title has several versions; clients play MediaSources[0].
-  const showDefault = hasMultiple;
-
-  // Header meta: container · size · duration · overall bitrate. The container often omits an overall
-  // bitrate (typical for MKV), so fall back to the average derived from size ÷ duration — display only.
-  const bitrateKbps =
-    source.bitrate != null && source.bitrate > 0
-      ? Math.round(source.bitrate / 1000)
-      : source.durationTicks > 0
-        ? Math.round((source.sizeBytes * 8) / (source.durationTicks / 1e7) / 1000)
-        : null;
-  const metaParts = [
-    source.container,
-    formatBytes(source.sizeBytes),
-    formatRuntime(source.durationTicks),
-    bitrateKbps ? `${bitrateKbps.toLocaleString()} kbps` : null,
-  ].filter(Boolean);
-
-  const setDefault = useMutation({
-    mutationFn: (next: boolean) => mediaServer.setDefaultSource(itemId, next ? source.id : null),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
-      toast.success(isDefault ? "Default version cleared" : "Set as default version");
-    },
-    onError: (error) => toast.error("Couldn’t update default version", { description: errorMessage(error) }),
-  });
-
-  return (
-    <div className="rounded-md border p-3 text-sm">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-mono font-medium break-all">{source.fileName}</p>
-            {rangeBadges.map((badge) => (
-              <Badge key={badge} variant="secondary" className="font-normal">
-                {badge}
-              </Badge>
-            ))}
-            {rangeNote ? <span className="text-muted-foreground text-xs">{rangeNote}</span> : null}
-          </div>
-          <p className="text-muted-foreground mt-1 font-mono text-xs">{metaParts.join(" · ")}</p>
-        </div>
-        {canManage && (
-          <div className="flex shrink-0 items-center gap-1">
-            {showDefault && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={isDefault ? "Clear default version" : "Set as default version"}
-                disabled={setDefault.isPending}
-                onClick={() => setDefault.mutate(!isDefault)}
-              >
-                <Star className={cn(isDefault && "fill-current text-amber-500")} />
-              </Button>
-            )}
-            <Button variant="ghost" size="icon-sm" aria-label="Rename version" onClick={() => setEditOpen(true)}>
-              <Pencil />
-            </Button>
-            {canConvert && (
-              <Button variant="ghost" size="icon-sm" aria-label="Convert to a smaller version" onClick={() => setConvertOpen(true)}>
-                <Shrink />
-              </Button>
-            )}
-            {canConvert && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Extract tracks to files"
-                onClick={() => setExtractOpen(true)}
-              >
-                <FileOutput />
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Delete this version"
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 />
-            </Button>
-          </div>
-        )}
-      </div>
-      <dl className="mt-2 flex flex-col gap-1.5">
-        {groupStreams(source.streams).map((group) => (
-          <StreamSection key={group.type} group={group} />
-        ))}
-      </dl>
-
-      <SidecarSection
-        sidecars={source.streams.filter((stream) => stream.isExternal)}
-        itemId={itemId}
-        canManage={canManage}
-        canMerge={canConvert}
-        onMerge={(streamIds) => {
-          setPreselectedSidecars(streamIds);
-          setConvertOpen(true);
-        }}
-      />
-
-      {canManage && (
-        <EditVersionDialog
-          source={source}
-          itemId={itemId}
-          title={title}
-          year={year}
-          open={editOpen}
-          onOpenChange={setEditOpen}
-        />
-      )}
-      {canManage && canConvert && (
-        <TranscodeDialog
-          source={source}
-          open={convertOpen}
-          onOpenChange={(next) => {
-            setConvertOpen(next);
-            // A later Convert click must not reopen with the last merge's selection still checked.
-            if (!next) setPreselectedSidecars([]);
-          }}
-          preselectedSidecars={preselectedSidecars}
-        />
-      )}
-      {canManage && canConvert && (
-        <ExtractDialog source={source} itemId={itemId} open={extractOpen} onOpenChange={setExtractOpen} />
-      )}
-      {canManage && <DeleteVersionDialog source={source} itemId={itemId} open={deleteOpen} onOpenChange={setDeleteOpen} />}
-    </div>
-  );
-}
-
-// Characters the server rejects (they'd be stripped from a filename). Mirrored here so the field flags them
-// before the request, but the server stays the source of truth.
-const INVALID_VERSION_CHARS = /[/\\:*?"<>|]/;
-
-// Rename or clear a movie source's version — the ` - {version}` suffix on its filename, which also labels the
-// version in players (e.g. Infuse). This renames the file on disk; the `Title (Year)` stem is locked.
-function EditVersionDialog({
-  source,
-  itemId,
-  title,
-  year,
-  open,
-  onOpenChange,
-}: {
-  source: LibraryMediaSource;
-  itemId: string;
-  title: string;
-  year: number | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const queryClient = useQueryClient();
-  const inputId = useId();
-  const [value, setValue] = useState(source.versionName ?? "");
-
-  // Re-seed the field with the current version each time the dialog (re)opens.
-  const [wasOpen, setWasOpen] = useState(open);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) setValue(source.versionName ?? "");
-  }
-
-  // Preview the resulting file name: locked "Title (Year)" stem + the typed suffix + the current extension.
-  // Normalize the suffix the same way the server does (collapse runs of spaces, drop trailing dots) so the
-  // preview matches what actually lands on disk.
-  const trimmed = value.trim();
-  const suffix = trimmed.replace(/\s+/g, " ").replace(/\.+$/, "");
-  const invalid = INVALID_VERSION_CHARS.test(value);
-  const stem = year != null ? `${title} (${year})` : title;
-  const fileName = source.fileName ?? "";
-  const extension = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")) : "";
-  const previewName = `${stem}${suffix ? ` - ${suffix}` : ""}${extension}`;
-
-  const save = useMutation({
-    mutationFn: (next: string | null) => mediaServer.setSourceVersion(source.id, next),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
-      onOpenChange(false);
-      toast.success("Version renamed");
-    },
-    onError: (error) => toast.error("Couldn’t rename version", { description: errorMessage(error) }),
-  });
-
-  const submit = () => {
-    if (save.isPending || invalid) return; // Guard against double-submit (e.g. repeated Enter) and bad input.
-    save.mutate(trimmed ? trimmed : null);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Rename version</DialogTitle>
-          <DialogDescription>
-            Renames the file on disk and the label shown in players (e.g. Infuse). The “{stem}” part is locked —
-            only the part after it changes.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-2">
-          <Label htmlFor={inputId}>Version</Label>
-          <Input
-            id={inputId}
-            value={value}
-            aria-invalid={invalid}
-            placeholder="e.g. Remux 1080p, Director’s Cut"
-            onChange={(event) => setValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                submit();
-              }
-            }}
-          />
-          {invalid ? (
-            <p className="text-destructive text-xs">{`Can’t contain / \\ : * ? " < > |`}</p>
-          ) : (
-            <p className="text-muted-foreground font-mono text-xs break-all">{previewName}</p>
-          )}
-        </div>
-
-        <DialogFooter className="gap-2 sm:gap-2">
-          {source.versionName ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-destructive hover:text-destructive mr-auto"
-              disabled={save.isPending}
-              onClick={() => save.mutate(null)}
-            >
-              Remove version
-            </Button>
-          ) : null}
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button size="sm" disabled={save.isPending || invalid} onClick={submit}>
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Sidecar tracks: dub and subtitle files sitting beside the video rather than inside it. They are listed
-// apart from the container's own tracks because they behave differently — each is a file that can be
-// removed on its own, and a player will not use an external *audio* track at all until it is merged in.
-function SidecarSection({
-  sidecars,
-  itemId,
-  canManage,
-  canMerge,
-  onMerge,
-}: {
-  sidecars: MediaStream[];
-  itemId: string;
-  canManage: boolean;
-  canMerge: boolean;
-  /** Hands the checked sidecars to the Convert dialog. Merging used to submit a job straight from here, so
-   *  there was no way to see what the result would carry, or fix a track's name, before it started. */
-  onMerge: (streamIds: string[]) => void;
-}) {
-  const queryClient = useQueryClient();
-  const [selected, setSelected] = useState<string[]>([]);
-
-  const remove = useMutation({
-    mutationFn: ({ id, deleteFile }: { id: string; deleteFile: boolean }) =>
-      mediaServer.deleteExternalStream(id, deleteFile),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
-      toast.success("Track removed");
-    },
-    onError: (error) => toast.error("Couldn’t remove the track", { description: errorMessage(error) }),
-  });
-
-  if (sidecars.length === 0) {
-    return null;
-  }
-
-  // Grouped by kind, because a dub and a subtitle are not interchangeable and a sidecar row often has
-  // nothing on it that would say which is which — no language, no codec, just the label its release gave
-  // it. The kind heads the group; the file name under each row is the other half of the answer, and the
-  // thing an operator sees when they open the folder.
-  const groups = groupByType(sidecars);
-
-  return (
-    <div className="mt-2 border-t pt-2">
-      <p className="text-muted-foreground text-xs">
-        {sidecars.length} separate {sidecars.length === 1 ? "file" : "files"} beside this version
-      </p>
-      {groups.map((group) => {
-        const Icon = STREAM_ICONS[group.type] ?? FileQuestion;
-        return (
-          // The gap before a heading has to beat the gap inside a group, or the last row of one kind reads
-          // as belonging to the next.
-          <div key={group.type} className="mt-3">
-            <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-              <Icon className="size-3.5 shrink-0" />
-              <span className="font-medium">{group.label}</span>
-              {group.type === "Audio" && (
-                // Worth stating plainly, and right where the dubs are: keeping one as a file preserves it,
-                // but no player will use it there.
-                <span>— only plays once merged into the video</span>
-              )}
-            </p>
-            <ul className="mt-1 flex flex-col gap-1">
-              {group.streams.map((stream) => (
-                <li key={stream.id} className="flex items-start gap-2 text-sm">
-                  {canManage && canMerge && (
-                    <Checkbox
-                      className="mt-1"
-                      checked={selected.includes(stream.id)}
-                      onCheckedChange={(checked) =>
-                        setSelected((current) =>
-                          checked ? [...current, stream.id] : current.filter((id) => id !== stream.id),
-                        )
-                      }
-                      aria-label={`Merge ${stream.fileName ?? stream.displayTitle ?? stream.type} into a new version`}
-                    />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate leading-6">
-                      <TrackText stream={stream} titleLeads />
-                    </span>
-                    {stream.fileName && (
-                      <span className="text-muted-foreground block truncate font-mono text-xs">
-                        {stream.fileName}
-                      </span>
-                    )}
-                  </span>
-                  {canManage && (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`Remove ${stream.fileName ?? "this track"}`}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      disabled={remove.isPending}
-                      onClick={() => remove.mutate({ id: stream.id, deleteFile: true })}
-                    >
-                      <Trash2 />
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        );
-      })}
-      {canManage && canMerge && selected.length > 0 && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="mt-2"
-          onClick={() => {
-            // Handing the selection to the dialog consumes it. Keeping it checked here would leave two
-            // places claiming to hold the answer, and the stale one wins the next time this button is
-            // pressed — after the dialog's own selection has moved on.
-            onMerge(selected);
-            setSelected([]);
-          }}
-        >
-          Merge {selected.length} into a new version…
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// This movie's transcode jobs, polled while any is active. When the last one finishes, the detail is
-// refreshed so the freshly produced version appears in the source list above.
-function MovieConversions({ itemId }: { itemId: string }) {
-  const queryClient = useQueryClient();
-  const jobs = useQuery({
-    queryKey: ["transcode-jobs"],
-    queryFn: mediaServer.listTranscodeJobs,
-    refetchInterval: (query) => {
-      const data = (query.state.data ?? []) as TranscodeJob[];
-      return data.some((job) => job.mediaItemId === itemId && isTranscodeActive(job)) ? 2000 : false;
-    },
-  });
-
-  const mine = (jobs.data ?? []).filter((job) => job.mediaItemId === itemId);
-  const activeCount = mine.filter(isTranscodeActive).length;
-
-  const previousActive = useRef(activeCount);
-  useEffect(() => {
-    if (previousActive.current > 0 && activeCount === 0) {
-      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
-    }
-    previousActive.current = activeCount;
-  }, [activeCount, itemId, queryClient]);
-
-  if (mine.length === 0) {
-    return null;
-  }
-
-  // A label over a stack of conversion cards, mirroring the Activity page's groups — each job already draws
-  // its own bordered card, so this block adds no box of its own.
-  return (
-    <section className="flex flex-col gap-2">
-      <p className="text-muted-foreground text-xs font-medium">Conversions</p>
-      <div className="flex flex-col gap-3">
-        {mine.map((job) => (
-          <TranscodeJobRow key={job.id} job={job} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function DeleteVersionDialog({
-  source,
-  itemId,
-  open,
-  onOpenChange,
-}: {
-  source: LibraryMediaSource;
-  itemId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const queryClient = useQueryClient();
-  const deleteFileId = useId();
-  const [deleteFile, setDeleteFile] = useState(false);
-
-  // Re-apply the default each time the dialog (re)opens so a prior toggle (then cancel) doesn't carry over.
-  const [wasOpen, setWasOpen] = useState(open);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) setDeleteFile(false);
-  }
-
-  const remove = useMutation({
-    mutationFn: () => mediaServer.deleteMediaSource(source.id, deleteFile),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["library-detail", itemId] });
-      onOpenChange(false);
-      toast.success("Version removed");
-    },
-    onError: (error) => toast.error("Couldn’t remove version", { description: errorMessage(error) }),
-  });
-
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="sm:max-w-md">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Remove this version?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Removes <span className="text-foreground font-medium">{source.versionName ?? source.container}</span> (
-            {formatBytes(source.sizeBytes)}) from this movie.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-
-        <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
-          <Checkbox
-            id={deleteFileId}
-            className="mt-0.5"
-            checked={deleteFile}
-            onCheckedChange={(checked) => setDeleteFile(checked === true)}
-          />
-          <label htmlFor={deleteFileId} className="cursor-pointer">
-            Delete file from disk
-            <span className="text-muted-foreground block text-xs">
-              Frees the disk space. Otherwise only the library entry is removed.
-            </span>
-          </label>
-        </div>
-
-        <AlertDialogFooter>
-          <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" size="sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
-            {deleteFile ? "Delete + remove file" : "Remove version"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 interface SeasonGroup {
   key: string;
   seasonId: string | null;
@@ -1575,7 +869,11 @@ function SeriesEpisodes({
   seasons: SeasonSummary[] | null;
   backHref: string;
 }) {
+  const { role } = useSession();
   const episodes = useQuery({ queryKey: ["episodes", seriesId], queryFn: () => mediaServer.listEpisodes(seriesId) });
+  // A move relocates the whole show, so every episode's controls lock together.
+  const moving = useActiveMove(seriesId) !== undefined;
+  const invalidate = useEpisodeInvalidation(seriesId);
 
   if (episodes.isPending) {
     return <p className="text-muted-foreground text-sm">Loading episodes…</p>;
@@ -1586,8 +884,13 @@ function SeriesEpisodes({
     return <EmptyDetailPanel>No episodes available.</EmptyDetailPanel>;
   }
 
+  const episodeIds = (episodes.data ?? []).map((episode) => episode.id);
+
   return (
     <section className="flex flex-col gap-4">
+      {/* Every episode's jobs in one place, where a movie's Media tab keeps its own: a job card names its
+          output file, which carries the episode code, so nothing is lost by not listing them per row. */}
+      {role === "admin" && episodeIds.length > 0 && <Conversions itemIds={episodeIds} onSettled={invalidate} />}
       {groups.map((group) => (
         <div key={group.key} className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
@@ -1604,7 +907,7 @@ function SeriesEpisodes({
           {group.episodes.length ? (
             <ul className="flex flex-col divide-y rounded-md border">
               {group.episodes.map((episode) => (
-                <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} backHref={backHref} />
+                <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} moving={moving} backHref={backHref} />
               ))}
             </ul>
           ) : (
@@ -1616,12 +919,13 @@ function SeriesEpisodes({
   );
 }
 
-// Invalidates every view an episode or season delete can change. Shared so the row and the season heading
-// cannot drift apart.
+// Invalidates every view a change under a series can affect — a delete, a remap, a version produced or
+// removed. Shared so the row, the season heading and the media surface cannot drift apart. Every detail
+// query goes, not only the series': an expanded episode holds its own, and it is the one that changed.
 function useEpisodeInvalidation(seriesId: string) {
   const queryClient = useQueryClient();
   return () => {
-    for (const key of [["episodes", seriesId], ["library-detail", seriesId], ["library"], ["nextup"], ["resume"], ["recent"]]) {
+    for (const key of [["episodes", seriesId], ["library-detail"], ["library"], ["nextup"], ["resume"], ["recent"]]) {
       queryClient.invalidateQueries({ queryKey: key });
     }
   };
@@ -1705,10 +1009,21 @@ function EmptyDetailPanel({ children }: { children: string }) {
   return <p className="text-muted-foreground py-6 text-sm">{children}</p>;
 }
 
-function EpisodeRow({ episode, seriesId, backHref }: { episode: Episode; seriesId: string; backHref: string }) {
+function EpisodeRow({
+  episode,
+  seriesId,
+  moving,
+  backHref,
+}: {
+  episode: Episode;
+  seriesId: string;
+  moving: boolean;
+  backHref: string;
+}) {
   const { role } = useSession();
   const [remapOpen, setRemapOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const invalidate = useEpisodeInvalidation(seriesId);
   const afterDelete = useAfterChildDelete(seriesId, backHref);
 
@@ -1739,74 +1054,119 @@ function EpisodeRow({ episode, seriesId, backHref }: { episode: Episode; seriesI
   );
 
   return (
-    <li className="flex items-center gap-3 p-3 text-sm">
-      <button
-        onClick={() => played.mutate(!isPlayed)}
-        disabled={played.isPending}
-        aria-label={isPlayed ? "Mark unwatched" : "Mark watched"}
-        className={cn(
-          "flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors",
-          isPlayed ? "bg-brand text-brand-foreground border-brand" : "text-muted-foreground hover:text-foreground",
+    <li className="flex flex-col">
+      <div className="flex items-center gap-3 p-3 text-sm">
+        <button
+          onClick={() => played.mutate(!isPlayed)}
+          disabled={played.isPending}
+          aria-label={isPlayed ? "Mark unwatched" : "Mark watched"}
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors",
+            isPlayed ? "bg-brand text-brand-foreground border-brand" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Check className="size-3.5" aria-hidden />
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate">
+            <span className="text-muted-foreground font-mono text-xs">{label}</span> {episode.title}
+          </p>
+          {/* What is on disk, at a glance: the default version's picture and size, and how many versions
+              there are. The full surface — every version, track and control — is one click down. */}
+          <p className="text-muted-foreground mt-0.5 truncate font-mono text-xs">{episodeMediaLine(episode.media)}</p>
+          {resume != null && (
+            <span className="bg-secondary mt-1 block h-1 max-w-32 overflow-hidden rounded-full">
+              <span className="bg-brand block h-full" style={{ width: `${resume}%` }} />
+            </span>
+          )}
+        </div>
+        {runtime && <span className="text-muted-foreground shrink-0 text-xs">{runtime}</span>}
+        {deepLink && (
+          <Button variant="ghost" size="icon-sm" aria-label="Play in Infuse" onClick={() => openInfuse(deepLink)}>
+            <Play />
+          </Button>
         )}
-      >
-        <Check className="size-3.5" aria-hidden />
-      </button>
-      <div className="min-w-0 flex-1">
-        <p className="truncate">
-          <span className="text-muted-foreground font-mono text-xs">{label}</span> {episode.title}
-        </p>
-        {resume != null && (
-          <span className="bg-secondary mt-1 block h-1 max-w-32 overflow-hidden rounded-full">
-            <span className="bg-brand block h-full" style={{ width: `${resume}%` }} />
-          </span>
+        {role === "admin" && (
+          <Button variant="ghost" size="icon-sm" aria-label="Fix match" onClick={() => setRemapOpen(true)}>
+            <Wand2 />
+          </Button>
         )}
-      </div>
-      {runtime && <span className="text-muted-foreground shrink-0 text-xs">{runtime}</span>}
-      {deepLink && (
-        <Button variant="ghost" size="icon-sm" aria-label="Play in Infuse" onClick={() => openInfuse(deepLink)}>
-          <Play />
-        </Button>
-      )}
-      {role === "admin" && (
-        <Button variant="ghost" size="icon-sm" aria-label="Fix match" onClick={() => setRemapOpen(true)}>
-          <Wand2 />
-        </Button>
-      )}
-      {role === "admin" && (
+        {role === "admin" && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Delete ${label}`}
+            disabled={remove.isPending}
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2 />
+          </Button>
+        )}
+        {role === "admin" && (
+          <DeleteItemDialog
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            heading="Delete episode?"
+            title={`${label} · ${episode.title}`}
+            onConfirm={(options) => remove.mutate(options)}
+          />
+        )}
+        {role === "admin" && (
+          <RemapDialog
+            itemId={episode.id}
+            mode="episode"
+            currentTitle={`${label} · ${episode.title}`}
+            defaultSeason={episode.seasonNumber ?? 1}
+            defaultEpisode={episode.episodeNumber ?? 1}
+            open={remapOpen}
+            onOpenChange={setRemapOpen}
+            onRemapped={() => {
+              setRemapOpen(false);
+              invalidate();
+            }}
+          />
+        )}
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Delete ${label}`}
-          disabled={remove.isPending}
-          onClick={() => setDeleteOpen(true)}
+          aria-label={expanded ? `Hide media of ${label}` : `Show media of ${label}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
         >
-          <Trash2 />
+          <ChevronDown className={cn("transition-transform", !expanded && "-rotate-90")} />
         </Button>
-      )}
-      {role === "admin" && (
-        <DeleteItemDialog
-          open={deleteOpen}
-          onOpenChange={setDeleteOpen}
-          heading="Delete episode?"
-          title={`${label} · ${episode.title}`}
-          onConfirm={(options) => remove.mutate(options)}
-        />
-      )}
-      {role === "admin" && (
-        <RemapDialog
-          itemId={episode.id}
-          mode="episode"
-          currentTitle={`${label} · ${episode.title}`}
-          defaultSeason={episode.seasonNumber ?? 1}
-          defaultEpisode={episode.episodeNumber ?? 1}
-          open={remapOpen}
-          onOpenChange={setRemapOpen}
-          onRemapped={() => {
-            setRemapOpen(false);
-            invalidate();
-          }}
-        />
+      </div>
+      {expanded && (
+        <div className="border-t p-3">
+          <EpisodeMedia episode={episode} seriesId={seriesId} moving={moving} />
+        </div>
       )}
     </li>
+  );
+}
+
+// The expanded row: the episode's versions on the same surface a movie's Media tab uses. Fetched on
+// expand, so a long season never carries every episode's stream list in one listing.
+function EpisodeMedia({ episode, seriesId, moving }: { episode: Episode; seriesId: string; moving: boolean }) {
+  const invalidate = useEpisodeInvalidation(seriesId);
+  const detail = useQuery({ queryKey: ["library-detail", episode.id], queryFn: () => mediaServer.getLibraryDetail(episode.id) });
+
+  if (detail.isPending) {
+    return <p className="text-muted-foreground text-sm">Loading media…</p>;
+  }
+
+  if (detail.isError || !detail.data) {
+    return <p className="text-muted-foreground text-sm">This episode’s media could not be loaded.</p>;
+  }
+
+  return (
+    <MediaSources
+      owner={{ id: episode.id, kind: "Episode", title: episode.title }}
+      sources={detail.data.mediaSources}
+      defaultSourceId={detail.data.defaultSourceId}
+      moving={moving}
+      showConversions={false}
+      onChanged={invalidate}
+    />
   );
 }

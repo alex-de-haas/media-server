@@ -165,9 +165,12 @@ internal static class JellyfinItemsEndpoints
         {
             var seasonId = request.Query["SeasonId"].ToString();
             var seasonNumber = ParseInt(request.Query["Season"]);
+            // The same field the items listing honours: a client that builds its version picker from the
+            // listing sees an episode's versions only if the listing carries them.
+            var includeMediaSources = WantsMediaSources(request);
             return JellyfinJson.Ok(await library.GetEpisodesAsync(
                 seriesId, string.IsNullOrEmpty(seasonId) ? null : seasonId, seasonNumber,
-                JellyfinPrincipal.AppUserId(principal), cancellationToken));
+                includeMediaSources, JellyfinPrincipal.AppUserId(principal), cancellationToken));
         });
     }
 
@@ -182,12 +185,16 @@ internal static class JellyfinItemsEndpoints
             IncludeItemTypes = SplitList(query["IncludeItemTypes"])?.ToHashSet(StringComparer.OrdinalIgnoreCase),
             SearchTerm = NullIfEmpty(query["SearchTerm"]),
             Recursive = bool.TryParse(query["Recursive"], out var recursive) && recursive,
-            IncludeMediaSources = SplitList(query["Fields"])?.Any(field =>
-                field.Equals("MediaSources", StringComparison.OrdinalIgnoreCase)) ?? false,
+            IncludeMediaSources = WantsMediaSources(request),
             StartIndex = ParseInt(query["StartIndex"]),
             Limit = ParseInt(query["Limit"]),
         };
     }
+
+    /// <summary>Whether <c>Fields</c> names <c>MediaSources</c> — read the same way on every listing that can carry them.</summary>
+    private static bool WantsMediaSources(HttpRequest request) =>
+        SplitList(request.Query["Fields"])?.Any(field =>
+            field.Equals("MediaSources", StringComparison.OrdinalIgnoreCase)) ?? false;
 
     private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

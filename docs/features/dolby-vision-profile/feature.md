@@ -1,7 +1,7 @@
 # Dolby Vision Profile
 
 Created: 2026-09-04
-Updated: 2026-09-04
+Updated: 2026-09-08
 
 The library tells apart the Dolby Vision a client will play from the Dolby Vision it will
 quietly show as HDR10, and offers a lossless way to turn the second kind into the first.
@@ -35,9 +35,10 @@ that pass reaches past provenance. See
 ## What a viewer sees
 
 Every stream DTO carries `dolbyVision: { profile, level, blCompatibilityId, enhancementLayer }`
-or null. The web version card shows the dynamic range as badges — `HDR10`, `HDR10+`, `HLG`,
-`Dolby Vision 8.1`, `Dolby Vision 7` — one per format the probe named, so a `Dolby Vision ·
-HDR10` value yields two; profile 8 is named by its base layer, the others by profile alone,
+or null. The web version card — a movie's on its Media tab, an episode's in its expanded row,
+and the episode's summary line beside it — shows the dynamic range as badges — `HDR10`,
+`HDR10+`, `HLG`, `Dolby Vision 8.1`, `Dolby Vision 7` — one per format the probe named, so a
+`Dolby Vision · HDR10` value yields two; profile 8 is named by its base layer, the others by profile alone,
 and the bare `Dolby Vision` stays while a profile is not yet recorded. A dual layer carries
 the note *Apple TV and Infuse play its HDR10 base layer*. Text marks, not logos: the Dolby
 Vision mark is a licensed trademark, and a capsule reads the same. The tvOS title screen

@@ -105,7 +105,7 @@ export function objectAudioFormat(profile: string | null | undefined): string | 
   return /dts:?x/i.test(profile) ? "DTS:X" : null;
 }
 
-import type { DolbyVisionDetail, MediaStream } from "@/lib/media-server";
+import type { DolbyVisionDetail, EpisodeMediaSummary, MediaStream } from "@/lib/media-server";
 
 /** Codecs a muxer writes cover art as: a real video track in every way that can be seen, and not the film. */
 const STILL_IMAGE_CODECS = new Set(["mjpeg", "png", "bmp", "gif", "webp"]);
@@ -177,4 +177,36 @@ export function reencodeDynamicRangeWarning(hdrFormat: string | null | undefined
     return `This source is ${label}. Re-encoding drops the Dolby Vision layer and lands on its SDR base layer — choose “Keep original video” to preserve it.`;
   }
   return `This source is ${label}. Re-encoding drops the Dolby Vision (and any HDR10+) layer and keeps an HDR10 picture — choose “Keep original video” to preserve it.`;
+}
+
+/** The Episodes tab's one-line summary of what is on disk — `HEVC 2160p · Dolby Vision 7 · 38.2 GB · 2 versions`.
+ *  The codec, height, range and size are the default version's, the file a player starts on; the count is over
+ *  every version and named only when there is more than one. An episode with no file says so. */
+export function episodeMediaLine(media: EpisodeMediaSummary | null | undefined): string {
+  if (!media) {
+    return "No file";
+  }
+  const picture = [media.videoCodec?.toUpperCase(), media.height ? `${media.height}p` : null].filter(Boolean).join(" ");
+  const parts = [
+    picture || null,
+    ...dynamicRangeBadges(media.hdrFormat, media.dolbyVision),
+    media.sizeBytes > 0 ? formatBytes(media.sizeBytes) : null,
+    media.versionCount > 1 ? `${media.versionCount} versions` : null,
+  ];
+  return parts.filter((part): part is string => part != null).join(" · ");
+}
+
+/** The part of a version's file name a rename leaves alone, and its extension. `Arrival (2016) - Remux.mkv`
+ *  labelled `Remux` has the stem `Arrival (2016)`: what precedes the label's ` - `. Read off the name rather
+ *  than composed from a title and year, which is what makes it right for an episode's `Show S01E03` too; the
+ *  server rebuilds the real stem from metadata, this only previews it. A label the name does not end with
+ *  (a label that drifted from the file) leaves the whole base name as the stem rather than guessing. */
+export function versionStem(fileName: string | null | undefined, versionName: string | null | undefined): { stem: string; extension: string } {
+  const name = fileName ?? "";
+  const dot = name.lastIndexOf(".");
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const extension = dot > 0 ? name.slice(dot) : "";
+  const suffix = versionName ? ` - ${versionName}` : "";
+  const stem = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
+  return { stem, extension };
 }

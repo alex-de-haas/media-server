@@ -213,6 +213,73 @@ public sealed class LibraryMaintenanceServiceTests : IDisposable
         Assert.False(await Service().RefreshMediaAsync(Guid.NewGuid(), CancellationToken.None));
     }
 
+    [Fact]
+    public async Task RefreshMedia_on_a_series_reprobes_every_episodes_sources_and_spares_their_sidecars()
+    {
+        // A series row holds no file of its own, so asking it to refresh is asking for its episodes' — one
+        // gesture per title, as on a movie. The sidecar rule rides along: an external row describes a file
+        // beside the video, and probing the video says nothing about it.
+        var catalog = SeedCatalog();
+        var (seriesId, episodeIds) = SeedSeriesWithEpisodes(catalog, "Show/Season 01/Show S01E01.mkv", "Show/Season 01/Show S01E02.mkv");
+        foreach (var relative in new[] { "Show/Season 01/Show S01E01.mkv", "Show/Season 01/Show S01E02.mkv" })
+        {
+            var absolute = Path.Combine(_root, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+            await File.WriteAllBytesAsync(absolute, new byte[16]);
+        }
+        var firstSource = await _database.MediaSources.SingleAsync(source => source.MediaItemId == episodeIds[0]);
+        _database.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = firstSource.Id, StreamType = StreamType.Audio, Index = 1000,
+            Codec = "ac3", Language = "rus", IsExternal = true, ExternalPath = "Show/Season 01/Show S01E01.rus.mka",
+        });
+        await _database.SaveChangesAsync();
+
+        var refreshed = await Service().RefreshMediaAsync(seriesId, CancellationToken.None);
+
+        Assert.True(refreshed);
+        await using var fresh = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        foreach (var episodeId in episodeIds)
+        {
+            var source = await fresh.MediaSources.Include(s => s.Streams).SingleAsync(s => s.MediaItemId == episodeId);
+            Assert.Equal("matroska", source.Container);
+            Assert.Equal(2, source.Streams.Count(s => !s.IsExternal));
+        }
+        var sidecar = Assert.Single(await fresh.MediaStreams.Where(s => s.IsExternal).ToListAsync());
+        Assert.Equal(firstSource.Id, sidecar.MediaSourceId);
+    }
+
+    private (Guid SeriesId, IReadOnlyList<Guid> EpisodeIds) SeedSeriesWithEpisodes(Catalog catalog, params string[] relativePaths)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var series = new MediaItem
+        {
+            Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Series, Title = "Show",
+            IdentityProvider = "tmdb", IdentityProviderId = "9", AddedAt = now, UpdatedAt = now,
+        };
+        _database.MediaItems.Add(series);
+        var episodeIds = new List<Guid>();
+        var number = 0;
+        foreach (var relative in relativePaths)
+        {
+            var episode = new MediaItem
+            {
+                Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Episode, Title = $"Episode {++number}",
+                ParentId = series.Id, SeriesId = series.Id, ParentIndexNumber = 1, IndexNumber = number,
+                LibraryPath = relative, AddedAt = now, UpdatedAt = now,
+            };
+            _database.MediaItems.Add(episode);
+            _database.MediaSources.Add(new MediaSource
+            {
+                Id = Guid.NewGuid(), MediaItemId = episode.Id, Container = "mkv", Path = relative, SizeBytes = 1024, CreatedAt = now,
+            });
+            episodeIds.Add(episode.Id);
+        }
+
+        _database.SaveChanges();
+        return (series.Id, episodeIds);
+    }
+
     public void Dispose()
     {
         _database.Dispose();

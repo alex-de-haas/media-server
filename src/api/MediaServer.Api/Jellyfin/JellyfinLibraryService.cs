@@ -287,7 +287,8 @@ public sealed class JellyfinLibraryService(
     }
 
     public async Task<QueryResult<BaseItemDto>> GetEpisodesAsync(
-        string seriesPublicId, string? seasonPublicId, int? seasonNumber, int? appUserId, CancellationToken cancellationToken)
+        string seriesPublicId, string? seasonPublicId, int? seasonNumber, bool includeMediaSources, int? appUserId,
+        CancellationToken cancellationToken)
     {
         var series = await FindByPublicIdAsync(seriesPublicId, cancellationToken);
         if (series is null || series.Kind != MediaKind.Series)
@@ -316,7 +317,7 @@ public sealed class JellyfinLibraryService(
             .ThenBy(item => item.IndexNumber)
             .ToListAsync(cancellationToken);
 
-        var dtos = await MapManyAsync(episodes, includeMediaSources: false, appUserId, cancellationToken);
+        var dtos = await MapManyAsync(episodes, includeMediaSources, appUserId, cancellationToken);
         return new QueryResult<BaseItemDto>(dtos, dtos.Count);
     }
 
