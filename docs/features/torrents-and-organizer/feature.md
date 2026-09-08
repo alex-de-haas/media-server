@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-09-03
+Updated: 2026-09-08
 
 ## Description
 
@@ -335,7 +335,7 @@ the source, with a free-space pre-check. See
 
 ## Library Scan (import)
 
-A per-catalog **Scan** action (Catalogs page, admin) lets operators onboard files
+A per-catalog **Scan** action (Settings → Catalogs tab, admin) lets operators onboard files
 that were not downloaded through the app — e.g. an existing collection copied into
 the catalog root.
 

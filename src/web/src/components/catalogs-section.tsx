@@ -94,7 +94,7 @@ export function CatalogsSection() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-col gap-2 sm:grid sm:gap-1">
         <CardTitle>Catalogs</CardTitle>
         <CardDescription>Destinations on one filesystem; each holds files/ and library/.</CardDescription>
         <CardAction className="flex flex-wrap items-center gap-2">

@@ -21,7 +21,7 @@ test("an unanchored catalog is labelled for re-anchoring, not as an offline volu
     catalogMounts: MOUNTS,
   });
 
-  await page.goto("/catalogs");
+  await page.goto("/settings?tab=catalogs");
 
   // The distinction matters: "offline" tells the operator to reconnect a volume, which would be wrong.
   await expect(page.getByText("unanchored")).toBeVisible();
@@ -41,7 +41,7 @@ test("re-anchoring a catalog whose mount is gone submits the mount it actually s
     catalogMounts: MOUNTS,
   });
 
-  await page.goto("/catalogs");
+  await page.goto("/settings?tab=catalogs");
   await page.getByRole("button", { name: "Catalog actions" }).click();
   await page.getByRole("menuitem", { name: "Re-anchor" }).click();
 
@@ -70,7 +70,7 @@ test("re-anchoring sends the mount label and a normalized path within it", async
     catalogMounts: MOUNTS,
   });
 
-  await page.goto("/catalogs");
+  await page.goto("/settings?tab=catalogs");
   await page.getByRole("button", { name: "Catalog actions" }).click();
   await page.getByRole("menuitem", { name: "Re-anchor" }).click();
 
@@ -117,7 +117,7 @@ test("scanning a catalog reports what left the library, not just what arrived", 
     },
   });
 
-  await page.goto("/catalogs");
+  await page.goto("/settings?tab=catalogs");
   await page.getByRole("button", { name: "Catalog actions" }).click();
   await page.getByRole("menuitem", { name: "Scan for media" }).click();
 
@@ -146,7 +146,7 @@ test("a catalog whose volume is gone is reported as offline, not as an emptied l
     },
   });
 
-  await page.goto("/catalogs");
+  await page.goto("/settings?tab=catalogs");
   await page.getByRole("button", { name: "Catalog actions" }).click();
   await page.getByRole("menuitem", { name: "Scan for media" }).click();
 
@@ -171,7 +171,7 @@ test("the whole library can be scanned from one button", async ({ page }) => {
     },
   });
 
-  await page.goto("/catalogs");
+  await page.goto("/settings?tab=catalogs");
 
   const posted = page.waitForRequest(
     (request) => request.url().includes("/api/proxy/api/catalogs/scan") && request.method() === "POST",

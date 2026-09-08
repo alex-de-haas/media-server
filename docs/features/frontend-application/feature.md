@@ -70,12 +70,15 @@ section).
   rates, ETA). Work that is waiting shows a
   queued line instead of a bar. The same card renders a conversion wherever it
   appears, including the Conversions block on movie detail.
-- **Catalogs** (`/catalogs`, admin) — configured catalogs (with free space and
-  offline state), scan and metadata-refresh triggers, a direct `Browse media`
-  action, and catalog removal.
-- **Settings** (`/settings`) — admin app-owned settings (TMDb key, supported
-  languages, server name, torrent limits) and, **per signed-in user**, Infuse
-  access credentials (username + PIN).
+- **Settings** (`/settings`) — General retains release-group preferences, per-user
+  Infuse credentials, and watch-history controls. The admin-only **Catalogs** tab
+  (`/settings?tab=catalogs`) holds catalog configuration, storage usage, scanning,
+  metadata refresh, browsing, and removal. Tab selection survives refresh and browser
+  history. Non-admin requests for the Catalogs tab display General.
+- Movies and Series show contextual alerts for unavailable storage, with an admin
+  link to catalog settings. The Home offline-catalog indicator opens that same tab.
+- The standalone `/catalogs` page and its app/Hosty navigation entry are removed;
+  the old URL returns 404 without redirecting.
 - **Watchlist** — (future, M5) monitored titles and release calendar.
 
 ## Session and Data

@@ -22,10 +22,10 @@ test("direct navigation and refresh survive", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Movies" })).toBeVisible();
 });
 
-test("admin sees the Catalogs tab", async ({ page }) => {
+test("catalog management is absent from primary navigation", async ({ page }) => {
   await setupApp(page, { role: "admin" });
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Catalogs", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation").getByRole("link", { name: "Catalogs", exact: true })).toHaveCount(0);
 });
 
 test("non-admin cannot see or use Catalogs", async ({ page }) => {
@@ -34,8 +34,10 @@ test("non-admin cannot see or use Catalogs", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Catalogs", exact: true })).toHaveCount(0);
 
-  await page.goto("/catalogs");
-  await expect(page.getByText(/administrators only/)).toBeVisible();
+  await page.goto("/settings?tab=catalogs");
+  await expect(page.getByRole("tab", { name: "General", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Catalogs", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Scan all", exact: true })).toHaveCount(0);
 });
 
 test("an expired session without a reachable Core shows the sign-in card", async ({ page }) => {
