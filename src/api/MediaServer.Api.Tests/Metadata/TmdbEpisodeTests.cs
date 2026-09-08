@@ -74,6 +74,46 @@ public sealed class TmdbEpisodeTests
         Assert.Empty(await provider.GetEpisodeImagesAsync(new("tmdb", "123"), 0, 1, ["en-US"], CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Refresh_replaces_legacy_backdrops_even_when_the_still_is_already_cached(bool stillAlreadyCached)
+    {
+        using var fixture = new JellyfinDatabase();
+        await using var db = fixture.Create();
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "TV", Root = "/tv", Type = CatalogType.Series };
+        var episode = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Episode,
+            Title = "Episode", PublicId = "episode", IdentityProvider = "tmdb", IdentityProviderId = "123",
+            ParentIndexNumber = 1, IndexNumber = 2 };
+        db.Catalogs.Add(catalog); db.MediaItems.Add(episode);
+        ImageAsset Asset(string path, string provider = "tmdb", ImageType type = ImageType.Backdrop) => new()
+        {
+            Id = Guid.NewGuid(), MediaItemId = episode.Id, Provider = provider, ImageType = type,
+            RemotePath = $"https://image.tmdb.org/t/p/original/{path}.jpg", Tag = path,
+        };
+        db.ImageAssets.AddRange(Asset("legacy-show"), Asset("other-provider", "other"), Asset("poster", type: ImageType.Primary));
+        if (stillAlreadyCached) db.ImageAssets.Add(Asset("frame"));
+        await db.SaveChangesAsync();
+        var handler = new EpisodeHandler { NoImages = true };
+        var settings = new MediaServerSettings { TmdbApiKey = "0123456789abcdef0123456789abcdef", SupportedLanguages = ["en-US"] };
+        var factory = IHttpClientFactory.Imposter();
+        factory.CreateClient(Arg<string>.Any()).Returns(new HttpClient(handler) { BaseAddress = new("https://api.themoviedb.org/") });
+        var provider = new TmdbMetadataProvider(factory.Instance(), settings, NullLogger<TmdbMetadataProvider>.Instance);
+        var enrich = new EnrichService(db, provider, settings, new PersonSyncService(db), new CollectionSyncService(db),
+            new MetadataTagSync(db, NullLogger<MetadataTagSync>.Instance));
+        await enrich.EnrichAsync(catalog, episode, CancellationToken.None);
+        Assert.True(await db.ImageAssets.AnyAsync(image => image.Tag == "legacy-show"));
+        handler.NoImages = false;
+        await enrich.EnrichAsync(catalog, episode, CancellationToken.None);
+        await enrich.EnrichAsync(catalog, episode, CancellationToken.None);
+        var images = await db.ImageAssets.AsNoTracking().ToListAsync();
+        Assert.DoesNotContain(images, image => image.Tag == "legacy-show");
+        Assert.Contains(images, image => image.Tag == "other-provider");
+        Assert.Contains(images, image => image.Tag == "poster");
+        var backdrop = Assert.Single(images, image => image.Provider == "tmdb" && image.ImageType == ImageType.Backdrop);
+        Assert.EndsWith("/frame.jpg", backdrop.RemotePath);
+    }
+
     private sealed class EpisodeHandler : HttpMessageHandler
     {
         public List<string> Paths { get; } = [];

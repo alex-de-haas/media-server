@@ -37,8 +37,9 @@ request-race protection, refresh and focus restoration are implemented.
 
 ## Scope and versioning
 
-Server: 0.75.0 → 0.76.0. Apple client: 0.11.1 → 0.12.0. Keep implementation and
-acceptance in one feature PR. No commits are created without the user's request.
+Server: 0.75.0 → 0.76.0. Apple client: 0.11.1 → 0.12.0. The user requested merging the implementation
+on 2026-09-08 with device acceptance still outstanding. The unchecked acceptance
+deliverables above remain open; merge does not count as physical-device verification.
 
 Automatic next-episode playback, series-level Continue Watching aggregation,
 and library management remain outside this feature.

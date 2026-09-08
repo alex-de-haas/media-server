@@ -52,7 +52,10 @@ stored identity coordinates with display-number fallback for older records.
 TMDb's [episode details](https://developer.themoviedb.org/reference/tv-episode-details)
 and [episode images](https://developer.themoviedb.org/reference/tv-episode-images)
 provide localized titles, synopses, runtimes, air dates and stills. Stills are stored
-as Backdrop assets and served through the existing image cache. A combined episode
+as Backdrop assets and served through the existing image cache. After a non-empty
+still response is saved, obsolete Backdrop assets from that provider are removed
+from the episode, including legacy show artwork. Empty responses retain existing
+artwork; other providers and poster selections are preserved. A combined episode
 file retains one identity and uses the first episode's metadata.
 
 New imports receive episode enrichment automatically. Existing libraries receive
