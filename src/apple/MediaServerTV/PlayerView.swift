@@ -174,6 +174,10 @@ struct PlayerView: UIViewControllerRepresentable {
         private static let log = Logger(subsystem: "com.haas.mediaserver", category: "playback")
 
         private let onFinished: (Double) -> Void
+
+        /// Set by `observe`, and read only from the main actor. See there.
+        private var onProgress: ((Double) -> Void)?
+
         private let diagnostics: PlaybackDiagnostics?
         private var token: Any?
         private weak var player: AVPlayer?
@@ -208,15 +212,21 @@ struct PlayerView: UIViewControllerRepresentable {
 
         /// Every ten seconds, which is often enough that a resume lands where the viewer left and rare
         /// enough that a two-hour film is a few hundred requests rather than a few hundred thousand.
+        ///
+        /// The reporter is held here rather than captured by the observer's block: that block is
+        /// `@Sendable`, a plain closure is not, and the two only meet through something the compiler
+        /// knows is main-actor bound — which this coordinator is.
         func observe(_ player: AVPlayer, onProgress: @escaping (Double) -> Void) {
             self.player = player
+            self.onProgress = onProgress
             token = player.addPeriodicTimeObserver(
                 forInterval: CMTime(seconds: 10, preferredTimescale: 1), queue: .main
-            ) { time in
+            ) { [weak self] time in
                 let seconds = time.seconds
-                if seconds.isFinite, seconds > 0 {
-                    onProgress(seconds)
-                }
+                guard seconds.isFinite, seconds > 0 else { return }
+                // The observer was asked for on the main queue, so this already runs on the main
+                // actor; the hop is the one AVFoundation's block signature cannot state.
+                MainActor.assumeIsolated { self?.onProgress?(seconds) }
             }
         }
 
