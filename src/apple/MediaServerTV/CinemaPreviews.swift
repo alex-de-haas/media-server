@@ -18,7 +18,13 @@ private struct CinemaPreviewTransport: ClientTransport {
         }
         let cards = (0..<3).map(card).joined(separator: ",")
         let json: String
-        if path.contains("/collections/saga") {
+        if path.contains("/home/resume") {
+            json = #"[{"id":"movie-0","kind":"Movie","navId":"movie-0","navKind":"Movie","title":"The Long Journey Across the Silent Northern Sea","userData":{"key":"0","playbackPositionTicks":25350000000,"playCount":0,"isFavorite":false,"played":false}}]"#
+        } else if path.contains("/home/nextup") {
+            json = #"[{"id":"episode-2","kind":"Episode","navId":"series-0","navKind":"Series","title":"The Northern Sea","subtitle":"S01E02 · The Lighthouse"}]"#
+        } else if path.contains("/recommendations") {
+            json = #"{"items":[{"kind":"Movie","tmdbId":"1","mediaItemId":"movie-1","title":"A Summer in the City","year":2002,"inLibrary":true,"reason":{"kind":"seed","detail":"The Last Lighthouse"}},{"kind":"Movie","tmdbId":"2","title":"An unavailable discovery","inLibrary":false}],"popularityBias":0,"maxPopularityBias":1}"#
+        } else if path.contains("/collections/saga") {
             json = """
             {"id":"saga","name":"The Northern Sea Collection","items":[\(cards)]}
             """

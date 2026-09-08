@@ -717,6 +717,80 @@
         }
       }
     },
+    "/native/v1/home/resume": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "operationId": "getNativeHomeResume",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LibraryRailItemDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native/v1/home/nextup": {
+      "get": {
+        "tags": [
+          "MediaServer.Api"
+        ],
+        "operationId": "getNativeHomeNextUp",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LibraryRailItemDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/native/v1/items/{id}": {
       "get": {
         "tags": [
@@ -1626,6 +1700,52 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "LibraryRailItemDto": {
+        "required": [
+          "id",
+          "kind",
+          "navId",
+          "navKind",
+          "title",
+          "subtitle",
+          "posterUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "navId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "navKind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "posterUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userData": {
+            "$ref": "#/components/schemas/UserItemDataDto"
           }
         }
       },

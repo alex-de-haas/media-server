@@ -1,7 +1,7 @@
 # Apple Client Visual Design and Collections
 
 Created: 2026-09-06
-Updated: 2026-09-07
+Updated: 2026-09-08
 
 Collections reload through the store’s screen-appearance handler whenever the
 collection screen appears. The unsupported-server
@@ -12,23 +12,18 @@ is in flight; subsequent refreshes remain available after success or failure.
 ## Presentation
 
 The tvOS client follows the system light/dark appearance with an adaptive neutral canvas, system typography, and native card
-focus. Its top-level tabs are Movies, Series, Collections, and Settings.
+focus. Its top-level tabs are Home, Movies, Series, Collections, and Settings.
 
-Movies shows Continue Watching above All Movies when unwatched films have a
-resume position. The row uses the library's stable ordering and displays a
-timestamp, not a percentage: the client library model has no duration. Reading
-a title after playback updates its state in the library and the continue row.
-Series retains the existing poster grid without a series-level resume action.
-When the All Movies grid is below the viewport, Down from Continue Watching
-scrolls to its heading and focuses the first movie after scrolling completes.
-Continue Watching and All Movies use the same 44-point heading-to-poster gap,
-without extra top padding inside the horizontal shelf.
+[Home](../apple-tv-home/feature.md) owns Continue Watching, Next Up, and held
+recommendations. Movies and Series retain complete poster grids. Home refreshes
+per-user rails independently on appearance; detail reads still update the library's
+local watched/resume state. Episode resume cards navigate to their owning series.
 Poster/caption groups and shelves participate in directional focus navigation;
 the captions remain outside the visual card. The transition respects Reduce Motion.
 
 Movie and series cards show only one compact metadata line below the poster:
-year and available HDR/Dolby Vision formats in the library, or the resume position
-in Continue Watching. Formats aggregate the movie's sources without Dolby Vision
+year and available HDR/Dolby Vision formats in the library. Home cards retain
+visible titles and resume, episode, or recommendation captions. Formats aggregate the movie's sources without Dolby Vision
 profiles; they describe available files, not device playback support. The server
 projects these labels once per page in `videoFormats`, without detail requests
 per card. Older servers omit the field and the client displays the year alone. Titles are not

@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-09-06
-Updated: 2026-09-06
+Updated: 2026-09-08
 
 ## Goal
 
@@ -28,22 +28,18 @@ and reduced-motion settings.
 
 ### Main navigation and library
 
-Top-level order: **Movies · Series · Collections · Settings**. Each browsing tab
-keeps its own navigation path, scroll position, and focused item on return.
+Home navigation and its resume/next-up/recommendation rows are owned by
+[Apple TV Home](../apple-tv-home/feature.md). This plan keeps the visual treatment
+of the Movies and Series grids and Collections; it does not duplicate Home work.
+Each browsing tab keeps its own navigation path, scroll position, and focus.
 Collections stays visible with a useful empty state even when none qualify.
-
-Movies gains a compact Continue Watching row above All Movies. Use existing
-resume positions greater than zero for unwatched movies, in stable library
-order; do not imply recency without a timestamp. Hide the row when empty.
-Keep the ordinary Series grid: episode navigation and next-episode aggregation
-are outside this visual change, so do not imply playable series-level resume.
 
 Movie and series cards show a compact year or resume line below the poster,
 without repeated titles or a focused-title header above shelves and grids. Center
 the title inside the placeholder only when artwork is unavailable.
 Scale poster and metadata together on focus with a short gap, retaining the
 accessible title and watched/resume marks. Return from playback updates
-both the row and grid, removing completed movies from Continue Watching.
+the library grid; Home revalidates its rows through its own store.
 
 Show a textual resume position rather than inventing a progress fraction:
 `LibraryTitle` has no runtime. This plan does not add per-card detail requests

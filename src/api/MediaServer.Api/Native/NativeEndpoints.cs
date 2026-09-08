@@ -68,6 +68,7 @@ public static class NativeEndpoints
         group.MapNativeImageEndpoints();
         group.MapNativeDiscoveryEndpoints();
         group.MapNativeCollectionEndpoints();
+        group.MapNativeHomeEndpoints();
 
         group.MapGet("/items/{id:guid}", async (
             Guid id,

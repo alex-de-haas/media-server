@@ -71,6 +71,12 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /native/v1/collections/{id}/images/{imageType}`.
     /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)`.
     func getNativeCollectionImage(_ input: Operations.GetNativeCollectionImage.Input) async throws -> Operations.GetNativeCollectionImage.Output
+    /// - Remark: HTTP `GET /native/v1/home/resume`.
+    /// - Remark: Generated from `#/paths//native/v1/home/resume/get(getNativeHomeResume)`.
+    func getNativeHomeResume(_ input: Operations.GetNativeHomeResume.Input) async throws -> Operations.GetNativeHomeResume.Output
+    /// - Remark: HTTP `GET /native/v1/home/nextup`.
+    /// - Remark: Generated from `#/paths//native/v1/home/nextup/get(getNativeHomeNextUp)`.
+    func getNativeHomeNextUp(_ input: Operations.GetNativeHomeNextUp.Input) async throws -> Operations.GetNativeHomeNextUp.Output
     /// - Remark: HTTP `GET /native/v1/items/{id}`.
     /// - Remark: Generated from `#/paths//native/v1/items/{id}/get`.
     func getNativeV1ItemsId(_ input: Operations.GetNativeV1ItemsId.Input) async throws -> Operations.GetNativeV1ItemsId.Output
@@ -283,6 +289,28 @@ extension APIProtocol {
     ) async throws -> Operations.GetNativeCollectionImage.Output {
         try await getNativeCollectionImage(Operations.GetNativeCollectionImage.Input(
             path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /native/v1/home/resume`.
+    /// - Remark: Generated from `#/paths//native/v1/home/resume/get(getNativeHomeResume)`.
+    public func getNativeHomeResume(
+        query: Operations.GetNativeHomeResume.Input.Query = .init(),
+        headers: Operations.GetNativeHomeResume.Input.Headers = .init()
+    ) async throws -> Operations.GetNativeHomeResume.Output {
+        try await getNativeHomeResume(Operations.GetNativeHomeResume.Input(
+            query: query,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /native/v1/home/nextup`.
+    /// - Remark: Generated from `#/paths//native/v1/home/nextup/get(getNativeHomeNextUp)`.
+    public func getNativeHomeNextUp(
+        query: Operations.GetNativeHomeNextUp.Input.Query = .init(),
+        headers: Operations.GetNativeHomeNextUp.Input.Headers = .init()
+    ) async throws -> Operations.GetNativeHomeNextUp.Output {
+        try await getNativeHomeNextUp(Operations.GetNativeHomeNextUp.Input(
+            query: query,
             headers: headers
         ))
     }
@@ -985,6 +1013,65 @@ public enum Components {
                 case runtimeTicks
                 case communityRating
                 case videoFormats
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto`.
+        public struct LibraryRailItemDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/kind`.
+            public var kind: Swift.String
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/navId`.
+            public var navId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/navKind`.
+            public var navKind: Swift.String
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/title`.
+            public var title: Swift.String
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/subtitle`.
+            public var subtitle: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/posterUrl`.
+            public var posterUrl: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/userData`.
+            public var userData: Components.Schemas.UserItemDataDto?
+            /// Creates a new `LibraryRailItemDto`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - kind:
+            ///   - navId:
+            ///   - navKind:
+            ///   - title:
+            ///   - subtitle:
+            ///   - posterUrl:
+            ///   - userData:
+            public init(
+                id: Swift.String,
+                kind: Swift.String,
+                navId: Swift.String,
+                navKind: Swift.String,
+                title: Swift.String,
+                subtitle: Swift.String? = nil,
+                posterUrl: Swift.String? = nil,
+                userData: Components.Schemas.UserItemDataDto? = nil
+            ) {
+                self.id = id
+                self.kind = kind
+                self.navId = navId
+                self.navKind = navKind
+                self.title = title
+                self.subtitle = subtitle
+                self.posterUrl = posterUrl
+                self.userData = userData
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case kind
+                case navId
+                case navKind
+                case title
+                case subtitle
+                case posterUrl
+                case userData
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaKind`.
@@ -5496,6 +5583,258 @@ public enum Operations {
                     .png,
                     .imageWebp,
                     .imageGif
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `GET /native/v1/home/resume`.
+    /// - Remark: Generated from `#/paths//native/v1/home/resume/get(getNativeHomeResume)`.
+    public enum GetNativeHomeResume {
+        public static let id: Swift.String = "getNativeHomeResume"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/native/v1/home/resume/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/home/resume/GET/query/limit`.
+                public var limit: Swift.Int32?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - limit:
+                public init(limit: Swift.Int32? = nil) {
+                    self.limit = limit
+                }
+            }
+            public var query: Operations.GetNativeHomeResume.Input.Query
+            /// - Remark: Generated from `#/paths/native/v1/home/resume/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeHomeResume.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeHomeResume.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.GetNativeHomeResume.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - query:
+            ///   - headers:
+            public init(
+                query: Operations.GetNativeHomeResume.Input.Query = .init(),
+                headers: Operations.GetNativeHomeResume.Input.Headers = .init()
+            ) {
+                self.query = query
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/home/resume/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/home/resume/GET/responses/200/content/application\/json`.
+                    case json([Components.Schemas.LibraryRailItemDto])
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: [Components.Schemas.LibraryRailItemDto] {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.GetNativeHomeResume.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.GetNativeHomeResume.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/home/resume/get(getNativeHomeResume)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.GetNativeHomeResume.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.GetNativeHomeResume.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `GET /native/v1/home/nextup`.
+    /// - Remark: Generated from `#/paths//native/v1/home/nextup/get(getNativeHomeNextUp)`.
+    public enum GetNativeHomeNextUp {
+        public static let id: Swift.String = "getNativeHomeNextUp"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/native/v1/home/nextup/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/home/nextup/GET/query/limit`.
+                public var limit: Swift.Int32?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - limit:
+                public init(limit: Swift.Int32? = nil) {
+                    self.limit = limit
+                }
+            }
+            public var query: Operations.GetNativeHomeNextUp.Input.Query
+            /// - Remark: Generated from `#/paths/native/v1/home/nextup/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeHomeNextUp.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeHomeNextUp.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.GetNativeHomeNextUp.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - query:
+            ///   - headers:
+            public init(
+                query: Operations.GetNativeHomeNextUp.Input.Query = .init(),
+                headers: Operations.GetNativeHomeNextUp.Input.Headers = .init()
+            ) {
+                self.query = query
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/home/nextup/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/home/nextup/GET/responses/200/content/application\/json`.
+                    case json([Components.Schemas.LibraryRailItemDto])
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: [Components.Schemas.LibraryRailItemDto] {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.GetNativeHomeNextUp.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.GetNativeHomeNextUp.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/home/nextup/get(getNativeHomeNextUp)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.GetNativeHomeNextUp.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.GetNativeHomeNextUp.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
                 ]
             }
         }
