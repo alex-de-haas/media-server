@@ -318,6 +318,7 @@ export interface LibraryItem {
   year: number | null;
   posterUrl: string | null;
   userData: UserItemData | null;
+  videoFormats?: string[] | null;
 }
 
 export interface ListLibraryOptions {

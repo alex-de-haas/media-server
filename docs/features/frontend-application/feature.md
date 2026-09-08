@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-09-07
+Updated: 2026-09-08
 
 ## Description
 
@@ -142,6 +142,15 @@ actions: add torrent, confirm/remap source files, stop seeding, remove downloads
 and delete library items — a whole movie or series, one season, or one episode. The UI
 is English-only in v1; localization is deferred until Hosty provides app-level language
 support.
+
+## Library poster captions
+
+Movies and Series grids hide the permanent title beneath poster artwork and show
+the year followed by available video formats, such as `1997 · HDR10 · Dolby Vision`.
+The title remains the link's accessible name and appears in the artwork placeholder
+when no poster is available. Missing years and formats produce no extra separators.
+Other poster-card surfaces keep their title captions. Series format aggregation is
+unchanged: the server currently supplies format badges for movies only.
 
 ## Testing Expectations
 

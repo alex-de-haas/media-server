@@ -1,7 +1,7 @@
 # Catalogs
 
 Created: 2026-06-15
-Updated: 2026-09-07
+Updated: 2026-09-08
 
 ## Description
 
@@ -248,6 +248,14 @@ Without a telemetry listener, no activities are allocated.
 
 - [Catalog library browsing idea](../../ideas/catalog-library-browsing.md)
 - [Frontend application](../frontend-application/feature.md)
+
+## Card metadata reads
+
+Library cards use a manual SQL projection containing only item identity, language,
+title, release date, genres, runtime, and rating. Full provider JSON, cast, crew,
+and descriptions stay in the database. List, search, recent items, native sync,
+and other callers of the shared card projection keep the same DTO and language
+fallback. Detail and episode metadata reads retain their existing fields.
 
 ## Testing Expectations
 
