@@ -3,6 +3,7 @@ using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
 using MediaServer.Api.Library;
+using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Tests.Jellyfin;
 
@@ -196,7 +197,7 @@ public sealed class JellyfinMappingTests : IDisposable
         Assert.Equal(_seriesPublicId, season.ParentId);
         Assert.Equal(1, season.ChildCount);
 
-        var episodes = await _library.GetEpisodesAsync(_seriesPublicId, null, null, appUserId: null, CancellationToken.None);
+        var episodes = await _library.GetEpisodesAsync(_seriesPublicId, null, null, includeMediaSources: false, appUserId: null, CancellationToken.None);
         var episode = Assert.Single(episodes.Items);
         Assert.Equal("Episode", episode.Type);
         Assert.Equal(_seriesPublicId, episode.SeriesId);
@@ -205,6 +206,38 @@ public sealed class JellyfinMappingTests : IDisposable
         Assert.Equal(1, episode.ParentIndexNumber);
         Assert.Equal(1, episode.IndexNumber);
         Assert.Equal("Breaking Bad", episode.SeriesName);
+    }
+
+    [Fact]
+    public async Task Episodes_carry_their_versions_when_the_listing_asks_for_MediaSources()
+    {
+        // The same field the items listing honours. A client that builds its version picker from the
+        // episode listing sees an episode's versions only if the listing carries them; one that never asks
+        // is handed the same lean rows as before.
+        await using (var context = _db.Create())
+        {
+            var episode = await context.MediaItems.SingleAsync(item => item.Kind == MediaKind.Episode);
+            context.MediaSources.AddRange(
+                new MediaSource
+                {
+                    Id = Guid.NewGuid(), MediaItemId = episode.Id, Container = "mkv",
+                    Path = "Breaking Bad (2008)/Season 01/Breaking Bad S01E01.mkv", SizeBytes = 1, CreatedAt = DateTimeOffset.UtcNow,
+                },
+                new MediaSource
+                {
+                    Id = Guid.NewGuid(), MediaItemId = episode.Id, Container = "mkv", VersionName = "HEVC 1080p",
+                    Path = "Breaking Bad (2008)/Season 01/Breaking Bad S01E01 - HEVC 1080p.mkv", SizeBytes = 1, CreatedAt = DateTimeOffset.UtcNow,
+                });
+            await context.SaveChangesAsync();
+        }
+
+        var lean = await _library.GetEpisodesAsync(_seriesPublicId, null, null, includeMediaSources: false, appUserId: null, CancellationToken.None);
+        Assert.Null(Assert.Single(lean.Items).MediaSources);
+
+        var full = await _library.GetEpisodesAsync(_seriesPublicId, null, null, includeMediaSources: true, appUserId: null, CancellationToken.None);
+        var sources = Assert.Single(full.Items).MediaSources!;
+        Assert.Equal(2, sources.Count);
+        Assert.Contains(sources, source => source.Name == "HEVC 1080p");
     }
 
     [Fact]
@@ -237,7 +270,7 @@ public sealed class JellyfinMappingTests : IDisposable
         Assert.Equal(1, series.ChildCount);
 
         // Episodes/seasons don't leak extras either (guarded by kind filters).
-        var episodes = await _library.GetEpisodesAsync(_seriesPublicId, null, null, appUserId: null, CancellationToken.None);
+        var episodes = await _library.GetEpisodesAsync(_seriesPublicId, null, null, includeMediaSources: false, appUserId: null, CancellationToken.None);
         Assert.Single(episodes.Items);
     }
 

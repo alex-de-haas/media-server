@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dolbyVisionLabel, dolbyVisionNote, dynamicRangeBadges, episodeLabel, objectAudioFormat, pictureStream, reencodeDynamicRangeWarning } from "@/lib/format";
-import type { MediaStream } from "@/lib/media-server";
+import { dolbyVisionLabel, dolbyVisionNote, dynamicRangeBadges, episodeLabel, episodeMediaLine, objectAudioFormat, pictureStream, reencodeDynamicRangeWarning, versionStem } from "@/lib/format";
+import type { EpisodeMediaSummary, MediaStream } from "@/lib/media-server";
 
 describe("objectAudioFormat", () => {
   it("reads the object layer out of the codec profile", () => {
@@ -138,5 +138,59 @@ describe("pictureStream", () => {
     const external = stream({ id: "ext", codec: "hevc", isExternal: true });
     const film = stream({ id: "film", index: 1, codec: "hevc" });
     expect(pictureStream([external, film])?.id).toBe("film");
+  });
+});
+
+describe("episodeMediaLine", () => {
+  const summary = (overrides: Partial<EpisodeMediaSummary> = {}): EpisodeMediaSummary => ({
+    versionCount: 1,
+    videoCodec: "hevc",
+    height: 2160,
+    hdrFormat: "Dolby Vision · HDR10",
+    dolbyVision: { profile: 7, level: 6, blCompatibilityId: 6, enhancementLayer: true },
+    sizeBytes: 41_000_000_000,
+    ...overrides,
+  });
+
+  it("reads codec, height, range badges, size and the version count in that order", () => {
+    expect(episodeMediaLine(summary({ versionCount: 2 }))).toBe("HEVC 2160p · Dolby Vision 7 · HDR10 · 38 GB · 2 versions");
+  });
+
+  it("names the count only when there is more than one version", () => {
+    expect(episodeMediaLine(summary())).not.toContain("version");
+  });
+
+  it("leaves out what the probe did not record rather than printing a blank", () => {
+    // A header-probed row knows no codec profile and an unprobed one no size; neither earns a separator.
+    expect(episodeMediaLine(summary({ videoCodec: null, hdrFormat: null, dolbyVision: null, sizeBytes: 0 }))).toBe("2160p");
+    expect(episodeMediaLine(summary({ videoCodec: null, height: null, hdrFormat: null, dolbyVision: null, sizeBytes: 0 }))).toBe("");
+  });
+
+  it("says so for an episode with no file", () => {
+    expect(episodeMediaLine(null)).toBe("No file");
+  });
+});
+
+describe("versionStem", () => {
+  it("strips the label's suffix and keeps the extension", () => {
+    expect(versionStem("Arrival (2016) - Remux.mkv", "Remux")).toEqual({ stem: "Arrival (2016)", extension: ".mkv" });
+  });
+
+  it("works for an episode, whose stem is the show's rather than a title and year", () => {
+    expect(versionStem("Severance S01E03 - HEVC 1080p.mkv", "HEVC 1080p")).toEqual({ stem: "Severance S01E03", extension: ".mkv" });
+  });
+
+  it("keeps the whole base name when there is no label", () => {
+    expect(versionStem("Arrival (2016).mkv", null)).toEqual({ stem: "Arrival (2016)", extension: ".mkv" });
+  });
+
+  it("does not guess when the label drifted from the file name", () => {
+    // The stored label says 1080p but the file says HEVC 1080p: the server rebuilds the real stem anyway,
+    // and a wrong strip here would preview a name that never lands.
+    expect(versionStem("The Rock (1996) - HEVC 1080p.mkv", "1080p")).toEqual({ stem: "The Rock (1996) - HEVC 1080p", extension: ".mkv" });
+  });
+
+  it("copes with a name that has no extension", () => {
+    expect(versionStem("movie", null)).toEqual({ stem: "movie", extension: "" });
   });
 });

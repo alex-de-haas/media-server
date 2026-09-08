@@ -373,7 +373,7 @@ public sealed class NativePlaybackResolver(
     /// the remux path already skips them, and a resolver that judged one would refuse a perfectly
     /// playable title for having an undecodable "picture".
     /// </summary>
-    private static readonly HashSet<string> StillImages =
+    internal static readonly HashSet<string> StillImages =
         new(StringComparer.OrdinalIgnoreCase) { "mjpeg", "png", "bmp", "gif", "webp" };
 
     /// <summary>
@@ -445,6 +445,20 @@ public sealed class NativePlaybackResolver(
         id is { } wanted && candidates.Any(track => track.Id == wanted && track.StreamType == kind)
             ? wanted
             : null;
+
+    /// <summary>
+    /// The same choice, returning the entity itself, for the surfaces that need more of the picture than
+    /// <see cref="StreamFacts"/> carries — its height, for one. Sidecars are never a picture, so external
+    /// rows are left out here rather than by every caller.
+    /// </summary>
+    internal static MediaStream? PictureStream(IEnumerable<MediaStream> streams)
+    {
+        var video = streams
+            .Where(stream => stream.StreamType == StreamType.Video && !stream.IsExternal)
+            .OrderBy(stream => stream.Index)
+            .ToList();
+        return video.FirstOrDefault(stream => !StillImages.Contains(stream.Codec ?? string.Empty)) ?? video.FirstOrDefault();
+    }
 
     /// <summary>The same choice, over the entity rather than the projection, so a test can make one.</summary>
     internal static StreamFacts? PictureFor(IEnumerable<MediaStream> streams) =>

@@ -200,6 +200,93 @@ public sealed class LibraryReadServiceTests : IDisposable
         Assert.Empty(cards.Single(card => card.Id == _seriesId).VideoFormats!);
     }
 
+    [Fact]
+    public async Task Series_cards_carry_the_union_of_their_episodes_formats()
+    {
+        // A show has no picture of its own; a viewer scanning the grid still wants to know that its later
+        // seasons arrived in Dolby Vision. Covers and audio are skipped exactly as they are for a movie.
+        var pilot = AddEpisodeVersion(_episodeId, "s01e01.mkv", "hevc", 2160, "HDR10", sizeBytes: 10);
+        _context.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = pilot, StreamType = StreamType.Video, Index = 5, Codec = "mjpeg", HdrFormat = "HDR10+",
+        });
+        AddEpisodeVersion(_episode2Id, "s01e02.mkv", "hevc", 2160, "Dolby Vision · HDR10", dvProfile: 8, sizeBytes: 12);
+        await _context.SaveChangesAsync();
+
+        var cards = await _library.ListAsync(null, null, null, CancellationToken.None);
+
+        Assert.Equal(new[] { "HDR10", "Dolby Vision" }, cards.Single(card => card.Id == _seriesId).VideoFormats);
+        Assert.Empty(cards.Single(card => card.Id == _movieId).VideoFormats!);
+    }
+
+    [Fact]
+    public async Task Episodes_carry_a_media_summary_from_the_default_version()
+    {
+        // Two versions of the pilot: an older UHD remux and a newer 1080p encode. With no pin the oldest is
+        // what a player starts on, so it is what the row reads; pinning the other moves the summary with it.
+        // The cover a muxer wrote as a video track sorts first and is passed over, as everywhere else.
+        var remux = AddEpisodeVersion(_episodeId, "s01e01 - Remux.mkv", "hevc", 2160, "Dolby Vision · HDR10",
+            dvProfile: 7, dvCompatibility: 6, dvEnhancement: true, sizeBytes: 40_000_000_000, createdAt: DateTimeOffset.UtcNow.AddDays(-1));
+        _context.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = remux, StreamType = StreamType.Video, Index = -1, Codec = "mjpeg", Height = 600,
+        });
+        var encode = AddEpisodeVersion(_episodeId, "s01e01 - HEVC 1080p.mkv", "hevc", 1080, null, sizeBytes: 2_000_000_000);
+        await _context.SaveChangesAsync();
+
+        var episodes = await _library.GetEpisodesAsync(_seriesId, seasonId: null, appUserId: null, CancellationToken.None);
+
+        var pilot = episodes.Single(episode => episode.Id == _episodeId).Media!;
+        Assert.Equal(2, pilot.VersionCount);
+        Assert.Equal("hevc", pilot.VideoCodec);
+        Assert.Equal(2160, pilot.Height);
+        Assert.Equal("Dolby Vision · HDR10", pilot.HdrFormat);
+        Assert.Equal(new DolbyVisionDto(7, 0, 6, true), pilot.DolbyVision);
+        Assert.Equal(40_000_000_000, pilot.SizeBytes);
+        // An episode with no file on disk says so by carrying nothing, rather than a summary full of nulls.
+        Assert.Null(episodes.Single(episode => episode.Id == _episode2Id).Media);
+
+        await using (var context = _db.Create())
+        {
+            (await context.MediaItems.FirstAsync(item => item.Id == _episodeId)).DefaultSourceId = encode;
+            await context.SaveChangesAsync();
+        }
+
+        var pinned = (await _library.GetEpisodesAsync(_seriesId, seasonId: null, appUserId: null, CancellationToken.None))
+            .Single(episode => episode.Id == _episodeId).Media!;
+        Assert.Equal(2, pinned.VersionCount);
+        Assert.Equal(1080, pinned.Height);
+        Assert.Null(pinned.HdrFormat);
+        Assert.Null(pinned.DolbyVision);
+        Assert.Equal(2_000_000_000, pinned.SizeBytes);
+
+        // Scoped to the season, the same summaries come back.
+        var bySeason = await _library.GetEpisodesAsync(_seriesId, seasonId: _seasonId, appUserId: null, CancellationToken.None);
+        Assert.Equal(2, bySeason.Single(episode => episode.Id == _episodeId).Media!.VersionCount);
+    }
+
+    /// <summary>One version of an episode with a single picture stream, added to the tracked context (not yet saved).</summary>
+    private Guid AddEpisodeVersion(
+        Guid episodeId, string fileName, string codec, int height, string? hdrFormat,
+        int? dvProfile = null, int? dvCompatibility = null, bool? dvEnhancement = null,
+        long sizeBytes = 0, DateTimeOffset? createdAt = null)
+    {
+        var source = new MediaSource
+        {
+            Id = Guid.NewGuid(), MediaItemId = episodeId, Container = "mkv",
+            Path = $"library/Breaking Bad/Season 1/{fileName}", SizeBytes = sizeBytes,
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
+        };
+        _context.MediaSources.Add(source);
+        _context.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = source.Id, StreamType = StreamType.Video, Index = 0,
+            Codec = codec, Width = height * 16 / 9, Height = height, HdrFormat = hdrFormat,
+            DvProfile = dvProfile, DvBlSignalCompatibilityId = dvCompatibility, DvElPresent = dvEnhancement,
+        });
+        return source.Id;
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

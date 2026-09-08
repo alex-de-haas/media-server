@@ -9,8 +9,9 @@ namespace MediaServer.Api.Library;
 /// Admin edits to a published item's sources: which version plays by default (clients treat the first
 /// <c>MediaSource</c> as the default, so this drives ordering — see <see cref="MediaSourceOrdering"/>), and
 /// the per-source version — the <c> - {edition}</c> suffix on the filename, which doubles as the label shown
-/// in client pickers. Renaming the version actually renames the file on disk (the <c>Title (Year)</c> stem is
-/// locked to the item's metadata) and keeps the stored label in sync.
+/// in client pickers. Renaming the version actually renames the file on disk (the stem — <c>Title (Year)</c>
+/// for a movie, <c>Show SxxEyy</c> in its season folder for an episode — is locked to the item's metadata)
+/// and keeps the stored label in sync.
 /// </summary>
 public sealed class LibrarySourceService(
     MediaServerDbContext database,
@@ -55,10 +56,11 @@ public sealed class LibrarySourceService(
     }
 
     /// <summary>
-    /// Renames a movie source's version: rewrites the <c> - {edition}</c> suffix of its filename (clearing it
-    /// when <paramref name="versionName"/> is null/blank → bare <c>Title (Year).ext</c>), renaming the file on
-    /// disk and syncing the stored label + the originating <see cref="SourceFile"/>. The <c>Title (Year)</c>
-    /// stem is rebuilt from the item's metadata, so it can't be edited here. Versions only exist on movies.
+    /// Renames a movie's or an episode's version: rewrites the <c> - {edition}</c> suffix of its filename
+    /// (clearing it when <paramref name="versionName"/> is null/blank → the bare canonical name), renaming the
+    /// file on disk and syncing the stored label + the originating <see cref="SourceFile"/>. The stem is
+    /// rebuilt from the item's metadata by <see cref="LibraryNaming"/>, so it can't be edited here: an
+    /// episode's season folder and <c>SxxEyy</c> token are as locked as a movie's <c>Title (Year)</c>.
     /// </summary>
     public async Task<RenameVersionResult> RenameVersionAsync(Guid sourceId, string? versionName, CancellationToken cancellationToken)
     {
@@ -71,7 +73,7 @@ public sealed class LibrarySourceService(
         }
 
         var item = source.MediaItem;
-        if (item.Kind != MediaKind.Movie)
+        if (item.Kind is not (MediaKind.Movie or MediaKind.Episode))
         {
             return RenameVersionResult.Unsupported;
         }
@@ -88,7 +90,13 @@ public sealed class LibrarySourceService(
         }
 
         var oldRelative = source.Path;
-        var newRelative = LibraryNaming.ForMovie(catalog, item, Path.GetExtension(oldRelative), edition);
+        var newRelative = await CanonicalPathAsync(catalog, item, Path.GetExtension(oldRelative), edition, cancellationToken);
+        if (newRelative is null)
+        {
+            // An episode's name is built from its series, so a series row that is gone leaves nothing to
+            // name it by — the same answer as an unknown source rather than a guess at the show's folder.
+            return RenameVersionResult.NotFound;
+        }
 
         // No path change: just reconcile a drifted stored label (legacy data) and return.
         if (string.Equals(newRelative, oldRelative, StringComparison.Ordinal))
@@ -193,6 +201,25 @@ public sealed class LibrarySourceService(
         return RenameVersionResult.Ok;
     }
 
+    /// <summary>
+    /// The canonical path the version lands on with this edition: a movie's from the catalog's naming template,
+    /// an episode's from its series (<c>Show (Year)/Season NN/Show SxxEyy - edition.ext</c>). Null for an
+    /// episode whose series row cannot be found.
+    /// </summary>
+    private async Task<string?> CanonicalPathAsync(
+        Catalog catalog, MediaItem item, string extension, string? edition, CancellationToken cancellationToken)
+    {
+        if (item.Kind != MediaKind.Episode)
+        {
+            return LibraryNaming.ForMovie(catalog, item, extension, edition);
+        }
+
+        var series = item.SeriesId is { } seriesId
+            ? await database.MediaItems.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == seriesId, cancellationToken)
+            : null;
+        return series is null ? null : LibraryNaming.ForEpisode(series, item, extension, edition);
+    }
+
     // Trims, treats blank as "clear the suffix", rejects filename-unsafe characters (explicit error rather
     // than silent sanitize), and collapses to the exact form LibraryNaming.Sanitize would keep so the stored
     // label equals the on-disk suffix.
@@ -238,7 +265,7 @@ public readonly record struct RenameVersionResult(RenameVersionResult.Kind Statu
 
     public static readonly RenameVersionResult Ok = new(Kind.Ok);
     public static readonly RenameVersionResult NotFound = new(Kind.NotFound);
-    public static readonly RenameVersionResult Unsupported = new(Kind.Unsupported, "Only a movie version can be renamed.");
+    public static readonly RenameVersionResult Unsupported = new(Kind.Unsupported, "Only a movie or episode version can be renamed.");
     public static readonly RenameVersionResult MissingFile = new(Kind.MissingFile, "The media file is missing on disk.");
 
     public static RenameVersionResult Invalid(string error) => new(Kind.InvalidName, error);

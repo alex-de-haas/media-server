@@ -68,6 +68,26 @@ public sealed class LibraryMaintenanceService(
             return false;
         }
 
+        // A series row holds no file of its own — its media is its episodes' — so a refresh asked of the
+        // series fans out over them: one gesture per title, as on a movie.
+        var itemIds = item.Kind == MediaKind.Series
+            ? await database.MediaItems
+                .Where(episode => episode.SeriesId == item.Id && episode.Kind == MediaKind.Episode)
+                .Select(episode => episode.Id)
+                .ToListAsync(cancellationToken)
+            : [item.Id];
+
+        foreach (var id in itemIds)
+        {
+            await ReprobeSourcesAsync(catalog, id, cancellationToken);
+        }
+
+        return true;
+    }
+
+    /// <summary>Re-probes one item's sources on disk and swaps their embedded streams for what the probe says now.</summary>
+    private async Task ReprobeSourcesAsync(Catalog catalog, Guid mediaItemId, CancellationToken cancellationToken)
+    {
         var sources = await database.MediaSources
             .Include(source => source.Streams)
             .Where(source => source.MediaItemId == mediaItemId)
@@ -150,7 +170,6 @@ public sealed class LibraryMaintenanceService(
         logger.LogInformation(
             "Refreshed media data for item {MediaItem}: re-probed {Count} of {Total} source(s).",
             mediaItemId, reprobed, sources.Count);
-        return true;
     }
 
     /// <summary>

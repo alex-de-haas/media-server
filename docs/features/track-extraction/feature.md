@@ -1,10 +1,13 @@
 # Track Extraction
 
 Created: 2026-08-07
-Updated: 2026-08-07
+Updated: 2026-09-08
 
 A version's embedded audio and subtitle tracks can be written out as files beside
-it, each recorded as an external `MediaStream` of the same source.
+it, each recorded as an external `MediaStream` of the same source. A movie's version
+or an episode's: the file lands beside whichever video it came out of, in the season
+folder for an episode ([episode-media](../episode-media/feature.md)). A series extra's
+is refused by name, since nothing displays an extra.
 
 This is the exact inverse of merging, and it lands on the model that already
 exists: an extracted track **is** a sidecar, indistinguishable from one a release
@@ -207,7 +210,9 @@ the folder directly (SMB/NFS) do get it. This feature does not narrow that gap.
 ## Testing Expectations
 
 - `TrackExtractionTests` — the whole path against a real database and a recording
-  engine: audio always becoming Matroska with its tags on the output entry; each text
+  engine: an episode's track landing beside it in the season folder with the job
+  attached to the episode, and a series extra refused by name; audio always becoming
+  Matroska with its tags on the output entry; each text
   subtitle codec mapping to its file and `mov_text` to the one conversion; a
   picture-based subtitle, an unknown codec and video refused; a sidecar, a stream of
   another version, and an empty selection refused; tracks ordered by container

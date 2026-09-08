@@ -603,6 +603,22 @@ export interface Episode {
   runtimeTicks: number | null;
   posterUrl: string | null;
   userData: UserItemData | null;
+  /** What is on disk for this episode — the Episodes tab's summary line. Null when it has no source. */
+  media: EpisodeMediaSummary | null;
+}
+
+/**
+ * An episode's media at a glance. The codec, height, dynamic range and size are the default version's — the
+ * file a player starts on — while `versionCount` counts every version. The full surface is the episode's
+ * own detail (`getLibraryDetail(episodeId)`), fetched when the row is expanded.
+ */
+export interface EpisodeMediaSummary {
+  versionCount: number;
+  videoCodec: string | null;
+  height: number | null;
+  hdrFormat: string | null;
+  dolbyVision: DolbyVisionDetail | null;
+  sizeBytes: number;
 }
 
 // A Home-rail leaf (movie/episode) with its detail-page navigation target resolved.

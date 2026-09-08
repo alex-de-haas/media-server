@@ -9,9 +9,10 @@ namespace MediaServer.Api.Tests.Library;
 
 /// <summary>
 /// Coverage for <see cref="LibrarySourceService"/>: pinning/clearing the default source, and renaming a
-/// movie source's version — which now renames the file on disk (locked <c>Title (Year)</c> stem), syncs the
-/// stored label + originating <see cref="SourceFile"/>, validates characters, and rejects collisions. Backed
-/// by in-memory SQLite plus a real temp catalog root so the file moves are exercised end to end.
+/// movie's or an episode's version — which renames the file on disk (locked <c>Title (Year)</c> stem for a
+/// movie, locked season folder and <c>SxxEyy</c> token for an episode), syncs the stored label + originating
+/// <see cref="SourceFile"/>, validates characters, and rejects collisions. Backed by in-memory SQLite plus a
+/// real temp catalog root so the file moves are exercised end to end.
 /// </summary>
 public sealed class LibrarySourceServiceTests : IDisposable
 {
@@ -26,6 +27,11 @@ public sealed class LibrarySourceServiceTests : IDisposable
     private const string GhostRelative = MovieFolder + "/The Rock (1996) - Ghost.mkv";
     private const string OtherRelative = "Heat (1995)/Heat (1995).mkv";
 
+    private const string SeasonFolder = "Breaking Bad (2008)/Season 01";
+    private const string EpisodeRelative = SeasonFolder + "/Breaking Bad S01E01 - WEB.mkv";
+    private const string DoubleEpisodeRelative = SeasonFolder + "/Breaking Bad S01E02-E03.mkv";
+    private const string OrphanEpisodeRelative = SeasonFolder + "/Breaking Bad S01E09.mkv";
+
     private readonly Guid _movieId = Guid.NewGuid();
     private readonly Guid _sourceA = Guid.NewGuid();
     private readonly Guid _sourceB = Guid.NewGuid();
@@ -35,6 +41,11 @@ public sealed class LibrarySourceServiceTests : IDisposable
     private readonly Guid _otherSource = Guid.NewGuid();
     private readonly Guid _videoId = Guid.NewGuid();
     private readonly Guid _videoSource = Guid.NewGuid();
+    private readonly Guid _seriesId = Guid.NewGuid();
+    private readonly Guid _episodeId = Guid.NewGuid();
+    private readonly Guid _episodeSource = Guid.NewGuid();
+    private readonly Guid _doubleEpisodeSource = Guid.NewGuid();
+    private readonly Guid _orphanEpisodeSource = Guid.NewGuid();
 
     public LibrarySourceServiceTests()
     {
@@ -218,11 +229,64 @@ public sealed class LibrarySourceServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RenameVersion_rejects_a_non_movie_source()
+    public async Task RenameVersion_rejects_a_series_extra()
     {
         var result = await _service.RenameVersionAsync(_videoSource, "x", CancellationToken.None);
 
         Assert.Equal(RenameVersionResult.Kind.Unsupported, result.Status);
+        Assert.Contains("movie or episode", result.Error);
+    }
+
+    [Fact]
+    public async Task RenameVersion_renames_an_episode_inside_its_season_folder()
+    {
+        // The stem an episode is locked to is the show's, not a Title (Year): the season folder and the
+        // SxxEyy token are rebuilt from the series row, and only the suffix moves.
+        var result = await _service.RenameVersionAsync(_episodeSource, "Remux", CancellationToken.None);
+
+        Assert.Equal(RenameVersionResult.Kind.Ok, result.Status);
+        const string expected = SeasonFolder + "/Breaking Bad S01E01 - Remux.mkv";
+        Assert.True(File.Exists(Absolute(expected)));
+        Assert.False(File.Exists(Absolute(EpisodeRelative)));
+        await using var verify = CreateContext();
+        var source = (await verify.MediaSources.FindAsync(_episodeSource))!;
+        Assert.Equal(expected, source.Path);
+        Assert.Equal("Remux", source.VersionName);
+        Assert.Equal(expected, (await verify.MediaItems.FindAsync(_episodeId))!.LibraryPath);
+    }
+
+    [Fact]
+    public async Task RenameVersion_clears_an_episode_to_its_bare_canonical_name()
+    {
+        var result = await _service.RenameVersionAsync(_episodeSource, null, CancellationToken.None);
+
+        Assert.Equal(RenameVersionResult.Kind.Ok, result.Status);
+        const string expected = SeasonFolder + "/Breaking Bad S01E01.mkv";
+        Assert.True(File.Exists(Absolute(expected)));
+        await using var verify = CreateContext();
+        var source = (await verify.MediaSources.FindAsync(_episodeSource))!;
+        Assert.Equal(expected, source.Path);
+        Assert.Null(source.VersionName);
+    }
+
+    [Fact]
+    public async Task RenameVersion_keeps_the_range_a_double_episode_file_covers()
+    {
+        var result = await _service.RenameVersionAsync(_doubleEpisodeSource, "Remux", CancellationToken.None);
+
+        Assert.Equal(RenameVersionResult.Kind.Ok, result.Status);
+        Assert.True(File.Exists(Absolute(SeasonFolder + "/Breaking Bad S01E02-E03 - Remux.mkv")));
+    }
+
+    [Fact]
+    public async Task RenameVersion_returns_not_found_for_an_episode_with_no_series_to_name_it_by()
+    {
+        // An episode's canonical name is the show's; with no series row there is nothing to build it from,
+        // and guessing at a folder would move the file somewhere the scan does not expect.
+        var result = await _service.RenameVersionAsync(_orphanEpisodeSource, "Remux", CancellationToken.None);
+
+        Assert.Equal(RenameVersionResult.Kind.NotFound, result.Status);
+        Assert.True(File.Exists(Absolute(OrphanEpisodeRelative)));
     }
 
     [Fact]
@@ -262,8 +326,39 @@ public sealed class LibrarySourceServiceTests : IDisposable
             CreatedAt = now, UpdatedAt = now,
         };
 
+        var series = new MediaItem
+        {
+            Id = _seriesId, PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id, Kind = MediaKind.Series,
+            Title = "Breaking Bad", Year = 2008, AddedAt = now, UpdatedAt = now,
+        };
+        var season = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id, Kind = MediaKind.Season,
+            Title = "Season 1", ParentId = _seriesId, SeriesId = _seriesId, IndexNumber = 1, AddedAt = now, UpdatedAt = now,
+        };
+        var episode = new MediaItem
+        {
+            Id = _episodeId, PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id, Kind = MediaKind.Episode,
+            Title = "Pilot", ParentId = season.Id, SeriesId = _seriesId, SeasonId = season.Id,
+            ParentIndexNumber = 1, IndexNumber = 1, LibraryPath = EpisodeRelative, AddedAt = now, UpdatedAt = now,
+        };
+        var doubleEpisode = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id, Kind = MediaKind.Episode,
+            Title = "Cat's in the Bag...", ParentId = season.Id, SeriesId = _seriesId, SeasonId = season.Id,
+            ParentIndexNumber = 1, IndexNumber = 2, IndexNumberEnd = 3, LibraryPath = DoubleEpisodeRelative,
+            AddedAt = now, UpdatedAt = now,
+        };
+        // An episode row with no series to name it by — what a partly-pruned show leaves behind.
+        var orphanEpisode = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = catalog.Id, Kind = MediaKind.Episode,
+            Title = "Lost", ParentIndexNumber = 1, IndexNumber = 9, LibraryPath = OrphanEpisodeRelative,
+            AddedAt = now, UpdatedAt = now,
+        };
+
         _context.Catalogs.Add(catalog);
-        _context.MediaItems.AddRange(movie, other, video);
+        _context.MediaItems.AddRange(movie, other, video, series, season, episode, doubleEpisode, orphanEpisode);
         _context.IngestItems.Add(ingest);
         _context.SourceFiles.Add(new SourceFile
         {
@@ -275,13 +370,19 @@ public sealed class LibrarySourceServiceTests : IDisposable
             new MediaSource { Id = _sourceB, MediaItemId = _movieId, Container = "mkv", Path = SourceBRelative, VersionName = "Remux", CreatedAt = now },
             new MediaSource { Id = _ghostSource, MediaItemId = _movieId, Container = "mkv", Path = GhostRelative, VersionName = "Ghost", CreatedAt = now },
             new MediaSource { Id = _otherSource, MediaItemId = _otherMovieId, Container = "mkv", Path = OtherRelative, CreatedAt = now },
-            new MediaSource { Id = _videoSource, MediaItemId = _videoId, Container = "mkv", Path = "Home Clip.mkv", CreatedAt = now });
+            new MediaSource { Id = _videoSource, MediaItemId = _videoId, Container = "mkv", Path = "Home Clip.mkv", CreatedAt = now },
+            new MediaSource { Id = _episodeSource, MediaItemId = _episodeId, Container = "mkv", Path = EpisodeRelative, VersionName = "WEB", CreatedAt = now },
+            new MediaSource { Id = _doubleEpisodeSource, MediaItemId = doubleEpisode.Id, Container = "mkv", Path = DoubleEpisodeRelative, CreatedAt = now },
+            new MediaSource { Id = _orphanEpisodeSource, MediaItemId = orphanEpisode.Id, Container = "mkv", Path = OrphanEpisodeRelative, CreatedAt = now });
         _context.SaveChanges();
 
         // Files on disk for every source except the deliberately-missing "ghost".
         WriteFile(SourceARelative);
         WriteFile(SourceBRelative);
         WriteFile(OtherRelative);
+        WriteFile(EpisodeRelative);
+        WriteFile(DoubleEpisodeRelative);
+        WriteFile(OrphanEpisodeRelative);
     }
 
     private MediaServerDbContext CreateContext() =>

@@ -2,7 +2,8 @@ using MediaServer.Api.Data;
 
 namespace MediaServer.Api.Transcoding;
 
-/// <summary>Request to transcode a movie source into a new sibling version, or to merge its sidecars in.
+/// <summary>Request to transcode a version — a movie's or an episode's — into a new sibling version, or to
+/// merge its sidecars in.
 /// <para>
 /// <see cref="MergeStreamIds"/> names external streams of this source — sidecar dubs and subtitles sitting
 /// beside the file — whose tracks join the output. Naming any makes the job a merge: the video is copied
@@ -41,7 +42,7 @@ public sealed record CreateTranscodeRequest(
     string? DolbyVision = null);
 
 /// <summary>
-/// Request to write chosen tracks of a movie source out as files beside it — the inverse of merging.
+/// Request to write chosen tracks of a version out as files beside it — the inverse of merging.
 /// <para>
 /// <see cref="StreamIds"/> names embedded audio and subtitle streams of this source. Each becomes a file of
 /// its own under the sidecar naming convention, recorded as an external <c>MediaStream</c> of the same
@@ -140,8 +141,28 @@ public sealed record TranscodeJobResponse(
     }
 }
 
-/// <summary>Raised for invalid transcode requests (bad source, non-movie, missing file, no mount) — a 400.</summary>
+/// <summary>Raised for invalid transcode requests (bad source, wrong kind of item, missing file, no mount) — a 400.</summary>
 public class TranscodeRequestException(string message) : Exception(message);
+
+/// <summary>
+/// Which items' versions a job may read: a movie's and an episode's. Conversion and extraction share the
+/// rule so the two cannot drift, and so a series extra (<see cref="MediaKind.Video"/>) is refused in the
+/// same words by both — by name, because it has no surface it could be reached from, and admitting it
+/// here would be a promise nothing displays.
+/// </summary>
+public static class TranscodeTargets
+{
+    public static void RequireMovieOrEpisode(MediaItem item, string operation)
+    {
+        if (item.Kind is MediaKind.Movie or MediaKind.Episode)
+        {
+            return;
+        }
+
+        var owner = item.Kind == MediaKind.Video ? "a series extra" : $"a {item.Kind.ToString().ToLowerInvariant()}";
+        throw new TranscodeRequestException($"Only a movie or an episode {operation}; this version belongs to {owner}.");
+    }
+}
 
 /// <summary>
 /// Raised when a valid transcode request loses to concurrent state (the movie is mid-move to another

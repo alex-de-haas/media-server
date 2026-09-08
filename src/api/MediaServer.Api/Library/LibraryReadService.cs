@@ -2,6 +2,7 @@ using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.Native.Playback;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Library;
@@ -292,10 +293,23 @@ public sealed class LibraryReadService(
                 movieIds.Contains(stream.MediaSource!.MediaItemId))
             .Select(stream => new { stream.MediaSource!.MediaItemId, stream.Codec, stream.HdrFormat })
             .ToListAsync(cancellationToken), rows => rows.Count);
+        // A series has no picture of its own: its badges are the union of its episodes', keyed by the
+        // series so the rows fold into the same dictionary — a show whose later seasons arrived in Dolby
+        // Vision says so on its card.
+        var seriesIds = items.Where(item => item.Kind == MediaKind.Series).Select(item => item.Id).ToList();
+        var episodeStreams = seriesIds.Count == 0
+            ? []
+            : await LibraryDiagnostics.MeasureAsync("library.series_video_formats",
+                () => database.MediaStreams.AsNoTracking()
+                .Where(stream => stream.StreamType == StreamType.Video &&
+                    stream.MediaSource!.MediaItem!.Kind == MediaKind.Episode &&
+                    stream.MediaSource.MediaItem.SeriesId != null &&
+                    seriesIds.Contains(stream.MediaSource.MediaItem.SeriesId.Value))
+                .Select(stream => new { MediaItemId = stream.MediaSource!.MediaItem!.SeriesId!.Value, stream.Codec, stream.HdrFormat })
+                .ToListAsync(cancellationToken), rows => rows.Count);
         using var projection = LibraryDiagnostics.Source.StartActivity("library.project_cards");
-        var formatsByItem = videoStreams
-            .Where(stream => !new[] { "mjpeg", "png", "bmp", "gif", "webp" }
-                .Contains(stream.Codec, StringComparer.OrdinalIgnoreCase))
+        var formatsByItem = videoStreams.Concat(episodeStreams)
+            .Where(stream => !NativePlaybackResolver.StillImages.Contains(stream.Codec ?? string.Empty))
             .GroupBy(stream => stream.MediaItemId)
             .ToDictionary(group => group.Key, group => CardVideoFormats(group.Select(stream => stream.HdrFormat)));
 
@@ -589,6 +603,7 @@ public sealed class LibraryReadService(
         var metaByItem = await MetadataByItemAsync(ids, cancellationToken);
         var posters = await PostersAsync(ids, cancellationToken);
         var userDataByItem = await userData.LoadAsync(appUserId, episodes, cancellationToken);
+        var mediaByItem = await EpisodeMediaAsync(episodes, seriesId, seasonId, cancellationToken);
 
         return episodes.Select(episode =>
         {
@@ -605,8 +620,58 @@ public sealed class LibraryReadService(
                 meta?.Overview,
                 meta?.RuntimeTicks,
                 posters.GetValueOrDefault(episode.Id),
-                userDataByItem.GetValueOrDefault(episode.Id));
+                userDataByItem.GetValueOrDefault(episode.Id),
+                mediaByItem.GetValueOrDefault(episode.Id));
         }).ToList();
+    }
+
+    /// <summary>
+    /// One query for the whole listing: every version of these episodes with its streams, folded into a
+    /// summary per episode. Filtered through the episode rows rather than an id list, so a long-running show
+    /// never runs into SQLite's parameter limit.
+    /// </summary>
+    private async Task<Dictionary<Guid, EpisodeMediaSummaryDto>> EpisodeMediaAsync(
+        IReadOnlyList<MediaItem> episodes, Guid seriesId, Guid? seasonId, CancellationToken cancellationToken)
+    {
+        var query = database.MediaSources.AsNoTracking()
+            .Include(source => source.Streams)
+            .Where(source => source.MediaItem!.SeriesId == seriesId && source.MediaItem.Kind == MediaKind.Episode);
+        if (seasonId is { } sid)
+        {
+            query = query.Where(source => source.MediaItem!.SeasonId == sid);
+        }
+
+        var versionsByEpisode = (await query.ToListAsync(cancellationToken))
+            .GroupBy(source => source.MediaItemId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<MediaSource>)group.ToList());
+
+        var summaries = new Dictionary<Guid, EpisodeMediaSummaryDto>();
+        foreach (var episode in episodes)
+        {
+            if (versionsByEpisode.TryGetValue(episode.Id, out var versions))
+            {
+                summaries[episode.Id] = EpisodeMediaSummary(versions, episode.DefaultSourceId);
+            }
+        }
+
+        return summaries;
+    }
+
+    /// <summary>
+    /// The summary line's facts: the default version's picture and size — the file a player starts on, by
+    /// the same ordering the players are handed — and the count over every version.
+    /// </summary>
+    internal static EpisodeMediaSummaryDto EpisodeMediaSummary(IReadOnlyList<MediaSource> versions, Guid? defaultSourceId)
+    {
+        var playing = versions.OrderByDefault(defaultSourceId)[0];
+        var picture = NativePlaybackResolver.PictureStream(playing.Streams);
+        return new EpisodeMediaSummaryDto(
+            versions.Count,
+            picture?.Codec,
+            picture?.Height,
+            picture?.HdrFormat,
+            picture is null ? null : DolbyVision(picture),
+            playing.SizeBytes);
     }
 
     private async Task<List<SeasonSummaryDto>> LoadSeasonsAsync(

@@ -42,7 +42,14 @@ section).
   tabs show Cast, Episodes grouped by season, and Tags; an episode whose file
   holds a consecutive range is labelled `S01E01-E02` (matching the on-disk name)
   so the season does not look like it skipped an episode — the title stays the
-  first episode's, as that is all the provider has. Seasons come from the detail's
+  first episode's, as that is all the provider has. Every episode row carries a
+  one-line summary of what is on disk (`HEVC 2160p · Dolby Vision 7 · 38.2 GB ·
+  2 versions`, or "No file") and expands onto the same media surface a movie's
+  Media tab is — versions, tracks, sidecars, and for an admin every control that
+  changes them; the episode's detail is fetched when the row opens. An admin also
+  sees a Conversions block above the seasons listing every episode's jobs, and
+  **Refresh media data** in the series menu, which fans out over its episodes.
+  See [episode-media](../episode-media/feature.md). Seasons come from the detail's
   season rollup, so a season the API kept after its last episode went — one holding
   only extras — still gets a heading (reading "No episodes in this season") instead of
   vanishing from the tab. On the Episodes tab an admin can also delete a single episode
@@ -69,7 +76,8 @@ section).
   monospace tabular stat line (percent, transferred/total bytes for a download,
   rates, ETA). Work that is waiting shows a
   queued line instead of a bar. The same card renders a conversion wherever it
-  appears, including the Conversions block on movie detail.
+  appears, including the Conversions block on movie detail and above a series'
+  seasons.
 - **Settings** (`/settings`) — General retains release-group preferences, per-user
   Infuse credentials, and watch-history controls. The admin-only **Catalogs** tab
   (`/settings?tab=catalogs`) holds catalog configuration, storage usage, scanning,
@@ -152,8 +160,9 @@ Movies and Series grids hide the permanent title beneath poster artwork and show
 the year followed by available video formats, such as `1997 · HDR10 · Dolby Vision`.
 The title remains the link's accessible name and appears in the artwork placeholder
 when no poster is available. Missing years and formats produce no extra separators.
-Other poster-card surfaces keep their title captions. Series format aggregation is
-unchanged: the server currently supplies format badges for movies only.
+Other poster-card surfaces keep their title captions. A series' badges are the union
+of its episodes' formats — a show whose later seasons arrived in Dolby Vision says so
+on its card — and a series whose episodes were never probed carries none.
 
 ## Testing Expectations
 
@@ -178,6 +187,14 @@ coverage:
   carries `deleteFiles` only when the checkbox is ticked, a delete that prunes the
   series navigates back to the library grid, and a season with no episodes left is
   still listed and still deletable.
+- Episode media: the summary line on a row and "No file" on one without a source,
+  expanding a row fetching the episode's detail once and listing its versions, a
+  viewer seeing the media and none of the controls, an admin opening the Convert
+  and Extract dialogs from an episode's version with copy that fits either kind, the
+  rename preview carrying the episode's own stem, and an episode's job listed above
+  the seasons.
+- Series grid captions carrying the aggregated format badges, and none for a series
+  with no probed episode.
 
 ## Links
 

@@ -22,7 +22,7 @@ public sealed class TrackExtractionTests : IDisposable
     private readonly JellyfinDatabase _db = new();
     private readonly MediaServerDbContext _context;
     private readonly string _root;
-    private readonly RecordingEngine _engine = new();
+    private readonly RecordingTranscodeEngine _engine = new();
 
     private Guid _sourceId;
     private Guid _movieId;
@@ -48,40 +48,6 @@ public sealed class TrackExtractionTests : IDisposable
     }
 
     // ── harness ──────────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>Captures the request instead of talking to an engine, and answers with a descriptor.</summary>
-    private sealed class RecordingEngine : ITranscodeEngine
-    {
-        private int _created;
-
-        public TranscodeJobRequest? Seen { get; private set; }
-
-        public Task<JobDescriptor> CreateAsync(TranscodeJobRequest request, CancellationToken cancellationToken)
-        {
-            Seen = request;
-            // A fresh id per call, because EngineJobId is unique: a test that extracts twice is testing the
-            // second attempt, not the index.
-            return Task.FromResult(new JobDescriptor(
-                $"engine-{++_created}", request.InputRelativePath, request.OutputRelativePath, 120, 1000,
-                request.Outputs?.Select(output => output.RelativePath).ToList()));
-        }
-
-        public Task CancelAsync(string jobId, CancellationToken cancellationToken) => Task.CompletedTask;
-
-        public Task RemoveAsync(string jobId, bool deleteOutput, CancellationToken cancellationToken) => Task.CompletedTask;
-
-        public JobSnapshot? GetSnapshot(string jobId) => null;
-
-        public IReadOnlyList<JobSnapshot> GetAllSnapshots() => [];
-
-        public Task<TranscodeTooling> GetToolingAsync(CancellationToken cancellationToken) => Task.FromResult(TranscodeTooling.None);
-
-#pragma warning disable CS0067 // The consumer surface raises these; nothing here does.
-        public event EventHandler<string>? JobStarted;
-        public event EventHandler<string>? JobCompleted;
-        public event EventHandler<string>? JobFailed;
-#pragma warning restore CS0067
-    }
 
     /// <summary>Answers for whatever file it is handed, so an imported row gets its specs.</summary>
     private sealed class StubProbe(params ProbedStream[] streams) : IMediaProbe
@@ -129,20 +95,79 @@ public sealed class TrackExtractionTests : IDisposable
 
     private Guid AddStream(
         StreamType type, int index, string? codec, string? language = null, string? title = null,
-        bool isExternal = false, string? externalPath = null)
+        bool isExternal = false, string? externalPath = null, Guid? sourceId = null)
     {
         var id = Guid.NewGuid();
         _context.MediaStreams.Add(new MediaStream
         {
-            Id = id, MediaSourceId = _sourceId, StreamType = type, Index = index, Codec = codec,
+            Id = id, MediaSourceId = sourceId ?? _sourceId, StreamType = type, Index = index, Codec = codec,
             Language = language, Title = title, IsExternal = isExternal, ExternalPath = externalPath,
         });
         _context.SaveChanges();
         return id;
     }
 
-    private Task<TranscodeJobResponse> ExtractAsync(params Guid[] streamIds) =>
-        Service().CreateAsync(new CreateExtractionRequest(_sourceId, streamIds), CancellationToken.None);
+    private Task<TranscodeJobResponse> ExtractAsync(params Guid[] streamIds) => ExtractFromAsync(_sourceId, streamIds);
+
+    private Task<TranscodeJobResponse> ExtractFromAsync(Guid sourceId, params Guid[] streamIds) =>
+        Service().CreateAsync(new CreateExtractionRequest(sourceId, streamIds), CancellationToken.None);
+
+    /// <summary>An episode of a show, with its file where the organizer puts one; returns the episode and its source.</summary>
+    private (Guid ItemId, Guid SourceId) SeedEpisode()
+    {
+        const string relative = "Breaking Bad (2008)/Season 01/Breaking Bad S01E01.mkv";
+        var now = DateTimeOffset.UtcNow;
+        var series = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = _catalogId,
+            Kind = MediaKind.Series, Title = "Breaking Bad", Year = 2008, AddedAt = now, UpdatedAt = now,
+        };
+        var episode = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = _catalogId,
+            Kind = MediaKind.Episode, Title = "Pilot", ParentId = series.Id, SeriesId = series.Id,
+            ParentIndexNumber = 1, IndexNumber = 1, LibraryPath = relative, AddedAt = now, UpdatedAt = now,
+        };
+        var source = new MediaSource
+        {
+            Id = Guid.NewGuid(), MediaItemId = episode.Id, Container = "mkv", Path = relative,
+            SizeBytes = 1000, DurationTicks = 1, CreatedAt = now,
+        };
+        _context.MediaItems.AddRange(series, episode);
+        _context.MediaSources.Add(source);
+        _context.SaveChanges();
+        WriteFile(relative);
+        return (episode.Id, source.Id);
+    }
+
+    /// <summary>A series extra — a <see cref="MediaKind.Video"/> under the show — with a file of its own.</summary>
+    private Guid SeedExtra()
+    {
+        const string relative = "Breaking Bad (2008)/extras/Making Of.mkv";
+        var now = DateTimeOffset.UtcNow;
+        var extra = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString("N"), CatalogId = _catalogId,
+            Kind = MediaKind.Video, Title = "Making Of", LibraryPath = relative, AddedAt = now, UpdatedAt = now,
+        };
+        var source = new MediaSource
+        {
+            Id = Guid.NewGuid(), MediaItemId = extra.Id, Container = "mkv", Path = relative,
+            SizeBytes = 1000, DurationTicks = 1, CreatedAt = now,
+        };
+        _context.MediaItems.Add(extra);
+        _context.MediaSources.Add(source);
+        _context.SaveChanges();
+        WriteFile(relative);
+        return source.Id;
+    }
+
+    private void WriteFile(string relative)
+    {
+        var absolute = Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        File.WriteAllText(absolute, "video");
+    }
 
     // ── containers ───────────────────────────────────────────────────────────────────────────────────
 
@@ -214,6 +239,36 @@ public sealed class TrackExtractionTests : IDisposable
         var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ExtractAsync(video));
 
         Assert.Contains("audio and subtitle", error.Message);
+    }
+
+    // ── whose tracks ─────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task An_episodes_track_lands_beside_it_in_the_season_folder()
+    {
+        // Nothing here is written for an episode: the file is named beside its video by the same rule, and
+        // the job is attached to the episode, which is where the Episodes tab lists it.
+        var (episodeId, sourceId) = SeedEpisode();
+        var dub = AddStream(StreamType.Audio, 1, "ac3", "rus", sourceId: sourceId);
+
+        var job = await ExtractFromAsync(sourceId, dub);
+
+        Assert.Equal("Breaking Bad (2008)/Season 01/Breaking Bad S01E01.rus.mka", Assert.Single(job.OutputPaths));
+        Assert.Equal(episodeId, job.MediaItemId);
+    }
+
+    [Fact]
+    public async Task A_series_extras_tracks_are_refused_by_name()
+    {
+        // An extra has no surface it could be reached from; admitting it would be a promise nothing
+        // displays, so the refusal says what the version belongs to rather than "not a movie".
+        var sourceId = SeedExtra();
+        var dub = AddStream(StreamType.Audio, 1, "ac3", "rus", sourceId: sourceId);
+
+        var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ExtractFromAsync(sourceId, dub));
+
+        Assert.Contains("series extra", error.Message);
+        Assert.Contains("movie or an episode", error.Message);
     }
 
     // ── selection ────────────────────────────────────────────────────────────────────────────────────

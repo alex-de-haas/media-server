@@ -112,8 +112,9 @@ export function isTranscodeActive(job: TranscodeJob): boolean {
   return ACTIVE_STATES.includes(job.state);
 }
 
-/** Dialog to start a transcode of one movie source into a new version: re-encode (optionally smaller) or a
- * lossless remux, with per-track audio/subtitle selection and a choice of default track. */
+/** Dialog to start a transcode of one version — a movie's or an episode's — into a new version: re-encode
+ * (optionally smaller) or a lossless remux, with per-track audio/subtitle selection and a choice of default
+ * track. */
 export function TranscodeDialog({
   source,
   open,
@@ -389,7 +390,7 @@ export function TranscodeDialog({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Convert version</DialogTitle>
-          <DialogDescription>Create a new version of this movie. The original stays until you delete it.</DialogDescription>
+          <DialogDescription>Create a new version of this title. The original stays until you delete it.</DialogDescription>
         </DialogHeader>
 
         <form

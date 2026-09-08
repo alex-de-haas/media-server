@@ -8,8 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.Transcoding;
 
 /// <summary>
-/// Writes chosen tracks of a movie source out as files beside it — the inverse of merging, and the operation
-/// that turns a container's own track into a sidecar.
+/// Writes chosen tracks of a version — a movie's or an episode's — out as files beside it: the inverse of
+/// merging, and the operation that turns a container's own track into a sidecar.
 /// <para>
 /// The result is deliberately indistinguishable from a sidecar a release shipped: same naming rule, same
 /// external <see cref="MediaStream"/> rows, same external indexes. Everything
@@ -39,12 +39,9 @@ public sealed class TrackExtractionService(
             ?? throw new TranscodeRequestException("Media source not found.");
 
         var item = source.MediaItem ?? throw new TranscodeRequestException("Source is not attached to a media item.");
-        if (item.Kind != MediaKind.Movie)
-        {
-            throw new TranscodeRequestException("Only movies can have their tracks extracted for now.");
-        }
+        TranscodeTargets.RequireMovieOrEpisode(item, "can have its tracks extracted");
 
-        // The same guard a conversion carries: a move is relocating this movie's files, so reading them and
+        // The same guard a conversion carries: a move is relocating this title's files, so reading them and
         // writing sidecars into the old catalog would break both.
         if (await moveGuard.IsItemMovingAsync(item.Id, cancellationToken))
         {

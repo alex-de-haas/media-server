@@ -1,7 +1,7 @@
 # File and Directory Management
 
 Created: 2026-06-15
-Updated: 2026-07-25
+Updated: 2026-09-08
 
 ## Description
 
@@ -79,7 +79,8 @@ With one tree, one file backs one item:
   that page is gone. Deleting an item drops the plays recorded against it — playback
   history follows its media item by design.
 - **Remove one version** (`DELETE /api/library/sources/{id}`, admin): drops a single
-  `MediaSource` of an item, used to retire the original after a verified transcode.
+  `MediaSource` of a movie or an episode, used to retire the original after a verified
+  transcode. The item stays, even with no version left — see [plan.md](plan.md).
 - Every removal above drops the item's `ImageAsset` rows; the cached artwork binaries
   they pointed at are reclaimed later by the image-cache sweep (see
   [Storage and data](../storage-and-data/feature.md)), not inline.
