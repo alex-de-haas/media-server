@@ -6,6 +6,7 @@ Updated: 2026-09-08
 ## Navigation and rails
 
 Home is the first tvOS tab, followed by Movies, Series, Collections, and Settings.
+The selected tab identifies Home; the screen does not repeat it as a navigation title.
 Movies and Series are complete browsing grids. Home owns three independent rows:
 
 - Continue Watching reads in-progress movies and episodes in server recency order.
@@ -28,7 +29,9 @@ poster fallback when the series has no poster. Older responses without this opti
 field retain navigation-owner artwork behavior;
 this feature does not add direct episode playback or redesign series detail.
 Recommendations open the local movie/series detail and show the available reason.
-Home cards retain visible names alongside resume/episode/recommendation captions.
+Home cards use the same poster presentation as Movies and Series: no separate
+title below the artwork, with one compact resume/episode/recommendation caption.
+Titles remain available to VoiceOver and inside missing-artwork placeholders.
 
 ## Native API
 
@@ -39,7 +42,7 @@ used by Web; user identities are resolved from the principal, never query parame
 The OpenAPI document and generated Swift client include both operations.
 
 The existing `/native/v1/recommendations` contract and generation remain unchanged.
-The server release is 0.73.0; the independently versioned tvOS client is 0.11.0.
+The server release is 0.73.0; the independently versioned tvOS client is 0.11.2.
 
 ## Related features
 

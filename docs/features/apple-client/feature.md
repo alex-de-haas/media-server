@@ -638,8 +638,11 @@ the unit that matters. It is a preference and not an instruction: the player sti
 it to what it will hold.
 
 Progress is reported every ten seconds, which is often enough that a resume lands where the
-viewer left and rare enough that a two-hour film is a few hundred requests. The session it is
-filed against opens **alongside** the player rather than in front of it: opening it at all is
+viewer left and rare enough that a two-hour film is a few hundred requests. The reporter is
+held by the player's coordinator rather than captured by AVFoundation's periodic observer:
+that block is `@Sendable` and a plain closure is not, so the two meet through the coordinator,
+which is main-actor bound — and the observer is asked for on the main queue, which is where it
+already runs. The session it is filed against opens **alongside** the player rather than in front of it: opening it at all is
 what leaves a record for somebody who stops after ten seconds, and it was always best effort,
 so a server slow to answer should never have been something a viewer waits on. It was on the
 critical path for no reason but the order the code was written in.
@@ -684,6 +687,13 @@ xcodebuild -project src/apple/MediaServerTV.xcodeproj -scheme MediaServerTV -des
 
 Requires Xcode 26 or later for the tvOS 26 SDK. Simulator builds sign themselves locally
 and need no developer account; device builds and TestFlight do, and neither is set up.
+
+Both configurations compile as Swift 6 and the build is expected to be clean: a warning here
+is a defect, because the only thing keeping this client honest about concurrency is the
+compiler saying so. The project also sets `ALWAYS_SEARCH_USER_PATHS = NO`, which is what
+Xcode asks for now that traditional headermaps are gone and costs nothing — the local
+`MediaKit` package is the only non-system dependency, and no header is found by searching
+user paths.
 
 The client is **not** built in CI, decided on 2026-08-09: macOS runners cost roughly ten
 times the Linux ones already in use, and until there is a client worth protecting they

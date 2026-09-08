@@ -25,7 +25,6 @@ struct HomeView: View {
             .padding(CinemaStyle.inset)
         }
         .focusScope(homeFocus)
-        .navigationTitle("Home")
         .task { await home.load() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await home.load() } }
@@ -41,7 +40,7 @@ struct HomeView: View {
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 48) {
                         ForEach(rail.items) { card in
-                            PosterCard(title: card.destination.title, subtitle: card.subtitle) {
+                            PosterCard(title: card.destination.title, subtitle: card.subtitle, showTitle: false) {
                                 ServerArtwork(url: card.artworkURL(on: library.server),
                                     loader: session.artwork,
                                     symbol: card.destination.kind == .movie ? "film" : "tv",
