@@ -281,7 +281,7 @@ public sealed class LibraryReadService(
         var posters = await LibraryDiagnostics.MeasureAsync("library.posters",
             () => PostersAsync(itemIds, cancellationToken), rows => rows.Count);
         var metaByItem = await LibraryDiagnostics.MeasureAsync("library.metadata",
-            () => MetadataByItemAsync(itemIds, cancellationToken), rows => rows.Count);
+            () => CardMetadataByItemAsync(itemIds, cancellationToken), rows => rows.Count);
         var userDataByItem = await LibraryDiagnostics.MeasureAsync("library.user_data",
             () => userData.LoadAsync(appUserId, items, cancellationToken), rows => rows.Count);
         // One projection for the whole page, not a detail query per card.
@@ -307,7 +307,7 @@ public sealed class LibraryReadService(
                 item.PublicId,
                 item.CatalogId!.Value,
                 item.Kind.ToString(),
-                TitleFor(meta, item.Title),
+                !string.IsNullOrWhiteSpace(meta?.Title) ? meta.Title : item.Title,
                 item.Year ?? meta?.ReleaseDate?.Year,
                 posters.GetValueOrDefault(item.Id),
                 userDataByItem.GetValueOrDefault(item.Id),
@@ -643,6 +643,32 @@ public sealed class LibraryReadService(
     // surface shares (see ImageSelection).
     private Task<Dictionary<Guid, string>> PostersAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken) =>
         database.BestPosterUrlsAsync(itemIds, settings.PreferredLanguage, cancellationToken);
+
+    // A card never needs the provider payload, cast, crew, or synopsis. Project before materializing
+    // so those columns stay in SQLite; language selection retains the same fallback behavior.
+    private sealed record CardMetadata(Guid MediaItemId, string Language, string? Title,
+        DateTimeOffset? ReleaseDate, IReadOnlyList<string> Genres, long? RuntimeTicks, double? CommunityRating);
+
+    private async Task<Dictionary<Guid, CardMetadata>> CardMetadataByItemAsync(
+        IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
+    {
+        var records = new List<CardMetadata>();
+        foreach (var chunk in itemIds.Chunk(500))
+        {
+            records.AddRange(await database.MetadataRecords.AsNoTracking()
+                .Where(record => chunk.Contains(record.MediaItemId))
+                .Select(record => new CardMetadata(record.MediaItemId, record.Language, record.Title,
+                    record.ReleaseDate, record.Genres, record.RuntimeTicks, record.CommunityRating))
+                .ToListAsync(cancellationToken));
+        }
+        if (System.Diagnostics.Activity.Current is
+            { OperationName: "library.metadata", Source.Name: LibraryDiagnostics.SourceName } activity)
+        {
+            activity.SetTag("library.metadata.record_count", records.Count);
+        }
+        return records.GroupBy(record => record.MediaItemId).ToDictionary(group => group.Key,
+            group => MetadataLanguage.Pick(group.ToList(), settings.PreferredLanguage, record => record.Language));
+    }
 
     private async Task<Dictionary<Guid, MetadataRecord>> MetadataByItemAsync(
         IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)

@@ -1,3 +1,5 @@
+using System.Data.Common;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Diagnostics;
 using System.Collections.Concurrent;
 using MediaServer.Api.Catalogs;
@@ -36,6 +38,55 @@ public sealed class LibraryReadServiceTests : IDisposable
         _context = _db.Create();
         var settings = new MediaServerSettings { SupportedLanguages = ["en-US"] };
         _library = new LibraryReadService(_context, new UserDataService(_context, TimeProvider.System), settings);
+    }
+
+    [Theory]
+    [InlineData("list")]
+    [InlineData("search")]
+    [InlineData("recent")]
+    public async Task Card_reads_select_only_needed_metadata_columns(string surface)
+    {
+        var metadata = await _context.MetadataRecords.SingleAsync(record => record.MediaItemId == _movieId);
+        metadata.Raw = new string('x', 100_000);
+        metadata.Cast = "unused cast";
+        metadata.Crew = "unused crew";
+        await _context.SaveChangesAsync();
+        var commands = new CardCommandCapture();
+        using var context = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>()
+            .UseSqlite(_context.Database.GetDbConnection()).AddInterceptors(commands).Options);
+        var library = new LibraryReadService(context, new UserDataService(context, TimeProvider.System),
+            new MediaServerSettings { SupportedLanguages = ["en-US"] });
+
+        var cards = surface switch
+        {
+            "search" => (await library.SearchAsync(new LibrarySearchQuery(Kind: MediaKind.Movie), _userId, CancellationToken.None)).Items,
+            "recent" => await library.GetRecentAsync(20, _userId, CancellationToken.None),
+            _ => await library.ListAsync(null, MediaKind.Movie, _userId, CancellationToken.None),
+        };
+
+        var movie = Assert.Single(cards, card => card.Id == _movieId);
+        Assert.Equal("Inception", movie.Title);
+        Assert.Equal(new[] { "Science Fiction", "Action" }, movie.Genres);
+        Assert.Equal(TimeSpan.FromMinutes(148).Ticks, movie.RuntimeTicks);
+        var reads = commands.Sql.Where(sql => sql.Contains("MetadataRecords", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(reads);
+        foreach (var sql in reads)
+        {
+            foreach (var column in new[] { "Raw", "Cast", "Crew", "Overview", "Tagline" })
+                Assert.DoesNotContain($"\"{column}\"", sql);
+        }
+    }
+
+    private sealed class CardCommandCapture : DbCommandInterceptor
+    {
+        public List<string> Sql { get; } = [];
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Sql.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     [Fact]
