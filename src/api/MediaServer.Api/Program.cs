@@ -604,7 +604,7 @@ app.MapRealtimeEndpoints();
 // Jellyfin-compatible surface served on the public `jellyfin` endpoint.
 app.MapJellyfinEndpoints();
 
-// First-party client surface, also public. See docs/features/native-client-api/plan.md.
+// First-party client surface, also public. See docs/features/native-client-api/feature.md.
 app.MapNativeEndpoints();
 
 // The document itself is NOT published on the public binding: a client generator reads it at

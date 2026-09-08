@@ -9,7 +9,7 @@ namespace MediaServer.Api.Native;
 /// browses from it, so a screen costs no round-trip — the biggest difference from a Jellyfin client,
 /// which re-queries per screen.
 ///
-/// See <c>docs/features/native-client-api/plan.md</c>.
+/// See <c>docs/features/native-client-api/feature.md</c>.
 /// </summary>
 public sealed class NativeSyncService(MediaServerDbContext database, LibraryReadService library)
 {

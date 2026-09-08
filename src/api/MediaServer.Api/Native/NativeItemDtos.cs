@@ -8,7 +8,7 @@ namespace MediaServer.Api.Native;
 ///
 /// The detail is <b>embedded, not restated</b>. Forking it would let the two surfaces drift, and a
 /// client and a web page disagreeing about what a title contains is a bug rather than a platform
-/// difference. See <c>docs/features/native-client-api/plan.md</c>.
+/// difference. See <c>docs/features/native-client-api/feature.md</c>.
 /// </summary>
 public sealed record NativeItemDto(
     LibraryDetailDto Detail,

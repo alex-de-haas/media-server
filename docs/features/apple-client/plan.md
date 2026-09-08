@@ -666,7 +666,7 @@ and can be reordered by appetite.
 - ~~**Pairing UX on tvOS.**~~ Settled: Core already ships a device authorization
   flow with approval in Shell, and the app-identity exchange composes on top of
   it, so this app writes no authentication code. See
-  [native-client-api](../native-client-api/plan.md#authentication-hostys-device-flow-not-one-of-our-own).
+  [native-client-api](../native-client-api/feature.md#authentication).
 - **Push notifications** — reminders and "your download is ready" want APNs, which
   needs a push certificate and a sender. Whether that belongs to this app or to
   Hosty Core is a platform question, not a client one; see [Hosty platform

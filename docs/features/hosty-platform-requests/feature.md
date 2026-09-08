@@ -238,7 +238,7 @@ an app identity token that the SDK's `HostyAuthenticationHandler` already accept
 
 The PIN and lockout machinery this item originally asked for turned out to be
 unnecessary — the app writes no authentication code at all. See
-[native-client-api](../native-client-api/plan.md#authentication-hostys-device-flow-not-one-of-our-own).
+[native-client-api](../native-client-api/feature.md#authentication).
 
 ### 7a. Device flow that names the app — High
 

@@ -8,7 +8,7 @@ namespace MediaServer.Api.Native;
 /// Short-lived signed tokens for the media and image URLs the native clients hand to
 /// <c>AVPlayer</c>. It will not attach an <c>Authorization</c> header to the ranged requests it
 /// issues itself, which is the same reason the Jellyfin surface accepts <c>api_key=</c> on those
-/// routes. See <c>docs/features/native-client-api/plan.md</c>.
+/// routes. See <c>docs/features/native-client-api/feature.md</c>.
 ///
 /// A token is not merely "scoped to an item": one playback issues many ranged requests over hours,
 /// so it is bound to the user, the specific media source, and the methods it may be used with, and

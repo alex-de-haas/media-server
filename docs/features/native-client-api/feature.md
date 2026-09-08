@@ -1,7 +1,7 @@
 # Native Client API
 
 Created: 2026-08-04
-Updated: 2026-09-06
+Updated: 2026-09-08
 
 ## Description
 
@@ -216,3 +216,49 @@ Backend tests use xUnit and Imposter. Required coverage:
 - Artwork URLs offered only for the types the instance holds, carrying the tag, and
   absent entirely for an item with no artwork; each role picked by the artwork
   ranking, and a pinned poster offered over the ranking's own answer.
+
+### What only a running instance could show — production run, 2026-09-08
+
+Four claims here key off which binding a request arrived on, or off a caller that
+is not the web proxy. A `TestServer` has no real ports and no second binding, so
+these were carried live instead, against Core 0.97.3 and `com.haas.media-server`
+0.72.3 on the docker runtime.
+
+**The binding split.** Off the published binding, `/native/v1/server/public` answers
+200 while `/api/torrents` and `/api/library` answer 404 with an empty body; on the
+host, the same `/api/torrents` against the loopback `api` binding answers 401. The
+route is therefore alive internally and merely unpublished — the 404/401 pair is the
+whole distinction, and nothing but the binding differs between them.
+
+**Middleware ordering.** The ordering itself is settled by the registration in
+`Program.cs` — `UseRouting()`, then `UsePublicSurfaceAllowlist(hosty)`, then
+`UseAuthentication()` inside its `UseWhen` branch, then `UseAuthorization()` — so an
+unpublished route is refused before authentication looks at a credential, and no
+bearer for such a route is ever validated against Core. That is the claim, and it is
+a property of the pipeline rather than of any one request.
+
+What the live run adds is that the assembled pipeline behaves that way on a real
+second binding: the three allowlisted native routes answered 401 while a bogus route
+under the same prefix answered 404, and the app's log carried exactly three Hosty
+authentication challenges — one per allowlisted route, none for either `/api`
+request. Taken alone those observations would be weaker than they look, since an
+unauthenticated request produces no challenge whichever side of the allowlist
+authentication sits on; they corroborate the registration order rather than
+establish it. What they do establish on their own is that the allowlist tells a real
+native route from a bogus one under the same prefix, so it decides on the matched
+route and therefore runs after routing.
+
+**Route parity.** With an app identity token the native read surfaces answer with
+data. Parity itself is structural rather than observed: each handler is
+`Results.Ok(await service.X(...))` over the same service its `/api` twin calls, with
+no second projection in between, so the two cannot drift without the shared service
+moving under both.
+
+**The realtime stream outside the proxy.** `/native/v1/events` and `/api/events` are
+the same `SseEndpoints.StreamAsync` method, and the web client reaches it through
+the BFF at `/api/proxy/api/events`. What had never been exercised was a caller that
+is not that proxy: with an identity token the stream opens and holds, emitting its
+`: connected` frame — written only after `notifier.Subscribe()` returns — and
+subsequent keepalives. No domain event was witnessed on that particular stream, and
+none is owed: delivery is the same subscription the proxied path exercises
+continuously, and nothing on it is native-specific.
