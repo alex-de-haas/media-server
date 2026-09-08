@@ -211,6 +211,16 @@ public sealed class LibraryReadServiceTests : IDisposable
             Id = Guid.NewGuid(), MediaSourceId = pilot, StreamType = StreamType.Video, Index = 5, Codec = "mjpeg", HdrFormat = "HDR10+",
         });
         AddEpisodeVersion(_episode2Id, "s01e02.mkv", "hevc", 2160, "Dolby Vision · HDR10", dvProfile: 8, sizeBytes: 12);
+        // An episode probed but never published — an ingest held for a retry — is invisible to every episode
+        // listing, so a badge it alone earned would advertise a picture no listing can reach.
+        var unpublished = new MediaItem
+        {
+            Id = Guid.NewGuid(), PublicId = null, CatalogId = (await _context.MediaItems.FindAsync(_seriesId))!.CatalogId,
+            Kind = MediaKind.Episode, Title = "Held back", ParentId = _seasonId, SeriesId = _seriesId, SeasonId = _seasonId,
+            ParentIndexNumber = 1, IndexNumber = 3, AddedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        _context.MediaItems.Add(unpublished);
+        AddEpisodeVersion(unpublished.Id, "s01e03.mkv", "hevc", 1080, "HLG");
         await _context.SaveChangesAsync();
 
         var cards = await _library.ListAsync(null, null, null, CancellationToken.None);

@@ -10,10 +10,9 @@ Decide what a leaf item is once its last version is gone.
 
 `DELETE /api/library/sources/{id}` drops one `MediaSource`; when it was the item's
 only one, the movie or episode stays in the library as a row with no file behind
-it. The detail page then reads "No media sources available", the episode row (once
-[episode-media](../episode-media/plan.md) ships) says the episode has no file, and
-the title keeps appearing in grids, rails and the Jellyfin surface as something
-that can be played. Removing the item itself behaves differently: it tombstones
+it. The detail page then reads "No media sources available", the episode row
+([episode-media](../episode-media/feature.md)) reads "No file", and the title keeps
+appearing in grids, rails and the Jellyfin surface as something that can be played. Removing the item itself behaves differently: it tombstones
 or purges the row and prunes an emptied season and series
 ([feature.md](feature.md#removal-semantics)).
 

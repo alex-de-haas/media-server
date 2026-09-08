@@ -12,7 +12,8 @@ namespace MediaServer.Api.Tests.Transcoding;
 /// The whole conversion path for an episode, against a real database and a recording engine: a job lands
 /// beside the episode in its season folder, a merge reads the sidecar beside it, and the two refusals a
 /// version can meet — belonging to a series extra, and a path a version already holds — say so in words
-/// that fit a title of either kind. The label and path arithmetic itself is <see cref="TranscodeServiceTests"/>'.
+/// that fit a title of either kind. The label and path arithmetic itself is covered by
+/// <see cref="TranscodeServiceTests"/>.
 /// </summary>
 public sealed class TranscodeServiceConversionTests : IDisposable
 {

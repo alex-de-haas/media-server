@@ -301,8 +301,12 @@ public sealed class LibraryReadService(
             ? []
             : await LibraryDiagnostics.MeasureAsync("library.series_video_formats",
                 () => database.MediaStreams.AsNoTracking()
+                // Published episodes only: an ingest probed but not yet published, or one held for a retry,
+                // is invisible to every episode listing, and a badge it alone earned would advertise a
+                // picture no listing can reach.
                 .Where(stream => stream.StreamType == StreamType.Video &&
                     stream.MediaSource!.MediaItem!.Kind == MediaKind.Episode &&
+                    stream.MediaSource.MediaItem.PublicId != null &&
                     stream.MediaSource.MediaItem.SeriesId != null &&
                     seriesIds.Contains(stream.MediaSource.MediaItem.SeriesId.Value))
                 .Select(stream => new { MediaItemId = stream.MediaSource!.MediaItem!.SeriesId!.Value, stream.Codec, stream.HdrFormat })
@@ -626,24 +630,56 @@ public sealed class LibraryReadService(
     }
 
     /// <summary>
-    /// One query for the whole listing: every version of these episodes with its streams, folded into a
-    /// summary per episode. Filtered through the episode rows rather than an id list, so a long-running show
-    /// never runs into SQLite's parameter limit.
+    /// One query for the whole listing, carrying only what the summary reads: each version's size and age,
+    /// and the picture facts of its own video streams — not the audio and subtitle rows, of which a
+    /// long-running show has thousands. Filtered through the episode rows rather than an id list, so it
+    /// never runs into SQLite's parameter limit, and to published episodes, like the listing it feeds.
     /// </summary>
     private async Task<Dictionary<Guid, EpisodeMediaSummaryDto>> EpisodeMediaAsync(
         IReadOnlyList<MediaItem> episodes, Guid seriesId, Guid? seasonId, CancellationToken cancellationToken)
     {
         var query = database.MediaSources.AsNoTracking()
-            .Include(source => source.Streams)
-            .Where(source => source.MediaItem!.SeriesId == seriesId && source.MediaItem.Kind == MediaKind.Episode);
+            .Where(source => source.MediaItem!.SeriesId == seriesId && source.MediaItem.Kind == MediaKind.Episode &&
+                source.MediaItem.PublicId != null);
         if (seasonId is { } sid)
         {
             query = query.Where(source => source.MediaItem!.SeasonId == sid);
         }
 
-        var versionsByEpisode = (await query.ToListAsync(cancellationToken))
-            .GroupBy(source => source.MediaItemId)
-            .ToDictionary(group => group.Key, group => (IReadOnlyList<MediaSource>)group.ToList());
+        var rows = await query
+            .Select(source => new
+            {
+                source.Id,
+                source.MediaItemId,
+                source.SizeBytes,
+                source.CreatedAt,
+                Video = source.Streams
+                    .Where(stream => stream.StreamType == StreamType.Video && !stream.IsExternal)
+                    .OrderBy(stream => stream.Index)
+                    .Select(stream => new
+                    {
+                        stream.Codec, stream.Height, stream.HdrFormat,
+                        stream.DvProfile, stream.DvLevel, stream.DvBlSignalCompatibilityId, stream.DvElPresent,
+                    })
+                    .ToList(),
+            })
+            .ToListAsync(cancellationToken);
+
+        var versionsByEpisode = rows
+            .GroupBy(row => row.MediaItemId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<EpisodeVersionFacts>)group
+                    .Select(row => new EpisodeVersionFacts(
+                        row.Id,
+                        row.SizeBytes,
+                        row.CreatedAt,
+                        row.Video
+                            .Select(stream => new PictureFacts(
+                                stream.Codec, stream.Height, stream.HdrFormat,
+                                stream.DvProfile, stream.DvLevel, stream.DvBlSignalCompatibilityId, stream.DvElPresent))
+                            .ToList()))
+                    .ToList());
 
         var summaries = new Dictionary<Guid, EpisodeMediaSummaryDto>();
         foreach (var episode in episodes)
@@ -661,18 +697,25 @@ public sealed class LibraryReadService(
     /// The summary line's facts: the default version's picture and size — the file a player starts on, by
     /// the same ordering the players are handed — and the count over every version.
     /// </summary>
-    internal static EpisodeMediaSummaryDto EpisodeMediaSummary(IReadOnlyList<MediaSource> versions, Guid? defaultSourceId)
+    internal static EpisodeMediaSummaryDto EpisodeMediaSummary(IReadOnlyList<EpisodeVersionFacts> versions, Guid? defaultSourceId)
     {
-        var playing = versions.OrderByDefault(defaultSourceId)[0];
-        var picture = NativePlaybackResolver.PictureStream(playing.Streams);
+        var playing = versions.OrderByDefault(defaultSourceId, version => version.Id, version => version.CreatedAt)[0];
+        var picture = NativePlaybackResolver.PictureAmong(playing.Video, facts => facts.Codec);
         return new EpisodeMediaSummaryDto(
             versions.Count,
             picture?.Codec,
             picture?.Height,
             picture?.HdrFormat,
-            picture is null ? null : DolbyVision(picture),
+            picture is null ? null : DolbyVision(picture.DvProfile, picture.DvLevel, picture.DvBlSignalCompatibilityId, picture.DvElPresent),
             playing.SizeBytes);
     }
+
+    /// <summary>What the episode summary reads of one version: enough to pick the default and describe its picture.</summary>
+    internal sealed record EpisodeVersionFacts(Guid Id, long SizeBytes, DateTimeOffset CreatedAt, IReadOnlyList<PictureFacts> Video);
+
+    /// <summary>One video stream's picture facts, in container order — what the still-image rule and the badges read.</summary>
+    internal sealed record PictureFacts(
+        string? Codec, int? Height, string? HdrFormat, int? DvProfile, int? DvLevel, int? DvBlSignalCompatibilityId, bool? DvElPresent);
 
     private async Task<List<SeasonSummaryDto>> LoadSeasonsAsync(
         Guid seriesId, int? appUserId, CancellationToken cancellationToken)
@@ -854,9 +897,10 @@ public sealed class LibraryReadService(
     /// <summary>The record is stored as four columns and read as one object: a stream either has it whole or
     /// not at all, and a client should not have to ask four times.</summary>
     internal static DolbyVisionDto? DolbyVision(MediaStream stream) =>
-        stream.DvProfile is { } profile
-            ? new DolbyVisionDto(profile, stream.DvLevel ?? 0, stream.DvBlSignalCompatibilityId ?? 0, stream.DvElPresent ?? false)
-            : null;
+        DolbyVision(stream.DvProfile, stream.DvLevel, stream.DvBlSignalCompatibilityId, stream.DvElPresent);
+
+    private static DolbyVisionDto? DolbyVision(int? profile, int? level, int? compatibility, bool? enhancementLayer) =>
+        profile is { } recorded ? new DolbyVisionDto(recorded, level ?? 0, compatibility ?? 0, enhancementLayer ?? false) : null;
 
     private static string? DisplayTitle(MediaStream stream) => stream.StreamType switch
     {
