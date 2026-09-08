@@ -530,7 +530,7 @@ public sealed class LibraryDeleteService(
         // so the DbContext's own change-log hook never sees any of it. A purge is precisely the case a
         // native client cannot discover any other way — the row is gone and, unlike a tombstone, leaves
         // nothing behind to poll — so the notifications are appended here by hand, inside the caller's
-        // transaction. See docs/features/native-client-api/plan.md.
+        // transaction. See docs/features/native-client-api/feature.md.
         await AppendChangeLogAsync(tombstoneIds, ChangeKind.Upsert, cancellationToken);
         await AppendChangeLogAsync(purgeIds, ChangeKind.Delete, cancellationToken);
 

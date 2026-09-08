@@ -10,7 +10,7 @@ namespace MediaServer.Api.Native;
 ///
 /// The check is a positive list expressed as endpoint metadata rather than a path prefix, so a route
 /// group added later is unpublished until somebody marks it deliberately. That is the safe direction
-/// for the mistake to fall. See <c>docs/features/native-client-api/plan.md</c>.
+/// for the mistake to fall. See <c>docs/features/native-client-api/feature.md</c>.
 /// </summary>
 public sealed class PublicSurfaceAttribute : Attribute;
 

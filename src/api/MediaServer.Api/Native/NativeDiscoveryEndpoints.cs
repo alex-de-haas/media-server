@@ -17,7 +17,7 @@ namespace MediaServer.Api.Native;
 /// implementation. An earlier draft simply pointed the client at <c>/api</c>; that was rejected
 /// because it would leave a large part of the client's contract outside the OpenAPI document, publish
 /// an internal BFF shape as a public one, and make every change to a web-facing route a potential
-/// client break. See <c>docs/features/native-client-api/plan.md</c>.
+/// client break. See <c>docs/features/native-client-api/feature.md</c>.
 /// </summary>
 public static class NativeDiscoveryEndpoints
 {

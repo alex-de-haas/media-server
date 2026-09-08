@@ -13,7 +13,7 @@ namespace MediaServer.Api.Native;
 /// The first-party client surface, versioned in the path so a client pinned to v1 keeps working when
 /// v2 appears. Authentication is Hosty's own — the app writes none — so these routes sit on the same
 /// scheme the rest of <c>/api</c> uses, and only the bootstrap route is anonymous.
-/// See <c>docs/features/native-client-api/plan.md</c>.
+/// See <c>docs/features/native-client-api/feature.md</c>.
 /// </summary>
 public static class NativeEndpoints
 {

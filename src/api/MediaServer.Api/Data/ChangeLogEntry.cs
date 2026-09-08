@@ -10,7 +10,7 @@ namespace MediaServer.Api.Data;
 /// mutation they describe — the <c>SaveChanges</c> override for tracked writes, and explicitly inside
 /// the transaction for the bulk-delete paths that bypass the change tracker.
 ///
-/// See <c>docs/features/native-client-api/plan.md</c>.
+/// See <c>docs/features/native-client-api/feature.md</c>.
 /// </summary>
 public sealed class ChangeLogEntry
 {
