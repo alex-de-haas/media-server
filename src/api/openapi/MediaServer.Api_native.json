@@ -1746,6 +1746,13 @@
           },
           "userData": {
             "$ref": "#/components/schemas/UserItemDataDto"
+          },
+          "posterItemId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
           }
         }
       },

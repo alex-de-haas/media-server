@@ -899,3 +899,28 @@ extension HomeStoreTests {
         #expect(store.rails[.recommendations]?.state == .loaded)
     }
 }
+
+
+extension HomeStoreTests {
+    @Test("Episode artwork owner is independent of its series navigation target")
+    func episodeArtworkOwnership() throws {
+        let server = URL(string: "https://media.example/")!
+        let decoder = JSONDecoder()
+        func card(_ extra: String, poster: String = "\"https://cdn/episode.jpg\"") throws -> HomeCard {
+            let json = """
+            {"id":"episode","kind":"Episode","navId":"series","navKind":"Series","title":"Show",
+             "posterUrl":\(poster)\(extra)}
+            """
+            return try #require(HomeCard(decoder.decode(Components.Schemas.LibraryRailItemDto.self, from: Data(json.utf8))))
+        }
+        let episode = try card(",\"posterItemId\":\"episode\"")
+        #expect(episode.destination.id == "series")
+        #expect(episode.artworkURL(on: server)?.path == "/native/v1/items/episode/images/primary")
+        let series = try card(",\"posterItemId\":\"series\"")
+        #expect(series.artworkURL(on: server)?.path == "/native/v1/items/series/images/primary")
+        let oldServer = try card("")
+        #expect(oldServer.artworkURL(on: server)?.path == "/native/v1/items/series/images/primary")
+        let missing = try card("", poster: "null")
+        #expect(missing.artworkURL(on: server) == nil)
+    }
+}

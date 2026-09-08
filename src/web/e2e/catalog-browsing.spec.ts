@@ -111,3 +111,24 @@ test("admin opens a catalog directly in its matching media page", async ({ page 
 
   await expect(page).toHaveURL(`/series?catalog=${ANIME}`);
 });
+
+
+test("library posters use compact accessible captions and preserve artwork fallbacks", async ({ page }) => {
+  await setupApp(page, { library: [
+    { ...aMovie("m1", "Arrival"), posterUrl: "/poster.svg", videoFormats: ["HDR10", "Dolby Vision"] },
+    { ...aMovie("m2", "Missing artwork"), year: null, videoFormats: [] },
+    { ...aSeries("s1", "Severance"), videoFormats: [] },
+  ] });
+  await page.route("**/poster.svg", route => route.fulfill({ contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#345"/></svg>' }));
+  await page.goto("/movies");
+  const card = page.getByRole("link", { name: /Arrival/ });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("2016 · HDR10 · Dolby Vision");
+  await expect(card.getByText("Arrival", { exact: true })).toHaveClass("sr-only");
+  await expect(page.getByRole("link", { name: /Missing artwork/ }).locator('[aria-hidden]')).toContainText("Missing artwork");
+  await page.goto("/series");
+  const series = page.getByRole("link", { name: /Severance/ });
+  await expect(series).toContainText("2022");
+  await expect(series).not.toContainText(" · ");
+});

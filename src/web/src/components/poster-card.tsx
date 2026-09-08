@@ -28,8 +28,8 @@ export function parsePersonId(id: string): { provider: string; providerId: strin
   return { provider: id.slice(0, dash), providerId: id.slice(dash + 1) };
 }
 
-// A poster tile used in both the library grids and the Home rails. The title sits under the art with
-// the type·year caption beneath it; the amber accent carries the resume bar and the watched badge.
+// A poster tile used in library grids and Home rails. Library grids hide the title caption;
+// other surfaces retain it. The amber accent carries the resume bar and watched badge.
 //
 // It leads somewhere or it does something: `href` makes it a link to a detail page, `onSelect` a button
 // that opens something in place. A removed title takes the second form — it has no page to go to, only
@@ -44,6 +44,7 @@ type PosterCardProps = {
   userData: UserItemData | null;
   badge?: string;
   dimmed?: boolean;
+  showTitle?: boolean;
 } & ({ href: string; onSelect?: never } | { href?: never; onSelect: () => void });
 
 export function PosterCard({
@@ -55,6 +56,7 @@ export function PosterCard({
   userData,
   badge,
   dimmed = false,
+  showTitle = true,
 }: PosterCardProps) {
   const resume =
     !userData?.played && userData?.playedPercentage ? Math.min(userData.playedPercentage, 100) : null;
@@ -67,18 +69,17 @@ export function PosterCard({
         }`}
       >
         {posterUrl ? (
-          // Decorative: the title below the art already names the link, and an alt repeating it would make
-          // a screen reader announce the same name twice.
+          // Decorative: the visible or screen-reader-only title already names the link.
           // eslint-disable-next-line @next/next/no-img-element
           <img src={posterUrl} alt="" className="h-full w-full object-cover" />
         ) : (
-          // The title is rendered below the card, so the empty art says only that art is what is missing —
-          // and says it to the eye alone: inside the link, the words would join the link's accessible name.
+          // Without a visible caption, the placeholder identifies the title. The separate title
+          // still names the link for assistive technology.
           <div
             aria-hidden
             className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-xs"
           >
-            No poster
+            {showTitle ? "No poster" : title}
           </div>
         )}
         {userData?.played && (
@@ -100,14 +101,12 @@ export function PosterCard({
           </span>
         )}
       </div>
-      {/* Poster art alone identifies a title only for someone who recognises it, so the name is spelled out
-          under the art, with the type·year caption below it. `title` carries the full text for a name the
-          single line has to truncate. */}
+      {/* Keep the title accessible even when the library hides its visual caption. */}
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate text-[13px] font-medium" title={title}>
+        <span className={showTitle ? "truncate text-[13px] font-medium" : "sr-only"} title={title}>
           {title}
         </span>
-        {subtitle && <span className="text-muted-foreground truncate text-xs">{subtitle}</span>}
+        {subtitle && <span className={showTitle ? "text-muted-foreground truncate text-xs" : "text-muted-foreground text-xs leading-relaxed"}>{subtitle}</span>}
       </div>
     </>
   );

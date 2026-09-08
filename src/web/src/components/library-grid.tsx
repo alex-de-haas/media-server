@@ -139,7 +139,8 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
                 key={item.id}
                 href={detailHref(item.kind, item.id, effectiveCatalogId)}
                 title={item.title}
-                subtitle={`${item.kind}${item.year ? ` · ${item.year}` : ""}`}
+                showTitle={false}
+                subtitle={[item.year, ...(item.videoFormats ?? [])].filter((value) => value != null).join(" · ")}
                 posterUrl={item.posterUrl}
                 userData={item.userData}
               />

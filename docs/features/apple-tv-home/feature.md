@@ -23,6 +23,9 @@ the same row are ignored. Cancellation resets its state so a later visit can ret
 Cards use authenticated local artwork, a readable missing-artwork title, accessible
 names, native directional focus and the existing detail navigation. Episode cards
 retain their episode identity and label but open the owning series detail screen;
+`posterItemId` separately identifies the selected artwork owner, preserving episode
+poster fallback when the series has no poster. Older responses without this optional
+field retain navigation-owner artwork behavior;
 this feature does not add direct episode playback or redesign series detail.
 Recommendations open the local movie/series detail and show the available reason.
 Home cards retain visible names alongside resume/episode/recommendation captions.

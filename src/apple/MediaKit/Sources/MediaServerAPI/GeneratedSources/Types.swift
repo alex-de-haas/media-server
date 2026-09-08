@@ -1033,6 +1033,8 @@ public enum Components {
             public var posterUrl: Swift.String?
             /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/userData`.
             public var userData: Components.Schemas.UserItemDataDto?
+            /// - Remark: Generated from `#/components/schemas/LibraryRailItemDto/posterItemId`.
+            public var posterItemId: Swift.String?
             /// Creates a new `LibraryRailItemDto`.
             ///
             /// - Parameters:
@@ -1044,6 +1046,7 @@ public enum Components {
             ///   - subtitle:
             ///   - posterUrl:
             ///   - userData:
+            ///   - posterItemId:
             public init(
                 id: Swift.String,
                 kind: Swift.String,
@@ -1052,7 +1055,8 @@ public enum Components {
                 title: Swift.String,
                 subtitle: Swift.String? = nil,
                 posterUrl: Swift.String? = nil,
-                userData: Components.Schemas.UserItemDataDto? = nil
+                userData: Components.Schemas.UserItemDataDto? = nil,
+                posterItemId: Swift.String? = nil
             ) {
                 self.id = id
                 self.kind = kind
@@ -1062,6 +1066,7 @@ public enum Components {
                 self.subtitle = subtitle
                 self.posterUrl = posterUrl
                 self.userData = userData
+                self.posterItemId = posterItemId
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -1072,6 +1077,7 @@ public enum Components {
                 case subtitle
                 case posterUrl
                 case userData
+                case posterItemId
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaKind`.

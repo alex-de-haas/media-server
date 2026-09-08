@@ -42,8 +42,7 @@ struct HomeView: View {
                     LazyHStack(alignment: .top, spacing: 48) {
                         ForEach(rail.items) { card in
                             PosterCard(title: card.destination.title, subtitle: card.subtitle) {
-                                ServerArtwork(url: card.destination.hasArtwork
-                                    ? card.destination.artworkURL(on: library.server) : nil,
+                                ServerArtwork(url: card.artworkURL(on: library.server),
                                     loader: session.artwork,
                                     symbol: card.destination.kind == .movie ? "film" : "tv",
                                     fallbackTitle: card.destination.title)

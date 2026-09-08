@@ -18,11 +18,19 @@ public struct HomeCard: Identifiable, Equatable, Sendable {
     public let id: String
     public let destination: LibraryTitle
     public let subtitle: String
+    public let artworkItemId: String?
+
+    /// Artwork ownership is independent of the destination (an episode may supply a series card).
+    public func artworkURL(on server: URL) -> URL? {
+        guard let artworkItemId else { return nil }
+        return URL(string: "native/v1/items/\(artworkItemId)/images/primary", relativeTo: server)?.absoluteURL
+    }
 
     init?(_ dto: Components.Schemas.LibraryRailItemDto) {
         guard let destination = LibraryTitle(.init(id: dto.navId, catalogId: "", kind: dto.navKind,
             title: dto.title, posterUrl: dto.posterUrl)) else { return nil }
         self.id = dto.id
+        self.artworkItemId = dto.posterUrl == nil ? nil : (dto.posterItemId ?? dto.navId)
         self.destination = destination
         let seconds = Double(dto.userData?.playbackPositionTicks ?? 0) / 10_000_000
         self.subtitle = [dto.subtitle, seconds > 0 ? "Resume from \(PlaybackPosition.label(seconds))" : nil]
@@ -34,6 +42,7 @@ public struct HomeCard: Identifiable, Equatable, Sendable {
               let destination = LibraryTitle(.init(id: id, catalogId: "", kind: dto.kind,
                 title: dto.title, year: dto.year, posterUrl: dto.posterUrl)) else { return nil }
         self.id = id
+        self.artworkItemId = dto.posterUrl == nil ? nil : id
         self.destination = destination
         let detail = dto.reason?.detail
         switch dto.reason?.kind {
