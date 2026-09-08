@@ -430,7 +430,9 @@ public sealed class CatalogService(
 
     private CatalogResponse ToResponse(Catalog catalog)
     {
-        var online = filesystem.DirectoryExists(catalog.Root);
+        // A missing bind mount can leave an empty root behind. Only a verified recovery clears
+        // the persisted offline marker; directory existence alone must not report it online.
+        var online = catalog.OfflineSince is null && filesystem.DirectoryExists(catalog.Root);
         var freeBytes = online ? filesystem.GetAvailableFreeBytes(catalog.Root) : 0;
         return CatalogResponse.From(catalog, freeBytes, online, IsUnanchored(catalog));
     }

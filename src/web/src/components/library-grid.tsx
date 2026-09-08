@@ -143,7 +143,7 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
           <AlertTriangle aria-hidden />
           <AlertTitle>Storage unavailable</AlertTitle>
           <AlertDescription>
-            <ul className="list-inside list-disc">
+            <ul className="mb-2 list-inside list-disc">
               {unavailableCatalogs.map((catalog) => (
                 <li key={catalog.id}>
                   {catalog.name}: {catalog.unanchored ? "storage location needs to be reconnected." : "storage is offline."}

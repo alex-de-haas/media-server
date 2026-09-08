@@ -162,7 +162,10 @@ for the pre-download space check (see
   matching the media kind and active catalog filter, even when there is only one
   catalog. Titles remain browsable. Admins receive a link to Settings → Catalogs;
   regular users see the explanation without management controls. Catalog health
-  refreshes every five seconds, clearing the alert when storage recovers.
+  refreshes every five seconds. The API reports a catalog online only when its
+  root exists and its persisted `OfflineSince` marker is clear. An empty root
+  left by a missing bind mount does not clear the alert; recovery waits for the
+  health check or scan to verify storage and clear that marker.
 
 ## Item Model
 
