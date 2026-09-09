@@ -138,30 +138,56 @@ public static class ImageSelection
     /// The best poster per item as a remote URL — the shape every grid, rail and calendar needs. Ranked,
     /// grouped and reduced to one row per item in the database, so a listing does not transfer every cached
     /// language variant of every poster; the item's own pin is joined in rather than fetched separately.
-    /// Chunked because the id list rides as SQL parameters, which SQLite caps at 999.
     /// </summary>
-    public static async Task<Dictionary<Guid, string>> BestPosterUrlsAsync(
+    public static Task<Dictionary<Guid, string>> BestPosterUrlsAsync(
         this MediaServerDbContext database,
         IReadOnlyList<Guid> itemIds,
         string displayLanguage,
+        CancellationToken cancellationToken) =>
+        database.BestUrlsAsync(itemIds, ImageType.Primary, displayLanguage, cancellationToken);
+
+    /// <summary>
+    /// The best backdrop per item as a remote URL, by the backdrop ranking (textless first). This is how a
+    /// listing reads episode stills: the provider files a still under the backdrop role, and a season's
+    /// worth of rows wants one frame each, not every cached candidate. Nothing is pinned here — only
+    /// posters are.
+    /// </summary>
+    public static Task<Dictionary<Guid, string>> BestBackdropUrlsAsync(
+        this MediaServerDbContext database,
+        IReadOnlyList<Guid> itemIds,
+        string displayLanguage,
+        CancellationToken cancellationToken) =>
+        database.BestUrlsAsync(itemIds, ImageType.Backdrop, displayLanguage, cancellationToken);
+
+    /// <summary>
+    /// One remote URL per item for <paramref name="type"/>, chosen in the database. Chunked because the id
+    /// list rides as SQL parameters, which SQLite caps at 999.
+    /// </summary>
+    private static async Task<Dictionary<Guid, string>> BestUrlsAsync(
+        this MediaServerDbContext database,
+        IReadOnlyList<Guid> itemIds,
+        ImageType type,
+        string displayLanguage,
         CancellationToken cancellationToken)
     {
-        var posters = new Dictionary<Guid, string>();
+        var urls = new Dictionary<Guid, string>();
         if (itemIds.Count == 0)
         {
-            return posters;
+            return urls;
         }
 
-        var (tierDisplay, tierEnglish, tierOther, tierUntagged) = Tiers.Poster;
+        var (tierDisplay, tierEnglish, tierOther, tierUntagged) = TiersFor(type);
         var display = PrimarySubtag(displayLanguage);
+        // The operator's pin is a poster's: a backdrop or logo never outranks the ranking by being pinned.
+        var pinnable = type == ImageType.Primary;
 
         foreach (var chunk in itemIds.Chunk(ChunkSize))
         {
             // The tier chain is inlined rather than taken from Rank because it has to be part of one
             // translatable expression tree together with the pin, which lives on the item rather than the
-            // image. Tiers.Poster keeps the values themselves in one place.
+            // image. TiersFor keeps the values themselves in one place.
             var rows = await database.ImageAssets.AsNoTracking()
-                .Where(image => chunk.Contains(image.MediaItemId) && image.ImageType == ImageType.Primary)
+                .Where(image => chunk.Contains(image.MediaItemId) && image.ImageType == type)
                 .Join(
                     database.MediaItems.AsNoTracking(),
                     image => image.MediaItemId,
@@ -172,7 +198,7 @@ public static class ImageSelection
                         image.RemotePath,
                         image.SortOrder,
                         image.Tag,
-                        Tier = item.PreferredPosterTag != null && image.Tag == item.PreferredPosterTag ? Pinned
+                        Tier = pinnable && item.PreferredPosterTag != null && image.Tag == item.PreferredPosterTag ? Pinned
                             : image.Language == null || image.Language == "" || image.Language!.ToLower() == NoLanguage ? tierUntagged
                             : image.Language!.ToLower() == display ? tierDisplay
                             : image.Language!.ToLower() == English ? tierEnglish
@@ -196,11 +222,11 @@ public static class ImageSelection
 
             foreach (var row in rows)
             {
-                posters[row.MediaItemId] = row.Url;
+                urls[row.MediaItemId] = row.Url;
             }
         }
 
-        return posters;
+        return urls;
     }
 
     /// <summary>SQLite's parameter ceiling is 999; the id list rides as parameters in the IN-clause.</summary>

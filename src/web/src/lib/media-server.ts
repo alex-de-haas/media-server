@@ -605,6 +605,10 @@ export interface Episode {
   userData: UserItemData | null;
   /** What is on disk for this episode — the Episodes tab's summary line. Null when it has no source. */
   media: EpisodeMediaSummary | null;
+  /** When the episode first aired, as the provider records it; null when it has no metadata yet. */
+  airDate: string | null;
+  /** The episode's still — its 16:9 preview frame — as a remote URL; null when none was fetched. */
+  stillUrl: string | null;
 }
 
 /**

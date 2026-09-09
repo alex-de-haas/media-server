@@ -30,6 +30,20 @@ export function formatRuntime(ticks: number | null | undefined): string | null {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+// Pinned to "en" and UTC so the server and the browser format identically (a hydration mismatch
+// otherwise), and because an air date is a calendar day: read in a zone west of UTC, midnight UTC would
+// print as the day before.
+const airDateFormatter = new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+
+/** An episode's air date as "Feb 17, 2022". Null when there is none or it does not parse. */
+export function formatAirDate(iso: string | null | undefined): string | null {
+  if (!iso) {
+    return null;
+  }
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : airDateFormatter.format(date);
+}
+
 /**
  * The zero-padded episode code shown beside an episode title: "S01E03", or "S01E01-E02" when a single
  * file holds a consecutive range (a "double episode" — one library item, no separate item for the second

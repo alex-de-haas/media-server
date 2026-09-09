@@ -1,7 +1,7 @@
 # Episode Media
 
 Created: 2026-09-08
-Updated: 2026-09-08
+Updated: 2026-09-09
 
 An episode has the media surface a movie has — its versions, the tracks inside
 them, the sidecars beside them, and every conversion the
@@ -43,7 +43,9 @@ has a version at…".
 
 ## The Episodes tab
 
-- Every episode row carries a **media summary** on its line: the picture's codec and
+- Every episode row leads with the episode itself — its still, title, air date,
+  runtime and synopsis, from [metadata](../metadata/feature.md#episode-details-and-stills) —
+  and carries a **media summary** beneath them: the picture's codec and
   height, its dynamic-range badges in the vocabulary the version cards use, the
   file's size, and the version count when it is more than one —
   `HEVC 2160p · Dolby Vision 7 · 38.2 GB · 2 versions`. With several versions the

@@ -275,6 +275,29 @@ public sealed class LibraryReadServiceTests : IDisposable
         Assert.Equal(2, bySeason.Single(episode => episode.Id == _episodeId).Media!.VersionCount);
     }
 
+    [Fact]
+    public async Task Episodes_carry_their_textless_still_and_none_without_one()
+    {
+        using (var context = _db.Create())
+        {
+            // A still is filed under the backdrop role. Ranked as a backdrop: the frame carrying no text wins
+            // over the display language's, whatever the provider's order — the row draws its own title.
+            context.ImageAssets.AddRange(
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _episodeId, ImageType = ImageType.Backdrop, Language = "en", Provider = "tmdb", RemotePath = "https://image.tmdb.org/still-en.jpg", Tag = "stillen", SortOrder = 0 },
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _episodeId, ImageType = ImageType.Backdrop, Language = null, Provider = "tmdb", RemotePath = "https://image.tmdb.org/still.jpg", Tag = "stillnull", SortOrder = 1 },
+                // A poster on the episode is not a still and must not stand in for one.
+                new ImageAsset { Id = Guid.NewGuid(), MediaItemId = _episode2Id, ImageType = ImageType.Primary, Language = null, Provider = "tmdb", RemotePath = "https://image.tmdb.org/poster.jpg", Tag = "poster", SortOrder = 0 });
+            context.SaveChanges();
+        }
+
+        var episodes = await _library.GetEpisodesAsync(_seriesId, seasonId: null, appUserId: null, CancellationToken.None);
+
+        Assert.Equal("https://image.tmdb.org/still.jpg", episodes.Single(episode => episode.Id == _episodeId).StillUrl);
+        var second = episodes.Single(episode => episode.Id == _episode2Id);
+        Assert.Null(second.StillUrl);
+        Assert.Equal("https://image.tmdb.org/poster.jpg", second.PosterUrl);
+    }
+
     /// <summary>One version of an episode with a single picture stream, added to the tracked context (not yet saved).</summary>
     private Guid AddEpisodeVersion(
         Guid episodeId, string fileName, string codec, int height, string? hdrFormat,

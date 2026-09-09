@@ -217,7 +217,12 @@ public sealed record EpisodeDto(
     UserItemDataDto? UserData,
     // What is on disk for this episode — the Episodes tab's summary line. Null when it has no source.
     EpisodeMediaSummaryDto? Media,
-    DateTimeOffset? AirDate = null);
+    DateTimeOffset? AirDate = null,
+    // The episode's still — the frame the provider files under the backdrop role — as a remote URL, ranked
+    // by the backdrop rule (textless first). Null for an episode never enriched with one; the web row then
+    // shows a placeholder rather than the show's art. The Apple client reads the same frame through the
+    // authenticated native image route instead (NativeEpisodeDto.Still).
+    string? StillUrl = null);
 
 /// <summary>
 /// An episode's media at a glance. The codec, height, dynamic range and size are the <b>default</b>

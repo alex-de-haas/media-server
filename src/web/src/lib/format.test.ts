@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dolbyVisionLabel, dolbyVisionNote, dynamicRangeBadges, episodeLabel, episodeMediaLine, objectAudioFormat, pictureStream, reencodeDynamicRangeWarning, versionStem } from "@/lib/format";
+import { dolbyVisionLabel, dolbyVisionNote, dynamicRangeBadges, episodeLabel, episodeMediaLine, formatAirDate, objectAudioFormat, pictureStream, reencodeDynamicRangeWarning, versionStem } from "@/lib/format";
 import type { EpisodeMediaSummary, MediaStream } from "@/lib/media-server";
 
 describe("objectAudioFormat", () => {
@@ -22,6 +22,21 @@ describe("objectAudioFormat", () => {
     expect(objectAudioFormat(null)).toBeNull();
     expect(objectAudioFormat(undefined)).toBeNull();
     expect(objectAudioFormat("")).toBeNull();
+  });
+});
+
+describe("formatAirDate", () => {
+  it("prints the provider's calendar day, not the viewer's", () => {
+    // The API sends midnight UTC; a viewer west of Greenwich must still read the 17th, not the 16th.
+    expect(formatAirDate("2022-02-17T00:00:00+00:00")).toBe("Feb 17, 2022");
+    expect(formatAirDate("2022-02-17T00:00:00Z")).toBe("Feb 17, 2022");
+  });
+
+  it("says nothing for a missing or unparseable date", () => {
+    expect(formatAirDate(null)).toBeNull();
+    expect(formatAirDate(undefined)).toBeNull();
+    expect(formatAirDate("")).toBeNull();
+    expect(formatAirDate("not a date")).toBeNull();
   });
 });
 
