@@ -34,7 +34,7 @@ private struct CinemaPreviewTransport: ClientTransport {
             let season = path.contains("season-2") ? 2 : path.contains("season-0") ? 0 : 1
             json = "[" + (1...18).map { number in
                 """
-                {"episode":{"id":"episode-\(season)-\(number)","title":"\(number == 1 ? "The Lighthouse · S\(season)" : "The Northern Passage \(number)")","seasonNumber":\(season),"episodeNumber":\(number),"overview":"A mysterious signal reaches the coast. The crew follows its trail across the northern sea.","userData":{"key":"e\(number)","playbackPositionTicks":\(number == 1 ? 12000000000 : 0),"playCount":0,"isFavorite":false,"played":\(number == 2)}},"durationTicks":28800000000}
+                {"episode":{"id":"episode-\(season)-\(number)","title":"\(number == 1 ? "The Lighthouse · S\(season)" : "The Northern Passage \(number)")","seasonNumber":\(season),"episodeNumber":\(number),"airDate":"2026-09-01T00:00:00Z","media":{"versionCount":2,"videoCodec":"hevc","height":2160,"hdrFormat":"Dolby Vision · HDR10","dolbyVision":{"profile":8,"level":6,"blCompatibilityId":1,"enhancementLayer":false},"sizeBytes":26000000000,"videoFormats":\(number % 3 == 1 ? #"["HDR10","Dolby Vision"]"# : number % 3 == 2 ? #"["HDR10"]"# : "[]")},"overview":"A mysterious signal reaches the coast. The crew follows its trail across the northern sea.","userData":{"key":"e\(number)","playbackPositionTicks":\(number == 1 ? 12000000000 : 0),"playCount":0,"isFavorite":false,"played":\(number == 2)}},"durationTicks":28800000000}
                 """
             }.joined(separator: ",") + "]"
         } else if path.contains("/items/series-0") {

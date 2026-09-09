@@ -765,6 +765,8 @@ public enum Components {
             public var dolbyVision: Components.Schemas.DolbyVisionDto?
             /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/sizeBytes`.
             public var sizeBytes: Swift.Int64
+            /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/videoFormats`.
+            public var videoFormats: [Swift.String]?
             /// Creates a new `EpisodeMediaSummaryDto`.
             ///
             /// - Parameters:
@@ -774,13 +776,15 @@ public enum Components {
             ///   - hdrFormat:
             ///   - dolbyVision:
             ///   - sizeBytes:
+            ///   - videoFormats:
             public init(
                 versionCount: Swift.Int32,
                 videoCodec: Swift.String? = nil,
                 height: Swift.Int32? = nil,
                 hdrFormat: Swift.String? = nil,
                 dolbyVision: Components.Schemas.DolbyVisionDto? = nil,
-                sizeBytes: Swift.Int64
+                sizeBytes: Swift.Int64,
+                videoFormats: [Swift.String]? = nil
             ) {
                 self.versionCount = versionCount
                 self.videoCodec = videoCodec
@@ -788,6 +792,7 @@ public enum Components {
                 self.hdrFormat = hdrFormat
                 self.dolbyVision = dolbyVision
                 self.sizeBytes = sizeBytes
+                self.videoFormats = videoFormats
             }
             public enum CodingKeys: String, CodingKey {
                 case versionCount
@@ -796,6 +801,7 @@ public enum Components {
                 case hdrFormat
                 case dolbyVision
                 case sizeBytes
+                case videoFormats
             }
         }
         /// - Remark: Generated from `#/components/schemas/LibraryDetailDto`.

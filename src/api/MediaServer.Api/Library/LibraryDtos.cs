@@ -226,7 +226,8 @@ public sealed record EpisodeDto(
 
 /// <summary>
 /// An episode's media at a glance. The codec, height, dynamic range and size are the <b>default</b>
-/// version's — the file a player starts on — while <see cref="VersionCount"/> counts every version. The
+/// version's — the file a player starts on — while <see cref="VersionCount"/> counts every version
+/// and <see cref="VideoFormats"/> lists dynamic-range formats across all versions. The
 /// picture is chosen by the rule every other surface uses, so a cover a muxer wrote as a video track is
 /// passed over. Everything a version card shows is a click away (<c>GET /api/library/{episodeId}</c>);
 /// this is what a season reads at a glance.
@@ -237,7 +238,8 @@ public sealed record EpisodeMediaSummaryDto(
     int? Height,
     string? HdrFormat,
     DolbyVisionDto? DolbyVision,
-    long SizeBytes);
+    long SizeBytes,
+    IReadOnlyList<string>? VideoFormats = null);
 
 /// <summary>
 /// A leaf item (movie or episode) for the Home rails (Continue Watching / Next Up). Navigation resolves

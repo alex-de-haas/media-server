@@ -239,7 +239,7 @@ public sealed class LibraryReadServiceTests : IDisposable
             dvProfile: 7, dvCompatibility: 6, dvEnhancement: true, sizeBytes: 40_000_000_000, createdAt: DateTimeOffset.UtcNow.AddDays(-1));
         _context.MediaStreams.Add(new MediaStream
         {
-            Id = Guid.NewGuid(), MediaSourceId = remux, StreamType = StreamType.Video, Index = -1, Codec = "mjpeg", Height = 600,
+            Id = Guid.NewGuid(), MediaSourceId = remux, StreamType = StreamType.Video, Index = -1, Codec = "mjpeg", Height = 600, HdrFormat = "HDR10+",
         });
         var encode = AddEpisodeVersion(_episodeId, "s01e01 - HEVC 1080p.mkv", "hevc", 1080, null, sizeBytes: 2_000_000_000);
         await _context.SaveChangesAsync();
@@ -253,6 +253,7 @@ public sealed class LibraryReadServiceTests : IDisposable
         Assert.Equal("Dolby Vision · HDR10", pilot.HdrFormat);
         Assert.Equal(new DolbyVisionDto(7, 0, 6, true), pilot.DolbyVision);
         Assert.Equal(40_000_000_000, pilot.SizeBytes);
+        Assert.Equal(new[] { "HDR10", "Dolby Vision" }, pilot.VideoFormats);
         // An episode with no file on disk says so by carrying nothing, rather than a summary full of nulls.
         Assert.Null(episodes.Single(episode => episode.Id == _episode2Id).Media);
 
@@ -269,10 +270,34 @@ public sealed class LibraryReadServiceTests : IDisposable
         Assert.Null(pinned.HdrFormat);
         Assert.Null(pinned.DolbyVision);
         Assert.Equal(2_000_000_000, pinned.SizeBytes);
+        Assert.Equal(pilot.VideoFormats, pinned.VideoFormats);
 
         // Scoped to the season, the same summaries come back.
         var bySeason = await _library.GetEpisodesAsync(_seriesId, seasonId: _seasonId, appUserId: null, CancellationToken.None);
         Assert.Equal(2, bySeason.Single(episode => episode.Id == _episodeId).Media!.VersionCount);
+        Assert.Equal(pilot.VideoFormats, bySeason.Single(episode => episode.Id == _episodeId).Media!.VideoFormats);
+    }
+
+    [Fact]
+    public async Task Sdr_episodes_do_not_advertise_cover_or_external_stream_formats()
+    {
+        var source = AddEpisodeVersion(_episodeId, "s01e01.mkv", "h264", 1080, "SDR");
+        _context.MediaStreams.AddRange(
+            new MediaStream
+            {
+                Id = Guid.NewGuid(), MediaSourceId = source, StreamType = StreamType.Video,
+                Index = -1, Codec = "mjpeg", HdrFormat = "Dolby Vision",
+            },
+            new MediaStream
+            {
+                Id = Guid.NewGuid(), MediaSourceId = source, StreamType = StreamType.Video,
+                Index = -2, Codec = "hevc", HdrFormat = "HDR10", IsExternal = true,
+            });
+        await _context.SaveChangesAsync();
+
+        var episodes = await _library.GetEpisodesAsync(_seriesId, null, null, CancellationToken.None);
+
+        Assert.Empty(episodes.Single(episode => episode.Id == _episodeId).Media!.VideoFormats!);
     }
 
     [Fact]

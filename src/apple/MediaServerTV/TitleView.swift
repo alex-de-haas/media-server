@@ -425,7 +425,7 @@ struct TitleView: View {
                         Image(systemName: version.id == chosenVersion ? "checkmark.circle.fill" : "circle")
                         VStack(alignment: .leading, spacing: 10) {
                             Text(version.versionName.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } ?? "Original")
-                            Text([version.container.uppercased(), version.video?.codec?.uppercased(), version.sizeDescription]
+                            Text([version.container.uppercased(), version.video?.codec?.uppercased(), version.video?.resolutionLabel, version.sizeDescription]
                                 .compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -641,6 +641,14 @@ private struct SeriesEpisodesView: View {
             ServerArtwork(url: episode.artworkURL(on: library.server, fallback: detail.backdropURL(on: library.server)),
                           loader: loader, symbol: "tv", fallbackTitle: episode.title)
                 .frame(width: 340, height: 191)
+                .overlay(alignment: .topTrailing) {
+                    if let format = episode.videoFormatBadge {
+                        Text(format).font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 5))
+                            .padding(10)
+                    }
+                }
                 .overlay(alignment: .bottomLeading) {
                     if let seconds = episode.durationSeconds {
                         Text(Duration.seconds(seconds).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))

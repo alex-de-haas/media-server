@@ -698,7 +698,7 @@ public sealed class LibraryReadService(
 
     /// <summary>
     /// The summary line's facts: the default version's picture and size — the file a player starts on, by
-    /// the same ordering the players are handed — and the count over every version.
+    /// the same ordering the players are handed — plus the count and dynamic-range formats over every version.
     /// </summary>
     internal static EpisodeMediaSummaryDto EpisodeMediaSummary(IReadOnlyList<EpisodeVersionFacts> versions, Guid? defaultSourceId)
     {
@@ -710,7 +710,9 @@ public sealed class LibraryReadService(
             picture?.Height,
             picture?.HdrFormat,
             picture is null ? null : DolbyVision(picture.DvProfile, picture.DvLevel, picture.DvBlSignalCompatibilityId, picture.DvElPresent),
-            playing.SizeBytes);
+            playing.SizeBytes,
+            CardVideoFormats(versions.Select(version =>
+                NativePlaybackResolver.PictureAmong(version.Video, facts => facts.Codec)?.HdrFormat)));
     }
 
     /// <summary>What the episode summary reads of one version: enough to pick the default and describe its picture.</summary>

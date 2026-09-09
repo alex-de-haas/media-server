@@ -42,6 +42,11 @@ public struct TitleTrack: Identifiable, Equatable, Sendable {
     public let codec: String?
     public let title: String?
     public let channels: Int?
+    public let height: Int?
+
+    public var resolutionLabel: String? {
+        height.flatMap { $0 > 0 ? "\($0)p" : nil }
+    }
 
     /// Language leads so identically named "full" or "forced" tracks remain distinguishable.
     public func menuTitle(locale: Locale = .current) -> String {
@@ -280,6 +285,7 @@ extension TitleTrack {
         self.codec = dto.codec
         self.title = dto.title?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.channels = dto.channels.map(Int.init)
+        self.height = dto.height.map(Int.init)
         self.hdrFormat = dto.hdrFormat
         self.dolbyVision = dto.dolbyVision.map {
             DolbyVisionDetail(

@@ -1462,6 +1462,15 @@
               "string"
             ],
             "format": "int64"
+          },
+          "videoFormats": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
