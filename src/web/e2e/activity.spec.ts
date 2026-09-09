@@ -609,9 +609,21 @@ test("admin switches the VPN profile from the activity header", async ({ page })
   });
 
   await page.goto("/activity");
-  await page.getByText("VPN · nl-ams · NL").click();
-
+  const trigger = page.getByRole("button", { name: /Traffic egresses through the VPN/ });
+  await expect(trigger).toHaveJSProperty("tagName", "BUTTON");
+  await expect(trigger).toHaveAttribute("type", "button");
   const menu = page.getByRole("menu");
+
+  for (const key of ["Enter", "Space"]) {
+    await trigger.focus();
+    await trigger.press(key);
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+  }
+
+  await trigger.click();
   await expect(menu).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: /nl-ams/ })).toHaveAttribute("aria-disabled", "true");
   await expect(menu.getByRole("menuitem", { name: /de-fra/ })).toBeVisible();

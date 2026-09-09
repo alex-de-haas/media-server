@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-09-08
+Updated: 2026-09-09
 
 ## Description
 
@@ -134,7 +134,8 @@ up, `VPN · switching…` (amber) while a switch is in flight, and `VPN off` whi
 the tooltip adds the exit IP, the tunnel address, and the last error. The presentation
 rules live in `@/lib/vpn` (`vpnKind` / `vpnLabel` / `vpnTooltip`).
 
-For an **admin** the pill is also a menu. Opening it lists the engine's profiles
+For an **admin** the pill is a native button that opens a menu by click, Enter, or
+Space; Escape closes the menu and returns focus to the button. Opening it lists the engine's profiles
 (`GET /api/vpn/profiles`, fetched fresh on every open because the engine lists its
 folder live) with the active one checked and disabled, and choosing another sends
 `PUT /api/vpn/profile`. The engine only records the choice and answers `202` with its
@@ -419,7 +420,8 @@ Backend tests should use xUnit. Required coverage:
 - `vpnStatusChanged` publishes the profile trio in camelCase.
 - Web (vitest): `vpnKind` / `vpnLabel` / `vpnTooltip` for up, down and switching,
   with and without a profile, an exit, and a last error. E2E: an admin opens the
-  picker, the active profile is checked and disabled, choosing another sends the
+  picker by click, Enter, and Space; Escape returns focus to its native button;
+  the active profile is checked and disabled, choosing another sends the
   `PUT`; a user gets the indicator without a menu.
 - Free-space pre-check refuses oversized `.torrent` downloads and notifies for
   magnets.
