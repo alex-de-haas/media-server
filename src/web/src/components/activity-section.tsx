@@ -326,8 +326,10 @@ function VpnBadge({ status, canSwitch }: { status: VpnStatus | null; canSwitch: 
   if (!status) return null;
 
   const kind = vpnKind(status);
+  const Pill = canSwitch ? "button" : "span";
   const pill = (
-    <span
+    <Pill
+      type={canSwitch ? "button" : undefined}
       tabIndex={0}
       aria-label={vpnTooltip(status)}
       className={cn(
@@ -348,7 +350,7 @@ function VpnBadge({ status, canSwitch }: { status: VpnStatus | null; canSwitch: 
       />
       {vpnLabel(status)}
       {canSwitch && <ChevronDown className="size-3 opacity-70" aria-hidden />}
-    </span>
+    </Pill>
   );
 
   if (!canSwitch) {
