@@ -1000,6 +1000,37 @@ test("an episode row shows its still, air date and synopsis, and a placeholder w
   await expect(second.getByRole("button", { name: "Mark watched" })).toHaveAttribute("aria-pressed", "false");
 });
 
+test("an episode row keeps its title readable on a phone by dropping the actions under the facts", async ({ page }) => {
+  // The worst case: an admin (every control) with an Infuse deep link, a still, and a long title.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await setupApp(page, {
+    library: [aSeries("s1", "Severance")],
+    detail: { s1: seriesDetail("s1", "Severance", "95396") },
+    episodes: {
+      s1: [
+        anEpisode("e1", 1, 1, "Good News About Hell, and Other Things That Happened", null, {
+          stillUrl: "https://image.tmdb.org/t/p/original/still.jpg",
+          overview: "Mark is promoted to lead the team after his friend leaves the company.",
+        }),
+      ],
+    },
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  const pilot = page.getByRole("listitem").filter({ hasText: "S01E01" });
+  const still = await pilot.locator("img").boundingBox();
+  const expand = await pilot.getByRole("button", { name: "Show media of S01E01" }).boundingBox();
+  const title = await pilot.getByText("Good News About Hell, and Other Things That Happened").boundingBox();
+  expect(still && expand && title).toBeTruthy();
+  // The controls sit below the still rather than squeezing the text column to nothing…
+  expect(expand!.y).toBeGreaterThanOrEqual(still!.y + still!.height);
+  expect(title!.width).toBeGreaterThan(150);
+  // …and nothing spills past the viewport.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
 test("an episode row summarises what is on disk and expands onto the media surface a movie has", async ({ page }) => {
   let detailRequests = 0;
   page.on("request", (request) => {
