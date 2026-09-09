@@ -22,6 +22,8 @@ public struct TitleEpisode: Identifiable, Equatable, Sendable {
     public let durationSeconds: Double?
     public let airDate: Date?
     public let stillPath: String?
+    /// Best available dynamic range across versions, independent of the default source.
+    public let videoFormatBadge: String?
     public let played: Bool
     public let resumeSeconds: Double
 
@@ -51,6 +53,14 @@ public struct TitleEpisode: Identifiable, Equatable, Sendable {
         durationSeconds = dto.durationTicks.map { Double($0) / 10_000_000 }
         airDate = episode.airDate
         stillPath = dto.still
+        let formats = Set(episode.media?.videoFormats ?? [])
+        if formats.contains("Dolby Vision") {
+            videoFormatBadge = "Dolby Vision"
+        } else if !formats.isDisjoint(with: ["HDR", "HDR10", "HDR10+", "HLG"]) {
+            videoFormatBadge = "HDR"
+        } else {
+            videoFormatBadge = nil
+        }
         played = episode.userData?.played ?? false
         resumeSeconds = Double(episode.userData?.playbackPositionTicks ?? 0) / 10_000_000
     }

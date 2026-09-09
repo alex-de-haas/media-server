@@ -1,7 +1,7 @@
 # Apple Series Browsing
 
 Created: 2026-09-08
-Updated: 2026-09-08
+Updated: 2026-09-09
 
 The tvOS series detail screen presents a horizontal season selector above a
 horizontal rail of episode cards. Focusing or selecting a season updates the rail
@@ -10,7 +10,18 @@ empty seasons are omitted. There is no series-level Play action.
 
 Cards use 16:9 episode stills and show numbering (including multi-episode ranges),
 title, short synopsis, duration, air date, watched status, and resume progress when
-available. Air dates use UTC calendar dates to avoid shifting to the previous day.
+available. A compact badge on the still shows Dolby Vision if any available
+version has it, otherwise HDR for HDR10/HDR10+/HLG/HDR. SDR and unknown formats
+have no badge. This uses `media.videoFormats` across all versions, independently
+of the pinned/default source; older servers without this aggregate omit the badge.
+Codec, resolution, file size and version count are absent from the episode rail;
+codec, resolution, file size and detailed dynamic range appear for each variant
+on the episode's version selection screen. Resolution comes directly from the
+stream's server-defined `resolutionLabel`, using `VideoResolution.Label`, so cropped
+1920×816 video reads 1080p. The client does not infer resolution from dimensions;
+older servers without the field omit this label.
+The short card synopsis opens into the full synopsis on the episode detail screen;
+the series synopsis remains on the series screen. Air dates use UTC calendar dates to avoid shifting to the previous day.
 Missing still URLs fall back to the series backdrop, then a title placeholder.
 
 An episode opens the existing title detail screen with its own ID. Versions,
@@ -72,7 +83,9 @@ episode metadata instead of copying the whole show's title and artwork.
   idempotency, multi-episode identity and refresh of an existing published episode.
 - MediaKit series tests: season mapping/order/Specials, episode ranges, artwork
   fallback, progress, empty/404/retry states, request races, native authentication,
-  grid isolation and episode playback identity.
+  grid isolation, episode playback identity, all-version badge priority/omissions,
+  and per-version server resolution labels from the picture rather than cover art,
+  including omission when older servers do not provide the field.
 - Build the tvOS target and run `--cinema-preview --series-preview` in a simulator
   to exercise the three-season, 18-episode fixture, horizontal focus, episode
   details, source controls and Back restoration.

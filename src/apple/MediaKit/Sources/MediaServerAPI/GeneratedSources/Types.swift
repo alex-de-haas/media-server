@@ -765,6 +765,8 @@ public enum Components {
             public var dolbyVision: Components.Schemas.DolbyVisionDto?
             /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/sizeBytes`.
             public var sizeBytes: Swift.Int64
+            /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto/videoFormats`.
+            public var videoFormats: [Swift.String]?
             /// Creates a new `EpisodeMediaSummaryDto`.
             ///
             /// - Parameters:
@@ -774,13 +776,15 @@ public enum Components {
             ///   - hdrFormat:
             ///   - dolbyVision:
             ///   - sizeBytes:
+            ///   - videoFormats:
             public init(
                 versionCount: Swift.Int32,
                 videoCodec: Swift.String? = nil,
                 height: Swift.Int32? = nil,
                 hdrFormat: Swift.String? = nil,
                 dolbyVision: Components.Schemas.DolbyVisionDto? = nil,
-                sizeBytes: Swift.Int64
+                sizeBytes: Swift.Int64,
+                videoFormats: [Swift.String]? = nil
             ) {
                 self.versionCount = versionCount
                 self.videoCodec = videoCodec
@@ -788,6 +792,7 @@ public enum Components {
                 self.hdrFormat = hdrFormat
                 self.dolbyVision = dolbyVision
                 self.sizeBytes = sizeBytes
+                self.videoFormats = videoFormats
             }
             public enum CodingKeys: String, CodingKey {
                 case versionCount
@@ -796,6 +801,7 @@ public enum Components {
                 case hdrFormat
                 case dolbyVision
                 case sizeBytes
+                case videoFormats
             }
         }
         /// - Remark: Generated from `#/components/schemas/LibraryDetailDto`.
@@ -1355,6 +1361,8 @@ public enum Components {
             public var fileName: Swift.String?
             /// - Remark: Generated from `#/components/schemas/MediaStreamDto/dolbyVision`.
             public var dolbyVision: Components.Schemas.DolbyVisionDto?
+            /// - Remark: Generated from `#/components/schemas/MediaStreamDto/resolutionLabel`.
+            public var resolutionLabel: Swift.String?
             /// Creates a new `MediaStreamDto`.
             ///
             /// - Parameters:
@@ -1379,6 +1387,7 @@ public enum Components {
             ///   - isExternal:
             ///   - fileName:
             ///   - dolbyVision:
+            ///   - resolutionLabel:
             public init(
                 id: Swift.String,
                 _type: Swift.String,
@@ -1400,7 +1409,8 @@ public enum Components {
                 isForced: Swift.Bool,
                 isExternal: Swift.Bool,
                 fileName: Swift.String? = nil,
-                dolbyVision: Components.Schemas.DolbyVisionDto? = nil
+                dolbyVision: Components.Schemas.DolbyVisionDto? = nil,
+                resolutionLabel: Swift.String? = nil
             ) {
                 self.id = id
                 self._type = _type
@@ -1423,6 +1433,7 @@ public enum Components {
                 self.isExternal = isExternal
                 self.fileName = fileName
                 self.dolbyVision = dolbyVision
+                self.resolutionLabel = resolutionLabel
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -1446,6 +1457,7 @@ public enum Components {
                 case isExternal
                 case fileName
                 case dolbyVision
+                case resolutionLabel
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativeCapabilityProfile`.

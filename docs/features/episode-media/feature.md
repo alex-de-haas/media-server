@@ -96,10 +96,17 @@ were never probed carries none.
   episodes and answers true when the series exists. External rows stay spared, as
   they are for a movie.
 - `EpisodeDto.media` is `{ versionCount, videoCodec, height, hdrFormat, dolbyVision,
-  sizeBytes }` or null. The picture is chosen by the rule every other surface uses
+  sizeBytes, videoFormats }` or null. The picture follows the shared selection rule
   (`NativePlaybackResolver.PictureStream`), so a cover a muxer wrote as a video track
   is passed over; the default version by `MediaSourceOrdering`, so the row and the
-  players agree on which file that is.
+  players agree on which file that is. `videoFormats` aggregates the selected
+  picture format from every version, ignoring covers when a non-still video stream exists
+  and external streams. It is independent of the default-source pin and uses the
+  same normalized HDR/Dolby Vision names as library cards.
+- `MediaStreamDto.resolutionLabel` carries the server-defined nominal resolution
+  from `VideoResolution.Label(width, height)` for video streams. Non-video streams
+  and unknown dimensions carry null; clients can display it without duplicating
+  resolution buckets.
 - `LibraryItemDto.videoFormats` is filled for `Series` items from their episodes'
   picture streams.
 - The Jellyfin `GET /Shows/{seriesId}/Episodes` honours `Fields=MediaSources` the way
@@ -132,8 +139,10 @@ were never probed carries none.
   a series extra `Unsupported` with the message naming what is allowed.
 - `LibraryReadServiceTests` — the episode summary: version count, codec and height
   from the picture rather than a cover, formats, size, the default version's figures
-  before and after a pin, an episode with no source carrying nothing, and the same
-  summaries when scoped to a season; series cards carrying the union of their
+  before and after a pin, all-version formats unaffected by pinning with cover and
+  external formats excluded, an episode with no source carrying nothing, and the same
+  summaries when scoped to a season; server-projected resolution labels for cropped
+  widescreen, vertical video and missing dimensions; series cards carrying the union of their
   episodes' formats with covers skipped and a movie unaffected.
 - `LibraryMaintenanceServiceTests` — a series refresh re-probing every episode's
   sources and sparing their sidecars.

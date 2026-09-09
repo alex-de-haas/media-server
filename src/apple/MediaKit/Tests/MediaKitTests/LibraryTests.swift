@@ -263,7 +263,7 @@ struct TitleVideoTests {
             id: "s", versionName: nil, container: "mkv", sizeBytes: 1, durationSeconds: 1,
             videos: codecs.enumerated().map { index, codec in
                 TitleTrack(
-                    id: "v\(index)", language: nil, codec: codec, title: nil, channels: nil, hdrFormat: nil,
+                    id: "v\(index)", language: nil, codec: codec, title: nil, channels: nil, resolutionLabel: nil, hdrFormat: nil,
                     dolbyVision: nil, isExternal: false)
             },
             audio: [], subtitles: [])
@@ -943,6 +943,8 @@ struct SeriesEpisodeTests {
     @Test func mapsEpisodeIdentityArtworkAndProgress() throws {
         let value = try episode("episode-id", number: 2)
         #expect(value.id == "episode-id")
+        #expect(value.title == "Episode title")
+        #expect(value.overview == "Episode synopsis")
         #expect(value.numberLabel == "Episodes 2–3")
         #expect(value.progress == 0.5)
         #expect(value.airDate != nil)
@@ -954,6 +956,53 @@ struct SeriesEpisodeTests {
         #expect(absent.artworkURL(on: fallback, fallback: fallback) == fallback)
         #expect(absent.progress == 0)
         #expect(absent.durationSeconds == nil)
+    }
+
+    @Test func versionResolutionComesFromItsOwnPicture() throws {
+        let json = #"{"id":"source","fileName":"episode.mkv","container":"mkv","sizeBytes":1000,"durationTicks":0,"streams":[{"id":"cover","type":"Video","index":0,"codec":"mjpeg","height":600,"resolutionLabel":"480p","isDefault":false,"isForced":false,"isExternal":false},{"id":"picture","type":"Video","index":1,"codec":"hevc","width":3840,"height":1600,"resolutionLabel":"2160p","isDefault":false,"isForced":false,"isExternal":false}]}"#
+        let version = TitleVersion(try JSONDecoder().decode(Components.Schemas.MediaSourceDto.self, from: Data(json.utf8)))
+        #expect(version.video?.resolutionLabel == "2160p")
+        for height in [nil, 0, -1] as [Int32?] {
+            let track = TitleTrack(Components.Schemas.MediaStreamDto(id: "video", _type: "Video", index: 0, height: height,
+                isDefault: false, isForced: false, isExternal: false))
+            #expect(track.resolutionLabel == nil)
+        }
+    }
+
+    @Test func resolutionUsesServerLabelWithoutClientInference() {
+        for label in [nil, "1080p", "Server-defined label"] as [String?] {
+            let track = TitleTrack(Components.Schemas.MediaStreamDto(
+                id: "video", _type: "Video", index: 0, width: 1920, height: 816,
+                isDefault: false, isForced: false, isExternal: false, resolutionLabel: label))
+            #expect(track.resolutionLabel == label)
+        }
+    }
+
+    @Test func bestAvailableFormatDoesNotFollowTheDefaultSource() throws {
+        // The pinned file is SDR, but another available version carries Dolby Vision.
+        let json = #"{"episode":{"id":"episode","title":"Pilot","media":{"versionCount":2,"videoCodec":"h264","height":1080,"hdrFormat":"SDR","sizeBytes":1000,"videoFormats":["HDR10","Dolby Vision"]}}}"#
+        let value = TitleEpisode(try JSONDecoder().decode(Components.Schemas.NativeEpisodeDto.self, from: Data(json.utf8)))
+        #expect(value.videoFormatBadge == "Dolby Vision")
+    }
+
+    @Test(arguments: ["HDR", "HDR10", "HDR10+", "HLG"])
+    func hdrVariantsShareOneCompactBadge(format: String) throws {
+        let json = """
+        {"episode":{"id":"episode","title":"Pilot","media":{"versionCount":1,"sizeBytes":0,"videoFormats":["\(format)"]}}}
+        """
+        let value = TitleEpisode(try JSONDecoder().decode(Components.Schemas.NativeEpisodeDto.self, from: Data(json.utf8)))
+        #expect(value.videoFormatBadge == "HDR")
+    }
+
+    @Test func missingAggregateAndSdrHaveNoBadge() throws {
+        for media in ["", #", "media": null"#,
+                      #", "media": {"versionCount":1,"hdrFormat":"Dolby Vision","sizeBytes":0}"#,
+                      #", "media": {"versionCount":1,"sizeBytes":0,"videoFormats":[]}"#,
+                      #", "media": {"versionCount":1,"sizeBytes":0,"videoFormats":["SDR","unknown"]}"#] {
+            let json = "{\"episode\":{\"id\":\"episode\",\"title\":\"Pilot\"\(media)}}"
+            let value = TitleEpisode(try JSONDecoder().decode(Components.Schemas.NativeEpisodeDto.self, from: Data(json.utf8)))
+            #expect(value.videoFormatBadge == nil)
+        }
     }
 
     @Test func preservesSeriesAndOrdersAvailableSeasons() throws {
