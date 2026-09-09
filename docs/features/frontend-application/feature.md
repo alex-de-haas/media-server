@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-09-08
+Updated: 2026-09-09
 
 ## Description
 
@@ -42,11 +42,19 @@ section).
   tabs show Cast, Episodes grouped by season, and Tags; an episode whose file
   holds a consecutive range is labelled `S01E01-E02` (matching the on-disk name)
   so the season does not look like it skipped an episode — the title stays the
-  first episode's, as that is all the provider has. Every episode row carries a
-  one-line summary of what is on disk (`HEVC 2160p · Dolby Vision 7 · 38.2 GB ·
-  2 versions`, or "No file") and expands onto the same media surface a movie's
-  Media tab is — versions, tracks, sidecars, and for an admin every control that
-  changes them; the episode's detail is fetched when the row opens. An admin also
+  first episode's, as that is all the provider has. Every episode row leads with
+  the episode's still (16:9, lazy-loaded; a "No preview" placeholder when none is
+  cached, never the show's backdrop), then its title, one fact line with the air
+  date (the provider's calendar day, formatted in UTC so it never shifts a day
+  west of Greenwich) and runtime, and its synopsis clamped to three lines — the
+  clamp lifts when the row is opened. A watched episode carries the same check
+  badge in the still's corner that a poster card does; the control that flips it
+  is the first of the row's action icons on the right, tinted while the episode
+  is watched. Below those sits a one-line summary of what
+  is on disk (`HEVC 2160p · Dolby Vision 7 · 38.2 GB · 2 versions`, or "No file"),
+  and the row expands onto the same media surface a movie's Media tab is —
+  versions, tracks, sidecars, and for an admin every control that changes them;
+  the episode's detail is fetched when the row opens. An admin also
   sees a Conversions block above the seasons listing every episode's jobs, and
   **Refresh media data** in the series menu, which fans out over its episodes.
   See [episode-media](../episode-media/feature.md). Seasons come from the detail's

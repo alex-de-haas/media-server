@@ -1,7 +1,7 @@
 # Metadata
 
 Created: 2026-06-15
-Updated: 2026-09-08
+Updated: 2026-09-09
 
 ## Description
 
@@ -188,6 +188,15 @@ coordinates to fetch episode-specific metadata and Backdrop still assets. New
 imports include episodes in enrichment; catalog metadata refresh updates existing
 episodes through the same path. See
 [Apple series browsing](../apple-series-browsing/feature.md).
+
+The web episode listing (`GET /api/library/{seriesId}/episodes`) carries what
+that fetch cached: the localized title, synopsis, air date and runtime from the
+episode's own metadata record, and the still as `EpisodeDto.stillUrl` — the
+provider's remote URL, chosen by the backdrop ranking (textless first) and reduced
+to one row per episode in the database, the way posters are for a grid. An
+episode with no cached still carries null rather than the series' backdrop. The
+Apple client reads the same frame through the authenticated native image route
+instead (`NativeEpisodeDto.still`).
 
 ## Testing Expectations
 

@@ -680,6 +680,8 @@ public enum Components {
             public var media: Components.Schemas.EpisodeMediaSummaryDto?
             /// - Remark: Generated from `#/components/schemas/EpisodeDto/airDate`.
             public var airDate: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/EpisodeDto/stillUrl`.
+            public var stillUrl: Swift.String?
             /// Creates a new `EpisodeDto`.
             ///
             /// - Parameters:
@@ -697,6 +699,7 @@ public enum Components {
             ///   - userData:
             ///   - media:
             ///   - airDate:
+            ///   - stillUrl:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
@@ -711,7 +714,8 @@ public enum Components {
                 posterUrl: Swift.String? = nil,
                 userData: Components.Schemas.UserItemDataDto? = nil,
                 media: Components.Schemas.EpisodeMediaSummaryDto? = nil,
-                airDate: Foundation.Date? = nil
+                airDate: Foundation.Date? = nil,
+                stillUrl: Swift.String? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
@@ -727,6 +731,7 @@ public enum Components {
                 self.userData = userData
                 self.media = media
                 self.airDate = airDate
+                self.stillUrl = stillUrl
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -743,6 +748,7 @@ public enum Components {
                 case userData
                 case media
                 case airDate
+                case stillUrl
             }
         }
         /// - Remark: Generated from `#/components/schemas/EpisodeMediaSummaryDto`.

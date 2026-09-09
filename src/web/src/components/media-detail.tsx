@@ -27,7 +27,7 @@ import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { WatchTimeDialog } from "@/components/watch-time-dialog";
 import { QUERIES_AFFECTED_BY_HISTORY_CHANGE } from "@/lib/watch-history-calendar";
-import { episodeLabel, episodeMediaLine, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
+import { episodeLabel, episodeMediaLine, formatAirDate, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
 import { errorMessage, formatCount, openExternal } from "@/lib/ui";
 import {
   AlertDialog,
@@ -1035,6 +1035,8 @@ function EpisodeRow({
   const isPlayed = episode.userData?.played ?? false;
   const resume = !isPlayed && episode.userData?.playedPercentage ? Math.min(episode.userData.playedPercentage, 100) : null;
   const runtime = formatRuntime(episode.runtimeTicks);
+  // When it aired and how long it runs, on one line under the title.
+  const facts = [formatAirDate(episode.airDate), runtime].filter(Boolean).join(" · ");
   // A double-episode file reads "S01E01-E02", so the season no longer looks like it skipped an episode.
   // The title stays the first episode's — TMDb has no combined title for the range and one is not invented.
   const label = episodeLabel(episode.seasonNumber, episode.episodeNumber, episode.episodeNumberEnd);
@@ -1055,32 +1057,60 @@ function EpisodeRow({
 
   return (
     <li className="flex flex-col">
-      <div className="flex items-center gap-3 p-3 text-sm">
-        <button
-          onClick={() => played.mutate(!isPlayed)}
-          disabled={played.isPending}
-          aria-label={isPlayed ? "Mark unwatched" : "Mark watched"}
-          className={cn(
-            "flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors",
-            isPlayed ? "bg-brand text-brand-foreground border-brand" : "text-muted-foreground hover:text-foreground",
+      <div className="flex items-start gap-3 p-3 text-sm">
+        {/* The episode's still, at the 16:9 the provider cut it at. A row without one shows a placeholder
+            rather than borrowing the show's backdrop, which would make every row look the same. Lazy, since
+            a long-running show lists hundreds of rows at once. The watched mark sits in its corner, where a
+            poster card carries it; the control that flips it is among the row's actions on the right. */}
+        <div className="bg-secondary relative aspect-video w-24 shrink-0 overflow-hidden rounded-md sm:w-40">
+          {episode.stillUrl ? (
+            // Decorative: the row's title names the episode.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={episode.stillUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
+          ) : (
+            <div aria-hidden className="text-muted-foreground flex h-full items-center justify-center text-xs">
+              No preview
+            </div>
           )}
-        >
-          <Check className="size-3.5" aria-hidden />
-        </button>
+          {isPlayed && (
+            <span
+              className="bg-brand text-brand-foreground absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded-full"
+              aria-label="Watched"
+            >
+              <Check className="size-3.5" aria-hidden />
+            </span>
+          )}
+        </div>
         <div className="min-w-0 flex-1">
           <p className="truncate">
             <span className="text-muted-foreground font-mono text-xs">{label}</span> {episode.title}
           </p>
+          {facts && <p className="text-muted-foreground mt-0.5 text-xs">{facts}</p>}
+          {/* The synopsis is clamped so a season scans as a list; opening the row — which is where the
+              rest of the episode lives — lets it run to its end. */}
+          {episode.overview && (
+            <p className={cn("text-muted-foreground mt-1 text-xs", !expanded && "line-clamp-3")}>{episode.overview}</p>
+          )}
           {/* What is on disk, at a glance: the default version's picture and size, and how many versions
               there are. The full surface — every version, track and control — is one click down. */}
-          <p className="text-muted-foreground mt-0.5 truncate font-mono text-xs">{episodeMediaLine(episode.media)}</p>
+          <p className="text-muted-foreground mt-1 truncate font-mono text-xs">{episodeMediaLine(episode.media)}</p>
           {resume != null && (
             <span className="bg-secondary mt-1 block h-1 max-w-32 overflow-hidden rounded-full">
               <span className="bg-brand block h-full" style={{ width: `${resume}%` }} />
             </span>
           )}
         </div>
-        {runtime && <span className="text-muted-foreground shrink-0 text-xs">{runtime}</span>}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={isPlayed ? "Mark unwatched" : "Mark watched"}
+          aria-pressed={isPlayed}
+          disabled={played.isPending}
+          onClick={() => played.mutate(!isPlayed)}
+          className={cn(isPlayed && "text-brand hover:text-brand")}
+        >
+          <Check />
+        </Button>
         {deepLink && (
           <Button variant="ghost" size="icon-sm" aria-label="Play in Infuse" onClick={() => openInfuse(deepLink)}>
             <Play />

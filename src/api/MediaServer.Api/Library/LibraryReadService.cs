@@ -606,6 +606,7 @@ public sealed class LibraryReadService(
         var ids = episodes.Select(episode => episode.Id).ToList();
         var metaByItem = await MetadataByItemAsync(ids, cancellationToken);
         var posters = await PostersAsync(ids, cancellationToken);
+        var stills = await StillsAsync(ids, cancellationToken);
         var userDataByItem = await userData.LoadAsync(appUserId, episodes, cancellationToken);
         var mediaByItem = await EpisodeMediaAsync(episodes, seriesId, seasonId, cancellationToken);
 
@@ -626,7 +627,8 @@ public sealed class LibraryReadService(
                 posters.GetValueOrDefault(episode.Id),
                 userDataByItem.GetValueOrDefault(episode.Id),
                 mediaByItem.GetValueOrDefault(episode.Id),
-                meta?.ReleaseDate);
+                meta?.ReleaseDate,
+                stills.GetValueOrDefault(episode.Id));
         }).ToList();
     }
 
@@ -755,6 +757,11 @@ public sealed class LibraryReadService(
     // surface shares (see ImageSelection).
     private Task<Dictionary<Guid, string>> PostersAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken) =>
         database.BestPosterUrlsAsync(itemIds, settings.PreferredLanguage, cancellationToken);
+
+    // The still for each episode row: the provider files it under the backdrop role, so it is the backdrop
+    // ranking (textless first) reduced to one URL per item in the database, like the posters above.
+    private Task<Dictionary<Guid, string>> StillsAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken) =>
+        database.BestBackdropUrlsAsync(itemIds, settings.PreferredLanguage, cancellationToken);
 
     // A card never needs the provider payload, cast, crew, or synopsis. Project before materializing
     // so those columns stay in SQLite; language selection retains the same fallback behavior.

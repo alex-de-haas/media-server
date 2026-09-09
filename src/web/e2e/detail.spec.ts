@@ -951,6 +951,55 @@ const pilotSummary = {
   sizeBytes: 4_100_000_000,
 };
 
+test("an episode row shows its still, air date and synopsis, and a placeholder without a still", async ({ page }) => {
+  await setupApp(page, {
+    role: "user",
+    library: [aSeries("s1", "Severance")],
+    detail: { s1: seriesDetail("s1", "Severance", "95396") },
+    episodes: {
+      s1: [
+        anEpisode("e1", 1, 1, "Good News About Hell", null, {
+          stillUrl: "https://image.tmdb.org/t/p/original/still.jpg",
+          airDate: "2022-02-17T00:00:00+00:00",
+          overview: "Mark is promoted to lead the team after his friend leaves the company.",
+          userData: aUserData({ played: true, playCount: 1 }),
+        }),
+        anEpisode("e2", 1, 2, "Half Loop"),
+      ],
+    },
+  });
+
+  await page.goto("/series/s1");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  // The still is the provider's frame for this episode, the air date its calendar day (not shifted by
+  // the viewer's zone), and the synopsis sits under them; the runtime moved onto the same fact line.
+  const pilot = page.getByRole("listitem").filter({ hasText: "S01E01" });
+  await expect(pilot.locator("img")).toHaveAttribute("src", "https://image.tmdb.org/t/p/original/still.jpg");
+  await expect(pilot.getByText("Feb 17, 2022 · 4m")).toBeVisible();
+  await expect(pilot.getByText("Mark is promoted to lead the team after his friend leaves the company.")).toBeVisible();
+
+  // A watched episode wears the poster card's check badge on its still, and the toggle sits among the
+  // row's actions rather than beside the still.
+  // Exact: "Mark unwatched" would otherwise match the badge's label too.
+  await expect(pilot.getByLabel("Watched", { exact: true })).toBeVisible();
+  const unwatch = pilot.getByRole("button", { name: "Mark unwatched" });
+  await expect(unwatch).toHaveAttribute("aria-pressed", "true");
+  const cleared = page.waitForRequest(
+    (request) => request.url().includes("/api/proxy/api/library/e1/played") && request.method() === "DELETE",
+  );
+  await unwatch.click();
+  await cleared;
+
+  // A row without a still says so rather than borrowing the show's backdrop.
+  const second = page.getByRole("listitem").filter({ hasText: "S01E02" });
+  await expect(second.locator("img")).toHaveCount(0);
+  await expect(second.getByText("No preview")).toBeVisible();
+  await expect(second.getByText("4m")).toBeVisible();
+  await expect(second.getByLabel("Watched", { exact: true })).toHaveCount(0);
+  await expect(second.getByRole("button", { name: "Mark watched" })).toHaveAttribute("aria-pressed", "false");
+});
+
 test("an episode row summarises what is on disk and expands onto the media surface a movie has", async ({ page }) => {
   let detailRequests = 0;
   page.on("request", (request) => {

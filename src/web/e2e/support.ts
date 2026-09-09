@@ -493,6 +493,8 @@ export const anEpisode = (
   posterUrl: null,
   userData: null,
   media: null,
+  airDate: null,
+  stillUrl: null,
   ...overrides,
 });
 
