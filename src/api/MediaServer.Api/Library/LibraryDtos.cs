@@ -180,7 +180,9 @@ public sealed record MediaStreamDto(
     // The Dolby Vision configuration record's fields, beside the flat HdrFormat: what tells a dual-layer
     // profile 7 (which Apple TV and Infuse play as HDR10) from a single-layer 8.1 (which they play as Dolby
     // Vision). Null for anything that is not Dolby Vision, and for a row probed before it was recorded.
-    DolbyVisionDto? DolbyVision = null);
+    DolbyVisionDto? DolbyVision = null,
+    // Server-defined nominal resolution; null for non-video streams or unknown dimensions.
+    string? ResolutionLabel = null);
 
 /// <summary>A Dolby Vision configuration record as a client reads it: the profile (5, 7 or 8), its level, the
 /// base-layer compatibility id (1 is HDR10, 2 SDR, 4 HLG, 6 the HDR10 a UHD Blu-ray carries under profile

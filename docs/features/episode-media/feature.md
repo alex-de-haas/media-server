@@ -103,6 +103,10 @@ were never probed carries none.
   picture format from every version, ignoring covers when a non-still video stream exists
   and external streams. It is independent of the default-source pin and uses the
   same normalized HDR/Dolby Vision names as library cards.
+- `MediaStreamDto.resolutionLabel` carries the server-defined nominal resolution
+  from `VideoResolution.Label(width, height)` for video streams. Non-video streams
+  and unknown dimensions carry null; clients can display it without duplicating
+  resolution buckets.
 - `LibraryItemDto.videoFormats` is filled for `Series` items from their episodes'
   picture streams.
 - The Jellyfin `GET /Shows/{seriesId}/Episodes` honours `Fields=MediaSources` the way
@@ -137,7 +141,8 @@ were never probed carries none.
   from the picture rather than a cover, formats, size, the default version's figures
   before and after a pin, all-version formats unaffected by pinning with cover and
   external formats excluded, an episode with no source carrying nothing, and the same
-  summaries when scoped to a season; series cards carrying the union of their
+  summaries when scoped to a season; server-projected resolution labels for cropped
+  widescreen, vertical video and missing dimensions; series cards carrying the union of their
   episodes' formats with covers skipped and a movie unaffected.
 - `LibraryMaintenanceServiceTests` — a series refresh re-probing every episode's
   sources and sparing their sidecars.

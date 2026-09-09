@@ -16,7 +16,10 @@ have no badge. This uses `media.videoFormats` across all versions, independently
 of the pinned/default source; older servers without this aggregate omit the badge.
 Codec, resolution, file size and version count are absent from the episode rail;
 codec, resolution, file size and detailed dynamic range appear for each variant
-on the episode's version selection screen.
+on the episode's version selection screen. Resolution comes directly from the
+stream's server-defined `resolutionLabel`, using `VideoResolution.Label`, so cropped
+1920×816 video reads 1080p. The client does not infer resolution from dimensions;
+older servers without the field omit this label.
 The short card synopsis opens into the full synopsis on the episode detail screen;
 the series synopsis remains on the series screen. Air dates use UTC calendar dates to avoid shifting to the previous day.
 Missing still URLs fall back to the series backdrop, then a title placeholder.
@@ -81,7 +84,8 @@ episode metadata instead of copying the whole show's title and artwork.
 - MediaKit series tests: season mapping/order/Specials, episode ranges, artwork
   fallback, progress, empty/404/retry states, request races, native authentication,
   grid isolation, episode playback identity, all-version badge priority/omissions,
-  and per-version resolution from the picture rather than cover art.
+  and per-version server resolution labels from the picture rather than cover art,
+  including omission when older servers do not provide the field.
 - Build the tvOS target and run `--cinema-preview --series-preview` in a simulator
   to exercise the three-season, 18-episode fixture, horizontal focus, episode
   details, source controls and Back restoration.

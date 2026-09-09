@@ -263,7 +263,7 @@ struct TitleVideoTests {
             id: "s", versionName: nil, container: "mkv", sizeBytes: 1, durationSeconds: 1,
             videos: codecs.enumerated().map { index, codec in
                 TitleTrack(
-                    id: "v\(index)", language: nil, codec: codec, title: nil, channels: nil, height: nil, hdrFormat: nil,
+                    id: "v\(index)", language: nil, codec: codec, title: nil, channels: nil, resolutionLabel: nil, hdrFormat: nil,
                     dolbyVision: nil, isExternal: false)
             },
             audio: [], subtitles: [])
@@ -959,13 +959,22 @@ struct SeriesEpisodeTests {
     }
 
     @Test func versionResolutionComesFromItsOwnPicture() throws {
-        let json = #"{"id":"source","fileName":"episode.mkv","container":"mkv","sizeBytes":1000,"durationTicks":0,"streams":[{"id":"cover","type":"Video","index":0,"codec":"mjpeg","height":600,"isDefault":false,"isForced":false,"isExternal":false},{"id":"picture","type":"Video","index":1,"codec":"hevc","height":2160,"isDefault":false,"isForced":false,"isExternal":false}]}"#
+        let json = #"{"id":"source","fileName":"episode.mkv","container":"mkv","sizeBytes":1000,"durationTicks":0,"streams":[{"id":"cover","type":"Video","index":0,"codec":"mjpeg","height":600,"resolutionLabel":"480p","isDefault":false,"isForced":false,"isExternal":false},{"id":"picture","type":"Video","index":1,"codec":"hevc","width":3840,"height":1600,"resolutionLabel":"2160p","isDefault":false,"isForced":false,"isExternal":false}]}"#
         let version = TitleVersion(try JSONDecoder().decode(Components.Schemas.MediaSourceDto.self, from: Data(json.utf8)))
         #expect(version.video?.resolutionLabel == "2160p")
         for height in [nil, 0, -1] as [Int32?] {
             let track = TitleTrack(Components.Schemas.MediaStreamDto(id: "video", _type: "Video", index: 0, height: height,
                 isDefault: false, isForced: false, isExternal: false))
             #expect(track.resolutionLabel == nil)
+        }
+    }
+
+    @Test func resolutionUsesServerLabelWithoutClientInference() {
+        for label in [nil, "1080p", "Server-defined label"] as [String?] {
+            let track = TitleTrack(Components.Schemas.MediaStreamDto(
+                id: "video", _type: "Video", index: 0, width: 1920, height: 816,
+                isDefault: false, isForced: false, isExternal: false, resolutionLabel: label))
+            #expect(track.resolutionLabel == label)
         }
     }
 

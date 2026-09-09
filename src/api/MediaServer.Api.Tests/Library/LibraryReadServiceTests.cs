@@ -403,11 +403,37 @@ public sealed class LibraryReadServiceTests : IDisposable
 
         var video = Assert.Single(source.Streams, stream => stream.Type == "Video");
         Assert.Equal("1080p H264", video.DisplayTitle);
+        Assert.Equal("1080p", video.ResolutionLabel);
 
         var audio = Assert.Single(source.Streams, stream => stream.Type == "Audio");
         Assert.Equal("eng AC3 5.1", audio.DisplayTitle);
+        Assert.Null(audio.ResolutionLabel);
 
         Assert.Contains(source.Streams, stream => stream.Type == "Subtitle");
+    }
+
+    [Theory]
+    [InlineData(1920, 816, "1080p")]
+    [InlineData(3840, 1600, "2160p")]
+    [InlineData(1280, 544, "720p")]
+    [InlineData(720, 404, "480p")]
+    [InlineData(1080, 1920, "1080p")]
+    [InlineData(null, 1080, "1080p")]
+    [InlineData(1920, null, "1080p")]
+    [InlineData(640, 360, "360p")]
+    [InlineData(null, null, null)]
+    [InlineData(0, 0, null)]
+    public async Task Detail_stream_carries_server_resolution_label(int? width, int? height, string? expected)
+    {
+        var stream = await _context.MediaStreams.FirstAsync(stream => stream.StreamType == StreamType.Video);
+        stream.Width = width;
+        stream.Height = height;
+        await _context.SaveChangesAsync();
+
+        var detail = await _library.GetDetailAsync(_movieId, appUserId: null, CancellationToken.None);
+
+        var video = Assert.Single(Assert.Single(detail!.MediaSources).Streams, stream => stream.Type == "Video");
+        Assert.Equal(expected, video.ResolutionLabel);
     }
 
     [Fact]

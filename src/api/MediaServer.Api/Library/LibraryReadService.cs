@@ -902,7 +902,8 @@ public sealed class LibraryReadService(
         stream.IsForced,
         stream.IsExternal,
         stream.IsExternal ? EmptyToNull(Path.GetFileName(stream.ExternalPath)) : null,
-        DolbyVision(stream));
+        DolbyVision(stream),
+        stream.StreamType == StreamType.Video ? VideoResolution.Label(stream.Width, stream.Height) : null);
 
     /// <summary>The record is stored as four columns and read as one object: a stream either has it whole or
     /// not at all, and a client should not have to ask four times.</summary>
