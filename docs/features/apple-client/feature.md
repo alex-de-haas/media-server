@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-08
+Updated: 2026-09-10
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -574,7 +574,7 @@ one it can, and one verdict would hide the copy that works. Without an explicit 
 selection, the client takes the first playable copy. Opening or refreshing the title screen
 does not select a version; only activating a version row pins playback to that source.
 An explicitly selected version keeps
-its own verdict: pending indexing displays “Indexing in progress” and does not open the
+its own verdict: pending indexing displays the live preparation state and does not open the
 player or substitute another copy. A selected source absent from the response is reported
 as missing. Retrying playback resolves its readiness again.
 
@@ -720,6 +720,10 @@ Series show a season selector and episode cards. Focusing a season changes the
 rail below it; selecting an episode opens its versions and playback controls.
 There is no series-level Play action. See
 [Apple series browsing](../apple-series-browsing/feature.md).
+
+## Indexing progress
+
+Movie and episode Versions display [indexing progress](../indexing-progress/feature.md) before playback. External audio tracks display their own preparation state. A shared MediaKit SSE connection updates progress and reconciles detail on reconnect; the last visible subscriber releases the connection.
 
 ## Testing Expectations
 

@@ -38,6 +38,8 @@ public final class ServerSession {
     @ObservationIgnored
     public private(set) var artwork: ArtworkLoader!
 
+    @ObservationIgnored public private(set) var indexing: IndexingFeed!
+
     public init(
         paired: PairedServer,
         store: any CredentialStore = KeychainCredentialStore(),
@@ -48,6 +50,7 @@ public final class ServerSession {
         self.store = store
         self.pairing = pairing
         self.transport = transport
+        self.indexing = IndexingFeed(session: self)
 
         // Built here rather than lazily: every stored property is set, so capturing self is legal, and
         // `@Observable` has no lazy of its own.
@@ -73,6 +76,25 @@ public final class ServerSession {
             middlewares: [RefreshingBearerMiddleware(
                 token: { [weak self] in await self?.currentToken() },
                 refresh: { [weak self] in await self?.refreshToken() })])
+    }
+
+    /// SSE uses the same bearer refresh flow as REST, with a streaming URLSession body.
+    func eventBytes(using network: URLSession) async throws -> URLSession.AsyncBytes {
+        var request = URLRequest(url: paired.server.appendingPathComponent("native/v1/events"))
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(paired.identity.accessToken)", forHTTPHeaderField: "Authorization")
+        var (bytes, response) = try await network.bytes(for: request)
+        if (response as? HTTPURLResponse)?.statusCode == 401, let token = await refreshToken() {
+            bytes.task.cancel()
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            (bytes, response) = try await network.bytes(for: request)
+        }
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+              http.mimeType == "text/event-stream" else {
+            bytes.task.cancel()
+            throw URLError(.badServerResponse)
+        }
+        return bytes
     }
 
     private func currentToken() -> String? {

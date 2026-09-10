@@ -18,7 +18,8 @@ public sealed class RemuxIndexService(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
     RemuxIndexStore store,
-    ILogger<RemuxIndexService> logger)
+    ILogger<RemuxIndexService> logger,
+    IndexingProgress? progress = null)
 {
     /// <summary>
     /// Containers whose samples an MP4 can reference. Only Matroska for now: an MP4 source is already
@@ -36,7 +37,7 @@ public sealed class RemuxIndexService(
     /// sidecar file. Both are Guids and the store does not care which, so an external dub is indexed the
     /// same way its video is.
     /// </summary>
-    internal sealed record Candidate(Guid Key, string AbsolutePath);
+    internal sealed record Candidate(Guid Key, string AbsolutePath, Guid ItemId = default, Guid SourceId = default, Guid? StreamId = null);
 
     /// <summary>
     /// Sources that ought to have an index and do not — visible, present on disk, and either never built
@@ -67,22 +68,33 @@ public sealed class RemuxIndexService(
     {
         try
         {
+            progress?.Start(candidate);
             var started = TimeProvider.System.GetTimestamp();
             MatroskaIndex index;
             await using (var stream = new FileStream(
                 candidate.AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read,
                 bufferSize: 64 * 1024, useAsync: false))
             {
-                index = await Task.Run(() => MatroskaIndexer.Build(stream, cancellationToken), cancellationToken);
+                index = await Task.Run(() => MatroskaIndexer.Build(stream, cancellationToken,
+                    (position, length) => progress?.Report(candidate.Key, position, length)), cancellationToken);
             }
 
             if (index.Tracks.Count == 0)
             {
+                progress?.Finish(candidate.Key, "failed");
                 logger.LogDebug("No tracks in {Path}; not indexing it.", candidate.AbsolutePath);
                 return false;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
+            if (progress is not null && !progress.IsUnchanged(candidate.Key))
+            {
+                progress.Finish(candidate.Key, "waiting");
+                return false;
+            }
+            progress?.Finish(candidate.Key, "saving");
             store.Save(candidate.Key, candidate.AbsolutePath, index);
+            progress?.Finish(candidate.Key, "ready");
 
             // Everything needed to answer the two questions this log exists for: whether the walk is bound
             // by the disk it reads (bytes and rate, which the elapsed time alone could not say), and which
@@ -105,14 +117,21 @@ public sealed class RemuxIndexService(
         }
         catch (OperationCanceledException)
         {
+            progress?.Finish(candidate.Key, "waiting");
             throw;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             // A file that vanished or is being written to is a normal thing to meet mid-scan; the next
             // pass picks it up.
+            progress?.Finish(candidate.Key, "failed");
             logger.LogDebug(exception, "Could not index {Path}.", candidate.AbsolutePath);
             return false;
+        }
+        catch
+        {
+            progress?.Finish(candidate.Key, "failed");
+            throw;
         }
     }
 
@@ -184,6 +203,7 @@ public sealed class RemuxIndexService(
                 (source, item) => new
                 {
                     source.Id,
+                    source.MediaItemId,
                     source.Container,
                     source.Path,
                     item.CatalogId,
@@ -205,15 +225,15 @@ public sealed class RemuxIndexService(
                 continue;
             }
 
-            candidates.Add(new Candidate(row.Id, absolute));
+            candidates.Add(new Candidate(row.Id, absolute, row.MediaItemId, row.Id));
         }
 
         // Sidecar dubs. An external audio track is a second Matroska file, and playing one means
         // referencing its samples beside the video's — which needs an index of its own, built here rather
         // than on the request that wants it.
-        var catalogById = rows
+        var ownerBySourceId = rows
             .Where(row => row.CatalogId is not null)
-            .ToDictionary(row => row.Id, row => row.CatalogId!.Value);
+            .ToDictionary(row => row.Id, row => (CatalogId: row.CatalogId!.Value, row.MediaItemId));
 
         var sidecars = await database.MediaStreams.AsNoTracking()
             .Where(stream => stream.IsExternal
@@ -225,16 +245,17 @@ public sealed class RemuxIndexService(
         foreach (var sidecar in sidecars)
         {
             if (!visible.Contains(sidecar.MediaSourceId)
-                || !catalogById.TryGetValue(sidecar.MediaSourceId, out var catalogId)
-                || !catalogs.TryGetValue(catalogId, out var catalog)
-                || !IsIndexable(Path.GetExtension(sidecar.ExternalPath).TrimStart('.'))
+                || !ownerBySourceId.TryGetValue(sidecar.MediaSourceId, out var owner)
+                || !catalogs.TryGetValue(owner.CatalogId, out var catalog)
+                || !IsIndexable(Path.GetExtension(sidecar.ExternalPath!).TrimStart('.'))
                 || !sandbox.TryResolve(catalog, sidecar.ExternalPath!, out var absolute)
                 || !File.Exists(absolute))
             {
                 continue;
             }
 
-            candidates.Add(new Candidate(sidecar.Id, absolute));
+            candidates.Add(new Candidate(
+                sidecar.Id, absolute, owner.MediaItemId, sidecar.MediaSourceId, sidecar.Id));
         }
 
         return candidates;

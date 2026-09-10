@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-09-09
+Updated: 2026-09-10
 
 ## Description
 
@@ -171,6 +171,10 @@ when no poster is available. Missing years and formats produce no extra separato
 Other poster-card surfaces keep their title captions. A series' badges are the union
 of its episodes' formats — a show whose later seasons arrived in Dolby Vision says so
 on its card — and a series whose episodes were never probed carries none.
+
+## Indexing progress
+
+Movie media cards and expanded episode media cards display [indexing progress](../indexing-progress/feature.md), including independent external audio preparation. The existing SSE bridge updates percentages without polling; reconnect refreshes detail snapshots.
 
 ## Testing Expectations
 

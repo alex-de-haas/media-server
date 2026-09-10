@@ -1,4 +1,6 @@
 using System.Threading.Channels;
+using MediaServer.Api.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Realtime;
 
@@ -25,6 +27,7 @@ public static class SseEndpoints
         response.Headers["X-Accel-Buffering"] = "no";
 
         var token = context.RequestAborted;
+        MediaServerDbContext? database = null;
         using var subscription = notifier.Subscribe();
 
         // Open the stream immediately so the client's fetch resolves and it knows it's connected.
@@ -42,6 +45,14 @@ public static class SseEndpoints
 
                 while (subscription.Reader.TryRead(out var message))
                 {
+                    if (message.VisibleItemId is { } itemId)
+                    {
+                        // A title can disappear while indexing. Apply detail visibility at delivery too.
+                        database ??= context.RequestServices.GetRequiredService<MediaServerDbContext>();
+                        if (!await database.MediaItems.AsNoTracking().AnyAsync(
+                                item => item.Id == itemId && item.PublicId != null && item.RemovedAt == null, token))
+                            continue;
+                    }
                     await response.WriteAsync($"event: {message.Event}\ndata: {message.Data}\n\n", token);
                 }
 

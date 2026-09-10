@@ -29,7 +29,7 @@ internal static class MatroskaIndexer
     private const ulong IdAudio = 0xE1, IdChannels = 0x9F, IdSamplingFrequency = 0xB5;
     private const ulong IdBlockAdditionMapping = 0x41E4, IdBlockAddIdName = 0x41A4, IdBlockAddIdExtraData = 0x41ED;
 
-    public static MatroskaIndex Build(Stream stream, CancellationToken cancellationToken = default)
+    public static MatroskaIndex Build(Stream stream, CancellationToken cancellationToken = default, Action<long, long>? progress = null)
     {
         var index = new MatroskaIndex { SourceLength = stream.Length };
 
@@ -40,7 +40,7 @@ internal static class MatroskaIndexer
 
         ReadInfo(stream, index, segment);
         ReadTracks(stream, index, segment);
-        ReadClusters(stream, index, segment, cancellationToken);
+        ReadClusters(stream, index, segment, cancellationToken, progress);
         return index;
     }
 
@@ -233,7 +233,7 @@ internal static class MatroskaIndexer
     }
 
     private static void ReadClusters(
-        Stream stream, MatroskaIndex index, Ebml.Element segment, CancellationToken cancellationToken)
+        Stream stream, MatroskaIndex index, Ebml.Element segment, CancellationToken cancellationToken, Action<long, long>? progress)
     {
         // Only the tracks whose samples can end up in an output. A block belonging to any other track is
         // then not merely skipped when the index is written — it is never delaced, never measured, and
@@ -253,6 +253,7 @@ internal static class MatroskaIndexer
 
             cancellationToken.ThrowIfCancellationRequested();
             ReadCluster(stream, byNumber, element.Start, element.End);
+            progress?.Invoke(element.End, stream.Length);
         }
     }
 

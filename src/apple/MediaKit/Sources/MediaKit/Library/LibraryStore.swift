@@ -75,6 +75,7 @@ public enum LibraryLoadState: Equatable, Sendable {
 @MainActor
 @Observable
 public final class LibraryStore {
+    public var indexing: IndexingFeed { session.indexing }
     public private(set) var state: LibraryLoadState = .idle
     public private(set) var items: [LibraryTitle] = []
 

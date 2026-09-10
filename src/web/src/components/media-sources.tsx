@@ -1,5 +1,6 @@
 "use client";
 
+import { IndexingIndicator } from "@/components/indexing-status";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AudioLines, Captions, Check, ChevronDown, FileOutput, FileQuestion, Film, Pencil, Shrink, Star, Trash2, type LucideIcon } from "lucide-react";
@@ -333,6 +334,7 @@ function SourceCard({
             {rangeNote ? <span className="text-muted-foreground text-xs">{rangeNote}</span> : null}
           </div>
           <p className="text-muted-foreground mt-1 font-mono text-xs">{metaParts.join(" · ")}</p>
+          <IndexingIndicator id={source.id} snapshot={source.indexing} />
         </div>
         {canManage && (
           <div className="flex shrink-0 items-center gap-1">
@@ -604,6 +606,7 @@ function SidecarSection({
                     <span className="block truncate leading-6">
                       <TrackText stream={stream} titleLeads />
                     </span>
+                    <IndexingIndicator id={stream.id} snapshot={stream.indexing} />
                     {stream.fileName && (
                       <span className="text-muted-foreground block truncate font-mono text-xs">
                         {stream.fileName}

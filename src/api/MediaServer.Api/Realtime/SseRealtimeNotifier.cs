@@ -8,8 +8,8 @@ namespace MediaServer.Api.Realtime;
 /// Fans realtime events out to connected Server-Sent Events subscribers. Replaces the SignalR hub: the
 /// activity/downloads surface only pushes server→client, which SSE does directly over the same-origin BFF
 /// as a plain streaming HTTP response — no WebSocket upgrade, which the Next.js route-handler BFF cannot
-/// proxy. A singleton; each connected client gets a bounded channel (a slow client drops the oldest
-/// message rather than growing unbounded — the client reconciles via a refetch on reconnect).
+/// proxy. A singleton; each connected client gets a bounded channel (a slow client is disconnected
+/// rather than silently losing terminal events — the client reconciles on reconnect).
 /// </summary>
 public sealed class SseRealtimeNotifier : IRealtimeNotifier
 {
@@ -35,12 +35,16 @@ public sealed class SseRealtimeNotifier : IRealtimeNotifier
     public Task JobChangedAsync(string eventName, JobEvent job, CancellationToken cancellationToken = default) =>
         PublishAsync(eventName, job);
 
+    /// <summary>Publishes a transient indexing update on both authenticated event routes.</summary>
+    public void IndexingChanged(Remux.IndexingEvent update) =>
+        _ = PublishAsync("indexingChanged", update, update.ItemId);
+
     /// <summary>Registers a subscriber. Dispose the returned <see cref="Subscription"/> to detach it.</summary>
     public Subscription Subscribe()
     {
         var channel = Channel.CreateBounded<SseMessage>(new BoundedChannelOptions(256)
         {
-            FullMode = BoundedChannelFullMode.DropOldest,
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false,
         });
@@ -49,17 +53,17 @@ public sealed class SseRealtimeNotifier : IRealtimeNotifier
         return new Subscription(this, id, channel.Reader);
     }
 
-    private Task PublishAsync<T>(string eventName, T payload)
+    private Task PublishAsync<T>(string eventName, T payload, Guid? visibleItemId = null)
     {
         if (_subscribers.IsEmpty)
         {
             return Task.CompletedTask;
         }
 
-        var message = new SseMessage(eventName, JsonSerializer.Serialize(payload, SerializerOptions));
-        foreach (var channel in _subscribers.Values)
+        var message = new SseMessage(eventName, JsonSerializer.Serialize(payload, SerializerOptions), visibleItemId);
+        foreach (var (id, channel) in _subscribers)
         {
-            channel.Writer.TryWrite(message);
+            if (!channel.Writer.TryWrite(message)) Unsubscribe(id);
         }
 
         return Task.CompletedTask;
@@ -83,4 +87,4 @@ public sealed class SseRealtimeNotifier : IRealtimeNotifier
 }
 
 /// <summary>One SSE frame: the event name and its already-serialized JSON payload.</summary>
-public readonly record struct SseMessage(string Event, string Data);
+public readonly record struct SseMessage(string Event, string Data, Guid? VisibleItemId = null);

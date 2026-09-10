@@ -1,7 +1,7 @@
 # Native Client API
 
 Created: 2026-08-04
-Updated: 2026-09-08
+Updated: 2026-09-10
 
 ## Description
 
@@ -198,6 +198,10 @@ with per-user progress and cached landscape artwork. Native series details filte
 season summaries to those with visible episodes and media sources. See
 [Apple series browsing](../apple-series-browsing/feature.md) for the contract and
 visibility rules.
+
+## Indexing progress
+
+Shared media-source and external audio DTOs carry optional `indexing` snapshots. `/native/v1/events` publishes revisioned `indexingChanged` updates, with detail reconciliation after reconnect. See [Indexing progress](../indexing-progress/feature.md).
 
 ## Testing Expectations
 

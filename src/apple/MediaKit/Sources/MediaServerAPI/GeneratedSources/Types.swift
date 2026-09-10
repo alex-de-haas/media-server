@@ -804,6 +804,35 @@ public enum Components {
                 case videoFormats
             }
         }
+        /// - Remark: Generated from `#/components/schemas/IndexingStatus`.
+        public struct IndexingStatus: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/IndexingStatus/state`.
+            public var state: Swift.String
+            /// - Remark: Generated from `#/components/schemas/IndexingStatus/percent`.
+            public var percent: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/IndexingStatus/revision`.
+            public var revision: Swift.Int64
+            /// Creates a new `IndexingStatus`.
+            ///
+            /// - Parameters:
+            ///   - state:
+            ///   - percent:
+            ///   - revision:
+            public init(
+                state: Swift.String,
+                percent: Swift.Int32? = nil,
+                revision: Swift.Int64
+            ) {
+                self.state = state
+                self.percent = percent
+                self.revision = revision
+            }
+            public enum CodingKeys: String, CodingKey {
+                case state
+                case percent
+                case revision
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/LibraryDetailDto`.
         public struct LibraryDetailDto: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/id`.
@@ -1276,6 +1305,8 @@ public enum Components {
             public var durationTicks: Swift.Int64
             /// - Remark: Generated from `#/components/schemas/MediaSourceDto/streams`.
             public var streams: [Components.Schemas.MediaStreamDto]
+            /// - Remark: Generated from `#/components/schemas/MediaSourceDto/indexing`.
+            public var indexing: Components.Schemas.IndexingStatus?
             /// Creates a new `MediaSourceDto`.
             ///
             /// - Parameters:
@@ -1287,6 +1318,7 @@ public enum Components {
             ///   - bitrate:
             ///   - durationTicks:
             ///   - streams:
+            ///   - indexing:
             public init(
                 id: Swift.String,
                 versionName: Swift.String? = nil,
@@ -1295,7 +1327,8 @@ public enum Components {
                 sizeBytes: Swift.Int64,
                 bitrate: Swift.Int32? = nil,
                 durationTicks: Swift.Int64,
-                streams: [Components.Schemas.MediaStreamDto]
+                streams: [Components.Schemas.MediaStreamDto],
+                indexing: Components.Schemas.IndexingStatus? = nil
             ) {
                 self.id = id
                 self.versionName = versionName
@@ -1305,6 +1338,7 @@ public enum Components {
                 self.bitrate = bitrate
                 self.durationTicks = durationTicks
                 self.streams = streams
+                self.indexing = indexing
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -1315,6 +1349,7 @@ public enum Components {
                 case bitrate
                 case durationTicks
                 case streams
+                case indexing
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaStreamDto`.
@@ -1363,6 +1398,8 @@ public enum Components {
             public var dolbyVision: Components.Schemas.DolbyVisionDto?
             /// - Remark: Generated from `#/components/schemas/MediaStreamDto/resolutionLabel`.
             public var resolutionLabel: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/MediaStreamDto/indexing`.
+            public var indexing: Components.Schemas.IndexingStatus?
             /// Creates a new `MediaStreamDto`.
             ///
             /// - Parameters:
@@ -1388,6 +1425,7 @@ public enum Components {
             ///   - fileName:
             ///   - dolbyVision:
             ///   - resolutionLabel:
+            ///   - indexing:
             public init(
                 id: Swift.String,
                 _type: Swift.String,
@@ -1410,7 +1448,8 @@ public enum Components {
                 isExternal: Swift.Bool,
                 fileName: Swift.String? = nil,
                 dolbyVision: Components.Schemas.DolbyVisionDto? = nil,
-                resolutionLabel: Swift.String? = nil
+                resolutionLabel: Swift.String? = nil,
+                indexing: Components.Schemas.IndexingStatus? = nil
             ) {
                 self.id = id
                 self._type = _type
@@ -1434,6 +1473,7 @@ public enum Components {
                 self.fileName = fileName
                 self.dolbyVision = dolbyVision
                 self.resolutionLabel = resolutionLabel
+                self.indexing = indexing
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -1458,6 +1498,7 @@ public enum Components {
                 case fileName
                 case dolbyVision
                 case resolutionLabel
+                case indexing
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativeCapabilityProfile`.

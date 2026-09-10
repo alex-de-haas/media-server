@@ -1,7 +1,7 @@
 # Remux Streaming
 
 Created: 2026-08-08
-Updated: 2026-09-07
+Updated: 2026-09-10
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an
@@ -536,6 +536,10 @@ reads subtitle payloads rather than seeking past them. Both are paid once, in th
 
 On a fast disc this changes nothing measurable: 8,800 reads there are milliseconds. It is the spinning
 disk this is for, where the same reads are seconds and playback stopped rather than played.
+
+## Indexing progress
+
+Background indexing exposes per-file traversal progress and lifecycle states through the shared detail DTOs and SSE. See [Indexing progress](../indexing-progress/feature.md). This observes the existing sequential worker; playback requests do not initiate indexing.
 
 ## Testing Expectations
 
