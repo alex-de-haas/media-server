@@ -111,12 +111,20 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
             request.DolbyVision);
 
         using var cts = ControlCts(cancellationToken);
-        using var response = await _http.PostAsJsonAsync("/jobs", wire, Json, cts.Token);
+        using var response = request.JoinInputs is { } inputs
+            ? await _http.PostAsJsonAsync("/jobs/join", new
+            {
+                inputs, request.OutputMountLabel, outputPath = request.OutputRelativePath, request.ClientJobId,
+            }, Json, cts.Token)
+            : await _http.PostAsJsonAsync("/jobs", wire, Json, cts.Token);
 
         // Surface the engine's own error (e.g. an unknown mountLabel or a missing input) instead of a bare
         // status code, so a caller gets an actionable message.
         if (!response.IsSuccessStatusCode)
         {
+            if (request.JoinInputs is not null && ((int)response.StatusCode >= 500 ||
+                response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests))
+                throw new HttpRequestException("The engine submission could not be confirmed; retry with the same job id.");
             var detail = await ReadEngineErrorAsync(response, cts.Token);
             throw new InvalidOperationException(detail is null
                 ? $"transcode-engine rejected the job ({(int)response.StatusCode})."
@@ -124,7 +132,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         }
 
         var descriptor = await response.Content.ReadFromJsonAsync<JobDescriptor>(Json, cts.Token)
-            ?? throw new InvalidOperationException("transcode-engine returned an empty descriptor.");
+            ?? throw new HttpRequestException("transcode-engine returned an empty descriptor; submission needs confirmation.");
         SeedInitial(descriptor);
         return descriptor;
     }
@@ -149,6 +157,16 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         }
     }
 
+    public async Task<JobSnapshot?> InspectAsync(string jobId, CancellationToken ct)
+    {
+        using var timeout = ControlCts(ct);
+        using var response = await _http.GetAsync($"/jobs/{jobId}", timeout.Token);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JobSnapshot>(Json, timeout.Token)
+            ?? throw new HttpRequestException("The engine returned an empty job snapshot.");
+    }
+
     public JobSnapshot? GetSnapshot(string jobId) => _snapshots.GetValueOrDefault(jobId);
 
     public async Task<TranscodeTooling> GetToolingAsync(CancellationToken cancellationToken)
@@ -157,7 +175,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         {
             using var cts = ControlCts(cancellationToken);
             var hardware = await _http.GetFromJsonAsync<WireHardware>("/hardware", Json, cts.Token);
-            return new TranscodeTooling(hardware?.Tools?.DolbyVisionConversion == true);
+            return new TranscodeTooling(hardware?.Tools?.DolbyVisionConversion == true, hardware?.VideoPartJoining == true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -330,7 +348,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         string? DolbyVision = null);
 
     /// <summary>The engine's <c>GET /hardware</c>, read for its <c>tools</c> block alone.</summary>
-    private sealed record WireHardware(WireTools? Tools);
+    private sealed record WireHardware(WireTools? Tools, bool VideoPartJoining = false);
 
     private sealed record WireTools(bool DolbyVisionConversion, string? DoviTool, string? Mkvtoolnix);
 

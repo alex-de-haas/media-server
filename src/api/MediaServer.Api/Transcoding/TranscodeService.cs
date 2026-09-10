@@ -180,13 +180,23 @@ public sealed class TranscodeService(
 
     public async Task<bool> CancelAsync(Guid id, CancellationToken cancellationToken)
     {
-        var job = await database.TranscodeJobs.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
-        if (job is null)
+        TranscodeJob? job;
+        using (await LibraryFileMutation.EnterAsync(cancellationToken))
         {
-            return false;
-        }
+            job = await database.TranscodeJobs.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+            if (job is null)
+            {
+                return false;
+            }
 
+            if (job.Kind == TranscodeJobKind.Join)
+            {
+                job.CancellationRequested = true;
+                await database.SaveChangesAsync(cancellationToken);
+            }
+        }
         await engine.CancelAsync(job.EngineJobId, cancellationToken);
+        if (job.Kind == TranscodeJobKind.Join) return true;
 
         if (job.State is TranscodeJobState.Queued or TranscodeJobState.Running)
         {
@@ -200,16 +210,25 @@ public sealed class TranscodeService(
 
     public async Task<bool> RemoveAsync(Guid id, bool deleteOutput, CancellationToken cancellationToken)
     {
-        var job = await database.TranscodeJobs.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
-        if (job is null)
+        string engineJobId;
+        using (await LibraryFileMutation.EnterAsync(cancellationToken))
         {
-            return false;
+            var job = await database.TranscodeJobs.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+            if (job is null)
+            {
+                return false;
+            }
+
+            if (job.Kind == TranscodeJobKind.Join &&
+                (job.State is TranscodeJobState.Queued or TranscodeJobState.Running ||
+                 job.State == TranscodeJobState.Completed && !job.OutputImported))
+                throw new LibraryFileBusyException();
+            // Imported versions are removed through the library, not through job history.
+            if (job.Kind == TranscodeJobKind.Join && job.OutputImported) deleteOutput = false;
+            engineJobId = job.EngineJobId;
+            database.TranscodeJobs.Remove(job);
+            await database.SaveChangesAsync(cancellationToken);
         }
-
-        var engineJobId = job.EngineJobId;
-        database.TranscodeJobs.Remove(job);
-        await database.SaveChangesAsync(cancellationToken);
-
         // Best-effort engine/file cleanup AFTER the row is gone, so a transient engine failure can't roll
         // back (or block) the removal the operator asked for.
         try

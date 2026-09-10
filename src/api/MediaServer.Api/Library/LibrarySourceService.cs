@@ -64,6 +64,8 @@ public sealed class LibrarySourceService(
     /// </summary>
     public async Task<RenameVersionResult> RenameVersionAsync(Guid sourceId, string? versionName, CancellationToken cancellationToken)
     {
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        await LibraryFileMutation.RequireSourceAvailableAsync(database, sourceId, cancellationToken);
         var source = await database.MediaSources
             .Include(candidate => candidate.MediaItem)
             .FirstOrDefaultAsync(candidate => candidate.Id == sourceId, cancellationToken);

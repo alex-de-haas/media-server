@@ -45,6 +45,32 @@ public sealed class RemapServiceTests : IDisposable
             NullLogger<RemapService>.Instance);
     }
 
+    [Theory]
+    [InlineData(TranscodeJobState.Queued)]
+    [InlineData(TranscodeJobState.Running)]
+    [InlineData(TranscodeJobState.Completed)]
+    public async Task Remap_ActiveJoin_PreservesFilesAndReservation(TranscodeJobState state)
+    {
+        var catalog = await SeedCatalogAsync(CatalogType.Movie);
+        var (movie, path) = await SeedPublishedMovieAsync(catalog, "Wrong Title", 2000, "tmdb", "111", "payload");
+        var source = await _database.MediaSources.SingleAsync();
+        _database.TranscodeJobs.Add(new TranscodeJob
+        {
+            Id = Guid.NewGuid(), EngineJobId = "join", CatalogId = catalog.Id, MediaItemId = movie.Id,
+            MediaSourceId = source.Id, Kind = TranscodeJobKind.Join, State = state,
+            InputPath = path, VideoCodec = "h264", HardwareAcceleration = "none",
+        });
+        await _database.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<LibraryFileBusyException>(() => _remap.RemapAsync(movie.Id,
+            new RemapRequest(MediaKind.Movie, "tmdb", "222", "Correct Movie", 2021, null, null), default));
+
+        Assert.Equal("payload", await File.ReadAllTextAsync(Path.Combine(catalog.Root, path)));
+        Assert.Equal(path, (await _database.MediaSources.SingleAsync()).Path);
+        Assert.Equal(movie.Id, (await _database.MediaSources.SingleAsync()).MediaItemId);
+        Assert.Single(await _database.TranscodeJobs.ToListAsync());
+    }
+
     [Fact]
     public async Task Remap_movie_relinks_file_to_corrected_identity_and_purges_old_item()
     {

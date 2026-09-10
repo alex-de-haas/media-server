@@ -67,6 +67,7 @@ export interface AppMock {
   // GET /recommendations. Merged over the envelope's defaults, so a test names only what it cares
   // about and still gets a well-formed feed.
   recommendations?: Record<string, unknown>;
+  videoPartJoining?: boolean;
   transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
   transcodeJobs?: unknown[]; // GET /transcode — the Conversions block above a movie's versions or a series' seasons
   transcodeLanguages?: string[]; // GET /transcode/languages — what the language field validates against
@@ -198,7 +199,7 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     // The engine is an optional dependency, so it is off unless a test says otherwise — the Convert and
     // Merge controls follow it.
     if (path === "/transcode/availability") {
-      return route.fulfill({ json: { available: mock.transcodeAvailable ?? false } });
+      return route.fulfill({ json: { available: mock.transcodeAvailable ?? false, videoPartJoining: mock.videoPartJoining ?? false } });
     }
     if (path === "/transcode/languages") {
       return route.fulfill({ json: mock.transcodeLanguages ?? ["eng", "ger", "rus", "ukr"] });
@@ -211,7 +212,7 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     }
     // Extraction is its own route: it shares no field with a conversion, so the two request shapes never
     // meet on the wire either.
-    if (path === "/transcode/extract" && method === "POST") {
+    if ((path === "/transcode/extract" || path === "/transcode/join") && method === "POST") {
       return route.fulfill({ status: 201, json: { id: "job-2" } });
     }
     if (path === "/library/removed") return route.fulfill({ json: mock.removedTitles ?? [] });

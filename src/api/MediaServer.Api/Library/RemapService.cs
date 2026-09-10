@@ -30,6 +30,8 @@ public sealed class RemapService(
 
     public async Task<RemapResult> RemapAsync(Guid itemId, RemapRequest request, CancellationToken cancellationToken)
     {
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        await LibraryFileMutation.RequireItemAvailableAsync(database, itemId, cancellationToken);
         var current = await database.MediaItems.FirstOrDefaultAsync(item => item.Id == itemId, cancellationToken);
         if (current is null)
         {

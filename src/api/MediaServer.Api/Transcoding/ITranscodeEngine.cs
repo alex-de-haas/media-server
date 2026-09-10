@@ -25,12 +25,17 @@ public sealed record TranscodeJobRequest(
     IReadOnlyList<EngineExtractionOutput>? Outputs = null,
     /// <summary><c>toProfile81</c> asks the engine to rewrite the copied picture's Dolby Vision from the
     /// dual-layer profile 7 to single-layer 8.1; null keeps it as it is.</summary>
-    string? DolbyVision = null);
+    string? DolbyVision = null,
+    IReadOnlyList<EngineJoinInput>? JoinInputs = null,
+    Guid? ClientJobId = null);
+
+/// <summary>A mounted video part, in playback order.</summary>
+public sealed record EngineJoinInput(string? MountLabel, string Path);
 
 /// <summary>What the engine has beyond ffmpeg. <see cref="DolbyVisionConversion"/> is whether it carries the
 /// tools a profile 7 → 8.1 rewrite runs on (<c>dovi_tool</c> and MKVToolNix); a consumer offers the option
 /// only when it does, because an engine without them refuses the job rather than copying silently.</summary>
-public sealed record TranscodeTooling(bool DolbyVisionConversion)
+public sealed record TranscodeTooling(bool DolbyVisionConversion, bool VideoPartJoining = false)
 {
     public static readonly TranscodeTooling None = new(false);
 }
@@ -103,7 +108,8 @@ public sealed record JobSnapshot(
     double Fps,
     double Speed,
     long OutputSizeBytes,
-    double? EtaSeconds);
+    double? EtaSeconds,
+    string? Error = null);
 
 /// <summary>
 /// Abstraction over the transcode engine. The transcoding surface is the external
@@ -124,6 +130,9 @@ public interface ITranscodeEngine
     Task RemoveAsync(string jobId, bool deleteOutput, CancellationToken cancellationToken);
 
     JobSnapshot? GetSnapshot(string jobId);
+
+    /// <summary>Reads authoritative state; null means the engine confirms that the job is absent.</summary>
+    Task<JobSnapshot?> InspectAsync(string jobId, CancellationToken ct) => Task.FromResult(GetSnapshot(jobId));
 
     IReadOnlyList<JobSnapshot> GetAllSnapshots();
 

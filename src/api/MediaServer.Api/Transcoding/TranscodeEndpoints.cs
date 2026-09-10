@@ -23,7 +23,7 @@ public static class TranscodeEndpoints
         {
             var available = engine is not DisabledTranscodeEngine;
             var tooling = available ? await engine.GetToolingAsync(cancellationToken) : TranscodeTooling.None;
-            return Results.Ok(new { available, dolbyVisionConversion = tooling.DolbyVisionConversion });
+            return Results.Ok(new { available, dolbyVisionConversion = tooling.DolbyVisionConversion, videoPartJoining = tooling.VideoPartJoining });
         });
 
         // Every language tag a track edit may carry — the canonical forms plus the spellings that fold onto
@@ -58,6 +58,17 @@ public static class TranscodeEndpoints
         // composes. Its own route rather than a mode of that one: it shares no field with a conversion, and
         // folding two disjoint request shapes into one body would make every field on both conditionally
         // valid.
+        group.MapPost("/join", async (CreateJoinRequest request, VideoPartJoinService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var job = await service.CreateAsync(request, ct);
+                return Results.Created($"/api/transcode/{job.Id}", job);
+            }
+            catch (TranscodeConflictException exception) { return Results.Problem(exception.Message, statusCode: 409); }
+            catch (TranscodeRequestException exception) { return Results.Problem(exception.Message, statusCode: 400); }
+        });
+
         group.MapPost("/extract", async (CreateExtractionRequest request, TrackExtractionService service, CancellationToken cancellationToken) =>
         {
             try
