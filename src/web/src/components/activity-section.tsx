@@ -7,6 +7,7 @@ import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type DhtStatus, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatBytes, formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
 import { transferredBytes } from "@/lib/downloads";
+import { displayIngestPath, ingestMatchLabel, ingestTitle } from "@/lib/ingest-identity";
 import { dhtKind, dhtLabel, dhtTooltip } from "@/lib/dht";
 import { vpnKind, vpnLabel, vpnTooltip } from "@/lib/vpn";
 import { errorMessage } from "@/lib/ui";
@@ -633,7 +634,8 @@ function IngestRow({
             parked: false,
           };
   // Show the "pinned" marker only while it still governs an upcoming identify (not after publish).
-  const pinned = item.targetTitle != null && item.status !== "Done" && !identifyDone;
+  const matchLabel = ingestMatchLabel(item);
+  const pinned = !matchLabel && item.targetTitle != null && item.status !== "Done" && !identifyDone;
   const title = ingestTitle(item);
   const age = formatTimeAgo(item.createdAt);
   const hint = stateHint(item);
@@ -667,6 +669,22 @@ function IngestRow({
         titleAttr={title}
         markers={
           <>
+            {matchLabel && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      tabIndex={0}
+                      aria-label={matchLabel}
+                      className="text-primary shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <SearchCheck className="size-3.5" />
+                    </span>
+                  }
+                />
+                <TooltipContent>{matchLabel}.</TooltipContent>
+              </Tooltip>
+            )}
             {pinned && (
               <Tooltip>
                 <TooltipTrigger
@@ -916,36 +934,6 @@ function SeedingStats({ download }: { download: Download }) {
   );
 }
 
-// Source-file paths are catalog-root-relative; while a torrent is still in flight they sit under the
-// transient `.incoming/<downloadId>/` staging folder, which is noise to the operator — hide it.
-function displayPath(relativePath: string): string {
-  return relativePath.replace(/^\.incoming\/[0-9a-f]{32}\//i, "");
-}
-
-// The card title is the parsed title the pipeline identifies by — release groups and per-file noise
-// (SxxEyy, codecs, the raw filename) stripped — so it reads the same whether or not the item has been
-// identified yet. Prefer the resolved media title, then an operator-pinned title (the correct name, even
-// before identify runs), then the backend's parsed title, and only fall back to the torrent/download name
-// when no files have been parsed yet (e.g. a magnet still fetching metadata).
-//
-// mediaTitle names one media item — the batch's primary — so a franchise pack resolving to several movies
-// would read as just the first of them. Count the distinct movies the batch actually mapped and say so.
-// Movies only: a season pack's many episodes still belong to the one series the title already names.
-function ingestTitle(item: IngestItem): string {
-  if (item.mediaTitle) {
-    const movieIds = new Set(
-      item.sourceFiles.filter((file) => file.assigned?.kind === "Movie" && file.mediaItemId).map((file) => file.mediaItemId!),
-    );
-    return movieIds.size > 1 ? `${item.mediaTitle} (+${movieIds.size - 1} more)` : item.mediaTitle;
-  }
-  if (item.targetTitle) return item.targetTitle;
-  const parsed = item.sourceFiles.find((file) => file.parsedTitle?.trim())?.parsedTitle?.trim();
-  if (parsed) return parsed;
-  if (item.downloadName) return item.downloadName;
-  const first = item.sourceFiles[0]?.relativePath;
-  return first ? displayPath(first) : "Untitled item";
-}
-
 // The torrent's files are detail-on-demand: a compact count on the card, the full list (capped) in a
 // tooltip, so a multi-file pack doesn't push three lines of paths onto every card.
 function FilesTooltip({ files }: { files: IngestSourceFile[] }) {
@@ -968,7 +956,7 @@ function FilesTooltip({ files }: { files: IngestSourceFile[] }) {
         <ul className="flex flex-col gap-0.5 font-mono text-xs">
           {shown.map((file) => (
             <li key={file.id} className="break-all">
-              {displayPath(file.relativePath)}
+              {displayIngestPath(file.relativePath)}
             </li>
           ))}
           {rest > 0 && (

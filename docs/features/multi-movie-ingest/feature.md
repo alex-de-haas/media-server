@@ -1,7 +1,7 @@
 # Multi-Movie Ingest (Franchise Packs)
 
 Created: 2026-07-24
-Updated: 2026-07-24
+Updated: 2026-09-10
 
 ## Description
 
@@ -135,6 +135,12 @@ library remap.
 - **Activity row.** A batch that mapped several distinct movies reads
   `Die Hard 2 (+1 more)` instead of naming only its primary item. Counted over
   movie assignments only, so a season pack still reads as its one series.
+  During download, confirmed per-file movie titles replace the parsed filename
+  immediately after matching. Multiple files mapped to the same movie show one
+  title. A match icon reports how many video files are matched; skipped files
+  and companion audio/subtitle tracks are excluded from the total. Partial
+  matches show the confirmed title and the partial count. The icon disappears
+  once Identify completes, like the batch-wide pin marker.
 
 ## Testing Expectations
 
@@ -170,6 +176,12 @@ covers the same grouped shape with one group; the series pack covers the
 untouched single-identity flow. A still-downloading pack opens the same dialog
 from "Set titles" and sends the same grouped request, and a parked pack asserts
 the identity action never doubles up.
+
+Activity identity unit tests cover pre-matched titles, distinct movies versus
+multiple cuts, partial matches, skipped files and companion tracks, and the
+existing pin, parsed-title, and completed-identification behavior. The download
+e2e also verifies the title and match marker update after Approve and survive
+reloading the page.
 
 Parser and scoring coverage for the identification fixes lives with the metadata
 feature: [metadata](../metadata/feature.md).
