@@ -132,7 +132,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         }
 
         var descriptor = await response.Content.ReadFromJsonAsync<JobDescriptor>(Json, cts.Token)
-            ?? throw new InvalidOperationException("transcode-engine returned an empty descriptor.");
+            ?? throw new HttpRequestException("transcode-engine returned an empty descriptor; submission needs confirmation.");
         SeedInitial(descriptor);
         return descriptor;
     }

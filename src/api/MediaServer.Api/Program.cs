@@ -575,7 +575,7 @@ app.Use(async (context, next) =>
     try { await next(context); }
     catch (LibraryFileBusyException exception)
     {
-        await Results.Conflict(new { error = exception.Message }).ExecuteAsync(context);
+        await Results.Problem(detail: exception.Message, statusCode: StatusCodes.Status409Conflict).ExecuteAsync(context);
     }
 });
 app.UsePublicSurfaceAllowlist(hosty);

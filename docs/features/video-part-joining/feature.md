@@ -58,9 +58,11 @@ and errors.
 ## File protection and completion
 
 A shared admission gate serializes joining with version rename, source/title
-deletion and catalog-move admission. Persisted active join rows protect both inputs
+deletion, remapping, catalog deletion and catalog-move admission. Persisted active join rows protect both inputs
 until the engine confirms a terminal state; a completed join holds its reservation
-until output import finishes. Another join of the same movie is refused while one
+until output import finishes. Engine calls and output probing run outside the library
+mutation gate; a per-job operation guard prevents concurrent submission or import.
+Another join of the same movie is refused while one
 is active. Removing job history cannot discard an active reservation. Removing an
 imported join's history does not delete the library version.
 
@@ -72,7 +74,12 @@ finished file, checks duration and records the new version once by item/output
 path. Missing or invalid output fails the job without changing the originals.
 
 A Media Server restart recovers pending submissions and unimported completed jobs.
-An unreachable engine keeps the reservation in place. The engine journals joining
+An unreachable engine keeps the reservation in place. Accepted engine ids are retained
+for inspection and cancellation even when the engine changes their spelling. Expected
+duration is persisted from known source durations before submission; missing duration
+is recovered through idempotent engine submission before output import. Transient
+probe or database failures retain completed, unimported jobs for retry; explicit
+missing-output or duration mismatches fail validation. The engine journals joining
 status under its app data directory; completed status survives its restart, while
 an interrupted join becomes Failed with a restart explanation and its temporary
 files are removed. Retrying that failed operation is an explicit new join.
@@ -81,9 +88,10 @@ files are removed. Retrying that failed operation is an explicit new join.
 
 - `VideoPartJoinServiceTests`: ordered request and durable reservation, invalid or
   missing/cross-title sources, engine availability, move conflicts, actual rename
-  and delete service protections for both parts, lost-response recovery under the
+  and delete service protections for both parts, remap and catalog deletion guards, lost-response recovery under the
   same id, cancellation and history-removal guards, idempotent import and missing
-  output. Preferred source and original file bytes remain unchanged.
+  output; slow-operation isolation, accepted-id tracking, lost-response duration recovery
+  and retryable probe/database failures. Preferred source and original file bytes remain unchanged.
 - `RemoteTranscodeEngineWireTests`: the distinct endpoint, ordered mounted paths,
   stable id and absence of conversion/sidecar settings.
 - Engine `JoinEndpointTests` and `VideoPartJoinTests`: HTTP validation, path/order

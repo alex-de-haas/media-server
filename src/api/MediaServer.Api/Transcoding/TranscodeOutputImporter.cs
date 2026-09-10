@@ -54,6 +54,8 @@ public sealed class TranscodeOutputImporter(
             return true;
         }
 
+        if (job.Kind == TranscodeJobKind.Join && job.ExpectedDurationSeconds is not > 0)
+            throw new IOException("The join duration is not confirmed yet; retrying before import.");
         var result = await probe.ProbeAsync(absolute, cancellationToken);
         if (job.Kind == TranscodeJobKind.Join && (result.DurationTicks <= 0 ||
             (job.ExpectedDurationSeconds is { } expected && Math.Abs(result.DurationTicks / (double)TimeSpan.TicksPerSecond - expected) > 0.5)))
@@ -106,7 +108,16 @@ public sealed class TranscodeOutputImporter(
             });
         }
 
-        await database.SaveChangesAsync(cancellationToken);
+        try { await database.SaveChangesAsync(cancellationToken); }
+        catch
+        {
+            // A failed insert must not leak pending source/stream rows into a later coordinator save.
+            foreach (var entry in database.ChangeTracker.Entries<MediaStream>()
+                .Where(entry => entry.Entity.MediaSourceId == source.Id).ToList())
+                entry.State = EntityState.Detached;
+            database.Entry(source).State = EntityState.Detached;
+            throw;
+        }
         logger.LogInformation(
             "Transcode job {JobId}: imported output as a new '{Version}' version of item {ItemId}.",
             job.Id, source.VersionName, job.MediaItemId);

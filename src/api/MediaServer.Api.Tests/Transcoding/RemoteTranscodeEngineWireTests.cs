@@ -72,6 +72,17 @@ public sealed class RemoteTranscodeEngineWireTests
     }
 
     [Fact]
+    public async Task Join_EmptySuccessfulResponse_IsUnconfirmedRatherThanRejected()
+    {
+        using var engine = new RemoteTranscodeEngine(
+            new HttpClient(new HardwareHandler("null")) { BaseAddress = new Uri("http://engine.local/") },
+            new MediaServerSettings(), NullLogger<RemoteTranscodeEngine>.Instance);
+        await Assert.ThrowsAsync<HttpRequestException>(() => engine.CreateAsync(
+            new TranscodeJobRequest("movies", "a.mkv", "movies", "joined.mkv", null, null, null,
+                JoinInputs: [new("movies", "a.mkv"), new("movies", "b.mkv")], ClientJobId: Guid.NewGuid()), default));
+    }
+
+    [Fact]
     public async Task The_dolby_vision_mode_travels_under_the_engines_name()
     {
         var handler = new StubHandler();

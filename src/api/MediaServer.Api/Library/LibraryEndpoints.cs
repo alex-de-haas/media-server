@@ -355,7 +355,7 @@ public static class LibraryEndpoints
                 LibraryMoveRequestStatus.CatalogOffline => Results.Conflict(new { error = "The source or target catalog root is offline." }),
                 LibraryMoveRequestStatus.InsufficientSpace => Results.Conflict(new { error = "Not enough free space in the target catalog for this move." }),
                 LibraryMoveRequestStatus.AlreadyMoving => Results.Conflict(new { error = "A move is already in progress for this item." }),
-                LibraryMoveRequestStatus.TranscodeActive => Results.Conflict(new { error = "A conversion is running for this item — wait for it to finish or cancel it first." }),
+                LibraryMoveRequestStatus.TranscodeActive => Results.Problem(detail: "A conversion or join is active for this item — wait for it to finish or cancel it first.", statusCode: StatusCodes.Status409Conflict),
                 _ => Results.NotFound(),
             };
         }).RequireAuthorization(AppRoles.AdminPolicy);

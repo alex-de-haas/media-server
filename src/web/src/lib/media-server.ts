@@ -1120,7 +1120,7 @@ export const mediaServer = {
   // accept a value the API then refuses.
   transcodeLanguages: () => apiJson<string[]>(`${BASE}/transcode/languages`),
   joinVideoParts: (sourceIds: string[]) => apiJson<TranscodeJob>(`${BASE}/transcode/join`, {
-    method: "POST", body: JSON.stringify({ sourceIds }), headers: { "Content-Type": "application/json" },
+    method: "POST", body: JSON.stringify({ sourceIds }), headers: { "content-type": "application/json" },
   }),
 
   listTranscodeJobs: () => apiJson<TranscodeJob[]>(`${BASE}/transcode`),

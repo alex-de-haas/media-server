@@ -29,6 +29,12 @@ public static class LibraryFileMutation
     public static Task<bool> HasJoinAsync(MediaServerDbContext db, Guid itemId, CancellationToken ct) =>
         ActiveJoins(db).AnyAsync(job => job.MediaItemId == itemId, ct);
 
+    public static async Task RequireCatalogAvailableAsync(MediaServerDbContext db, Guid catalogId, CancellationToken ct)
+    {
+        if (await ActiveJoins(db).AnyAsync(job => job.CatalogId == catalogId, ct))
+            throw new LibraryFileBusyException();
+    }
+
     public static async Task RequireItemAvailableAsync(MediaServerDbContext db, Guid itemId, CancellationToken ct)
     {
         if (await HasJoinAsync(db, itemId, ct)) throw new LibraryFileBusyException();

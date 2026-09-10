@@ -1,6 +1,7 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.IO;
+using MediaServer.Api.Library;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Catalogs;
@@ -209,6 +210,8 @@ public sealed class CatalogService(
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        await LibraryFileMutation.RequireCatalogAvailableAsync(database, id, cancellationToken);
         var exists = await database.Catalogs.AnyAsync(candidate => candidate.Id == id, cancellationToken);
         if (!exists)
         {

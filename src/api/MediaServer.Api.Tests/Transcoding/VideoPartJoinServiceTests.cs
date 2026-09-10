@@ -3,6 +3,7 @@ using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.IO;
 using MediaServer.Api.Probe;
 using MediaServer.Api.Tests.Jellyfin;
 using MediaServer.Api.Transcoding;
@@ -30,6 +31,14 @@ public sealed class VideoPartJoinServiceTests : IDisposable
     private Exception? _submissionError;
     private TranscodeJobRequest? _submitted;
     private int _submissions;
+    private string? _descriptorId;
+    private bool _alternateIdFormat;
+    private readonly TaskCompletionSource _operationEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? _submissionBlock;
+    private Task? _inspectionBlock;
+    private Task? _probeBlock;
+    private Exception? _probeError;
+    private double _outputDuration = 2;
 
     public VideoPartJoinServiceTests()
     {
@@ -38,29 +47,39 @@ public sealed class VideoPartJoinServiceTests : IDisposable
         Db.Catalogs.Add(catalog);
         Db.MediaItems.Add(new MediaItem { Id = _movie, PublicId = "movie", CatalogId = catalog.Id, Kind = MediaKind.Movie,
             Title = "Parts", AddedAt = now, UpdatedAt = now, DefaultSourceId = _first });
-        Db.MediaSources.AddRange(new MediaSource { Id = _first, MediaItemId = _movie, Path = "part1.mkv", Container = "mkv", CreatedAt = now },
-            new MediaSource { Id = _second, MediaItemId = _movie, Path = "part2.mkv", Container = "mkv", CreatedAt = now });
+        Db.MediaSources.AddRange(new MediaSource { Id = _first, MediaItemId = _movie, Path = "part1.mkv", Container = "mkv", DurationTicks = TimeSpan.TicksPerSecond, CreatedAt = now },
+            new MediaSource { Id = _second, MediaItemId = _movie, Path = "part2.mkv", Container = "mkv", DurationTicks = TimeSpan.TicksPerSecond, CreatedAt = now });
         Db.SaveChanges();
         File.WriteAllText(Path.Combine(_root, "part1.mkv"), "first original");
         File.WriteAllText(Path.Combine(_root, "part2.mkv"), "second original");
         var engine = ITranscodeEngine.Imposter();
         engine.GetToolingAsync(Arg<CancellationToken>.Any()).Returns((CancellationToken ct) => Task.FromResult(new TranscodeTooling(false, _available)));
         engine.CreateAsync(Arg<TranscodeJobRequest>.Any(), Arg<CancellationToken>.Any())
-            .Returns((TranscodeJobRequest request, CancellationToken ct) =>
+            .Returns(async (TranscodeJobRequest request, CancellationToken ct) =>
             {
                 _submitted = request; _submissions++;
-                if (_submissionError is { } error) return Task.FromException<JobDescriptor>(error);
-                var id = request.ClientJobId!.Value.ToString("n");
-                _snapshot = Snapshot(id, "Queued");
-                return Task.FromResult(new JobDescriptor(id, request.InputRelativePath, request.OutputRelativePath, 2, 28));
+                if (_submissionBlock is { } block) { _operationEntered.TrySetResult(); await block.WaitAsync(ct); }
+                if (_submissionError is { } error) throw error;
+                var id = _descriptorId ?? (_alternateIdFormat ? request.ClientJobId!.Value.ToString("D").ToUpperInvariant() : request.ClientJobId!.Value.ToString("n"));
+                _snapshot ??= Snapshot(id, "Queued");
+                return new JobDescriptor(id, request.InputRelativePath, request.OutputRelativePath, 2, 28);
             });
         engine.GetSnapshot(Arg<string>.Any()).Returns((string id) => _snapshot!);
-        engine.InspectAsync(Arg<string>.Any(), Arg<CancellationToken>.Any()).Returns((string id, CancellationToken ct) => Task.FromResult(_snapshot!));
+        engine.InspectAsync(Arg<string>.Any(), Arg<CancellationToken>.Any()).Returns(async (string id, CancellationToken ct) =>
+        {
+            if (_inspectionBlock is { } block) { _operationEntered.TrySetResult(); await block.WaitAsync(ct); }
+            return _snapshot!;
+        });
         engine.CancelAsync(Arg<string>.Any(), Arg<CancellationToken>.Any()).Returns(Task.CompletedTask);
         _engine = engine.Instance();
         var probe = IMediaProbe.Imposter();
-        probe.ProbeAsync(Arg<string>.Any(), Arg<CancellationToken>.Any()).Returns(Task.FromResult(new ProbeResult("mkv", 2 * TimeSpan.TicksPerSecond, null, 28,
-            [new ProbedStream(StreamType.Video, 0, "h264", null, null, 160, 90, 25, 8, null, null, null, null, true, false, null)])));
+        probe.ProbeAsync(Arg<string>.Any(), Arg<CancellationToken>.Any()).Returns(async (string path, CancellationToken ct) =>
+        {
+            if (_probeBlock is { } block) { _operationEntered.TrySetResult(); await block.WaitAsync(ct); }
+            if (_probeError is { } error) throw error;
+            return new ProbeResult("mkv", (long)(_outputDuration * TimeSpan.TicksPerSecond), null, 28,
+                [new ProbedStream(StreamType.Video, 0, "h264", null, null, 160, 90, 25, 8, null, null, null, null, true, false, null)]);
+        });
         _probe = probe.Instance();
     }
 
@@ -112,6 +131,31 @@ public sealed class VideoPartJoinServiceTests : IDisposable
         }
         await Assert.ThrowsAsync<LibraryFileBusyException>(() => delete.DeleteAsync(_movie, true, true, default));
         Assert.Equal(2, await Db.MediaSources.CountAsync());
+        Assert.True(File.Exists(Path.Combine(_root, "part2.mkv")));
+    }
+
+    [Theory]
+    [InlineData(TranscodeJobState.Queued)]
+    [InlineData(TranscodeJobState.Running)]
+    [InlineData(TranscodeJobState.Completed)]
+    public async Task CatalogDeletion_ProtectsActiveJoinAndAllowsDeletionAfterRelease(TranscodeJobState state)
+    {
+        await Create();
+        var job = await Db.TranscodeJobs.SingleAsync();
+        job.State = state;
+        await Db.SaveChangesAsync();
+        var catalogs = new CatalogService(Db, new FilesystemInspector(), Settings);
+
+        await Assert.ThrowsAsync<LibraryFileBusyException>(() => catalogs.DeleteAsync(job.CatalogId, default));
+
+        Assert.Equal(2, await Db.MediaSources.CountAsync());
+        Assert.Single(await Db.TranscodeJobs.ToListAsync());
+        Assert.Single(await Db.Catalogs.ToListAsync());
+        job.State = TranscodeJobState.Cancelled;
+        await Db.SaveChangesAsync();
+        Assert.True(await catalogs.DeleteAsync(job.CatalogId, default));
+        Assert.Empty(await Db.TranscodeJobs.ToListAsync());
+        Assert.True(File.Exists(Path.Combine(_root, "part1.mkv")));
         Assert.True(File.Exists(Path.Combine(_root, "part2.mkv")));
     }
 
@@ -187,6 +231,122 @@ public sealed class VideoPartJoinServiceTests : IDisposable
         _snapshot = Snapshot(job.EngineJobId, "Cancelled");
         await Service().ReconcileAsync(job, default);
         await LibraryFileMutation.RequireSourceAvailableAsync(Db, _second, default);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AcceptedJobId_IsTrackedWithoutReleasingReservation(bool equivalentUuid)
+    {
+        _alternateIdFormat = equivalentUuid;
+        _descriptorId = equivalentUuid ? null : "engine-assigned-id";
+        await Create();
+        var job = await Db.TranscodeJobs.SingleAsync();
+        Assert.Equal(equivalentUuid ? job.Id.ToString("D").ToUpperInvariant() : _descriptorId, job.EngineJobId);
+        Assert.Equal(TranscodeJobState.Queued, job.State);
+        await Assert.ThrowsAsync<LibraryFileBusyException>(() => LibraryFileMutation.RequireItemAvailableAsync(Db, _movie, default));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LostResponse_RecoversDurationAndRejectsTruncatedOutput(bool knownSourceDurations)
+    {
+        if (!knownSourceDurations)
+        {
+            foreach (var source in await Db.MediaSources.ToListAsync()) source.DurationTicks = 0;
+            await Db.SaveChangesAsync();
+        }
+        _submissionError = new HttpRequestException("response lost after acceptance");
+        await Create();
+        var job = await Db.TranscodeJobs.SingleAsync();
+        if (knownSourceDurations) Assert.Equal(2, job.ExpectedDurationSeconds);
+        _snapshot = Snapshot(job.EngineJobId, "Completed");
+        _submissionError = null;
+        _outputDuration = 1;
+        await File.WriteAllTextAsync(Path.Combine(_root, job.OutputPath!), "truncated output");
+        await Service().ReconcileAsync(job, default);
+        Assert.Equal(2, job.ExpectedDurationSeconds);
+        Assert.Equal(TranscodeJobState.Failed, job.State);
+        Assert.Contains("unexpected duration", job.Error);
+        Assert.Equal(2, await Db.MediaSources.CountAsync());
+        Assert.Equal(knownSourceDurations ? 1 : 2, _submissions);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletedJoin_TransientImportFailure_RetainsReservationAndRetries(bool databaseFailure)
+    {
+        await Create();
+        var job = await Db.TranscodeJobs.SingleAsync();
+        _snapshot = Snapshot(job.EngineJobId, "Completed");
+        await File.WriteAllTextAsync(Path.Combine(_root, job.OutputPath!), "joined output");
+        if (databaseFailure)
+            await Db.Database.ExecuteSqlRawAsync("CREATE TRIGGER fail_join_import BEFORE INSERT ON MediaSources BEGIN SELECT RAISE(ABORT, 'temporary write failure'); END;");
+        else _probeError = new IOException("temporary probe failure");
+
+        await Service().ReconcileAsync(job, default);
+
+        Assert.Equal(TranscodeJobState.Completed, job.State);
+        Assert.False(job.OutputImported);
+        Assert.Equal(2, await Db.MediaSources.CountAsync());
+        await Assert.ThrowsAsync<LibraryFileBusyException>(() => LibraryFileMutation.RequireItemAvailableAsync(Db, _movie, default));
+        if (databaseFailure) await Db.Database.ExecuteSqlRawAsync("DROP TRIGGER fail_join_import;");
+        _probeError = null;
+        await Service().ReconcileAsync(job, default);
+        Assert.True(job.OutputImported);
+        Assert.Equal(3, await Db.MediaSources.CountAsync());
+        await Service().ReconcileAsync(job, default);
+        Assert.Equal(3, await Db.MediaSources.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("submission")]
+    [InlineData("inspection")]
+    [InlineData("import")]
+    public async Task SlowJoinOperation_DoesNotHoldLibraryGate_OrRunDuplicateReconciliation(string stage)
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task operation;
+        TranscodeJob job;
+        if (stage == "submission")
+        {
+            _submissionBlock = release.Task;
+            operation = Create();
+            await _operationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            job = await Db.TranscodeJobs.SingleAsync();
+        }
+        else
+        {
+            await Create();
+            job = await Db.TranscodeJobs.SingleAsync();
+            if (stage == "inspection") _inspectionBlock = release.Task;
+            else
+            {
+                _snapshot = Snapshot(job.EngineJobId, "Completed");
+                _probeBlock = release.Task;
+                await File.WriteAllTextAsync(Path.Combine(_root, job.OutputPath!), "joined output");
+            }
+            operation = Service().ReconcileAsync(job, default);
+            await _operationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        try
+        {
+            Assert.False(operation.IsCompleted);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using (await LibraryFileMutation.EnterAsync(timeout.Token))
+                await LibraryFileMutation.RequireItemAvailableAsync(Db, Guid.NewGuid(), timeout.Token);
+            await Service().ReconcileAsync(job, timeout.Token);
+            Assert.False(operation.IsCompleted);
+            Assert.Equal(1, _submissions);
+        }
+        finally
+        {
+            release.SetResult();
+            await operation;
+        }
+        Assert.Equal(stage == "import" ? 3 : 2, await Db.MediaSources.CountAsync());
     }
 
     [Fact]
