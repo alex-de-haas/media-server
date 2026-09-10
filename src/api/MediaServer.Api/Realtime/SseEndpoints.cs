@@ -27,6 +27,7 @@ public static class SseEndpoints
         response.Headers["X-Accel-Buffering"] = "no";
 
         var token = context.RequestAborted;
+        MediaServerDbContext? database = null;
         using var subscription = notifier.Subscribe();
 
         // Open the stream immediately so the client's fetch resolves and it knows it's connected.
@@ -47,7 +48,7 @@ public static class SseEndpoints
                     if (message.VisibleItemId is { } itemId)
                     {
                         // A title can disappear while indexing. Apply detail visibility at delivery too.
-                        var database = context.RequestServices.GetRequiredService<MediaServerDbContext>();
+                        database ??= context.RequestServices.GetRequiredService<MediaServerDbContext>();
                         if (!await database.MediaItems.AsNoTracking().AnyAsync(
                                 item => item.Id == itemId && item.PublicId != null && item.RemovedAt == null, token))
                             continue;

@@ -231,9 +231,9 @@ public sealed class RemuxIndexService(
         // Sidecar dubs. An external audio track is a second Matroska file, and playing one means
         // referencing its samples beside the video's — which needs an index of its own, built here rather
         // than on the request that wants it.
-        var catalogById = rows
+        var ownerBySourceId = rows
             .Where(row => row.CatalogId is not null)
-            .ToDictionary(row => row.Id, row => row.CatalogId!.Value);
+            .ToDictionary(row => row.Id, row => (CatalogId: row.CatalogId!.Value, row.MediaItemId));
 
         var sidecars = await database.MediaStreams.AsNoTracking()
             .Where(stream => stream.IsExternal
@@ -245,8 +245,8 @@ public sealed class RemuxIndexService(
         foreach (var sidecar in sidecars)
         {
             if (!visible.Contains(sidecar.MediaSourceId)
-                || !catalogById.TryGetValue(sidecar.MediaSourceId, out var catalogId)
-                || !catalogs.TryGetValue(catalogId, out var catalog)
+                || !ownerBySourceId.TryGetValue(sidecar.MediaSourceId, out var owner)
+                || !catalogs.TryGetValue(owner.CatalogId, out var catalog)
                 || !IsIndexable(Path.GetExtension(sidecar.ExternalPath!).TrimStart('.'))
                 || !sandbox.TryResolve(catalog, sidecar.ExternalPath!, out var absolute)
                 || !File.Exists(absolute))
@@ -254,7 +254,8 @@ public sealed class RemuxIndexService(
                 continue;
             }
 
-            candidates.Add(new Candidate(sidecar.Id, absolute, rows.First(row => row.Id == sidecar.MediaSourceId).MediaItemId, sidecar.MediaSourceId, sidecar.Id));
+            candidates.Add(new Candidate(
+                sidecar.Id, absolute, owner.MediaItemId, sidecar.MediaSourceId, sidecar.Id));
         }
 
         return candidates;

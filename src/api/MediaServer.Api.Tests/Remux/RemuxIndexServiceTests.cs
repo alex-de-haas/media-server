@@ -138,6 +138,40 @@ public sealed class RemuxIndexServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Sidecar_candidates_keep_each_owner_and_skip_unpublished_or_removed_sources()
+    {
+        var first = SeedSource("first.mp4", container: "mp4");
+        var second = SeedSource("second.mp4", container: "mp4");
+        var hidden = SeedSource("hidden.mp4", container: "mp4", published: false);
+        var removed = SeedSource("removed.mp4", container: "mp4", removed: true);
+        var tracks = new Dictionary<Guid, Guid>();
+        foreach (var sourceId in new[] { first, second, hidden, removed })
+        {
+            var trackId = Guid.NewGuid();
+            var path = $"{trackId}.mka";
+            await File.WriteAllBytesAsync(AbsolutePath(path), TinyMatroska());
+            _database.MediaStreams.Add(new MediaStream
+            {
+                Id = trackId, MediaSourceId = sourceId, StreamType = StreamType.Audio,
+                Index = 1, IsExternal = true, ExternalPath = path,
+            });
+            tracks.Add(sourceId, trackId);
+        }
+        await _database.SaveChangesAsync();
+
+        var pending = await Service().PendingAsync(10, CancellationToken.None);
+
+        Assert.Equal(2, pending.Count);
+        foreach (var sourceId in new[] { first, second })
+        {
+            var candidate = Assert.Single(pending, candidate => candidate.SourceId == sourceId);
+            Assert.Equal(tracks[sourceId], candidate.Key);
+            Assert.Equal(tracks[sourceId], candidate.StreamId);
+            Assert.Equal(_database.MediaSources.Single(source => source.Id == sourceId).MediaItemId, candidate.ItemId);
+        }
+    }
+
+    [Fact]
     public async Task A_matroska_source_without_an_index_is_pending()
     {
         var id = SeedSource();

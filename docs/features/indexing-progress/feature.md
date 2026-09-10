@@ -59,7 +59,10 @@ Both existing authenticated routes publish `indexingChanged`: `/api/events`
 `sourceId`, optional `streamId`, and `indexing`. Revisions order snapshots and
 live updates, including retries. No filesystem path or credential is included.
 Only published, non-removed items enter discovery, and event delivery rechecks
-item visibility in case a title disappears during indexing.
+item visibility in case a title disappears during indexing. The request resolves
+its database context only when the first visibility-sensitive event arrives and
+reuses it for subsequent checks. Discovery looks up sidecar ownership in a
+source-ID dictionary, without rescanning the full source list for each track.
 
 The notifier bounds each subscriber's channel. A subscriber that falls behind
 its buffer is disconnected, causing snapshot reconciliation after reconnect
