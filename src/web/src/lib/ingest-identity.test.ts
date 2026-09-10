@@ -57,7 +57,7 @@ describe("Activity identity", () => {
       file({ id: "s1", companionKind: "Subtitle", assignmentStatus: "Unassigned", assigned: null }),
     ]);
     expect(ingestTitle(pack)).toBe("Остров сокровищ");
-    expect(ingestMatchLabel(pack)).toBe("Matched 1 of 1 video files");
+    expect(ingestMatchLabel(pack)).toBe("Matched 1 of 1 video file");
   });
 
   it("keeps the final primary title and pack count after Identify, without the early-match marker", () => {

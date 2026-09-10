@@ -36,5 +36,5 @@ export function ingestMatchLabel(item: IngestItem): string | null {
   const total = item.sourceFiles.filter(
     (file) => file.companionKind == null && file.assignmentStatus !== "Skipped",
   ).length;
-  return `Matched ${matched} of ${total} video files`;
+  return `Matched ${matched} of ${total} video file${total === 1 ? "" : "s"}`;
 }
