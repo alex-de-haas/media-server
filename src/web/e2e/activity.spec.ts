@@ -1,5 +1,6 @@
 import { test, expect, type Route } from "@playwright/test";
-import { setupApp } from "./support";
+import { setupApp, type AppMock } from "./support";
+import type { IngestItem } from "../src/lib/media-server";
 
 // The Resolve-match dialog lists each unresolved file with its metadata candidates (poster + title + score).
 // Duplicate source files are prevented at the backend (LocalTorrentInspector), so the dialog renders the
@@ -484,7 +485,7 @@ test("a downloading movie pack matches per file ahead of the transfer finishing"
   const dieHard = { reference: { provider: "tmdb", id: "562" }, title: "Die Hard", year: 1988, score: 0.6, posterUrl: null };
   const dieHard2 = { reference: { provider: "tmdb", id: "1573" }, title: "Die Hard 2", year: 1990, score: 0.6, posterUrl: null };
 
-  await setupApp(page, {
+  const mock: AppMock = {
     catalogs: [{ id: "c1", name: "Movies", type: "Movie" }],
     metadataSearch: [dieHard, dieHard2],
     downloads: [
@@ -531,7 +532,7 @@ test("a downloading movie pack matches per file ahead of the transfer finishing"
             // Explicit: the row counts videos as those with no companionKind, which is what routes this
             // pack to the matching dialog rather than the single-movie pin.
             companionKind: null,
-            parsedTitle: "Die Hard",
+            parsedTitle: "1 фильм",
             parsedYear: 1988,
             parsedSeason: null,
             parsedEpisode: null,
@@ -543,7 +544,7 @@ test("a downloading movie pack matches per file ahead of the transfer finishing"
             assignmentStatus: "Unassigned",
             mediaItemId: null,
             companionKind: null,
-            parsedTitle: "Die Hard 2",
+            parsedTitle: "2 фильм",
             parsedYear: 1990,
             parsedSeason: null,
             parsedEpisode: null,
@@ -553,9 +554,26 @@ test("a downloading movie pack matches per file ahead of the transfer finishing"
         updatedAt: "2026-07-24T10:00:00Z",
       },
     ],
+  };
+  await setupApp(page, mock);
+  const pack = mock.ingest![0] as IngestItem;
+  // Keep the batch title null, just like the API until Identify runs. Matching only updates files.
+  await page.route("**/api/proxy/api/ingest/ingest-1/match", async (route) => {
+    pack.sourceFiles = pack.sourceFiles.map((file, index) => ({
+      ...file,
+      assignmentStatus: "Confirmed",
+      mediaItemId: `m${index + 1}`,
+      assigned: {
+        kind: "Movie", title: index === 0 ? dieHard.title : dieHard2.title,
+        season: null, episode: null, seriesTitle: null,
+        provider: "tmdb", providerId: index === 0 ? "562" : "1573",
+      },
+    }));
+    await route.fulfill({ json: null });
   });
 
   await page.goto("/activity");
+  await expect(page.getByLabel("Matched 2 of 2 video files", { exact: true })).toHaveCount(0);
 
   // The multi-video movie pack offers "Set titles" (the matching dialog), never the single-movie pin.
   await expect(page.getByRole("button", { name: "Set title", exact: true })).toHaveCount(0);
@@ -580,6 +598,14 @@ test("a downloading movie pack matches per file ahead of the transfer finishing"
   // The same grouped contract the review flow sends — issued while the torrent is still downloading.
   expect(body.groups.map((group) => group.providerId)).toEqual(["562", "1573"]);
   expect(body.groups.map((group) => group.files.map((file) => file.sourceFileId))).toEqual([["source-1"], ["source-2"]]);
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("Die Hard (+1 more)", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Matched 2 of 2 video files", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 фильм", { exact: true })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByText("Die Hard (+1 more)", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Matched 2 of 2 video files", { exact: true })).toBeVisible();
 });
 
 // The VPN pill in the Activity header doubles as the profile picker for an admin: the menu lists the
