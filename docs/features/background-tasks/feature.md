@@ -1,7 +1,7 @@
 # Background Tasks and Progress
 
 Created: 2026-06-15
-Updated: 2026-07-25
+Updated: 2026-09-10
 
 ## Description
 
@@ -17,6 +17,9 @@ job state that survives restarts.
 - Media scans.
 - Identify and metadata enrich/refresh (including language backfill).
 - Media probing.
+- [Video part joining](../video-part-joining/feature.md), with both inputs protected
+  until terminal state and output import; engine restart reports an interrupted
+  join as Failed and cleans its temporary files.
 - Media file operations: move/organize, remap, `.incoming/` staging cleanup,
   library item deletion, and large-file streaming support work where progress is
   useful.

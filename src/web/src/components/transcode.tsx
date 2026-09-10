@@ -776,6 +776,7 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
   });
 
   const extraction = job.kind === "Extract";
+  const joining = job.kind === "Join";
   const title = job.name ?? job.outputPath ?? job.inputPath;
   // The card's meta line, matching the "catalog · added 2m ago" line on an ingest card: what this run
   // produces, and how long the job has existed. `createdAt` is when the job was queued, not when encoding
@@ -786,7 +787,9 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
   // be the larger half of what changed. An extraction encodes nothing, so none of that applies — what it
   // produces is a count of files, and the codec/quality columns would only ever read "Remux".
   const meta = (
-    extraction
+    joining
+      ? ["Join parts · 2 files", age && `added ${age}`]
+      : extraction
       ? [`Extract · ${job.outputPaths.length} ${job.outputPaths.length === 1 ? "file" : "files"}`, age && `added ${age}`]
       : [
           job.videoCodec === "copy" ? (job.dolbyVision ? "Remux DV 8.1" : "Remux") : job.videoCodec.toUpperCase(),

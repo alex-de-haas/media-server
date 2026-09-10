@@ -25,6 +25,8 @@ public sealed class LibraryDeleteService(
     /// <summary>Returns false if no such item exists.</summary>
     public async Task<bool> DeleteAsync(Guid id, bool deleteFiles, bool deleteUserData, CancellationToken cancellationToken)
     {
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        await LibraryFileMutation.RequireItemAvailableAsync(database, id, cancellationToken);
         // Only published top-level movies/series are deletable — never episodes/seasons or unpublished rows.
         var item = await database.MediaItems.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.PublicId != null &&
@@ -333,6 +335,8 @@ public sealed class LibraryDeleteService(
     /// </summary>
     public async Task<bool> DeleteSourceAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
     {
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        await LibraryFileMutation.RequireSourceAvailableAsync(database, sourceId, cancellationToken);
         var source = await database.MediaSources.AsNoTracking()
             .Where(candidate => candidate.Id == sourceId)
             .Select(candidate => new { candidate.Id, candidate.Path, candidate.SourceFileId, candidate.MediaItemId })

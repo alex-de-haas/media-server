@@ -55,6 +55,12 @@ public sealed class TranscodeOutputImporter(
         }
 
         var result = await probe.ProbeAsync(absolute, cancellationToken);
+        if (job.Kind == TranscodeJobKind.Join && (result.DurationTicks <= 0 ||
+            (job.ExpectedDurationSeconds is { } expected && Math.Abs(result.DurationTicks / (double)TimeSpan.TicksPerSecond - expected) > 0.5)))
+        {
+            job.Error = "The joined output has an unexpected duration; it was not added to the library.";
+            return false;
+        }
         var source = new MediaSource
         {
             Id = Guid.NewGuid(),
@@ -112,6 +118,7 @@ public sealed class TranscodeOutputImporter(
     /// from the probe so the label always reflects the produced file, not just the requested settings.</summary>
     private static string VersionLabel(TranscodeJob job, ProbeResult result)
     {
+        if (job.Kind == TranscodeJobKind.Join) return "Joined";
         var video = result.Streams.FirstOrDefault(stream => stream.Type == StreamType.Video);
         var height = video?.Height;
 

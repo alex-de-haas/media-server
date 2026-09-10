@@ -1,9 +1,9 @@
 # Convert Dialog
 
 Created: 2026-07-29
-Updated: 2026-09-08
+Updated: 2026-09-10
 
-The one place a new version of a title — a movie's or an episode's — is composed. It
+This dialog composes a new version from one video file — a movie's or an episode's. It
 submits a single job to the
 transcode engine, and everything that job can carry is decided here: what happens
 to the video, which of the container's tracks survive, which files beside it are
@@ -26,6 +26,8 @@ plays is database-side and works with no engine attached. The surface is one com
 for a movie's Media tab and an episode's expanded row
 ([episode-media](../episode-media/feature.md)), so the dialog is reached the same way
 from either.
+
+Sequentially joining two video parts is a separate [Join parts](../video-part-joining/feature.md) action in a movie's Media tab.
 
 ## What it composes
 

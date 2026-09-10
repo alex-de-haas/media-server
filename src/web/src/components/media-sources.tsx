@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AudioLines, Captions, Check, ChevronDown, FileOutput, FileQuestion, Film, Pencil, Shrink, Star, Trash2, type LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
+import { JoinPartsControl } from "@/components/join-parts-dialog";
 import { ExtractDialog } from "@/components/extract-dialog";
 import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
 import { dolbyVisionNote, dynamicRangeBadges, formatBytes, formatRuntime, pictureStream, versionStem } from "@/lib/format";
@@ -84,6 +85,7 @@ export function MediaSources({
   return (
     <section className="flex flex-col gap-3">
       {admin && showConversions && <Conversions itemIds={[owner.id]} onSettled={changed} />}
+      {canManage && owner.kind === "Movie" && sources.length > 1 && <JoinPartsControl sources={sources} itemId={owner.id} />}
       {sources.length ? (
         sources.map((source) => (
           <SourceCard

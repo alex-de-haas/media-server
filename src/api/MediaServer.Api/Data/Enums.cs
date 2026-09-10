@@ -62,6 +62,9 @@ public enum TranscodeJobKind
 
     /// <summary>Writes chosen tracks of the source out as files beside it, leaving the source untouched.</summary>
     Extract = 1,
+
+    /// <summary>Joins two consecutive parts into one new version.</summary>
+    Join = 2,
 }
 
 /// <summary>The v1 processing (PROC) pipeline stages, persisted as <c>IngestItem.Stage</c>.</summary>

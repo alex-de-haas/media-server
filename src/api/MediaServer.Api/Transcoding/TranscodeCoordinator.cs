@@ -68,12 +68,18 @@ public sealed class TranscodeCoordinator(
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
 
         var active = await database.TranscodeJobs
-            .Where(job => job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running)
+            .Where(job => job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running ||
+                job.Kind == TranscodeJobKind.Join && job.State == TranscodeJobState.Completed && !job.OutputImported)
             .ToListAsync(cancellationToken);
 
         var completed = new List<TranscodeJob>();
         foreach (var job in active)
         {
+            if (job.Kind == TranscodeJobKind.Join)
+            {
+                await scope.ServiceProvider.GetRequiredService<VideoPartJoinService>().ReconcileAsync(job, cancellationToken);
+                continue;
+            }
             var before = job.State;
             Apply(job, engine.GetSnapshot(job.EngineJobId));
             if (before is not TranscodeJobState.Completed && job.State is TranscodeJobState.Completed)
@@ -103,6 +109,8 @@ public sealed class TranscodeCoordinator(
             return;
         }
 
+        // Joins reconcile on the timer under the same mutation gate as submit/cancel/delete.
+        if (job.Kind == TranscodeJobKind.Join) return;
         var before = job.State;
         Apply(job, engine.GetSnapshot(engineJobId));
         await database.SaveChangesAsync();
@@ -182,7 +190,7 @@ public sealed class TranscodeCoordinator(
 
             if (state is TranscodeJobState.Failed)
             {
-                job.Error ??= "The transcode job failed.";
+                job.Error ??= snapshot.Error ?? "The transcode job failed.";
             }
         }
 

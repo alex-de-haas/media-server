@@ -18,9 +18,11 @@ public sealed class RemoteTranscodeEngineWireTests
     private sealed class StubHandler : HttpMessageHandler
     {
         public string? RequestBody { get; private set; }
+        public string? RequestPath { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            RequestPath = request.RequestUri!.AbsolutePath;
             RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -48,6 +50,25 @@ public sealed class RemoteTranscodeEngineWireTests
             CancellationToken.None);
 
         return handler.RequestBody!;
+    }
+
+    [Fact]
+    public async Task Join_UsesDistinctEndpointAndOrderedMountedInputsWithoutEncodeSettings()
+    {
+        var handler = new StubHandler();
+        using var engine = new RemoteTranscodeEngine(new HttpClient(handler) { BaseAddress = new Uri("http://engine.local/") },
+            new MediaServerSettings(), NullLogger<RemoteTranscodeEngine>.Instance);
+        var id = Guid.NewGuid();
+        await engine.CreateAsync(new TranscodeJobRequest("movies", "second.mkv", "movies", "joined.mkv", null, null, null,
+            JoinInputs: [new("movies", "second.mkv"), new("movies", "first.mkv")], ClientJobId: id), default);
+        Assert.Equal("/jobs/join", handler.RequestPath);
+        using var json = System.Text.Json.JsonDocument.Parse(handler.RequestBody!);
+        var root = json.RootElement;
+        Assert.Equal("second.mkv", root.GetProperty("inputs")[0].GetProperty("path").GetString());
+        Assert.Equal("first.mkv", root.GetProperty("inputs")[1].GetProperty("path").GetString());
+        Assert.Equal(id, root.GetProperty("clientJobId").GetGuid());
+        Assert.False(root.TryGetProperty("videoCodec", out _));
+        Assert.False(root.TryGetProperty("additionalInputs", out _));
     }
 
     [Fact]

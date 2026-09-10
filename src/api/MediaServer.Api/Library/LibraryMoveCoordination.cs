@@ -110,6 +110,9 @@ public sealed class LibraryMoveCoordinator(
 {
     public async Task<LibraryMoveRequestResult> RequestAsync(Guid itemId, Guid targetCatalogId, CancellationToken cancellationToken)
     {
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        if (await LibraryFileMutation.HasJoinAsync(database, itemId, cancellationToken))
+            return new(LibraryMoveRequestStatus.TranscodeActive, null);
         var item = await database.MediaItems.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == itemId, cancellationToken);
         if (item is null)
         {

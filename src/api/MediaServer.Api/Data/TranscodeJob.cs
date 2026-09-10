@@ -25,6 +25,14 @@ public sealed class TranscodeJob
     /// <summary>The source being re-encoded.</summary>
     public Guid MediaSourceId { get; set; }
 
+    /// <summary>The second part of a join, after MediaSourceId. Retained as job history without a cascading foreign key.</summary>
+    public Guid? SecondSourceId { get; set; }
+    public string? SecondInputPath { get; set; }
+    public double? ExpectedDurationSeconds { get; set; }
+    public bool OutputImported { get; set; }
+    public bool CancellationRequested { get; set; }
+    public DateTimeOffset? LastSubmissionAt { get; set; }
+
     /// <summary>The movie the source belongs to (denormalized so the job list can group by item).</summary>
     public Guid MediaItemId { get; set; }
 

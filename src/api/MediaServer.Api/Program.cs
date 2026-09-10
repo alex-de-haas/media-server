@@ -157,6 +157,7 @@ else
 builder.Services.AddHostedService<TranscodeCoordinator>();
 builder.Services.AddScoped<TranscodeService>();
 builder.Services.AddScoped<TrackExtractionService>();
+builder.Services.AddScoped<VideoPartJoinService>();
 builder.Services.AddScoped<TranscodeOutputImporter>();
 builder.Services.AddScoped<ExtractOutputImporter>();
 
@@ -569,6 +570,14 @@ if (settings.PlaybackDiagnosticsEnabled)
 // Routing first, so the allowlist below can see which endpoint matched; then the allowlist, so an
 // unpublished route 404s on the public binding before authentication ever looks at a credential.
 app.UseRouting();
+app.Use(async (context, next) =>
+{
+    try { await next(context); }
+    catch (LibraryFileBusyException exception)
+    {
+        await Results.Conflict(new { error = exception.Message }).ExecuteAsync(context);
+    }
+});
 app.UsePublicSurfaceAllowlist(hosty);
 
 // Everything but the MCP surface. The Hosty scheme is the default one, so this middleware would
