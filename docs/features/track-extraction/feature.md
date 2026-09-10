@@ -1,7 +1,7 @@
 # Track Extraction
 
 Created: 2026-08-07
-Updated: 2026-09-08
+Updated: 2026-09-10
 
 A version's embedded audio and subtitle tracks can be written out as files beside
 it, each recorded as an external `MediaStream` of the same source. A movie's version
@@ -151,6 +151,11 @@ app, which grew an `outputs` list for it: one ffmpeg invocation writes every
 selected track, so a nineteen-dub remux is read once rather than nineteen times.
 The `api` image ships without `ffmpeg` and keeps it that way.
 
+The request leaves `videoCodec`, `hardwareAcceleration`, and the other picture
+settings null. Even `videoCodec: "copy"` is invalid for extraction: the engine
+refuses it because there is no video output. Stream copying is selected by the
+individual output's null `codec`.
+
 `TranscodeJob.Kind` tells the two shapes apart, and `TranscodeJobOutput` holds each
 planned file. The names are fixed at submit time because the engine writes them, and
 the language and title are carried rather than re-read: a `.srt` has nowhere to hold
@@ -232,8 +237,9 @@ the folder directly (SMB/NFS) do get it. This feature does not narrow that gap.
   own, and a reserved name taken out of circulation without affecting crowding.
 - `RemoteTranscodeEngineWireTests` — the outputs travelling under the names the
   engine binds (`path`, not `relativePath`), an extraction sending a null
-  `outputPath`, a text conversion naming its codec, and an ordinary job sending no
-  outputs.
+  `outputPath`, audio and subtitle extractions sending null picture settings, a text
+  conversion naming its codec, and an ordinary job keeping its video settings and
+  sending no outputs.
 - `detail.spec.ts` — the Extract control opening the dialog, the audio caveat on its
   heading, the file each track becomes, a picture-based subtitle unselectable with
   its reason, sidecars not offered, and the submitted payload.

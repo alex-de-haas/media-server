@@ -16,6 +16,8 @@ out/
 *.tsbuildinfo
 next-env.d.ts
 .pnpm-store/
+/src/web/AGENTS.md
+/src/web/CLAUDE.md
 
 # --- Test / coverage ---
 [Tt]est[Rr]esults/

@@ -142,7 +142,7 @@ public sealed class RemoteTranscodeEngineWireTests
         await engine.CreateAsync(
             new TranscodeJobRequest(
                 "movies", "in.mkv", OutputMountLabel: null, OutputRelativePath: null,
-                "copy", "auto", null, Outputs: outputs),
+                null, null, null, Outputs: outputs),
             CancellationToken.None);
 
         return handler.RequestBody!;
@@ -178,11 +178,27 @@ public sealed class RemoteTranscodeEngineWireTests
         Assert.Contains("\"codec\":\"srt\"", body);
     }
 
+    [Theory]
+    [InlineData("movie.rus.mka", null)]
+    [InlineData("movie.eng.srt", "srt")]
+    public async Task An_extraction_sends_no_video_settings(string path, string? codec)
+    {
+        var body = await PostExtractionAsync(new EngineExtractionOutput("movies", path, 3, codec));
+
+        Assert.Contains("\"videoCodec\":null", body);
+        Assert.Contains("\"hardwareAcceleration\":null", body);
+        Assert.Contains("\"qualityLevel\":null", body);
+        Assert.Contains("\"maxHeight\":null", body);
+        Assert.Contains("\"dolbyVision\":null", body);
+    }
+
     [Fact]
     public async Task An_ordinary_job_sends_no_outputs()
     {
         var body = await PostAsync();
 
         Assert.Contains("\"outputs\":null", body);
+        Assert.Contains("\"videoCodec\":\"copy\"", body);
+        Assert.Contains("\"hardwareAcceleration\":\"auto\"", body);
     }
 }

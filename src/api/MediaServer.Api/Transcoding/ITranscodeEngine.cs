@@ -4,14 +4,15 @@ namespace MediaServer.Api.Transcoding;
 /// <see cref="InputMountLabel"/>/<see cref="OutputMountLabel"/> plus a path relative to that mount root.
 /// The engine resolves them against its own media root with the same label (the same host path), so the job
 /// reads and writes on the same filesystem as the catalog. <see cref="OutputMountLabel"/> defaults to
-/// <see cref="InputMountLabel"/> when null.</summary>
+/// <see cref="InputMountLabel"/> when null. Extraction leaves <see cref="VideoCodec"/>
+/// and <see cref="HardwareAcceleration"/> null because it produces no video output.</summary>
 public sealed record TranscodeJobRequest(
     string? InputMountLabel,
     string InputRelativePath,
     string? OutputMountLabel,
     string? OutputRelativePath,
-    string VideoCodec,
-    string HardwareAcceleration,
+    string? VideoCodec,
+    string? HardwareAcceleration,
     string? QualityLevel,
     int? MaxHeight = null,
     IReadOnlyList<int>? AudioStreamIndexes = null,

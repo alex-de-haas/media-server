@@ -388,6 +388,8 @@ public sealed class TrackExtractionTests : IDisposable
         Assert.Null(job.OutputPath);
         // Nothing about a picture reaches the engine: it refuses a job that claims otherwise.
         Assert.Null(_engine.Seen!.OutputRelativePath);
+        Assert.Null(_engine.Seen.VideoCodec);
+        Assert.Null(_engine.Seen.HardwareAcceleration);
         Assert.Null(_engine.Seen.MaxHeight);
         Assert.Null(_engine.Seen.QualityLevel);
         Assert.Null(_engine.Seen.AdditionalInputs);
