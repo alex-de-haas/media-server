@@ -85,9 +85,8 @@ public sealed class TrackExtractionService(
             descriptor = await engine.CreateAsync(
                 new TranscodeJobRequest(
                     input.Label, input.Relative, OutputMountLabel: null, OutputRelativePath: null,
-                    // Structurally required by the request record and meaningless here: an extraction encodes
-                    // nothing, and the engine refuses a job that says otherwise.
-                    VideoCodec: "copy", HardwareAcceleration: "auto", QualityLevel: null,
+                    // No video output: even "copy" is a video setting the engine refuses on extraction.
+                    VideoCodec: null, HardwareAcceleration: null, QualityLevel: null,
                     Outputs: outputs),
                 cancellationToken);
         }

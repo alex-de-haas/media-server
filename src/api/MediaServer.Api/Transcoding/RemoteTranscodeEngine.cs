@@ -320,7 +320,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
     // positional record parameter the engine cannot bind simply stays null — so clarity belongs in a comment
     // here, and the names that carry units live on the domain types these are mapped from.
     private sealed record WireCreateJobRequest(
-        string? InputMountLabel, string InputPath, string? OutputMountLabel, string? OutputPath, string VideoCodec, string HardwareAcceleration, string? QualityLevel,
+        string? InputMountLabel, string InputPath, string? OutputMountLabel, string? OutputPath, string? VideoCodec, string? HardwareAcceleration, string? QualityLevel,
         int? MaxHeight = null, IReadOnlyList<int>? AudioStreamIndexes = null, IReadOnlyList<int>? SubtitleStreamIndexes = null,
         int? DefaultAudioStreamIndex = null, int? DefaultSubtitleStreamIndex = null,
         IReadOnlyList<WireAdditionalInput>? AdditionalInputs = null,
