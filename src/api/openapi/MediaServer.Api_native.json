@@ -1474,6 +1474,36 @@
           }
         }
       },
+      "IndexingStatus": {
+        "required": [
+          "state",
+          "percent",
+          "revision"
+        ],
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "percent": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "revision": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "LibraryDetailDto": {
         "required": [
           "id",
@@ -2042,6 +2072,9 @@
             "items": {
               "$ref": "#/components/schemas/MediaStreamDto"
             }
+          },
+          "indexing": {
+            "$ref": "#/components/schemas/IndexingStatus"
           }
         }
       },
@@ -2207,6 +2240,9 @@
               "null",
               "string"
             ]
+          },
+          "indexing": {
+            "$ref": "#/components/schemas/IndexingStatus"
           }
         }
       },

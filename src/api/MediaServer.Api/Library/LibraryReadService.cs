@@ -16,7 +16,9 @@ namespace MediaServer.Api.Library;
 public sealed class LibraryReadService(
     MediaServerDbContext database,
     UserDataService userData,
-    MediaServerSettings settings)
+    MediaServerSettings settings,
+    Remux.IndexingProgress? indexing = null,
+    Catalogs.ICatalogPathSandbox? sandbox = null)
 {
     /// <summary>Top-level browsable items (published movies and series), optionally filtered by catalog/kind.</summary>
     public async Task<IReadOnlyList<LibraryItemDto>> ListAsync(
@@ -446,9 +448,11 @@ public sealed class LibraryReadService(
                 .ToListAsync(cancellationToken);
             // The management UI keeps a stable order by file name (the default version is marked with a star,
             // not by position). The Jellyfin surface still puts the default first — that's how Infuse picks it.
+            var sourceCatalog = await database.Catalogs.AsNoTracking()
+                .FirstOrDefaultAsync(catalog => catalog.Id == item.CatalogId, cancellationToken);
             mediaSources = sources
                 .OrderBy(source => Path.GetFileName(source.Path), StringComparer.OrdinalIgnoreCase)
-                .Select(MapSource)
+                .Select(source => MapSource(source, sourceCatalog))
                 .ToList();
         }
 
@@ -856,7 +860,7 @@ public sealed class LibraryReadService(
 
     private static string? EmptyToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
-    private static MediaSourceDto MapSource(MediaSource source) => new(
+    private MediaSourceDto MapSource(MediaSource source, Catalog? catalog) => new(
         source.Id,
         source.VersionName,
         Path.GetFileName(source.Path),
@@ -864,7 +868,17 @@ public sealed class LibraryReadService(
         source.SizeBytes,
         source.Bitrate,
         source.DurationTicks,
-        source.Streams.OrderBy(stream => stream.Index).Select(MapStream).ToList());
+        source.Streams.OrderBy(stream => stream.Index).Select(stream => MapStream(stream) with
+        {
+            Indexing = stream.IsExternal && stream.StreamType == StreamType.Audio
+                ? ReadIndexing(stream.Id, stream.ExternalPath, Path.GetExtension(stream.ExternalPath)?.TrimStart('.'), catalog) : null,
+        }).ToList(),
+        ReadIndexing(source.Id, source.Path, source.Container, catalog));
+
+    private Remux.IndexingStatus? ReadIndexing(Guid key, string? path, string? container, Catalog? catalog) =>
+        indexing is not null && sandbox is not null && catalog is not null && path is not null
+            && sandbox.TryResolve(catalog, path, out var absolute)
+            ? indexing.Read(key, absolute, container) : null;
 
     // Older rows stored ffprobe's demuxer format list (e.g. "matroska,webm") as the container; show the real
     // container from the file extension instead, falling back to the first listed format. New rows are already

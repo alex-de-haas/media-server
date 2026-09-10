@@ -296,6 +296,7 @@ builder.Services.AddSingleton<RemuxHeaderCache>();
 builder.Services.AddSingleton<RemuxStreamActivity>();
 builder.Services.AddSingleton(serviceProvider => new RemuxIndexStore(
     hosty.AppCacheDir, serviceProvider.GetRequiredService<ILogger<RemuxIndexStore>>()));
+builder.Services.AddSingleton<IndexingProgress>();
 builder.Services.AddScoped<RemuxIndexService>();
 builder.Services.AddScoped<RemuxStreamService>();
 builder.Services.AddScoped<IRemuxReadiness, RemuxReadiness>();

@@ -3,6 +3,7 @@ import MediaServerAPI
 
 /// One playable copy of a title, and what is in it.
 public struct TitleVersion: Identifiable, Equatable, Sendable {
+    public var indexing: IndexingStatus? = nil
     public let id: String
 
     /// What an operator called this copy — "Director's Cut", "4K" — or nothing when there is only one.
@@ -33,6 +34,7 @@ public struct TitleVersion: Identifiable, Equatable, Sendable {
 }
 
 public struct TitleTrack: Identifiable, Equatable, Sendable {
+    public var indexing: IndexingStatus? = nil
     /// Codecs that are a picture rather than a film — cover art the muxer never flagged as attached.
     /// Kept in step with the server's own list; the two answering differently is the defect.
     static let stillImages: Set<String> = ["mjpeg", "png", "bmp", "gif", "webp"]
@@ -257,6 +259,7 @@ extension TitleDetail {
 
 extension TitleVersion {
     init(_ dto: Components.Schemas.MediaSourceDto) {
+        self.indexing = dto.indexing.map(IndexingStatus.init)
         self.id = dto.id
         self.versionName = dto.versionName
         self.container = dto.container
@@ -277,6 +280,7 @@ extension TitleVersion {
 
 extension TitleTrack {
     init(_ dto: Components.Schemas.MediaStreamDto) {
+        self.indexing = dto.indexing.map(IndexingStatus.init)
         self.id = dto.id
         self.language = dto.language
         self.codec = dto.codec

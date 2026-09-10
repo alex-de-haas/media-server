@@ -22,6 +22,7 @@ struct TitleView: View {
         self.playback = playback
     }
 
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var systemColorScheme
     // Cast portraits are public provider URLs and must never receive the server credential.
     @State private var portraitLoader = ArtworkLoader(token: { nil })
@@ -89,6 +90,13 @@ struct TitleView: View {
                 detail = loaded
             } catch {
                 failure = String(describing: error)
+            }
+        }
+        .task(id: scenePhase == .active && playing == nil) {
+            guard scenePhase == .active, playing == nil else { return }
+            for await connected in library.indexing.connections() {
+                guard !Task.isCancelled else { break }
+                if connected { await refresh() }
             }
         }
         .fullScreenCover(item: $playing) { stream in
@@ -283,7 +291,7 @@ struct TitleView: View {
 
     private func refusalTitle(_ refusal: PlaybackRefusal) -> String {
         switch refusal {
-        case .packagingPending: "Indexing in progress"
+        case .packagingPending: "Waiting for indexing"
         case .unsupportedVideoCodec, .packagingUnsupportedVideo: "This picture cannot be played here"
         case .unsupportedAudioCodec, .packagingUnsupportedAudio: "This soundtrack cannot be played here"
         case .unsupportedDynamicRange: "This needs a display this one is not"
@@ -332,7 +340,18 @@ struct TitleView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 950, alignment: .leading)
             }
-            if case .refused(let refusal, _) = plan { refusalNotice(refusal) }
+            if case .refused(let refusal, let source) = plan {
+                if refusal.isPending, let version = detail.versions.first(where: { $0.id == source }),
+                   let status = library.indexing.status(for: version.id, snapshot: version.indexing),
+                   status.label != nil || status.state == "ready" {
+                    if status.state == "ready" {
+                        Text("Indexing finished. Press Play to try this version again.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        indexingIndicator(version.id, snapshot: version.indexing)
+                    }
+                } else { refusalNotice(refusal) }
+            }
 
             if let version = detail.versions.first(where: { $0.id == chosenVersion }) ?? detail.versions.first {
                 VStack(alignment: .leading, spacing: 20) {
@@ -413,6 +432,25 @@ struct TitleView: View {
     }
 
     @ViewBuilder
+    private func indexingIndicator(_ id: String, snapshot: IndexingStatus?) -> some View {
+        if let status = library.indexing.status(for: id, snapshot: snapshot), let label = status.label {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label).font(.caption)
+                if status.state == "indexing", let percent = status.percent {
+                    ProgressView(value: Double(max(0, min(99, percent))), total: 100)
+                        .frame(maxWidth: 360)
+                        .accessibilityLabel(label)
+                } else if status.state == "waiting" || status.state == "saving" {
+                    ProgressView().controlSize(.small)
+                }
+                if !library.indexing.connected {
+                    Text("Reconnecting…").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private func versions(_ versions: [TitleVersion]) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Versions").font(.title2)
@@ -425,6 +463,7 @@ struct TitleView: View {
                         Image(systemName: version.id == chosenVersion ? "checkmark.circle.fill" : "circle")
                         VStack(alignment: .leading, spacing: 10) {
                             Text(version.versionName.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } ?? "Original")
+                            indexingIndicator(version.id, snapshot: version.indexing)
                             Text([version.container.uppercased(), version.video?.codec?.uppercased(), version.video?.resolutionLabel, version.sizeDescription]
                                 .compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
@@ -515,6 +554,7 @@ struct TitleView: View {
                             // A dub or a subtitle file beside the video is the thing this library holds and
                             // no other client of it can play, so it is worth pointing at.
                             if track.isExternal {
+                                indexingIndicator(track.id, snapshot: track.indexing)
                                 Image(systemName: "doc.badge.plus")
                                     .foregroundStyle(.secondary)
                                     .help("Beside the file")

@@ -7,6 +7,21 @@ namespace MediaServer.Api.Tests.Realtime;
 public sealed class SseRealtimeNotifierTests
 {
     [Fact]
+    public async Task Slow_subscriber_is_disconnected_so_it_can_reconcile_missed_completion()
+    {
+        var notifier = new SseRealtimeNotifier();
+        using var slow = notifier.Subscribe();
+        for (var i = 0; i < 257; i++)
+            notifier.IndexingChanged(new(Guid.NewGuid(), Guid.NewGuid(), null, new("indexing", i % 100, i)));
+        while (slow.Reader.TryRead(out _)) { }
+        Assert.False(await slow.Reader.WaitToReadAsync());
+        using var reconnected = notifier.Subscribe();
+        notifier.IndexingChanged(new(Guid.NewGuid(), Guid.NewGuid(), null, new("ready", null, 300)));
+        Assert.True(reconnected.Reader.TryRead(out var completed));
+        Assert.Contains("ready", completed.Data);
+    }
+
+    [Fact]
     public async Task Publishes_a_named_event_with_camelCase_json_to_a_subscriber()
     {
         var notifier = new SseRealtimeNotifier();

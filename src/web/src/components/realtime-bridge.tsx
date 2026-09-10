@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { applyIndexingEvent } from "@/lib/indexing";
 import { openEventStream } from "@/lib/sse";
 import type { CatalogRefreshJob, DhtStatus, Download, LibraryMoveJob, VpnStatus } from "@/lib/media-server";
 
@@ -71,7 +72,9 @@ function useRealtime() {
       onEvent: (event, data) => handleEvent(queryClient, event, data),
       // On (re)connect, reconcile anything missed while disconnected.
       onStatus: (connected) => {
+        queryClient.setQueryData(["indexing-connected"], connected);
         if (connected) {
+          queryClient.invalidateQueries({ queryKey: ["library-detail"] });
           invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"], ["dht"], ["catalog-refresh-jobs"], ["library-move-jobs"]);
         }
       },
@@ -81,6 +84,9 @@ function useRealtime() {
 
 function handleEvent(queryClient: QueryClient, event: string, data: unknown): void {
   switch (event) {
+    case "indexingChanged":
+      applyIndexingEvent(queryClient, data);
+      break;
     case "downloadProgress":
       patchDownload(queryClient, data as DownloadProgressEvent);
       break;

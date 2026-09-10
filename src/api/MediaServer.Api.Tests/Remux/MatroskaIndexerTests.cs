@@ -15,6 +15,25 @@ public sealed class MatroskaIndexerTests
     private static byte[] Tracks(params byte[][] entries) => ContainerBuilders.Ebml(0x1654AE6B, entries);
 
     [Fact]
+    public void Reports_monotonic_file_offsets_after_clusters_without_changing_the_index()
+    {
+        var file = File(Tracks(TrackEntry(1, 1, "V_MPEGH/ISO/HEVC", codecPrivate: [0x01])),
+            Cluster(0, SimpleBlock(1, 0, keyframe: true, Frame(100, 0xAB))),
+            Cluster(1000, SimpleBlock(1, 0, keyframe: true, Frame(200, 0xCD))));
+        var positions = new List<long>();
+        var index = MatroskaIndexer.Build(new MemoryStream(file), progress: (position, length) =>
+        {
+            Assert.Equal(file.Length, length);
+            Assert.InRange(position, 0, length);
+            positions.Add(position);
+        });
+        Assert.Equal(2, positions.Count);
+        Assert.True(positions[1] > positions[0]);
+        Assert.Equal(file.Length, positions[^1]);
+        Assert.Equal(2, Assert.Single(index.Tracks).Samples.Count);
+    }
+
+    [Fact]
     public void Carries_what_a_sample_entry_needs_rather_than_deriving_it()
     {
         var hvcc = new byte[] { 0x01, 0x22, 0x20, 0x00 };

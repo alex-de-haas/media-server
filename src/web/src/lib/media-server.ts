@@ -1,3 +1,4 @@
+import type { IndexingStatus } from "./indexing";
 // Typed client for the Media Server backend, reached through the same-origin BFF proxy
 // (`/api/proxy/...` → internal `api` service). All calls carry the validated Host identity.
 
@@ -354,6 +355,7 @@ export interface DolbyVisionDetail {
 }
 
 export interface MediaStream {
+  indexing?: IndexingStatus | null;
   /** Addressable because a sidecar is a file of its own — it can be merged in or removed independently. */
   id: string;
   type: string;
@@ -389,6 +391,7 @@ export interface MediaStream {
 }
 
 export interface LibraryMediaSource {
+  indexing?: IndexingStatus | null;
   id: string;
   versionName: string | null;
   // On-disk file name (with extension); read-only, shown to tell sources apart.

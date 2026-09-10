@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-09-04
+Updated: 2026-09-10
 
 ## Description
 
@@ -200,6 +200,10 @@ pretending it has no picture.
 The rule is stated in three places and has to mean the same thing in all of them, or two
 surfaces disagree about what the film is — the detail projection a client is shown, the resolver
 that judges what can be played, and the remux path that writes the sample entry.
+
+## Indexing progress
+
+Apple TV presents the attempted version's [indexing progress](../indexing-progress/feature.md) while a `packaging_pending` refusal is active. Completion invites a new Play attempt; index readiness alone does not promise codec support.
 
 ## Testing Expectations
 

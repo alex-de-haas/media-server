@@ -144,7 +144,8 @@ public sealed record MediaSourceDto(
     long SizeBytes,
     int? Bitrate,
     long DurationTicks,
-    IReadOnlyList<MediaStreamDto> Streams);
+    IReadOnlyList<MediaStreamDto> Streams,
+    Remux.IndexingStatus? Indexing = null);
 
 public sealed record MediaStreamDto(
     // A sidecar is a file of its own and can be merged in or removed on its own, so it has to be
@@ -182,7 +183,8 @@ public sealed record MediaStreamDto(
     // Vision). Null for anything that is not Dolby Vision, and for a row probed before it was recorded.
     DolbyVisionDto? DolbyVision = null,
     // Server-defined nominal resolution; null for non-video streams or unknown dimensions.
-    string? ResolutionLabel = null);
+    string? ResolutionLabel = null,
+    Remux.IndexingStatus? Indexing = null);
 
 /// <summary>A Dolby Vision configuration record as a client reads it: the profile (5, 7 or 8), its level, the
 /// base-layer compatibility id (1 is HDR10, 2 SDR, 4 HLG, 6 the HDR10 a UHD Blu-ray carries under profile

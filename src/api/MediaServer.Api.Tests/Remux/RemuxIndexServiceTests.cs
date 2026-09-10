@@ -96,6 +96,48 @@ public sealed class RemuxIndexServiceTests : IDisposable
         Path.Combine(_root, "library", relativePath);
 
     [Fact]
+    public async Task Build_publishes_lifecycle_and_detail_exposes_the_same_ready_snapshot()
+    {
+        var id = SeedSource();
+        var notifier = new MediaServer.Api.Realtime.SseRealtimeNotifier();
+        var progress = new IndexingProgress(_store, notifier, TimeProvider.System);
+        var sandbox = new CatalogPathSandbox();
+        var service = new RemuxIndexService(_database, sandbox, _store, NullLogger<RemuxIndexService>.Instance, progress);
+        using var subscriber = notifier.Subscribe();
+        var candidate = Assert.Single(await service.PendingAsync(10, CancellationToken.None));
+        var library = new MediaServer.Api.Library.LibraryReadService(_database,
+            new MediaServer.Api.Library.UserDataService(_database, TimeProvider.System),
+            new MediaServer.Api.Configuration.MediaServerSettings(), progress, sandbox);
+        var before = await library.GetDetailAsync(candidate.ItemId, null, CancellationToken.None);
+        Assert.Equal("waiting", Assert.Single(before!.MediaSources).Indexing!.State);
+        Assert.True(await service.BuildAsync(candidate, CancellationToken.None));
+        var after = await library.GetDetailAsync(candidate.ItemId, null, CancellationToken.None);
+        Assert.Equal("ready", Assert.Single(after!.MediaSources).Indexing!.State);
+        var states = new List<string>();
+        while (subscriber.Reader.TryRead(out var message))
+        {
+            using var json = System.Text.Json.JsonDocument.Parse(message.Data);
+            states.Add(json.RootElement.GetProperty("indexing").GetProperty("state").GetString()!);
+            Assert.Equal(id, json.RootElement.GetProperty("sourceId").GetGuid());
+        }
+        Assert.Equal(new[] { "indexing", "saving", "ready" }, states);
+    }
+
+    [Fact]
+    public async Task Cancelled_build_does_not_leave_a_running_indicator()
+    {
+        SeedSource();
+        var progress = new IndexingProgress(_store, new MediaServer.Api.Realtime.SseRealtimeNotifier(), TimeProvider.System);
+        var service = new RemuxIndexService(_database, new CatalogPathSandbox(), _store,
+            NullLogger<RemuxIndexService>.Instance, progress);
+        var candidate = Assert.Single(await service.PendingAsync(10, CancellationToken.None));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.BuildAsync(candidate, cancelled.Token));
+        Assert.Equal("waiting", progress.Read(candidate.Key, candidate.AbsolutePath, "mkv")!.State);
+    }
+
+    [Fact]
     public async Task A_matroska_source_without_an_index_is_pending()
     {
         var id = SeedSource();
