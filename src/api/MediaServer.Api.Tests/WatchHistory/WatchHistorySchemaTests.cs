@@ -72,15 +72,6 @@ public sealed class WatchHistorySchemaTests : IDisposable
         PlaySessionId = sessionId,
     };
 
-    private WatchHistoryProviderConnection Connection(string providerKey = "trakt") => new()
-    {
-        Id = Guid.NewGuid(),
-        AppUserId = _userId,
-        ProviderKey = providerKey,
-        SecretKey = $"{providerKey}.connection.x.tokens",
-        Status = WatchHistoryConnectionStatus.Connected,
-        ConnectedAt = DateTimeOffset.UnixEpoch,
-    };
 
     [Fact]
     public void OneSessionCanOnlyRecordOnePlay()
@@ -121,134 +112,6 @@ public sealed class WatchHistorySchemaTests : IDisposable
     }
 
     [Fact]
-    public void AUserHasAtMostOneConnectionPerProvider()
-    {
-        _database.WatchHistoryConnections.Add(Connection());
-        _database.SaveChanges();
-
-        _database.WatchHistoryConnections.Add(Connection());
-
-        Assert.Throws<DbUpdateException>(() => _database.SaveChanges());
-    }
-
-    [Fact]
-    public void ADifferentProviderIsASeparateConnection()
-    {
-        // The one-active-connection limit is a service policy, not a schema shape, so lifting it later
-        // needs no migration.
-        _database.WatchHistoryConnections.Add(Connection("trakt"));
-        _database.WatchHistoryConnections.Add(Connection("simkl"));
-        _database.SaveChanges();
-
-        Assert.Equal(2, _database.WatchHistoryConnections.Count());
-    }
-
-    [Fact]
-    public void ProviderKeysAreStoredCanonically()
-    {
-        // The unique index below is case-sensitive in SQLite while the registry resolves keys without
-        // regard to case; storing the raw string would let the two disagree about identity.
-        var connection = Connection("  TRAKT  ");
-        _database.WatchHistoryConnections.Add(connection);
-        _database.SaveChanges();
-
-        Assert.Equal("trakt", _database.WatchHistoryConnections.AsNoTracking().Single().ProviderKey);
-    }
-
-    [Fact]
-    public void ACasingVariantIsTheSameConnection()
-    {
-        // Otherwise one user could hold two connections to a single account, and Settings would show
-        // whichever the query happened to match.
-        _database.WatchHistoryConnections.Add(Connection("trakt"));
-        _database.SaveChanges();
-
-        _database.WatchHistoryConnections.Add(Connection("Trakt"));
-
-        Assert.Throws<DbUpdateException>(() => _database.SaveChanges());
-    }
-
-    [Fact]
-    public void AHistoryEntrysProviderLinkIsStoredCanonically()
-    {
-        var entry = Entry("session-1", DateTimeOffset.UnixEpoch);
-        entry.ProviderKey = "Trakt";
-        entry.ProviderHistoryId = "9001";
-        _database.PlaybackHistoryEntries.Add(entry);
-        _database.SaveChanges();
-
-        Assert.Equal("trakt", _database.PlaybackHistoryEntries.AsNoTracking().Single().ProviderKey);
-    }
-
-    [Fact]
-    public void AnUnlinkedHistoryEntryKeepsANullProviderKey()
-    {
-        // Blank must collapse to null rather than to an empty string, or the provider index would
-        // carry rows that are not linked to anything.
-        var entry = Entry("session-1");
-        entry.ProviderKey = "   ";
-        _database.PlaybackHistoryEntries.Add(entry);
-        _database.SaveChanges();
-
-        Assert.Null(_database.PlaybackHistoryEntries.AsNoTracking().Single().ProviderKey);
-    }
-
-    [Fact]
-    public void OutboxEventsAreUniquePerIdempotencyKey()
-    {
-        // Trakt does not deduplicate history by item and timestamp, so a duplicate enqueue would show
-        // up as a second viewing on the user's profile.
-        var connection = Connection();
-        _database.WatchHistoryConnections.Add(connection);
-        _database.SaveChanges();
-
-        WatchHistoryOutboxEvent Event() => new()
-        {
-            Id = Guid.NewGuid(),
-            ConnectionId = connection.Id,
-            AppUserId = _userId,
-            MediaItemId = _itemId,
-            Operation = WatchHistoryOutboxOperation.AddExactWatch,
-            IdempotencyKey = "connection:item:1:AddExactWatch",
-            Status = WatchHistoryOutboxStatus.Pending,
-            CreatedAt = DateTimeOffset.UnixEpoch,
-        };
-
-        _database.WatchHistoryOutboxEvents.Add(Event());
-        _database.SaveChanges();
-        _database.WatchHistoryOutboxEvents.Add(Event());
-
-        Assert.Throws<DbUpdateException>(() => _database.SaveChanges());
-    }
-
-    [Fact]
-    public void DeletingAConnectionDropsItsUndeliveredWork()
-    {
-        // There is no longer an account to deliver it to.
-        var connection = Connection();
-        _database.WatchHistoryConnections.Add(connection);
-        _database.SaveChanges();
-
-        _database.WatchHistoryOutboxEvents.Add(new WatchHistoryOutboxEvent
-        {
-            Id = Guid.NewGuid(),
-            ConnectionId = connection.Id,
-            AppUserId = _userId,
-            MediaItemId = _itemId,
-            Operation = WatchHistoryOutboxOperation.EnsureTimelessWatched,
-            IdempotencyKey = "k1",
-            Status = WatchHistoryOutboxStatus.Pending,
-            CreatedAt = DateTimeOffset.UnixEpoch,
-        });
-        _database.SaveChanges();
-
-        _database.WatchHistoryConnections.Remove(connection);
-        _database.SaveChanges();
-
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
-    }
-
-    [Fact]
     public void DeletingAnItemDropsItsHistory()
     {
         // A deleted item's plays can no longer be projected or exported.
@@ -259,42 +122,6 @@ public sealed class WatchHistorySchemaTests : IDisposable
         _database.SaveChanges();
 
         Assert.Empty(_database.PlaybackHistoryEntries);
-    }
-
-    [Fact]
-    public void AnAuthorizationSecretKeyIsDerivedFromTheRowId()
-    {
-        // Derived rather than stored, so cleanup never depends on reading the row first — a denied or
-        // abandoned attempt can still have its device code removed.
-        var id = Guid.Parse("11112222-3333-4444-5555-666677778888");
-
-        Assert.Equal(
-            "trakt.authorization.11112222333344445555666677778888.device",
-            WatchHistoryProviderAuthorization.SecretKeyFor("Trakt", id));
-    }
-
-    [Fact]
-    public void AUserHasAtMostOneAuthorizationAttemptPerProvider()
-    {
-        WatchHistoryProviderAuthorization Attempt() => new()
-        {
-            Id = Guid.NewGuid(),
-            AppUserId = _userId,
-            ProviderKey = "trakt",
-            UserCode = "ABCD1234",
-            VerificationUrl = "https://trakt.tv/activate",
-            CreatedAt = DateTimeOffset.UnixEpoch,
-            ExpiresAt = DateTimeOffset.UnixEpoch.AddMinutes(10),
-            PollIntervalSeconds = 5,
-            NextPollAt = DateTimeOffset.UnixEpoch,
-            Status = WatchHistoryAuthorizationStatus.Pending,
-        };
-
-        _database.WatchHistoryAuthorizations.Add(Attempt());
-        _database.SaveChanges();
-        _database.WatchHistoryAuthorizations.Add(Attempt());
-
-        Assert.Throws<DbUpdateException>(() => _database.SaveChanges());
     }
 
     [Fact]
@@ -316,10 +143,8 @@ public sealed class WatchHistorySchemaTests : IDisposable
         var row = _database.UserItemData.AsNoTracking().Single();
         Assert.Equal(DateTimeOffset.UnixEpoch.AddDays(3), row.LastWatchedAt);
 
-        // The context bumps the revision on every insert and update — that is the whole point of the
-        // token, and it is what a long-running sync re-checks before applying a remote snapshot. The
-        // seeded 7 is therefore stored as 8. This used to read back unchanged only because the
-        // synchronous SaveChanges bypassed the hook; it no longer does.
+        // Both synchronous and asynchronous saves bump the revision for delta consumers.
+        // The seeded 7 is therefore stored as 8.
         Assert.Equal(8, row.StateRevision);
     }
 

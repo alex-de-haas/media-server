@@ -9,7 +9,7 @@ namespace MediaServer.Api.Native.Playback;
 ///
 /// It writes through <see cref="UserDataService"/> — the same path the Jellyfin surface uses — and
 /// nothing else. A second writer is how the watched threshold, the resume rules, the season and series
-/// aggregates, <c>PlaybackHistoryEntries</c> and the Trakt outbox would start disagreeing depending on
+/// aggregates and <c>PlaybackHistoryEntries</c> would start disagreeing depending on
 /// which client played the file. See <c>docs/features/native-playback/feature.md</c>.
 /// </summary>
 public sealed class NativeSessionService(MediaServerDbContext database, UserDataService userData)

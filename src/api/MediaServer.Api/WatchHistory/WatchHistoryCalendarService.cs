@@ -56,7 +56,7 @@ public sealed record WatchHistoryUndatedCounts(int Movies, int Episodes);
 
 /// <summary>One page of dated history, with what the window left out.</summary>
 /// <param name="UndatedTotal">
-/// Plays this user has that carry no date at all — imported from a provider that reported none. They
+/// Plays this user has that carry no date at all, such as timeless watched marks. They
 /// can never fall inside a period, so an answer about one silently omits them unless it says so.
 /// </param>
 public sealed record WatchHistoryPage(

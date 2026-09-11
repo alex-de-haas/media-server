@@ -1941,31 +1941,25 @@ public enum Components {
             public var packaging: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/NativeServerCapabilities/recommendations`.
             public var recommendations: Swift.Bool
-            /// - Remark: Generated from `#/components/schemas/NativeServerCapabilities/trakt`.
-            public var trakt: Swift.Bool
             /// Creates a new `NativeServerCapabilities`.
             ///
             /// - Parameters:
             ///   - transcodeEngine:
             ///   - packaging:
             ///   - recommendations:
-            ///   - trakt:
             public init(
                 transcodeEngine: Swift.Bool,
                 packaging: Swift.Bool,
-                recommendations: Swift.Bool,
-                trakt: Swift.Bool
+                recommendations: Swift.Bool
             ) {
                 self.transcodeEngine = transcodeEngine
                 self.packaging = packaging
                 self.recommendations = recommendations
-                self.trakt = trakt
             }
             public enum CodingKeys: String, CodingKey {
                 case transcodeEngine
                 case packaging
                 case recommendations
-                case trakt
             }
         }
         /// - Remark: Generated from `#/components/schemas/NativeServerDescription`.

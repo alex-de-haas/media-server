@@ -59,8 +59,7 @@ public static class NativeEndpoints
                     // rather than of the deployment. Whether a *particular* source is ready is a
                     // different question, and `resolve` answers it per source.
                     Packaging: true,
-                    Recommendations: !string.IsNullOrWhiteSpace(settings.TmdbApiKey),
-                    Trakt: settings.IsTraktConfigured))))
+                    Recommendations: !string.IsNullOrWhiteSpace(settings.TmdbApiKey)))))
             .RequireAuthorization()
             .Produces<NativeServerDescription>();
 
@@ -307,5 +306,4 @@ public sealed record NativeServerDescription(
 public sealed record NativeServerCapabilities(
     bool TranscodeEngine,
     bool Packaging,
-    bool Recommendations,
-    bool Trakt);
+    bool Recommendations);

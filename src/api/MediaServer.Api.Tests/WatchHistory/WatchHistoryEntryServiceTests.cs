@@ -11,7 +11,7 @@ namespace MediaServer.Api.Tests.WatchHistory;
 
 /// <summary>
 /// Editing one recorded play — deleting it, or moving it in time: whose entries a caller may touch,
-/// what the aggregates become, and what the provider is — and is not — asked to change.
+/// what the aggregates become, and which recording session is reopened.
 /// </summary>
 public sealed class WatchHistoryEntryServiceTests : IDisposable
 {
@@ -252,106 +252,17 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         Assert.Equal(first.Id, reloaded.HistoryEntryId);
     }
 
-    // ---- Outbound removal ----
+    // ---- Imported history ----
 
     [Fact]
-    public async Task AnOwnedEntryQueuesItsRemovalWithTheRemoteId()
+    public async Task AnImportedEntryCanBeDeletedLocally()
     {
-        Connect();
-        var entry = AddPlay("2026-08-01T20:00:00Z", remoteId: "111", owned: true);
-
-        await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
-
-        var queued = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
-        Assert.Equal(WatchHistoryOutboxOperation.RemoveOwnedEntries, queued.Operation);
-        Assert.Contains("111", queued.RemoteIdSnapshot);
-    }
-
-    [Fact]
-    public async Task AnImportedEntryIsNeverRemovedRemotely()
-    {
-        // A matching identity and timestamp is not evidence of ownership: removing it would take a
-        // play another client recorded.
-        Connect();
+        // Once recorded locally, an imported play obeys the same deletion rules.
         var entry = AddPlay(
-            "2026-08-01T20:00:00Z", remoteId: "111", owned: false, origin: PlaybackHistoryOrigin.ProviderSync);
+            "2026-08-01T20:00:00Z", origin: PlaybackHistoryOrigin.ProviderSync);
 
         await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
 
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
-    }
-
-    [Fact]
-    public async Task AnUnresolvedEntryIsNeverRemovedRemotely()
-    {
-        // The add committed but its remote id was never pinned down. Guessing here destroys history
-        // this app did not create.
-        Connect();
-        var entry = AddPlay(
-            "2026-08-01T20:00:00Z", remoteId: "111", owned: true, link: PlaybackHistoryLinkStatus.Unresolved);
-
-        await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
-
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
-    }
-
-    [Fact]
-    public async Task AnEntryWithNothingToRemoveQueuesNoWork()
-    {
-        // An empty removal would complete as a no-op, but until the worker reached it the user's
-        // explicit sync would refuse to start, calling it undelivered work.
-        Connect();
-        var entry = AddPlay("2026-08-01T20:00:00Z");
-
-        await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
-
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
-    }
-
-    [Fact]
-    public async Task AnOwnedEntryIsStillRemovedWhenItsItemCanNoLongerBeIdentified()
-    {
-        // The removal is addressed by the remote id alone. Refusing it because the item has since been
-        // re-identified or lost its metadata would leave the remote entry behind — and the next sync
-        // would re-import the very play the user deleted.
-        Connect();
-        var unidentifiable = AddItem(identified: false);
-        var entry = AddPlay("2026-08-01T20:00:00Z", itemId: unidentifiable.Id, remoteId: "111", owned: true);
-
-        await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
-
-        var queued = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
-        Assert.Equal(WatchHistoryOutboxOperation.RemoveOwnedEntries, queued.Operation);
-        Assert.Contains("111", queued.RemoteIdSnapshot);
-    }
-
-    [Fact]
-    public async Task WithoutAConnectionNothingIsQueued()
-    {
-        var entry = AddPlay("2026-08-01T20:00:00Z", remoteId: "111", owned: true);
-
-        await Service().DeleteAsync(_userId, entry.Id, CancellationToken.None);
-
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
-    }
-
-    [Fact]
-    public async Task DeletingTwoPlaysOfOneItemQueuesBothRemovals()
-    {
-        // Deleting two plays changes no watched state at all, so a row-derived idempotency key would
-        // collide and the second removal would be swallowed as a duplicate.
-        Connect();
-        var first = AddPlay("2026-08-01T20:00:00Z", remoteId: "111", owned: true);
-        var second = AddPlay("2026-08-02T21:00:00Z", remoteId: "222", owned: true);
-        AddRow(playCount: 2, played: true, lastWatchedAt: second.WatchedAt);
-
-        await Service().DeleteAsync(_userId, first.Id, CancellationToken.None);
-        await Service().DeleteAsync(_userId, second.Id, CancellationToken.None);
-
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync();
-        Assert.Equal(2, queued.Count);
-        Assert.Contains(queued, item => item.RemoteIdSnapshot!.Contains("111"));
-        Assert.Contains(queued, item => item.RemoteIdSnapshot!.Contains("222"));
     }
 
     // ---- Dating an undated mark ----
@@ -441,68 +352,6 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         Assert.Null((await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync()).WatchedAt);
     }
 
-    [Fact]
-    public async Task DatingAnOwnedMarkRetiresItRemotelyAndRestatesItAsAnExactPlay()
-    {
-        // The provider holds this play as timeless. Adding the exact one without removing that mark
-        // would leave the account with the same viewing twice — and the next sync would import the
-        // timeless one straight back into the undated list the user just emptied.
-        Connect();
-        var mark = AddTimelessPlay(remoteId: "111", owned: true);
-        AddRow(playCount: 1, played: true, lastWatchedAt: null);
-        var watchedAt = DateTimeOffset.Parse("2026-08-04T21:15:00Z");
-
-        await Service().SetWatchedAtAsync(_userId, mark.Id, watchedAt, CancellationToken.None);
-
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync();
-        Assert.Equal(2, queued.Count);
-        var removal = Assert.Single(queued, item => item.Operation == WatchHistoryOutboxOperation.RemoveOwnedEntries);
-        Assert.Contains("111", removal.RemoteIdSnapshot);
-        var add = Assert.Single(queued, item => item.Operation == WatchHistoryOutboxOperation.AddExactWatch);
-        Assert.Equal(watchedAt, add.OccurredAt);
-    }
-
-    [Fact]
-    public async Task DatingAnOwnedMarkDropsTheLinkItNoLongerHas()
-    {
-        // The remote entry is being removed, so the local one must stop naming it: left in place, a
-        // later deletion of this play would ask the provider to remove an id that is already gone.
-        Connect();
-        var mark = AddTimelessPlay(remoteId: "111", owned: true);
-
-        await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
-
-        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
-        Assert.False(entry.ProviderEntryOwned);
-        Assert.Null(entry.ProviderHistoryId);
-        Assert.Equal(PlaybackHistoryLinkStatus.None, entry.LinkStatus);
-    }
-
-    [Fact]
-    public async Task DatingAnUnownedMarkRemovesNothingRemotely()
-    {
-        // Nothing here is this app's to delete — an unresolved add, or a mark another client made — so
-        // the exact play is stated and the remote mark is left alone.
-        Connect();
-        var mark = AddTimelessPlay(remoteId: "111", owned: true, link: PlaybackHistoryLinkStatus.Unresolved);
-
-        await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
-
-        var queued = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
-        Assert.Equal(WatchHistoryOutboxOperation.AddExactWatch, queued.Operation);
-    }
-
-    [Fact]
-    public async Task WithoutAConnectionDatingAMarkQueuesNothing()
-    {
-        var mark = AddTimelessPlay(remoteId: "111", owned: true);
-        AddRow(playCount: 1, played: true, lastWatchedAt: null);
-
-        await Service().SetWatchedAtAsync(_userId, mark.Id, DateTimeOffset.Parse("2026-08-04T21:15:00Z"), CancellationToken.None);
-
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
-    }
-
     // ---- Correcting a play that already has a time ----
 
     [Fact]
@@ -571,111 +420,13 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
     {
         // Re-confirming a time is not a correction. Queueing one would ask the provider to retire and
         // re-state the play for a change nobody made.
-        Connect();
         var watchedAt = DateTimeOffset.Parse("2026-08-01T20:00:00Z");
-        var play = AddPlay("2026-08-01T20:00:00Z", remoteId: "111", owned: true);
+        var play = AddPlay("2026-08-01T20:00:00Z");
 
         var status = await Service().SetWatchedAtAsync(_userId, play.Id, watchedAt, CancellationToken.None);
 
         Assert.Equal(SetWatchedAtStatus.Updated, status);
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
         var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
-        Assert.Equal("111", entry.ProviderHistoryId);
-    }
-
-    [Fact]
-    public async Task CorrectingAnOwnedPlayRetiresItRemotelyAndRestatesItAtTheNewTime()
-    {
-        Connect();
-        var play = AddPlay("2026-08-01T20:00:00Z", remoteId: "111", owned: true);
-        var corrected = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
-
-        await Service().SetWatchedAtAsync(_userId, play.Id, corrected, CancellationToken.None);
-
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync();
-        Assert.Equal(2, queued.Count);
-        var removal = Assert.Single(queued, item => item.Operation == WatchHistoryOutboxOperation.RemoveOwnedEntries);
-        Assert.Contains("111", removal.RemoteIdSnapshot);
-        var add = Assert.Single(queued, item => item.Operation == WatchHistoryOutboxOperation.AddExactWatch);
-        Assert.Equal(corrected, add.OccurredAt);
-    }
-
-    [Fact]
-    public async Task CorrectingAPlayTheProviderMayHoldQueuesNothing()
-    {
-        // Nothing here can retire the remote copy — an exact add never resolves its id — so stating the
-        // new time would leave the account with the same viewing twice, and the next explicit sync
-        // would import the stale one back as another local play. The correction stays local.
-        Connect();
-        var play = AddPlay("2026-08-01T20:00:00Z");
-        AddRow(playCount: 1, played: true, lastWatchedAt: DateTimeOffset.Parse("2026-08-01T20:00:00Z"));
-        var corrected = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
-
-        await Service().SetWatchedAtAsync(_userId, play.Id, corrected, CancellationToken.None);
-
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
-        // Local history still moved: the provider's limits are not the user's problem here.
-        Assert.Equal(corrected, (await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync()).WatchedAt);
-    }
-
-    [Fact]
-    public async Task CorrectingAPlayWhoseAddWasNeverSentReplacesThatClaim()
-    {
-        // The queued add has never been attempted, so the provider has not seen it. Dropping it is the
-        // one way a correction can supersede an earlier claim without risking a duplicate.
-        Connect();
-        var play = AddPlay("2026-08-01T20:00:00Z");
-        var queued = QueueAdd(play, DateTimeOffset.Parse("2026-08-01T20:00:00Z"), attempts: 0);
-        var corrected = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
-
-        await Service().SetWatchedAtAsync(_userId, play.Id, corrected, CancellationToken.None);
-
-        var add = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
-        Assert.Equal(WatchHistoryOutboxOperation.AddExactWatch, add.Operation);
-        Assert.Equal(corrected, add.OccurredAt);
-        Assert.NotEqual(queued.Id, add.Id);
-    }
-
-    [Fact]
-    public async Task AnAddAlreadyAttemptedIsLeftAloneAndNotReplaced()
-    {
-        // An attempt may have reached the provider before the process died — which is why delivery
-        // re-reads history on a retry rather than re-posting. Replacing it here would be guessing.
-        Connect();
-        var play = AddPlay("2026-08-01T20:00:00Z");
-        var queued = QueueAdd(play, DateTimeOffset.Parse("2026-08-01T20:00:00Z"), attempts: 1);
-
-        await Service().SetWatchedAtAsync(
-            _userId, play.Id, DateTimeOffset.Parse("2026-07-30T18:30:00Z"), CancellationToken.None);
-
-        var remaining = Assert.Single(await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync());
-        Assert.Equal(queued.Id, remaining.Id);
-        Assert.Equal(DateTimeOffset.Parse("2026-08-01T20:00:00Z"), remaining.OccurredAt);
-    }
-
-    [Fact]
-    public async Task CorrectingAPlayTwiceBeforeDeliveryStatesOnlyTheLatestTime()
-    {
-        // Each correction supersedes the untried one before it, so the provider is never told a time
-        // the user has already replaced — and the second add is not swallowed as a duplicate of the
-        // first, which an entry-only idempotency key would do.
-        Connect();
-        var mark = AddTimelessPlay(remoteId: "111", owned: true);
-        var first = DateTimeOffset.Parse("2026-07-30T18:30:00Z");
-        var second = DateTimeOffset.Parse("2026-07-29T21:00:00Z");
-
-        await Service().SetWatchedAtAsync(_userId, mark.Id, first, CancellationToken.None);
-        await Service().SetWatchedAtAsync(_userId, mark.Id, second, CancellationToken.None);
-
-        var add = Assert.Single(
-            await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync(),
-            item => item.Operation == WatchHistoryOutboxOperation.AddExactWatch);
-        Assert.Equal(second, add.OccurredAt);
-        // The timeless mark's removal still stands: that remote entry has to go whatever time the play
-        // ends up carrying.
-        Assert.Single(
-            await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync(),
-            item => item.Operation == WatchHistoryOutboxOperation.RemoveOwnedEntries);
     }
 
     [Fact]
@@ -780,11 +531,7 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
 
     private WatchHistoryEntryService Service() => new(
         _database,
-        new WatchHistoryRecorder(
-            _database,
-            new WatchHistoryIdentityMapper(_database),
-            _time,
-            NullLogger<WatchHistoryRecorder>.Instance),
+        new WatchHistoryRecorder(_database, _time),
         // Deleting the last play of a removed title takes the tombstone with it.
         new LibraryDeleteService(_database, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance)),
         _time);
@@ -794,21 +541,6 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         HostUserId = hostUserId, Email = email, DisplayName = email, Role = AppUserRole.User,
         CreatedAt = _time.GetUtcNow(), LastSeenAt = _time.GetUtcNow(),
     };
-
-    private void Connect()
-    {
-        var connection = new WatchHistoryProviderConnection
-        {
-            Id = Guid.NewGuid(),
-            AppUserId = _userId,
-            ProviderKey = "trakt",
-            Status = WatchHistoryConnectionStatus.Connected,
-            ConnectedAt = _time.GetUtcNow(),
-        };
-        connection.SecretKey = $"trakt.connection.{connection.Id:N}.tokens";
-        _database.WatchHistoryConnections.Add(connection);
-        _database.SaveChanges();
-    }
 
     /// <summary>A second item, optionally one the identity mapper cannot resolve.</summary>
     private MediaItem AddItem(bool identified)
@@ -849,10 +581,7 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
         string watchedAt,
         int? appUserId = null,
         Guid? itemId = null,
-        string? remoteId = null,
-        bool owned = false,
-        PlaybackHistoryOrigin origin = PlaybackHistoryOrigin.LocalPlayback,
-        PlaybackHistoryLinkStatus link = PlaybackHistoryLinkStatus.Resolved)
+        PlaybackHistoryOrigin origin = PlaybackHistoryOrigin.LocalPlayback)
     {
         var entry = new PlaybackHistoryEntry
         {
@@ -862,10 +591,6 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
             CreatedAt = _time.GetUtcNow(),
             WatchedAt = DateTimeOffset.Parse(watchedAt),
             Origin = origin,
-            ProviderKey = remoteId is null ? null : "trakt",
-            ProviderHistoryId = remoteId,
-            ProviderEntryOwned = owned,
-            LinkStatus = remoteId is null ? PlaybackHistoryLinkStatus.None : link,
         };
         _database.PlaybackHistoryEntries.Add(entry);
         _database.SaveChanges();
@@ -873,10 +598,7 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
     }
 
     private PlaybackHistoryEntry AddTimelessPlay(
-        int? appUserId = null,
-        string? remoteId = null,
-        bool owned = false,
-        PlaybackHistoryLinkStatus link = PlaybackHistoryLinkStatus.Resolved)
+        int? appUserId = null)
     {
         var entry = new PlaybackHistoryEntry
         {
@@ -886,37 +608,10 @@ public sealed class WatchHistoryEntryServiceTests : IDisposable
             CreatedAt = _time.GetUtcNow(),
             WatchedAt = null,
             Origin = PlaybackHistoryOrigin.Manual,
-            ProviderKey = remoteId is null ? null : "trakt",
-            ProviderHistoryId = remoteId,
-            ProviderEntryOwned = owned,
-            LinkStatus = remoteId is null ? PlaybackHistoryLinkStatus.None : link,
         };
         _database.PlaybackHistoryEntries.Add(entry);
         _database.SaveChanges();
         return entry;
-    }
-
-    /// <summary>An add already queued for one entry, at whatever stage of delivery a test needs.</summary>
-    private WatchHistoryOutboxEvent QueueAdd(PlaybackHistoryEntry entry, DateTimeOffset occurredAt, int attempts)
-    {
-        var queued = new WatchHistoryOutboxEvent
-        {
-            Id = Guid.NewGuid(),
-            ConnectionId = _database.WatchHistoryConnections.Single(link => link.AppUserId == _userId).Id,
-            AppUserId = _userId,
-            MediaItemId = entry.MediaItemId,
-            HistoryEntryId = entry.Id,
-            Operation = WatchHistoryOutboxOperation.AddExactWatch,
-            OccurredAt = occurredAt,
-            IdempotencyKey = Guid.NewGuid().ToString("N"),
-            Status = WatchHistoryOutboxStatus.Pending,
-            Attempts = attempts,
-            CreatedAt = _time.GetUtcNow(),
-            NextAttemptAt = _time.GetUtcNow(),
-        };
-        _database.WatchHistoryOutboxEvents.Add(queued);
-        _database.SaveChanges();
-        return queued;
     }
 
     private void AddRow(int playCount, bool played, DateTimeOffset? lastWatchedAt)

@@ -2646,8 +2646,7 @@
         "required": [
           "transcodeEngine",
           "packaging",
-          "recommendations",
-          "trakt"
+          "recommendations"
         ],
         "type": "object",
         "properties": {
@@ -2658,9 +2657,6 @@
             "type": "boolean"
           },
           "recommendations": {
-            "type": "boolean"
-          },
-          "trakt": {
             "type": "boolean"
           }
         }
