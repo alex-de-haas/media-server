@@ -281,6 +281,63 @@ public sealed class IngestPipelineTests
     }
 
     [Fact]
+    public async Task Separate_season_downloads_keep_every_version_on_disk_after_ingest_cleanup()
+    {
+        using var harness = new PipelineTestHarness();
+        StrongMatch(harness, id: "1399");
+        Guid? catalogId = null;
+        var expectedContents = new Dictionary<string, string>();
+
+        // Three separate season packs exercise both the initial collision and an occupied fallback name.
+        for (var version = 1; version <= 3; version++)
+        {
+            var (ingestId, seededCatalogId, _) = await harness.SeedCompletedDownloadAsync(
+                CatalogType.Series, "Silo.S03.2160p", "Silo.S03.2160p/Silo.S03E01.mkv", catalogId,
+                additionalSourceRelativePaths: ["Silo.S03.2160p/Silo.S03E02.mkv"]);
+            catalogId = seededCatalogId;
+            using (var setup = harness.CreateScope())
+            {
+                var db = setup.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+                var catalog = await db.Catalogs.SingleAsync(c => c.Id == catalogId);
+                foreach (var file in await db.SourceFiles.Where(f => f.IngestItemId == ingestId).ToListAsync())
+                {
+                    await File.WriteAllTextAsync(Path.Combine(catalog.Root, file.RelativePath),
+                        $"version {version}, file {file.TorrentFileIndex}");
+                }
+            }
+
+            await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
+
+            using var verify = harness.CreateScope();
+            var database = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            Assert.Equal(IngestStatus.Done, (await database.IngestItems.SingleAsync(i => i.Id == ingestId)).Status);
+            var root = (await database.Catalogs.SingleAsync(c => c.Id == catalogId)).Root;
+            foreach (var source in await database.MediaSources
+                         .Where(s => database.SourceFiles.Any(f => f.Id == s.SourceFileId && f.IngestItemId == ingestId))
+                         .ToListAsync())
+            {
+                Assert.False(CatalogPaths.IsIncoming(source.Path));
+                var file = await database.SourceFiles.SingleAsync(f => f.Id == source.SourceFileId);
+                Assert.Equal(file.RelativePath, source.Path);
+                Assert.Equal(version == 1 ? null : $"Version {version}", source.VersionName);
+                expectedContents.Add(Path.Combine(root, source.Path), $"version {version}, file {file.TorrentFileIndex}");
+            }
+        }
+
+        using var scope = harness.CreateScope();
+        var dbFinal = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(2, await dbFinal.MediaItems.CountAsync(i => i.Kind == MediaKind.Episode));
+        Assert.Equal(6, await dbFinal.MediaSources.CountAsync());
+        Assert.Equal(3, await scope.ServiceProvider.GetRequiredService<IngestService>()
+            .DeleteCompletedAsync(CancellationToken.None));
+        Assert.Equal(6, expectedContents.Count);
+        foreach (var (path, contents) in expectedContents)
+        {
+            Assert.Equal(contents, await File.ReadAllTextAsync(path));
+        }
+    }
+
+    [Fact]
     public async Task Ingest_list_shows_series_name_and_season_for_episodes()
     {
         using var harness = new PipelineTestHarness();

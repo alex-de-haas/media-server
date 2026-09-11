@@ -1,6 +1,9 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Organizer;
+using MediaServer.Api.Pipeline;
+using MediaServer.Api.Pipeline.Stages;
+using MediaServer.Api.Tests.Pipeline;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -123,10 +126,13 @@ public sealed class OrganizerServiceTests : IDisposable
 
         // The episode's LibraryPath tracks the primary (lowest torrent index) version.
         Assert.Equal(regular.RelativePath, episode.LibraryPath);
+
+        var retried = await organizer.OrganizeAsync([regular, blackWhite], catalog, CancellationToken.None);
+        Assert.Equal(organized.Select(file => file.LibraryRelativePath), retried.Select(file => file.LibraryRelativePath));
     }
 
     [Fact]
-    public async Task Organize_refuses_to_overwrite_a_file_backing_another_version()
+    public async Task Organize_allocates_a_version_path_when_the_original_is_already_published()
     {
         var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
         var now = DateTimeOffset.UtcNow;
@@ -161,15 +167,21 @@ public sealed class OrganizerServiceTests : IDisposable
 
         var organized = await organizer.OrganizeAsync([orphan], catalog, CancellationToken.None);
 
-        // The collision is refused: nothing organized, the original is untouched, the newcomer stays put.
-        Assert.Empty(organized);
+        var result = Assert.Single(organized);
         Assert.Equal("ORIGINAL", await File.ReadAllTextAsync(originalAbsolute));
-        Assert.True(File.Exists(Path.Combine(_root, staged.Replace('/', Path.DirectorySeparatorChar))));
-        Assert.Equal(staged, orphan.RelativePath);
+        Assert.Equal("video", await File.ReadAllTextAsync(result.AbsolutePath));
+        Assert.Equal("Inception (2010)/Inception (2010) - Version 2.mkv", orphan.RelativePath);
+        Assert.Equal("Version 2", orphan.Edition);
+        Assert.False(File.Exists(Path.Combine(_root, staged.Replace('/', Path.DirectorySeparatorChar))));
+
+        // A retry keeps the allocated path rather than adding another suffix or replacing either file.
+        var retried = Assert.Single(await organizer.OrganizeAsync([orphan], catalog, CancellationToken.None));
+        Assert.Equal(result.LibraryRelativePath, retried.LibraryRelativePath);
+        Assert.Equal("ORIGINAL", await File.ReadAllTextAsync(originalAbsolute));
     }
 
     [Fact]
-    public async Task Organize_refuses_to_overwrite_a_file_another_pending_ingest_still_owns()
+    public async Task Organize_allocates_a_version_path_when_another_pending_ingest_owns_the_original()
     {
         var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
         var now = DateTimeOffset.UtcNow;
@@ -198,9 +210,10 @@ public sealed class OrganizerServiceTests : IDisposable
         var organized = await organizer.OrganizeAsync([loose], catalog, CancellationToken.None);
 
         // The original is a real library file another ingest still owns — never a stale leftover.
-        Assert.Empty(organized);
+        var result = Assert.Single(organized);
         Assert.Equal("ORIGINAL", await File.ReadAllTextAsync(originalAbsolute));
-        Assert.True(File.Exists(Path.Combine(_root, loose.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
+        Assert.Equal("video", await File.ReadAllTextAsync(result.AbsolutePath));
+        Assert.Equal("Inception (2010)/Inception (2010) - Version 2.mkv", loose.RelativePath);
     }
 
     [Theory]
@@ -233,6 +246,90 @@ public sealed class OrganizerServiceTests : IDisposable
         Assert.Equal(relativePath, scanned.RelativePath);
         Assert.Equal(expectedEdition, scanned.Edition);
         Assert.True(File.Exists(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar))));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Organize_preserves_untracked_files_and_reserves_missing_published_paths(bool originalOnDisk)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title} ({Year})" };
+        var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Inception", Year = 2010 };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id };
+        var source = MakeSource(ingest.Id, movie.Id, $".incoming/{ingest.Id:N}/Inception.mkv", 0, now);
+        var canonical = "Inception (2010)/Inception (2010).mkv";
+        _database.AddRange(catalog, movie, ingest, source);
+        if (originalOnDisk)
+        {
+            await WriteStagingFileAsync(canonical);
+        }
+        else
+        {
+            _database.MediaSources.Add(new MediaSource
+            {
+                Id = Guid.NewGuid(), MediaItemId = movie.Id, Path = canonical, Container = "mkv",
+            });
+        }
+        await _database.SaveChangesAsync();
+        await WriteStagingFileAsync(source.RelativePath);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+
+        var result = Assert.Single(await organizer.OrganizeAsync([source], catalog, CancellationToken.None));
+
+        Assert.Equal("Inception (2010)/Inception (2010) - Version 2.mkv", result.LibraryRelativePath);
+        Assert.Equal("video", await File.ReadAllTextAsync(result.AbsolutePath));
+        Assert.Equal(originalOnDisk, File.Exists(Path.Combine(_root, canonical)));
+    }
+
+    [Theory]
+    [InlineData(".incoming/download/Inception.mkv")]
+    [InlineData("Inception (2010)/Inception (2010).mkv")]
+    public async Task OrganizeStage_fails_when_an_assigned_file_is_missing(string path)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title} ({Year})" };
+        var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Inception", Year = 2010 };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id };
+        var source = MakeSource(ingest.Id, movie.Id, path, 0, now);
+        _database.AddRange(catalog, movie, ingest, source);
+        await _database.SaveChangesAsync();
+        var context = new IngestContext { Catalog = catalog, Item = ingest, SourceFiles = [source], Paths = CatalogPaths.For(catalog) };
+        var stage = new OrganizeStage(new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance));
+
+        var result = Assert.IsType<StageResult.Failed>(await stage.RunAsync(context, CancellationToken.None));
+
+        Assert.Contains(path, result.Error);
+        Assert.Null(movie.LibraryPath);
+        Assert.Empty(await _database.MediaSources.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(".incoming/download/Inception.mkv", true)]
+    [InlineData("Inception (2010)/Inception (2010).mkv", false)]
+    public async Task ProbeStage_does_not_publish_staged_or_missing_files(string path, bool exists)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root };
+        var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Inception" };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id };
+        var source = MakeSource(ingest.Id, movie.Id, path, 0, now);
+        _database.AddRange(catalog, movie, ingest, source);
+        await _database.SaveChangesAsync();
+        if (exists)
+        {
+            await WriteStagingFileAsync(path);
+        }
+        var context = new IngestContext { Catalog = catalog, Item = ingest, SourceFiles = [source], Paths = CatalogPaths.For(catalog) };
+        var stage = new ProbeStage(new FakeMediaProbe
+        {
+            OnProbe = _ => throw new InvalidOperationException("An unorganized file must not be probed."),
+        }, _database);
+
+        Assert.IsType<StageResult.Failed>(await stage.RunAsync(context, CancellationToken.None));
+
+        Assert.Empty(await _database.MediaSources.ToListAsync());
+        Assert.Equal(exists, File.Exists(Path.Combine(_root, path)));
     }
 
     private static SourceFile MakeSource(Guid ingestId, Guid mediaItemId, string relativePath, int torrentIndex, DateTimeOffset now) => new()

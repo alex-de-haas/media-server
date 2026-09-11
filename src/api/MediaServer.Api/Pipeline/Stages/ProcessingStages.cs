@@ -183,7 +183,17 @@ public sealed class OrganizeStage(IOrganizer organizer) : IPipelineStage
 
     public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        await organizer.OrganizeAsync(context.SourceFiles, context.Catalog, cancellationToken);
+        var organized = await organizer.OrganizeAsync(context.SourceFiles, context.Catalog, cancellationToken);
+        var organizedIds = organized.Select(file => file.SourceFileId).ToHashSet();
+        var unorganized = context.SourceFiles.FirstOrDefault(file =>
+            file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes) &&
+            !organizedIds.Contains(file.Id));
+        if (unorganized is not null)
+        {
+            return new StageResult.Failed(
+                $"Could not organize source file into the library: {unorganized.RelativePath}. Check that the file exists and retry.",
+                Retryable: false);
+        }
         return StageResult.Done;
     }
 }
@@ -208,11 +218,19 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
 
         foreach (var sourceFile in assignedFiles)
         {
+            if (CatalogPaths.IsIncoming(sourceFile.RelativePath))
+            {
+                return new StageResult.Failed(
+                    $"Source file is still in download staging: {sourceFile.RelativePath}. Organize it into the library before retrying.",
+                    Retryable: false);
+            }
+
             var mediaItemId = sourceFile.MediaItemId!.Value;
             var absolute = Path.Combine(context.Catalog.Root, sourceFile.RelativePath.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(absolute))
             {
-                continue;
+                return new StageResult.Failed(
+                    $"Organized source file is missing on disk: {sourceFile.RelativePath}.", Retryable: false);
             }
 
             var alreadyProbed = await database.MediaSources.AnyAsync(

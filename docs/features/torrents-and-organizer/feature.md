@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-09-09
+Updated: 2026-09-11
 
 ## Description
 
@@ -271,26 +271,28 @@ hardlink:
    `.incoming/<downloadId>/` staging folder.
 
 A move within one filesystem is atomic and frees no extra space (one copy exists
-throughout). If a destination already exists from a prior run, organize is
-idempotent (re-derives the same path; replace if needed).
+throughout). Re-running an organized file keeps its canonical path and version label.
+An existing destination is preserved; a different source gets a free version path.
 
 ### Version collisions
 
 Version labels normally come from `EditionLabeler`, which diffs the names of files that share one
-ingest. A **scan** queues one ingest per file, so files that identify as the same item never meet in
-one group and each would derive the same unlabelled canonical name — the second one organized would
-rename over the first. Two rules keep that from destroying media:
+ingest. Separate downloads of the same season and scans (one ingest per file) also produce distinct
+versions in the canonical library folder:
 
 - **Recover the label from the name.** A file already sitting at `<canonical stem> - <label>.<ext>`
-  is already canonical for that edition, so the organizer adopts `<label>` and leaves it in place
-  instead of renaming it onto the plain canonical name. This is the exact suffix `LibraryNaming`
-  writes and transcode-engine emits, read back. A title that itself contains `" - "` is unaffected:
-  its canonical stem carries the hyphen and matches exactly.
-- **Never overwrite a claimed path.** The organizer refuses to move onto a path that backs a
-  published `MediaSource` *or* that another ingest's `SourceFile` still owns — the latter is what a
-  scan over a pre-existing library looks like before anything reaches probe, when `MediaSources` is
-  still empty. A refused file also pins its `.incoming/` staging root against the recursive cleanup,
-  which would otherwise delete the file the refusal just preserved.
+  keeps its label and path. A title that itself contains `" - "` is unaffected. Retries retain the
+  edition already assigned to each source file, including batches with multiple versions.
+- **Allocate a free path.** If the canonical destination exists on disk or is claimed by another
+  `MediaSource` or `SourceFile` in the catalog, the newcomer gets ` - Version 2`, ` - Version 3`,
+  and so on. An existing edition gets a numeric suffix instead (for example ` - HDR 2`). Missing
+  files' database claims and untracked files on disk also reserve their names. Comparisons follow
+  the filesystem's case rules. The original file is never overwritten or renamed; each new version's
+  `SourceFile` and probed `MediaSource` point at its actual library file.
+- **Require a successful move before publishing.** Organize fails if an assigned playable file is
+  missing or cannot be organized, and keeps staging roots containing unorganized playable files.
+  Probe also rejects files still under `.incoming/` or missing on disk. Temporary paths do not become
+  published versions that disappear when completed ingest history is cleared.
 
 ## Removal Semantics
 
@@ -401,6 +403,10 @@ Backend tests should use xUnit. Required coverage:
 - Organize **moves** the file to the canonical path (extension preserved,
   source-file mapping, season-pack handling) and clears the `.incoming/` staging
   folder.
+- Successive downloads of the same season retain distinct file contents and canonical version paths,
+  including after completed-ingest cleanup; retries preserve allocated names.
+- Destination collisions preserve published versions, pending-ingest files, untracked files, and
+  database claims whose files are missing. Missing or staged files cannot pass through to publish.
 - Post-publish remap moves/renames the canonical file without touching unrelated
   files.
 - Catalog scan imports orphan root files (confident → published, low-confidence →
