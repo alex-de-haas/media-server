@@ -1,7 +1,7 @@
 # Indexing Progress
 
 Created: 2026-09-10
-Updated: 2026-09-10
+Updated: 2026-09-11
 
 ## Behavior
 
@@ -76,7 +76,8 @@ entries independently of detail fetches. Version/track indicators select the new
 snapshot or event. Reconnection invalidates library detail queries; foreground
 query refresh also reconciles snapshots. A disconnected stream adds a reconnecting
 label to the last known preparation state. There is no indexing polling timer or
-connection per card.
+connection per card. Cache subscriptions use React Query's `skipToken`: SSE owns
+the data, and rendering an indicator does not require or execute a query function.
 
 MediaKit's `IndexingFeed` shares one authenticated SSE connection across subscribed
 detail views, bounded to 512 remembered file states. It parses fragmented SSE
@@ -94,8 +95,10 @@ without indexing fields retains the existing playback notice.
 - SSE regression coverage for ownership metadata and bounded-subscriber overflow
   followed by successful reconnection.
 - Web unit coverage for status presentation, malformed/unknown events, independent
-  tracks and revision ordering. Browser scenarios exercise movie and episode
-  cards through waiting, progress and saving without per-tick detail fetches,
+  tracks and revision ordering. Indicator rendering covers snapshots, cached SSE
+  updates and connection state without missing-query-function errors in development.
+  Browser scenarios exercise movie and episode cards through waiting, progress
+  and saving without per-tick detail fetches,
   then recover a missed completion via reconnect. Inspect desktop/mobile layout.
 - MediaKit coverage for fragmented/CRLF/multiline frames, malformed and oversized
   frames, optional generated DTO mapping, revision ordering, shared authenticated
