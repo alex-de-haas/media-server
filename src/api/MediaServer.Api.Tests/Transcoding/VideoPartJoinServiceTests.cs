@@ -93,6 +93,119 @@ public sealed class VideoPartJoinServiceTests : IDisposable
     }
     private Task<TranscodeJobResponse> Create(params Guid[] ids) => Service().CreateAsync(new(ids.Length == 0 ? [_first, _second] : ids), default);
 
+    [Theory]
+    [InlineData("part1.mkv", "Parts - Joined.mkv")]
+    [InlineData("dir/sub/part1.mkv", "dir/sub/Parts - Joined.mkv")]
+    [InlineData(@"dir\sub\part1.mkv", "dir/sub/Parts - Joined.mkv")]
+    [InlineData(@"dir\sub/part1.mkv", "dir/sub/Parts - Joined.mkv")]
+    public async Task FindOutputPath_MixedSeparators_UsesPosixDirectory(string firstPath, string expected)
+    {
+        var catalog = await Db.Catalogs.SingleAsync();
+        var movie = await Db.MediaItems.SingleAsync();
+
+        var output = await Service().FindOutputPathAsync(catalog, movie, firstPath, default);
+
+        Assert.Equal(expected, output);
+    }
+
+    [Theory]
+    [InlineData(false, "{Title} ({Year})", "Treasure Island (1988)")]
+    [InlineData(true, "{Title} ({Year})", "Treasure Island (1988)")]
+    [InlineData(false, "{Year} - {Title}", "1988 - Treasure Island")]
+    public async Task Create_NamedParts_UsesMovieNameAndJoinedEdition(bool reverse, string template, string expectedStem)
+    {
+        var item = await Db.MediaItems.SingleAsync();
+        item.Title = "Treasure Island";
+        item.Year = 1988;
+        (await Db.Catalogs.SingleAsync()).NamingTemplate = template;
+        Directory.CreateDirectory(Path.Combine(_root, "movie"));
+        foreach (var source in await Db.MediaSources.ToListAsync())
+        {
+            var edition = source.Id == _first ? "Version 1" : "Version 2";
+            var path = $"movie/Treasure Island (1988) - {edition}.mkv";
+            File.Move(Path.Combine(_root, source.Path), Path.Combine(_root, path));
+            source.Path = path;
+            source.VersionName = edition;
+        }
+        await Db.SaveChangesAsync();
+
+        await Create(reverse ? _second : _first, reverse ? _first : _second);
+
+        Assert.Equal($"movie/{expectedStem} - Joined.mkv", _submitted!.OutputRelativePath);
+        Assert.Equal(_submitted.OutputRelativePath, (await Db.TranscodeJobs.SingleAsync()).OutputPath);
+    }
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("directory")]
+    [InlineData("source")]
+    [InlineData("label")]
+    [InlineData("job")]
+    public async Task Create_OccupiedNames_ImportsNextNumberAndAllowsRename(string collision)
+    {
+        for (var number = 1; number <= 2; number++)
+        {
+            var label = number == 1 ? "Joined" : $"Joined {number}";
+            var path = $"Parts - {label}.mkv";
+            switch (collision)
+            {
+                case "file":
+                    File.WriteAllText(Path.Combine(_root, path), "existing output");
+                    break;
+                case "directory":
+                    Directory.CreateDirectory(Path.Combine(_root, path));
+                    break;
+                case "source":
+                case "label":
+                    Db.MediaSources.Add(new MediaSource { Id = Guid.NewGuid(), MediaItemId = _movie,
+                        Path = collision == "source" ? path : $"legacy-{number}.mkv",
+                        VersionName = collision == "label" ? label : "Other", Container = "mkv", CreatedAt = DateTimeOffset.UtcNow });
+                    break;
+                case "job":
+                    Db.TranscodeJobs.Add(new TranscodeJob { Id = Guid.NewGuid(), EngineJobId = $"old-{number}",
+                        CatalogId = (await Db.Catalogs.SingleAsync()).Id, MediaItemId = _movie, MediaSourceId = _first,
+                        InputPath = "part1.mkv", OutputPath = path, Kind = TranscodeJobKind.Join,
+                        VideoCodec = "copy", HardwareAcceleration = "none", State = TranscodeJobState.Failed,
+                        CreatedAt = DateTimeOffset.UtcNow });
+                    break;
+            }
+        }
+        await Db.SaveChangesAsync();
+
+        var response = await Create();
+        Assert.Equal("Parts - Joined 3.mkv", _submitted!.OutputRelativePath);
+        var job = await Db.TranscodeJobs.SingleAsync(j => j.Id == response.Id);
+        File.WriteAllText(Path.Combine(_root, job.OutputPath!), "joined output");
+        _snapshot = Snapshot(job.EngineJobId, "Completed");
+        using (var restarted = _db.Create())
+            await Service(restarted).ReconcileAsync(await restarted.TranscodeJobs.SingleAsync(j => j.Id == job.Id), default);
+
+        var joined = await Db.MediaSources.SingleAsync(s => s.Path == job.OutputPath);
+        Assert.Equal("Joined 3", joined.VersionName);
+        var rename = new LibrarySourceService(Db, new CatalogPathSandbox(), NullLogger<LibrarySourceService>.Instance);
+        Assert.Equal(RenameVersionResult.Ok, await rename.RenameVersionAsync(joined.Id, "Combined", default));
+        Assert.Equal("Parts/Parts - Combined.mkv", joined.Path);
+        Assert.Equal("joined output", File.ReadAllText(Path.Combine(_root, joined.Path)));
+        if (collision == "file")
+            Assert.Equal("existing output", File.ReadAllText(Path.Combine(_root, "Parts - Joined.mkv")));
+    }
+
+    [Fact]
+    public async Task Reconcile_LegacyJob_KeepsGenericJoinedLabel()
+    {
+        await Create();
+        var job = await Db.TranscodeJobs.SingleAsync();
+        job.OutputPath = $"part1 - Joined {job.Id:N}.mkv";
+        await Db.SaveChangesAsync();
+        File.WriteAllText(Path.Combine(_root, job.OutputPath), "joined output");
+        _snapshot = Snapshot(job.EngineJobId, "Completed");
+
+        await Service().ReconcileAsync(job, default);
+
+        Assert.True(job.OutputImported);
+        Assert.Equal("Joined", (await Db.MediaSources.SingleAsync(s => s.Path == job.OutputPath)).VersionName);
+    }
+
     [Fact]
     public async Task CreatesOrderedInputs_AndLocksBothUntilOutputIsImportedExactlyOnce()
     {
@@ -202,6 +315,7 @@ public sealed class VideoPartJoinServiceTests : IDisposable
         var restored = await restarted.TranscodeJobs.SingleAsync();
         await Service(restarted).ReconcileAsync(restored, default);
         Assert.Equal(originalRequest!.ClientJobId, _submitted!.ClientJobId);
+        Assert.Equal(originalRequest.OutputRelativePath, _submitted.OutputRelativePath);
         Assert.Equal(originalRequest.JoinInputs, _submitted.JoinInputs);
         Assert.Equal(2, _submissions);
     }

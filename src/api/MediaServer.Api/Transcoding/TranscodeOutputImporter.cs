@@ -129,7 +129,14 @@ public sealed class TranscodeOutputImporter(
     /// from the probe so the label always reflects the produced file, not just the requested settings.</summary>
     private static string VersionLabel(TranscodeJob job, ProbeResult result)
     {
-        if (job.Kind == TranscodeJobKind.Join) return "Joined";
+        if (job.Kind == TranscodeJobKind.Join)
+        {
+            // Recover the reserved edition from the durable path, including after a restart.
+            // Jobs created before readable filenames keep their original generic label.
+            var match = System.Text.RegularExpressions.Regex.Match(
+                Path.GetFileNameWithoutExtension(job.OutputPath) ?? string.Empty, @" - (Joined(?: [1-9][0-9]*)?)$");
+            return match.Success ? match.Groups[1].Value : "Joined";
+        }
         var video = result.Streams.FirstOrDefault(stream => stream.Type == StreamType.Video);
         var height = video?.Height;
 
