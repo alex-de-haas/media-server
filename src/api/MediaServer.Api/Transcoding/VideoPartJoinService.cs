@@ -3,6 +3,7 @@ using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
+using MediaServer.Api.Organizer;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Transcoding;
@@ -49,15 +50,11 @@ public sealed class VideoPartJoinService(MediaServerDbContext database, ITransco
             if (await moveGuard.IsItemMovingAsync(item.Id, ct)) throw new TranscodeConflictException(LibraryMoveGuard.MoveInProgressError);
             if (await LibraryFileMutation.HasJoinAsync(database, item.Id, ct))
                 throw new TranscodeConflictException("This movie already has an active join.");
-            var output = TranscodeService.BuildOutputRelative(first.Path, $"Joined {id:N}");
             var catalog = item.Catalog ?? throw new TranscodeRequestException("The movie's catalog is unavailable.");
             foreach (var path in new[] { first.Path, second.Path })
                 if (!sandbox.TryResolve(catalog, path, out var absolute) || !File.Exists(absolute))
                     throw new TranscodeRequestException("A selected part is missing from the catalog.");
-            if (!sandbox.TryResolve(catalog, output, out var destination) || File.Exists(destination) ||
-                await database.MediaSources.AnyAsync(s => s.MediaItemId == item.Id && s.Path == output, ct) ||
-                await database.TranscodeJobs.AnyAsync(j => j.CatalogId == catalog.Id && j.OutputPath == output, ct))
-                throw new TranscodeConflictException("The output filename is already reserved.");
+            var output = await FindOutputPathAsync(catalog, item, first.Path, ct);
             job = new TranscodeJob
             {
                 Id = id, EngineJobId = id.ToString("n"), Kind = TranscodeJobKind.Join,
@@ -92,6 +89,28 @@ public sealed class VideoPartJoinService(MediaServerDbContext database, ITransco
             logger.LogWarning(exception, "Join {JobId} submission needs reconciliation.", job.Id);
         }
         return TranscodeJobResponse.From(job, engine.GetSnapshot(job.EngineJobId));
+    }
+
+    private async Task<string> FindOutputPathAsync(Catalog catalog, MediaItem item, string firstPath, CancellationToken ct)
+    {
+        // Keep the output beside Part 1, but name it from the movie rather than either part's edition.
+        // Admission holds the library mutation gate until this choice is durably reserved on the job.
+        var directory = Path.GetDirectoryName(firstPath);
+        for (var number = 1; ; number++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var label = number == 1 ? "Joined" : $"Joined {number}";
+            var fileName = Path.GetFileName(LibraryNaming.ForMovie(catalog, item, ".mkv", label));
+            var output = string.IsNullOrEmpty(directory) ? fileName : $"{directory}/{fileName}";
+            if (!sandbox.TryResolve(catalog, output, out var destination))
+                throw new TranscodeRequestException("Could not place the output inside the catalog.");
+            if (File.Exists(destination) || Directory.Exists(destination) ||
+                await database.MediaSources.AnyAsync(s => s.MediaItem!.CatalogId == catalog.Id && s.Path == output, ct) ||
+                await database.MediaSources.AnyAsync(s => s.MediaItemId == item.Id && s.VersionName == label, ct) ||
+                await database.TranscodeJobs.AnyAsync(j => j.CatalogId == catalog.Id && j.OutputPath == output, ct))
+                continue;
+            return output;
+        }
     }
 
     private TranscodeJobRequest RequestFor(TranscodeJob job, Catalog catalog)

@@ -1,14 +1,19 @@
 # Video Part Joining
 
 Created: 2026-09-10
-Updated: 2026-09-10
+Updated: 2026-09-11
 
 ## Joining two parts of one movie
 
 An administrator opens **Join parts** in a movie's Media tab, selects two versions
 as **Part 1** and **Part 2**, and swaps them if necessary. The dialog shows their
 filenames, durations and expected combined duration. The output is a new **Joined**
-version in a Matroska file beside Part 1. Its unique filename contains the job id.
+version in a Matroska file beside Part 1. Its filename uses the movie's catalog
+naming template followed by ` - Joined.mkv`, without either part's edition or a job id.
+Occupied filenames, existing version labels and reserved job output paths are skipped
+using `Joined 2`, `Joined 3`, and so on. The imported version label matches this
+suffix, including after a restart, and remains editable through **Rename version**.
+Existing joined files retain their names until explicitly renamed.
 Both source files remain unchanged, as do the movie's preferred version, metadata,
 favorites and watch history. Playback uses the existing version selector.
 
@@ -86,7 +91,9 @@ files are removed. Retrying that failed operation is an explicit new join.
 
 ## Testing Expectations
 
-- `VideoPartJoinServiceTests`: ordered request and durable reservation, invalid or
+- `VideoPartJoinServiceTests`: ordered request and durable reservation,
+  readable movie-based filenames, numbered collision handling, matching imported labels
+  and subsequent version renaming; invalid or
   missing/cross-title sources, engine availability, move conflicts, actual rename
   and delete service protections for both parts, remap and catalog deletion guards, lost-response recovery under the
   same id, cancellation and history-removal guards, idempotent import and missing
