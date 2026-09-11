@@ -10,6 +10,7 @@ as **Part 1** and **Part 2**, and swaps them if necessary. The dialog shows thei
 filenames, durations and expected combined duration. The output is a new **Joined**
 version in a Matroska file beside Part 1. Its filename uses the movie's catalog
 naming template followed by ` - Joined.mkv`, without either part's edition or a job id.
+Output paths use forward slashes, including when the stored input path uses backslashes.
 Occupied filenames, existing version labels and reserved job output paths are skipped
 using `Joined 2`, `Joined 3`, and so on. The imported version label matches this
 suffix, including after a restart, and remains editable through **Rename version**.
@@ -92,7 +93,7 @@ files are removed. Retrying that failed operation is an explicit new join.
 ## Testing Expectations
 
 - `VideoPartJoinServiceTests`: ordered request and durable reservation,
-  readable movie-based filenames, numbered collision handling, matching imported labels
+  readable movie-based filenames, normalized path separators, numbered collision handling, matching imported labels
   and subsequent version renaming; invalid or
   missing/cross-title sources, engine availability, move conflicts, actual rename
   and delete service protections for both parts, remap and catalog deletion guards, lost-response recovery under the

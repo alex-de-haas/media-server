@@ -94,6 +94,21 @@ public sealed class VideoPartJoinServiceTests : IDisposable
     private Task<TranscodeJobResponse> Create(params Guid[] ids) => Service().CreateAsync(new(ids.Length == 0 ? [_first, _second] : ids), default);
 
     [Theory]
+    [InlineData("part1.mkv", "Parts - Joined.mkv")]
+    [InlineData("dir/sub/part1.mkv", "dir/sub/Parts - Joined.mkv")]
+    [InlineData(@"dir\sub\part1.mkv", "dir/sub/Parts - Joined.mkv")]
+    [InlineData(@"dir\sub/part1.mkv", "dir/sub/Parts - Joined.mkv")]
+    public async Task FindOutputPath_MixedSeparators_UsesPosixDirectory(string firstPath, string expected)
+    {
+        var catalog = await Db.Catalogs.SingleAsync();
+        var movie = await Db.MediaItems.SingleAsync();
+
+        var output = await Service().FindOutputPathAsync(catalog, movie, firstPath, default);
+
+        Assert.Equal(expected, output);
+    }
+
+    [Theory]
     [InlineData(false, "{Title} ({Year})", "Treasure Island (1988)")]
     [InlineData(true, "{Title} ({Year})", "Treasure Island (1988)")]
     [InlineData(false, "{Year} - {Title}", "1988 - Treasure Island")]

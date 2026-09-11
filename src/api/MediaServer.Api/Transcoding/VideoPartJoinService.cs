@@ -91,11 +91,13 @@ public sealed class VideoPartJoinService(MediaServerDbContext database, ITransco
         return TranscodeJobResponse.From(job, engine.GetSnapshot(job.EngineJobId));
     }
 
-    private async Task<string> FindOutputPathAsync(Catalog catalog, MediaItem item, string firstPath, CancellationToken ct)
+    internal async Task<string> FindOutputPathAsync(Catalog catalog, MediaItem item, string firstPath, CancellationToken ct)
     {
         // Keep the output beside Part 1, but name it from the movie rather than either part's edition.
         // Admission holds the library mutation gate until this choice is durably reserved on the job.
-        var directory = Path.GetDirectoryName(firstPath);
+        var slashed = firstPath.Replace('\\', '/');
+        var lastSlash = slashed.LastIndexOf('/');
+        var directory = lastSlash >= 0 ? slashed[..lastSlash] : string.Empty;
         for (var number = 1; ; number++)
         {
             ct.ThrowIfCancellationRequested();
