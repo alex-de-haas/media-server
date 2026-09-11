@@ -1,6 +1,7 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Organizer;
@@ -25,9 +26,37 @@ public sealed class OrganizerService(
 
         var organized = new List<OrganizedFile>();
         var stagingToClean = new HashSet<string>(StringComparer.Ordinal);
-        // Staging roots still holding a file the organizer refused to move. The cleanup below is recursive,
-        // so a root must be spared even when a sibling file did organize out of it successfully.
+        // Cleanup is recursive: spare roots holding an unorganized file even when a sibling moved out.
         var stagingKept = new HashSet<string>(StringComparer.Ordinal);
+
+        // Compare paths in SQL using the same Unicode/case rules as the filesystem; SQLite's NOCASE
+        // only folds ASCII. Registration also applies when EF opens this connection for a later query.
+        const string pathCollation = "organizer_path";
+        ((SqliteConnection)database.Database.GetDbConnection()).CreateCollation(pathCollation,
+            (left, right) => string.Compare(left, right, PathComparison));
+        var claims = new Dictionary<string, HashSet<Guid?>>(
+            PathComparison == StringComparison.OrdinalIgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+        async Task<bool> IsClaimedAsync(string candidate, Guid sourceFileId)
+        {
+            if (!claims.TryGetValue(candidate, out var owners))
+            {
+                // Only read owners of this candidate, and cache across files in this batch. In-place
+                // files and destinations already occupied on disk never need a claim query.
+                var published = database.MediaSources
+                    .Where(source => source.MediaItem!.CatalogId == catalog.Id &&
+                        EF.Functions.Collate(source.Path, pathCollation) == candidate)
+                    .Select(source => source.SourceFileId);
+                var pending = database.SourceFiles
+                    .Where(file => file.IngestItem!.CatalogId == catalog.Id &&
+                        EF.Functions.Collate(file.RelativePath, pathCollation) == candidate)
+                    .Select(file => (Guid?)file.Id);
+                owners = (await published.Concat(pending).ToListAsync(cancellationToken)).ToHashSet();
+                claims.Add(candidate, owners);
+            }
+
+            return owners.Any(owner => owner != sourceFileId);
+        }
 
         void KeepStaging(SourceFile file)
         {
@@ -77,11 +106,17 @@ public sealed class OrganizerService(
             for (var index = 0; index < filesInGroup.Count; index++)
             {
                 var sourceFile = filesInGroup[index];
-                var edition = editions?[index];
+                var edition = sourceFile.Edition ?? editions?[index];
 
                 if (!sandbox.TryResolve(catalog, sourceFile.RelativePath, out var sourceAbsolute))
                 {
                     logger.LogWarning("Refusing to organize unresolved source path {Path}", sourceFile.RelativePath);
+                    continue;
+                }
+
+                if (!File.Exists(sourceAbsolute))
+                {
+                    logger.LogWarning("Source file missing for organize: {Path}", sourceAbsolute);
                     continue;
                 }
 
@@ -106,54 +141,31 @@ public sealed class OrganizerService(
                     continue;
                 }
 
+                // Separate downloads do not meet in EditionLabeler. Allocate a free version name against
+                // both disk and database claims, including claims whose files are temporarily missing.
+                var baseEdition = edition;
+                var versionNumber = 2;
+                while (!string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison) &&
+                       (File.Exists(canonicalAbsolute) || Directory.Exists(canonicalAbsolute) ||
+                        await IsClaimedAsync(canonicalRelative, sourceFile.Id)))
+                {
+                    edition = baseEdition is null ? $"Version {versionNumber++}" : $"{baseEdition} {versionNumber++}";
+                    canonicalRelative = await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
+                    if (!sandbox.TryResolve(catalog, canonicalRelative, out canonicalAbsolute))
+                    {
+                        throw new IOException($"Cannot resolve library version path: {canonicalRelative}");
+                    }
+                }
+
                 // A case-only path change on a case-insensitive filesystem maps to the same file — skip the move.
                 if (!string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison))
                 {
-                    if (!File.Exists(sourceAbsolute))
-                    {
-                        logger.LogWarning("Source file missing for organize: {Path}", sourceAbsolute);
-                        continue;
-                    }
-
                     Directory.CreateDirectory(Path.GetDirectoryName(canonicalAbsolute)!);
-                    if (File.Exists(canonicalAbsolute))
-                    {
-                        // Replacing a stale leftover is fine, but never destroy a file that already backs a
-                        // different version: organizing one file onto another source's canonical path would
-                        // silently overwrite it (e.g. a re-ingested transcode output colliding with the
-                        // original). In that case leave both files alone and skip this one.
-                        var backsAnotherSource = await database.MediaSources.AnyAsync(
-                            existing => existing.MediaItem!.CatalogId == catalog.Id &&
-                                existing.Path == canonicalRelative && existing.SourceFileId != sourceFile.Id,
-                            cancellationToken);
-
-                        // A published MediaSource is not the only claim on a path. Scanning a pre-existing
-                        // library queues one ingest per file, so the original and its " - <edition>" transcode
-                        // outputs identify as the same item while MediaSources is still empty — whichever
-                        // organizes first would delete the others. A file another ingest still owns is a real
-                        // library file, never a leftover.
-                        var ownedByAnotherIngest = !backsAnotherSource && await database.SourceFiles.AnyAsync(
-                            other => other.IngestItem!.CatalogId == catalog.Id &&
-                                other.Id != sourceFile.Id && other.RelativePath == canonicalRelative,
-                            cancellationToken);
-
-                        if (backsAnotherSource || ownedByAnotherIngest)
-                        {
-                            logger.LogWarning(
-                                "Refusing to organize {Source} onto {Target}: that path already backs another version.",
-                                sourceFile.RelativePath, canonicalRelative);
-                            KeepStaging(sourceFile);
-                            continue;
-                        }
-
-                        File.Delete(canonicalAbsolute); // Idempotent re-run: replace a stale, unreferenced leftover.
-                    }
-
+                    // Never overwrite: a concurrent claimant makes this ingest fail safely and retry.
                     File.Move(sourceAbsolute, canonicalAbsolute);
 
                     // The staging folder may go now that its file actually moved out. Recorded here rather
-                    // than before the move so a refused file never has its staging root swept from under it —
-                    // the sweep is recursive and would delete the very file the refusal above preserved.
+                    // than before the move so a failed file never schedules its own staging root for cleanup.
                     if (StagingRootOf(sourceFile.RelativePath) is { } stagingRoot &&
                         sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
                     {
@@ -164,6 +176,13 @@ public sealed class OrganizerService(
                 sourceFile.RelativePath = canonicalRelative;
                 sourceFile.Edition = edition;
                 sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+
+                // Reserve successful moves immediately, before the batch's database save.
+                if (!claims.TryGetValue(canonicalRelative, out var owners))
+                {
+                    claims.Add(canonicalRelative, owners = []);
+                }
+                owners.Add(sourceFile.Id);
 
                 // The item's LibraryPath tracks the primary (first successfully organized) version; the
                 // per-file MediaSource rows probed next are the real source of truth for every version.
@@ -179,6 +198,14 @@ public sealed class OrganizerService(
         }
 
         await database.SaveChangesAsync(cancellationToken);
+
+        var organizedIds = organized.Select(file => file.SourceFileId).ToHashSet();
+        foreach (var file in sourceFiles.Where(file =>
+            file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes) &&
+            !organizedIds.Contains(file.Id)))
+        {
+            KeepStaging(file);
+        }
 
         // Skipped files (unmatchable extras the operator excluded) are never grouped/organized above, so a
         // skip-only torrent ingest would otherwise leave its whole .incoming/<downloadId>/ staging — and the
