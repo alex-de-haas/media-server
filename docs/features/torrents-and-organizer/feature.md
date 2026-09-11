@@ -287,7 +287,9 @@ versions in the canonical library folder:
   `MediaSource` or `SourceFile` in the catalog, the newcomer gets ` - Version 2`, ` - Version 3`,
   and so on. An existing edition gets a numeric suffix instead (for example ` - HDR 2`). Missing
   files' database claims and untracked files on disk also reserve their names. Comparisons follow
-  the filesystem's case rules. The original file is never overwritten or renamed; each new version's
+  the filesystem's case rules, including Unicode. Database claims are queried only for candidate
+  destinations not already occupied on disk and cached by path within the batch; in-place retries
+  do not load claims. The original file is never overwritten or renamed; each new version's
   `SourceFile` and probed `MediaSource` point at its actual library file.
 - **Require a successful move before publishing.** Organize fails if an assigned playable file is
   missing or cannot be organized, and keeps staging roots containing unorganized playable files.
@@ -406,7 +408,9 @@ Backend tests should use xUnit. Required coverage:
 - Successive downloads of the same season retain distinct file contents and canonical version paths,
   including after completed-ingest cleanup; retries preserve allocated names.
 - Destination collisions preserve published versions, pending-ingest files, untracked files, and
-  database claims whose files are missing. Missing or staged files cannot pass through to publish.
+  database claims whose files are missing. Claim queries filter candidate paths in SQL, cache repeated
+  candidates, and preserve Unicode case rules without loading all catalog claims. Missing or staged
+  files cannot pass through to publish.
 - Post-publish remap moves/renames the canonical file without touching unrelated
   files.
 - Catalog scan imports orphan root files (confident → published, low-confidence →

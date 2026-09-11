@@ -1,3 +1,4 @@
+using System.Data.Common;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Organizer;
@@ -6,12 +7,14 @@ using MediaServer.Api.Pipeline.Stages;
 using MediaServer.Api.Tests.Pipeline;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MediaServer.Api.Tests;
 
 public sealed class OrganizerServiceTests : IDisposable
 {
+    private readonly ClaimCommandCapture _commands = new();
     private readonly SqliteConnection _connection;
     private readonly MediaServerDbContext _database;
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ms-org-" + Guid.NewGuid().ToString("N"));
@@ -20,7 +23,7 @@ public sealed class OrganizerServiceTests : IDisposable
     {
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
-        _database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        _database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).AddInterceptors(_commands).Options);
         _database.Database.Migrate();
         CatalogPaths.For(_root).EnsureCreated();
     }
@@ -330,6 +333,113 @@ public sealed class OrganizerServiceTests : IDisposable
 
         Assert.Empty(await _database.MediaSources.ToListAsync());
         Assert.Equal(exists, File.Exists(Path.Combine(_root, path)));
+    }
+
+    [Fact]
+    public async Task Organize_queries_only_candidate_claims_and_caches_them_across_the_batch()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title}" };
+        // Different titles sanitize to the same destination, so both files visit the same reserved names.
+        var first = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Movie:A" };
+        var second = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Movie?A" };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id };
+        var firstFile = MakeSource(ingest.Id, first.Id, $".incoming/{ingest.Id:N}/first.mkv", 0, now);
+        var secondFile = MakeSource(ingest.Id, second.Id, $".incoming/{ingest.Id:N}/second.mkv", 1, now);
+        var canonical = "Movie A/Movie A.mkv";
+        var version2 = "Movie A/Movie A - Version 2.mkv";
+        var reservedIngest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id };
+        _database.AddRange(catalog, first, second, ingest, firstFile, secondFile, reservedIngest,
+            MakeSource(reservedIngest.Id, first.Id, version2, 0, now),
+            new MediaSource { Id = Guid.NewGuid(), MediaItemId = first.Id, Path = canonical, Container = "mkv" });
+        _database.MediaSources.AddRange(Enumerable.Range(0, 128).Select(index => new MediaSource
+        {
+            Id = Guid.NewGuid(), MediaItemId = first.Id, Path = $"Unrelated/{index}.mkv", Container = "mkv",
+        }));
+        await _database.SaveChangesAsync();
+        await WriteStagingFileAsync(firstFile.RelativePath);
+        await WriteStagingFileAsync(secondFile.RelativePath);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        _commands.Reads.Clear();
+
+        var organized = await organizer.OrganizeAsync([firstFile, secondFile], catalog, CancellationToken.None);
+
+        Assert.Equal(2, organized.Count);
+        Assert.Equal("Movie A/Movie A - Version 3.mkv", firstFile.RelativePath);
+        Assert.Equal("Movie A/Movie A - Version 4.mkv", secondFile.RelativePath);
+        Assert.All(organized, file => Assert.True(File.Exists(file.AbsolutePath)));
+        // Each destination is checked once, even the two missing-file claims shared by both inputs.
+        Assert.Equal(4, _commands.Reads.Count);
+        foreach (var path in new[] { canonical, version2, firstFile.RelativePath, secondFile.RelativePath })
+        {
+            var read = Assert.Single(_commands.Reads, read => read.Parameters.Contains(path));
+            Assert.Contains("\"Path\" COLLATE organizer_path =", read.Sql);
+            Assert.Contains("\"RelativePath\" COLLATE organizer_path =", read.Sql);
+        }
+
+        _commands.Reads.Clear();
+        await organizer.OrganizeAsync([firstFile, secondFile], catalog, CancellationToken.None);
+        Assert.Empty(_commands.Reads); // An in-place retry never loads catalog claims.
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Organize_missing_claims_use_filesystem_case_rules_for_unicode_paths(bool pendingClaim)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title}" };
+        var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Солярис" };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id };
+        var source = MakeSource(ingest.Id, movie.Id, $".incoming/{ingest.Id:N}/movie.mkv", 0, now);
+        _database.AddRange(catalog, movie, ingest, source);
+        if (pendingClaim)
+        {
+            _database.SourceFiles.Add(MakeSource(ingest.Id, movie.Id, "СОЛЯРИС/СОЛЯРИС.mkv", 1, now));
+        }
+        else
+        {
+            _database.MediaSources.Add(new MediaSource
+            {
+                Id = Guid.NewGuid(), MediaItemId = movie.Id, Path = "СОЛЯРИС/СОЛЯРИС.mkv", Container = "mkv",
+            });
+        }
+        await _database.SaveChangesAsync();
+        await WriteStagingFileAsync(source.RelativePath);
+        // Let EF open/close the connection as in production; the collation must survive those opens.
+        using var disk = new SqliteConnection($"Data Source={Path.Combine(_root, "library.db")};Pooling=False");
+        disk.Open();
+        _connection.BackupDatabase(disk);
+        disk.Close();
+        using var database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(disk).Options);
+        var trackedSource = await database.SourceFiles.SingleAsync(file => file.Id == source.Id);
+        var organizer = new OrganizerService(database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+
+        var result = Assert.Single(await organizer.OrganizeAsync([trackedSource], catalog, CancellationToken.None));
+
+        var expected = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? "Солярис/Солярис - Version 2.mkv" : "Солярис/Солярис.mkv";
+        Assert.Equal(expected, result.LibraryRelativePath);
+        Assert.True(File.Exists(result.AbsolutePath));
+    }
+
+    private sealed class ClaimCommandCapture : DbCommandInterceptor
+    {
+        public List<(string Sql, string[] Parameters)> Reads { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.StartsWith("SELECT", StringComparison.Ordinal) &&
+                (command.CommandText.Contains("\"MediaSources\"", StringComparison.Ordinal) ||
+                 command.CommandText.Contains("\"SourceFiles\"", StringComparison.Ordinal)))
+            {
+                Reads.Add((command.CommandText, command.Parameters.Cast<DbParameter>()
+                    .Select(parameter => parameter.Value).OfType<string>().ToArray()));
+            }
+            return ValueTask.FromResult(result);
+        }
     }
 
     private static SourceFile MakeSource(Guid ingestId, Guid mediaItemId, string relativePath, int torrentIndex, DateTimeOffset now) => new()

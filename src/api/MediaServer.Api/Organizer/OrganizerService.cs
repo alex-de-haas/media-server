@@ -1,6 +1,7 @@
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Organizer;
@@ -28,17 +29,34 @@ public sealed class OrganizerService(
         // Cleanup is recursive: spare roots holding an unorganized file even when a sibling moved out.
         var stagingKept = new HashSet<string>(StringComparer.Ordinal);
 
-        // Match database claims using the filesystem's case rules, not SQLite's default collation.
-        // Load once for the whole batch so a season pack does not rescan the catalog for every episode.
-        var publishedClaims = await database.MediaSources
-            .Where(source => source.MediaItem!.CatalogId == catalog.Id)
-            .Select(source => new { source.Path, source.SourceFileId }).ToListAsync(cancellationToken);
-        var ingestClaims = await database.SourceFiles
-            .Where(file => file.IngestItem!.CatalogId == catalog.Id)
-            .Select(file => new { Path = file.RelativePath, SourceFileId = (Guid?)file.Id }).ToListAsync(cancellationToken);
-        var claims = publishedClaims.Concat(ingestClaims).ToLookup(claim => claim.Path,
-            claim => claim.SourceFileId,
+        // Compare paths in SQL using the same Unicode/case rules as the filesystem; SQLite's NOCASE
+        // only folds ASCII. Registration also applies when EF opens this connection for a later query.
+        const string pathCollation = "organizer_path";
+        ((SqliteConnection)database.Database.GetDbConnection()).CreateCollation(pathCollation,
+            (left, right) => string.Compare(left, right, PathComparison));
+        var claims = new Dictionary<string, HashSet<Guid?>>(
             PathComparison == StringComparison.OrdinalIgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+        async Task<bool> IsClaimedAsync(string candidate, Guid sourceFileId)
+        {
+            if (!claims.TryGetValue(candidate, out var owners))
+            {
+                // Only read owners of this candidate, and cache across files in this batch. In-place
+                // files and destinations already occupied on disk never need a claim query.
+                var published = database.MediaSources
+                    .Where(source => source.MediaItem!.CatalogId == catalog.Id &&
+                        EF.Functions.Collate(source.Path, pathCollation) == candidate)
+                    .Select(source => source.SourceFileId);
+                var pending = database.SourceFiles
+                    .Where(file => file.IngestItem!.CatalogId == catalog.Id &&
+                        EF.Functions.Collate(file.RelativePath, pathCollation) == candidate)
+                    .Select(file => (Guid?)file.Id);
+                owners = (await published.Concat(pending).ToListAsync(cancellationToken)).ToHashSet();
+                claims.Add(candidate, owners);
+            }
+
+            return owners.Any(owner => owner != sourceFileId);
+        }
 
         void KeepStaging(SourceFile file)
         {
@@ -129,7 +147,7 @@ public sealed class OrganizerService(
                 var versionNumber = 2;
                 while (!string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison) &&
                        (File.Exists(canonicalAbsolute) || Directory.Exists(canonicalAbsolute) ||
-                        claims[canonicalRelative].Any(owner => owner != sourceFile.Id)))
+                        await IsClaimedAsync(canonicalRelative, sourceFile.Id)))
                 {
                     edition = baseEdition is null ? $"Version {versionNumber++}" : $"{baseEdition} {versionNumber++}";
                     canonicalRelative = await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
@@ -158,6 +176,13 @@ public sealed class OrganizerService(
                 sourceFile.RelativePath = canonicalRelative;
                 sourceFile.Edition = edition;
                 sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
+
+                // Reserve successful moves immediately, before the batch's database save.
+                if (!claims.TryGetValue(canonicalRelative, out var owners))
+                {
+                    claims.Add(canonicalRelative, owners = []);
+                }
+                owners.Add(sourceFile.Id);
 
                 // The item's LibraryPath tracks the primary (first successfully organized) version; the
                 // per-file MediaSource rows probed next are the real source of truth for every version.
