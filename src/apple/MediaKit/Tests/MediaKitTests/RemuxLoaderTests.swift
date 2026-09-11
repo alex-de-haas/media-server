@@ -353,7 +353,7 @@ struct RemuxLoaderTests {
 
         // The fill promises the whole window, delivers half of it, and then the connection goes.
         let fill = try await fixture.network.range(start: 0)
-        fill.answer(total: 1 << 20, start: 0, count: budget, delivering: half)
+        fill.answer(total: 1 << 20, start: 0, count: budget, delivering: half, piece: 4 << 10)
         try await fixture.until { first.finished }
         try await waitUntil { fixture.loader.makeSnapshot().windowBytes == half }
         let dropped = ContinuousClock.now
@@ -376,7 +376,7 @@ struct RemuxLoaderTests {
         #expect(fixture.loader.makeSnapshot().asides == 0)
 
         // ... and goes on from the refill once it lands, with no fetch of its own for either read.
-        refill.answer(total: 1 << 20, start: half, count: half)
+        refill.answer(total: 1 << 20, start: half, count: half, piece: 4 << 10)
         let resumed = Request(offset: Int64(half), length: 8)
         await fixture.onQueue { _ = fixture.loader.accept(resumed) }
         try await fixture.until { resumed.finished }
@@ -504,19 +504,22 @@ private final class Stub: URLProtocol, @unchecked Sendable {
             httpVersion: nil, headerFields: ["Content-Length": "\(total)"])!, cacheStoragePolicy: .notAllowed)
         client!.urlProtocolDidFinishLoading(self)
     }
-    func answer(total: Int, start: Int, count: Int) {
-        answer(total: total, start: start, count: count, delivering: count)
+    /// The bytes arrive in pieces of `piece`: eight, as the byte-scale cases read, unless a
+    /// kilobyte-scale case says otherwise — a hundred kilobytes eight bytes at a time is sixteen
+    /// thousand callbacks for nothing the loader can tell apart.
+    func answer(total: Int, start: Int, count: Int, piece: Int = 8) {
+        answer(total: total, start: start, count: count, delivering: count, piece: piece)
         client!.urlProtocolDidFinishLoading(self)
     }
 
     /// The response and the first `delivered` of its `count` bytes, with the connection left open —
     /// for the test to drop once the loader has taken what came.
-    func answer(total: Int, start: Int, count: Int, delivering delivered: Int) {
+    func answer(total: Int, start: Int, count: Int, delivering delivered: Int, piece: Int = 8) {
         client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 206,
             httpVersion: nil, headerFields: ["Content-Length": "\(count)",
                 "Content-Range": "bytes \(start)-\(start + count - 1)/\(total)"])!, cacheStoragePolicy: .notAllowed)
-        for offset in stride(from: start, to: start + delivered, by: 8) {
-            client!.urlProtocol(self, didLoad: payload(start: offset, count: min(8, start + delivered - offset)))
+        for offset in stride(from: start, to: start + delivered, by: piece) {
+            client!.urlProtocol(self, didLoad: payload(start: offset, count: min(piece, start + delivered - offset)))
         }
     }
 
