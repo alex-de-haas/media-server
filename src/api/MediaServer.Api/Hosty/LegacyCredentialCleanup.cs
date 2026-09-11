@@ -40,7 +40,8 @@ public sealed partial class LegacyCredentialCleanup(
 public sealed class LegacyCredentialCleanupWorker(
     LegacyCredentialCleanup cleanup,
     IHostyCoreClient core,
-    TimeProvider time) : BackgroundService
+    TimeProvider time,
+    ILogger<LegacyCredentialCleanupWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -49,9 +50,32 @@ public sealed class LegacyCredentialCleanupWorker(
             return;
         }
 
-        while (!await cleanup.TryCleanupAsync(stoppingToken))
+        try
         {
-            await Task.Delay(TimeSpan.FromMinutes(5), time, stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    if (await cleanup.TryCleanupAsync(stoppingToken))
+                    {
+                        return;
+                    }
+                }
+                catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // Exception messages can contain response data or credential keys. Log only
+                    // the failure type, and let local playback continue while cleanup retries.
+                    logger.LogWarning(
+                        "Obsolete app credential cleanup failed unexpectedly ({ExceptionType}); retrying later.",
+                        exception.GetType().Name);
+                }
+
+                await Task.Delay(TimeSpan.FromMinutes(5), time, stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown, including cancellation during a Core call or the retry delay.
         }
     }
 }

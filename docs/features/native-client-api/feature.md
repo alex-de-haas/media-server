@@ -1,7 +1,7 @@
 # Native Client API
 
 Created: 2026-08-04
-Updated: 2026-09-10
+Updated: 2026-09-11
 
 ## Description
 
@@ -61,7 +61,8 @@ library, the users, or which integrations are configured.
 
 `GET /native/v1/server` is authenticated and reports what the instance can
 actually do, so a client hides what the server cannot do rather than failing on
-use.
+use. Required v1 capability fields remain present when disabled, with a `false`
+value, so existing clients can decode the response across server upgrades.
 
 ### Signed URL tokens
 
@@ -207,6 +208,9 @@ Shared media-source and external audio DTOs carry optional `indexing` snapshots.
 
 Backend tests use xUnit and Imposter. Required coverage:
 
+- Server-description compatibility: existing v1 decoders receive required
+  capability booleans even when they are disabled or default values are omitted
+  elsewhere in the response.
 - URL tokens: round trip, expiry across a film-length window, wrong media source,
   disallowed method, tampered payload, another instance's key.
 - The public-binding allowlist driven through a real pipeline — metadata lookup,

@@ -579,6 +579,11 @@ Core persists to Core-owned `<app-dir>/secrets.json` — outside the backed-up
 `data/` directory, the same posture as `secret: true` settings in `state.json` —
 so no container-mount change in either runtime profile.
 
+App credential cleanup runs independently of playback. Failed passes retry after
+five minutes, including unexpected client or response errors. Logs report the
+failure type without secret keys, values, or response contents; host cancellation
+ends both in-flight requests and retry delays without another attempt.
+
 **Acceptance criteria.**
 - App can PUT/GET/DELETE its own secrets with its service token; requests
   authenticated with another app's service token are rejected.

@@ -306,4 +306,9 @@ public sealed record NativeServerDescription(
 public sealed record NativeServerCapabilities(
     bool TranscodeEngine,
     bool Packaging,
-    bool Recommendations);
+    bool Recommendations)
+{
+    /// <summary>Required by existing v1 clients; this capability is always disabled.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public bool Trakt => false;
+}
