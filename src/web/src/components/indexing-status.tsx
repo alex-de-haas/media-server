@@ -1,13 +1,13 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { LoaderCircle } from "lucide-react";
 import { indexingLabel, latestIndexing, type IndexingStatus } from "@/lib/indexing";
 
 /** Snapshot on entry, SSE thereafter. This component never starts a timer or a connection. */
 export function IndexingIndicator({ id, snapshot }: { id: string; snapshot?: IndexingStatus | null }) {
-  const { data: live } = useQuery<IndexingStatus>({ queryKey: ["indexing", id.toLowerCase()], enabled: false });
-  const { data: connected } = useQuery<boolean>({ queryKey: ["indexing-connected"], enabled: false });
+  const { data: live } = useQuery<IndexingStatus>({ queryKey: ["indexing", id.toLowerCase()], queryFn: skipToken });
+  const { data: connected } = useQuery<boolean>({ queryKey: ["indexing-connected"], queryFn: skipToken });
   const status = latestIndexing(snapshot, live);
   const label = indexingLabel(status);
   if (!label || !status) return null;
