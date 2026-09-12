@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-10
+Updated: 2026-09-12
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -196,6 +196,15 @@ without hardware. On macOS `presentsHDR` is `false` rather than assumed: the hon
 lives on the screen a window is on, which a synchronous property has no business reaching
 for and which means nothing before there is a window. Under-claiming costs an SDR picture
 that always works; over-claiming breaks one.
+
+## Playback completion
+
+When a movie or episode reaches the end of its file, the tvOS player closes and returns
+to the title detail screen that opened it. Completion reports the final position and
+refreshes the title's watched state through the same stop path as manual dismissal.
+The player stops its loader, recovery and track-switch tasks before dismissing; teardown
+reports the stop only once. Completion follows the current player item after track
+switches or loader recovery and ignores notifications from replaced or unrelated items.
 
 ## Feeding the player
 
@@ -726,6 +735,12 @@ There is no series-level Play action. See
 Movie and episode Versions display [indexing progress](../indexing-progress/feature.md) before playback. External audio tracks display their own preparation state. A shared MediaKit SSE connection updates progress and reconciles detail on reconnect; the last visible subscriber releases the connection.
 
 ## Testing Expectations
+
+- `PlaybackCompletionTests` covers natural completion with the local video fixture,
+  replacement and unrelated items, duplicate notifications, and observer removal on stop.
+  On Apple TV, let a movie and an episode finish, including after a track switch, and
+  verify return to their details with the watched state refreshed. Manual Back still
+  dismisses playback and preserves the resume position.
 
 - Explicit version selection preserves pending and unsupported refusals even when another
   copy plays; missing selected sources do not fall back, and automatic selection still
