@@ -11,6 +11,7 @@ test("general settings has no legacy library upkeep controls", async ({ page }) 
   await expect(page.getByRole("button", { name: "Fill in media data" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run check" })).toHaveCount(0);
   await expect(page.getByText("Removed titles")).toHaveCount(0);
+  await expect(page.getByText("Watch history providers", { exact: true })).toHaveCount(0);
 });
 
 test("catalog settings tab survives refresh and browser history", async ({ page }) => {

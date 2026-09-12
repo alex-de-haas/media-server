@@ -35,43 +35,12 @@ public sealed class PlaybackHistoryEntry
     /// </summary>
     public string? PlaySessionId { get; set; }
 
-    /// <summary>
-    /// Frozen provider-neutral identity (JSON) as it was when the play was recorded. Outbound delivery
-    /// runs later and must describe the item as identified then, even if the library has since been
-    /// rescanned, re-identified, or the item deleted.
-    /// </summary>
-    public string? IdentitySnapshot { get; set; }
-
-    /// <summary>
-    /// Provider this entry is linked to, when it is. One link per entry in v1. Stored canonically, so
-    /// resolving a remote id back to its local entry cannot miss rows on casing.
-    /// </summary>
-    public string? ProviderKey
-    {
-        get => providerKey;
-        set => providerKey = WatchHistoryProviderKey.Normalize(value);
-    }
-
-    private string? providerKey;
-
-    /// <summary>The provider's own id for the corresponding remote entry, once resolved.</summary>
-    public string? ProviderHistoryId { get; set; }
-
-    /// <summary>
-    /// True only when Media Server created the remote entry. Remote deletion is permitted for these
-    /// and nothing else: a matching identity and timestamp is not evidence of ownership, and deleting
-    /// on that basis would remove plays another client recorded.
-    /// </summary>
-    public bool ProviderEntryOwned { get; set; }
-
-    public PlaybackHistoryLinkStatus LinkStatus { get; set; }
-
     public AppUser? AppUser { get; set; }
 
     public MediaItem? MediaItem { get; set; }
 }
 
-/// <summary>Where a play came from. Decides what may be exported and what may be deleted remotely.</summary>
+/// <summary>Where a recorded play came from.</summary>
 public enum PlaybackHistoryOrigin
 {
     /// <summary>Observed playback crossing the watched threshold. The only source of an exact local time.</summary>
@@ -85,29 +54,9 @@ public enum PlaybackHistoryOrigin
     /// </summary>
     Manual,
 
-    /// <summary>Imported from the provider during an explicit sync.</summary>
+    /// <summary>Imported history. The stored origin is retained for existing entries.</summary>
     ProviderSync,
 
     /// <summary>Reconstructed from a pre-migration aggregate row. Timeless — its real times are unknowable.</summary>
     Legacy,
-}
-
-/// <summary>How far the link between a local entry and its remote counterpart got.</summary>
-public enum PlaybackHistoryLinkStatus
-{
-    /// <summary>Not linked, and not expected to be.</summary>
-    None,
-
-    /// <summary>Outbound work is in flight; the remote id is not known yet.</summary>
-    Pending,
-
-    /// <summary>The remote id was resolved uniquely and stored.</summary>
-    Resolved,
-
-    /// <summary>
-    /// The add committed but its remote id could not be pinned down — an eventually consistent read,
-    /// or a concurrent write making the before/after difference ambiguous. Never reposted and never
-    /// deleted remotely: guessing here means destroying someone else's history.
-    /// </summary>
-    Unresolved,
 }

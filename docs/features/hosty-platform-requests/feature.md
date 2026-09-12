@@ -1,7 +1,7 @@
 # Hosty Platform Requests
 
 Created: 2026-06-15
-Updated: 2026-08-02
+Updated: 2026-09-11
 
 ## Description
 
@@ -564,17 +564,7 @@ directory. SDK clients ship in `HostySdk.App` 0.3.0 (`HostySecretsClient`,
 `AddHostySecrets`) and `@hosty-sdk/app` 0.4.0 (server-only), both with a
 write-through cache and classified errors. See the
 [feature document](https://github.com/alex-de-haas/docker-host/blob/main/docs/features/app-secrets-store.md).
-[Watched-history providers](../watch-history-providers/feature.md) stores its
-OAuth tokens here rather than under an app-side encryption key.
-
-**Problem (historical).** The Trakt integration must persist per-user OAuth access/refresh
-tokens acquired at runtime. They cannot be hashed — the app has to present them
-to Trakt — so they must be stored recoverably, but Hosty backups are directory
-copies of `data/` containing the SQLite file, so plaintext tokens would make
-every backup archive live access to every connected Trakt account. Every future
-OAuth or API-token integration repeats the same problem.
-
-**Proposed contract.** An app-callable bounded secrets store:
+**Contract.** An app-callable bounded secrets store:
 
 ```text
 PUT    {HOSTY_CORE_ORIGIN}/api/internal/apps/{appId}/secrets/{key}
@@ -589,20 +579,10 @@ Core persists to Core-owned `<app-dir>/secrets.json` — outside the backed-up
 `data/` directory, the same posture as `secret: true` settings in `state.json` —
 so no container-mount change in either runtime profile.
 
-**How Media Server uses it.** Stores Trakt tokens under per-connection keys
-(e.g. `trakt.connection.{id}.tokens`) and drops `TRAKT_TOKEN_ENCRYPTION_KEY`,
-the operator `openssl rand` step, and the local AES-256-GCM envelope. A missing
-secret maps to the existing `RequiresReconnect` state. Restore semantics
-improve: a database restore rolls back rows but not tokens — Trakt refresh
-tokens rotate, so tokens embedded in a backup are usually stale by restore time,
-while the live secrets store keeps connections working.
-
-**Workaround (historical).** The Trakt plan originally specced an
-operator-generated 32-byte key in a secret app setting plus a versioned
-AES-256-GCM credential envelope in SQLite. Its limits are why this request
-existed: key loss or rotation killed every connection, the operator had to keep
-the key outside backups by hand, restored backups carried stale rotating refresh
-tokens anyway, and every future OAuth integration would repeat the crypto.
+App credential cleanup runs independently of playback. Failed passes retry after
+five minutes, including unexpected client or response errors. Logs report the
+failure type without secret keys, values, or response contents; host cancellation
+ends both in-flight requests and retry delays without another attempt.
 
 **Acceptance criteria.**
 - App can PUT/GET/DELETE its own secrets with its service token; requests

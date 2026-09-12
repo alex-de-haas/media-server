@@ -1,7 +1,7 @@
 # Recommendations
 
 Created: 2026-07-25
-Updated: 2026-08-15
+Updated: 2026-09-11
 
 ## Description
 
@@ -9,13 +9,6 @@ A "what should I watch next" surface built entirely from what this instance
 already knows: what the viewer watched, what they said about it, and what the
 library holds. TMDb answers "what is like X" and supplies public metadata; every
 judgement about *this* viewer is made locally.
-
-There is **one engine**. There was briefly a second source — Trakt — and rank
-fusion to merge them; both are gone. Registering a Trakt OAuth application now
-requires VIP, so almost no operator could reach it, and the engine had grown a
-shaped output (diversity, caps) that fusion could only flatten back into
-positions and re-derive. Trakt **watched-history sync is a separate feature and
-is untouched** — see [watch-history providers](../watch-history-providers/feature.md).
 
 ## Star ratings
 
@@ -25,8 +18,7 @@ could see a play, a favorite and a rewatch, so a film watched and endured seeded
 the feed as loudly as one watched and loved.
 
 **It is not a second favorite.** A favorite is curation — "keep this where I can
-find it" — applies to any item including seasons, and travels to a connected
-provider. A rating is a judgement on a work, stays local, and places the title in
+find it" — applies to any item including seasons, and stays in this user's library. A rating is a judgement on a work, stays local, and places the title in
 no list. Neither writes the other, and a title can honestly be both a favorite
 and two stars.
 

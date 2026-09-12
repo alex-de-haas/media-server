@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace MediaServer.Api.Tests.WatchHistory;
 
 /// <summary>
-/// Recording per-play history and the outbound intent that follows it, through the real
+/// Recording local per-play history through the real
 /// <see cref="UserDataService"/> paths so the staging-and-one-commit contract is exercised end to end.
 /// </summary>
 public sealed class WatchHistoryRecorderTests : IDisposable
@@ -106,27 +106,7 @@ public sealed class WatchHistoryRecorderTests : IDisposable
     private UserDataService Service() => new(
         _database,
         _time,
-        new WatchHistoryRecorder(
-            _database,
-            new WatchHistoryIdentityMapper(_database),
-            _time,
-            NullLogger<WatchHistoryRecorder>.Instance));
-
-    private WatchHistoryProviderConnection Connect()
-    {
-        var connection = new WatchHistoryProviderConnection
-        {
-            Id = Guid.NewGuid(),
-            AppUserId = _userId,
-            ProviderKey = "trakt",
-            Status = WatchHistoryConnectionStatus.Connected,
-            ConnectedAt = _time.GetUtcNow(),
-        };
-        connection.SecretKey = $"trakt.connection.{connection.Id:N}.tokens";
-        _database.WatchHistoryConnections.Add(connection);
-        _database.SaveChanges();
-        return connection;
-    }
+        new WatchHistoryRecorder(_database, _time));
 
     private async Task WatchToCompletionAsync(string session = "session-1")
     {
@@ -145,7 +125,6 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         Assert.Equal(PlaybackHistoryOrigin.LocalPlayback, entry.Origin);
         Assert.Equal(_time.GetUtcNow(), entry.WatchedAt);
         Assert.Equal("session-1", entry.PlaySessionId);
-        Assert.Contains("27205", entry.IdentitySnapshot);
     }
 
     [Fact]
@@ -193,47 +172,9 @@ public sealed class WatchHistoryRecorderTests : IDisposable
     // ---- Outbound intent ----
 
     [Fact]
-    public async Task WithoutAConnectionHistoryIsStillRecordedButNothingIsQueued()
+    public async Task AnUnidentifiedItemRecordsHistory()
     {
-        // The history is the local source of truth; connecting later has to have something to export.
-        await WatchToCompletionAsync();
-
-        Assert.Single(_database.PlaybackHistoryEntries);
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
-    }
-
-    [Fact]
-    public async Task AConnectedUsersCompletionQueuesAnExactWatch()
-    {
-        var connection = Connect();
-
-        await WatchToCompletionAsync();
-
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
-        Assert.Equal(WatchHistoryOutboxOperation.AddExactWatch, queued.Operation);
-        Assert.Equal(connection.Id, queued.ConnectionId);
-        Assert.Equal(_time.GetUtcNow(), queued.OccurredAt);
-        Assert.Contains("27205", queued.IdentitySnapshot);
-    }
-
-    [Fact]
-    public async Task TheHistoryEntryAndItsOutboxEventCommitTogether()
-    {
-        // Both are staged and saved by the same SaveChangesAsync, so neither can exist alone.
-        Connect();
-
-        await WatchToCompletionAsync();
-
-        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
-        Assert.Equal(entry.Id, queued.HistoryEntryId);
-    }
-
-    [Fact]
-    public async Task AnUnidentifiedItemRecordsHistoryWithoutQueueingUndeliverableWork()
-    {
-        // Queueing work that can never be addressed would retry forever; the local change still stands.
-        Connect();
+        // Local history does not require a metadata match.
         var unidentified = NewItem(MediaKind.Movie, (await _database.Catalogs.FirstAsync()).Id, "Unknown");
         _database.MediaItems.Add(unidentified);
         _database.MediaSources.Add(new MediaSource
@@ -247,7 +188,6 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         await Service().ReportPlaybackAsync(_userId, unidentified.PublicId!, (long)(Runtime * 0.95), false, "s", null, CancellationToken.None);
 
         Assert.Single(_database.PlaybackHistoryEntries);
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
     }
 
     // ---- Manual marks ----
@@ -284,18 +224,6 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         Assert.Equal(PlaybackHistoryOrigin.LocalPlayback, entry.Origin);
     }
 
-    [Fact]
-    public async Task AManualMarkQueuesEnsureTimelessWatched()
-    {
-        Connect();
-
-        await Service().SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
-
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
-        Assert.Equal(WatchHistoryOutboxOperation.EnsureTimelessWatched, queued.Operation);
-        Assert.Null(queued.OccurredAt);
-    }
-
     // ---- Logged watches ----
 
     [Fact]
@@ -311,7 +239,6 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         Assert.Equal(PlaybackHistoryOrigin.Manual, entry.Origin);
         Assert.Equal(watchedAt, entry.WatchedAt);
         Assert.Null(entry.PlaySessionId);
-        Assert.Contains("27205", entry.IdentitySnapshot);
     }
 
     [Fact]
@@ -326,25 +253,6 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         var row = await _database.UserItemData.AsNoTracking().SingleAsync(data => data.MediaItemId == _movieId);
         Assert.Equal(2, row.PlayCount);
         Assert.True(row.Played);
-    }
-
-    [Fact]
-    public async Task EachLoggedWatchQueuesItsOwnExactWatch()
-    {
-        // Keyed on the entry: a second log changes no state on the row, so a row-derived idempotency
-        // key would collide and the second event would be swallowed as a duplicate.
-        Connect();
-        var first = DateTimeOffset.Parse("2026-07-20T21:30:00Z");
-        var second = DateTimeOffset.Parse("2026-07-22T18:00:00Z");
-
-        await Service().LogWatchAsync(_userId, _movieId, first, CancellationToken.None);
-        await Service().LogWatchAsync(_userId, _movieId, second, CancellationToken.None);
-
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync();
-        Assert.Equal(2, queued.Count);
-        Assert.All(queued, item => Assert.Equal(WatchHistoryOutboxOperation.AddExactWatch, item.Operation));
-        Assert.Contains(queued, item => item.OccurredAt == first);
-        Assert.Contains(queued, item => item.OccurredAt == second);
     }
 
     [Fact]
@@ -456,9 +364,7 @@ public sealed class WatchHistoryRecorderTests : IDisposable
     [Fact]
     public async Task AnUnidentifiedItemStillRecordsTheLoggedPlay()
     {
-        // Same rule as an observed completion: history is local truth, and undeliverable work is not
-        // queued rather than retried forever.
-        Connect();
+        // Manually logged history also works without a metadata match.
         var unidentified = NewItem(MediaKind.Movie, (await _database.Catalogs.FirstAsync()).Id, "Unknown");
         _database.MediaItems.Add(unidentified);
         await _database.SaveChangesAsync();
@@ -467,7 +373,6 @@ public sealed class WatchHistoryRecorderTests : IDisposable
 
         Assert.Equal(LogWatchStatus.Recorded, result.Status);
         Assert.Single(_database.PlaybackHistoryEntries);
-        Assert.Empty(_database.WatchHistoryOutboxEvents);
     }
 
     // ---- Unwatch ----
@@ -498,13 +403,13 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         {
             Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = _movieId,
             CreatedAt = _time.GetUtcNow(), WatchedAt = null,
-            Origin = PlaybackHistoryOrigin.Manual, LinkStatus = PlaybackHistoryLinkStatus.None,
+            Origin = PlaybackHistoryOrigin.Manual,
         });
         _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
         {
             Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = _movieId,
             CreatedAt = _time.GetUtcNow(), WatchedAt = _time.GetUtcNow().AddDays(-3),
-            Origin = PlaybackHistoryOrigin.ProviderSync, LinkStatus = PlaybackHistoryLinkStatus.Resolved,
+            Origin = PlaybackHistoryOrigin.ProviderSync,
         });
         await _database.SaveChangesAsync();
 
@@ -528,26 +433,12 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         Assert.NotNull(row.LastWatchedAt);
     }
 
-    [Fact]
-    public async Task UnwatchQueuesAnOwnedOnlyRemoval()
-    {
-        Connect();
-        await Service().SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
-
-        await Service().SetPlayedAsync(_userId, _moviePublicId, played: false, playedAt: null, CancellationToken.None);
-
-        Assert.Contains(
-            await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync(),
-            queued => queued.Operation == WatchHistoryOutboxOperation.RemoveOwnedTimelessEntries);
-    }
-
     // ---- Folder marks ----
 
     [Fact]
-    public async Task MarkingASeasonRecordsPerEpisodeHistoryAndIntent()
+    public async Task MarkingASeasonRecordsPerEpisodeHistory()
     {
-        // Providers know episodes, not seasons, so the fan-out has to happen on this side.
-        Connect();
+        // A season mark records the episodes it contains.
 
         await Service().SetPlayedAsync(_userId, _seasonPublicId, played: true, playedAt: null, CancellationToken.None);
 
@@ -555,42 +446,6 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         Assert.Equal(2, entries.Count);
         Assert.All(entries, entry => Assert.NotEqual(_seasonId, entry.MediaItemId));
 
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().ToListAsync();
-        Assert.Equal(2, queued.Count);
-        Assert.All(queued, item => Assert.Equal(WatchHistoryOutboxOperation.EnsureTimelessWatched, item.Operation));
-    }
-
-    [Fact]
-    public async Task TheEnsureEventCarriesTheEntryItMustRecordOwnershipOn()
-    {
-        // Without it, a mark undone before delivery leaves a remote timeless mark with no local
-        // owner — and ownership is the only thing that permits removing it later.
-        Connect();
-
-        await Service().SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
-
-        var entry = await _database.PlaybackHistoryEntries.AsNoTracking().SingleAsync();
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
-        Assert.Equal(entry.Id, queued.HistoryEntryId);
-    }
-
-    [Fact]
-    public async Task AMarkWithExistingHistoryStillPointsAtAnOwnableEntry()
-    {
-        // No new entry is created, but the event may still add a remote mark that needs an owner.
-        Connect();
-        _database.PlaybackHistoryEntries.Add(new PlaybackHistoryEntry
-        {
-            Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = _movieId,
-            CreatedAt = _time.GetUtcNow(), WatchedAt = null,
-            Origin = PlaybackHistoryOrigin.Manual, LinkStatus = PlaybackHistoryLinkStatus.None,
-        });
-        await _database.SaveChangesAsync();
-
-        await Service().SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
-
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
-        Assert.NotNull(queued.HistoryEntryId);
     }
 
     [Fact]
@@ -608,34 +463,7 @@ public sealed class WatchHistoryRecorderTests : IDisposable
         Assert.Empty(_database.PlaybackSessions);
     }
 
-    [Fact]
-    public async Task TheIdempotencyKeyFitsItsColumn()
-    {
-        // A 200-character session key plus two ids and the longest operation name overruns 256, and
-        // silent truncation would let two different changes collide and the second be swallowed.
-        Connect();
-
-        await WatchToCompletionAsync(new string('s', 200));
-
-        var queued = await _database.WatchHistoryOutboxEvents.AsNoTracking().SingleAsync();
-        Assert.True(queued.IdempotencyKey.Length <= 256, $"key was {queued.IdempotencyKey.Length} characters");
-    }
-
     // ---- Idempotency ----
-
-    [Fact]
-    public async Task RepeatingTheSameChangeDoesNotQueueTwice()
-    {
-        // Trakt does not deduplicate by item and timestamp, so a duplicate enqueue would show up as a
-        // second viewing on the user's profile.
-        Connect();
-
-        await Service().SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
-        var afterFirst = await _database.WatchHistoryOutboxEvents.CountAsync();
-        await Service().SetPlayedAsync(_userId, _moviePublicId, played: true, playedAt: null, CancellationToken.None);
-
-        Assert.Equal(afterFirst, await _database.WatchHistoryOutboxEvents.CountAsync());
-    }
 
     public void Dispose()
     {

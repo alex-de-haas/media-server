@@ -16,8 +16,7 @@ public sealed class UserDataService(
     MediaServerDbContext database,
     TimeProvider time,
     WatchHistoryRecorder? watchHistory = null,
-    ILogger<UserDataService>? logger = null,
-    FavoritesRecorder? favorites = null)
+    ILogger<UserDataService>? logger = null)
 {
     /// <summary>Crossing this fraction of the runtime marks the item watched and clears its resume point.</summary>
     internal const double WatchedThreshold = 0.90;
@@ -153,8 +152,7 @@ public sealed class UserDataService(
             MarkWatched(row, now, counts);
             if (counts)
             {
-                // Staged, not saved: the row change, the history entry and the outbound intent commit
-                // together in the SaveChangesAsync below, so a crash cannot separate them.
+                // The row change and history entry commit together in SaveChangesAsync below.
                 // The gate's key, not the raw one: it trims and rejects overlong values, and history
                 // keyed on a value the gate refused would sit outside the uniqueness the gate relies
                 // on. A session the gate declined leaves this null, which is correct — that report
@@ -343,8 +341,7 @@ public sealed class UserDataService(
         var row = await GetOrCreateRowAsync(appUserId, item.Id, cancellationToken);
         ApplyLoggedWatch(row, watchedAt, now);
 
-        // Staged before the save, like every other history write: the aggregates, the entry and the
-        // outbound intent commit together or not at all.
+        // Stage the history entry before saving, so it commits together with its aggregates.
         if (watchHistory is not null)
         {
             await watchHistory.StageLoggedWatchAsync(appUserId, item, row, watchedAt, cancellationToken);
@@ -373,16 +370,7 @@ public sealed class UserDataService(
         }
 
         var row = await GetOrCreateRowAsync(appUserId, item.Id, cancellationToken);
-        var changed = row.IsFavorite != favorite;
         row.IsFavorite = favorite;
-
-        // Only a real transition travels to a connected provider, and only from this explicit action:
-        // re-clicking a favorite is not a new statement, and a row that merely vanishes is not one at
-        // all. Staged before the save so the flag and its outbound event commit together.
-        if (changed && favorites is not null)
-        {
-            await favorites.StageAsync(appUserId, item, favorite, cancellationToken);
-        }
 
         await database.SaveChangesAsync(cancellationToken);
         return await LoadOneAsync(appUserId, item, cancellationToken);
@@ -396,10 +384,6 @@ public sealed class UserDataService(
     /// collapses an episode play into its series, so "more like episode 4" is not a question anything
     /// downstream can ask — and a season is not a work either. Rejecting those is the honest answer;
     /// storing them would create rows nothing reads.
-    /// <para>
-    /// Unlike a favorite this stages nothing outbound: a rating is a local judgement, and no connected
-    /// provider is told about it.
-    /// </para>
     /// </remarks>
     public async Task<SetRatingResult> SetRatingAsync(
         int appUserId, Guid mediaItemId, int? rating, CancellationToken cancellationToken)
@@ -481,8 +465,7 @@ public sealed class UserDataService(
             return;
         }
 
-        // The rows above are the leaves a folder mark fanned out to, so each one gets its own history
-        // and outbound intent — providers know episodes, not seasons. Staged here and committed by the
+        // Each episode affected by a folder mark gets its own local history, committed by the
         // caller's SaveChangesAsync along with the state change.
         var items = await database.MediaItems
             .Where(entry => itemIds.Contains(entry.Id))

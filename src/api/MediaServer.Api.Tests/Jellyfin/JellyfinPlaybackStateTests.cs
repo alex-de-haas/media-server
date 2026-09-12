@@ -614,7 +614,7 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
         Assert.Equal(1, row.PlayCount);
     }
 
-    // ---- Phase 0 playback diagnostics (docs/planning/trakt-watched-state-sync.md) ----
+    // ---- Playback diagnostics ----
 
     [Fact]
     public async Task PlaybackDiagnostics_AreOffByDefault_AndRecordNothing()
@@ -699,7 +699,7 @@ public sealed class JellyfinPlaybackStateTests : IDisposable
             Assert.True(records[0].GetProperty("playedAfter").GetBoolean());
             Assert.Equal(1, records[0].GetProperty("playCountAfter").GetInt32());
 
-            // The unmark leaves PlayCount at 1 — the Played=false/PlayCount>0 residue the Trakt plan
+            // The unmark leaves PlayCount at 1 — the Played=false/PlayCount>0 state the playback diagnostics
             // must not export. Seeing it in the trace is the point of the exercise.
             Assert.Equal("PlayedItemsDelete", records[1].GetProperty("route").GetString());
             Assert.True(records[1].GetProperty("playedBefore").GetBoolean());

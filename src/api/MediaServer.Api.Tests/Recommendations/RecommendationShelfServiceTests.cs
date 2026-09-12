@@ -308,7 +308,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
     public async Task AnEmptyShelfIsNotRebuiltOnEveryRead()
     {
         // An empty result is still an answer. Without a recorded generation every /UserViews would
-        // rebuild from scratch — for a Trakt-backed user, an upstream call per library refresh.
+        // rebuild from scratch, including upstream calls on every library refresh.
         Suggest("99999");
 
         Assert.Empty(await Shelf().GetAsync(_userId, limit: null, CancellationToken.None));

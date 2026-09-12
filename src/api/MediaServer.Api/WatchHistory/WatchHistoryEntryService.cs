@@ -48,8 +48,7 @@ public sealed class WatchHistoryEntryService(
         var previous = entry.WatchedAt;
         if (previous == watchedAt)
         {
-            // Already the instant it carries. Writing it again would be harmless locally but would ask
-            // the provider to retire and re-state the play for a correction nobody made.
+            // Already the instant it carries; no state changed.
             return SetWatchedAtStatus.Updated;
         }
 
@@ -60,17 +59,6 @@ public sealed class WatchHistoryEntryService(
         if (row is not null)
         {
             row.LastWatchedAt = await LatestWatchAsync(appUserId, entry, previous, row.LastWatchedAt, watchedAt, cancellationToken);
-        }
-
-        // The provider is told when there is one and the correction can be stated cleanly — the
-        // recorder decides that, because whether the stale remote claim can be retired is what makes
-        // the difference between correcting a play there and duplicating it. Staged before the save so
-        // the stamped entry and whatever outbound intent it produces commit together.
-        var item = await database.MediaItems.FirstOrDefaultAsync(
-            media => media.Id == entry.MediaItemId, cancellationToken);
-        if (item is not null)
-        {
-            await recorder.StageWatchedAtChangedAsync(appUserId, item, row, entry, previous, watchedAt, cancellationToken);
         }
 
         await database.SaveChangesAsync(cancellationToken);
@@ -134,22 +122,17 @@ public sealed class WatchHistoryEntryService(
 
         if (item is null)
         {
-            // The cascade normally makes this impossible. If it happens anyway there is no identity to
-            // describe to a provider and no aggregate row worth reprojecting, so drop the orphan and
-            // report success — the user asked for the entry to be gone, and it is.
+            // The cascade normally prevents orphaned entries. Remove one if found anyway.
             database.PlaybackHistoryEntries.Remove(entry);
             await database.SaveChangesAsync(cancellationToken);
             return true;
         }
 
-        // Tracked, not a bulk update: SaveChanges is what bumps StateRevision, which the Jellyfin delta
-        // sync and the watch-history sync's staleness check both read.
+        // SaveChanges bumps StateRevision for the Jellyfin delta sync.
         var data = await database.UserItemData.FirstOrDefaultAsync(
             row => row.AppUserId == appUserId && row.MediaItemId == entry.MediaItemId, cancellationToken);
 
-        // Staged, then committed here in one transaction: the deletion, the reprojected aggregates and
-        // the outbound removal have to land together, or a crash between them leaves the app believing
-        // it removed something remotely that it never queued.
+        // Commit the deletion and reprojected aggregates together.
         await recorder.StageEntryDeletionAsync(appUserId, item, data, entry, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
 

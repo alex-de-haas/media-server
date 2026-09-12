@@ -63,8 +63,7 @@ public sealed class LibraryDeleteServiceTests : IDisposable
     public async Task A_watched_episode_survives_deletion_with_its_user_data_and_history()
     {
         // The ingest keeps its file row (a rescan can re-adopt it); the per-user state and the plays
-        // stay on the tombstone, and the outbox row keeps its frozen identity as before. Transient
-        // playback sessions are dropped — a ghost cannot be played.
+        // stay on the tombstone. Transient playback sessions are dropped — a ghost cannot be played.
         await using (var seed = _db.Create())
         {
             seed.PlaybackSessions.Add(new PlaybackSession
@@ -83,7 +82,6 @@ public sealed class LibraryDeleteServiceTests : IDisposable
         Assert.Null(sourceFile.MediaItemId);
         Assert.True(await verify.UserItemData.AnyAsync(data => data.MediaItemId == _episode1Id));
         Assert.True(await verify.PlaybackHistoryEntries.AnyAsync(entry => entry.MediaItemId == _episode1Id));
-        Assert.True(await verify.WatchHistoryOutboxEvents.AnyAsync(item => item.MediaItemId == _episode1Id));
         Assert.False(await verify.PlaybackSessions.AnyAsync(session => session.MediaItemId == _episode1Id));
     }
 
@@ -96,9 +94,8 @@ public sealed class LibraryDeleteServiceTests : IDisposable
         await using var verify = _db.Create();
         Assert.False(await verify.MediaItems.AnyAsync(item => item.Id == _episode1Id));
         Assert.False(await verify.UserItemData.AnyAsync(data => data.MediaItemId == _episode1Id));
-        // History follows the item by DB cascade; the outbox row has no FK and keeps its frozen identity.
+        // History follows the item by DB cascade.
         Assert.False(await verify.PlaybackHistoryEntries.AnyAsync(entry => entry.MediaItemId == _episode1Id));
-        Assert.True(await verify.WatchHistoryOutboxEvents.AnyAsync(item => item.MediaItemId == _episode1Id));
     }
 
     [Fact]
@@ -504,27 +501,18 @@ public sealed class LibraryDeleteServiceTests : IDisposable
         };
         context.IngestItems.Add(ingest);
 
-        // An outbox event needs its owning connection to exist (FK), and the user id needs to be real
-        // before the dependent rows reference it.
+        // Save the user before the dependent rows reference its generated id.
         context.SaveChanges();
         _userId = user.Id;
-        var connection = new WatchHistoryProviderConnection
-        {
-            Id = Guid.NewGuid(), AppUserId = user.Id, ProviderKey = "trakt",
-            Status = WatchHistoryConnectionStatus.Connected, ConnectedAt = now,
-            SecretKey = "trakt.connection.x.tokens",
-        };
-        context.WatchHistoryConnections.Add(connection);
-
-        _episode1Id = SeedEpisode(context, catalog, series, season, 1, ingest, connection, user.Id, now);
-        _episode2Id = SeedEpisode(context, catalog, series, season, 2, ingest: null, connection: null, user.Id, now);
+        _episode1Id = SeedEpisode(context, catalog, series, season, 1, ingest, user.Id, now);
+        _episode2Id = SeedEpisode(context, catalog, series, season, 2, ingest: null, user.Id, now);
 
         context.SaveChanges();
     }
 
     private Guid SeedEpisode(
         MediaServerDbContext context, Catalog catalog, MediaItem series, MediaItem season, int number,
-        IngestItem? ingest, WatchHistoryProviderConnection? connection, int userId, DateTimeOffset now)
+        IngestItem? ingest, int userId, DateTimeOffset now)
     {
         var relativePath = $"Breaking Bad/Season 1/S01E0{number}.mkv";
         var absolutePath = AbsolutePath(relativePath);
@@ -561,13 +549,6 @@ public sealed class LibraryDeleteServiceTests : IDisposable
             {
                 Id = Guid.NewGuid(), AppUserId = userId, MediaItemId = episode.Id, CreatedAt = now,
                 WatchedAt = now, Origin = PlaybackHistoryOrigin.LocalPlayback, PlaySessionId = "session-1",
-            });
-            context.WatchHistoryOutboxEvents.Add(new WatchHistoryOutboxEvent
-            {
-                Id = Guid.NewGuid(), ConnectionId = connection!.Id, AppUserId = userId,
-                MediaItemId = episode.Id, Operation = WatchHistoryOutboxOperation.AddExactWatch,
-                IdentitySnapshot = "{}", IdempotencyKey = $"key-{number}", CreatedAt = now,
-                NextAttemptAt = now,
             });
         }
 

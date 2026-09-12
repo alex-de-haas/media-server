@@ -14,7 +14,6 @@ using MediaServer.Api.Native;
 using MediaServer.Api.Native.Playback;
 using MediaServer.Api.Recommendations;
 using MediaServer.Api.WatchHistory;
-using MediaServer.Api.WatchHistory.Trakt;
 using MediaServer.Api.Jobs;
 using MediaServer.Api.Library;
 using MediaServer.Api.Sidecars;
@@ -86,7 +85,7 @@ builder.Services.AddScoped<NativePreferenceService>();
 builder.Services.AddScoped<NativeSessionService>();
 builder.Services.AddHostedService<ChangeLogPruner>();
 
-// Phase 0 playback observation (docs/planning/trakt-watched-state-sync.md). Off unless the operator
+// Playback observation. Off unless the operator
 // turns it on, and the writer simply does not exist then, so the recorder short-circuits.
 if (settings.PlaybackDiagnosticsEnabled)
 {
@@ -192,35 +191,7 @@ builder.Services.AddScoped<IncrementalMetadataRefreshService>();
 // Scoped: it reads the library and the payload cache through a DbContext.
 builder.Services.AddScoped<TitlePreviewService>();
 
-// Watched-history providers resolve by stable key, like the metadata providers above.
-// Scoped rather than singleton: the adapters it resolves hold a DbContext, and a singleton registry
-// would capture one for the process lifetime.
-builder.Services.AddScoped<IWatchHistoryProviderRegistry, WatchHistoryProviderRegistry>();
-builder.Services.AddSingleton<IWatchHistoryCredentialStore, HostyCoreCredentialStore>();
-builder.Services.AddHttpClient(TraktOAuthClient.HttpClientName, client =>
-{
-    client.BaseAddress = new Uri("https://api.trakt.tv/");
-    client.Timeout = TimeSpan.FromSeconds(15);
-});
-builder.Services.AddScoped<TraktOAuthClient>();
-// Scoped, not singleton: it holds a DbContext. Registered against the interface as well so the
-// registry picks it up without naming the concrete type.
-builder.Services.AddScoped<TraktAuthorizationService>();
-builder.Services.AddScoped<IWatchHistoryProviderAuthorization>(provider =>
-    provider.GetRequiredService<TraktAuthorizationService>());
-builder.Services.AddSingleton<TraktWorkIdCache>();
-builder.Services.AddScoped<TraktWorkIdResolver>();
-builder.Services.AddScoped<IWatchHistoryProvider, TraktWatchHistoryProvider>();
-// Favorites are a separate, optional capability: an adapter that only knows plays stays a complete
-// IWatchHistoryProvider, and the core resolves this interface by provider key when it needs one.
-builder.Services.AddScoped<IWatchHistoryFavoritesProvider, TraktFavoritesProvider>();
-builder.Services.AddScoped<WatchHistoryIdentityMapper>();
 builder.Services.AddScoped<WatchHistoryRecorder>();
-builder.Services.AddScoped<WatchHistoryDeliveryService>();
-builder.Services.AddScoped<WatchHistorySyncPreviewService>();
-builder.Services.AddScoped<WatchHistorySyncApplyService>();
-builder.Services.AddScoped<FavoritesRecorder>();
-builder.Services.AddScoped<FavoritesSyncService>();
 builder.Services.AddScoped<WatchHistoryCalendarService>();
 builder.Services.AddScoped<WatchHistoryEntryService>();
 
@@ -258,11 +229,6 @@ builder.Services.AddScoped<RecommendationShelfService>();
 builder.Services.AddScoped<IRecommendationShelf>(services => services.GetRequiredService<RecommendationShelfService>());
 // Singleton: it collapses concurrent rebuilds, and the thing it guards is shared across requests.
 builder.Services.AddSingleton<RecommendationShelfRefresher>();
-builder.Services.AddHostedService<WatchHistoryDeliveryWorker>();
-// An abandoned device flow is never polled again, so nothing else would remove its row or its stored
-// device code.
-builder.Services.AddScoped<WatchHistoryAuthorizationCleanupService>();
-builder.Services.AddHostedService<WatchHistoryAuthorizationCleanupWorker>();
 builder.Services.AddSingleton<IReleaseScheduleProvider, TmdbReleaseScheduleProvider>();
 
 // Pipeline: stages, supporting services, orchestrator, and the worker + reconciler hosted services.
@@ -428,6 +394,8 @@ builder.Services.AddSingleton<IHostyCoreClient>(provider => provider.GetRequired
 // Same object behind both contracts; the secrets half is separate because its failures must not be
 // folded into null the way the fire-and-forget calls are.
 builder.Services.AddSingleton<IHostyCoreSecrets>(provider => provider.GetRequiredService<HostyCoreClient>());
+builder.Services.AddSingleton<LegacyCredentialCleanup>();
+builder.Services.AddHostedService<LegacyCredentialCleanupWorker>();
 
 // Polls Core's scoped directory (no webhooks): upserts assigned users, revokes Jellyfin access on unassign/disable.
 builder.Services.AddScoped<DirectoryReconcileService>();
