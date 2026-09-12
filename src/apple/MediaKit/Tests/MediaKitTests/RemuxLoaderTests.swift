@@ -339,6 +339,55 @@ struct RemuxLoaderTests {
         #expect(bytes == payload(start: 80, count: 944))
         #expect(fixture.loader.makeSnapshot().restarts == 0)
     }
+
+    @Test("A fill whose connection dropped is resumed from the window's end, a moment later")
+    func refillAfterDrop() async throws {
+        // Kilobytes rather than bytes: the session hands a protocol's data on in batches, and a fill of
+        // a few dozen bytes reaches the loader only once the load ends — which a dropped one never does.
+        let budget = 256 << 10
+        let half = budget / 2
+        let fixture = Fixture(total: 1 << 20, budget: budget)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+
+        // The fill promises the whole window, delivers half of it, and then the connection goes.
+        let fill = try await fixture.network.range(start: 0)
+        fill.answer(total: 1 << 20, start: 0, count: budget, delivering: half, piece: 4 << 10)
+        try await fixture.until { first.finished }
+        try await waitUntil { fixture.loader.makeSnapshot().windowBytes == half }
+        let dropped = ContinuousClock.now
+        fill.drop()
+
+        // Not at once — a server that just dropped a connection is not helped by another one
+        // immediately — and nothing else prompts it: no request arrives in the meantime. The retry
+        // begins where the window ends and asks for exactly the room.
+        let refill = try await fixture.network.range(start: half)
+        #expect(ContinuousClock.now - dropped >= .milliseconds(950))
+        #expect(refill.request.value(forHTTPHeaderField: "Range") == "bytes=\(half)-\(budget - 1)")
+
+        // What arrived is kept, and the window still answers from it while the refill is out ...
+        let kept = Request(offset: 8, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(kept) }
+        try await fixture.until { kept.finished }
+        let keptBytes = await fixture.onQueue { kept.bytes }
+        #expect(keptBytes == payload(start: 8, count: 8))
+        #expect(fixture.loader.makeSnapshot().serverRequests == 2)
+        #expect(fixture.loader.makeSnapshot().asides == 0)
+
+        // ... and goes on from the refill once it lands, with no fetch of its own for either read.
+        refill.answer(total: 1 << 20, start: half, count: half, piece: 4 << 10)
+        let resumed = Request(offset: Int64(half), length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(resumed) }
+        try await fixture.until { resumed.finished }
+        let resumedBytes = await fixture.onQueue { resumed.bytes }
+        #expect(resumedBytes == payload(start: half, count: 8))
+        let details = fixture.loader.makeSnapshot()
+        #expect(details.serverRequests == 2)
+        #expect(details.asides == 0)
+        #expect(details.restarts == 0)
+        #expect(details.outstanding == 0)
+    }
 }
 
 private func payload(start: Int, count: Int) -> Data {
@@ -455,13 +504,29 @@ private final class Stub: URLProtocol, @unchecked Sendable {
             httpVersion: nil, headerFields: ["Content-Length": "\(total)"])!, cacheStoragePolicy: .notAllowed)
         client!.urlProtocolDidFinishLoading(self)
     }
-    func answer(total: Int, start: Int, count: Int) {
+    /// The bytes arrive in pieces of `piece`: eight, as the byte-scale cases read, unless a
+    /// kilobyte-scale case says otherwise — a hundred kilobytes eight bytes at a time is sixteen
+    /// thousand callbacks for nothing the loader can tell apart.
+    func answer(total: Int, start: Int, count: Int, piece: Int = 8) {
+        answer(total: total, start: start, count: count, delivering: count, piece: piece)
+        client!.urlProtocolDidFinishLoading(self)
+    }
+
+    /// The response and the first `delivered` of its `count` bytes, with the connection left open —
+    /// for the test to drop once the loader has taken what came.
+    func answer(total: Int, start: Int, count: Int, delivering delivered: Int, piece: Int = 8) {
         client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 206,
             httpVersion: nil, headerFields: ["Content-Length": "\(count)",
                 "Content-Range": "bytes \(start)-\(start + count - 1)/\(total)"])!, cacheStoragePolicy: .notAllowed)
-        for offset in stride(from: start, to: start + count, by: 8) {
-            client!.urlProtocol(self, didLoad: payload(start: offset, count: min(8, start + count - offset)))
+        for offset in stride(from: start, to: start + delivered, by: piece) {
+            client!.urlProtocol(self, didLoad: payload(start: offset, count: min(piece, start + delivered - offset)))
         }
-        client!.urlProtocolDidFinishLoading(self)
+    }
+
+    /// A server that went away in the middle of a fill. Only once the bytes it sent have reached the
+    /// loader: the session hands a failure on ahead of data it has not delivered yet, so a stub that
+    /// fails at once loses what it promised.
+    func drop() {
+        client!.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
     }
 }

@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-09-06
-Updated: 2026-09-08
+Updated: 2026-09-11
 
 ## Goal
 
@@ -127,8 +127,8 @@ actions where useful. Missing artwork must never block navigation or playback.
 - [Apple client core](../apple-client-core/plan.md) retains ownership of the local
   SQLite mirror, sync reset/tombstones, and remaining core work. This plan changes
   presentation over the current in-memory store and does not depend on the mirror.
-- [Apple client loading](../apple-client-loading/plan.md) retains playback loading
-  and performance work. Coordinate edits to shared views; preserve its diagnostics
+- [Apple client](../apple-client/feature.md) describes the player, its loader and
+  its diagnostics. Coordinate edits to shared views; preserve its diagnostics
   switches and do not change the player/loader to achieve visual effects.
 - [Native client API](../native-client-api/feature.md) supplies authentication,
   OpenAPI, and image-serving conventions. This feature owns its collection route
