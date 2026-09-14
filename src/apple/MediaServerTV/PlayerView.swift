@@ -41,6 +41,7 @@ struct PlayerView: UIViewControllerRepresentable {
     let switchTracks: (String?, String?, Bool) async -> PlayableStream?
 
     let onProgress: (Double) -> Void
+    let onPlaybackEnded: () -> Void
     let onFinished: (Double) -> Void
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
@@ -101,6 +102,7 @@ struct PlayerView: UIViewControllerRepresentable {
         }
 
         context.coordinator.observe(player, onProgress: onProgress)
+        context.coordinator.observeCompletion(player, onEnded: onPlaybackEnded)
         context.coordinator.guardPlayback(player)
         // Only where the choice is ours to make. Direct play serves the file as it stands, so the
         // server reports no tracks and switching would fetch the same complete file again — every row
@@ -198,6 +200,8 @@ struct PlayerView: UIViewControllerRepresentable {
         private(set) var loader: RemuxLoader?
         private var ownLoader = true
         private let guardian = LoaderGuardian()
+        private let completion = PlaybackCompletionObserver()
+        private var finished = false
 
         /// The re-seat in flight, so leaving the film can stop it — the same hazard as a track switch:
         /// a seek that lands after the viewer has gone would start a film nobody is watching.
@@ -227,6 +231,14 @@ struct PlayerView: UIViewControllerRepresentable {
                 // The observer was asked for on the main queue, so this already runs on the main
                 // actor; the hop is the one AVFoundation's block signature cannot state.
                 MainActor.assumeIsolated { self?.onProgress?(seconds) }
+            }
+        }
+
+        func observeCompletion(_ player: AVPlayer, onEnded: @escaping () -> Void) {
+            completion.start(watching: player) { [weak self] in
+                guard let self else { return }
+                self.finish()
+                onEnded()
             }
         }
 
@@ -373,6 +385,11 @@ struct PlayerView: UIViewControllerRepresentable {
         /// The position is read from the player rather than passed in: whichever controller was showing,
         /// this is the one thing that knows where the viewer actually got to.
         func finish() {
+            // Natural completion also dismisses the cover, which calls dismantle afterwards.
+            guard !finished else { return }
+            finished = true
+            completion.stop()
+            onProgress = nil
             guardian.stop()
             loader?.stop()
             loader = nil
