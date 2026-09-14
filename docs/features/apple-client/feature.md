@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-12
+Updated: 2026-09-14
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -203,8 +203,10 @@ When a movie or episode reaches the end of its file, the tvOS player closes and 
 to the title detail screen that opened it. Completion reports the final position and
 refreshes the title's watched state through the same stop path as manual dismissal.
 The player stops its loader, recovery and track-switch tasks before dismissing; teardown
-reports the stop only once. Completion follows the current player item after track
-switches or loader recovery and ignores notifications from replaced or unrelated items.
+reports the stop only once. Releasing the completion observer also removes its
+notification registration, even without an explicit stop. Completion follows the current
+player item after track switches or loader recovery and ignores notifications from
+replaced or unrelated items.
 
 ## Feeding the player
 
@@ -775,7 +777,9 @@ Movie and episode Versions display [indexing progress](../indexing-progress/feat
   reader a little behind the window carried aside while one farther back restarts it a tail
   earlier, a settled reader far ahead and a probe far behind each fetched separately without moving
   the window, a play head of one read keeping the window while a speculative reader settles ahead
-  of it, and a forward seek restarting the window only once the reader it left falls quiet.
+  of it, a forward seek restarting the window only once the reader it left falls quiet, and a fill
+  whose connection dropped resumed from the window's end a moment later rather than at once — what
+  the window held still answering meanwhile, and no separate fetch for either side of the gap.
   A long hardware playback check covers sound continuity, recovery, seeking, and Dolby Vision;
   package tests do not establish those hardware outcomes.
 

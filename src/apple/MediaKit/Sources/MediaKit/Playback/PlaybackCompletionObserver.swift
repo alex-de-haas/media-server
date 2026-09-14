@@ -9,6 +9,10 @@ public final class PlaybackCompletionObserver {
 
     public init() {}
 
+    isolated deinit {
+        stop()
+    }
+
     public func start(watching player: AVPlayer, onEnded: @escaping () -> Void) {
         stop()
         self.onEnded = onEnded
