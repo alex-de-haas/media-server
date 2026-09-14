@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-09-10
+Updated: 2026-09-11
 
 ## Description
 
@@ -146,8 +146,8 @@ nothing.
 
 They write through **`UserDataService`** and nothing else — the same path the
 Jellyfin surface uses. A second writer is how the watched threshold, the resume
-rules, the season and series aggregates, `PlaybackHistoryEntries` and the Trakt
-outbox would start disagreeing depending on which client played the file.
+rules, the season and series aggregates, and `PlaybackHistoryEntries` would
+start disagreeing depending on which client played the file.
 
 The play-session id is **minted by the server**. It is what keeps one viewing from
 counting twice when a viewer rewinds past the watched threshold and watches forward

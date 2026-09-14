@@ -5,7 +5,6 @@ import { useSession } from "@/components/app-shell";
 import { CatalogsSection } from "@/components/catalogs-section";
 import { InfuseAccessSection } from "@/components/infuse-access-section";
 import { ReleaseGroupSettingsSection } from "@/components/release-group-settings-section";
-import { WatchHistorySection } from "@/components/watch-history-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function SettingsTabs() {
@@ -30,7 +29,6 @@ export function SettingsTabs() {
       <TabsContent value="general" className="flex flex-col gap-6">
         <ReleaseGroupSettingsSection />
         <InfuseAccessSection />
-        <WatchHistorySection />
       </TabsContent>
       {isAdmin && <TabsContent value="catalogs"><CatalogsSection /></TabsContent>}
     </Tabs>

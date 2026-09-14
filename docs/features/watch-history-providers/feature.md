@@ -1,231 +1,69 @@
-# Watched-History Providers: Trakt
+# Watch History
 
 Created: 2026-08-05
-Updated: 2026-08-09
-
-> **Development is wound down**, and the integration is inert for any operator
-> without Trakt VIP. Nothing further is being built; the remaining plans were
-> retired rather than parked. The code stays in the repository.
->
-> **Why.** A self-hosted deployment needs its *operator* to register their own
-> Trakt OAuth application — that is where `TRAKT_CLIENT_ID` and
-> `TRAKT_CLIENT_SECRET` come from. Observed on the operator's account on
-> 2026-08-05: Settings → Apps → **API Applications** now says *"Creating new
-> apps requires Trakt VIP"*, and the application registered there on 2026-07-24
-> is **gone**. Sync had stopped working days earlier, which is what a revoked
-> client id looks like from this side. Community reports describe the same
-> disappearance for other developers; Trakt's own API documentation has not been
-> updated to state the requirement.
->
-> This is the **developer-registration** limit, and it is not the same rule as
-> the Community-App **connection** limit that Trakt announced on 2026-07-22
-> (free accounts may *connect* one community app; VIP is needed for a second).
-> That announcement is about authorizing an app someone else registered, and
-> re-reading it does not contradict the above — a self-hosted app has no
-> pre-registered application to authorize.
->
-> Consequence: without VIP there is no client id to configure, so this feature
-> cannot start regardless of what the code does. An operator who does hold VIP
-> can register an application and everything below applies unchanged. The
-> `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` setting descriptions say so, so an
-> operator learns it before spending time at Trakt's application page rather
-> than after.
->
-> The **per-play history** below is not affected by any of this. It is
-> provider-neutral, it is what the [watch-history
-> calendar](../watch-history-calendar/feature.md) and
-> [recommendations](../recommendation-providers/feature.md) read, and it keeps
-> being written whether or not any provider is connected.
+Updated: 2026-09-11
 
 ## Per-play history
 
-`PlaybackHistoryEntry` holds one row per known play, scoped to an app user and a
-media item. This is the local source of truth; `UserItemData`'s aggregate
-counters are projected from it.
+`PlaybackHistoryEntry` is the local source of truth for a user's known plays.
+Each entry belongs to one app user and media item. `UserItemData` carries the
+aggregate watched flag, play count, last-watched time, favorite, rating, and
+resume position used by the library and clients.
 
-- `WatchedAt` is an exact instant for observed or imported plays, and **null**
-  for a timeless "watched, time unknown" mark — all a manual toggle or a
-  pre-migration aggregate row can honestly claim.
-- `Origin` records where it came from: `LocalPlayback`, `Manual`,
-  `ProviderSync`, or `Legacy`. `Manual` means "the user said so", not "timeless":
-  the toggle's entry has no time, while one the user logged by hand carries the
-  instant they named
-  ([watch-history-manual-entries](../watch-history-manual-entries/feature.md)).
-  Nothing keys on the origin alone — the queries that read it pair it with a null
-  `WatchedAt`, so a logged play is invisible to the toggle's bookkeeping.
-- `IdentitySnapshot` freezes the provider-neutral identity as it was when the
-  play happened, so outbound delivery can still describe an item that has since
-  been rescanned, re-identified, or deleted.
-- `ProviderKey` / `ProviderHistoryId` / `LinkStatus` record the link to a remote
-  entry once one is resolved.
+`WatchedAt` is an exact instant for an observed or explicitly dated viewing, and
+null for a timeless "watched, time unknown" mark. `Origin` preserves whether the
+entry came from observed playback, a manual action, an import, or legacy
+aggregate reconstruction. Imported entries remain ordinary local history.
 
-**One session yields one play.** `PlaybackSession`, keyed on the client's
-`PlaySessionId`, gates completion: crossing the 90% threshold counts once, and
-rewinding below it and crossing again does not count a second. This was a real
-bug found by observation rather than by reasoning — one continuous session took
-an episode from 0 to 3 plays — and the session gate is what fixes it. A client
-that sends no session id falls back to the aggregate flag and can still inflate;
-Infuse sends one on every report.
+The [calendar](../watch-history-calendar/feature.md) and
+[recommendations](../recommendation-providers/feature.md) read local history.
+Recording and editing a play requires no external account or metadata match.
 
-Genuine rewatches are kept as separate entries. At most one timeless entry
-exists per user and item, because "watched, time unknown" says nothing more the
-second time.
+## Recording and editing
 
-An entry is removed on the user's say-so by
-[watch-history-deletion](../watch-history-deletion/feature.md), which reprojects
-the aggregates and queues the remote removal under the ownership rule below. The
-unwatch toggle is a different statement and drops only the timeless marks this app
-created — a play the user logged by hand survives it exactly as an observed play
-does. An entry is added on the user's say-so by
-[watch-history-manual-entries](../watch-history-manual-entries/feature.md), which
-posts it as an exact watch keyed on the entry rather than on the row; giving an
-undated mark a time retires the owned timeless mark and re-states it as that exact
-play, so a later sync cannot import the undated one back.
+`WatchHistoryRecorder` stages entries in the same database transaction as the
+corresponding aggregate changes. Native and Jellyfin playback share
+`UserDataService`, so both apply the same rules.
 
-## Provider boundary
+- A playback session crossing 90% of the runtime records one exact play. A rewind
+  below the threshold followed by another crossing in that session does not
+  record another. A distinct session can record a rewatch. A client without a
+  session id falls back to the aggregate watched flag.
+- A manual watched toggle creates one timeless mark only when no history exists.
+  Repeating the toggle does not manufacture additional entries.
+- Unwatching removes local manual or legacy timeless marks. It preserves dated
+  plays, imported history, and the existing play count.
+- [Logging a watch](../watch-history-manual-entries/feature.md) creates a dated
+  manual entry. Separate logs remain separate plays, even at the same instant.
+- Correcting an entry's time updates the existing entry and its last-watched
+  projection without changing the play count.
+- [Deleting an entry](../watch-history-deletion/feature.md) removes that play,
+  reprojects its aggregates, and reopens its recording session's completion gate.
 
-`IWatchHistoryProvider` and `IWatchHistoryProviderAuthorization` are resolved by
-stable key through `WatchHistoryProviderRegistry`, with a capability descriptor
-(`ExactTimestampWrites`, `TimelessWrites`, `FullHistoryReads`,
-`IndividualEntryRemoval`, …) so callers ask what an adapter can do rather than
-naming it. Trakt is the only adapter, and one connection may be active per user.
+Favorites and star ratings are local user state. They feed the library,
+[recommendations](../recommendation-providers/feature.md), and client views.
 
-`WatchHistoryIdentityMapper` turns a local item into that neutral identity.
-Episodes are addressed by their **series** id plus canonical season and episode
-numbers, preferring `IdentitySeasonNumber`/`IdentityEpisodeNumber` over the
-display numbering — a re-mapped release (anime absolute numbering) displays one
-way and is identified another, and writing against the display numbers would
-record viewings for the wrong episodes.
+## API and data boundaries
 
-## Trakt adapter
+The authenticated `/api/watch-history` routes expose the calendar, undated
+entries, timestamp edits, and entry deletion. Every route resolves the caller's
+user identity; another user's entry is indistinguishable from an unknown id.
+Native discovery also exposes the caller's local calendar and undated entries.
 
-- **Device Code OAuth**, per user. Tokens live in the Hosty Core secrets store,
-  never in this app's database — so a database restore cannot resurrect stale
-  credentials, and a backup carries no bearer token. Refresh rotates the refresh
-  token and persists what comes back.
-- A transient failure while refreshing keeps its kind: a Trakt outage must not
-  be reported as `AuthenticationRequired` and send the user to reconnect an
-  account that is still connected.
-- Every request carries a `User-Agent`; without one Cloudflare answers 403.
-- **`/sync/history/{type}/{id}` takes a Trakt id, slug, or IMDb id — never a
-  TMDb id**, which it answers with `200` and an empty array. `TraktWorkIdResolver`
-  prefers an IMDb id when the identity carries one (no lookup needed) and
-  otherwise translates the TMDb id through `/search/tmdb/{id}`, caching the
-  mapping for the process. A lookup that fails travels back as a failure rather
-  than as an empty history: collapsing "I could not ask" into "there is nothing"
-  is what made this bug invisible for weeks.
-- Removal uses the **ids form only**, deleting exactly the entries this app
-  created and recorded. Trakt's media-object removal would take every play of
-  that item with it, including another client's.
-
-## Outbound delivery
-
-Local state changes never wait on Trakt. `UserDataService` writes the aggregate
-row, the history entry, and the outbound intent in one transaction; a worker
-performs the external call later.
-
-`WatchHistoryDeliveryService` leases up to 20 events per 30-second tick, with
-5-minute leases, 8 attempts, and exponential backoff. Failures are classified
-retryable or terminal rather than retried blindly.
-
-Ownership resolution is read-before / write / read-after: Trakt's add response
-returns counts, not ids, so the remote id is found from the difference between
-the two reads. An add whose id cannot be pinned down settles as `Unresolved` and
-is **never** reposted or deleted remotely — guessing there means destroying
-history this app did not create.
-
-Ownership is resolved for the **timeless mark only**. `AddExactWatch` posts the
-play and does not read back the id it created, so an exact play is never owned and
-never removable remotely. Deleting one therefore leaves the remote entry in place,
-and an explicit sync can re-import it. Resolving ownership for exact plays would
-be the fix; it is not scheduled, per the wind-down above.
-
-Removals travel as one of two operations, both landing in the same owned-only
-path: `RemoveOwnedTimelessEntries` from an unwatch, and `RemoveOwnedEntries` from
-a single-entry deletion. They stay distinct because the idempotency key embeds the
-operation name, and reusing one would let an unwatch and a deletion of the same
-item collide.
-
-## Explicit sync
-
-Sync is user-triggered, scoped by catalog and media kind, and always previewed.
-
-- **Preview** is read-only. It classifies each item (`InSync`, `RemoteOnly`,
-  `LocalOnly`, `LocalUnwatchedWithHistory`, `UnidentifiedLocally`,
-  `AmbiguousLocalIdentity`), captures each row's state revision, and expires.
-- **Apply** exports, re-reads, then projects — in that order. Projecting from a
-  snapshot taken before the export would erase the very plays just sent.
-- Apply refuses to run while **any** outbound work is undelivered. Otherwise
-  unmarking an item and syncing before the removal is delivered would reimport
-  the still-present remote mark and silently undo the unwatch.
-- A row that changed since the preview, or that appeared after it, is set aside
-  rather than overwritten. Anything set aside keeps all of its local state: a
-  half-applied item is worse than an unapplied one.
-- A local count of 5 with no recorded times exports as **one** timeless mark;
-  five `unknown` entries would invent four viewings nobody claimed.
-
-## Favorites
-
-The favorite flag syncs through the same connection and is documented separately
-in [Trakt favorites sync](../trakt-favorites-sync/feature.md).
-
-## Settings surface
-
-A **Watch history providers** card sits near Infuse Access: connection status
-and account name, the Device OAuth code and verification URL, Connect /
-Reconnect / Disconnect, `Last sync` beside `Last delivery` (a background
-delivery can land without a sync ever running), and the Sync dialog with its
-scope, counts, and set-aside reasons.
-
-No response carries an access token, refresh token, device code, or
-secrets-store key; a test pins that.
-
-Disconnecting revokes the token best-effort, deletes the stored credential, and
-**never touches local playback state** — disconnecting a provider is not
-forgetting what you watched.
-
-## Not built
-
-These were on the plan and are not being built:
-
-- **Grouped season/series delivery.** Each outbox event resolves one identity,
-  so marking a season performs one read/mutation pair per episode.
-  `GetHistoryAsync` already accepts an identity list, so grouping would be
-  additive.
-- **Directory reconciliation and structured telemetry** for the delivery worker.
-
-## Not verified
-
-Honest gaps, and now unclosable without a VIP account:
-
-- **The removal path has never been confirmed end to end against a live
-  account.** The id bug above meant no remote id was ever captured, so every
-  unwatch completed having correctly removed nothing; the fix is covered by
-  tests and its request shape was verified by hand against the live API, but the
-  full watch → unwatch cycle was never re-run afterwards.
-- Entries recorded before that fix remain `Unresolved` by design and will not
-  resolve retroactively.
-- Rate-limit and long-history pagination behavior is covered by tests against a
-  stub, not by a live run.
+The database keeps the session uniqueness constraint and user/date indexes used
+by history queries. Permanent item deletion cascades to its history; library
+removal can retain a tombstone while user history still refers to it.
 
 ## Testing Expectations
 
-- `WatchHistoryRecorderTests`, `UserDataService` playback tests — the session
-  gate, one-completion-per-session, timeless-vs-exact origins, and the
-  benign concurrent-report race.
-- `WatchHistoryIdentityMapperTests` — canonical over display numbering, series
-  expansion, unresolvable identities reported rather than guessed.
-- `TraktOAuthClientTests`, `TraktAuthorizationServiceTests` — device flow,
-  token persistence before the account lookup, transient-vs-permanent refresh
-  failures, poll-gate backoff.
-- `TraktWatchHistoryProviderTests`, `TraktWorkIdResolverTests` — the id the
-  per-work paths accept, IMDb preferred over a lookup, a failed lookup reported
-  as a failure rather than an empty history, pagination, owned-only removal.
-- `WatchHistoryDeliveryServiceTests` — leases, backoff, ownership resolution,
-  crash-idempotency, and never reposting an unresolved add.
-- `WatchHistorySyncPreviewServiceTests`, `WatchHistorySyncApplyServiceTests` —
-  classification, export-then-project ordering, blocking on undelivered work,
-  set-aside rows keeping their local state, and failed exports not being
-  projected over.
-- `WatchHistoryEndpointMappingTests` — failure-to-status mapping and that no
-  response carries credential material.
+- `WatchHistoryRecorderTests` and playback service tests cover session gating,
+  rewatches, timeless marks, manual logs, unidentified items, season expansion,
+  resume state, and unwatch behavior.
+- `WatchHistoryEntryServiceTests` cover timestamp corrections, user isolation,
+  deletion/reprojection, reopening the correct session, and tombstone cleanup.
+- `WatchHistorySchemaTests` cover session uniqueness, distinct plays at the same
+  instant, aggregate revisions, and item-deletion cascades.
+- `LocalWatchHistoryMigrationTests` cover preservation of local and imported
+  history, favorites, ratings, aggregates, and sessions during schema upgrades.
+- `WatchHistoryCalendarServiceTests` and `WatchHistoryEndpointMappingTests`
+  cover calendar projection and local mutation response semantics.

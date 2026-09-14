@@ -116,6 +116,7 @@ struct TitleView: View {
                     Task { await playback.report(
                         itemId: itemID, playSessionId: session, positionSeconds: position) }
                 },
+                onPlaybackEnded: { playing = nil },
                 onFinished: { position in
                     let ended = session
                     session = nil

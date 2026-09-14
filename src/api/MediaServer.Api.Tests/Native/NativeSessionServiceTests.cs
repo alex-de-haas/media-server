@@ -66,11 +66,7 @@ public sealed class NativeSessionServiceTests : IDisposable
     private UserDataService UserData() => new(
         _context,
         TimeProvider.System,
-        new WatchHistoryRecorder(
-            _context,
-            new WatchHistoryIdentityMapper(_context),
-            TimeProvider.System,
-            NullLogger<WatchHistoryRecorder>.Instance));
+        new WatchHistoryRecorder(_context, TimeProvider.System));
 
     private NativeSessionService Service() => new(_context, UserData());
 

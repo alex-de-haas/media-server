@@ -1,7 +1,7 @@
 # Watch-History Manual Entries
 
 Created: 2026-08-09
-Updated: 2026-08-21
+Updated: 2026-09-11
 
 ## Description
 
@@ -124,7 +124,7 @@ date** and appears in the grid on that day; a corrected play leaves the day it
 was on and appears on the new one.
 
 Re-confirming the instant a play already carries changes nothing at all, and in
-particular queues the provider no work: nobody made a correction.
+particular leaves the entry and its aggregates unchanged.
 
 ### What `LastWatchedAt` becomes
 
@@ -142,64 +142,6 @@ play.
 `PlayCount`, `Played` and `LastPlayedDate` are untouched, as they are by a
 deletion: when a viewing happened is not a claim about whether it happened, nor
 about the item's ordering.
-
-## What the provider is told
-
-A logged play stages `AddExactWatch` — the same operation an observed completion
-uses — keyed on the **entry id**. A row-derived key would collide, because a
-second log changes no state on the row and the second event would be swallowed as
-a duplicate.
-
-Setting or changing a time queues **two** events: `RemoveOwnedEntries` for the
-remote entry as it stands, and `AddExactWatch` for the play it has become. The
-claim the provider holds — "watched, time unknown", or "watched at the old T" — is
-no longer the claim being made, and adding without removing would leave the
-account with the same viewing twice, after which the next explicit sync would
-import the stale one straight back into the list the user just corrected. The two
-are independent (a removal is addressed by remote id, an add by identity and
-instant), so their delivery order does not matter. The local entry's link is
-cleared with them: after the removal there is no remote entry left for it to name.
-
-Both are keyed on the entry **and the instant it moved to**, so a second
-correction is not hashed to the first and swallowed as a duplicate.
-
-### A correction is exported only when it can be stated cleanly
-
-Retiring the stale claim is a precondition, not a bonus. Only timeless marks ever
-have their remote id resolved — an exact add records no id it could later address
-— so a play that already had a time usually has a remote copy this app can
-neither remove nor recall. Adding the corrected time regardless would put a
-second viewing of one film on the user's profile, and the next explicit sync
-would import the stale one back as another local play: a worse outcome than the
-correction never reaching the provider.
-
-So the export is staged only when one of these holds:
-
-- the entry's remote copy is **owned and resolved** — the timeless-mark case, which
-  is retired by the `RemoveOwnedEntries` above; or
-- the only claim outstanding is an `AddExactWatch` this app queued and has
-  **never attempted**, which the provider cannot have seen. That one is deleted
-  and replaced, so correcting a play twice before delivery states just the latest
-  time. An attempt that already ran is off limits: it may have reached the
-  provider before the process died, which is why delivery re-reads history on a
-  retry rather than re-posting.
-
-Otherwise the correction stays local and is logged as such. The local history is
-still right; the provider keeps the old time — the same standing limitation a
-deleted exact play already carries, recorded in
-[watch-history-deletion](../watch-history-deletion/feature.md).
-
-Only a mark this app **owns** is retired. An `Unresolved` link is left alone, as
-everywhere else — the add committed but its id was never pinned down, and removing
-on a guess destroys history this app did not create. The remote timeless mark then
-survives and a later sync can re-import it, which is the standing `Unresolved`
-limitation rather than a new one.
-
-As with every exact play, ownership of the remote entry is not resolved, so
-deleting a logged play later does not remove it remotely — the limitation
-recorded in [watch-history-deletion](../watch-history-deletion/feature.md), and
-moot while the provider is wound down
-([watch-history-providers](../watch-history-providers/feature.md)).
 
 ## API
 
@@ -233,31 +175,15 @@ plays at once, and any bulk backfill.
 
 ## Testing Expectations
 
-- `WatchHistoryRecorderTests` covers logging: one dated `Manual` entry with no
-  session; two logs recording two plays and queueing two `AddExactWatch` events
-  rather than colliding on one idempotency key; the never-backwards rule in both
-  directions; the watched flag changing once however many plays are logged; a
-  backdated log keeping the resume point while a current one clears it; a folder,
-  an unknown item and a future instant refused; a clock-skewed "now" accepted; an
-  unidentifiable item still recording its play without queueing undeliverable
-  work; and an unwatch leaving a logged play alone.
-- `WatchHistoryEntryServiceTests` covers dating: an undated mark taking its
-  instant with the play count unmoved; the row learning the time, forwards only;
-  an unknown or another user's entry refused and unchanged; a future instant
-  refused; an owned mark retired remotely and re-stated as an exact play with its
-  local link cleared; an `Unresolved` one only re-stated; and nothing queued at all
-  without a connection.
-- The same tests cover correcting a dated play: the entry moving with the play
-  count unmoved; the row following the play it was pointing at, backwards
-  included, and handing the title to a sibling when one is now the latest; an
-  older play's correction leaving the latest watch alone; the instant a play
-  already carries queueing nothing; an owned play retired and re-stated at its new
-  time; and a future instant refused.
-- And what the provider is told about one: a play whose remote copy cannot be
-  retired queueing nothing while the local move still happens; an untried queued
-  add replaced by the corrected one; an already-attempted add left alone; and two
-  corrections before delivery stating only the latest time while the timeless
-  mark's removal still stands.
+- `WatchHistoryRecorderTests` cover dated manual entries without a session,
+  separate rewatches, forward-only aggregate updates, stable watched flags,
+  resume behavior, invalid/future inputs, unidentified items, and keeping logged
+  plays when the user unwatches an item.
+- `WatchHistoryEntryServiceTests` cover dating marks without changing play count,
+  user isolation, future-time rejection, and corrections to dated plays. When the
+  aggregate points at the corrected play, it follows that play or the next latest
+  sibling; otherwise an older correction leaves the latest watch alone.
+- Reapplying the same instant leaves the entry and aggregates unchanged.
 - `WatchHistoryEndpointMappingTests` covers both routes' status mapping,
   including that an unknown and a foreign entry are indistinguishable.
 - `watch-time.test.ts` covers the conversion: a local ⇄ UTC round trip on both

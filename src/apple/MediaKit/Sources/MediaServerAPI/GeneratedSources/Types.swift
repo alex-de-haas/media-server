@@ -1942,7 +1942,7 @@ public enum Components {
             /// - Remark: Generated from `#/components/schemas/NativeServerCapabilities/recommendations`.
             public var recommendations: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/NativeServerCapabilities/trakt`.
-            public var trakt: Swift.Bool
+            public var trakt: Swift.Bool?
             /// Creates a new `NativeServerCapabilities`.
             ///
             /// - Parameters:
@@ -1954,7 +1954,7 @@ public enum Components {
                 transcodeEngine: Swift.Bool,
                 packaging: Swift.Bool,
                 recommendations: Swift.Bool,
-                trakt: Swift.Bool
+                trakt: Swift.Bool? = nil
             ) {
                 self.transcodeEngine = transcodeEngine
                 self.packaging = packaging

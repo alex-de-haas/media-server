@@ -657,114 +657,6 @@ export interface JellyfinCredentialSecret {
   serverUrl: string | null;
 }
 
-// Watch-history provider connections (Trakt today), managed by the signed-in user. No response on
-// any of these ever carries a token, refresh token, or device code — only display material.
-export type WatchHistoryConnectionStatus = "Connected" | "RequiresReconnect";
-
-export interface WatchHistoryConnection {
-  providerKey: string;
-  status: WatchHistoryConnectionStatus;
-  accountName: string | null;
-  connectedAt: string;
-  lastDeliveryAt: string | null;
-  lastSyncAt: string | null;
-  lastError: string | null;
-  // Favorites, when the provider carries them. favoritesCount/Capacity describe how full its list is
-  // (Trakt caps every account at 100); favoriteSyncFailures names titles whose push ended terminally —
-  // a full list is the usual reason.
-  supportsFavorites: boolean;
-  favoritesCount: number | null;
-  favoritesCapacity: number | null;
-  favoriteSyncFailures: string[];
-}
-
-// What reconciling favorites would do (or did) to one work.
-export type FavoriteSyncAction =
-  | "AddRemotely"
-  | "AddLocally"
-  | "RemoveRemotely"
-  | "RemoveLocally"
-  | "SkippedNotInLibrary";
-
-export interface FavoritesSyncPlan {
-  entries: { title: string; action: FavoriteSyncAction }[];
-  counts: Partial<Record<FavoriteSyncAction, number>>;
-  remoteCount: number | null;
-  capacity: number | null;
-}
-
-export interface WatchHistoryProvider {
-  key: string;
-  displayName: string;
-  // The operator has supplied this provider's application settings; without it, Connect is unavailable.
-  isConfigured: boolean;
-  supportsExactTimestamps: boolean;
-  connection: WatchHistoryConnection | null;
-}
-
-export type WatchHistoryAuthorizationState =
-  | "Pending"
-  | "Approved"
-  | "Denied"
-  | "Expired"
-  | "SlowDown";
-
-export interface WatchHistoryAuthorization {
-  state: WatchHistoryAuthorizationState;
-  // Safe to display by design: the activation code the user types on the provider's site, and where.
-  userCode: string | null;
-  verificationUrl: string | null;
-  expiresAt: string | null;
-  pollIntervalSeconds: number | null;
-  connection: WatchHistoryConnection | null;
-}
-
-// How one local item compares with the provider. Mirrors the API's classification enum names.
-export type WatchHistorySyncClassification =
-  | "InSync"
-  | "RemoteOnly"
-  | "LocalOnly"
-  | "LocalUnwatchedWithHistory"
-  | "UnidentifiedLocally"
-  | "AmbiguousLocalIdentity";
-
-export interface WatchHistorySyncEntry {
-  mediaItemId: string;
-  title: string;
-  classification: WatchHistorySyncClassification;
-  localPlayCount: number;
-  remotePlayCount: number;
-}
-
-export interface WatchHistorySyncPreview {
-  runId: string;
-  // Keyed by classification name; a key is absent when its tally is zero.
-  counts: Partial<Record<WatchHistorySyncClassification, number>>;
-  sample: WatchHistorySyncEntry[];
-  hasPendingOutboundWork: boolean;
-  hasTerminalOutboundWork: boolean;
-  aggregateCountsMayCollapse: boolean;
-}
-
-// Why an item was left untouched during apply. Mirrors the API's skip-reason enum names.
-export type WatchHistorySyncSkip =
-  | "LocalStateChangedDuringSync"
-  | "AmbiguousLocalIdentity"
-  | "UnidentifiedLocally"
-  | "ExportFailed";
-
-export interface WatchHistorySyncResult {
-  imported: number;
-  exported: number;
-  unchanged: number;
-  skipped: Partial<Record<WatchHistorySyncSkip, number>>;
-}
-
-export interface WatchHistorySyncScope {
-  catalogIds?: string[];
-  kinds?: Array<"Movie" | "Episode">;
-}
-
 /** One completed play on the Watched calendar. Episodes carry their series' title and poster. */
 export interface WatchHistoryCalendarEvent {
   entryId: string;
@@ -1315,8 +1207,6 @@ export const mediaServer = {
     send(`/recommendations/hide?kind=${kind}&tmdbId=${encodeURIComponent(tmdbId)}`, "DELETE"),
   setRecommendationPopularityBias: (popularityBias: number) =>
     send(`/recommendations/popularity-bias`, "PUT", { popularityBias }),
-  listWatchHistoryProviders: () =>
-    apiJson<WatchHistoryProvider[]>(`${BASE}/watch-history/providers`),
   // The range is the visible grid as UTC instants; the server returns raw plays and the browser
   // groups them by its own local days.
   // The kind is applied server-side so the list and the toolbar's count answer the same question,
@@ -1329,43 +1219,7 @@ export const mediaServer = {
     apiJson<WatchHistoryCalendarResponse>(
       `${BASE}/watch-history/calendar?from=${encodeURIComponent(from)}&toExclusive=${encodeURIComponent(toExclusive)}`,
     ),
-  startWatchHistoryAuthorization: (providerKey: string) =>
-    apiJson<WatchHistoryAuthorization>(
-      `${BASE}/watch-history/connections/${providerKey}/authorization/start`,
-      { method: "POST" },
-    ),
-  pollWatchHistoryAuthorization: (providerKey: string) =>
-    apiJson<WatchHistoryAuthorization>(
-      `${BASE}/watch-history/connections/${providerKey}/authorization/poll`,
-      { method: "POST" },
-    ),
-  // Favorites reconcile on their own preview/apply pair: they compare works, not plays.
-  previewFavoritesSync: (providerKey: string) =>
-    apiJson<FavoritesSyncPlan>(`${BASE}/watch-history/connections/${providerKey}/favorites/preview`, { method: "POST" }),
-  applyFavoritesSync: (providerKey: string) =>
-    apiJson<FavoritesSyncPlan>(`${BASE}/watch-history/connections/${providerKey}/favorites/apply`, { method: "POST" }),
-  previewWatchHistorySync: (providerKey: string, scope?: WatchHistorySyncScope) =>
-    apiJson<WatchHistorySyncPreview>(
-      `${BASE}/watch-history/connections/${providerKey}/sync/preview`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(scope ?? {}),
-      },
-    ),
-  applyWatchHistorySync: (providerKey: string, runId: string) =>
-    apiJson<WatchHistorySyncResult>(
-      `${BASE}/watch-history/connections/${providerKey}/sync/apply`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId }),
-      },
-    ),
-  disconnectWatchHistoryProvider: (providerKey: string) =>
-    send(`/watch-history/connections/${providerKey}`, "DELETE"),
-  // Deletes one recorded play. 404 for an id this user doesn't own, so a failed delete can't be read
-  // as proof that someone else's entry exists.
+  // Delete one of the caller's recorded plays; an unknown or foreign entry returns 404.
   deleteWatchHistoryEntry: (entryId: string) =>
     send(`/watch-history/entries/${entryId}`, "DELETE"),
   // Sets when a play happened: a mark that was never timed takes its instant, and one recorded at the
