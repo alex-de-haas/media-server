@@ -33,6 +33,10 @@ struct LibraryView: View {
                 shelf(library.series, heading: "All Series", empty: "No series yet.")
             }
 
+            Tab("Groups", systemImage: "folder") {
+                NavigationStack { GroupsView(session: session, library: library) }
+            }
+
             Tab("Collections", systemImage: "square.stack") {
                 NavigationStack {
                     CollectionsView(session: session, library: library)

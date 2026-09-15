@@ -1082,3 +1082,60 @@ struct EpisodePlaybackIdentityTests {
         #expect(await transport.itemID == "episode-id")
     }
 }
+
+@Suite("Group browsing")
+@MainActor
+struct GroupTests {
+    @Test func distinguishesEmptyUnsupportedAndFailureAndRefreshes() async {
+        let transport = SurfaceStub(["/native/v1/groups": [(404, ""), (503, ""), (200, "[]")]])
+        let groups = GroupStore(session: ServerSession(paired: pairing(), transport: transport))
+        await groups.load()
+        #expect(groups.state == .unsupported)
+        await groups.load()
+        #expect(groups.state == .failed("The server returned HTTP 503."))
+        await groups.load()
+        #expect(groups.state == .loaded)
+        #expect(groups.items.isEmpty)
+    }
+
+    @Test func decodesTypedFoldersAndSeriesPagesUsingBearer() async throws {
+        let transport = SurfaceStub([
+            "/native/v1/groups": [(200, #"[{"id":"retro","name":"Retro TV","kind":"smart","catalogType":"series","itemCount":2}]"#)],
+            "/native/v1/groups/retro": [(200, """
+            {"id":"retro","name":"Retro TV","kind":"smart","catalogType":"series","total":2,"offset":0,"limit":1,"items":[\(title("one", "Series", "First"))]}
+            """), (200, """
+            {"id":"retro","name":"Retro TV","kind":"smart","catalogType":"series","total":2,"offset":1,"limit":1,"items":[\(title("two", "Series", "Second"))]}
+            """)]
+        ])
+        let groups = GroupStore(session: ServerSession(paired: pairing(), transport: transport))
+        await groups.load()
+        #expect(groups.items.first?.typeLabel == "Series")
+        #expect(groups.items.first?.itemCount == 2)
+        let first = try await groups.page(id: "retro")
+        #expect(first.items.map(\.id) == ["one"])
+        #expect(first.hasNext)
+        let next = try await groups.page(id: "retro", offset: 1)
+        #expect(next.items.map(\.id) == ["two"])
+        #expect(!next.hasNext)
+        #expect(transport.tokensSeen == ["Bearer old-token", "Bearer old-token", "Bearer old-token"])
+    }
+
+    @Test func missingGroupIsNotAnEmptyGroup() async {
+        let transport = SurfaceStub([:])
+        let groups = GroupStore(session: ServerSession(paired: pairing(), transport: transport))
+        do { _ = try await groups.page(id: "gone"); Issue.record("Missing group must throw") }
+        catch GroupError.missing {} catch { Issue.record("Wrong error: \(error)") }
+    }
+
+    @Test func doesNotDuplicateConcurrentListLoads() async {
+        let transport = GatedCollectionTransport(firstStatus: 200)
+        let groups = GroupStore(session: ServerSession(paired: pairing(), transport: transport))
+        let first = Task { await groups.load() }
+        await transport.waitForRequest()
+        await groups.load()
+        #expect(await transport.calls == 1)
+        await transport.release()
+        await first.value
+        #expect(groups.state == .loaded)
+    }
+}

@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-14
+Updated: 2026-09-15
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -719,7 +719,7 @@ Xcode project is theirs and `manifest.json` is the server's. A change touching o
 
 ## Native tvOS visual design and collections
 
-The native Apple TV client exposes Home, Movies, Series, Collections, and Settings.
+The native Apple TV client exposes Home, Movies, Series, Groups, Collections, and Settings.
 [Apple TV Home](../apple-tv-home/feature.md) owns resume, next-up, and held recommendations.
 The visual layout and authenticated collection list, detail, and artwork routes
 are described in [Apple client visual design](../apple-client-visual-design/feature.md).
@@ -735,6 +735,14 @@ There is no series-level Play action. See
 ## Indexing progress
 
 Movie and episode Versions display [indexing progress](../indexing-progress/feature.md) before playback. External audio tracks display their own preparation state. A shared MediaKit SSE connection updates progress and reconciles detail on reconnect; the last visible subscriber releases the connection.
+
+## Groups
+
+[Manual and smart groups](../groups/feature.md) are separate from franchises.
+The Groups tab sits between Series and Collections and shows folders, then the
+standard title poster grid. Each group has a fixed Movie, Series, or Anime
+catalog type. Configuration is in web Settings; Apple TV reads the authenticated
+native group list and paged member routes using the generated Swift client.
 
 ## Testing Expectations
 

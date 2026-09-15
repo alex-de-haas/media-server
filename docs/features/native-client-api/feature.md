@@ -1,7 +1,7 @@
 # Native Client API
 
 Created: 2026-08-04
-Updated: 2026-09-11
+Updated: 2026-09-15
 
 ## Description
 
@@ -187,7 +187,7 @@ off the public binding, since a client generator reads it at development time.
 
 ## Native tvOS visual design and collections
 
-The native Apple TV client exposes Movies, Series, Collections, and Settings.
+The native Apple TV client exposes Home, Movies, Series, Groups, Collections, and Settings.
 The visual layout and authenticated collection list, detail, and artwork routes
 are described in [Apple client visual design](../apple-client-visual-design/feature.md).
 Collection reads exclude removed movies from counts, members, and poster fallbacks.
@@ -203,6 +203,14 @@ visibility rules.
 ## Indexing progress
 
 Shared media-source and external audio DTOs carry optional `indexing` snapshots. `/native/v1/events` publishes revisioned `indexingChanged` updates, with detail reconciliation after reconnect. See [Indexing progress](../indexing-progress/feature.md).
+
+## Groups
+
+[Manual and smart groups](../groups/feature.md) are separate from franchises.
+The Groups tab sits between Series and Collections and shows folders, then the
+standard title poster grid. Each group has a fixed Movie, Series, or Anime
+catalog type. Configuration is in web Settings; Apple TV reads the authenticated
+native group list and paged member routes using the generated Swift client.
 
 ## Testing Expectations
 

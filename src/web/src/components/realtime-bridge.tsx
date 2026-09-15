@@ -97,7 +97,7 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
       invalidate(queryClient, ["ingest"]);
       // A published item changes the library, its collections, and the Home rails.
       if ((data as IngestStageEvent).status === "Done") {
-        invalidate(queryClient, ["library"], ["collections"], ["recent"], ["resume"], ["nextup"]);
+        invalidate(queryClient, ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"]);
       }
       break;
     case "vpnStatusChanged":
@@ -175,7 +175,7 @@ function patchLibraryMove(queryClient: QueryClient, event: string, job: JobEvent
   }
 
   if (done) {
-    invalidate(queryClient, ["library"], ["collections"], ["recent"], ["resume"], ["nextup"], ["ingest"]);
+    invalidate(queryClient, ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"], ["ingest"]);
     // relatedId is the resulting top-level item; on a merge it differs from the item the move started on,
     // whose (now deleted) detail page must also learn its fate — refresh both.
     if (job.relatedId) {
@@ -199,7 +199,7 @@ function patchCatalogRefresh(queryClient: QueryClient, event: string, job: JobEv
   });
 
   if (event === "jobCompleted") {
-    invalidate(queryClient, ["library"], ["collections"], ["recent"], ["resume"], ["nextup"]);
+    invalidate(queryClient, ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"]);
   }
 }
 

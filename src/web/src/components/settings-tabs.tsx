@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/components/app-shell";
+import { GroupsSection } from "@/components/groups-section";
 import { CatalogsSection } from "@/components/catalogs-section";
 import { InfuseAccessSection } from "@/components/infuse-access-section";
 import { ReleaseGroupSettingsSection } from "@/components/release-group-settings-section";
@@ -12,12 +13,13 @@ export function SettingsTabs() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = role === "admin";
-  const tab = isAdmin && searchParams.get("tab") === "catalogs" ? "catalogs" : "general";
+  const requested = searchParams.get("tab");
+  const tab = isAdmin && (requested === "catalogs" || requested === "groups") ? requested : "general";
 
   return (
     <Tabs value={tab} onValueChange={(value) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (value === "catalogs") params.set("tab", "catalogs");
+      if (value === "catalogs" || value === "groups") params.set("tab", value);
       else params.delete("tab");
       const query = params.toString();
       router.push(query ? `/settings?${query}` : "/settings", { scroll: false });
@@ -25,12 +27,14 @@ export function SettingsTabs() {
       <TabsList aria-label="Settings sections">
         <TabsTrigger value="general">General</TabsTrigger>
         {isAdmin && <TabsTrigger value="catalogs">Catalogs</TabsTrigger>}
+        {isAdmin && <TabsTrigger value="groups">Groups</TabsTrigger>}
       </TabsList>
       <TabsContent value="general" className="flex flex-col gap-6">
         <ReleaseGroupSettingsSection />
         <InfuseAccessSection />
       </TabsContent>
       {isAdmin && <TabsContent value="catalogs"><CatalogsSection /></TabsContent>}
+      {isAdmin && <TabsContent value="groups"><GroupsSection /></TabsContent>}
     </Tabs>
   );
 }

@@ -1,7 +1,7 @@
 # Apple Client Visual Design and Collections
 
 Created: 2026-09-06
-Updated: 2026-09-08
+Updated: 2026-09-15
 
 Collections reload through the store’s screen-appearance handler whenever the
 collection screen appears. The unsupported-server
@@ -12,7 +12,7 @@ is in flight; subsequent refreshes remain available after success or failure.
 ## Presentation
 
 The tvOS client follows the system light/dark appearance with an adaptive neutral canvas, system typography, and native card
-focus. Its top-level tabs are Home, Movies, Series, Collections, and Settings.
+focus. Its top-level tabs are Home, Movies, Series, Groups, Collections, and Settings.
 
 [Home](../apple-tv-home/feature.md) owns Continue Watching, Next Up, and held
 recommendations. Movies and Series retain complete poster grids. Home refreshes
@@ -112,6 +112,14 @@ appearance; ordinary launches follow the system. Release builds do not include
 this mode. SwiftUI previews cover the
 library's long titles and missing artwork. Remaining integration and device
 acceptance checks are tracked in [the plan](plan.md).
+
+## Groups
+
+[Manual and smart groups](../groups/feature.md) are separate from franchises.
+The Groups tab sits between Series and Collections and shows folders, then the
+standard title poster grid. Each group has a fixed Movie, Series, or Anime
+catalog type. Configuration is in web Settings; Apple TV reads the authenticated
+native group list and paged member routes using the generated Swift client.
 
 ## Testing Expectations
 

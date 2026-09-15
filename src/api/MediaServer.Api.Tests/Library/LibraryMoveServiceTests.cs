@@ -48,6 +48,16 @@ public sealed class LibraryMoveServiceTests : IDisposable
         _coordinator = new LibraryMoveCoordinator(_database, _filesystem, _jobs, _queue);
     }
 
+    private async Task<Guid> AddManualGroupAsync(params Guid[] members)
+    {
+        var group = new MediaGroup { Id = Guid.NewGuid(), Name = "Selected", Kind = "manual", CatalogType = "movie",
+            RulesJson = "{\"version\":1,\"match\":\"all\",\"conditions\":[]}" };
+        _database.Add(group);
+        _database.AddRange(members.Select(id => new MediaGroupMember { MediaGroupId = group.Id, MediaItemId = id }));
+        await _database.SaveChangesAsync();
+        return group.Id;
+    }
+
     [Fact]
     public async Task Move_movie_repoint_changes_catalog_preserves_id_and_dependents()
     {
@@ -55,8 +65,10 @@ public sealed class LibraryMoveServiceTests : IDisposable
         var target = await AddCatalogAsync(_targetRoot, CatalogType.Movie, "Movies 4K");
         var movie = await AddMovieAsync(source, "Inception", 2010, "tmdb", "27205", "bytes");
 
+        var groupId = await AddManualGroupAsync(movie.Id);
         var result = await MoveAsync(movie.Id, target.Id);
 
+        Assert.True(await _database.Set<MediaGroupMember>().AnyAsync(m => m.MediaGroupId == groupId && m.MediaItemId == movie.Id));
         Assert.Equal(MoveResult.Kind.Ok, result.Status);
         Assert.Equal(movie.Id, result.ResultId); // re-point keeps the same row
 
@@ -87,8 +99,12 @@ public sealed class LibraryMoveServiceTests : IDisposable
         var existing = await AddMovieAsync(target, "Inception", 2010, "tmdb", "27205", "existing-4k");
         var incoming = await AddMovieAsync(source, "Inception", 2010, "tmdb", "27205", "incoming-hd");
 
+        var incomingOnly = await AddManualGroupAsync(incoming.Id);
+        var shared = await AddManualGroupAsync(incoming.Id, existing.Id);
         var result = await MoveAsync(incoming.Id, target.Id);
 
+        foreach (var groupId in new[] { incomingOnly, shared })
+            Assert.Equal(existing.Id, (await _database.Set<MediaGroupMember>().SingleAsync(m => m.MediaGroupId == groupId)).MediaItemId);
         Assert.Equal(MoveResult.Kind.Ok, result.Status);
         Assert.Equal(existing.Id, result.ResultId); // merged into the existing target item
 
@@ -142,7 +158,12 @@ public sealed class LibraryMoveServiceTests : IDisposable
         var targetSeries = await AddSeriesAsync(target, "The Show", "tmdb", "500", [(1, 1)]);
         var sourceSeries = await AddSeriesAsync(source, "The Show", "tmdb", "500", [(1, 1), (1, 2)]);
 
+        var groupId = await AddManualGroupAsync(sourceSeries.Id, targetSeries.Id);
+        var group = await _database.Set<MediaGroup>().FindAsync(groupId);
+        group!.CatalogType = "series";
+        await _database.SaveChangesAsync();
         var result = await MoveAsync(sourceSeries.Id, target.Id);
+        Assert.Equal(targetSeries.Id, (await _database.Set<MediaGroupMember>().SingleAsync(m => m.MediaGroupId == groupId)).MediaItemId);
 
         Assert.Equal(MoveResult.Kind.Ok, result.Status);
         Assert.Equal(targetSeries.Id, result.ResultId);
