@@ -71,6 +71,12 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /native/v1/collections/{id}/images/{imageType}`.
     /// - Remark: Generated from `#/paths//native/v1/collections/{id}/images/{imageType}/get(GetNativeCollectionImage)`.
     func getNativeCollectionImage(_ input: Operations.GetNativeCollectionImage.Input) async throws -> Operations.GetNativeCollectionImage.Output
+    /// - Remark: HTTP `GET /native/v1/groups`.
+    /// - Remark: Generated from `#/paths//native/v1/groups/get(ListNativeGroups)`.
+    func listNativeGroups(_ input: Operations.ListNativeGroups.Input) async throws -> Operations.ListNativeGroups.Output
+    /// - Remark: HTTP `GET /native/v1/groups/{id}`.
+    /// - Remark: Generated from `#/paths//native/v1/groups/{id}/get(GetNativeGroup)`.
+    func getNativeGroup(_ input: Operations.GetNativeGroup.Input) async throws -> Operations.GetNativeGroup.Output
     /// - Remark: HTTP `GET /native/v1/home/resume`.
     /// - Remark: Generated from `#/paths//native/v1/home/resume/get(getNativeHomeResume)`.
     func getNativeHomeResume(_ input: Operations.GetNativeHomeResume.Input) async throws -> Operations.GetNativeHomeResume.Output
@@ -292,6 +298,24 @@ extension APIProtocol {
     ) async throws -> Operations.GetNativeCollectionImage.Output {
         try await getNativeCollectionImage(Operations.GetNativeCollectionImage.Input(
             path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /native/v1/groups`.
+    /// - Remark: Generated from `#/paths//native/v1/groups/get(ListNativeGroups)`.
+    public func listNativeGroups(headers: Operations.ListNativeGroups.Input.Headers = .init()) async throws -> Operations.ListNativeGroups.Output {
+        try await listNativeGroups(Operations.ListNativeGroups.Input(headers: headers))
+    }
+    /// - Remark: HTTP `GET /native/v1/groups/{id}`.
+    /// - Remark: Generated from `#/paths//native/v1/groups/{id}/get(GetNativeGroup)`.
+    public func getNativeGroup(
+        path: Operations.GetNativeGroup.Input.Path,
+        query: Operations.GetNativeGroup.Input.Query = .init(),
+        headers: Operations.GetNativeGroup.Input.Headers = .init()
+    ) async throws -> Operations.GetNativeGroup.Output {
+        try await getNativeGroup(Operations.GetNativeGroup.Input(
+            path: path,
+            query: query,
             headers: headers
         ))
     }
@@ -802,6 +826,106 @@ public enum Components {
                 case dolbyVision
                 case sizeBytes
                 case videoFormats
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/GroupDetailDto`.
+        public struct GroupDetailDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/GroupDetailDto/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GroupDetailDto/name`.
+            public var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GroupDetailDto/kind`.
+            public var kind: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GroupDetailDto/catalogType`.
+            public var catalogType: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GroupDetailDto/items`.
+            public var items: [Components.Schemas.LibraryItemDto]
+            /// - Remark: Generated from `#/components/schemas/GroupDetailDto/total`.
+            public var total: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/GroupDetailDto/limit`.
+            public var limit: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/GroupDetailDto/offset`.
+            public var offset: Swift.Int32
+            /// Creates a new `GroupDetailDto`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - name:
+            ///   - kind:
+            ///   - catalogType:
+            ///   - items:
+            ///   - total:
+            ///   - limit:
+            ///   - offset:
+            public init(
+                id: Swift.String,
+                name: Swift.String,
+                kind: Swift.String,
+                catalogType: Swift.String,
+                items: [Components.Schemas.LibraryItemDto],
+                total: Swift.Int32,
+                limit: Swift.Int32,
+                offset: Swift.Int32
+            ) {
+                self.id = id
+                self.name = name
+                self.kind = kind
+                self.catalogType = catalogType
+                self.items = items
+                self.total = total
+                self.limit = limit
+                self.offset = offset
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case kind
+                case catalogType
+                case items
+                case total
+                case limit
+                case offset
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/GroupSummaryDto`.
+        public struct GroupSummaryDto: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/GroupSummaryDto/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GroupSummaryDto/name`.
+            public var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GroupSummaryDto/kind`.
+            public var kind: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GroupSummaryDto/catalogType`.
+            public var catalogType: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GroupSummaryDto/itemCount`.
+            public var itemCount: Swift.Int32
+            /// Creates a new `GroupSummaryDto`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - name:
+            ///   - kind:
+            ///   - catalogType:
+            ///   - itemCount:
+            public init(
+                id: Swift.String,
+                name: Swift.String,
+                kind: Swift.String,
+                catalogType: Swift.String,
+                itemCount: Swift.Int32
+            ) {
+                self.id = id
+                self.name = name
+                self.kind = kind
+                self.catalogType = catalogType
+                self.itemCount = itemCount
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case kind
+                case catalogType
+                case itemCount
             }
         }
         /// - Remark: Generated from `#/components/schemas/IndexingStatus`.
@@ -5835,6 +5959,298 @@ public enum Operations {
                     .png,
                     .imageWebp,
                     .imageGif
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `GET /native/v1/groups`.
+    /// - Remark: Generated from `#/paths//native/v1/groups/get(ListNativeGroups)`.
+    public enum ListNativeGroups {
+        public static let id: Swift.String = "ListNativeGroups"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/native/v1/groups/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListNativeGroups.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListNativeGroups.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.ListNativeGroups.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            public init(headers: Operations.ListNativeGroups.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/groups/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/groups/GET/responses/200/content/application\/json`.
+                    case json([Components.Schemas.GroupSummaryDto])
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: [Components.Schemas.GroupSummaryDto] {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.ListNativeGroups.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.ListNativeGroups.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/groups/get(ListNativeGroups)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.ListNativeGroups.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.ListNativeGroups.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `GET /native/v1/groups/{id}`.
+    /// - Remark: Generated from `#/paths//native/v1/groups/{id}/get(GetNativeGroup)`.
+    public enum GetNativeGroup {
+        public static let id: Swift.String = "GetNativeGroup"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/native/v1/groups/{id}/GET/path`.
+            public struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/groups/{id}/GET/path/id`.
+                public var id: Swift.String
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - id:
+                public init(id: Swift.String) {
+                    self.id = id
+                }
+            }
+            public var path: Operations.GetNativeGroup.Input.Path
+            /// - Remark: Generated from `#/paths/native/v1/groups/{id}/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/groups/{id}/GET/query/limit`.
+                public var limit: Swift.Int32?
+                /// - Remark: Generated from `#/paths/native/v1/groups/{id}/GET/query/offset`.
+                public var offset: Swift.Int32?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - limit:
+                ///   - offset:
+                public init(
+                    limit: Swift.Int32? = nil,
+                    offset: Swift.Int32? = nil
+                ) {
+                    self.limit = limit
+                    self.offset = offset
+                }
+            }
+            public var query: Operations.GetNativeGroup.Input.Query
+            /// - Remark: Generated from `#/paths/native/v1/groups/{id}/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeGroup.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNativeGroup.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.GetNativeGroup.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - query:
+            ///   - headers:
+            public init(
+                path: Operations.GetNativeGroup.Input.Path,
+                query: Operations.GetNativeGroup.Input.Query = .init(),
+                headers: Operations.GetNativeGroup.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.query = query
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/native/v1/groups/{id}/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/native/v1/groups/{id}/GET/responses/200/content/application\/json`.
+                    case json(Components.Schemas.GroupDetailDto)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.GroupDetailDto {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.GetNativeGroup.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.GetNativeGroup.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/groups/{id}/get(GetNativeGroup)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.GetNativeGroup.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.GetNativeGroup.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                public init() {}
+            }
+            /// Not Found
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/groups/{id}/get(GetNativeGroup)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.GetNativeGroup.Output.NotFound)
+            /// Not Found
+            ///
+            /// - Remark: Generated from `#/paths//native/v1/groups/{id}/get(GetNativeGroup)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            public static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            public var notFound: Operations.GetNativeGroup.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
                 ]
             }
         }

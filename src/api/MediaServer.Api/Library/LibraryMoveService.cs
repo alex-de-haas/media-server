@@ -648,6 +648,19 @@ public sealed class LibraryMoveService(
     {
         var now = DateTimeOffset.UtcNow;
 
+        // Preserve explicit groups when the source identity is merged away. A cross-type series
+        // move keeps its links, but the group's catalog-type predicate hides incompatible titles.
+        var oldTopId = plan.Movie?.Id ?? plan.SourceSeriesId;
+        if (oldTopId is { } oldId && oldId != plan.ResultTopId)
+        {
+            var links = await database.Set<MediaGroupMember>().Where(m => m.MediaItemId == oldId).ToListAsync(cancellationToken);
+            var targetGroups = await database.Set<MediaGroupMember>().Where(m => m.MediaItemId == plan.ResultTopId)
+                .Select(m => m.MediaGroupId).ToListAsync(cancellationToken);
+            database.AddRange(links.Where(m => !targetGroups.Contains(m.MediaGroupId)).Select(m => new MediaGroupMember
+                { MediaGroupId = m.MediaGroupId, MediaItemId = plan.ResultTopId }));
+            database.RemoveRange(links);
+        }
+
         // The source files behind every moving media source, plus the ingest items that own them (their
         // CatalogId must follow the move so it stays consistent with the item's new catalog).
         var sourceFileIds = plan.Moves.Where(move => move.Source.SourceFileId is not null).Select(move => move.Source.SourceFileId!.Value).ToList();

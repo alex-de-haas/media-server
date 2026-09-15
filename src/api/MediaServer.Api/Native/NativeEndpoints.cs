@@ -67,6 +67,7 @@ public static class NativeEndpoints
         group.MapNativeImageEndpoints();
         group.MapNativeDiscoveryEndpoints();
         group.MapNativeCollectionEndpoints();
+        group.MapNativeGroupEndpoints();
         group.MapNativeHomeEndpoints();
         group.MapNativeEpisodeEndpoints();
 

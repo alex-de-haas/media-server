@@ -1,7 +1,7 @@
 # Collections (Movie Franchises)
 
 Created: 2026-06-24
-Updated: 2026-09-06
+Updated: 2026-09-15
 
 Movies the operator owns are grouped into the franchise they belong to, and the
 grouping is browsable on both surfaces: a Collections page in the web UI, and a
@@ -173,7 +173,8 @@ non-goal. All collection state on this surface is read-only and derived from the
 ## Non-Goals
 
 - TV/anime "collections" (no TMDb equivalent).
-- Operator-curated / manual collections (TMDb-driven only).
+- Operator-curated collections in this franchise model; manual and smart
+  selections live in the separate [Groups](../groups/feature.md) feature.
 - Collection-level watched roll-up beyond what per-movie `UserData` already gives.
 - Showing the full franchise with unowned entries greyed out: both surfaces show
   owned movies only. It would need a `/collection/{id}` TMDb fetch and extra
@@ -181,7 +182,7 @@ non-goal. All collection state on this surface is read-only and derived from the
 
 ## Native tvOS visual design and collections
 
-The native Apple TV client exposes Movies, Series, Collections, and Settings.
+The native Apple TV client exposes Home, Movies, Series, Groups, Collections, and Settings.
 The visual layout and authenticated collection list, detail, and artwork routes
 are described in [Apple client visual design](../apple-client-visual-design/feature.md).
 Collection reads exclude removed movies from counts, members, and poster fallbacks.

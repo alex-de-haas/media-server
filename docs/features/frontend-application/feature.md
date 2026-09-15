@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-09-10
+Updated: 2026-09-15
 
 ## Description
 
@@ -86,11 +86,16 @@ section).
   queued line instead of a bar. The same card renders a conversion wherever it
   appears, including the Conversions block on movie detail and above a series'
   seasons.
+- **Groups** (`/groups`, `/groups/{id}`) — folders between Series and Collections,
+  opening the standard movie or series poster grid. Each manual or smart group
+  has one catalog type. See [Groups](../groups/feature.md).
 - **Settings** (`/settings`) — General retains release-group preferences, per-user
   Infuse credentials, and watch-history controls. The admin-only **Catalogs** tab
   (`/settings?tab=catalogs`) holds catalog configuration, storage usage, scanning,
   metadata refresh, browsing, and removal. Tab selection survives refresh and browser
-  history. Non-admin requests for the Catalogs tab display General.
+  history. The admin-only **Groups** tab (`/settings?tab=groups`) holds group
+  definitions, manual membership, and smart-rule preview. Non-admin requests for
+  Catalogs or Groups settings display General.
 - Movies and Series show contextual alerts for unavailable storage, with an admin
   link to catalog settings. The Home offline-catalog indicator opens that same tab.
 - The standalone `/catalogs` page and its app/Hosty navigation entry are removed;

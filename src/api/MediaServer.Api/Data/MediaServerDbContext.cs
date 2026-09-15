@@ -62,6 +62,7 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         ConfigureCatalog(modelBuilder);
         ConfigureMediaItem(modelBuilder);
         ConfigureMovieCollection(modelBuilder);
+        ConfigureMediaGroups(modelBuilder);
         ConfigureMediaSource(modelBuilder);
         ConfigureMetadataRecord(modelBuilder);
         ConfigureMetadataTag(modelBuilder);
@@ -303,6 +304,20 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
             .WithMany(entity => entity.Movies)
             .HasForeignKey(entity => entity.CollectionId)
             .OnDelete(DeleteBehavior.SetNull);
+    }
+
+    private static void ConfigureMediaGroups(ModelBuilder modelBuilder)
+    {
+        var group = modelBuilder.Entity<MediaGroup>();
+        group.HasKey(g => g.Id);
+        group.Property(g => g.Name).HasMaxLength(120).IsRequired();
+        group.Property(g => g.Kind).IsRequired();
+        group.Property(g => g.CatalogType).IsRequired();
+        group.Property(g => g.RulesJson).IsRequired();
+        var member = modelBuilder.Entity<MediaGroupMember>();
+        member.HasKey(m => new { m.MediaGroupId, m.MediaItemId });
+        member.HasOne<MediaGroup>().WithMany().HasForeignKey(m => m.MediaGroupId).OnDelete(DeleteBehavior.Cascade);
+        member.HasOne<MediaItem>().WithMany().HasForeignKey(m => m.MediaItemId).OnDelete(DeleteBehavior.Cascade);
     }
 
     private static void ConfigureMovieCollection(ModelBuilder modelBuilder)

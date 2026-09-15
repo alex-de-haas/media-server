@@ -1228,6 +1228,140 @@ public struct Client: APIProtocol {
             }
         )
     }
+    /// - Remark: HTTP `GET /native/v1/groups`.
+    /// - Remark: Generated from `#/paths//native/v1/groups/get(ListNativeGroups)`.
+    public func listNativeGroups(_ input: Operations.ListNativeGroups.Input) async throws -> Operations.ListNativeGroups.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.ListNativeGroups.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/native/v1/groups",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.ListNativeGroups.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            [Components.Schemas.GroupSummaryDto].self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// - Remark: HTTP `GET /native/v1/groups/{id}`.
+    /// - Remark: Generated from `#/paths//native/v1/groups/{id}/get(GetNativeGroup)`.
+    public func getNativeGroup(_ input: Operations.GetNativeGroup.Input) async throws -> Operations.GetNativeGroup.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.GetNativeGroup.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/native/v1/groups/{}",
+                    parameters: [
+                        input.path.id
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: true,
+                    name: "limit",
+                    value: input.query.limit
+                )
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: true,
+                    name: "offset",
+                    value: input.query.offset
+                )
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.GetNativeGroup.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.GroupDetailDto.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
     /// - Remark: HTTP `GET /native/v1/home/resume`.
     /// - Remark: Generated from `#/paths//native/v1/home/resume/get(getNativeHomeResume)`.
     public func getNativeHomeResume(_ input: Operations.GetNativeHomeResume.Input) async throws -> Operations.GetNativeHomeResume.Output {
