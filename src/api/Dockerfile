@@ -6,7 +6,7 @@
 #   docker buildx imagetools inspect mcr.microsoft.com/dotnet/<repo>:10.0 --format '{{.Manifest.Digest}}'
 
 # ---- build ----
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:4beef5b8919dcaa2dc924233bd069257e883cc7a061e09088a97d152d6a48510 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:2fa828c68761b1b8c23d7662dc134421b9d3b59fe1425fdbc80804e390cdb24d AS build
 WORKDIR /src
 
 # Restore against the project file alone first so the package layer caches across source-only changes.
