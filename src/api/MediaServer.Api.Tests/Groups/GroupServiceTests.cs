@@ -1,9 +1,11 @@
+using System.Data.Common;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Groups;
 using MediaServer.Api.Library;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace MediaServer.Api.Tests.Groups;
 
@@ -13,10 +15,11 @@ public sealed class GroupServiceTests : IDisposable
     private readonly MediaServerDbContext db;
     private readonly GroupService service;
     private readonly CancellationToken ct = CancellationToken.None;
+    private readonly ReadCommands reads = new();
     public GroupServiceTests()
     {
         connection.Open();
-        db = new(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(connection).Options);
+        db = new(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(connection).AddInterceptors(reads).Options);
         db.Database.Migrate();
         var settings = new MediaServerSettings { SupportedLanguages = ["en-US"] };
         service = new(db, new LibraryReadService(db, new UserDataService(db, TimeProvider.System), settings), settings);
@@ -48,6 +51,91 @@ public sealed class GroupServiceTests : IDisposable
     private static SaveGroupRequest Manual(params Guid[] ids) => new("Manual", "manual", "movie", new(1, "all", []), ids);
     private static GroupCondition Hdr(string value) => new("hdr", "equals", value);
     private async Task<LibrarySearchPage> Preview(params GroupCondition[] conditions) => await service.PreviewAsync(Smart(conditions: conditions), null, 60, 0, ct);
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(12, 2)]
+    [InlineData(65, 4)]
+    public async Task List_batches_counts_and_preserves_order_empty_groups_and_unique_members(int groupCount, int expectedReads)
+    {
+        var movie = Title("Retro Film"); Source(movie, "HDR10"); Source(movie, "HDR10");
+        var hidden = Title("Removed"); hidden.RemovedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        for (var index = groupCount - 1; index >= 0; index--)
+        {
+            var request = (index % 3) switch
+            {
+                0 => Manual(movie.Id, hidden.Id),
+                1 => Smart(match: "any", conditions: [Hdr("any"), new("year", "before", "2000")]),
+                _ => Smart(conditions: [new("year", "after", "2000")]),
+            };
+            await service.SaveAsync(null, request with { Name = $"Group {index:D3}" }, ct);
+        }
+        reads.Commands.Clear();
+
+        var groups = await service.ListAsync(ct);
+
+        Assert.Equal(expectedReads, reads.Commands.Count);
+        Assert.Equal(groupCount, groups.Count);
+        for (var index = 0; index < groupCount; index++)
+        {
+            Assert.Equal($"Group {index:D3}", groups[index].Name);
+            Assert.Equal(index % 3 == 2 ? 0 : 1, groups[index].ItemCount);
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Blank_candidate_search_does_not_add_a_title_predicate(string? search)
+    {
+        var movie = Title("Retro Film");
+        reads.Commands.Clear();
+        var page = await service.CandidatesAsync("movie", search, null, 30, 0, ct);
+        Assert.Equal(movie.Id, Assert.Single(page.Items).Id);
+        Assert.DoesNotContain("LIKE", reads.Commands[0], StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("instr(", reads.Commands[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(" retro ")]
+    [InlineData("RETRO")]
+    public async Task Candidate_search_matches_item_and_metadata_titles_without_case_sensitivity(string search)
+    {
+        var direct = Title("Retro Film");
+        var translated = Title("Different title"); Metadata(translated, 1999).Title = "Retro Translation";
+        Title("Unrelated"); await db.SaveChangesAsync(ct);
+        var page = await service.CandidatesAsync("movie", search, null, 30, 0, ct);
+        Assert.Equal(2, page.Total);
+        Assert.Equal(new[] { direct.Id, translated.Id }.Order(), page.Items.Select(i => i.Id).Order());
+    }
+
+    [Fact]
+    public async Task Option_search_matches_keywords_and_genres_without_case_sensitivity()
+    {
+        Metadata(Title("Film"), 1999, "en-US", (MetadataTagKind.Keyword, "heist"), (MetadataTagKind.Genre, "Heist Comedy"));
+        var options = await service.OptionsAsync("movie", " HeIsT ", ct);
+        Assert.Equal("heist", Assert.Single(options.Tags));
+        Assert.Equal("Heist Comedy", Assert.Single(options.Genres));
+    }
+
+    [Theory]
+    [InlineData("%")]
+    [InlineData("_")]
+    [InlineData("\\")]
+    public async Task Searches_treat_like_wildcards_and_escape_characters_literally(string literal)
+    {
+        var direct = Title("Film " + literal);
+        var translated = Title("Translation"); Metadata(translated, 1999).Title = "Film " + literal;
+        Metadata(direct, 1999, "en-US", (MetadataTagKind.Keyword, "tag" + literal), (MetadataTagKind.Genre, "genre" + literal));
+        Metadata(Title("Unrelated"), 1999, "en-US", (MetadataTagKind.Keyword, "tag-other"), (MetadataTagKind.Genre, "genre-other"));
+        await db.SaveChangesAsync(ct);
+        Assert.Equal(2, (await service.CandidatesAsync("movie", literal, null, 30, 0, ct)).Total);
+        var options = await service.OptionsAsync("movie", literal, ct);
+        Assert.Equal("tag" + literal, Assert.Single(options.Tags));
+        Assert.Equal("genre" + literal, Assert.Single(options.Genres));
+    }
 
     [Theory]
     [InlineData("HDR10")]
@@ -221,4 +309,15 @@ public sealed class GroupServiceTests : IDisposable
         Assert.Throws<GroupValidationException>(() => GroupService.Validate(Smart(conditions: [new(field, op, value)])));
 
     public void Dispose() { db.Dispose(); connection.Dispose(); }
+
+    private sealed class ReadCommands : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
+    }
 }

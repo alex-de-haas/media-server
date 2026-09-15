@@ -40,6 +40,11 @@ to 20 conditions. Smart groups require at least one condition; manual groups
 accept up to 10,000 title IDs and contain no conditions. Mode and catalog type
 cannot change after creation.
 
+Picker and option searches trim surrounding whitespace and use the library's
+SQLite case-insensitive substring search, treating `%`, `_`, and `\` literally.
+Blank picker searches omit the title predicate. Year rules do not request option
+lists or display option-loading errors.
+
 ## Filters
 
 | Field | Supported conditions |
@@ -101,6 +106,11 @@ item ID. The web client refreshes visible group data periodically and invalidate
 it when library events arrive. Apple TV refreshes folders on screen appearance
 and group pages when opened or paged.
 
+Folder counts run as scalar SQL aggregates in batches of up to 32 groups, after
+one definition query. Each batch uses one database round trip and transfers only
+summaries, including zero counts; each smart predicate still evaluates current
+membership independently.
+
 - Catalog moves preserve manual links. Movie and series merges union incoming
   memberships onto the surviving title inside the move transaction.
 - A Series/Anime cross-type move hides the title from groups of the previous
@@ -149,6 +159,9 @@ Jellyfin/Infuse continues to expose the existing franchise collections.
   boundaries and metadata fallback, whole tags/genres, catalog-type isolation,
   episode-to-series aggregation, page/count consistency, input validation,
   per-user state, removal/revival/purge, and editing links after type moves.
+  Regression tests verify bounded count-query batches, case-insensitive item and
+  metadata title searches, keyword/genre searches, literal search characters,
+  and omitted predicates for blank searches.
 - `GroupEndpointTests` checks authentication, admin-only settings/writes, and
   read-only public native routes.
 - `LibraryMoveServiceTests` checks manual membership preservation on ordinary
@@ -157,6 +170,8 @@ Jellyfin/Infuse continues to expose the existing franchise collections.
   one title card per result, every HDR option, tags/genres, typed series groups,
   preview, read-only viewers, and failure/retry. Existing settings, shell, and
   catalog browsing tests protect adjacent navigation and controls.
+  Year-only rules skip options requests and hide cached option errors;
+  `groups.test.ts` checks blank and encoded picker search parameters.
 - Swift `GroupTests` covers folder/page decoding, bearer authentication,
   empty/unsupported/error/missing states, pagination, refresh, and concurrent
   list-load deduplication. Build the tvOS simulator app to check SwiftUI integration.

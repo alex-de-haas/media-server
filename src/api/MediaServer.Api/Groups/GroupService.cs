@@ -10,6 +10,8 @@ namespace MediaServer.Api.Groups;
 public sealed class GroupService(MediaServerDbContext database, LibraryReadService library, MediaServerSettings settings)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private const int CountBatchSize = 32;
+    private const string LikeEscape = "\\";
     public static readonly string[] Resolutions = ["480p", "720p", "1080p", "2160p"];
     public static readonly string[] HdrFormats = ["HDR10", "HDR10+", "Dolby Vision", "HLG", "HDR", "any"];
 
@@ -18,13 +20,29 @@ public sealed class GroupService(MediaServerDbContext database, LibraryReadServi
     {
         var groups = await database.Set<MediaGroup>().AsNoTracking().OrderBy(g => g.Name).ThenBy(g => g.Id).ToListAsync(ct);
         var result = new List<GroupSummaryDto>();
-        foreach (var group in groups)
+        // Bound compound-query size while evaluating every group's current rules in SQL.
+        // Scalar counts retain empty groups and avoid transferring matching title rows.
+        foreach (var batch in groups.Chunk(CountBatchSize))
         {
-            var query = Members(group);
-            var total = await query.CountAsync(ct);
-            result.Add(new(group.Id, group.Name, group.Kind, group.CatalogType, total));
+            IQueryable<GroupCount>? counts = null;
+            foreach (var group in batch)
+            {
+                var members = Members(group);
+                var count = database.Set<MediaGroup>().Where(g => g.Id == group.Id)
+                    .Select(g => new GroupCount { Id = g.Id, Total = members.Count() });
+                counts = counts is null ? count : counts.Concat(count);
+            }
+            var summaries = await counts!.ToDictionaryAsync(g => g.Id, ct);
+            result.AddRange(batch.Where(g => summaries.ContainsKey(g.Id))
+                .Select(g => new GroupSummaryDto(g.Id, g.Name, g.Kind, g.CatalogType, summaries[g.Id].Total)));
         }
         return result;
+    }
+
+    private sealed class GroupCount
+    {
+        public Guid Id { get; init; }
+        public int Total { get; init; }
     }
 
     /// <summary>Reads one group page, with no minimum membership threshold.</summary>
@@ -89,9 +107,17 @@ public sealed class GroupService(MediaServerDbContext database, LibraryReadServi
     }
 
     /// <summary>Searches a bounded title page for the manual membership picker.</summary>
-    public Task<LibrarySearchPage> CandidatesAsync(string catalogType, string? title, int? userId, int limit, int offset, CancellationToken ct) =>
-        PageAsync(Items(catalogType).Where(i => title == null || i.Title.Contains(title) || database.MetadataRecords.Any(r =>
-            r.MediaItemId == i.Id && r.Title != null && r.Title.Contains(title))), userId, limit, offset, ct);
+    public Task<LibrarySearchPage> CandidatesAsync(string catalogType, string? title, int? userId, int limit, int offset, CancellationToken ct)
+    {
+        var items = Items(catalogType);
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            var pattern = SearchPattern(title);
+            items = items.Where(i => EF.Functions.Like(i.Title, pattern, LikeEscape) || database.MetadataRecords.Any(r =>
+                r.MediaItemId == i.Id && r.Title != null && EF.Functions.Like(r.Title, pattern, LikeEscape)));
+        }
+        return PageAsync(items, userId, limit, offset, ct);
+    }
 
     /// <summary>Lists bounded, searchable keyword/genre choices without loading the title library.</summary>
     public async Task<GroupOptionsDto> OptionsAsync(string catalogType, string? search, CancellationToken ct)
@@ -99,11 +125,20 @@ public sealed class GroupService(MediaServerDbContext database, LibraryReadServi
         var items = Items(catalogType);
         var tags = database.MetadataTags.AsNoTracking().Where(t => t.Value != "" && database.MetadataRecords.Any(r =>
             r.Id == t.MetadataRecordId && items.Any(i => i.Id == r.MediaItemId)));
-        if (!string.IsNullOrWhiteSpace(search)) tags = tags.Where(t => t.Value.Contains(search));
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = SearchPattern(search);
+            tags = tags.Where(t => EF.Functions.Like(t.Value, pattern, LikeEscape));
+        }
         return new(Resolutions, HdrFormats,
             await tags.Where(t => t.Kind == MetadataTagKind.Keyword).Select(t => t.Value).Distinct().Order().Take(100).ToListAsync(ct),
             await tags.Where(t => t.Kind == MetadataTagKind.Genre).Select(t => t.Value).Distinct().Order().Take(100).ToListAsync(ct));
     }
+
+    private static string SearchPattern(string term) => "%" + term.Trim()
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("%", "\\%", StringComparison.Ordinal)
+        .Replace("_", "\\_", StringComparison.Ordinal) + "%";
 
     private IQueryable<MediaItem> Items(string catalogType)
     {

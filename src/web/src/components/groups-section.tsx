@@ -129,7 +129,9 @@ function GroupEditor({ id, initial, onClose }: { id?: string; initial: GroupInpu
 }
 
 function RuleRow({ rule, index, catalogType, uid, onChange, onRemove }: { rule: GroupCondition; index: number; catalogType: GroupInput["catalogType"]; uid: string; onChange: (rule: GroupCondition) => void; onRemove: () => void }) {
+  const needsOptions = rule.field !== "year";
   const options = useQuery({ queryKey: ["groups", "options", catalogType, rule.field === "tag" || rule.field === "genre" ? rule.value : ""],
+    enabled: needsOptions,
     queryFn: () => groupsApi.options(catalogType, rule.field === "tag" || rule.field === "genre" ? rule.value : "") });
   const listId = `${uid}-rule-${index}`;
   const values = rule.field === "hdr" ? options.data?.hdrFormats : rule.field === "resolution" ? options.data?.resolutions : undefined;
@@ -142,7 +144,7 @@ function RuleRow({ rule, index, catalogType, uid, onChange, onRemove }: { rule: 
       {rule.field === "hdr" || rule.field === "resolution" ? <Choice label={`Condition ${index + 1} value`} value={rule.value} options={(values ?? [rule.value]).map(value => ({ value, label: rule.field === "hdr" ? hdrLabel(value) : value === "2160p" ? "4K (2160p)" : value }))} onChange={value => onChange({ ...rule, value })} />
         : <Input aria-label={`Condition ${index + 1} value`} type={rule.field === "year" ? "number" : "text"} required value={rule.value} list={rule.field === "year" ? undefined : listId} placeholder={rule.field === "tag" ? "Search keyword tags" : "Search genres"} onChange={e => onChange({ ...rule, value: e.target.value })} />}
       {(rule.field === "tag" || rule.field === "genre") && <datalist id={listId}>{(rule.field === "tag" ? options.data?.tags : options.data?.genres)?.map(value => <option key={value} value={value} />)}</datalist>}
-      {options.isError && <p className="text-destructive mt-1 text-xs">Could not load choices. <button type="button" onClick={() => void options.refetch()}>Retry</button></p>}
+      {needsOptions && options.isError && <p className="text-destructive mt-1 text-xs">Could not load choices. <button type="button" onClick={() => void options.refetch()}>Retry</button></p>}
     </div>
     {rule.field === "year" && rule.operator === "between" && <Input className="w-28" type="number" required aria-label={`Condition ${index + 1} end year`} value={rule.endValue ?? ""} onChange={e => onChange({ ...rule, endValue: e.target.value })} />}
     <Button type="button" variant="ghost" aria-label={`Remove condition ${index + 1}`} onClick={onRemove}><Trash2 /></Button>

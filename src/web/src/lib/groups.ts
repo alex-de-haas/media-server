@@ -25,7 +25,11 @@ export const groupsApi = {
   save: (id: string | undefined, input: GroupInput) => apiJson<GroupDefinition>(id ? `${BASE}/${id}` : BASE, { method: id ? "PUT" : "POST", ...body(input) }),
   remove: (id: string) => apiFetch(`${BASE}/${id}`, { method: "DELETE" }),
   preview: (input: GroupInput) => apiJson<GroupPage>(`${BASE}/preview?limit=12`, { method: "POST", ...body(input) }),
-  candidates: (catalogType: GroupCatalogType, title: string, offset: number) => apiJson<GroupPage>(`${BASE}/candidates?${new URLSearchParams({ catalogType, title, offset: String(offset), limit: "30" })}`),
+  candidates: (catalogType: GroupCatalogType, title: string, offset: number) => {
+    const params = new URLSearchParams({ catalogType, offset: String(offset), limit: "30" });
+    if (title.trim()) params.set("title", title.trim());
+    return apiJson<GroupPage>(`${BASE}/candidates?${params}`);
+  },
   options: (catalogType: GroupCatalogType, search: string) => apiJson<GroupOptions>(`${BASE}/options?${new URLSearchParams({ catalogType, search })}`),
 };
 export const groupTypeLabel = (type: GroupCatalogType) => ({ movie: "Movies", series: "Series", anime: "Anime" })[type];

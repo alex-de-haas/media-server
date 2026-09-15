@@ -113,6 +113,33 @@ test("ordinary viewers can browse but do not see group settings", async ({ page 
   await expect(page.getByRole("link", { name: /Retro Film/ })).toBeVisible();
 });
 
+test("year rules do not fetch choices or show a cached choices error", async ({ page }) => {
+  await mockGroups(page);
+  let optionRequests = 0;
+  await page.route("**/api/proxy/api/groups/options?**", route => {
+    optionRequests++;
+    return route.fulfill({ status: 503 });
+  });
+  await page.goto("/settings?tab=groups");
+  await page.getByRole("button", { name: "Add group", exact: true }).click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Retro");
+  await choice(page, "Group type", "Smart");
+  await page.getByRole("button", { name: "Preview matches" }).click();
+  await expect(page.getByText("1 matching title")).toBeVisible();
+  expect(optionRequests).toBe(0);
+  await expect(page.getByText("Could not load choices.")).toHaveCount(0);
+
+  await choice(page, "Condition 1 field", "HDR format");
+  await expect(page.getByText("Could not load choices.")).toBeVisible();
+  expect(optionRequests).toBe(1);
+  await choice(page, "Condition 1 field", "Release year");
+  await page.getByRole("spinbutton", { name: "Condition 1 value", exact: true }).fill("1990");
+  await page.getByRole("button", { name: "Preview matches" }).click();
+  await expect(page.getByText("1 matching title")).toBeVisible();
+  await expect(page.getByText("Could not load choices.")).toHaveCount(0);
+  expect(optionRequests).toBe(1);
+});
+
 test("failed group list offers retry instead of an empty folder list", async ({ page }) => {
   await mockGroups(page);
   let failed = true;
