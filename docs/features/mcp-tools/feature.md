@@ -1,7 +1,7 @@
 # MCP Tools
 
 Created: 2026-09-01
-Updated: 2026-09-04
+Updated: 2026-09-16
 
 This server's use cases as MCP tools, so an agent on the host can answer *"do I have this?"*,
 *"why has this not appeared?"*, *"get me this"*, and repair a bad identification without the
@@ -45,6 +45,14 @@ carry the app's mapped role.
 
 Scoped access tokens — the credential an external agent client keeps in its configuration — are not
 accepted yet; that is tracked in [plan.md](plan.md).
+
+## The Handshake Is Acknowledged With 202
+
+`notifications/initialized` is answered with **202 and no body**, which is what Streamable HTTP
+allows for a notification. The route used to answer an empty 200. Lenient clients accept that; Codex's
+does not, and fails while posting the notification, so a handshake whose `initialize` had just
+succeeded surfaced as "Transport channel closed" and the whole server dropped out of the assistant
+session before any tool was listed.
 
 ## Twenty-Two Tools, Not Eighty Routes
 
@@ -157,5 +165,8 @@ give one tool argument shapes that share nothing.
 - **The skill against the tools.** Every tool name the skill mentions is asserted to exist: the skill
   is prose the model reads before deciding anything, so a stale name sends it to a dead end and
   nothing else notices.
+- **The notification acknowledgement on the wire**: 202, an empty body, and no content type,
+  asserted on the executed response — an empty 200 is an ordinary result object and only wrong once
+  it is serialized.
 - **Not verified live.** No agent has called these tools through a running Core, and the remaining
   checks that need one are tracked in [plan.md](plan.md).

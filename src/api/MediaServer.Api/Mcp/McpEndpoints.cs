@@ -80,9 +80,9 @@ public static class McpEndpoints
                             + "different answers and only one is about the library.",
                     });
 
-                // A notification carries no id and must not be answered.
+                // A notification carries no id and must not be answered — only acknowledged.
                 case "notifications/initialized":
-                    return Results.Ok();
+                    return Accepted();
 
                 case "tools/list":
                     return Result(id, new JsonObject { ["tools"] = McpToolInvoker.Tools() });
