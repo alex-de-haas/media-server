@@ -113,6 +113,15 @@ internal static class McpProtocol
     public static IResult Result(JsonNode? id, JsonNode payload) =>
         Results.Json(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["result"] = payload });
 
+    /// <summary>How a notification is acknowledged: 202 with no body.</summary>
+    /// <remarks>
+    /// Streamable HTTP allows 202 here and nothing else. An empty 200 looks harmless, and a lenient client
+    /// accepts it — but Codex's client fails on it while posting <c>notifications/initialized</c>, so the
+    /// handshake that had just succeeded ends as "Transport channel closed" and every tool on this server
+    /// disappears from the session.
+    /// </remarks>
+    public static IResult Accepted() => Results.StatusCode(StatusCodes.Status202Accepted);
+
     /// <summary>A tool that failed, reported as a result the model can read and recover from.</summary>
     /// <remarks>
     /// Not a JSON-RPC error: that is a protocol fault and ends the turn, where a tool refusing an
