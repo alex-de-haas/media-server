@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-06-15
-Updated: 2026-08-19
+Updated: 2026-09-17
 
 ## Description
 
@@ -197,6 +197,10 @@ Public endpoint origins are configured after install through Core-managed
 `HOSTY_PUBLIC_ORIGIN_{ENDPOINT_KEY}` settings (`HOSTY_PUBLIC_ORIGIN_UI`,
 `HOSTY_PUBLIC_ORIGIN_JELLYFIN`); empty means use the local `localhost` endpoint.
 
+The `dev` profile explicitly declares `development: true`. Core runs it from the selected source
+folder, including a custom override, and adopts manifest edits on restart. The web service uses
+Next.js hot reload; API source edits need a restart with the current `dotnet run` command.
+
 ## Sample Manifest
 
 The authoritative manifest is `manifest.json` at the repo root.
@@ -215,7 +219,7 @@ per-service `runtimes` keyed by profile key:
   "name": "Media Server",
   "runtimeProfiles": [
     { "key": "docker", "type": "docker", "default": true },
-    { "key": "dev",    "type": "localCommand" }
+    { "key": "dev",    "type": "localCommand", "development": true }
   ],
   "defaultRuntime": "docker",
   "services": [
