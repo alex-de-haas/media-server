@@ -1,7 +1,7 @@
 # Apple Client Visual Design and Collections
 
 Created: 2026-09-06
-Updated: 2026-09-15
+Updated: 2026-09-17
 
 Collections reload through the store’s screen-appearance handler whenever the
 collection screen appears. The unsupported-server
