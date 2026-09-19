@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-06-15
-Updated: 2026-09-17
+Updated: 2026-09-19
 
 ## Description
 
@@ -147,6 +147,11 @@ Two independent auth domains.
    `api` re-validates against Core. (Hosty Core also accepts this identity as the
    `X-Docker-Host-Identity` header.) `api` never trusts unsigned or client-set
    headers or cookies.
+
+The web provider shares one code-exchange promise across React effect replays.
+Each active effect waits for that exchange before rendering the app, including
+the first page opened from Shell in development Strict Mode. An unmounted effect
+does not update readiness, and replaying an effect does not consume the code twice.
 
 Page-to-page navigation inside the open app uses the app-origin session cookie,
 so the app does not re-exchange a code on every Shell click.
@@ -334,3 +339,8 @@ servers can validate UI and business logic only.
 - After changes to the tab bar or the launch bridges, verify a plain tab shows
   the tab bar while `?hosty_launch=embedded` hides it, and that the parameter is
   cleaned from the URL.
+
+- Cover code-exchange effect replay with a delayed response: only one exchange
+  occurs, the active effect reveals the page, and unmounted effects stay inactive.
+  Verify Dashboard → Home, Dashboard → Movies, and returning to the first page
+  through the Core-managed development runtime without a second page click.
