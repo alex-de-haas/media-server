@@ -187,7 +187,9 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
             {ghosts.map((ghost) => (
               <PosterCard
                 key={ghost.id}
-                onSelect={() => setOpenGhost(ghost)}
+                {...(ghost.kind === "Movie"
+                  ? { href: withRemoved(detailHref(ghost.kind, ghost.id, catalogId), true) }
+                  : { onSelect: () => setOpenGhost(ghost) })}
                 title={ghost.title}
                 subtitle={ghost.year ? `${ghost.kind} · ${ghost.year}` : ghost.kind}
                 posterUrl={ghost.posterUrl}

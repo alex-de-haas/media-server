@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CalendarPlus, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FolderInput, Heart, Image as ImageIcon, Link2, MoreVertical, Play, RefreshCw, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
@@ -16,6 +16,7 @@ import {
   type Network,
   type SeasonSummary,
   type Studio,
+  type UserItemData,
 } from "@/lib/media-server";
 import { Conversions, MediaSources } from "@/components/media-sources";
 import { infuseDeepLink, openInfuse } from "@/lib/infuse";
@@ -25,6 +26,9 @@ import { RemapDialog } from "@/components/remap-dialog";
 import { StarRating } from "@/components/star-rating";
 import { TrackTitleControl } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
+import { ApiError } from "@/lib/api";
+import { MovieWatchHistory } from "@/components/movie-watch-history";
+import { RelatedMovies } from "@/components/related-movies";
 import { WatchTimeDialog } from "@/components/watch-time-dialog";
 import { QUERIES_AFFECTED_BY_HISTORY_CHANGE } from "@/lib/watch-history-calendar";
 import { episodeLabel, episodeMediaLine, formatAirDate, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
@@ -53,7 +57,17 @@ import { useSession } from "@/components/app-shell";
 /** Movie or series detail page. Branches on `kind`: a movie's Media tab lists its versions; a series lists its
  * episodes, each of which opens onto the same media surface. */
 export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref: string; backLabel: string }) {
-  const detail = useQuery({ queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id) });
+  const router = useRouter();
+  const detail = useQuery({
+    queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id),
+    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2,
+  });
+  useEffect(() => {
+    if (detail.data?.removedAt && detail.error instanceof ApiError && detail.error.status === 404) {
+      router.replace(backHref);
+      toast.success("This movie is no longer in your removed list");
+    }
+  }, [detail.data?.removedAt, detail.error, router, backHref]);
 
   if (detail.isPending) {
     return <MediaDetailSkeleton />;
@@ -73,10 +87,12 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-2">
         <BackLink href={backHref} label={backLabel} />
-        <ItemActions id={item.id} title={item.title} kind={item.kind} catalogId={item.catalogId} backHref={backHref} />
+        <ItemActions id={item.id} title={item.title} kind={item.kind} catalogId={item.catalogId} backHref={backHref} removed={!!item.removedAt} />
       </div>
       <Hero item={item} />
+      {item.kind === "Movie" && <MovieWatchHistory key={item.id} id={item.id} title={item.title} removed={!!item.removedAt} />}
       <DetailTabs item={item} backHref={backHref} />
+      {item.kind === "Movie" && <RelatedMovies id={item.id} />}
     </div>
   );
 }
@@ -89,7 +105,7 @@ function DetailTabs({ item, backHref }: { item: LibraryDetail; backHref: string 
       <div className="min-w-0 border-b">
         <TabsList variant="line" aria-label="Media detail sections">
           <TabsTrigger value="cast">Cast</TabsTrigger>
-          <TabsTrigger value="media">{mediaLabel}</TabsTrigger>
+          {!item.removedAt && <TabsTrigger value="media">{mediaLabel}</TabsTrigger>}
           <TabsTrigger value="tags">Tags</TabsTrigger>
         </TabsList>
       </div>
@@ -97,7 +113,7 @@ function DetailTabs({ item, backHref }: { item: LibraryDetail; backHref: string 
       <TabsContent value="cast">
         <CastList cast={item.cast} />
       </TabsContent>
-      <TabsContent value="media">
+      {!item.removedAt && <TabsContent value="media">
         <div className="flex flex-col gap-3">
           <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
           <MoveProgress itemId={item.id} />
@@ -107,7 +123,7 @@ function DetailTabs({ item, backHref }: { item: LibraryDetail; backHref: string 
             <MovieMedia item={item} />
           )}
         </div>
-      </TabsContent>
+      </TabsContent>}
       <TabsContent value="tags">
         <KeywordTags keywords={item.keywords} />
       </TabsContent>
@@ -232,7 +248,7 @@ function MediaDetailSkeleton() {
  * because the button row belongs to what a viewer does on most visits — a fourth button there would
  * compete with `Mark watched` for the same glance, and logging a past viewing is the rare gesture.
  */
-function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; title: string; kind: string; catalogId: string; backHref: string }) {
+function ItemActions({ id, title, kind, catalogId, backHref, removed }: { id: string; title: string; kind: string; catalogId: string | null; backHref: string; removed: boolean }) {
   const { role } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -255,6 +271,16 @@ function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; tit
       toast.success("Item deleted");
     },
     onError: (error) => toast.error("Couldn’t delete item", { description: errorMessage(error) }),
+  });
+
+  const purge = useMutation({
+    mutationFn: () => mediaServer.purgeRemovedTitle(id),
+    onSuccess: () => {
+      for (const queryKey of QUERIES_AFFECTED_BY_HISTORY_CHANGE) void queryClient.invalidateQueries({ queryKey });
+      router.replace(backHref);
+      toast.success("Removed title deleted permanently");
+    },
+    onError: (error) => toast.error(errorMessage(error)),
   });
 
   const refresh = useMutation({
@@ -318,7 +344,12 @@ function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; tit
             </DropdownMenuItem>
           )}
           {canLogWatch && role === "admin" && <DropdownMenuSeparator />}
-          {role === "admin" && (
+          {role === "admin" && removed && (
+            <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
+              <Trash2 /> Delete permanently…
+            </DropdownMenuItem>
+          )}
+          {role === "admin" && !removed && (
             <>
               <DropdownMenuItem disabled={refresh.isPending} onClick={() => refresh.mutate()}>
                 <RefreshCw className={cn(refresh.isPending && "animate-spin")} aria-hidden />
@@ -373,7 +404,21 @@ function ItemActions({ id, title, kind, catalogId, backHref }: { id: string; tit
 
       {/* Gated with the menu items that open them: a viewer who cannot reach the action has no use for
           its dialog in the tree. */}
-      {role === "admin" && (
+      {role === "admin" && removed && (
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {title} permanently?</AlertDialogTitle>
+              <AlertDialogDescription>Deletes the retained movie and every user’s history, ratings and favorites. This cannot be undone.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={purge.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" disabled={purge.isPending} onClick={() => purge.mutate()}>Delete permanently</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+      {role === "admin" && !removed && catalogId && (
         <>
           <DeleteItemDialog
             open={confirmOpen}
@@ -531,13 +576,17 @@ function BackLink({ href, label }: { href: string; label: string }) {
 
 function Hero({ item }: { item: LibraryDetail }) {
   const queryClient = useQueryClient();
-  const invalidate = () => {
-    for (const key of [["library-detail", item.id], ["library"], ["resume"], ["nextup"], ["recent"]]) {
-      queryClient.invalidateQueries({ queryKey: key });
+  const [clearMark, setClearMark] = useState<"rating" | "favorite" | null>(null);
+  const invalidate = (data: UserItemData) => {
+    setClearMark(null);
+    queryClient.setQueryData<LibraryDetail>(["library-detail", item.id], (previous) =>
+      previous ? { ...previous, userData: data } : previous);
+    for (const key of QUERIES_AFFECTED_BY_HISTORY_CHANGE) {
+      void queryClient.invalidateQueries({ queryKey: key });
     }
   };
-  const played = useMutation({ mutationFn: (value: boolean) => mediaServer.setPlayed(item.id, value), onSuccess: invalidate });
-  const favorite = useMutation({ mutationFn: (value: boolean) => mediaServer.setFavorite(item.id, value), onSuccess: invalidate });
+  const played = useMutation({ mutationFn: (value: boolean) => mediaServer.setPlayed(item.id, value), onSuccess: invalidate, onError: (error) => toast.error(errorMessage(error)) });
+  const favorite = useMutation({ mutationFn: (value: boolean) => mediaServer.setFavorite(item.id, value), onSuccess: invalidate, onError: (error) => toast.error(errorMessage(error)) });
   const rating = useMutation({
     mutationFn: (value: number | null) => mediaServer.setRating(item.id, value),
     onSuccess: invalidate,
@@ -549,7 +598,7 @@ function Hero({ item }: { item: LibraryDetail }) {
   // Only works are ratable: the engine collapses an episode into its series, so "more like episode 4"
   // is not a question anything downstream can ask.
   const isRatable = item.kind === "Movie" || item.kind === "Series";
-  const resume = !isPlayed && item.userData?.playedPercentage ? Math.min(item.userData.playedPercentage, 100) : null;
+  const resume = !item.removedAt && !isPlayed && item.userData?.playedPercentage ? Math.min(item.userData.playedPercentage, 100) : null;
   const runtime = formatRuntime(item.runtimeTicks);
   const seriesCounts =
     item.kind === "Series" && item.seasonCount ? `${item.seasonCount} season${item.seasonCount === 1 ? "" : "s"}` : null;
@@ -593,6 +642,7 @@ function Hero({ item }: { item: LibraryDetail }) {
               ) : (
                 <h1 className="text-3xl leading-tight font-semibold tracking-tight sm:text-4xl">{item.title}</h1>
               )}
+              {item.removedAt && <Badge variant="secondary">Removed from library</Badge>}
               {meta && <p className="text-muted-foreground text-sm">{meta}</p>}
               <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 {item.officialRating && (
@@ -627,18 +677,18 @@ function Hero({ item }: { item: LibraryDetail }) {
             )}
 
             <div className="flex flex-wrap gap-2">
-              <InfuseLaunch item={item} />
-              <Button
+              {!item.removedAt && <InfuseLaunch item={item} />}
+              {!item.removedAt && <Button
                 variant="outline"
                 onClick={() => played.mutate(!isPlayed)}
                 disabled={played.isPending}
                 className={cn(isPlayed && "border-brand text-brand")}
               >
                 <Check className="size-4" aria-hidden /> {isPlayed ? "Watched" : "Mark watched"}
-              </Button>
+              </Button>}
               <Button
                 variant="outline"
-                onClick={() => favorite.mutate(!isFavorite)}
+                onClick={() => item.removedAt && isFavorite ? setClearMark("favorite") : favorite.mutate(!isFavorite)}
                 disabled={favorite.isPending}
                 aria-label={isFavorite ? "Remove favorite" : "Add favorite"}
                 className={cn(isFavorite && "border-brand text-brand")}
@@ -651,7 +701,7 @@ function Hero({ item }: { item: LibraryDetail }) {
                 <StarRating
                   value={item.userData?.userRating ?? null}
                   pending={rating.isPending}
-                  onChange={(next) => rating.mutate(next)}
+                  onChange={(next) => item.removedAt && next === null ? setClearMark("rating") : rating.mutate(next)}
                 />
               )}
               {item.tmdbId && (item.kind === "Movie" || item.kind === "Series") && (
@@ -684,6 +734,22 @@ function Hero({ item }: { item: LibraryDetail }) {
         </div>
         {/* Overview lives inside the banner so the backdrop runs underneath it before fading out. */}
         {item.overview && <p className="max-w-2xl text-sm leading-relaxed">{item.overview}</p>}
+        <AlertDialog open={clearMark !== null} onOpenChange={(open) => !open && setClearMark(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear your {clearMark}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                If this is your last watch, rating or favorite, {item.title} disappears from your removed list.
+                Its record is deleted when nobody has any marks left.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={rating.isPending || favorite.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction disabled={rating.isPending || favorite.isPending}
+                onClick={() => clearMark === "rating" ? rating.mutate(null) : favorite.mutate(false)}>Clear {clearMark}</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

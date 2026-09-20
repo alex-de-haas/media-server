@@ -57,7 +57,7 @@ public sealed record LibraryDetailDto(
     string? PublicId,
     // TMDb id (movie id for a movie, series id for a series) — lets the UI build an Infuse library deep link.
     string? TmdbId,
-    Guid CatalogId,
+    Guid? CatalogId,
     // The catalog this item lives in — its name and root host path — shown on the media tab so an operator
     // can see where it sits on disk.
     string CatalogName,
@@ -115,7 +115,8 @@ public sealed record LibraryDetailDto(
     IReadOnlyList<StudioDto> Studios,
     // TMDb keyword tags.
     IReadOnlyList<string> Keywords,
-    IReadOnlyList<CrewMemberDto>? Crew = null);
+    IReadOnlyList<CrewMemberDto>? Crew = null,
+    DateTimeOffset? RemovedAt = null);
 
 /// <summary>A TV network/distributor with its (optional) logo, surfaced on series detail.</summary>
 public sealed record NetworkDto(string Name, string? LogoUrl);

@@ -317,9 +317,9 @@ public sealed class UserDataService(
     /// time at all.
     /// </remarks>
     public async Task<LogWatchResult> LogWatchAsync(
-        int appUserId, Guid mediaItemId, DateTimeOffset watchedAt, CancellationToken cancellationToken)
+        int appUserId, Guid mediaItemId, DateTimeOffset watchedAt, CancellationToken cancellationToken, bool includeRemoved = false)
     {
-        var item = await FindItemByIdAsync(mediaItemId, cancellationToken);
+        var item = await FindPersonalItemAsync(appUserId, mediaItemId, includeRemoved, cancellationToken);
         if (item is null)
         {
             return new LogWatchResult(LogWatchStatus.ItemNotFound, null);
@@ -358,8 +358,8 @@ public sealed class UserDataService(
 
     /// <summary>Same, keyed by the internal item id (UI surface).</summary>
     public async Task<UserItemDataDto?> SetFavoriteAsync(
-        int appUserId, Guid mediaItemId, bool favorite, CancellationToken cancellationToken) =>
-        await SetFavoriteCoreAsync(appUserId, await FindItemByIdAsync(mediaItemId, cancellationToken), favorite, cancellationToken);
+        int appUserId, Guid mediaItemId, bool favorite, CancellationToken cancellationToken, bool includeRemoved = false) =>
+        await SetFavoriteCoreAsync(appUserId, await FindPersonalItemAsync(appUserId, mediaItemId, includeRemoved, cancellationToken), favorite, cancellationToken);
 
     private async Task<UserItemDataDto?> SetFavoriteCoreAsync(
         int appUserId, MediaItem? item, bool favorite, CancellationToken cancellationToken)
@@ -386,14 +386,14 @@ public sealed class UserDataService(
     /// storing them would create rows nothing reads.
     /// </remarks>
     public async Task<SetRatingResult> SetRatingAsync(
-        int appUserId, Guid mediaItemId, int? rating, CancellationToken cancellationToken)
+        int appUserId, Guid mediaItemId, int? rating, CancellationToken cancellationToken, bool includeRemoved = false)
     {
         if (rating is { } value && !UserRatingScale.IsValid(value))
         {
             return new SetRatingResult(SetRatingStatus.OutOfRange, null);
         }
 
-        var item = await FindItemByIdAsync(mediaItemId, cancellationToken);
+        var item = await FindPersonalItemAsync(appUserId, mediaItemId, includeRemoved, cancellationToken);
         if (item is null)
         {
             return new SetRatingResult(SetRatingStatus.ItemNotFound, null);
@@ -410,6 +410,12 @@ public sealed class UserDataService(
         await database.SaveChangesAsync(cancellationToken);
         return new SetRatingResult(SetRatingStatus.Applied, await LoadOneAsync(appUserId, item, cancellationToken));
     }
+
+    // Only explicitly opted-in web personal-data routes may address a retained movie.
+    private Task<MediaItem?> FindPersonalItemAsync(int userId, Guid id, bool includeRemoved, CancellationToken cancellationToken) =>
+        includeRemoved
+            ? MovieDetailAccess.Query(database, userId).FirstOrDefaultAsync(item => item.Id == id, cancellationToken)
+            : FindItemByIdAsync(id, cancellationToken);
 
     private async Task<UserItemDataDto> LoadOneAsync(int appUserId, MediaItem item, CancellationToken cancellationToken)
     {

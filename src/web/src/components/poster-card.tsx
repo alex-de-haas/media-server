@@ -32,8 +32,8 @@ export function parsePersonId(id: string): { provider: string; providerId: strin
 // other surfaces retain it. The amber accent carries the resume bar and watched badge.
 //
 // It leads somewhere or it does something: `href` makes it a link to a detail page, `onSelect` a button
-// that opens something in place. A removed title takes the second form — it has no page to go to, only
-// the user's own marks left to manage.
+// that opens something in place. Removed movies link to their retained detail; removed series
+// still open the dialog for managing their retained marks.
 //
 // Exactly one of the two, spelled as a union so a card that does nothing at all cannot be written: the
 // tile is the whole hit target, and an inert one looks identical to a working one.

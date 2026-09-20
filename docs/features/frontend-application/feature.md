@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-09-15
+Updated: 2026-09-19
 
 ## Description
 
@@ -180,6 +180,14 @@ on its card — and a series whose episodes were never probed carries none.
 ## Indexing progress
 
 Movie media cards and expanded episode media cards display [indexing progress](../indexing-progress/feature.md), including independent external audio preparation. The existing SSE bridge updates percentages without polling; reconnect refreshes detail snapshots.
+
+## Movie history and related titles
+
+Movie details include inline viewing history below the synopsis and library-only
+collection/similar rows below the tabs. Removed movie cards open the same detail
+route with retained metadata and personal controls, without Media or playback.
+See [Movie detail context](../movie-detail-context/feature.md) for access rules,
+correction actions, paging, and related-row behavior.
 
 ## Testing Expectations
 
