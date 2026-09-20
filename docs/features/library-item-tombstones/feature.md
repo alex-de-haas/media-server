@@ -1,7 +1,7 @@
 # Library Item Tombstones
 
 Created: 2026-07-26
-Updated: 2026-08-31
+Updated: 2026-09-19
 
 Deleting a movie, series, season, or episode no longer erases the user's
 relationship with it. An item some user favorited, rated, or has at least one
@@ -96,10 +96,10 @@ files takes the same path.
 
 ## Visibility
 
-Every library surface — browse, rails, search, detail, Jellyfin, collections,
+Ordinary library surfaces — browse, rails, search, Jellyfin, collections,
 people, title preview, recommendations' "already in library", watch-history
-sync preview/apply, catalog metadata refresh — reads published items only; a
-tombstone surfaces nowhere. Two places deliberately know ghosts:
+sync preview/apply, catalog metadata refresh — read published items only; a
+tombstone stays excluded. These web surfaces deliberately know ghosts:
 
 - The **watched calendar** keeps rendering plays of tombstoned titles with
   poster and title from the retained metadata (it never links to item pages).
@@ -112,19 +112,18 @@ tombstone surfaces nowhere. Two places deliberately know ghosts:
   when this user has none; it lives in the URL (`?removed=1`), like the catalog
   filter, so the view survives a refresh.
 
-A ghost card opens a dialog rather than a page — there is no page, and nothing
-about it can be played or edited. The dialog shows the user's signal summary
-(favorite, rating, plays aggregated across the ghost subtree, last watched) and
-the only writes that reach a tombstone:
+A removed **movie** card opens its ordinary detail route with retained synopsis,
+cast, artwork, personal rating/favorite, and editable viewing history. Media and
+playback/file actions are absent. Access requires the caller's own retained
+signal; another user's marks alone do not grant access. See
+[Movie detail context](../movie-detail-context/feature.md).
 
-- **Unfavorite**, across the whole ghost subtree — the favorite may sit on an
-  episode that kept the chain alive, and the ordinary endpoint refuses ghosts;
-- **Clear rating** — its own action, because deleting a file does not retract a
-  verdict on a film that was watched;
-- **Delete permanently** (admin), the retroactive full purge of the tombstone
-  and its subtree (`DELETE /api/library/removed/{id}`).
-
-Clearing the last of those marks purges the ghost outright, as above.
+A removed **series** card still opens the summary dialog with subtree unfavorite,
+clear rating, and admin-only permanent deletion. Movie detail exposes personal
+rating/favorite changes, individual watch edits, logging, and the same admin
+permanent-delete action. Clearing a final mark still purges an untouched ghost;
+a caller losing their last mark returns to the removed movie list even if
+another user's marks keep the record alive.
 
 ## Testing Expectations
 
@@ -149,8 +148,8 @@ Clearing the last of those marks purges the ghost outright, as above.
   mark being cleared.
 - `WatchHistoryEntryServiceTests` — deleting a ghost's last play takes the
   ghost; another user's play keeps it; a published title is untouched.
-- Web e2e (`removed-titles.spec.ts`) — the toggle's default-off, hidden-when-
-  empty and URL behavior; the dialog's per-mark actions; admin-only permanent
-  delete; a series ghost belonging to the series grid.
+- Web e2e (`removed-titles.spec.ts`, `movie-detail-context.spec.ts`) — the toggle's
+  default-off, hidden-when-empty and URL behavior; movie detail navigation and
+  personal actions; admin-only permanent deletion; unchanged series dialogs.
 - Web e2e (`detail.spec.ts`) — both delete checkboxes and the query
   parameters they drive.

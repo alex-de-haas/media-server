@@ -1739,7 +1739,10 @@
             ]
           },
           "catalogId": {
-            "type": "string",
+            "type": [
+              "null",
+              "string"
+            ],
             "format": "uuid"
           },
           "catalogName": {
@@ -1997,6 +2000,13 @@
             "items": {
               "$ref": "#/components/schemas/CrewMemberDto"
             }
+          },
+          "removedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
           }
         }
       },

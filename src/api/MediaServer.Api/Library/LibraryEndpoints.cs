@@ -2,6 +2,7 @@ using System.Security.Claims;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Jellyfin;
+using MediaServer.Api.WatchHistory;
 
 namespace MediaServer.Api.Library;
 
@@ -66,8 +67,33 @@ public static class LibraryEndpoints
             CancellationToken cancellationToken) =>
         {
             var appUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
-            var detail = await library.GetDetailAsync(id, appUserId, cancellationToken);
+            var detail = await library.GetDetailAsync(id, appUserId, cancellationToken, includeRemoved: true);
             return detail is null ? Results.NotFound() : Results.Ok(detail);
+        });
+
+        group.MapGet("/{id:guid}/watch-history", async (
+            Guid id, int? offset, int? limit, ClaimsPrincipal principal,
+            MovieWatchHistoryService history, MediaServerDbContext database, CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
+                return Results.Unauthorized();
+            if (offset is < 0 || limit is < 1 or > 100)
+                return Results.BadRequest(new { error = "Offset must be nonnegative and limit between 1 and 100." });
+            var result = await history.LoadAsync(userId, id, offset ?? 0, limit ?? 20, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        group.MapGet("/{id:guid}/related/{section}", async (
+            Guid id, string section, ClaimsPrincipal principal,
+            RelatedMoviesService related, MediaServerDbContext database, CancellationToken cancellationToken) =>
+        {
+            if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
+                return Results.Unauthorized();
+            if (section is not ("collection" or "similar")) return Results.NotFound();
+            var result = section == "collection"
+                ? await related.CollectionAsync(id, userId, cancellationToken)
+                : await related.SimilarAsync(id, userId, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
         group.MapGet("/{id:guid}/episodes", async (
@@ -134,20 +160,20 @@ public static class LibraryEndpoints
                 return Results.BadRequest(new { error = "'watchedAt' is required." });
             }
 
-            return ToResult(await userData.LogWatchAsync(userId, id, watchedAt, cancellationToken));
+            return ToResult(await userData.LogWatchAsync(userId, id, watchedAt, cancellationToken, includeRemoved: true));
         });
 
-        group.MapPost("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
-            SetFavoriteAsync(id, favorite: true, principal, userData, database, cancellationToken));
-        group.MapDelete("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
-            SetFavoriteAsync(id, favorite: false, principal, userData, database, cancellationToken));
+        group.MapPost("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, LibraryDeleteService deletes, CancellationToken cancellationToken) =>
+            SetFavoriteAsync(id, favorite: true, principal, userData, database, deletes, cancellationToken));
+        group.MapDelete("/{id:guid}/favorite", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, LibraryDeleteService deletes, CancellationToken cancellationToken) =>
+            SetFavoriteAsync(id, favorite: false, principal, userData, database, deletes, cancellationToken));
 
         // The 1-5 star verdict on a watched work — a separate system from the favorite above, which is
         // curation. DELETE clears it back to unrated, which is a different statement from one star.
-        group.MapPut("/{id:guid}/rating", (Guid id, SetRatingRequest request, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
-            SetRatingAsync(id, request.Rating, principal, userData, database, cancellationToken));
-        group.MapDelete("/{id:guid}/rating", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
-            SetRatingAsync(id, rating: null, principal, userData, database, cancellationToken));
+        group.MapPut("/{id:guid}/rating", (Guid id, SetRatingRequest request, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, LibraryDeleteService deletes, CancellationToken cancellationToken) =>
+            SetRatingAsync(id, request.Rating, principal, userData, database, deletes, cancellationToken));
+        group.MapDelete("/{id:guid}/rating", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, LibraryDeleteService deletes, CancellationToken cancellationToken) =>
+            SetRatingAsync(id, rating: null, principal, userData, database, deletes, cancellationToken));
 
         // The removed-titles surface: tombstoned movies/series with the signed-in user's signal summary,
         // clearing one's own favorite on a ghost, and the retroactive full purge (admin).
@@ -414,27 +440,30 @@ public static class LibraryEndpoints
         return data is null ? Results.NotFound() : Results.Ok(data);
     }
 
-    private static async Task<IResult> SetFavoriteAsync(
-        Guid id, bool favorite, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken)
+    internal static async Task<IResult> SetFavoriteAsync(
+        Guid id, bool favorite, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, LibraryDeleteService deletes, CancellationToken cancellationToken)
     {
         if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
         {
             return Results.Unauthorized();
         }
 
-        var data = await userData.SetFavoriteAsync(userId, id, favorite, cancellationToken);
+        var data = await userData.SetFavoriteAsync(userId, id, favorite, cancellationToken, includeRemoved: true);
+        if (data is not null && !favorite) await deletes.PurgeIfUntouchedAsync(id, cancellationToken);
         return data is null ? Results.NotFound() : Results.Ok(data);
     }
 
-    private static async Task<IResult> SetRatingAsync(
-        Guid id, int? rating, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken)
+    internal static async Task<IResult> SetRatingAsync(
+        Guid id, int? rating, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, LibraryDeleteService deletes, CancellationToken cancellationToken)
     {
         if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } userId)
         {
             return Results.Unauthorized();
         }
 
-        return ToResult(await userData.SetRatingAsync(userId, id, rating, cancellationToken));
+        var result = await userData.SetRatingAsync(userId, id, rating, cancellationToken, includeRemoved: true);
+        if (result.Status == SetRatingStatus.Applied && rating is null) await deletes.PurgeIfUntouchedAsync(id, cancellationToken);
+        return ToResult(result);
     }
 
     internal static IResult ToResult(SetRatingResult result) => result.Status switch

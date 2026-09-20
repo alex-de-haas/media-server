@@ -27,16 +27,7 @@ import {
   type WatchedKindFilter,
 } from "@/lib/watch-history-calendar";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteWatchDialog } from "@/components/delete-watch-dialog";
 import {
   Dialog,
   DialogContent,
@@ -297,31 +288,11 @@ export function WatchedCalendar({
         }
       />
 
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <AlertDialogContent className="sm:max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this play?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Removes one recorded play of{" "}
-              <span className="text-foreground font-medium">{deleteTarget?.heading}</span>
-              {deleteTarget?.detail && <> ({deleteTarget.detail})</>} from your history. The play
-              count follows, and a connected service is asked to drop the entry when this app is the
-              one that put it there. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              size="sm"
-              disabled={remove.isPending}
-              onClick={() => deleteTarget && remove.mutate(deleteTarget.entryId)}
-            >
-              {remove.isPending ? "Deleting…" : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteWatchDialog
+        open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={deleteTarget?.heading} detail={deleteTarget?.detail} pending={remove.isPending}
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget.entryId)}
+      />
     </>
   );
 

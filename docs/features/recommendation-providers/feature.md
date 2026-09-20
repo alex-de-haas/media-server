@@ -1,7 +1,7 @@
 # Recommendations
 
 Created: 2026-07-25
-Updated: 2026-09-11
+Updated: 2026-09-19
 
 ## Description
 
@@ -352,6 +352,14 @@ Deliberately out of scope: episode-level recommendations, any direct hand-off
 from a discovery card into torrent intake, syncing ratings to any provider, and
 the two upper rungs of the cold-start ladder (borrowing another user's history,
 which is a privacy question; and trending filtered through the profile).
+
+## Movie-specific related row
+
+[Movie detail](../movie-detail-context/feature.md) reuses the cached TMDb seed
+source for a library-only related row. It preserves TMDb list order and includes
+watched, rated, and tracked candidates; personalized-feed exclusions and ranking
+do not govern a relation to one explicitly opened movie. Collection siblings use
+a separate local row. Normal recommendation availability still excludes tombstones.
 
 ## Testing Expectations
 

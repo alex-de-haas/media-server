@@ -1,7 +1,7 @@
 # Watch-History Deletion
 
 Created: 2026-08-05
-Updated: 2026-09-11
+Updated: 2026-09-19
 
 ## Description
 
@@ -101,11 +101,19 @@ unmake it.
 ## Not included
 
 Deliberately out of scope: deleting a whole day or an item's entire history at
-once, re-dating an entry that already carries a timestamp, and a history list on
-the item page. Deleting is a correction to one row; wholesale removal of an
-item's history is handled by permanent library deletion. Recording a
+once. Time correction is covered by
+[manual entries](../watch-history-manual-entries/feature.md). Deleting is a
+correction to one row; wholesale removal of an item's history is handled by permanent library deletion. Recording a
 play that is *missing* — including giving an undated mark its time — is
 [watch-history-manual-entries](../watch-history-manual-entries/feature.md).
+
+## Movie detail history
+
+The [movie detail page](../movie-detail-context/feature.md) offers the same
+per-entry deletion with the calendar's shared confirmation dialog. Removed
+movies explain that clearing the final personal mark removes the title from the
+caller's list; a subsequent inaccessible detail redirects back to that list.
+Deleting or correcting a watch refreshes both calendar and movie-history queries.
 
 ## Testing Expectations
 

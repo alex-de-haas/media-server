@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.Library;
 
 /// <summary>
-/// Read-only projection of the published library into UI DTOs for the internal <c>/api</c> surface.
+/// Read-only projection of the library into UI DTOs. Removed movie detail requires an explicit web opt-in.
 /// It queries the EF domain directly and reuses the surface-neutral <see cref="UserDataService"/> for
 /// per-user playback state. This is a sibling of the Jellyfin <c>JellyfinLibraryService</c> — both read
 /// the same domain, neither depends on the other, and the UI never touches the Jellyfin DTOs.
@@ -425,10 +425,11 @@ public sealed class LibraryReadService(
     }
 
     /// <summary>Detail for a single item by internal id. Movies/episodes carry media sources; series carry seasons.</summary>
-    public async Task<LibraryDetailDto?> GetDetailAsync(Guid id, int? appUserId, CancellationToken cancellationToken)
+    public async Task<LibraryDetailDto?> GetDetailAsync(Guid id, int? appUserId, CancellationToken cancellationToken, bool includeRemoved = false)
     {
-        var item = await database.MediaItems.AsNoTracking()
-            .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.PublicId != null, cancellationToken);
+        var query = includeRemoved ? MovieDetailAccess.Query(database, appUserId)
+            : database.MediaItems.AsNoTracking().Where(item => item.PublicId != null && item.RemovedAt == null);
+        var item = await query.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
             return null;
@@ -495,7 +496,7 @@ public sealed class LibraryReadService(
             item.Id,
             item.PublicId,
             TmdbId(item),
-            item.CatalogId!.Value,
+            item.CatalogId,
             catalogName,
             catalogRoot,
             item.Kind.ToString(),
@@ -534,7 +535,8 @@ public sealed class LibraryReadService(
             rich.Creators,
             rich.Studios.Select(brand => new StudioDto(brand.Name, brand.LogoUrl)).ToList(),
             rich.Keywords,
-            crew);
+            crew,
+            item.RemovedAt);
     }
 
     /// <summary>

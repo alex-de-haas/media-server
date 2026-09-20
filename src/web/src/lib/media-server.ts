@@ -412,11 +412,19 @@ export interface SeasonSummary {
   userData: UserItemData | null;
 }
 
+export interface MovieWatchEntry { id: string; watchedAt: string | null }
+export interface MovieWatchHistoryPage {
+  entries: MovieWatchEntry[]; undated: MovieWatchEntry[];
+  total: number; datedTotal: number; offset: number; limit: number;
+}
+export interface RelatedMoviesPage { collectionName: string | null; items: LibraryItem[] }
+
 export interface LibraryDetail {
+  removedAt?: string | null;
   id: string;
   publicId: string | null;
   tmdbId: string | null;
-  catalogId: string;
+  catalogId: string | null;
   // Name and root host path of the catalog this item lives in.
   catalogName: string;
   catalogRoot: string;
@@ -1077,6 +1085,10 @@ export const mediaServer = {
     const suffix = queryString ? `?${queryString}` : "";
     return apiJson<LibraryItem[]>(`${BASE}/library${suffix}`);
   },
+  movieWatchHistory: (id: string, offset = 0, limit = 20) =>
+    apiJson<MovieWatchHistoryPage>(`${BASE}/library/${id}/watch-history?offset=${offset}&limit=${limit}`),
+  relatedMovies: (id: string, section: "collection" | "similar") =>
+    apiJson<RelatedMoviesPage>(`${BASE}/library/${id}/related/${section}`),
   getLibraryDetail: (id: string) => apiJson<LibraryDetail>(`${BASE}/library/${id}`),
   listEpisodes: (seriesId: string, seasonId?: string) =>
     apiJson<Episode[]>(`${BASE}/library/${seriesId}/episodes${seasonId ? `?seasonId=${seasonId}` : ""}`),
