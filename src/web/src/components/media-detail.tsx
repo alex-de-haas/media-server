@@ -92,7 +92,7 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
       <Hero item={item} />
       {item.kind === "Movie" && <MovieWatchHistory key={item.id} id={item.id} title={item.title} removed={!!item.removedAt} />}
       <DetailTabs item={item} backHref={backHref} />
-      {item.kind === "Movie" && <RelatedMovies id={item.id} />}
+      {item.kind === "Movie" && <RelatedMovies id={item.id} backHref={backHref} />}
     </div>
   );
 }

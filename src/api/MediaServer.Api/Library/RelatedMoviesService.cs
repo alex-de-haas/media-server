@@ -52,8 +52,8 @@ public sealed class RelatedMoviesService(
         var identities = candidates.Select(item => new { item.Id, item.CollectionId,
             TmdbId = TmdbId(item.IdentityProvider, item.IdentityProviderId, item.Providers) }).ToList();
         // Legacy copies across catalogs must not repeat a collection title in the similar row.
-        var collectionIdentities = identities.Where(item => seed.CollectionId != null && item.CollectionId == seed.CollectionId)
-            .Select(item => item.TmdbId).ToHashSet(StringComparer.Ordinal);
+        var collectionIdentities = identities.Where(item => seed.CollectionId != null && item.CollectionId == seed.CollectionId && item.TmdbId != null)
+            .Select(item => item.TmdbId!).ToHashSet(StringComparer.Ordinal);
         var byProvider = identities.Where(item => item.TmdbId != null && !collectionIdentities.Contains(item.TmdbId))
             .OrderBy(item => item.Id)
             .GroupBy(item => item.TmdbId!, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.First().Id);

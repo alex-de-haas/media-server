@@ -87,11 +87,14 @@ public sealed class MovieDetailContextTests : IDisposable
     }
 
     [Theory]
-    [InlineData(-1, 20)]
-    [InlineData(0, 0)]
-    [InlineData(0, 101)]
-    public async Task History_rejects_invalid_page_bounds(int offset, int limit) =>
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => new MovieWatchHistoryService(Db).LoadAsync(_me.Id, _movie.Id, offset, limit, Ct));
+    [InlineData(-1, 20, "offset")]
+    [InlineData(0, 0, "limit")]
+    [InlineData(0, 101, "limit")]
+    public async Task History_rejects_invalid_page_bounds(int offset, int limit, string parameter)
+    {
+        var error = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => new MovieWatchHistoryService(Db).LoadAsync(_me.Id, _movie.Id, offset, limit, Ct));
+        Assert.Equal(parameter, error.ParamName);
+    }
 
     [Fact]
     public async Task Removed_detail_requires_own_signal_and_explicit_web_opt_in()
@@ -202,6 +205,26 @@ public sealed class MovieDetailContextTests : IDisposable
         Assert.Equal(new[] { first.Id, second.Id }, similar!.Items.Select(item => item.Id));
         Assert.Equal(5, similar.Items[0].UserData!.UserRating);
         Assert.Null(await service.SimilarAsync(_movie.Id, _other.Id, Ct));
+    }
+
+    [Fact]
+    public async Task Similar_movies_ignore_collection_members_without_tmdb_identity()
+    {
+        var collection = new MovieCollection { Id = Guid.NewGuid(), Provider = "tmdb", ProviderId = "100", Name = "Saga" };
+        Db.MovieCollections.Add(collection);
+        _movie.CollectionId = collection.Id;
+        var unknown = Movie("11", "Unknown identity");
+        unknown.CollectionId = collection.Id;
+        unknown.IdentityProviderId = null;
+        var candidate = Movie("12", "Recommendation");
+        await Db.SaveChangesAsync();
+        var source = ITmdbRecommendationSource.Imposter();
+        source.ForSeedAsync(Arg<RecommendationIdentity>.Any(), Arg<TmdbRecommendationGenerator>.Any(), Arg<CancellationToken>.Any())
+            .Returns(Task.FromResult<IReadOnlyList<TmdbRecommendedTitle>>([Title("12")]));
+        var service = new RelatedMoviesService(Db, Library, source.Instance());
+
+        Assert.Equal(unknown.Id, Assert.Single((await service.CollectionAsync(_movie.Id, _me.Id, Ct))!.Items).Id);
+        Assert.Equal(candidate.Id, Assert.Single((await service.SimilarAsync(_movie.Id, _me.Id, Ct))!.Items).Id);
     }
 
     [Fact]

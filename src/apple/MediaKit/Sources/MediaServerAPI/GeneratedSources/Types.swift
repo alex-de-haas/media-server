@@ -966,7 +966,7 @@ public enum Components {
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/tmdbId`.
             public var tmdbId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/catalogId`.
-            public var catalogId: Swift.String
+            public var catalogId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/catalogName`.
             public var catalogName: Swift.String
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/catalogRoot`.
@@ -1045,6 +1045,8 @@ public enum Components {
             public var keywords: [Swift.String]
             /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/crew`.
             public var crew: [Components.Schemas.CrewMemberDto]?
+            /// - Remark: Generated from `#/components/schemas/LibraryDetailDto/removedAt`.
+            public var removedAt: Foundation.Date?
             /// Creates a new `LibraryDetailDto`.
             ///
             /// - Parameters:
@@ -1091,11 +1093,12 @@ public enum Components {
             ///   - studios:
             ///   - keywords:
             ///   - crew:
+            ///   - removedAt:
             public init(
                 id: Swift.String,
                 publicId: Swift.String? = nil,
                 tmdbId: Swift.String? = nil,
-                catalogId: Swift.String,
+                catalogId: Swift.String? = nil,
                 catalogName: Swift.String,
                 catalogRoot: Swift.String,
                 kind: Swift.String,
@@ -1134,7 +1137,8 @@ public enum Components {
                 creators: [Swift.String],
                 studios: [Components.Schemas.StudioDto],
                 keywords: [Swift.String],
-                crew: [Components.Schemas.CrewMemberDto]? = nil
+                crew: [Components.Schemas.CrewMemberDto]? = nil,
+                removedAt: Foundation.Date? = nil
             ) {
                 self.id = id
                 self.publicId = publicId
@@ -1179,6 +1183,7 @@ public enum Components {
                 self.studios = studios
                 self.keywords = keywords
                 self.crew = crew
+                self.removedAt = removedAt
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -1224,6 +1229,7 @@ public enum Components {
                 case studios
                 case keywords
                 case crew
+                case removedAt
             }
         }
         /// - Remark: Generated from `#/components/schemas/LibraryGapDto`.

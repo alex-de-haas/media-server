@@ -19,8 +19,10 @@ public sealed class MovieWatchHistoryService(MediaServerDbContext database)
     public async Task<MovieWatchHistoryDto?> LoadAsync(
         int appUserId, Guid id, int offset, int limit, CancellationToken cancellationToken)
     {
-        if (offset < 0 || limit is < 1 or > 100)
-            throw new ArgumentOutOfRangeException(nameof(limit), "Offset must be nonnegative and limit between 1 and 100.");
+        if (offset < 0)
+            throw new ArgumentOutOfRangeException(nameof(offset), "Offset must be nonnegative.");
+        if (limit is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be between 1 and 100.");
         if (!await MovieDetailAccess.Query(database, appUserId)
                 .AnyAsync(item => item.Id == id && item.Kind == MediaKind.Movie, cancellationToken))
             return null;

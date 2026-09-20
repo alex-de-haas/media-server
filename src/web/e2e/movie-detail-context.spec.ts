@@ -87,6 +87,24 @@ test("collection loads despite recommendation failure and its cards open movie d
   await expect(page).toHaveURL(/\/movies\/m2$/);
 });
 
+for (const section of ["collection", "similar"] as const) {
+  test(`${section} links preserve browse filters through details and back to the grid`, async ({ page }) => {
+    await setupApp(page, {
+      catalogs: [{ id: "c1", name: "Movies", type: "Movie", root: "/movies", mountAvailable: true }],
+      detail: { m1: movieDetail("m1", "Arrival"), m2: movieDetail("m2", "Contact") },
+    });
+    await page.route(`**/api/proxy/api/library/m1/related/${section}`, (route) => route.fulfill({
+      json: { collectionName: "Saga", items: [aMovie("m2", "Contact")] },
+    }));
+    await page.goto("/movies/m1?catalog=c1&removed=1");
+    await page.getByRole("link", { name: /Contact/ }).click();
+    await expect(page).toHaveURL(/\/movies\/m2\?catalog=c1&removed=1$/);
+    await expect(page.getByRole("heading", { name: "Contact", exact: true })).toBeVisible();
+    await page.locator('a[href="/movies?catalog=c1&removed=1"]').click();
+    await expect(page).toHaveURL(/\/movies\?catalog=c1&removed=1$/);
+  });
+}
+
 test("movie history stays usable on a narrow viewport", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await setupApp(page, { detail: { m1: movieDetail("m1", "Arrival") } });

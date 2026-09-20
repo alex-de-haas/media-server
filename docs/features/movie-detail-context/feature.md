@@ -1,7 +1,7 @@
 # Movie Detail Context
 
 Created: 2026-09-19
-Updated: 2026-09-19
+Updated: 2026-09-20
 
 ## Movie page
 
@@ -40,8 +40,9 @@ return 404. All history reads and writes belong to the authenticated caller.
 ## Related movies
 
 Both rows contain available library movies only and link to normal movie detail
-pages. Empty rows are hidden. Reads are independent, so a slow or failed TMDb
-request does not block the hero, history, or collection row.
+pages, preserving the current catalog and removed-list filters across related
+details and the return to the grid. Empty rows are hidden. Reads are independent,
+so a slow or failed TMDb request does not block the hero, history, or collection row.
 
 - `GET /api/library/{id}/related/collection` reads other published movies from
   the seed's stored collection across catalogs, sorted by release year and title,
@@ -98,7 +99,8 @@ still return published items with a catalog and a null `removedAt`.
   web opt-in, foreign-write refusal, rating validation, logging, last-mark purge
   through web handlers, another user's retained history, revival, single-member
   collection rows, release ordering, provider-order matching, watched candidates,
-  unavailable/series/duplicate filtering, and missing provider identity.
+  unavailable/series/duplicate filtering, and missing seed or collection-member
+  provider identity.
 - Existing watch-history tests cover timestamp/aggregate semantics and local/UTC
   conversion across daylight-saving changes. Tombstone/native/Jellyfin regression
   suites preserve ordinary visibility and playback exclusions. Existing TMDb
@@ -107,4 +109,5 @@ still return published items with a catalog and a null `removedAt`.
   `calendar.spec.ts`: inline expansion/pagination, undated correction, logging on
   removed movies, cancelled/failed deletion, rating editing and final-mark
   navigation, removed controls and role gating, independent related loading,
-  keyboard navigation, narrow layouts, and existing calendar/detail interactions.
+  filtered navigation through both related rows, keyboard navigation, narrow layouts,
+  and existing calendar/detail interactions.
