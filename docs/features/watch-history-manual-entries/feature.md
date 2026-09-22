@@ -1,7 +1,7 @@
 # Watch-History Manual Entries
 
 Created: 2026-08-09
-Updated: 2026-09-11
+Updated: 2026-09-19
 
 ## Description
 
@@ -172,6 +172,14 @@ Deliberately out of scope: editing anything about a play other than its time —
 which item it belongs to, or where it came from — logging a watch for a whole
 season or series at once, logging one from the episode list, moving a whole day's
 plays at once, and any bulk backfill.
+
+## Movie detail history
+
+The [movie detail page](../movie-detail-context/feature.md) offers Log watch beside
+its inline history as well as in the overflow menu, and Set time / Change time
+on individual entries. Retained removed movies accept these web actions when the
+caller has their own retained signal. Public/native playback paths keep their
+published-item requirement.
 
 ## Testing Expectations
 

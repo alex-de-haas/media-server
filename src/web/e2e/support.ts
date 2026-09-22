@@ -254,6 +254,13 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     const imagesItemId = path.match(/^\/library\/([^/]+)\/images$/)?.[1];
     if (imagesItemId) return route.fulfill({ json: mock.itemImages?.[imagesItemId] ?? [] });
 
+    if (/^\/library\/[^/]+\/watch-history$/.test(path)) {
+      return route.fulfill({ json: { entries: [], undated: [], total: 0, datedTotal: 0, offset: 0, limit: 20 } });
+    }
+    if (/^\/library\/[^/]+\/related\/(collection|similar)$/.test(path)) {
+      return route.fulfill({ json: { collectionName: null, items: [] } });
+    }
+
     const detailId = path.match(/^\/library\/([^/]+)$/)?.[1];
     if (detailId && mock.detail?.[detailId]) return route.fulfill({ json: mock.detail[detailId] });
 

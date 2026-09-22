@@ -5,7 +5,7 @@ import { buildCoreOpenUrl, detectLaunchMode } from "@hosty-sdk/app";
 import type { SessionFailureStatus } from "@/lib/host-auth";
 
 // Once-per-tab guard so a standalone tab that comes back from Core still unauthorized does not
-// bounce through /open forever. Cleared by the code exchange in providers.tsx on success.
+// bounce through /open forever. Cleared by the code exchange in use-app-code-exchange.ts on success.
 const RECOVERY_GUARD_KEY = "hosty.auth.recovery-attempted";
 // How long an embedded frame waits for Shell to reissue a launch code before falling back to the
 // manual sign-in card (i.e. it is embedded by something other than Hosty Shell, or Shell broke).

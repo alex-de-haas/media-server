@@ -156,6 +156,8 @@ export function formatSpan(group: WatchedGroup): string {
  */
 export const QUERIES_AFFECTED_BY_HISTORY_CHANGE = [
   ["watch-history-calendar"],
+  ["movie-watch-history"],
+  ["related-movies"],
   ["watch-history-undated"],
   ["library"],
   ["library-detail"],

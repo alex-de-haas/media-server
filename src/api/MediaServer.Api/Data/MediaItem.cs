@@ -19,7 +19,7 @@ public sealed class MediaItem
     /// Set when the item was deleted from the library but kept as a tombstone because user data —
     /// favorites, watched state, playback history — still references it. A tombstone is unpublished
     /// (<see cref="PublicId"/> is null), owns no sources, and is invisible to every library surface
-    /// except the watched calendar and the removed-titles list. Ingest adopts it back by identity.
+    /// except the watched calendar, removed-titles list, and caller-scoped web movie detail. Ingest adopts it back by identity.
     /// </summary>
     public DateTimeOffset? RemovedAt { get; set; }
 

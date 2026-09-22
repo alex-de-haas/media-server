@@ -1,7 +1,7 @@
 # Collections (Movie Franchises)
 
 Created: 2026-06-24
-Updated: 2026-09-15
+Updated: 2026-09-19
 
 Movies the operator owns are grouped into the franchise they belong to, and the
 grouping is browsable on both surfaces: a Collections page in the web UI, and a
@@ -186,6 +186,13 @@ The native Apple TV client exposes Home, Movies, Series, Groups, Collections, an
 The visual layout and authenticated collection list, detail, and artwork routes
 are described in [Apple client visual design](../apple-client-visual-design/feature.md).
 Collection reads exclude removed movies from counts, members, and poster fallbacks.
+
+## Movie detail siblings
+
+[Movie detail](../movie-detail-context/feature.md) shows an independent local
+collection row with other available members, even when only one sibling remains
+for a removed seed. It excludes the current movie and removed members. This row
+does not change the two-owned-movies threshold on collection overview surfaces.
 
 ## Testing Expectations
 

@@ -1,7 +1,7 @@
 # Apple Client Visual Design and Collections
 
 Created: 2026-09-06
-Updated: 2026-09-15
+Updated: 2026-09-17
 
 Collections reload through the store’s screen-appearance handler whenever the
 collection screen appears. The unsupported-server
@@ -13,6 +13,8 @@ is in flight; subsequent refreshes remain available after success or failure.
 
 The tvOS client follows the system light/dark appearance with an adaptive neutral canvas, system typography, and native card
 focus. Its top-level tabs are Home, Movies, Series, Groups, Collections, and Settings.
+The Series tab explicitly renders its television symbol as a monochrome template,
+leaving its tint to the native tab bar for light/dark appearance, selection, and focus.
 
 [Home](../apple-tv-home/feature.md) owns Continue Watching, Next Up, and held
 recommendations. Movies and Series retain complete poster grids. Home refreshes
@@ -131,5 +133,8 @@ native group list and paged member routes using the generated Swift client.
   Shared collection and Jellyfin tests guard existing behavior.
 - Build tvOS with Xcode and exercise focus, back navigation, tab switching,
   full synopsis layout and technical-detail sheet navigation, and visual fallbacks in the simulator.
+- Check the Series tab icon in both appearances while unselected, focused, and
+  selected, including returning focus to the content and switching to another tab.
+  Its tint must follow the native tab label and remain visible against the tab background.
 - Validate real artwork, pairing QR scanning, playback, Siri Remote focus, and
   accessibility on Apple TV against a Core-managed instance before acceptance.
