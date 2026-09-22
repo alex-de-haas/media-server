@@ -3614,6 +3614,13 @@
               "null",
               "string"
             ]
+          },
+          "lastWatchedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
           }
         }
       },

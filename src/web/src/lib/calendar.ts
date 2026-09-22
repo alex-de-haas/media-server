@@ -11,11 +11,11 @@ export const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] 
 export type CalendarMode = "releases" | "watched";
 
 /**
- * Releases is the default so an existing `/calendar` link keeps its meaning. Anything unrecognized
+ * Watched is the default. Anything unrecognized
  * falls back rather than erroring — a hand-edited URL should show a calendar, not a crash.
  */
 export function parseCalendarMode(value: string | null | undefined): CalendarMode {
-  return value === "watched" ? "watched" : "releases";
+  return value === "releases" ? "releases" : "watched";
 }
 
 /** The month a `?month=yyyy-MM` param selects; an absent or malformed value means "this month". */
@@ -43,7 +43,7 @@ export function toMonthParam(month: Date): string {
  */
 export function calendarHref(mode: CalendarMode, month: Date, today: Date = new Date()): string {
   const params = new URLSearchParams();
-  if (mode !== "releases") {
+  if (mode !== "watched") {
     params.set("view", mode);
   }
   if (toMonthParam(month) !== toMonthParam(today)) {

@@ -1,7 +1,7 @@
 # Watch-History Manual Entries
 
 Created: 2026-08-09
-Updated: 2026-09-19
+Updated: 2026-09-22
 
 ## Description
 
@@ -16,13 +16,13 @@ question:
 
 All three put a play on a day of the Watched calendar
 ([watch-history-calendar](../watch-history-calendar/feature.md)), which nothing
-else about a hand-made statement does: the watched toggle records a **timeless**
+else about a hand-made statement does: the Jellyfin played command records a **timeless**
 entry by design, and timeless entries are counted under `Undated N` rather than
 placed on a guessed day.
 
-The first two exist because a dated play is only ever produced by playback
-reports observed crossing the watched threshold. Two ordinary situations bypass
-that:
+Logging and setting time cover viewings without an observed threshold crossing
+or an explicit Finish watching action. Two ordinary situations bypass playback
+observation:
 
 1. **The viewing happened elsewhere** — another device, a cinema, a disc — and
    the server saw none of it.
@@ -43,13 +43,28 @@ This is the counterpart to
 play that should not be there, this records one that is missing — or moves one
 that is in the wrong place.
 
-## The toggle is untouched
+## Playback status and explicit completion
 
-`Mark watched` / `Mark unwatched` keep their semantics exactly: an idempotent
-statement about current state, at most one timeless entry, and no second viewing
-for a second click. The toggle is the one-click gesture on the button row;
-logging a past viewing is rare, and making the common case ask for a time would
-tax it to serve the exception.
+Movie heroes and episode rows show watched status and the date of the latest
+actual dated history entry. An undated Jellyfin mark can set the status, but does
+not invent a date. The web interface has no timeless watched/unwatched toggle.
+Jellyfin played/unplayed commands keep their existing timeless semantics.
+
+An in-progress movie or episode offers **Finish watching** and **Clear progress**.
+Finishing records a dated manual watch at the current server time, marks the item
+watched and clears its resume position. A transaction claims the position, so
+repeated completion requests add no extra watch. When the position belongs to a
+known player session, that session is completed too; later reports from it cannot
+record another completion. An already completed session does not get another
+history entry. Without a resume position, finishing is a no-op.
+
+Clearing progress only resets the resume position. It does not change watched
+state, counts, dates, or history. Both controls also appear on the home
+**Continue watching** cards. Without a resume position the detail controls offer
+**Log watch**, with the time dialog initially set to now.
+
+Automatic playback completion uses an 85% runtime threshold. The existing session
+and below-threshold observation requirements still apply.
 
 ## Where it appears
 
@@ -95,8 +110,7 @@ as an observed play does.
 Any playable leaf — a movie, an episode, an extra — is a valid target of the API,
 the same set that accepts playback reports. A season or series is refused, because
 marking a folder is a fan-out over its episodes and logging one viewing against
-the folder itself is a different gesture. The UI offers the action on the movie
-page.
+the folder itself is a different gesture. The UI offers the action on movie pages and episode rows.
 
 ### What the aggregates become
 
@@ -148,9 +162,16 @@ about the item's ordering.
 ```http
 POST  /api/library/{id}/watches          { "watchedAt": "<utc-instant>" }
 PATCH /api/watch-history/entries/{id}    { "watchedAt": "<utc-instant>" }
+POST  /api/library/{id}/resume/finish
+DELETE /api/library/{id}/resume
 ```
 
-Both are authenticated and scoped to the caller.
+All routes are authenticated and scoped to the caller. Resume operations accept
+published movies and episodes, return updated user data on success (including a
+no-op), 404 for unknown items and 400 for folders. They change only the caller's
+state. The DTO's `lastWatchedAt` comes from dated history, independently of the
+legacy aggregate field of the same name. Folder-only batches skip the dated-history
+aggregation because only playable leaves expose this date.
 
 `POST /watches` answers `200` with the updated `UserItemData`, `404` for an
 unknown item, and `400` for a folder, a missing `watchedAt`, or a future instant.
@@ -170,18 +191,27 @@ minute fast would fail the most common action there is.
 
 Deliberately out of scope: editing anything about a play other than its time —
 which item it belongs to, or where it came from — logging a watch for a whole
-season or series at once, logging one from the episode list, moving a whole day's
+season or series at once, moving a whole day's
 plays at once, and any bulk backfill.
 
 ## Movie detail history
 
 The [movie detail page](../movie-detail-context/feature.md) offers Log watch beside
-its inline history as well as in the overflow menu, and Set time / Change time
-on individual entries. Retained removed movies accept these web actions when the
+its status and in the overflow menu. Inline history appears with at least two
+records and offers Log watch plus Set time / Change time on individual entries.
+Single records remain editable in the calendar. Retained removed movies accept these web actions when the
 caller has their own retained signal. Public/native playback paths keep their
 published-item requirement.
 
 ## Testing Expectations
+
+- Backend coverage checks the 85% boundary, movie and episode completion,
+  repeated requests and later session reports, caller isolation, folder rejection,
+  clear-progress preservation of all viewing facts, and undated status without
+  a fabricated date.
+- `e2e/watch-actions.spec.ts` covers completion and dismissal, zero/one/two-viewing
+  timeline visibility, home card removal, episode controls on phones, and failure
+  recovery without hiding resume actions.
 
 - `WatchHistoryRecorderTests` cover dated manual entries without a session,
   separate rewatches, forward-only aggregate updates, stable watched flags,

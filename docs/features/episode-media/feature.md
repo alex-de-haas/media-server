@@ -1,7 +1,7 @@
 # Episode Media
 
 Created: 2026-09-08
-Updated: 2026-09-09
+Updated: 2026-09-22
 
 An episode has the media surface a movie has — its versions, the tracks inside
 them, the sidecars beside them, and every conversion the
@@ -9,7 +9,7 @@ them, the sidecars beside them, and every conversion the
 component rather than a movie-only one with a series-shaped hole beside it.
 
 Before this, three services refused an episode's version outright ("Only movies can
-be transcoded for now"), and the Episodes tab said nothing about the file behind an
+be transcoded for now"), and the Episodes section said nothing about the file behind an
 episode. Everything below those gates already worked for an episode: the pipeline
 writes per-episode versions with editions, sidecars attach to an episode's source,
 `GET /api/library/{episodeId}` returns its versions, a conversion's output is named
@@ -20,7 +20,7 @@ gates were what was left of "for now".
 
 The version cards, stream sections, sidecar list, the rename and delete dialogs and
 the Conversions block live in `media-sources.tsx`, owned by an item — its id, kind
-and title — rather than by "the movie". A movie's Media tab renders it exactly as
+and title — rather than by "the movie". A movie's Media section renders it exactly as
 before; an episode's expanded row renders the same component fed by the episode's
 own detail. The API accepts the same calls for either kind, and this is the one place
 that offers them, so the two cannot drift.
@@ -41,7 +41,18 @@ the file leaves the whole base name as the stem rather than guessing. Copy lost 
 word "movie": "Create a new version of this title", and the API's "This title already
 has a version at…".
 
-## The Episodes tab
+## The Episodes section
+
+Library seasons appear in a multiple-open accordion, collapsed on every page
+entry. Each heading includes the number of episode entries in the library (for
+example, **Season 1 · 8 episodes**). Clicking it or activating it with the keyboard expands its
+episodes; opening one season does not close another. Season deletion remains a
+separate admin control inside the rounded accordion border, before the disclosure
+arrow at the right edge, available while collapsed. Seasons retained for extras
+still appear and show their empty episode message when expanded. Conversions
+remain visible above the accordion, even when all seasons are collapsed.
+Expanded episodes have horizontal separators between rows, without an inner
+border around the list.
 
 - Every episode row leads with the episode itself — its still, title, air date,
   runtime and synopsis, from [metadata](../metadata/feature.md#episode-details-and-stills) —
@@ -56,18 +67,23 @@ has a version at…".
   never runs into SQLite's parameter limit.
 - Every row **expands**. Expanded, it fetches `GET /api/library/{episodeId}` — on
   expand, so a 200-episode listing does not carry 200 stream lists — and shows what a
-  movie's Media tab shows: versions, tracks, sidecars, and for an admin the controls:
+  movie's Media section shows: versions, tracks, sidecars, and for an admin the controls:
   pin default, rename, convert, extract, merge, delete version, remove sidecar. A
   viewer sees the media and none of the controls.
 - A **Conversions** block sits above the seasons for an admin, listing the jobs of
   every episode of the series. A job card names its output file, which carries the
   episode code, so nothing is lost by not listing them per row. When the last active
   job finishes, the episode listing and every open row's detail refresh, as the movie
-  tab refreshes its version list.
+  section refreshes its version list.
 - **Refresh media data** in the series `⋮` menu fans out over the series' episodes
   on the server: a series row holds no file of its own, so a refresh asked of it is a
   refresh of its episodes' — one gesture per title, as on a movie. There is no
   per-episode control inside the expanded row.
+
+Episode actions show watched status and the latest actual viewing date.
+**Log watch** records a dated viewing; in-progress episodes instead offer
+**Finish watching** and **Clear progress**, using the same controls and semantics
+as movies ([manual entries](../watch-history-manual-entries/feature.md)).
 
 ## The grid
 
@@ -150,7 +166,8 @@ were never probed carries none.
   asks for them.
 - Vitest (`format.test.ts`) — the summary line's order and omissions, "No file"; the
   locked stem for a movie, an episode, no label, a drifted label, no extension.
-- `detail.spec.ts` — the summary on a row and "No file" on one without a source,
+- `detail.spec.ts` — seasons initially collapsed, independent expansion and keyboard
+  collapse, reset on reload, retained empty seasons and deletion while collapsed; the summary on a row and "No file" on one without a source,
   expanding fetching the episode's detail once and listing its versions, a viewer
   seeing the media and none of the controls, an admin opening Convert and Extract
   from an episode's version with copy that fits either kind, the rename preview

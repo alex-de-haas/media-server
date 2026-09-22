@@ -6,7 +6,7 @@ namespace MediaServer.Api.Data;
 /// </summary>
 /// <remarks>
 /// Without this, rewinding past the threshold and watching forward again re-counted the same
-/// viewing: crossing 90% marks the item played, dropping back below clears the flag (it is a genuine
+/// viewing: crossing the completion threshold marks the item played, dropping back below clears the flag (it is a genuine
 /// resume point), and the next crossing increments <see cref="UserItemData.PlayCount"/> again.
 /// Observed on 2026-07-22 — one continuous session took an episode from 0 to 3 plays.
 ///

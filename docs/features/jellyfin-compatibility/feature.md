@@ -1,7 +1,7 @@
 # Jellyfin Compatibility
 
 Created: 2026-06-15
-Updated: 2026-09-08
+Updated: 2026-09-22
 
 ## Description
 
@@ -382,7 +382,7 @@ design.
 ## Playback Progress and User Data
 
 - Progress is stored per internal Media Server user and item.
-- An item is marked played past a fixed 90% threshold
+- An item is marked played past a fixed 85% threshold
   (`UserDataService.WatchedThreshold`) or on an explicit mark; below 5% no resume
   point is kept.
 - Marking watched resets progress; stopping earlier preserves it.

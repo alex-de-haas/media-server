@@ -136,6 +136,14 @@ public static class LibraryEndpoints
         });
 
         // Per-user playback-state mutations (return the updated user data).
+        group.MapDelete("/{id:guid}/resume", async (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
+            await principal.ResolveAppUserIdAsync(database, cancellationToken) is { } userId
+                ? ToResult(await userData.ResolveResumeAsync(userId, id, finish: false, cancellationToken))
+                : Results.Unauthorized());
+        group.MapPost("/{id:guid}/resume/finish", async (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, CancellationToken cancellationToken) =>
+            await principal.ResolveAppUserIdAsync(database, cancellationToken) is { } userId
+                ? ToResult(await userData.ResolveResumeAsync(userId, id, finish: true, cancellationToken))
+                : Results.Unauthorized());
         group.MapPost("/{id:guid}/played", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, PlaybackDiagnostics diagnostics, CancellationToken cancellationToken) =>
             SetPlayedAsync(id, played: true, principal, userData, database, diagnostics, cancellationToken));
         group.MapDelete("/{id:guid}/played", (Guid id, ClaimsPrincipal principal, UserDataService userData, MediaServerDbContext database, PlaybackDiagnostics diagnostics, CancellationToken cancellationToken) =>

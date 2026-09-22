@@ -465,6 +465,87 @@ public sealed class WatchHistoryRecorderTests : IDisposable
 
     // ---- Idempotency ----
 
+    [Theory]
+    [InlineData(0.8499, false)]
+    [InlineData(0.85, true)]
+    public async Task AutomaticCompletion_Uses85Percent(double fraction, bool completed)
+    {
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, 0, false, "threshold", null, CancellationToken.None);
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, (long)(Runtime * fraction), true, "threshold", null, CancellationToken.None);
+        Assert.Equal(completed, (await _database.UserItemData.SingleAsync()).Played);
+        Assert.Equal(completed ? 1 : 0, await _database.PlaybackHistoryEntries.CountAsync());
+    }
+
+    [Fact]
+    public async Task DismissResume_ChangesOnlyPosition_AndFinishAfterDismissIsNoOp()
+    {
+        var watchedAt = _time.GetUtcNow().AddDays(-1);
+        await Service().LogWatchAsync(_userId, _movieId, watchedAt, CancellationToken.None);
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, Runtime / 2, true, "clip", null, CancellationToken.None);
+        var before = await _database.UserItemData.AsNoTracking().SingleAsync();
+        var changesBefore = await _database.ChangeLog.CountAsync();
+        var result = await Service().ResolveResumeAsync(_userId, _movieId, false, CancellationToken.None);
+        Assert.Equal(0, result.Data!.PlaybackPositionTicks);
+        Assert.Equal(before.Played, result.Data.Played);
+        Assert.Equal(before.PlayCount, result.Data.PlayCount);
+        Assert.Equal(before.LastPlayedDate, result.Data.LastPlayedDate);
+        Assert.Equal(watchedAt, result.Data.LastWatchedAt);
+        Assert.Equal(before.StateRevision + 1, (await _database.UserItemData.AsNoTracking().SingleAsync()).StateRevision);
+        Assert.Equal(changesBefore + 1, await _database.ChangeLog.CountAsync());
+        await Service().ResolveResumeAsync(_userId, _movieId, true, CancellationToken.None);
+        Assert.Equal(1, await _database.PlaybackHistoryEntries.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinishResume_RecordsOnce_AndLaterSessionReportsDoNotDuplicate(bool episode)
+    {
+        var itemId = _movieId;
+        var publicId = _moviePublicId;
+        if (episode)
+        {
+            var item = await _database.MediaItems.FirstAsync(item => item.Kind == MediaKind.Episode);
+            itemId = item.Id;
+            publicId = item.PublicId!;
+            _database.MediaSources.Add(new MediaSource
+            {
+                Id = Guid.NewGuid(), MediaItemId = item.Id, Container = "mkv", Path = "/s/episode.mkv",
+                SizeBytes = 1, DurationTicks = Runtime, CreatedAt = _time.GetUtcNow(),
+            });
+            await _database.SaveChangesAsync();
+        }
+        await Service().ReportPlaybackAsync(_userId, publicId, Runtime / 2, true, "finish", null, CancellationToken.None);
+        var result = await Service().ResolveResumeAsync(_userId, itemId, true, CancellationToken.None);
+        Assert.True(result.Data!.Played);
+        Assert.Equal(0, result.Data.PlaybackPositionTicks);
+        Assert.Equal(_time.GetUtcNow(), result.Data.LastWatchedAt);
+        await Service().ResolveResumeAsync(_userId, itemId, true, CancellationToken.None);
+        await Service().ReportPlaybackAsync(_userId, publicId, (long)(Runtime * 0.95), true, "finish", null, CancellationToken.None);
+        Assert.Equal(1, await _database.PlaybackHistoryEntries.CountAsync());
+        Assert.Equal(1, (await _database.UserItemData.AsNoTracking().SingleAsync()).PlayCount);
+    }
+
+    [Fact]
+    public async Task ResumeActions_AreScopedToCaller_AndRejectFolders()
+    {
+        await Service().ReportPlaybackAsync(_userId, _moviePublicId, Runtime / 2, true, CancellationToken.None);
+        await Service().ResolveResumeAsync(_userId + 100, _movieId, true, CancellationToken.None);
+        Assert.Equal(Runtime / 2, (await _database.UserItemData.AsNoTracking().SingleAsync()).PlaybackPositionTicks);
+        Assert.Empty(await _database.PlaybackHistoryEntries.ToListAsync());
+        var folder = await Service().ResolveResumeAsync(_userId, _seasonId, true, CancellationToken.None);
+        Assert.Equal(LogWatchStatus.NotPlayable, folder.Status);
+    }
+
+    [Fact]
+    public async Task TimelessJellyfinMark_DoesNotInventLastWatchDate()
+    {
+        var result = await Service().SetPlayedAsync(_userId, _moviePublicId, true, null, CancellationToken.None);
+        Assert.True(result!.Played);
+        Assert.Null(result.LastWatchedAt);
+        Assert.Null((await _database.PlaybackHistoryEntries.SingleAsync()).WatchedAt);
+    }
+
     public void Dispose()
     {
         _database.Dispose();

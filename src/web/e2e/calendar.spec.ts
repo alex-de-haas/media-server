@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { setupApp } from "./support";
+import { movieDetail, seriesDetail, setupApp } from "./support";
 
 // The calendar's two modes share one shell, so the risks are structural: that switching modes loses
 // the month, that a shared link opens the wrong view, or that the watched work disturbed releases.
@@ -72,9 +72,33 @@ const watchedHistory = {
   latestWatchedAt: "2026-07-10T21:00:00.000Z",
 };
 
-test("releases is the default mode and keeps its own actions", async ({ page }) => {
-  await setupApp(page, { releaseCalendar: [aRelease] });
+test("watched is first and selected by default", async ({ page }) => {
+  await setupApp(page, { watchHistoryCalendar: watchedHistory });
   await page.goto("/calendar?month=2026-07");
+  await expect(page.getByRole("tablist", { name: "Calendar mode" }).getByRole("tab")).toHaveText(["watched", "releases"]);
+  await expect(page.getByRole("tab", { name: "watched" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "releases" }).click();
+  await expect(page).toHaveURL(/view=releases&month=2026-07/);
+});
+
+for (const kind of ["movie", "episode"] as const) {
+  test(`a watched ${kind} opens its title details`, async ({ page }) => {
+    await setupApp(page, {
+      watchHistoryCalendar: watchedHistory,
+      detail: { "movie-1": movieDetail("movie-1", "Arrival"), "series-1": seriesDetail("series-1", "Severance") },
+    });
+    await page.goto("/calendar?month=2026-07");
+    await page.getByTestId("calendar-grid").getByRole("button", { name: kind === "movie" ? /Arrival/ : /Severance/ }).click();
+    const link = page.getByRole("dialog").getByRole("link", { name: kind === "movie" ? /Arrival/ : /Episode 1/ });
+    await expect(link).toHaveAttribute("href", kind === "movie" ? "/movies/movie-1" : "/series/series-1");
+    await link.press("Enter");
+    await expect(page.getByRole("heading", { name: kind === "movie" ? "Arrival" : "Severance", exact: true })).toBeVisible();
+  });
+}
+
+test("releases keeps its own actions when explicitly selected", async ({ page }) => {
+  await setupApp(page, { releaseCalendar: [aRelease] });
+  await page.goto("/calendar?view=releases&month=2026-07");
 
   await expect(page.getByRole("tab", { name: "releases" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("Dune: Part Three")).toBeVisible();
@@ -85,11 +109,11 @@ test("switching to watched keeps the month and swaps the toolbar", async ({ page
   await setupApp(page, { releaseCalendar: [aRelease], watchHistoryCalendar: watchedHistory });
   // Deliberately not the current month: the href omits the month when it is today's, so a current
   // month would make the preservation assertion vacuous.
-  await page.goto("/calendar?month=2026-03");
+  await page.goto("/calendar?view=releases&month=2026-03");
 
   await page.getByRole("tab", { name: "watched" }).click();
 
-  await expect(page).toHaveURL(/view=watched/);
+  await expect(page).not.toHaveURL(/view=releases/);
   await expect(page).toHaveURL(/month=2026-03/);
   // Release-only actions are gone; the watched filters take their place.
   await expect(page.getByRole("button", { name: "Add title" })).toHaveCount(0);

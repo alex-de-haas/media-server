@@ -101,15 +101,15 @@ describe("labels", () => {
 describe("calendar URL state", () => {
   const today = new Date(2026, 6, 24);
 
-  it("defaults to the releases mode, so an existing /calendar link keeps its meaning", () => {
-    expect(parseCalendarMode(null)).toBe("releases");
+  it("defaults to the watched mode", () => {
+    expect(parseCalendarMode(null)).toBe("watched");
     expect(parseCalendarMode("releases")).toBe("releases");
     expect(parseCalendarMode("watched")).toBe("watched");
   });
 
   it("falls back instead of erroring on an unrecognized mode", () => {
-    expect(parseCalendarMode("history")).toBe("releases");
-    expect(parseCalendarMode("")).toBe("releases");
+    expect(parseCalendarMode("history")).toBe("watched");
+    expect(parseCalendarMode("")).toBe("watched");
   });
 
   it("reads a month param as a local month", () => {
@@ -130,14 +130,14 @@ describe("calendar URL state", () => {
   });
 
   it("omits defaults so the common case stays a bare /calendar", () => {
-    expect(calendarHref("releases", new Date(2026, 6, 1), today)).toBe("/calendar");
+    expect(calendarHref("watched", new Date(2026, 6, 1), today)).toBe("/calendar");
   });
 
   it("encodes only what differs from the default", () => {
-    expect(calendarHref("watched", new Date(2026, 6, 1), today)).toBe("/calendar?view=watched");
-    expect(calendarHref("releases", new Date(2026, 2, 1), today)).toBe("/calendar?month=2026-03");
-    expect(calendarHref("watched", new Date(2026, 2, 1), today)).toBe(
-      "/calendar?view=watched&month=2026-03",
+    expect(calendarHref("releases", new Date(2026, 6, 1), today)).toBe("/calendar?view=releases");
+    expect(calendarHref("watched", new Date(2026, 2, 1), today)).toBe("/calendar?month=2026-03");
+    expect(calendarHref("releases", new Date(2026, 2, 1), today)).toBe(
+      "/calendar?view=releases&month=2026-03",
     );
   });
 });

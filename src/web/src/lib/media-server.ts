@@ -304,6 +304,7 @@ export interface UserItemData {
   played: boolean;
   playedPercentage: number | null;
   lastPlayedDate: string | null;
+  lastWatchedAt?: string | null;
   unplayedItemCount: number | null;
   // The user's own 1-5 star verdict, or null when unrated. Named apart from the community rating on
   // the item itself, and from Jellyfin's own 0-10 `Rating` on user data.
@@ -1097,6 +1098,8 @@ export const mediaServer = {
   listRecent: () => apiJson<LibraryItem[]>(`${BASE}/library/recent`),
   listResume: () => apiJson<LibraryRailItem[]>(`${BASE}/library/resume`),
   listNextUp: () => apiJson<LibraryRailItem[]>(`${BASE}/library/nextup`),
+  dismissResume: (id: string) => apiJson<UserItemData>(`${BASE}/library/${id}/resume`, { method: "DELETE" }),
+  finishWatching: (id: string) => apiJson<UserItemData>(`${BASE}/library/${id}/resume/finish`, { method: "POST" }),
   setPlayed: (id: string, played: boolean) =>
     apiJson<UserItemData>(`${BASE}/library/${id}/played`, { method: played ? "POST" : "DELETE" }),
   // Records a viewing the server never saw, at the instant the user names. Unlike setPlayed — which is

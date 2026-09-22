@@ -208,7 +208,7 @@ public sealed class PlaybackDiagnosticRecord
 
     public long? RuntimeTicks { get; set; }
 
-    /// <summary>Position as a fraction of runtime, rounded — the value the 90% policy compares.</summary>
+    /// <summary>Position as a fraction of runtime, rounded — the value the 85% policy compares.</summary>
     public double? PositionFraction { get; set; }
 
     /// <summary>Echoed client session id; null tells us Infuse does not return ours.</summary>

@@ -2876,6 +2876,8 @@ public enum Components {
             public var userRating: Swift.Int32?
             /// - Remark: Generated from `#/components/schemas/UserItemDataDto/itemId`.
             public var itemId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/UserItemDataDto/lastWatchedAt`.
+            public var lastWatchedAt: Foundation.Date?
             /// Creates a new `UserItemDataDto`.
             ///
             /// - Parameters:
@@ -2889,6 +2891,7 @@ public enum Components {
             ///   - unplayedItemCount:
             ///   - userRating:
             ///   - itemId:
+            ///   - lastWatchedAt:
             public init(
                 key: Swift.String,
                 playbackPositionTicks: Swift.Int64? = nil,
@@ -2899,7 +2902,8 @@ public enum Components {
                 lastPlayedDate: Foundation.Date? = nil,
                 unplayedItemCount: Swift.Int32? = nil,
                 userRating: Swift.Int32? = nil,
-                itemId: Swift.String? = nil
+                itemId: Swift.String? = nil,
+                lastWatchedAt: Foundation.Date? = nil
             ) {
                 self.key = key
                 self.playbackPositionTicks = playbackPositionTicks
@@ -2911,6 +2915,7 @@ public enum Components {
                 self.unplayedItemCount = unplayedItemCount
                 self.userRating = userRating
                 self.itemId = itemId
+                self.lastWatchedAt = lastWatchedAt
             }
             public enum CodingKeys: String, CodingKey {
                 case key
@@ -2923,6 +2928,7 @@ public enum Components {
                 case unplayedItemCount
                 case userRating
                 case itemId
+                case lastWatchedAt
             }
         }
         /// - Remark: Generated from `#/components/schemas/WatchHistoryCalendarEvent`.
