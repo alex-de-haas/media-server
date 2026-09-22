@@ -74,3 +74,13 @@ updates:
       - /src/api
     schedule:
       interval: weekly
+    ignore:
+      # Pin the Node base image to the current Active LTS line (24). Node 25 is only a
+      # "Current" release — odd majors never receive LTS status and go EOL a few months
+      # after release — so jumping onto it for a production image should be deliberate,
+      # not automatic. `node:24-bookworm-slim` is a rolling tag, so the only bumps
+      # Dependabot proposes are new majors (25, 26, ...); block those with `versions`
+      # (semver `update-types` is unreliable for Docker tags that carry a non-semver
+      # suffix). Drop/raise this bound once the target major is LTS.
+      - dependency-name: "node"
+        versions: [">= 25"]
