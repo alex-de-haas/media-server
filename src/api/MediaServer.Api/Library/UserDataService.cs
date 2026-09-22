@@ -86,7 +86,9 @@ public sealed class UserDataService(
         var rowByItem = rows.ToDictionary(row => row.MediaItemId);
 
         var runtimeByItem = await RuntimeTicksAsync(leafIds, cancellationToken);
-        var lastWatches = await database.PlaybackHistoryEntries.AsNoTracking()
+        var lastWatches = leafIds.Count == 0
+            ? new Dictionary<Guid, DateTimeOffset?>()
+            : await database.PlaybackHistoryEntries.AsNoTracking()
             .Where(entry => entry.AppUserId == userId && leafIds.Contains(entry.MediaItemId) && entry.WatchedAt != null)
             .GroupBy(entry => entry.MediaItemId)
             .Select(group => new { Id = group.Key, WatchedAt = group.Max(entry => entry.WatchedAt) })

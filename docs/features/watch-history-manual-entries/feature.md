@@ -170,7 +170,8 @@ All routes are authenticated and scoped to the caller. Resume operations accept
 published movies and episodes, return updated user data on success (including a
 no-op), 404 for unknown items and 400 for folders. They change only the caller's
 state. The DTO's `lastWatchedAt` comes from dated history, independently of the
-legacy aggregate field of the same name.
+legacy aggregate field of the same name. Folder-only batches skip the dated-history
+aggregation because only playable leaves expose this date.
 
 `POST /watches` answers `200` with the updated `UserItemData`, `404` for an
 unknown item, and `400` for a folder, a missing `watchedAt`, or a future instant.

@@ -39,7 +39,9 @@ section).
   labelled accordingly. Detail pages (`/movies/[id]`, `/series/[id]`) provide a
   backdrop hero, overview, watched status with the latest dated watch, a favorite toggle, and a persistent horizontal
   Cast carousel above the detail sections. Portrait cards link to person pages;
-  arrows, keyboard navigation, and swiping reveal more cast members. Movie
+  arrows, keyboard navigation, and swiping reveal more cast members. The shared
+  carousel maps arrow keys to its orientation: left/right horizontally and
+  up/down vertically. Movie
   details show a Media section (resolution/codec/audio), with Tags at the end
   of the page. Series details show Episodes grouped by season followed by Tags.
   Seasons form an accordion, all collapsed on page entry; each season opens
