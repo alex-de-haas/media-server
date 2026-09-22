@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-09-06
-Updated: 2026-09-11
+Updated: 2026-09-15
 
 ## Goal
 
@@ -197,8 +197,11 @@ order, not separate releases.
   increased contrast, and Reduce Motion acceptance checks.
 - [x] Update Apple client, Collections, and native API reality docs; create this
   feature's `feature.md` with Testing Expectations and regenerate the docs index.
-- [ ] Investigate and verify a fix for the intermittently missing Series tab
-  symbol, observed on both the simulator and a physical Apple TV.
+- [ ] Verify the Series tab's explicit monochrome template rendering on a
+  physical Apple TV in light/dark appearance, while unselected, focused, and
+  selected. Also check returning focus to populated Series content on device
+  and simulator; the local fixture has an empty Series shelf. Confirm that the
+  icon remains visible and follows the native tab label's tint in every state.
 - [ ] Delete this plan and regenerate the index after all acceptance checks pass.
 - [x] Apply independent minor version bumps at implementation shipment: Apple
   `MARKETING_VERSION` for the client, `manifest.json` for the new server API.
