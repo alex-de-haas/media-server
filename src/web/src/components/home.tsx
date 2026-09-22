@@ -12,6 +12,7 @@ import { RecommendationCard } from "@/components/recommendation-card";
 import { previewTarget, recommendationOf, useRecommendationActions } from "@/components/recommendations-view";
 import { TitlePreviewDialog, type TitlePreviewTarget } from "@/components/title-preview-dialog";
 import { PosterCard, detailHref } from "@/components/poster-card";
+import { WatchControls } from "@/components/watch-controls";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function Home() {
@@ -29,7 +30,7 @@ export function Home() {
 
       {session.role === "admin" && <OpsStrip />}
 
-      {resume.data?.length ? <RailRow title="Continue watching" items={resume.data} /> : null}
+      {resume.data?.length ? <RailRow title="Continue watching" items={resume.data} resume /> : null}
       {nextUp.data?.length ? <RailRow title="Next up" items={nextUp.data} /> : null}
       <RecommendedRow />
 
@@ -102,7 +103,7 @@ function RecommendedRow() {
   );
 }
 
-function RailRow({ title, items }: { title: string; items: LibraryRailItem[] }) {
+function RailRow({ title, items, resume = false }: { title: string; items: LibraryRailItem[]; resume?: boolean }) {
   return (
     <Rail title={title}>
       {items.map((item) => (
@@ -114,6 +115,7 @@ function RailRow({ title, items }: { title: string; items: LibraryRailItem[] }) 
             posterUrl={item.posterUrl}
             userData={item.userData}
           />
+          {resume && <WatchControls id={item.id} title={item.title} userData={item.userData} compact />}
         </RailItem>
       ))}
     </Rail>

@@ -22,7 +22,9 @@ public sealed record UserItemDataDto(
     int? UserRating = null,
     // Jellyfin's UserData carries the item id too; set only by the Jellyfin mapper (Infuse decodes it as
     // a required field). Left null for the internal /api surface, which keys off the item itself.
-    string? ItemId = null);
+    string? ItemId = null,
+    // Actual dated history, never the timestamp of a timeless watched toggle.
+    DateTimeOffset? LastWatchedAt = null);
 
 /// <summary>The bounds of the star scale, in one place so the endpoint, the engine and the UI agree.</summary>
 public static class UserRatingScale

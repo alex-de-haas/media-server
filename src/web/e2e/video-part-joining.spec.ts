@@ -13,7 +13,6 @@ function parts() {
 test("join previews both parts, validates selection and submits the chosen order", async ({ page }, testInfo) => {
   await setupApp(page, { library: [aMovie("m1", "A movie in two parts")], detail: { m1: parts() }, transcodeAvailable: true, videoPartJoining: true });
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Join parts", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("New version: Joined · MKV")).toBeVisible();
@@ -34,7 +33,6 @@ test("join reports incompatibility in the dialog and allows correction", async (
   await setupApp(page, { detail: { m1: parts() }, transcodeAvailable: true, videoPartJoining: true });
   await page.route("**/api/proxy/api/transcode/join", route => route.fulfill({ status: 400, json: { detail: "The parts have different numbers of tracks." } }));
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Join parts", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Join parts", exact: true }).click();
@@ -45,7 +43,6 @@ test("join reports incompatibility in the dialog and allows correction", async (
 test("an older engine does not offer joining", async ({ page }) => {
   await setupApp(page, { detail: { m1: parts() }, transcodeAvailable: true });
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await expect(page.getByRole("button", { name: "Join parts", exact: true })).toHaveCount(0);
 });
 
@@ -53,6 +50,5 @@ test("the job list identifies joining separately from conversion", async ({ page
   await setupApp(page, { detail: { m1: parts() }, transcodeAvailable: true, videoPartJoining: true,
     transcodeJobs: [{ ...aTranscodeJob("join1", "m1", "Joined movie"), kind: "Join" }] });
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await expect(page.getByText(/Join parts · 2 files/)).toBeVisible();
 });

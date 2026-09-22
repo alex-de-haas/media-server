@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSameMonth, startOfMonth } from "date-fns";
 import { Clock, Trash2 } from "lucide-react";
@@ -393,24 +394,26 @@ function PlayRow({
 
   return (
     <div className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5">
-      <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
-        {event.posterUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={event.posterUrl} alt="" className="h-full w-full object-cover" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{heading}</p>
-        {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
-        {event.origin === "ProviderSync" && (
-          <p className="text-muted-foreground text-[11px]">Imported</p>
-        )}
-      </div>
-      <span className="flex shrink-0 items-center gap-1.5">
-        {/* The screening-log notch: the one place the brand hue appears in this view. */}
-        <span className="bg-brand h-3 w-0.5 rounded-full" aria-hidden />
-        <span className="font-mono text-xs tabular-nums">{formatTime(event.watchedAt)}</span>
-      </span>
+      <WatchTitleLink entry={event}>
+        <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
+          {event.posterUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={event.posterUrl} alt="" className="h-full w-full object-cover" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{heading}</p>
+          {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
+          {event.origin === "ProviderSync" && (
+            <p className="text-muted-foreground text-[11px]">Imported</p>
+          )}
+        </div>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {/* The screening-log notch: the one place the brand hue appears in this view. */}
+          <span className="bg-brand h-3 w-0.5 rounded-full" aria-hidden />
+          <span className="font-mono text-xs tabular-nums">{formatTime(event.watchedAt)}</span>
+        </span>
+      </WatchTitleLink>
       {/* Named down to the timestamp, like the delete control beside it: a day can hold two plays of
           one movie, and two controls with the same accessible name leave a screen reader unable to
           say which one it is on. */}
@@ -430,6 +433,20 @@ function PlayRow({
       />
     </div>
   );
+}
+
+function WatchTitleLink({
+  entry,
+  children,
+}: {
+  entry: WatchHistoryCalendarEvent | WatchHistoryUndatedEntry;
+  children: ReactNode;
+}) {
+  const href = entry.kind === "Movie"
+    ? `/movies/${entry.mediaItemId}`
+    : "seriesId" in entry && entry.seriesId ? `/series/${entry.seriesId}` : null;
+  const className = "flex min-w-0 flex-1 items-center gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  return href ? <Link href={href} className={className}>{children}</Link> : <div className={className}>{children}</div>;
 }
 
 /**
@@ -536,16 +553,18 @@ function UndatedRow({
 
   return (
     <div className="hover:bg-secondary/60 flex items-center gap-3 rounded-md p-1.5">
-      <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
-        {entry.posterUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={entry.posterUrl} alt="" className="h-full w-full object-cover" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{heading}</p>
-        {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
-      </div>
+      <WatchTitleLink entry={entry}>
+        <div className="bg-secondary h-14 w-10 shrink-0 overflow-hidden rounded">
+          {entry.posterUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={entry.posterUrl} alt="" className="h-full w-full object-cover" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{heading}</p>
+          {secondary && <p className="text-muted-foreground truncate text-xs">{secondary}</p>}
+        </div>
+      </WatchTitleLink>
       {/* Named down to the title, like the delete control beside it: a list of marks with two identical
           accessible names leaves a screen reader unable to say which row it is on. */}
       <EntryTimeButton

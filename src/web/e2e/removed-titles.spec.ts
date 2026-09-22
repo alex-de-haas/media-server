@@ -57,7 +57,7 @@ test("a removed title's card opens what is left of it, and clearing a mark is of
 
   await expect(page).toHaveURL(/\/movies\/g1\?removed=1/);
   await expect(page.getByText("Removed from library", { exact: true })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Media", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Media", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Clear your rating" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove favorite" })).toBeVisible();
   await page.getByRole("button", { name: "Clear your rating" }).click();

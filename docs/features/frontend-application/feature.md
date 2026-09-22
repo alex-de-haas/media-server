@@ -1,7 +1,7 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-09-19
+Updated: 2026-09-22
 
 ## Description
 
@@ -37,9 +37,14 @@ section).
   detail navigation and refresh. Movies offers `Movie` catalogs; Series offers
   `Series` and `Anime` catalogs. Offline catalogs remain selectable and are
   labelled accordingly. Detail pages (`/movies/[id]`, `/series/[id]`) provide a
-  backdrop hero, overview, watched/favorite toggles, and detail tabs. Movie
-  detail tabs show Cast, Media (resolution/codec/audio), and Tags. Series detail
-  tabs show Cast, Episodes grouped by season, and Tags; an episode whose file
+  backdrop hero, overview, watched status with the latest dated watch, a favorite toggle, and a persistent horizontal
+  Cast carousel above the detail sections. Portrait cards link to person pages;
+  arrows, keyboard navigation, and swiping reveal more cast members. Movie
+  details show a Media section (resolution/codec/audio), with Tags at the end
+  of the page. Series details show Episodes grouped by season followed by Tags.
+  Seasons form an accordion, all collapsed on page entry; each season opens
+  independently, including with the keyboard. Only library seasons appear, and
+  the season delete control remains separate from its disclosure trigger; an episode whose file
   holds a consecutive range is labelled `S01E01-E02` (matching the on-disk name)
   so the season does not look like it skipped an episode — the title stays the
   first episode's, as that is all the provider has. Every episode row leads with
@@ -48,11 +53,11 @@ section).
   date (the provider's calendar day, formatted in UTC so it never shifts a day
   west of Greenwich) and runtime, and its synopsis clamped to three lines — the
   clamp lifts when the row is opened. A watched episode carries the same check
-  badge in the still's corner that a poster card does; the control that flips it
-  is the first of the row's action icons on the right, tinted while the episode
-  is watched. Below those sits a one-line summary of what
+  badge in the still's corner that a poster card does. Its actions show status,
+  latest dated watch, and Log watch; an in-progress episode offers Finish watching
+  and Clear progress instead. Below those sits a one-line summary of what
   is on disk (`HEVC 2160p · Dolby Vision 7 · 38.2 GB · 2 versions`, or "No file"),
-  and the row expands onto the same media surface a movie's Media tab is —
+  and the row expands onto the same media surface a movie's Media section is —
   versions, tracks, sidecars, and for an admin every control that changes them;
   the episode's detail is fetched when the row opens. An admin also
   sees a Conversions block above the seasons listing every episode's jobs, and
@@ -60,7 +65,7 @@ section).
   See [episode-media](../episode-media/feature.md). Seasons come from the detail's
   season rollup, so a season the API kept after its last episode went — one holding
   only extras — still gets a heading (reading "No episodes in this season") instead of
-  vanishing from the tab. On the Episodes tab an admin can also delete a single episode
+  vanishing from the section. In the Episodes section an admin can also delete a single episode
   row or a whole season from its heading; both confirm first, with a "Delete files from
   disk" checkbox that defaults to off, and both return to the library grid when the
   delete leaves the series with nothing in it.
@@ -183,13 +188,17 @@ Movie media cards and expanded episode media cards display [indexing progress](.
 
 ## Movie history and related titles
 
-Movie details include inline viewing history below the synopsis and library-only
-collection/similar rows below the tabs. Removed movie cards open the same detail
+Movie details include inline viewing history after at least two viewings, below the synopsis and library-only
+collection/similar rows below Media and above the final Tags section. Removed movie cards open the same detail
 route with retained metadata and personal controls, without Media or playback.
 See [Movie detail context](../movie-detail-context/feature.md) for access rules,
 correction actions, paging, and related-row behavior.
 
 ## Testing Expectations
+
+- Movie and series detail tests cover the persistent Cast carousel, ordered sections without tabs,
+  person links, previous/next and keyboard controls, a single actor, and keyboard
+  access to offscreen actors on a narrow viewport without page overflow.
 
 Frontend tests should cover user-visible behavior where practical. Required
 coverage:

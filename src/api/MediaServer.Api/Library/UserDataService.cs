@@ -19,7 +19,7 @@ public sealed class UserDataService(
     ILogger<UserDataService>? logger = null)
 {
     /// <summary>Crossing this fraction of the runtime marks the item watched and clears its resume point.</summary>
-    internal const double WatchedThreshold = 0.90;
+    internal const double WatchedThreshold = 0.85;
 
     /// <summary>On stop, a position below this fraction is treated as "not started" — no resume point kept.</summary>
     internal const double MinResumeThreshold = 0.05;
@@ -86,6 +86,11 @@ public sealed class UserDataService(
         var rowByItem = rows.ToDictionary(row => row.MediaItemId);
 
         var runtimeByItem = await RuntimeTicksAsync(leafIds, cancellationToken);
+        var lastWatches = await database.PlaybackHistoryEntries.AsNoTracking()
+            .Where(entry => entry.AppUserId == userId && leafIds.Contains(entry.MediaItemId) && entry.WatchedAt != null)
+            .GroupBy(entry => entry.MediaItemId)
+            .Select(group => new { Id = group.Key, WatchedAt = group.Max(entry => entry.WatchedAt) })
+            .ToDictionaryAsync(entry => entry.Id, entry => entry.WatchedAt, cancellationToken);
 
         foreach (var item in items)
         {
@@ -94,7 +99,7 @@ public sealed class UserDataService(
                 MediaKind.Series => FolderDto(item, children.Where(child => child.SeriesId == item.Id), rowByItem),
                 MediaKind.Season => FolderDto(item, children.Where(child => child.SeasonId == item.Id), rowByItem),
                 MediaKind.Movie or MediaKind.Episode or MediaKind.Video => LeafDto(
-                    item.PublicId!, rowByItem.GetValueOrDefault(item.Id), runtimeByItem.GetValueOrDefault(item.Id)),
+                    item.PublicId!, rowByItem.GetValueOrDefault(item.Id), runtimeByItem.GetValueOrDefault(item.Id), lastWatches.GetValueOrDefault(item.Id)),
                 _ => new UserItemDataDto(Key: item.PublicId ?? item.Id.ToString("N")),
             };
         }
@@ -142,9 +147,9 @@ public sealed class UserDataService(
         if (atOrAboveThreshold)
         {
             // Count the viewing only the first time this session crosses, and only if the session ever
-            // saw playback below the threshold. Without the first condition a rewind past 90% and a
+            // saw playback below the threshold. Without the first condition a rewind past the threshold and a
             // second climb counts twice (observed: one session took an episode from 0 to 3 plays);
-            // without the second, resuming straight into the final 10% counts a viewing nobody watched.
+            // without the second, resuming straight into the final portion counts a viewing nobody watched.
             // `Played` is still set either way — seeking to the end is a legitimate way to mark an item.
             var counts = session is null
                 ? !row.Played
@@ -349,6 +354,63 @@ public sealed class UserDataService(
 
         await database.SaveChangesAsync(cancellationToken);
         return new LogWatchResult(LogWatchStatus.Recorded, await LoadOneAsync(appUserId, item, cancellationToken));
+    }
+
+    /// <summary>Clears only the caller's resume position, or explicitly completes that in-progress viewing.</summary>
+    public async Task<LogWatchResult> ResolveResumeAsync(
+        int appUserId, Guid mediaItemId, bool finish, CancellationToken cancellationToken)
+    {
+        var item = await FindItemByIdAsync(mediaItemId, cancellationToken);
+        if (item is null) return new(LogWatchStatus.ItemNotFound, null);
+        if (item.Kind is not (MediaKind.Movie or MediaKind.Episode)) return new(LogWatchStatus.NotPlayable, null);
+
+        // Claim the resume point before recording history. Concurrent/repeated requests cannot finish
+        // the same position twice, and the claim and history commit in one transaction.
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var claimed = await database.UserItemData
+            .Where(row => row.AppUserId == appUserId && row.MediaItemId == mediaItemId && row.PlaybackPositionTicks > 0)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(row => row.PlaybackPositionTicks, 0)
+                .SetProperty(row => row.StateRevision, row => row.StateRevision + 1), cancellationToken);
+        if (claimed > 0 && finish)
+        {
+            var row = await database.UserItemData.SingleAsync(
+                row => row.AppUserId == appUserId && row.MediaItemId == mediaItemId, cancellationToken);
+            await database.Entry(row).ReloadAsync(cancellationToken);
+            var session = await database.PlaybackSessions
+                .Where(session => session.AppUserId == appUserId && session.MediaItemId == mediaItemId
+                    && session.LastReportAt == row.LastPlayedDate)
+                .OrderByDescending(session => session.StartedAt).FirstOrDefaultAsync(cancellationToken);
+            var now = time.GetUtcNow();
+            var counts = session?.CompletedAt is null;
+            MarkWatched(row, now, counts);
+            if (counts && watchHistory is not null)
+            {
+                var entry = await watchHistory.StageLoggedWatchAsync(appUserId, item, row, now, cancellationToken);
+                entry.PlaySessionId = session?.SessionKey;
+                if (session is not null)
+                {
+                    session.HistoryEntryId = entry.Id;
+                }
+            }
+            if (counts && session is not null) session.CompletedAt = now;
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        else if (claimed > 0)
+        {
+            // Bulk updates bypass the change-tracker hook; native clients still need this reset.
+            database.ChangeLog.Add(new ChangeLogEntry
+            {
+                EntityType = ChangeEntityType.UserItemData,
+                EntityId = mediaItemId.ToString("N"),
+                AppUserId = appUserId,
+                Kind = ChangeKind.Upsert,
+                OccurredAt = time.GetUtcNow(),
+            });
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return new(LogWatchStatus.Recorded, await LoadOneAsync(appUserId, item, cancellationToken));
     }
 
     /// <summary>Sets or clears the favorite flag on any item (leaf or folder) by public id (Jellyfin).</summary>
@@ -711,11 +773,11 @@ public sealed class UserDataService(
         return fromMeta ?? 0;
     }
 
-    private static UserItemDataDto LeafDto(string key, UserItemData? row, long runtimeTicks)
+    private static UserItemDataDto LeafDto(string key, UserItemData? row, long runtimeTicks, DateTimeOffset? lastWatchedAt)
     {
         if (row is null)
         {
-            return new UserItemDataDto(Key: key);
+            return new UserItemDataDto(Key: key, LastWatchedAt: lastWatchedAt);
         }
 
         double? percentage = !row.Played && row.PlaybackPositionTicks > 0 && runtimeTicks > 0
@@ -730,7 +792,8 @@ public sealed class UserDataService(
             Played: row.Played,
             PlayedPercentage: percentage,
             LastPlayedDate: row.LastPlayedDate,
-            UserRating: row.Rating);
+            UserRating: row.Rating,
+            LastWatchedAt: lastWatchedAt);
     }
 
     private static UserItemDataDto FolderDto(

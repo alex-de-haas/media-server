@@ -112,7 +112,7 @@ export function CalendarShell({
 function ModeSwitch({ mode, onChange }: { mode: CalendarMode; onChange: (mode: CalendarMode) => void }) {
   return (
     <div className="bg-secondary/60 flex items-center gap-0.5 rounded-md p-0.5" role="tablist" aria-label="Calendar mode">
-      {(["releases", "watched"] as const).map((value) => (
+      {(["watched", "releases"] as const).map((value) => (
         <button
           key={value}
           type="button"

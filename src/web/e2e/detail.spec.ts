@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { anEpisode, aMovie, aSeason, aSeries, aTranscodeJob, aUserData, episodeDetail, movieDetail, seriesDetail, setupApp } from "./support";
 
-test("opens a movie detail page and marks it watched", async ({ page }) => {
+test("opens a movie detail page and records a dated watch", async ({ page }) => {
   await setupApp(page, {
     library: [aMovie("m1", "Arrival")],
     detail: { m1: movieDetail("m1", "Arrival") },
@@ -13,9 +13,10 @@ test("opens a movie detail page and marks it watched", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Arrival" })).toBeVisible();
 
   const played = page.waitForRequest(
-    (request) => request.url().includes("/api/proxy/api/library/m1/played") && request.method() === "POST",
+    (request) => request.url().includes("/api/proxy/api/library/m1/watches") && request.method() === "POST",
   );
-  await page.getByRole("button", { name: "Mark watched" }).click();
+  await page.getByRole("button", { name: "Log watch", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Log watch", exact: true }).click();
   await played;
 });
 
@@ -178,7 +179,7 @@ test("shows and opens the IMDb movie link", async ({ page }) => {
   expect(opened).toContain("https://www.imdb.com/title/tt2543164/");
 });
 
-test("shows movie cast, media, and tags as ordered detail tabs", async ({ page }) => {
+test("keeps movie cast in a carousel above media and tags", async ({ page }, testInfo) => {
   await setupApp(page, {
     library: [aMovie("m1", "Arrival")],
     detail: {
@@ -196,7 +197,12 @@ test("shows movie cast, media, and tags as ordered detail tabs", async ({ page }
             streams: [{ type: "Video", index: 0, codec: "h264", language: null, displayTitle: "1080p H.264", title: null }],
           },
         ],
-        cast: [{ name: "Amy Adams", character: "Louise Banks", profileUrl: null }],
+        cast: [
+          { provider: "tmdb", providerId: "9273", name: "Amy Adams", character: "Louise Banks", profileUrl: null },
+          ...Array.from({ length: 8 }, (_, index) => ({
+            provider: "tmdb", providerId: `cast-${index}`, name: `Cast member ${index + 2}`, character: `Role ${index + 2}`, profileUrl: null,
+          })),
+        ],
         studios: [
           { name: "Amazon MGM Studios", logoUrl: null },
           { name: "Pascal Pictures", logoUrl: null },
@@ -209,18 +215,36 @@ test("shows movie cast, media, and tags as ordered detail tabs", async ({ page }
 
   await page.goto("/movies/m1");
 
-  const detailTabs = page.getByRole("tab");
-  await expect(detailTabs).toHaveCount(3);
-  await expect(detailTabs).toHaveText(["Cast", "Media", "Tags"]);
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Media", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Tags", exact: true })).toBeVisible();
+  await expect(page.locator("main h2")).toHaveText(["Cast", "Media", "Tags"]);
   await expect(page.getByText("Studios: Amazon MGM Studios +2")).toBeVisible();
   await expect(page.getByText("Pascal Pictures")).toHaveCount(0);
   await expect(page.getByText("Amy Adams")).toBeVisible();
+  const cast = page.getByRole("region", { name: "Cast", exact: true });
+  const amy = cast.getByRole("link", { name: /Amy Adams/ });
+  await expect(amy).toHaveAttribute("href", "/people/tmdb-9273");
+  const previous = cast.getByRole("button", { name: "Previous cast members" });
+  const next = cast.getByRole("button", { name: "Next cast members" });
+  await expect(previous).toBeDisabled();
+  await next.click();
+  await expect(previous).toBeEnabled();
+  await previous.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(previous).toBeDisabled();
+  await page.screenshot({ path: testInfo.outputPath("cast-carousel-desktop.png"), fullPage: true });
 
-  await page.getByRole("tab", { name: "Media" }).click();
   await expect(page.getByText("1080p H.264")).toBeVisible();
 
-  await page.getByRole("tab", { name: /Tags/ }).click();
   await expect(page.getByText("first contact")).toBeVisible();
+  await expect(cast).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  const lastActor = cast.getByRole("link", { name: /Cast member 9/ });
+  await lastActor.focus();
+  await expect(lastActor).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath("cast-carousel-mobile.png"), fullPage: true });
 });
 
 // The movie the merge tests drive: an H264 remux with one embedded track of each kind and two dubs beside
@@ -255,9 +279,8 @@ test("merging opens the convert dialog with those tracks checked, instead of sta
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
 
-  // Checking a sidecar on the Media tab and pressing Merge must not submit anything on its own — the point
+  // Checking a sidecar in the Media section and pressing Merge must not submit anything on its own — the point
   // of the change is that the job is composed first.
   await page.getByRole("checkbox", { name: /Merge .*Гаврилов/ }).check();
   await page.getByRole("button", { name: /Merge 1 into a new version/ }).click();
@@ -265,7 +288,7 @@ test("merging opens the convert dialog with those tracks checked, instead of sta
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Convert version" })).toBeVisible();
 
-  // The hand-off consumes the tab's selection: leaving it checked would leave two places claiming to hold
+  // The hand-off consumes the section's selection: leaving it checked would leave two places claiming to hold
   // the answer, and the stale one wins the next time the button is pressed.
   await expect(page.getByRole("button", { name: /Merge \d+ into a new version/ })).toHaveCount(0);
 
@@ -311,7 +334,6 @@ test("extracting writes the container's own tracks out as files, and refuses the
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Extract tracks to files" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -355,7 +377,6 @@ test("the quality level reaches every encoder, and an audio track can be re-enco
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -429,7 +450,6 @@ test("a file whose dubs outweigh its picture says so before the video controls",
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -458,7 +478,6 @@ test("a source that recorded no per-track bitrate shows no estimate rather than 
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -481,7 +500,6 @@ test("a track's language can be corrected, and a tag nobody knows blocks the sub
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -518,7 +536,6 @@ test("the language field accepts every spelling the API does", async ({ page }) 
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -540,7 +557,6 @@ test("dropping a track clears the bad language that was blocking the submit", as
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -564,7 +580,6 @@ test("clearing a language means keep, not erase", async ({ page }) => {
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -623,7 +638,6 @@ test("tells sidecar dubs from sidecar subtitles, by kind and by file name", asyn
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
 
   await expect(page.getByText("4 separate files beside this version")).toBeVisible();
 
@@ -681,19 +695,18 @@ test("a sidecar with specs reads like an embedded track", async ({ page }) => {
   });
 
   await page.goto("/movies/m1");
-  await page.getByRole("tab", { name: "Media" }).click();
 
   // The specs lead and the release name trails in quotes — the shape an embedded track has.
   await expect(page.getByText(/rus AC3 5\.1\s*“Гаврилов”\s*·\s*48 kHz/)).toBeVisible();
 });
 
-test("shows series cast, episodes, and tags as ordered detail tabs", async ({ page }) => {
+test("keeps series cast in a carousel above episodes and tags", async ({ page }) => {
   await setupApp(page, {
     library: [aSeries("s1", "Severance")],
     detail: {
       s1: {
         ...seriesDetail("s1", "Severance", "95396"),
-        cast: [{ name: "Adam Scott", character: "Mark Scout", profileUrl: null }],
+        cast: [{ provider: "tmdb", providerId: "119", name: "Adam Scott", character: "Mark Scout", profileUrl: null }],
         keywords: ["workplace"],
       },
     },
@@ -701,15 +714,48 @@ test("shows series cast, episodes, and tags as ordered detail tabs", async ({ pa
   });
 
   await page.goto("/series/s1");
+  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
-  const detailTabs = page.getByRole("tab");
-  await expect(detailTabs).toHaveCount(3);
-  await expect(detailTabs).toHaveText(["Cast", "Episodes", "Tags"]);
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Episodes", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Tags", exact: true })).toBeVisible();
+  await expect(page.locator("main h2")).toHaveText(["Cast", "Episodes", "Tags"]);
   await expect(page.getByText("Adam Scott")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Cast", exact: true }).getByRole("button")).toHaveCount(0);
 
-  await page.getByRole("tab", { name: "Episodes" }).click();
   await expect(page.getByText("Season 1")).toBeVisible();
   await expect(page.getByText(/S01E01/)).toBeVisible();
+});
+
+test("library seasons start collapsed and expand independently with keyboard support", async ({ page }) => {
+  await setupApp(page, {
+    library: [aSeries("s1", "Severance")],
+    detail: {
+      s1: { ...seriesDetail("s1", "Severance"), seasons: [aSeason("season-1", 1, 1), aSeason("season-3", 3, 1)] },
+    },
+    episodes: { s1: [anEpisode("e1", 1, 1, "First season episode"), anEpisode("e3", 3, 1, "Third season episode")] },
+  });
+  await page.goto("/series/s1");
+  const first = page.getByRole("button", { name: /^Season 1 ·/ });
+  const third = page.getByRole("button", { name: /^Season 3 ·/ });
+  await expect(first).toHaveAttribute("aria-expanded", "false");
+  await expect(first).toHaveText("Season 1 · 1 episode");
+  await expect(third).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: /^Season 2 ·/ })).toHaveCount(0);
+  await expect(page.getByRole("listitem").filter({ hasText: "First season episode" })).not.toBeVisible();
+  await expect(page.getByRole("listitem").filter({ hasText: "Third season episode" })).not.toBeVisible();
+  await first.press("Enter");
+  await expect(page.getByRole("listitem").filter({ hasText: "First season episode" })).toBeVisible();
+  await third.click();
+  await expect(first).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("listitem").filter({ hasText: "Third season episode" })).toBeVisible();
+  await first.press("Space");
+  await expect(first).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("listitem").filter({ hasText: "First season episode" })).not.toBeVisible();
+  await expect(third).toHaveAttribute("aria-expanded", "true");
+  await page.reload();
+  await expect(first).toHaveAttribute("aria-expanded", "false");
+  await expect(third).toHaveAttribute("aria-expanded", "false");
 });
 
 test("labels a double-episode file with the range it covers", async ({ page }) => {
@@ -724,7 +770,7 @@ test("labels a double-episode file with the range it covers", async ({ page }) =
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
+  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
   // The title stays the first episode's; only the code carries the range.
   await expect(page.getByText("S01E01-E02")).toBeVisible();
@@ -741,7 +787,7 @@ test("admin deletes one episode, keeping the files unless asked", async ({ page 
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
+  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
   // Keeping the files — and the watch history — is the default: a delete must not silently remove
   // media from disk, and watched state survives as a tombstone unless explicitly purged.
@@ -780,7 +826,6 @@ test("admin deletes a whole season and leaves when the series is pruned", async 
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
 
   const deleted = page.waitForRequest(
     (request) =>
@@ -809,9 +854,9 @@ test("a season left with only extras still shows up and stays deletable", async 
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
+  await page.getByRole("button", { name: /^Season 2 ·/ }).click();
 
-  await expect(page.getByRole("heading", { name: "Season 2" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Season 2 · 0 episodes", exact: true })).toBeVisible();
   await expect(page.getByText("No episodes in this season.")).toBeVisible();
 
   const deleted = page.waitForRequest(
@@ -833,7 +878,7 @@ test("a non-admin gets no episode or season delete actions", async ({ page }) =>
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
+  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
   await expect(page.getByText(/S01E01/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Delete S01E01" })).toHaveCount(0);
@@ -970,7 +1015,7 @@ test("an episode row shows its still, air date and synopsis, and a placeholder w
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
+  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
   // The still is the provider's frame for this episode, the air date its calendar day (not shifted by
   // the viewer's zone), and the synopsis sits under them; the runtime moved onto the same fact line.
@@ -983,13 +1028,8 @@ test("an episode row shows its still, air date and synopsis, and a placeholder w
   // row's actions rather than beside the still.
   // Exact: "Mark unwatched" would otherwise match the badge's label too.
   await expect(pilot.getByLabel("Watched", { exact: true })).toBeVisible();
-  const unwatch = pilot.getByRole("button", { name: "Mark unwatched" });
-  await expect(unwatch).toHaveAttribute("aria-pressed", "true");
-  const cleared = page.waitForRequest(
-    (request) => request.url().includes("/api/proxy/api/library/e1/played") && request.method() === "DELETE",
-  );
-  await unwatch.click();
-  await cleared;
+  await expect(pilot.getByRole("button", { name: "Mark unwatched" })).toHaveCount(0);
+  await expect(pilot.getByRole("button", { name: "Log watch" })).toBeVisible();
 
   // A row without a still says so rather than borrowing the show's backdrop.
   const second = page.getByRole("listitem").filter({ hasText: "S01E02" });
@@ -997,7 +1037,7 @@ test("an episode row shows its still, air date and synopsis, and a placeholder w
   await expect(second.getByText("No preview")).toBeVisible();
   await expect(second.getByText("4m")).toBeVisible();
   await expect(second.getByLabel("Watched", { exact: true })).toHaveCount(0);
-  await expect(second.getByRole("button", { name: "Mark watched" })).toHaveAttribute("aria-pressed", "false");
+  await expect(second.getByLabel("Watch status")).toHaveText("Not watched");
 });
 
 test("an episode row keeps its title readable on a phone by dropping the actions under the facts", async ({ page }) => {
@@ -1017,7 +1057,7 @@ test("an episode row keeps its title readable on a phone by dropping the actions
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
+  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
   const pilot = page.getByRole("listitem").filter({ hasText: "S01E01" });
   const still = await pilot.locator("img").boundingBox();
@@ -1046,7 +1086,7 @@ test("an episode row summarises what is on disk and expands onto the media surfa
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
+  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
   // The season reads at a glance; an episode with no file says so rather than showing nothing.
   await expect(page.getByText("HEVC 2160p · Dolby Vision 7 · HDR10 · 3.8 GB · 2 versions")).toBeVisible();
@@ -1080,7 +1120,7 @@ test("an admin converts and extracts from an episode version, and sees its job a
   });
 
   await page.goto("/series/s1");
-  await page.getByRole("tab", { name: "Episodes" }).click();
+  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
   // Every episode's jobs in one place, above the seasons: the card is named by its output file, which
   // carries the episode code, so no per-row block is needed.

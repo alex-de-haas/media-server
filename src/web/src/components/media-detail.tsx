@@ -45,16 +45,17 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
+import { WatchControls } from "@/components/watch-controls";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
 
-/** Movie or series detail page. Branches on `kind`: a movie's Media tab lists its versions; a series lists its
+/** Movie or series detail page. Branches on `kind`: a movie's Media section lists its versions; a series lists its
  * episodes, each of which opens onto the same media surface. */
 export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref: string; backLabel: string }) {
   const router = useRouter();
@@ -91,47 +92,35 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
       </div>
       <Hero item={item} />
       {item.kind === "Movie" && <MovieWatchHistory key={item.id} id={item.id} title={item.title} removed={!!item.removedAt} />}
-      <DetailTabs item={item} backHref={backHref} />
+      <CastCarousel key={`cast-${item.id}`} cast={item.cast} />
+      {!item.removedAt && <DetailMedia item={item} backHref={backHref} />}
       {item.kind === "Movie" && <RelatedMovies id={item.id} backHref={backHref} />}
+      <section aria-label="Tags" className="flex min-w-0 flex-col gap-3">
+        <h2 className="text-lg font-semibold tracking-tight">Tags</h2>
+        <KeywordTags keywords={item.keywords} />
+      </section>
     </div>
   );
 }
 
-function DetailTabs({ item, backHref }: { item: LibraryDetail; backHref: string }) {
+function DetailMedia({ item, backHref }: { item: LibraryDetail; backHref: string }) {
   const mediaLabel = item.kind === "Series" ? "Episodes" : "Media";
 
   return (
-    <Tabs defaultValue="cast" className="gap-4">
-      <div className="min-w-0 border-b">
-        <TabsList variant="line" aria-label="Media detail sections">
-          <TabsTrigger value="cast">Cast</TabsTrigger>
-          {!item.removedAt && <TabsTrigger value="media">{mediaLabel}</TabsTrigger>}
-          <TabsTrigger value="tags">Tags</TabsTrigger>
-        </TabsList>
-      </div>
-
-      <TabsContent value="cast">
-        <CastList cast={item.cast} />
-      </TabsContent>
-      {!item.removedAt && <TabsContent value="media">
-        <div className="flex flex-col gap-3">
-          <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
-          <MoveProgress itemId={item.id} />
-          {item.kind === "Series" ? (
-            <SeriesEpisodes seriesId={item.id} seasons={item.seasons} backHref={backHref} />
-          ) : (
-            <MovieMedia item={item} />
-          )}
-        </div>
-      </TabsContent>}
-      <TabsContent value="tags">
-        <KeywordTags keywords={item.keywords} />
-      </TabsContent>
-    </Tabs>
+    <section aria-label={mediaLabel} className="flex min-w-0 flex-col gap-3">
+      <h2 className="text-lg font-semibold tracking-tight">{mediaLabel}</h2>
+      <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
+      <MoveProgress itemId={item.id} />
+      {item.kind === "Series" ? (
+        <SeriesEpisodes seriesId={item.id} seasons={item.seasons} backHref={backHref} />
+      ) : (
+        <MovieMedia item={item} />
+      )}
+    </section>
   );
 }
 
-// A movie's Media tab: the shared media surface, owned by the movie and locked while it moves.
+// A movie's Media section: the shared media surface, owned by the movie and locked while it moves.
 function MovieMedia({ item }: { item: LibraryDetail }) {
   const moving = useActiveMove(item.id) !== undefined;
   return (
@@ -156,7 +145,7 @@ function useActiveMove(itemId: string): LibraryMoveJob | undefined {
   return (moves.data ?? []).find((move) => move.itemId === itemId);
 }
 
-// A move to another catalog in flight for this item — the Media-tab counterpart of the Conversions block,
+// A move to another catalog in flight for this item — the Media-section counterpart of the Conversions block,
 // with a live per-byte progress bar pushed over SSE. While it runs, mutations of the item and its sources
 // are disabled here and rejected by the API (the move is relocating these very files).
 function MoveProgress({ itemId }: { itemId: string }) {
@@ -244,9 +233,8 @@ function MediaDetailSkeleton() {
 
 /**
  * The page's overflow menu. It carries two kinds of action: logging a watch, which any signed-in user
- * may do to their own history, and the admin block that used to be all of it. Both live behind one `⋮`
- * because the button row belongs to what a viewer does on most visits — a fourth button there would
- * compete with `Mark watched` for the same glance, and logging a past viewing is the rare gesture.
+ * may do to their own history, and library administration. Logging remains reachable here even
+ * while the hero offers the two actions for an in-progress viewing.
  */
 function ItemActions({ id, title, kind, catalogId, backHref, removed }: { id: string; title: string; kind: string; catalogId: string | null; backHref: string; removed: boolean }) {
   const { role } = useSession();
@@ -460,7 +448,7 @@ function ItemActions({ id, title, kind, catalogId, backHref, removed }: { id: st
             open={moveOpen}
             onOpenChange={setMoveOpen}
             onMoveStarted={() => {
-              // The move runs in the background — stay here and watch it on the Media tab (like a conversion).
+              // The move runs in the background — stay here and watch it on the Media section (like a conversion).
               // The library views refresh now and again from the job's completion event; if a merge removes
               // this item, its detail refetch after completion surfaces "not found" with the back link.
               for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
@@ -585,7 +573,6 @@ function Hero({ item }: { item: LibraryDetail }) {
       void queryClient.invalidateQueries({ queryKey: key });
     }
   };
-  const played = useMutation({ mutationFn: (value: boolean) => mediaServer.setPlayed(item.id, value), onSuccess: invalidate, onError: (error) => toast.error(errorMessage(error)) });
   const favorite = useMutation({ mutationFn: (value: boolean) => mediaServer.setFavorite(item.id, value), onSuccess: invalidate, onError: (error) => toast.error(errorMessage(error)) });
   const rating = useMutation({
     mutationFn: (value: number | null) => mediaServer.setRating(item.id, value),
@@ -678,14 +665,7 @@ function Hero({ item }: { item: LibraryDetail }) {
 
             <div className="flex flex-wrap gap-2">
               {!item.removedAt && <InfuseLaunch item={item} />}
-              {!item.removedAt && <Button
-                variant="outline"
-                onClick={() => played.mutate(!isPlayed)}
-                disabled={played.isPending}
-                className={cn(isPlayed && "border-brand text-brand")}
-              >
-                <Check className="size-4" aria-hidden /> {isPlayed ? "Watched" : "Mark watched"}
-              </Button>}
+              <WatchControls id={item.id} title={item.title} userData={item.userData} removed={!!item.removedAt} statusOnly={item.kind === "Series"} />
               <Button
                 variant="outline"
                 onClick={() => item.removedAt && isFavorite ? setClearMark("favorite") : favorite.mutate(!isFavorite)}
@@ -790,31 +770,45 @@ function CreditLine({ item }: { item: LibraryDetail }) {
 
 // Top-billed cast with headshots; a person without a photo falls back to a placeholder icon. Each member
 // links to their person page (the cast DTO always carries a stable person identity).
-function CastList({ cast }: { cast: CastMember[] }) {
+function CastCarousel({ cast }: { cast: CastMember[] }) {
   if (!cast.length) {
-    return <EmptyDetailPanel>No cast information available.</EmptyDetailPanel>;
+    return (
+      <section aria-label="Cast" className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold tracking-tight">Cast</h2>
+        <EmptyDetailPanel>No cast information available.</EmptyDetailPanel>
+      </section>
+    );
   }
 
   return (
-    <section className="flex flex-col gap-3">
-      <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        {cast.map((member) => (
-          <li key={`${member.provider}-${member.providerId}:${member.character ?? ""}`}>
+    <Carousel aria-label="Cast" opts={{ align: "start", slidesToScroll: "auto", breakpoints: { "(prefers-reduced-motion: reduce)": { duration: 0 } } }} className="flex min-w-0 flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold tracking-tight">Cast</h2>
+        {cast.length > 1 && (
+          <div className="flex gap-2">
+            <CarouselPrevious aria-label="Previous cast members" className="static translate-none" />
+            <CarouselNext aria-label="Next cast members" className="static translate-none" />
+          </div>
+        )}
+      </div>
+      <CarouselContent className="-ml-3 touch-pan-y py-1">
+        {cast.map((member, index) => (
+          <CarouselItem key={`${member.provider}-${member.providerId}:${member.character ?? ""}`} aria-label={`${index + 1} of ${cast.length}`} className="basis-[44%] pl-3 sm:basis-1/4 lg:basis-1/6">
             <CastCard member={member} />
-          </li>
+          </CarouselItem>
         ))}
-      </ul>
-    </section>
+      </CarouselContent>
+    </Carousel>
   );
 }
 
 function CastCard({ member }: { member: CastMember }) {
   return (
-    <Link href={personHref(member.provider, member.providerId)} className="group flex flex-col gap-2">
+    <Link href={personHref(member.provider, member.providerId)} className="group flex flex-col gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
       <div className="bg-secondary aspect-[2/3] w-full overflow-hidden rounded-md ring-1 ring-black/5 transition group-hover:opacity-90">
         {member.profileUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={member.profileUrl} alt={member.name} className="h-full w-full object-cover" />
+          <img src={member.profileUrl} alt={member.name} loading="lazy" draggable={false} className="h-full w-full object-cover" />
         ) : (
           <div className="text-muted-foreground flex h-full w-full items-center justify-center">
             <User className="size-8" aria-hidden />
@@ -954,33 +948,45 @@ function SeriesEpisodes({
 
   return (
     <section className="flex flex-col gap-4">
-      {/* Every episode's jobs in one place, where a movie's Media tab keeps its own: a job card names its
+      {/* Every episode's jobs in one place, where a movie's Media section keeps its own: a job card names its
           output file, which carries the episode code, so nothing is lost by not listing them per row. */}
       {role === "admin" && episodeIds.length > 0 && <Conversions itemIds={episodeIds} onSettled={invalidate} />}
-      {groups.map((group) => (
-        <div key={group.key} className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <h2 className="flex-1 text-lg font-semibold tracking-tight">Season {group.seasonNumber}</h2>
-            <SeasonDeleteControl
-              season={group.seasonNumber}
-              seasonId={group.seasonId}
-              episodeCount={group.episodes.length}
-              seriesId={seriesId}
-              backHref={backHref}
-            />
-          </div>
-          <Separator />
-          {group.episodes.length ? (
-            <ul className="flex flex-col divide-y rounded-md border">
-              {group.episodes.map((episode) => (
-                <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} moving={moving} backHref={backHref} />
-              ))}
-            </ul>
-          ) : (
-            <p className="text-muted-foreground text-sm">No episodes in this season.</p>
-          )}
-        </div>
-      ))}
+      <Accordion key={seriesId} multiple defaultValue={[]} className="rounded-lg border">
+        {groups.map((group) => (
+          <AccordionItem key={group.key} value={group.key}>
+            <div className="relative">
+              <AccordionTrigger className="px-4 py-3">
+                <span className="pr-10">
+                  Season {group.seasonNumber}
+                  <span className="text-muted-foreground font-normal">
+                    {" · "}{formatCount(group.episodes.length)} {group.episodes.length === 1 ? "episode" : "episodes"}
+                  </span>
+                </span>
+              </AccordionTrigger>
+              <div className="absolute top-1/2 right-10 -translate-y-1/2">
+                <SeasonDeleteControl
+                  season={group.seasonNumber}
+                  seasonId={group.seasonId}
+                  episodeCount={group.episodes.length}
+                  seriesId={seriesId}
+                  backHref={backHref}
+                />
+              </div>
+            </div>
+            <AccordionContent className="px-3 pb-3">
+              {group.episodes.length ? (
+                <ul className="flex flex-col divide-y">
+                  {group.episodes.map((episode) => (
+                    <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} moving={moving} backHref={backHref} />
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted-foreground text-sm">No episodes in this season.</p>
+              )}
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
     </section>
   );
 }
@@ -1093,11 +1099,6 @@ function EpisodeRow({
   const invalidate = useEpisodeInvalidation(seriesId);
   const afterDelete = useAfterChildDelete(seriesId, backHref);
 
-  const played = useMutation({
-    mutationFn: (value: boolean) => mediaServer.setPlayed(episode.id, value),
-    onSuccess: invalidate,
-  });
-
   const isPlayed = episode.userData?.played ?? false;
   const resume = !isPlayed && episode.userData?.playedPercentage ? Math.min(episode.userData.playedPercentage, 100) : null;
   const runtime = formatRuntime(episode.runtimeTicks);
@@ -1171,18 +1172,8 @@ function EpisodeRow({
             )}
           </div>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={isPlayed ? "Mark unwatched" : "Mark watched"}
-            aria-pressed={isPlayed}
-            disabled={played.isPending}
-            onClick={() => played.mutate(!isPlayed)}
-            className={cn(isPlayed && "text-brand hover:text-brand")}
-          >
-            <Check />
-          </Button>
+        <div className="ml-auto flex max-w-full flex-wrap items-center gap-3">
+          <WatchControls id={episode.id} title={`${label} ${episode.title}`} userData={episode.userData} />
           {deepLink && (
             <Button variant="ghost" size="icon-sm" aria-label="Play in Infuse" onClick={() => openInfuse(deepLink)}>
               <Play />
@@ -1248,7 +1239,7 @@ function EpisodeRow({
   );
 }
 
-// The expanded row: the episode's versions on the same surface a movie's Media tab uses. Fetched on
+// The expanded row: the episode's versions on the same surface a movie's Media section uses. Fetched on
 // expand, so a long season never carries every episode's stream list in one listing.
 function EpisodeMedia({ episode, seriesId, moving }: { episode: Episode; seriesId: string; moving: boolean }) {
   const invalidate = useEpisodeInvalidation(seriesId);

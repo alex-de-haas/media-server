@@ -1,11 +1,11 @@
 # Watch-History Calendar
 
 Created: 2026-07-24
-Updated: 2026-08-21
+Updated: 2026-09-22
 
 ## Description
 
-`/calendar` answers two questions behind one `Releases | Watched` switch.
+`/calendar` answers two questions behind one `Watched | Releases` switch.
 **Releases** is unchanged: tracked release dates, reminders, and the Add-title
 and Tracked/Reminders actions. **Watched** is a screening diary over the per-play
 history in `PlaybackHistoryEntries` — what the signed-in user finished, and when.
@@ -23,9 +23,9 @@ issues a query and neither accumulates branches inside the other.
 
 ## Mode and month live in the URL
 
-`/calendar?view=watched&month=2026-07`. `Releases` is the default, so an
-existing `/calendar` link keeps its meaning, and defaults are omitted from
-generated links — the common case stays a bare `/calendar`.
+`Watched` is the first and default mode: `/calendar` opens viewing history.
+`/calendar?view=releases&month=2026-07` explicitly selects releases. Existing
+`view=watched` links still work; generated links omit that default mode.
 
 Switching mode **pushes** — it is a destination worth coming back from — while
 paging months **replaces**, so stepping through a year does not bury the
@@ -64,6 +64,10 @@ for series), exact local time, and a `--brand` time notch. Provenance appears
 only here — an imported play is labelled `Imported`; the grid treats local and
 imported plays identically, because provenance matters for diagnosis, not for
 the memory.
+
+The poster and title link to the movie detail page, or the parent series page for
+an episode. These links also appear in the undated list. An episode without a
+parent series retains plain text. Time and delete controls remain separate.
 
 Each play carries two controls. One deletes it, behind a confirmation naming that
 exact play; the day's own card follows — deleting one episode of a binge takes the
@@ -179,7 +183,7 @@ viewing-duration or streak analytics, and an activity heatmap.
   [watch-history-manual-entries](../watch-history-manual-entries/feature.md):
   giving an undated mark its time, and correcting a dated play from the day
   detail.
-- `e2e/calendar.spec.ts` covers the surface: releases unchanged and default,
+- `e2e/calendar.spec.ts` covers the surface: watched first and default, explicit releases links, movie and series detail navigation,
   mode switching preserving a non-current month, watched deep links, a binge
   rendering as one card that expands to every episode, the undated count
   tracking the filter, the empty-month jump, the phone agenda replacing the

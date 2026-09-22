@@ -34,8 +34,10 @@ for (const kind of ["movie", "episode"] as const) {
     let reads = 0;
     page.on("request", request => { if (request.url().endsWith(`/api/library/${id}`)) reads++; });
     await page.goto(kind === "movie" ? `/movies/${id}` : "/series/s1");
-    await page.getByRole("tab", { name: kind === "movie" ? "Media" : "Episodes" }).click();
-    if (kind === "episode") await page.getByRole("button", { name: "Show media" }).click();
+    if (kind === "episode") {
+      await page.getByRole("button", { name: /^Season 1 ·/ }).click();
+      await page.getByRole("button", { name: "Show media" }).click();
+    }
     await expect(page.getByText("Waiting for indexing", { exact: true })).toBeVisible();
     const initialReads = reads;
     const emit = async (state: string, revision: number, percent: number | null = null) => {

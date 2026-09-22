@@ -151,7 +151,7 @@ test("a search candidate can be checked before it is tracked", async ({ page }) 
     titlePreview: preview,
     metadataSearch: [{ reference: { provider: "tmdb", id: "27205" }, title: "Inception", year: 2010, score: 1, posterUrl: null }],
   });
-  await page.goto("/calendar?month=2026-07");
+  await page.goto("/calendar?view=releases&month=2026-07");
 
   await page.getByRole("button", { name: "Add title" }).click();
   await page.getByRole("textbox", { name: "Title" }).fill("Inception");
@@ -173,7 +173,7 @@ test("a tracked title opens its preview from the tracked drawer", async ({ page 
     titlePreview: preview,
     watchlist: [aTrackedInception],
   });
-  await page.goto("/calendar?month=2026-07");
+  await page.goto("/calendar?view=releases&month=2026-07");
 
   await page.getByRole("button", { name: "Tracked titles" }).click();
   await page.getByRole("button", { name: /Inception/ }).click();
@@ -185,7 +185,7 @@ test("a tracked title opens its preview from the tracked drawer", async ({ page 
 // nothing outside it can dismiss it — a dialog with no way out.
 test("the preview opened over the drawer can be closed every ordinary way", async ({ page }) => {
   await setupApp(page, { titlePreview: preview, watchlist: [aTrackedInception] });
-  await page.goto("/calendar?month=2026-07");
+  await page.goto("/calendar?view=releases&month=2026-07");
 
   const overview = page.getByText("A thief who steals corporate secrets through dream-sharing technology.");
   // Reopening goes through the drawer each time, since opening the preview hands the screen over to it.

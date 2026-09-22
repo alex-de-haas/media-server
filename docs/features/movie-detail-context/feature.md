@@ -1,28 +1,44 @@
 # Movie Detail Context
 
 Created: 2026-09-19
-Updated: 2026-09-20
+Updated: 2026-09-22
 
 ## Movie page
 
 The web movie page combines the retained description with personal viewing history
-and related movies. The history section sits below the synopsis, above Cast,
-Media, and Tags. Collection and similar-movie rows sit below those tabs and remain
-visible when the selected tab changes. Series detail pages keep their existing
-layout.
+and related movies. The history section sits below the synopsis, followed by a
+persistent Cast carousel and a Media section. Collection and similar-movie rows
+follow Media, with Tags as the final section on the page. All sections remain
+visible without switching tabs. Series pages share the Cast carousel, followed
+by Episodes and finally Tags.
+
+The Cast carousel shows one row of portraits, names, and character labels in
+billing order. Links open the corresponding person page. Previous/next controls,
+arrow keys, and touch dragging reveal more actors; keyboard focus also brings an
+offscreen actor into view. Cards adapt to the viewport without widening the page.
+Portraits load lazily and missing photos retain the person placeholder. An empty
+cast shows **No cast information available.** Removed movies omit Media and
+retain Tags at the bottom of the page.
 
 ## Viewing history
 
-**Watch history** shows the caller's three latest dated watches, newest first,
-and explicitly labelled **Date unknown** marks. **Show all** expands the dated
-list; **Load more** retrieves subsequent pages of 20. The count comes from actual
+**Watch history** appears only with at least two history entries and shows the caller's three latest dated watches in a horizontal
+ReUI timeline, newest first from left to right. Dates and times sit below each
+point, with time correction and deletion beside the time. Connecting lines run
+only between points, so a single viewing has no trailing line. The timeline
+scrolls horizontally inside the section on narrow screens and for long histories;
+keyboard users can reach every viewing's actions. **Date unknown** marks appear
+in a separate list below the timeline. **Show all** expands the dated timeline;
+**Load more** retrieves subsequent pages of 20. The count comes from actual
 history entries, independently of the legacy playback aggregate. Equal timestamps
 remain separate viewings, with stable ordering by entry ID.
 
 Dates and times use the browser's locale and timezone. Each entry offers time
 correction and deletion. **Log watch** is available in both the section and the
-movie overflow menu, including on retained removed movies. Empty history still
-offers logging; a failed read offers retry.
+movie overflow menu, including on retained removed movies. With zero or one entry,
+the section is hidden; status beside the hero controls shows the latest dated
+watch and provides Log watch when no playback is in progress. A failed history
+read still offers retry. Single records can be corrected or deleted in the calendar.
 
 The page reuses the calendar's [time editor](../watch-history-manual-entries/feature.md)
 and [deletion confirmation](../watch-history-deletion/feature.md). It uses the
@@ -67,7 +83,7 @@ exclusions do not apply to these movie-specific relations.
 A movie under **Show removed** opens the same `/movies/{id}` route as an available
 movie. Catalog and removed-list URL state survive navigation back to the grid.
 The page uses retained metadata, artwork, credits, and personal data, and shows
-**Removed from library**. Media, playback, the watched toggle, source controls,
+**Removed from library**. Media, playback, resume actions, source controls,
 conversions, moves, metadata/media refresh, poster editing, and remapping are hidden.
 Cast, tags, trailer, external links, tracking, rating, favorite, history, and
 related movies remain available. Removed series still use their existing dialog.
@@ -109,5 +125,6 @@ still return published items with a catalog and a null `removedAt`.
   `calendar.spec.ts`: inline expansion/pagination, undated correction, logging on
   removed movies, cancelled/failed deletion, rating editing and final-mark
   navigation, removed controls and role gating, independent related loading,
-  filtered navigation through both related rows, keyboard navigation, narrow layouts,
-  and existing calendar/detail interactions.
+  filtered navigation through both related rows, keyboard navigation, horizontal
+  history scrolling without page overflow on narrow layouts, and existing
+  calendar/detail interactions.
