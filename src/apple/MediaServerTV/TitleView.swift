@@ -51,6 +51,7 @@ struct TitleView: View {
     /// second for the length of a film.
     @State private var diagnostics: PlaybackDiagnostics?
     @State private var ownLoader = true
+    @State private var cacheStorage: PlaybackCacheStorage = .memory
 
     /// Which viewing this is. The session opens beside the player now, so its answer can land after the
     /// viewer has left — and assigning it then would leave a session id belonging to a film nobody is
@@ -106,6 +107,7 @@ struct TitleView: View {
                 startAt: startAt,
                 diagnostics: diagnostics,
                 ownLoader: ownLoader,
+                cacheStorage: cacheStorage,
                 audioTracks: version?.audio ?? [],
                 subtitleTracks: version?.subtitles ?? [],
                 switchTracks: { audioId, subtitleId, off in
@@ -226,11 +228,13 @@ struct TitleView: View {
 
             // Made here rather than in the cover's builder, so the run being watched is collected by
             // one object from beginning to end.
-            let watching = PlaybackPreferencesStore().load().showDiagnostics
+            let preferences = PlaybackPreferencesStore().load()
+            let watching = preferences.showDiagnostics
                 ? PlaybackDiagnostics() : nil
             watching?.resolved(after: Date().timeIntervalSince(asked))
             diagnostics = watching
-            ownLoader = PlaybackPreferencesStore().load().usesOwnLoader
+            ownLoader = preferences.usesOwnLoader
+            cacheStorage = preferences.cacheStorage
 
             // The film opens now. Everything a viewer is waiting for is in hand, and the only thing
             // still outstanding — the session a progress report is filed against — was always best

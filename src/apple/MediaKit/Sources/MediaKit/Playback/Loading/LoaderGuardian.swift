@@ -60,7 +60,7 @@ public final class LoaderGuardian {
         // What the player already holds ahead is the meter on open-ended delivery, and this is the
         // one place that can read it.
         loader.playerHolds(seconds: PlaybackDiagnostics.bufferAhead(
-            in: item.loadedTimeRanges.map(\.timeRangeValue), at: position))
+            in: item.loadedTimeRanges.map(\.timeRangeValue), at: position), duration: item.duration.seconds)
 
         let snapshot = loader.makeSnapshot()
         let reading = WedgeDetector.Reading(

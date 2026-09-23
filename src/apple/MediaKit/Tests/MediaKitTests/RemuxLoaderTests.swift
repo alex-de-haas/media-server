@@ -388,6 +388,176 @@ struct RemuxLoaderTests {
         #expect(details.restarts == 0)
         #expect(details.outstanding == 0)
     }
+    @Test("Disk cache serves a short backward seek without another server request")
+    func diskSeek() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = Fixture(total: 256, budget: 128, tail: 32, diskRoot: root)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 48, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let fill = try await fixture.network.range(start: 0)
+        fill.answer(total: 256, start: 0, count: 128)
+        try await fixture.until { first.finished }
+        let backward = Request(offset: 32, length: 16)
+        await fixture.onQueue { _ = fixture.loader.accept(backward) }
+        try await fixture.until { backward.finished }
+        #expect(await fixture.onQueue { backward.bytes } == payload(start: 32, count: 16))
+        let snapshot = fixture.loader.makeSnapshot()
+        #expect(snapshot.diskCache)
+        #expect(snapshot.serverRequests == 1)
+        #expect(snapshot.restarts == 0)
+        #expect(snapshot.cacheReadBytes == 24)
+    }
+
+    @Test("A disk read failure resumes at the owed offset through bounded RAM")
+    func diskReadFallback() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = Fixture(total: 256, diskRoot: root)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let fill = try await fixture.network.range(start: 0)
+        fill.answer(total: 256, start: 0, count: 64)
+        try await fixture.until { first.finished }
+        let session = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        let handle = try FileHandle(forWritingTo: session.appendingPathComponent("0.bytes"))
+        try handle.truncate(atOffset: 0)
+        try handle.close()
+        let next = Request(offset: 8, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(next) }
+        let retry = try await fixture.network.range(start: 8)
+        retry.answer(total: 256, start: 8, count: 64)
+        try await fixture.until { next.finished }
+        #expect(await fixture.onQueue { next.bytes } == payload(start: 8, count: 8))
+        let snapshot = fixture.loader.makeSnapshot()
+        #expect(!snapshot.diskCache)
+        #expect(snapshot.cacheFailures == 1)
+        #expect(!FileManager.default.fileExists(atPath: session.path))
+    }
+
+    @Test("An unwritable cache root falls back before playback starts")
+    func diskCreationFallback() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data([0]).write(to: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = Fixture(total: 256, diskRoot: root)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let fill = try await fixture.network.range(start: 0)
+        fill.answer(total: 256, start: 0, count: 64)
+        try await fixture.until { first.finished }
+        #expect(await fixture.onQueue { first.bytes } == payload(start: 0, count: 8))
+        #expect(!fixture.loader.makeSnapshot().diskCache)
+        #expect(fixture.loader.makeSnapshot().cacheFailures == 1)
+    }
+
+    @Test("A cached multi-megabyte request drains in bounded reads without a timer tick")
+    func boundedDiskReads() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let size = 3 << 20
+        let fixture = Fixture(total: size, budget: size, diskRoot: root)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let fill = try await fixture.network.range(start: 0)
+        fill.answer(total: size, start: 0, count: size, piece: 64 << 10)
+        try await waitUntil { fixture.loader.makeSnapshot().networkBytes == size }
+        let large = Request(offset: 0, length: size)
+        await fixture.onQueue { _ = fixture.loader.accept(large) }
+        try await fixture.until { large.finished }
+        #expect(await fixture.onQueue { large.bytes } == payload(start: 0, count: size))
+        #expect(await fixture.onQueue { large.maximumDelivery } <= 1 << 20)
+    }
+
+    @Test("Duration grows disk prefetch independently of player delivery, within capacity",
+          arguments: [(100_000, 36_000, 30_000), (10_000, 10_000, 8_334)])
+    func diskDurationBudget(_ values: (Int, Int, Int)) async throws {
+        let (capacity, expectedBudget, expectedEnd) = values
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = Fixture(total: 720_000, diskRoot: root, diskBudget: capacity)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let initial = try await fixture.network.range(start: 0)
+        initial.answer(total: 720_000, start: 0, count: 64)
+        try await fixture.until { first.finished }
+        fixture.loader.playerHolds(seconds: 20, duration: 7_200)
+        let fill = try await fixture.network.range(start: 64)
+        #expect(fill.request.value(forHTTPHeaderField: "Range") == "bytes=64-\(expectedEnd - 1)")
+        fill.answer(total: 720_000, start: 64, count: expectedEnd - 64, piece: 4_096)
+        try await waitUntil { fixture.loader.makeSnapshot().networkBytes == expectedEnd }
+        let snapshot = fixture.loader.makeSnapshot()
+        #expect(snapshot.cacheBudget == expectedBudget)
+        #expect(snapshot.estimatedAheadSeconds == Double(expectedEnd) / 100)
+        #expect(snapshot.deliveryPaused)
+    }
+
+    @Test("A disk write failure cancels the fill and retries without losing the waiting request")
+    func diskWriteFallback() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = Fixture(total: 256, diskRoot: root)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let fill = try await fixture.network.range(start: 0)
+        let session = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        try FileManager.default.createDirectory(at: session.appendingPathComponent("0.bytes"), withIntermediateDirectories: false)
+        fill.answer(total: 256, start: 0, count: 64)
+        let retry = try await fixture.network.range(start: 0, occurrence: 1)
+        retry.answer(total: 256, start: 0, count: 64)
+        try await fixture.until { first.finished }
+        #expect(await fixture.onQueue { first.bytes } == payload(start: 0, count: 8))
+        #expect(fixture.loader.makeSnapshot().cacheFailures == 1)
+        #expect(!fixture.loader.makeSnapshot().diskCache)
+    }
+
+    @Test("An unexpected representation or range is refused before entering the cache",
+          arguments: [true, false])
+    func invalidRepresentation(_ changedTag: Bool) async throws {
+        let fixture = Fixture(total: 256)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let fill = try await fixture.network.range(start: 0)
+        #expect(fill.request.value(forHTTPHeaderField: "If-Range") == "\"fixture-v1\"")
+        let headers = ["Content-Length": "64", "Content-Range": changedTag ? "bytes 0-63/256" : "bytes 8-71/256",
+                       "ETag": changedTag ? "\"fixture-v2\"" : "\"fixture-v1\""]
+        fill.client!.urlProtocol(fill, didReceive: HTTPURLResponse(url: fill.request.url!, statusCode: 206,
+            httpVersion: nil, headerFields: headers)!, cacheStoragePolicy: .notAllowed)
+        fill.client!.urlProtocolDidFinishLoading(fill)
+        try await fixture.until { first.finished }
+        #expect(await fixture.onQueue { first.error != nil && first.bytes.isEmpty })
+        #expect(fixture.loader.makeSnapshot().windowBytes == 0)
+    }
+
+    @Test("Explicit memory mode never opens disk storage or grows its budget from duration")
+    func selectedMemoryCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        // Disk initialization would fail on this path; selected memory mode must never try it.
+        try Data([0]).write(to: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = Fixture(total: 256, diskRoot: root, cacheStorage: .memory)
+        defer { fixture.loader.stop() }
+        let first = Request(offset: 0, length: 8)
+        await fixture.onQueue { _ = fixture.loader.accept(first) }
+        let fill = try await fixture.network.range(start: 0)
+        fill.answer(total: 256, start: 0, count: 64)
+        try await fixture.until { first.finished }
+        fixture.loader.playerHolds(seconds: 20, duration: 1)
+        let snapshot = await fixture.onQueue { fixture.loader.makeSnapshot() }
+        #expect(!snapshot.diskCache)
+        #expect(snapshot.cacheFailures == 0)
+        #expect(snapshot.cacheBudget == 64)
+        #expect(snapshot.estimatedAheadSeconds == nil)
+        #expect(await fixture.onQueue { first.bytes } == payload(start: 0, count: 8))
+    }
+
 }
 
 private func payload(start: Int, count: Int) -> Data {
@@ -409,6 +579,7 @@ private final class Request: LoadingRequest, LoadingDataRequest, @unchecked Send
     let requestedLength: Int
     let requestsAllDataToEndOfResource: Bool
     var bytes = Data()
+    var maximumDelivery = 0
     var finished = false
     var error: (any Error)?
     var currentOffset: Int64 { requestedOffset + Int64(bytes.count) }
@@ -420,7 +591,7 @@ private final class Request: LoadingRequest, LoadingDataRequest, @unchecked Send
         requestsAllDataToEndOfResource = toEnd
     }
     func describe(length: Int64) {}
-    func respond(with data: Data) { bytes.append(data) }
+    func respond(with data: Data) { maximumDelivery = max(maximumDelivery, data.count); bytes.append(data) }
     func finishLoading() { finished = true }
     func finishLoading(with error: (any Error)?) { self.error = error; finished = true }
 }
@@ -431,7 +602,8 @@ private final class Fixture: @unchecked Sendable {
     private let host: String
     /// Byte-scale slack for the ledger, as its own tests use: with the loader's megabytes every read
     /// here would be one reader. Behind, enough for a step back of a few reads to stay the reader.
-    init(total: Int, budget: Int = 64, tail: Int64 = 0, quiet: TimeInterval = 2) {
+    init(total: Int, budget: Int = 64, tail: Int64 = 0, quiet: TimeInterval = 2, diskRoot: URL? = nil, diskBudget: Int? = nil,
+         cacheStorage: PlaybackCacheStorage? = nil) {
         network = Network(total: total)
         host = UUID().uuidString.lowercased()
         Stub.register(network, host: host)
@@ -440,7 +612,8 @@ private final class Fixture: @unchecked Sendable {
         loader = RemuxLoader(origin: URL(string: "https://\(host)/film")!, budget: budget,
                              tail: tail, lag: 32, target: 20, configuration: configuration,
                              readers: ReaderLedger(slackBehind: 64, slackAhead: 8, patience: 5),
-                             quiet: quiet)
+                             quiet: quiet, cacheStorage: cacheStorage ?? (diskRoot != nil ? .disk : .memory),
+                             diskRoot: diskRoot, diskBudget: diskBudget ?? budget)
     }
     deinit { Stub.unregister(host: host) }
     func onQueue<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
@@ -501,7 +674,7 @@ private final class Stub: URLProtocol, @unchecked Sendable {
     override func stopLoading() { state.withLock { stopped = true } }
     func answerHead(total: Int) {
         client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200,
-            httpVersion: nil, headerFields: ["Content-Length": "\(total)"])!, cacheStoragePolicy: .notAllowed)
+            httpVersion: nil, headerFields: ["Content-Length": "\(total)", "ETag": "\"fixture-v1\""])!, cacheStoragePolicy: .notAllowed)
         client!.urlProtocolDidFinishLoading(self)
     }
     /// The bytes arrive in pieces of `piece`: eight, as the byte-scale cases read, unless a
@@ -516,7 +689,7 @@ private final class Stub: URLProtocol, @unchecked Sendable {
     /// for the test to drop once the loader has taken what came.
     func answer(total: Int, start: Int, count: Int, delivering delivered: Int, piece: Int = 8) {
         client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 206,
-            httpVersion: nil, headerFields: ["Content-Length": "\(count)",
+            httpVersion: nil, headerFields: ["Content-Length": "\(count)", "ETag": "\"fixture-v1\"",
                 "Content-Range": "bytes \(start)-\(start + count - 1)/\(total)"])!, cacheStoragePolicy: .notAllowed)
         for offset in stride(from: start, to: start + delivered, by: piece) {
             client!.urlProtocol(self, didLoad: payload(start: offset, count: min(piece, start + delivered - offset)))
