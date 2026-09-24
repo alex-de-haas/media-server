@@ -1,18 +1,11 @@
 import AVFoundation
 import Foundation
+import Darwin
 import Observation
 import os
 
-/// What playback is actually doing, sampled from the player rather than guessed at.
-///
-/// It exists because the difference between "the picture stutters" and a cause is a number nobody had:
-/// a freeze with the buffer empty is starvation, a freeze with data in hand is not, and the two want
-/// opposite fixes. Diagnosing this from a Mac took a purpose-built harness and still could not
-/// reproduce what a television did — the machine that has the problem is the one that has to be asked.
-///
-/// Most of this comes from `AVPlayerItemAccessLog`, which is Apple's own instrumentation: `numberOfStalls`
-/// is authoritative in a way a timer sampling `isPlaybackBufferEmpty` is not, and `observedBitrate` is
-/// what the player thinks it is getting rather than what a `curl` measured once.
+/// Opt-in playback observations. Loaded time ranges and access logs are estimates and may lag;
+/// a zero buffer estimate alone is not proof of a visible stall.
 @MainActor
 @Observable
 public final class PlaybackDiagnostics {
@@ -22,20 +15,17 @@ public final class PlaybackDiagnostics {
         public let at: Date
         public let position: Double
 
-        /// Seconds of media already loaded past the play head. This is the number that predicts a
-        /// freeze: it falls at one second per second whenever the player has stopped fetching.
+        /// Contiguous loaded-time coverage past the play head, as reported by AVPlayer.
         public let bufferAhead: Double
 
         public let stalls: Int
         public let observedBitrate: Double
         public let keepingUp: Bool
 
-        /// Bytes taken from the server since playback began: every access-log event added up, not the
-        /// newest one's counter. Negative where the player has no figure to give at all.
+        /// Network bytes for the current loader or native item. Negative when unavailable.
         public let bytesTransferred: Int64
 
-        /// Megabits per second that arrived since the previous reading — measured here by subtraction
-        /// rather than taken from the player's own estimate.
+        /// Megabits per second over the recent sampling window (up to ten seconds).
         public let inflow: Double
     }
 
@@ -54,20 +44,24 @@ public final class PlaybackDiagnostics {
 
     /// The most recent stall, and the buffer's lowest point, with everything else as it was then.
     public private(set) var lastStall: Moment?
+    public private(set) var lastRecovery: Moment?
+    private var network = PlaybackNetworkMetrics()
+    public var networkMbps: Double? { network.mbps }
+    public var networkBytes: Int64? { network.bytes }
+    public var serverRequests: Int? { network.requests }
+    public var requestsPerSecond: Double? { network.requestsPerSecond }
+    /// Aggregate received bytes divided by counted GETs, not a distribution of request sizes.
+    public var meanRequestBytes: Double? { network.meanRequestBytes }
+    public var peakInflow: Double? { network.peakMbps }
+    public private(set) var residentMB: Double = 0
+    public private(set) var droppedFrames: Int?
+    public private(set) var playerObservedMbps: Double?
     public private(set) var lowestMoment: Moment?
 
     /// When the buffer was at its lowest since playback began, and how low. A run that never dipped
     /// below a minute has a different problem from one that reached zero four times.
     public private(set) var lowestBuffer = Double.infinity
     public private(set) var lowestAt: Double = 0
-
-    /// The fastest second of the whole session.
-    ///
-    /// This is the reading that settles the argument a flat buffer cannot. A buffer parked at two
-    /// seconds means bytes arrive at exactly the rate they are consumed — true whether the path cannot
-    /// go faster or the player has decided not to ask. A peak far above what the film needs says the
-    /// path was never the limit.
-    public private(set) var peakInflow: Double = 0
 
     /// Seconds of film actually played this session.
     ///
@@ -102,7 +96,6 @@ public final class PlaybackDiagnostics {
     public weak var loader: RemuxLoader?
     public private(set) var windowMB: Double?
     public private(set) var aheadMB: Double?
-    public private(set) var serverRequests: Int?
     public private(set) var windowRestarts = 0
     public private(set) var asideFetches = 0
     public private(set) var loaderDetails: RemuxLoader.Snapshot?
@@ -112,6 +105,7 @@ public final class PlaybackDiagnostics {
     public private(set) var recoveries = 0
 
     public func recovered() {
+        lastRecovery = moment(at: item?.currentTime().seconds ?? 0)
         recoveries += 1
     }
 
@@ -123,6 +117,11 @@ public final class PlaybackDiagnostics {
     private var timer: Timer?
     private var stallObserver: (any NSObjectProtocol)?
     private weak var item: AVPlayerItem?
+    private var errorCursor = 0
+    private var stallsBeforeItem = 0
+    private var notifiedStalls = 0
+    private var loggedStalls = 0
+    private var observationID = UUID()
 
     public init() {}
 
@@ -150,7 +149,13 @@ public final class PlaybackDiagnostics {
         // replaced item — a track switch builds one — it would skip the new item's first entries, or
         // every one of them if its journal never grew past the old count. Failures after a switch would
         // then vanish from both the overlay and the log, which is the one thing this must not do.
-        errors = 0
+        errorCursor = 0
+        stallsBeforeItem = stalls
+        notifiedStalls = 0
+        loggedStalls = 0
+        droppedFrames = nil
+        playerObservedMbps = nil
+        let currentObservationID = observationID
 
         self.item = item
         stallObserver = NotificationCenter.default.addObserver(
@@ -158,15 +163,23 @@ public final class PlaybackDiagnostics {
         ) { [weak self] _ in
             // The notification is posted on whatever thread noticed, which is not necessarily this
             // one. Hopping is required rather than assumed — `assumeIsolated` would trap.
-            Task { @MainActor [weak self] in self?.recordStall() }
+            Task { @MainActor [weak self] in
+                guard let self, self.observationID == currentObservationID else { return }
+                self.recordStall()
+            }
         }
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.sample() }
+            Task { @MainActor [weak self] in
+                guard let self, self.observationID == currentObservationID else { return }
+                self.sample()
+            }
         }
+        sample()
     }
 
     public func stop() {
+        observationID = UUID()
         timer?.invalidate()
         timer = nil
 
@@ -179,7 +192,8 @@ public final class PlaybackDiagnostics {
     }
 
     private func recordStall() {
-        stalls += 1
+        notifiedStalls += 1
+        stalls = stallsBeforeItem + max(notifiedStalls, loggedStalls)
         let position = item?.currentTime().seconds ?? 0
         lastStall = moment(at: position)
         Self.log.warning("Playback stalled (#\(self.stalls)) at \(position, format: .fixed(precision: 1))s")
@@ -200,31 +214,40 @@ public final class PlaybackDiagnostics {
             in: item.loadedTimeRanges.map(\.timeRangeValue), at: position)
 
         readErrors(item)
+        residentMB = Self.residentMemoryMB()
 
+        let events = item.accessLog()?.events ?? []
+        let event = events.last
+        let now = ProcessInfo.processInfo.systemUptime
         if let loader {
             let held = loader.makeSnapshot()
             loaderDetails = held
+            network.update(source: ObjectIdentifier(loader), bytes: held.networkBytes,
+                           requests: held.serverRequests, at: now)
             windowMB = Double(held.windowBytes) / 1_000_000
             aheadMB = Double(held.aheadBytes) / 1_000_000
-            serverRequests = held.serverRequests
             windowRestarts = held.restarts
             asideFetches = held.asides
         } else {
-            // Cleared, not kept: an item that fetches for itself must not wear the previous one's
-            // figures.
             loaderDetails = nil
+            // For progressive files this is the HTTP byte-range GET count, not events.count.
+            // Never substitute the player's custom-resource reads for the loader's network GETs.
+            network.update(source: ObjectIdentifier(item),
+                           bytes: Self.knownTotal(of: events.map(\.numberOfBytesTransferred)),
+                           requests: Self.knownTotal(of: events.map(\.numberOfMediaRequests)), at: now)
             windowMB = nil
             aheadMB = nil
-            serverRequests = nil
             windowRestarts = 0
             asideFetches = 0
         }
+        droppedFrames = Self.knownTotal(of: events.map(\.numberOfDroppedVideoFrames))
+        playerObservedMbps = event.flatMap { $0.observedBitrate >= 0 ? $0.observedBitrate / 1_000_000 : nil }
 
-        // The access log's own stall count, which counts what the notification can miss.
-        let event = item.accessLog()?.events.last
-        let logged = event?.numberOfStalls ?? -1
-        if logged > stalls {
-            stalls = logged
+        // Both sources describe the same stalls; use the larger count for this item, not their sum.
+        loggedStalls = max(loggedStalls, Self.knownTotal(of: events.map(\.numberOfStalls)) ?? 0)
+        let combinedStalls = stallsBeforeItem + max(notifiedStalls, loggedStalls)
+        if combinedStalls > stalls {
+            stalls = combinedStalls
             lastStall = Moment(position: position, bufferAhead: ahead, window: loaderDetails)
         }
 
@@ -242,35 +265,31 @@ public final class PlaybackDiagnostics {
             lowestMoment = Moment(position: position, bufferAhead: ahead, window: loaderDetails)
         }
 
-        // Every event added up rather than the last one's counter: `numberOfBytesTransferred` is per
-        // event, so reading only the newest makes the session total collapse each time AVFoundation
-        // opens another one — and the subtraction below would come out negative exactly there.
-        let now = Date()
-        let transferred = item.accessLog().map { Self.total(of: $0.events.map(\.numberOfBytesTransferred)) } ?? -1
-
-        var inflow: Double = 0
-        if transferred >= 0, let previous = samples.last, previous.bytesTransferred >= 0 {
-            inflow = Self.rate(
-                bytes: transferred - previous.bytesTransferred,
-                over: now.timeIntervalSince(previous.at))
-        }
-
-        peakInflow = max(peakInflow, inflow)
-
         if let previous = samples.last {
             watched += Self.advance(from: previous.position, to: position)
         }
 
         samples.append(Sample(
-            at: now, position: position, bufferAhead: ahead, stalls: stalls,
+            at: Date(), position: position, bufferAhead: ahead, stalls: stalls,
             observedBitrate: event?.observedBitrate ?? 0,
             keepingUp: item.isPlaybackLikelyToKeepUp,
-            bytesTransferred: transferred,
-            inflow: inflow))
+            bytesTransferred: network.bytes ?? -1,
+            inflow: network.mbps ?? 0))
 
         if samples.count > Self.keep {
             samples.removeFirst(samples.count - Self.keep)
         }
+    }
+
+    private static func residentMemoryMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { words in
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), words, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? Double(info.resident_size) / 1_000_000 : 0
     }
 
     /// Anything new in the player's own error journal, said out loud.
@@ -283,13 +302,13 @@ public final class PlaybackDiagnostics {
 
         // A journal that shrank is a different journal. Trusting the old cursor would silence every
         // entry from here on, so it starts again rather than reading past the end of the new one.
-        if events.count < errors {
-            errors = 0
+        if events.count < errorCursor {
+            errorCursor = 0
         }
 
-        guard events.count > errors else { return }
+        guard events.count > errorCursor else { return }
 
-        for event in events[errors...] {
+        for event in events[errorCursor...] {
             let status = event.errorStatusCode
             let domain = event.errorDomain
             let comment = event.errorComment ?? "no comment"
@@ -302,28 +321,39 @@ public final class PlaybackDiagnostics {
             lastError = status == 0 ? "\(domain): \(comment)" : "\(domain) \(status): \(comment)"
         }
 
-        errors = events.count
+        errors += events.count - errorCursor
+        errorCursor = events.count
     }
 
-    /// How much media is loaded past the play head.
-    ///
-    /// The range **containing the position**, not the first one. After a seek the player keeps what it
-    /// had already fetched, so the first range is often an earlier stretch of the film — and measuring
-    /// from its end gives a negative number, which would read as starvation exactly when the buffer is
-    /// healthy. That is the one reading this overlay exists to get right.
-    /// Pure arithmetic over what the player reported, so it is testable without one.
+    /// Merge touching/overlapping ranges before measuring coverage. A boundary shared by two
+    /// ranges is not an empty buffer. Do not bridge actual gaps or count disconnected future data.
     nonisolated static func bufferAhead(in ranges: [CMTimeRange], at position: Double) -> Double {
-        for range in ranges {
-            let start = CMTimeGetSeconds(range.start)
-            let end = start + CMTimeGetSeconds(range.duration)
-            if position >= start && position <= end {
-                return end - position
-            }
+        guard position.isFinite else { return 0 }
+        let intervals = ranges.compactMap { range -> (start: Double, end: Double)? in
+            let start = range.start.seconds
+            let end = CMTimeRangeGetEnd(range).seconds
+            guard start.isFinite, end.isFinite, end >= start else { return nil }
+            return (start, end)
+        }.sorted { $0.start < $1.start }
+        var end = position
+        for interval in intervals {
+            if interval.start > end { break }
+            if interval.end > end { end = interval.end }
         }
+        return end - position
+    }
 
-        // Nothing covers the play head: whatever is loaded is somewhere else, and there is no buffer
-        // ahead of where the viewer is.
-        return 0
+    /// A missing or partially unknown journal cannot provide a complete total. In particular,
+    /// unavailable request counts must not appear as zero, or produce a misleading bytes/GET ratio.
+    nonisolated static func knownTotal<T: FixedWidthInteger>(of values: [T]) -> T? {
+        guard !values.isEmpty, values.allSatisfy({ $0 >= 0 }) else { return nil }
+        var total: T = 0
+        for value in values {
+            let sum = total.addingReportingOverflow(value)
+            guard !sum.overflow else { return nil }
+            total = sum.partialValue
+        }
+        return total
     }
 
     /// Bytes taken across the whole session, from each access-log event's own counter.
@@ -368,12 +398,10 @@ public final class PlaybackDiagnostics {
         (samples.last?.observedBitrate ?? 0) / 1_000_000
     }
 
-    /// What arrived in the last second, measured here rather than estimated by the player.
+    /// Receive rate over the recent sampling window; native access-log updates may be delayed.
     public var inflow: Double { samples.last?.inflow ?? 0 }
 
-    /// Gigabytes taken from the server so far. Against the seconds actually watched this is the film's
-    /// real cost per second — which for a container carrying every track is not the chosen tracks'
-    /// bitrate.
+    /// Received network gigabytes for the current source. Includes prefetch and repeat reads.
     public var transferredGB: Double {
         Double(max(samples.last?.bytesTransferred ?? 0, 0)) / 1_000_000_000
     }
@@ -381,4 +409,54 @@ public final class PlaybackDiagnostics {
     public var bufferAhead: Double { samples.last?.bufferAhead ?? 0 }
     public var position: Double { samples.last?.position ?? 0 }
     public var keepingUp: Bool { samples.last?.keepingUp ?? true }
+}
+
+/// Network readings share one calculation in native, RAM and disk modes. Totals belong to the
+/// current source (native item or loader); replacing it resets the baseline and peak. Recovery on
+/// the same loader preserves its counters. Rates span up to ten seconds to smooth bursty updates.
+struct PlaybackNetworkMetrics: Sendable {
+    private struct Reading: Sendable {
+        let at: TimeInterval
+        let bytes: Int64?
+        let requests: Int?
+    }
+    private var source: ObjectIdentifier?
+    private var readings: [Reading] = []
+    private(set) var bytes: Int64?
+    private(set) var requests: Int?
+    private(set) var mbps: Double?
+    private(set) var requestsPerSecond: Double?
+    private(set) var peakMbps: Double?
+
+    var meanRequestBytes: Double? {
+        guard let bytes, let requests, requests > 0 else { return nil }
+        return Double(bytes) / Double(requests)
+    }
+
+    mutating func update(source: ObjectIdentifier, bytes: Int64?, requests: Int?, at: TimeInterval) {
+        let bytes = bytes.flatMap { $0 >= 0 ? $0 : nil }
+        let requests = requests.flatMap { $0 >= 0 ? $0 : nil }
+        let regressed = (bytes != nil && self.bytes != nil && bytes! < self.bytes!)
+            || (requests != nil && self.requests != nil && requests! < self.requests!)
+        if self.source != source || regressed || at <= (readings.last?.at ?? -.infinity) {
+            readings.removeAll(keepingCapacity: true)
+            peakMbps = nil
+        }
+        self.source = source
+        self.bytes = bytes
+        self.requests = requests
+        readings.append(Reading(at: at, bytes: bytes, requests: requests))
+        while readings.count > 1, readings[0].at < at - 10 { readings.removeFirst() }
+        mbps = nil
+        requestsPerSecond = nil
+        if let first = readings.first, at > first.at {
+            if let bytes, let before = first.bytes, readings.allSatisfy({ $0.bytes != nil }) {
+                mbps = PlaybackDiagnostics.rate(bytes: bytes - before, over: at - first.at)
+                peakMbps = max(peakMbps ?? 0, mbps ?? 0)
+            }
+            if let requests, let before = first.requests, readings.allSatisfy({ $0.requests != nil }) {
+                requestsPerSecond = Double(max(0, requests - before)) / (at - first.at)
+            }
+        }
+    }
 }

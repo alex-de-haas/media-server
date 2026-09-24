@@ -227,11 +227,14 @@ much.
 
 It exists because of what the server's range log showed: the player asking in half-megabyte pieces,
 with a separate 64 KB request for every handful of audio frames — roughly seven extra round trips a
-second — and re-fetching about 1.4 times what it kept. Answers now come from a **window** held in
-memory, 128 MB ahead of the play head with 8 MB kept behind for a reader that lags, filled by a few
-large bounded requests: each asks for exactly the room there is, and the next starts once a quarter of
-the budget has drained. Bounded rather than open-ended because a connection nobody reads is one the
-server aborts.
+second — and re-fetching about 1.4 times what it kept. Answers come from a **window** in the selected cache storage. Settings → Playback
+exposes Enable cache and Memory / Disk. Memory is the default and keeps the 128 MiB window
+with an 8 MiB tail; disabling caching preserves direct AVPlayer loading.
+The [disk cache](../apple-playback-buffering/feature.md) estimates five minutes ahead and one minute
+behind from resource length and duration, within a 6 GiB limit and available space. Until duration
+is known, its target is 128 MiB. Disk errors fall back to the earlier 128 MiB RAM window with an
+8 MiB tail. Fills request at most 32 MiB, and delivery reads at most 1 MiB at a time. Bounded rather
+than open-ended because a connection nobody reads is one the server aborts.
 
 **The window keeps every reader it has seen, placed by a ledger rather than by what is pending.**
 AVFoundation reads a film with more than one reader: one at the play head, one a few seconds
@@ -315,47 +318,56 @@ ahead, and how many requests actually reached the server.
 
 ## Playback diagnostics
 
-A switch in Settings puts the player's own numbers over the picture: position, seconds of buffer
-ahead, stalls, what is arriving on the wire, and what the film costs to watch.
+The opt-in Settings switch overlays common playback and network metrics in every
+cache mode: disabled, memory or disk. The compact common column shows client
+version, active cache mode, position/watched time, AVPlayer buffer coverage and
+minimum, stalls/recoveries, dropped frames, errors, process resident RAM,
+resolve/open time, network traffic and the player's throughput estimate. A second
+column exists only when the application cache is active; it contains cache
+occupancy, reader/request state and retained cache snapshots.
 
-It exists because diagnosing a stutter from a Mac took a purpose-built harness and still could not
-reproduce what the television did. The machine with the problem is the one that has to be asked, and a
-television has no console to read and no file a viewer can reach — so a diagnostic that writes
-somewhere clever is one nobody uses.
+Without a loader, network totals sum `numberOfMediaRequests` and
+`numberOfBytesTransferred` across AVPlayer access-log events. Apple's
+[`numberOfMediaRequests`](https://developer.apple.com/documentation/avfoundation/avplayeritemaccesslogevent/numberofmediarequests)
+counts HTTP GET byte-range requests for progressive downloads; it is not the
+number of log entries. The plain AVPlayer loading path is unchanged: diagnostics
+add no proxy, resource loader or network requests.
 
-**Buffer ahead is the number that separates the causes.** It falls at one second per second whenever
-the player has stopped fetching, so a freeze preceded by a slow steady fall is starvation, and one
-that arrives with the buffer full is not. Those two want opposite fixes, and for three days they were
-being confused for each other.
+With a loader, network counters come from its HTTP fills and separate requests,
+not AVPlayer's reads from the custom resource. The overlay labels the source:
+AVPlayer access log or loader counters. Loader GET counts include started and
+cancelled attempts and exclude the metadata HEAD; received separate-response
+bytes enter the counter on completion. These measurements are useful comparisons,
+but their update timing and cancellation accounting are not identical.
 
-**Peak inflow is what settles the question a flat buffer cannot.** A buffer parked at two seconds means
-bytes arrive at exactly the rate they are spent, and that is equally true of a path that cannot go faster
-and of a player that has decided not to ask for more. The two want opposite fixes, so the session's
-fastest second is kept: a peak far above what the film needs rules the path out. Inflow is measured here,
-by subtracting one reading of `numberOfBytesTransferred` from the next, rather than taken from the
-player's own `observedBitrate` — which is kept beside it, since a disagreement between them is itself
-worth seeing.
+Network totals cover the **current native item or loader**. Replacing that source
+resets rate history and peak, including when its new total is larger than the old
+one. Recovery reusing the same loader preserves its network counters. Receive
+rate and GET frequency use a rolling window of up to ten seconds. The displayed
+peak is the highest such rate for that source. Native logs can update in batches,
+so these are reported-counter rates, not packet-level throughput measurements.
+Absent or partially unknown counters display `—`, including derived averages.
 
-The total is every access-log event added up, not the newest one's counter — the player keeps one per
-event and opens a new one whenever the connection is re-established, so reading only the last makes the
-session total collapse each time. Against the seconds **actually watched** it gives what a second of this
-film costs on the wire, which is **not** the chosen tracks' bitrate: the container hands over the
-untouched file, so a source with eleven dubs is paid for in full to hear one. Watched, because a resume
-starts an hour in and dividing this session's bytes by an hour nobody fetched would report a fraction of
-the real cost; a seek is not watching either.
+`Bytes / GET` divides received bytes by counted requests. It can reveal a low
+average alongside a high request frequency, but cannot establish the exact size
+distribution or number of tiny requests. In-flight/cancelled requests and delayed
+log updates affect it. Downloaded bytes divided by watched time is not displayed
+as the film's bitrate: prefetch and repeated reads distort that ratio. A high
+receive-rate peak does not rule out an intermittent network problem.
 
-The overlay also reads **`AVPlayerItemErrorLog`**, which nothing here had ever opened. It records the
-failures a player survives — a connection dropped, a request refused, a response that stopped — with the
-HTTP status and the domain behind each. None of them reach `AVPlayerItem.status`, which stays
-`readyToPlay` throughout, so a player that has quietly stopped asking for anything looks from every
-other angle exactly like a healthy one. If it recorded a reason, that is where it is.
+The chart shows **AVPlayer's loaded-time estimate**, not the application's cache
+window. Touching and overlapping ranges are merged before measuring coverage from
+the play head; real gaps are not bridged. Its scale is displayed, and bars reflect
+`isPlaybackLikelyToKeepUp` rather than an arbitrary fifteen-second threshold. A
+zero estimate does not by itself prove a visible freeze. The last stall/recovery
+position and buffer estimate remain available for a photograph.
 
-The journal belongs to the **item**, so the read cursor moves with it: carried over from a replaced item
-— switching a dub builds one — it would skip the new item's first entries, or all of them, and failures
-after a track change would vanish from both the overlay and the log.
-
-Most of the rest comes from Apple's own instrumentation rather than a timer of ours: `numberOfStalls`
-counts what a `playbackStalled` notification can miss.
+Stalls use the larger of notification and access-log counts for each item and
+accumulate across replacements. Queued notifications from retired items are
+ignored. Errors accumulate across items while the error-log cursor resets with
+each item, so a track change neither hides new errors nor discards the session's
+count. Dropped-frame and player-throughput readings come from the current item's
+access log and remain unavailable when the player supplies no value.
 
 ## AVKit is the only player
 
@@ -391,9 +403,9 @@ where it moved more than seven, and the server's log is almost nothing but playb
 forward through the film a second or two ahead of the play head, with nothing carrying the opening
 minute at all. Seven times less traffic, from deleting one line.
 
-The buffer is still thin — one and a half to two seconds — but it **stopped touching zero**, and zero
-is what a freeze is. It was reaching zero in every earlier run. The cushion did not grow; what grew is
-the room around it, from none to sevenfold.
+In that run the buffer estimate remained thin — one and a half to two seconds — but stopped
+reaching zero. Earlier runs reached zero alongside freezes. Later tvOS 27 observations include zero
+estimates without visible interruption, so that historical correlation is not a stall detector.
 
 It is worth recording how long that took. The re-reading was found by the range attribution, and the
 cause by reading those ranges rather than by reasoning about them: four hypotheses came first — the
@@ -649,13 +661,10 @@ picker is the one that works there.
 A switch still in flight is cancelled when the viewer leaves. Without that, a resolve landing
 after the film has gone replaces the item and starts it playing — heard rather than watched.
 
-The player item is built rather than left to `AVPlayer(url:)`, for the read-ahead alone.
-Left automatic, the buffer settled at two or three seconds on the television and stayed
-there — enough to play, not enough to survive anything, and every freeze arrived from that
-ledge. Automatic buffering picks a budget in bytes, and bytes bought very few seconds of a
-4K container that hands over every dub in the file. `preferredForwardBufferDuration` asks in
-the unit that matters. It is a preference and not an instruction: the player still narrows
-it to what it will hold.
+The player item is built explicitly to attach the resource loader and apply track selection.
+Read-ahead belongs to the loader's selected cache; `preferredForwardBufferDuration` remains unset
+because the earlier 60-second preference caused repeated opening-minute reads, as documented above.
+The cache's estimated time coverage and AVPlayer's loaded-time buffer are separate measurements.
 
 Progress is reported every ten seconds, which is often enough that a resume lands where the
 viewer left and rare enough that a two-hour film is a few hundred requests. The reporter is
@@ -673,7 +682,7 @@ viewings, and the first one's session must not collect the second one's progress
 arrives after its viewing ended it is **closed** at the position the viewer reached rather than
 dropped: the request had already gone out, so the session exists on the server either way.
 
-`первый кадр через` measures movement from **where playback was asked to begin**, not from zero.
+The `open` time measures movement from **where playback was asked to begin**, not from zero.
 A resume seeks to its destination before anything appears, and counting that as the film opening
 would report a resumed title — the very one anybody would be timing — as instant.
 
@@ -848,3 +857,12 @@ native group list and paged member routes using the generated Swift client.
 - **The simulator cannot answer the Dolby Vision question** and never will, reporting no
   HDR-eligible output. Every claim about it is checked on an Apple TV 4K, which is how every
   measurement in the epic was taken.
+
+- **Common playback diagnostics**: native media-request event totals, unknown/zero
+  distinction, bounded rate history, replacement/reset baselines, same-loader
+  continuity, loader-to-native transitions and ignored retired-item notifications.
+- **Buffer estimates**: shared boundaries, overlapping/unsorted intervals, actual
+  gaps and invalid times. A chart minimum alone is not evidence of a visible stall.
+- **Device comparison**: photograph the same film in no-cache, memory and disk
+  modes with diagnostics enabled; record GET count/frequency, bytes/GET, traffic,
+  stalls and OS/client versions. Verify overlay legibility in the maximum layout.

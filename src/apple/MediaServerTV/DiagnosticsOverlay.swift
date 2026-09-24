@@ -1,170 +1,185 @@
 import MediaKit
 import SwiftUI
 
-/// The numbers that tell a freeze apart from its causes, on screen while it happens.
-///
-/// A television has no console to read and no file a viewer can reach, so a diagnostic that writes
-/// somewhere clever is a diagnostic nobody uses. This is deliberately ugly and deliberately in the way:
-/// it is turned on when something is wrong and off the rest of the time.
-///
-/// **Buffer ahead is the number to watch.** It falls at one second per second whenever the player has
-/// stopped fetching — so a freeze preceded by a slow, steady fall is starvation, and one that arrives
-/// with the buffer full is not.
-///
-/// **Peak inflow is the number that settles what a flat buffer cannot.** A buffer parked at two seconds
-/// means bytes arrive at exactly the rate they are spent, which is equally true of a path that cannot go
-/// faster and of a player that has decided not to ask. A peak far above the film's own rate rules the
-/// path out.
+/// Common playback/network observations stay visible with every cache setting. Cache internals
+/// occupy a separate column; neither a zero buffer estimate nor a low rate alone implies a stall.
 struct DiagnosticsOverlay: View {
     let diagnostics: PlaybackDiagnostics
 
-    /// What the player held and what the loader held at an instant that was over before anyone could
-    /// photograph it: whether the player's own buffer was empty, and whether the window was empty,
-    /// ahead of the wrong reader, or full — which tells a starved player from one that stopped for
-    /// reasons of its own.
-    private func describe(_ moment: PlaybackDiagnostics.Moment) -> String {
-        let player = String(format: "на %.0f с: буфер %.1f с", moment.position, moment.bufferAhead)
-        guard let window = moment.window else {
-            return player + ", без загрузчика"
-        }
-        return player + String(
-            format: ", окно %.0f МБ, впереди %.0f МБ, читателей %d, отдельно %d",
-            Double(window.windowBytes) / 1_000_000, Double(window.aheadBytes) / 1_000_000,
-            window.readers, window.asides)
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            row("клиент", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
-            row("позиция", String(format: "%.0f с", diagnostics.position))
-            row("буфер впереди", String(format: "%.1f с", diagnostics.bufferAhead),
-                warn: diagnostics.bufferAhead < 15)
-            row("замираний", "\(diagnostics.stalls)", warn: diagnostics.stalls > 0)
-            if let moment = diagnostics.lastStall {
-                row("при замирании", describe(moment), warn: true)
+        HStack(alignment: .top, spacing: 16) {
+            panel { playerPanel }
+            if let details = diagnostics.loaderDetails {
+                panel { cachePanel(details) }
             }
-
-            if diagnostics.recoveries > 0 {
-                row("растормошён", "\(diagnostics.recoveries)", warn: true)
-            }
-            row("поспевает", diagnostics.keepingUp ? "да" : "НЕТ", warn: !diagnostics.keepingUp)
-
-            // The journal AVFoundation keeps and nothing here used to read. A player that stopped
-            // asking for anything looks healthy from every other angle, so if it recorded a reason
-            // this is where it is.
-            if let error = diagnostics.lastError {
-                row("ошибок плеера", "\(diagnostics.errors)", warn: true)
-                Text(error)
-                    .font(.system(size: 18, design: .monospaced))
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
-                    .frame(maxWidth: 900, alignment: .leading)
-            }
-
-            Divider().background(.white.opacity(0.3))
-
-            if let resolve = diagnostics.resolveSeconds {
-                row("сервер ответил", String(format: "%.1f с", resolve))
-            }
-
-            if let open = diagnostics.openSeconds {
-                row("первый кадр через", String(format: "%.1f с", open), warn: open > 5)
-            }
-
-            row("приток", String(format: "%.0f Мбит/с", diagnostics.inflow))
-            row("пик притока", String(format: "%.0f Мбит/с", diagnostics.peakInflow))
-            row("нужно фильму", needed)
-            row("скачано", String(format: "%.2f ГБ", diagnostics.transferredGB))
-
-            // What only the loader knows. Absent when the player fetches for itself.
-            if let requests = diagnostics.serverRequests {
-                row("окно", String(
-                    format: "%.0f МБ, впереди %.0f МБ", diagnostics.windowMB ?? 0, diagnostics.aheadMB ?? 0))
-                row("запросов к серверу", "\(requests)")
-                if let details = diagnostics.loaderDetails {
-                    // The readers the window keeps, and how far apart they are. Two readers tens of
-                    // megabytes apart is what the third run found; one is a window following the
-                    // wrong thing again.
-                    row("читателей", String(
-                        format: "%d, разнос %.0f МБ", details.readers, Double(details.readerSpread) / 1_000_000),
-                        warn: details.readers < 2)
-                    row("отдельно", "позади \(details.asideBehind), впереди \(details.asideAhead), ≤64К \(details.asideSmall)")
-                    if details.asides > 0 {
-                        row("средний отдельный запрос", String(format: "%.0f КиБ",
-                            Double(details.asideRequestedBytes) / Double(details.asides) / 1024))
-                    }
-                    if let reset = details.lastRestart {
-                        row("последний сброс окна", String(format: "%.0f–%.0f → %.0f МБ; %d Б%@",
-                            Double(reset.windowStart) / 1_000_000,
-                            Double(reset.windowEnd) / 1_000_000,
-                            Double(reset.offset) / 1_000_000, reset.requestedLength,
-                            reset.toEnd ? " до конца" : ""))
-                    }
-                }
-                // The two ways the window can be fought over. Either climbing during steady playback
-                // means it is following the wrong reader.
-                row("окно двигалось", "\(diagnostics.windowRestarts) раз, отдельно \(diagnostics.asideFetches)",
-                    warn: diagnostics.asideFetches > 20)
-            }
-            row("плеер считает", String(format: "%.0f Мбит/с", diagnostics.observedMbps))
-
-            if diagnostics.lowestBuffer.isFinite {
-                row("минимум буфера",
-                    String(format: "%.1f с на %.0f с", diagnostics.lowestBuffer, diagnostics.lowestAt),
-                    warn: diagnostics.lowestBuffer < 15)
-                if let moment = diagnostics.lowestMoment {
-                    row("в тот момент", describe(moment))
-                }
-            }
-
-            // The shape of the last minute, which is what says whether a dip was gradual or sudden.
-            sparkline
         }
-        .font(.system(size: 22, weight: .medium, design: .monospaced))
-        .padding(20)
-        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
-        .foregroundStyle(.white)
-        .padding(40)
+        .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(false)
     }
 
-    /// What a second of this film costs on the wire: everything fetched over everything watched.
-    ///
-    /// Watched, not the position — a resume starts an hour in, and dividing this session's bytes by an
-    /// hour nobody fetched would report a fraction of the real cost and send the diagnosis the wrong way.
-    ///
-    /// Not the chosen tracks' bitrate either: the container hands over the untouched file, so a source
-    /// with eleven dubs is paid for in full to hear one. Held back until enough has played to mean
-    /// something, since the header alone is megabytes and would read as a wildly expensive first second.
-    private var needed: String {
-        guard diagnostics.watched > 20, diagnostics.transferredGB > 0 else { return "—" }
-        let mbps = diagnostics.transferredGB * 8000 / diagnostics.watched
-        return String(format: "%.0f Мбит/с", mbps)
+    private func panel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 5, content: content)
+            .font(.system(size: 18, weight: .medium, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(16)
+            .frame(width: 600, alignment: .leading)
+            .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var playerPanel: some View {
+        Group {
+            HStack {
+                Text("PLAYBACK · \(mode)").fontWeight(.bold)
+                Spacer()
+                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    .foregroundStyle(.white.opacity(0.65))
+            }
+            row("Position / watched", String(format: "%.0f / %.0f s", diagnostics.position, diagnostics.watched))
+            row("Player buffer", String(format: "%.1f s · %@", diagnostics.bufferAhead,
+                                        diagnostics.keepingUp ? "keeping up" : "not keeping up"),
+                warn: !diagnostics.keepingUp)
+            if diagnostics.lowestBuffer.isFinite {
+                row("Minimum estimate", String(format: "%.1f s at %.0f s", diagnostics.lowestBuffer, diagnostics.lowestAt))
+            }
+            row("Stalls / recoveries", "\(diagnostics.stalls) / \(diagnostics.recoveries)",
+                warn: diagnostics.stalls > 0 || diagnostics.recoveries > 0)
+            row("Dropped / errors", "\(diagnostics.droppedFrames.map(String.init) ?? "—") / \(diagnostics.errors)")
+            row("Resident RAM", String(format: "%.0f MB", diagnostics.residentMB))
+            row("Resolve / open", "\(seconds(diagnostics.resolveSeconds)) / \(seconds(diagnostics.openSeconds))")
+            Divider().overlay(.white.opacity(0.2))
+            Text(diagnostics.loaderDetails == nil ? "NETWORK · AVPlayer access log" : "NETWORK · Loader counters")
+                .fontWeight(.bold)
+            row("Media GETs", diagnostics.serverRequests.map(String.init) ?? "—")
+            row("GETs / second", diagnostics.requestsPerSecond.map { String(format: "%.2f (recent)", $0) } ?? "—")
+            row("Bytes / GET", diagnostics.meanRequestBytes.map { String(format: "~%.0f KiB", $0 / 1024) } ?? "—")
+            row("Received", diagnostics.networkBytes.map { String(format: "%.2f GiB", Double($0) / 1_073_741_824) } ?? "—")
+            row("Receive / peak", "\(rate(diagnostics.networkMbps)) / \(rate(diagnostics.peakInflow)) Mbps")
+            row("Player rate estimate", diagnostics.playerObservedMbps.map { String(format: "%.1f Mbps", $0) } ?? "—")
+            Text(diagnostics.loaderDetails == nil
+                 ? "Current item · log updates may lag · — unavailable"
+                 : "Current loader · started GETs, including cancelled")
+                .foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 16, design: .monospaced))
+                .lineLimit(2)
+            Text("Rates: last ≤10 s · bytes/GET: aggregate estimate")
+                .foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 16, design: .monospaced))
+            sparkline
+            if let moment = diagnostics.lastStall {
+                row("Last stall", describe(moment), warn: true)
+            }
+            if let moment = diagnostics.lastRecovery {
+                row("Last recovery", describe(moment), warn: true)
+            }
+            if let error = diagnostics.lastError {
+                Text("Errors \(diagnostics.errors) · \(error)")
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+            }
+        }
+    }
+
+    private var mode: String {
+        guard let details = diagnostics.loaderDetails else { return "NO CACHE" }
+        return details.diskCache ? "DISK" : (details.cacheFailures > 0 ? "RAM FALLBACK" : "RAM")
+    }
+
+    private func cachePanel(_ details: RemuxLoader.Snapshot) -> some View {
+        Group {
+            Text("CACHE · \(mode)").fontWeight(.bold)
+            row("Size / target", String(format: "%.0f / %.0f MiB", Double(details.windowBytes) / 1_048_576,
+                                        Double(details.cacheBudget) / 1_048_576))
+            row("Ahead / behind", String(format: "%.0f / %.0f MiB", Double(details.aheadBytes) / 1_048_576,
+                                         Double(details.behindBytes) / 1_048_576))
+            if let seconds = details.estimatedAheadSeconds {
+                row("Ahead estimate", String(format: "~%.0f s (from bytes)", seconds))
+            }
+            row("Served from cache", String(format: "%.2f GiB", Double(details.cacheReadBytes) / 1_073_741_824))
+            row("Pending / cached", "\(details.outstanding) / \(details.cachedRequests) next byte")
+            row("Oldest / delivery", String(format: "%.1f s / %@", details.oldestRequestSeconds,
+                                           details.deliveryPaused ? "throttled" : "allowed"))
+            row("Readers / spread", String(format: "%d / %.0f MiB", details.readers, Double(details.readerSpread) / 1_048_576))
+            row("Resets / aside GETs", "\(details.restarts) / \(details.asides)")
+            row("Aside back / ahead", "\(details.asideBehind) / \(details.asideAhead)")
+            row("Aside ≤64 KiB", "\(details.asideSmall)")
+            if details.asides > 0 {
+                row("Mean aside request", String(format: "%.0f KiB", Double(details.asideRequestedBytes) / Double(details.asides) / 1024))
+            }
+            if let reset = details.lastRestart {
+                row("Last reset (MiB)", String(format: "%.0f–%.0f → %.0f", Double(reset.windowStart) / 1_048_576,
+                                              Double(reset.windowEnd) / 1_048_576, Double(reset.offset) / 1_048_576))
+            }
+            if details.diskCache || details.cacheFailures > 0 {
+                row("Disk max read/write", String(format: "%.1f / %.1f ms", details.maximumDiskReadMS, details.maximumDiskWriteMS))
+                row("Cache failures", "\(details.cacheFailures)", warn: details.cacheFailures > 0)
+            }
+            if let moment = diagnostics.lastStall {
+                cacheMoment("AT LAST STALL", moment)
+            }
+            if let moment = diagnostics.lastRecovery {
+                cacheMoment("AT LAST RECOVERY", moment)
+            }
+            if let moment = diagnostics.lowestMoment {
+                cacheMoment("AT MINIMUM BUFFER", moment)
+            }
+        }
+    }
+
+    private func cacheMoment(_ label: String, _ moment: PlaybackDiagnostics.Moment) -> some View {
+        Group {
+            if let cache = moment.window {
+                Divider().overlay(.white.opacity(0.2))
+                Text("\(label) · \(cache.diskCache ? "Disk" : "RAM")").fontWeight(.bold)
+                Text(String(format: "Ahead %.0f MiB · pending %d/%d cached",
+                            Double(cache.aheadBytes) / 1_048_576, cache.outstanding, cache.cachedRequests))
+                Text(String(format: "Oldest %.1f s · errors %d · %@", cache.oldestRequestSeconds,
+                            cache.cacheFailures, cache.deliveryPaused ? "throttled" : "allowed"))
+            }
+        }
+    }
+
+    private func describe(_ moment: PlaybackDiagnostics.Moment) -> String {
+        String(format: "%.0f s · buffer %.1f s", moment.position, moment.bufferAhead)
+    }
+
+    private func seconds(_ value: Double?) -> String {
+        value.map { String(format: "%.1f s", $0) } ?? "—"
+    }
+
+    private func rate(_ value: Double?) -> String {
+        value.map { String(format: "%.1f", $0) } ?? "—"
     }
 
     private func row(_ label: String, _ value: String, warn: Bool = false) -> some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label)
                 .foregroundStyle(.white.opacity(0.65))
-                .frame(width: 260, alignment: .leading)
+                .frame(width: 225, alignment: .leading)
             Text(value)
                 .foregroundStyle(warn ? .orange : .white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
     }
 
     private var sparkline: some View {
         let recent = diagnostics.samples.suffix(60)
         let peak = max(recent.map(\.bufferAhead).max() ?? 1, 1)
-
-        return HStack(alignment: .bottom, spacing: 2) {
-            ForEach(recent) { sample in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(sample.bufferAhead < 15 ? Color.orange : .white.opacity(0.8))
-                    .frame(width: 4, height: max(2, 60 * sample.bufferAhead / peak))
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(String(format: "Player buffer estimate · 60 s · scale 0–%.1f s", peak))
+                .font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.65))
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(recent) { sample in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(sample.keepingUp ? .white.opacity(0.8) : Color.orange)
+                        .frame(width: 7, height: max(2, 36 * sample.bufferAhead / peak))
+                }
             }
+            .frame(height: 36, alignment: .bottom)
         }
-        .frame(height: 60, alignment: .bottom)
-        .padding(.top, 4)
+        .padding(.vertical, 4)
     }
 }

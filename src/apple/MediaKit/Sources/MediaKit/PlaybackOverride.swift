@@ -32,6 +32,12 @@ public enum DynamicRangeOverride: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Storage for the optional application-owned playback cache.
+public enum PlaybackCacheStorage: String, Codable, CaseIterable, Sendable {
+    case memory
+    case disk
+}
+
 /// A viewer's stored preferences, applied to the detected profile on every resolve.
 ///
 /// Deliberately not a general "compatibility mode". There is one transport today, so a switch for it
@@ -55,16 +61,21 @@ public struct PlaybackPreferences: Codable, Equatable, Sendable {
     /// new on the hardware: a film that will not play through the loader still plays the old way.
     public var usesOwnLoader: Bool
 
+    /// Kept even while caching is disabled. Memory preserves the behavior of legacy installations.
+    public var cacheStorage: PlaybackCacheStorage
+
     public init(
         dynamicRange: DynamicRangeOverride = .automatic,
         maxAudioChannels: Int? = nil,
         showDiagnostics: Bool = false,
-        usesOwnLoader: Bool = true
+        usesOwnLoader: Bool = true,
+        cacheStorage: PlaybackCacheStorage = .memory
     ) {
         self.dynamicRange = dynamicRange
         self.maxAudioChannels = maxAudioChannels
         self.showDiagnostics = showDiagnostics
         self.usesOwnLoader = usesOwnLoader
+        self.cacheStorage = cacheStorage
     }
 
     /// Absent in anything written before a switch existed, which must read as off rather than as a
@@ -77,6 +88,9 @@ public struct PlaybackPreferences: Codable, Equatable, Sendable {
         maxAudioChannels = try container.decodeIfPresent(Int.self, forKey: .maxAudioChannels)
         showDiagnostics = try container.decodeIfPresent(Bool.self, forKey: .showDiagnostics) ?? false
         usesOwnLoader = try container.decodeIfPresent(Bool.self, forKey: .usesOwnLoader) ?? true
+        // An unknown storage option must not erase unrelated picture/audio preferences.
+        let storage = try container.decodeIfPresent(String.self, forKey: .cacheStorage)
+        cacheStorage = storage.flatMap(PlaybackCacheStorage.init(rawValue:)) ?? .memory
     }
 
     /// The profile actually sent: what the device reports, narrowed by what the viewer has chosen.

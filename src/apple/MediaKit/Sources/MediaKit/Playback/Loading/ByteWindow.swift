@@ -105,6 +105,7 @@ public struct ByteWindow: Sendable {
         while head < chunks.count, start + Int64(chunks[head].count) <= offset {
             start += Int64(chunks[head].count)
             count -= chunks[head].count
+            chunks[head] = Data()
             head += 1
         }
 

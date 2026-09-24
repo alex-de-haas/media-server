@@ -26,6 +26,7 @@ struct PlayerView: UIViewControllerRepresentable {
 
     /// Feed the player ourselves, from a window read ahead of it. See `RemuxLoader`.
     let ownLoader: Bool
+    let cacheStorage: PlaybackCacheStorage
 
     /// What this edition has to offer, for the menu. Known already from the title screen, so choosing
     /// costs no request until something is chosen.
@@ -56,7 +57,7 @@ struct PlayerView: UIViewControllerRepresentable {
         //
         // So this asks for nothing and lets the player choose, which is what it was doing before #211
         // and while playback was no worse than it is now.
-        let item = context.coordinator.feed(stream, ownLoader: ownLoader)
+        let item = context.coordinator.feed(stream, ownLoader: ownLoader, cacheStorage: cacheStorage)
         let player = AVPlayer(playerItem: item)
 
         // The server already chose the subtitle and the coordinator applies that choice to the item
@@ -87,8 +88,8 @@ struct PlayerView: UIViewControllerRepresentable {
         if let diagnostics {
             // The same value the seek above used, so a resumed film is not reported as opening the
             // instant its play head landed where it was sent.
-            diagnostics.start(observing: item, from: startAt > 1 ? startAt : 0)
             diagnostics.loader = context.coordinator.loader
+            diagnostics.start(observing: item, from: startAt > 1 ? startAt : 0)
             let overlay = UIHostingController(rootView: DiagnosticsOverlay(diagnostics: diagnostics))
             overlay.view.backgroundColor = .clear
             // A child of the player, not a loose view inside it: a hosting controller that never joins
@@ -199,6 +200,7 @@ struct PlayerView: UIViewControllerRepresentable {
         /// The loader feeding the current item, when the film is being fed rather than fetched.
         private(set) var loader: RemuxLoader?
         private var ownLoader = true
+        private var cacheStorage: PlaybackCacheStorage = .memory
         private let guardian = LoaderGuardian()
         private let completion = PlaybackCompletionObserver()
         private var finished = false
@@ -246,14 +248,15 @@ struct PlayerView: UIViewControllerRepresentable {
         ///
         /// Direct play keeps the plain asset. The server never assembled that file, and a loader that
         /// assumes it did has no business in front of it.
-        func feed(_ stream: PlayableStream, ownLoader: Bool) -> AVPlayerItem {
+        func feed(_ stream: PlayableStream, ownLoader: Bool, cacheStorage: PlaybackCacheStorage) -> AVPlayerItem {
             loader?.stop()
             loader = nil
             self.ownLoader = ownLoader
+            self.cacheStorage = cacheStorage
 
             let item: AVPlayerItem
             if ownLoader, stream.decision == .remux {
-                let fed = RemuxLoader(origin: stream.url)
+                let fed = RemuxLoader(origin: stream.url, cacheStorage: cacheStorage)
                 loader = fed
                 item = AVPlayerItem(asset: fed.makeAsset())
             } else {
@@ -302,7 +305,7 @@ struct PlayerView: UIViewControllerRepresentable {
         }
 
         /// A new item on the same loader. The window survives, so the new item's first requests are
-        /// answered from memory, and the position is restored exactly.
+        /// answered from the cache, and the position is restored exactly.
         private func reseat(_ player: AVPlayer) {
             guard let loader else { return }
             diagnostics?.recovered()
@@ -367,13 +370,13 @@ struct PlayerView: UIViewControllerRepresentable {
                 // that resumes into a player nobody can see is heard rather than watched.
                 guard !Task.isCancelled, let self, let replacement else { return }
 
-                let item = self.feed(replacement, ownLoader: self.ownLoader)
+                let item = self.feed(replacement, ownLoader: self.ownLoader, cacheStorage: self.cacheStorage)
                 player.replaceCurrentItem(with: item)
                 await player.seek(to: at, toleranceBefore: .zero, toleranceAfter: .zero)
                 guard !Task.isCancelled else { return }
 
-                self.diagnostics?.start(observing: item)
                 self.diagnostics?.loader = self.loader
+                self.diagnostics?.start(observing: item)
                 self.guardPlayback(player)
                 player.play()
 

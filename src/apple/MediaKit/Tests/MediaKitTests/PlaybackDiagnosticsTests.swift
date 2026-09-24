@@ -225,3 +225,177 @@ struct StartupTests {
         #expect(PlaybackDiagnostics.hasStarted(at: 1, from: 0))
     }
 }
+
+@Suite("Contiguous player buffer coverage")
+struct ContiguousBufferTests {
+    private func range(_ start: Double, _ duration: Double) -> CMTimeRange {
+        CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600),
+                    duration: CMTime(seconds: duration, preferredTimescale: 600))
+    }
+
+    @Test("A shared boundary does not create a false zero")
+    func touching() {
+        #expect(PlaybackDiagnostics.bufferAhead(in: [range(100, 10), range(110, 20)], at: 110) == 20)
+        #expect(PlaybackDiagnostics.bufferAhead(in: [range(100, 10), range(110, 20)], at: 105) == 25)
+    }
+
+    @Test("Unsorted overlapping and nested ranges contribute continuous coverage")
+    func overlapping() {
+        let ranges = [range(115, 20), range(102, 3), range(100, 20), range(0, 40)]
+        #expect(PlaybackDiagnostics.bufferAhead(in: ranges, at: 110) == 25)
+    }
+
+    @Test("A real gap is never bridged, even if tiny")
+    func gap() {
+        #expect(PlaybackDiagnostics.bufferAhead(in: [range(100, 10), range(110.01, 20)], at: 105) == 5)
+        #expect(PlaybackDiagnostics.bufferAhead(in: [range(100, 10), range(111, 20)], at: 110.5) == 0)
+    }
+
+    @Test("Invalid time values cannot poison the chart")
+    func invalid() {
+        #expect(PlaybackDiagnostics.bufferAhead(in: [.invalid, range(0, 20)], at: 5) == 15)
+        #expect(PlaybackDiagnostics.bufferAhead(in: [range(0, 20)], at: .nan) == 0)
+    }
+}
+
+@Suite("Common network diagnostics")
+struct NetworkDiagnosticsTests {
+    @Test("Request totals use event counters rather than the number of log events")
+    func counts() {
+        #expect(PlaybackDiagnostics.knownTotal(of: [100, 30, 5]) == 135)
+        #expect(PlaybackDiagnostics.knownTotal(of: [Int64(1_000), 500]) == 1_500)
+    }
+
+    @Test("Unavailable or incomplete counters differ from a measured zero")
+    func unknown() {
+        #expect(PlaybackDiagnostics.knownTotal(of: [Int]()) == nil)
+        #expect(PlaybackDiagnostics.knownTotal(of: [-1, -1]) == nil)
+        #expect(PlaybackDiagnostics.knownTotal(of: [100, -1]) == nil)
+        #expect(PlaybackDiagnostics.knownTotal(of: [0, 0]) == 0)
+        #expect(PlaybackDiagnostics.knownTotal(of: [Int.max, 1]) == nil)
+    }
+
+    @Test("Bursty log updates use elapsed time and a bounded recent window")
+    func rates() {
+        let source = NSObject()
+        var metrics = PlaybackNetworkMetrics()
+        metrics.update(source: ObjectIdentifier(source), bytes: 0, requests: 0, at: 0)
+        #expect(metrics.mbps == nil)
+        #expect(metrics.meanRequestBytes == nil)
+        metrics.update(source: ObjectIdentifier(source), bytes: 0, requests: 0, at: 1)
+        metrics.update(source: ObjectIdentifier(source), bytes: 12_500_000, requests: 100, at: 5)
+        #expect(metrics.mbps == 20)
+        #expect(metrics.requestsPerSecond == 20)
+        #expect(metrics.meanRequestBytes == 125_000)
+        metrics.update(source: ObjectIdentifier(source), bytes: 12_500_000, requests: 100, at: 10)
+        #expect(metrics.mbps == 10)
+        metrics.update(source: ObjectIdentifier(source), bytes: 12_500_000, requests: 100, at: 15)
+        #expect(metrics.mbps == 0)
+        #expect(metrics.requestsPerSecond == 0)
+        #expect(metrics.peakMbps == 20)
+    }
+
+    @Test("Replacing the native item or loader resets totals, rates and peak")
+    func replacement() {
+        let nativeItem = NSObject(), loader = NSObject()
+        var metrics = PlaybackNetworkMetrics()
+        metrics.update(source: ObjectIdentifier(nativeItem), bytes: 0, requests: 0, at: 0)
+        metrics.update(source: ObjectIdentifier(nativeItem), bytes: 100_000, requests: 100, at: 1)
+        // A new source with a larger byte total must not become a false throughput spike.
+        metrics.update(source: ObjectIdentifier(loader), bytes: 10_000_000, requests: 2, at: 2)
+        #expect(metrics.bytes == 10_000_000)
+        #expect(metrics.requests == 2)
+        #expect(metrics.mbps == nil)
+        #expect(metrics.requestsPerSecond == nil)
+        #expect(metrics.peakMbps == nil)
+        // Recovery that reuses the same loader continues the measurement.
+        metrics.update(source: ObjectIdentifier(loader), bytes: 11_000_000, requests: 4, at: 3)
+        #expect(metrics.mbps == 8)
+        #expect(metrics.requestsPerSecond == 2)
+    }
+
+    @Test("Unknown counters never appear as zero or a plausible average")
+    func missingCounters() {
+        let source = NSObject()
+        var metrics = PlaybackNetworkMetrics()
+        metrics.update(source: ObjectIdentifier(source), bytes: 1_000, requests: nil, at: 0)
+        metrics.update(source: ObjectIdentifier(source), bytes: 2_000, requests: -1, at: 1)
+        #expect(metrics.requests == nil)
+        #expect(metrics.requestsPerSecond == nil)
+        #expect(metrics.meanRequestBytes == nil)
+        #expect(metrics.mbps == 0.008)
+        metrics.update(source: ObjectIdentifier(source), bytes: nil, requests: nil, at: 2)
+        #expect(metrics.bytes == nil)
+        #expect(metrics.mbps == nil)
+        metrics.update(source: ObjectIdentifier(source), bytes: 10_000, requests: 20, at: 3)
+        #expect(metrics.mbps == nil)
+        #expect(metrics.requestsPerSecond == nil)
+    }
+
+    @Test("Regressing counters and duplicate timestamps reset the rate baseline")
+    func reset() {
+        let source = NSObject()
+        var metrics = PlaybackNetworkMetrics()
+        metrics.update(source: ObjectIdentifier(source), bytes: 100, requests: 10, at: 1)
+        metrics.update(source: ObjectIdentifier(source), bytes: 50, requests: 5, at: 2)
+        #expect(metrics.mbps == nil)
+        #expect(metrics.requestsPerSecond == nil)
+        metrics.update(source: ObjectIdentifier(source), bytes: 100, requests: 10, at: 2)
+        #expect(metrics.mbps == nil)
+        metrics.update(source: ObjectIdentifier(source), bytes: 200, requests: 20, at: 3)
+        #expect(metrics.mbps == 0.0008)
+        #expect(metrics.requestsPerSecond == 10)
+    }
+}
+
+@MainActor
+@Suite("Diagnostics item lifecycle")
+struct DiagnosticsLifecycleTests {
+    @Test("Native playback starts with unknown network counters")
+    func nativeStart() {
+        let diagnostics = PlaybackDiagnostics()
+        let item = AVPlayerItem(url: URL(string: "https://example.invalid/movie.mp4")!)
+        diagnostics.start(observing: item)
+        defer { diagnostics.stop() }
+        #expect(diagnostics.loader == nil)
+        #expect(diagnostics.serverRequests == nil)
+        #expect(diagnostics.networkBytes == nil)
+        #expect(diagnostics.networkMbps == nil)
+    }
+
+    @Test("Loader counters are used only while that loader feeds playback")
+    func loaderToNative() {
+        let diagnostics = PlaybackDiagnostics()
+        let loader = RemuxLoader(origin: URL(string: "https://example.invalid/remux.mp4")!)
+        let item = AVPlayerItem(url: URL(string: "https://example.invalid/movie.mp4")!)
+        defer { diagnostics.stop(); loader.stop() }
+        diagnostics.loader = loader
+        diagnostics.start(observing: item)
+        #expect(diagnostics.loaderDetails != nil)
+        #expect(diagnostics.serverRequests == 0)
+        #expect(diagnostics.networkBytes == 0)
+        diagnostics.loader = nil
+        diagnostics.start(observing: item)
+        #expect(diagnostics.loaderDetails == nil)
+        #expect(diagnostics.serverRequests == nil)
+        #expect(diagnostics.networkBytes == nil)
+        #expect(diagnostics.meanRequestBytes == nil)
+    }
+
+    @Test("Stalls survive item replacement and queued old notifications are ignored")
+    func stallsAcrossItems() async throws {
+        let diagnostics = PlaybackDiagnostics()
+        let first = AVPlayerItem(url: URL(string: "https://example.invalid/first.mp4")!)
+        let second = AVPlayerItem(url: URL(string: "https://example.invalid/second.mp4")!)
+        diagnostics.start(observing: first)
+        defer { diagnostics.stop() }
+        NotificationCenter.default.post(name: AVPlayerItem.playbackStalledNotification, object: first)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(diagnostics.stalls == 1)
+        NotificationCenter.default.post(name: AVPlayerItem.playbackStalledNotification, object: first)
+        diagnostics.start(observing: second)
+        NotificationCenter.default.post(name: AVPlayerItem.playbackStalledNotification, object: second)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(diagnostics.stalls == 2)
+    }
+}
