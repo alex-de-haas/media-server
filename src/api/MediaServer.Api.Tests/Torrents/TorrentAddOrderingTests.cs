@@ -1,3 +1,4 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
@@ -47,7 +48,8 @@ public sealed class TorrentAddOrderingTests : IDisposable
             _database, engine, new FilesystemInspector(),
             new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root },
             new PipelineQueue(),
-            new DownloadDeletionService(_database, engine, NullLogger<DownloadDeletionService>.Instance),
+            new DownloadDeletionService(_database, new DownloadRetentionService(_database, engine, new CatalogPathSandbox(), new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root })),
+        new DownloadRetentionService(_database, engine, new CatalogPathSandbox(), new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root }),
             NullLogger<TorrentService>.Instance);
 
         await service.AddAsync(new AddTorrentRequest(catalog.Id, "magnet:?xt=urn:btih:feedface", null, null), CancellationToken.None);

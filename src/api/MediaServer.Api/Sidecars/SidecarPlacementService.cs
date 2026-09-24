@@ -26,7 +26,8 @@ public sealed class SidecarPlacementService(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
     IMediaProbe probe,
-    ILogger<SidecarPlacementService> logger)
+    ILogger<SidecarPlacementService> logger,
+    MediaServer.Api.Organizer.FilePlacementService placement)
 {
     public async Task PlaceAsync(IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken)
     {
@@ -89,15 +90,6 @@ public sealed class SidecarPlacementService(
             .Where(stream => stream.MediaSourceId == source.Id && stream.IsExternal)
             .ToListAsync(cancellationToken);
 
-        // Captured before the moves, because placing a companion overwrites its RelativePath with the
-        // canonical one — reading the staging roots afterwards would find none and leave every emptied
-        // .incoming/<downloadId> folder behind.
-        var stagingRoots = companions
-            .Select(companion => StagingRootOf(companion.RelativePath))
-            .OfType<string>()
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
         var nextExternalIndex = ExternalStreamIndex.NextFor(existing);
 
         var placed = 0;
@@ -121,14 +113,14 @@ public sealed class SidecarPlacementService(
 
         foreach (var named in SidecarNaming.For(Path.GetFileName(video.RelativePath), forNaming, alreadyPlaced))
         {
-            var target = folder.Length == 0 ? named.FileName : $"{folder}/{named.FileName}";
+            var (file, language, title, track) = labelled.First(entry => entry.File.Id == named.Id);
+            var target = file.PlacementPath ?? (folder.Length == 0 ? named.FileName : $"{folder}/{named.FileName}");
             if (existing.Any(stream => string.Equals(stream.ExternalPath, target, StringComparison.Ordinal)))
             {
                 continue; // Already placed by an earlier drive.
             }
 
-            var (file, language, title, track) = labelled.First(entry => entry.File.Id == named.Id);
-            if (!TryMove(catalog, file, target))
+            if (!await TryMoveAsync(catalog, file, file.PlacementPath ?? target, cancellationToken))
             {
                 continue;
             }
@@ -157,49 +149,15 @@ public sealed class SidecarPlacementService(
             file.AssignmentStatus = SourceFileAssignmentStatus.Sidecar;
             file.UpdatedAt = DateTimeOffset.UtcNow;
             placed++;
+            await database.SaveChangesAsync(cancellationToken);
         }
 
         if (placed > 0)
         {
             await database.SaveChangesAsync(cancellationToken);
             logger.LogInformation("Placed {Count} companion file(s) beside {Video}.", placed, video.RelativePath);
-            SweepEmptiedStaging(catalog, stagingRoots);
+            // Retention cleanup protects original companion tracks while seeding.
         }
-    }
-
-    /// <summary>
-    /// Removes the staging folders the placed files came out of. Organize deliberately spares any root that
-    /// still holds a companion — its recursive sweep would otherwise take the only copy of a dub with it —
-    /// so clearing what is now empty falls here.
-    /// </summary>
-    private void SweepEmptiedStaging(Catalog catalog, IReadOnlyList<string> roots)
-    {
-        foreach (var root in roots)
-        {
-            if (!sandbox.TryResolve(catalog, root, out var absolute) || !Directory.Exists(absolute))
-            {
-                continue;
-            }
-
-            try
-            {
-                if (!Directory.EnumerateFiles(absolute, "*", SearchOption.AllDirectories).Any())
-                {
-                    Directory.Delete(absolute, recursive: true);
-                }
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                logger.LogDebug(exception, "Could not clear the emptied staging folder {Path}.", root);
-            }
-        }
-    }
-
-    /// <summary>The <c>.incoming/&lt;downloadId&gt;</c> staging root of a path, or null when it is not staged.</summary>
-    private static string? StagingRootOf(string relativePath)
-    {
-        var parts = relativePath.Split('/');
-        return parts.Length >= 2 && parts[0] == ".incoming" ? $"{parts[0]}/{parts[1]}" : null;
     }
 
     /// <summary>
@@ -304,7 +262,7 @@ public sealed class SidecarPlacementService(
     private static string? TaggedLanguage(string? value) =>
         Tagged(value) is { } language && !language.Equals("und", StringComparison.OrdinalIgnoreCase) ? language : null;
 
-    private bool TryMove(Catalog catalog, SourceFile companion, string targetRelative)
+    private async Task<bool> TryMoveAsync(Catalog catalog, SourceFile companion, string targetRelative, CancellationToken ct)
     {
         if (string.Equals(companion.RelativePath, targetRelative, StringComparison.Ordinal))
         {
@@ -323,24 +281,16 @@ public sealed class SidecarPlacementService(
             return false;
         }
 
-        if (File.Exists(to))
+        if (File.Exists(to) && companion.PlacementHash is null)
         {
-            // Never clobber a payload file that is already there.
-            logger.LogWarning("Refusing to place {Companion}: {Target} already exists.", companion.RelativePath, targetRelative);
+            logger.LogWarning("Companion destination is occupied; leaving the original in place: {Path}", targetRelative);
             return false;
         }
 
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
-            File.Move(from, to);
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(exception, "Could not place companion {Path}.", companion.RelativePath);
-            return false;
-        }
+        var download = companion.DownloadId is { } id ? await database.Downloads.FindAsync([id], ct) : null;
+        await placement.PlaceAsync(companion, from, to, targetRelative,
+            download is { KeepSeeding: true, StopRequested: false }, ct);
+        return true;
     }
 
     private static string FolderOf(string relativePath)

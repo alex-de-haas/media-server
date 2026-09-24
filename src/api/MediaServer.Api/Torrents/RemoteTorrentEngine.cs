@@ -117,6 +117,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         {
             var existing = LocalTorrentInspector.Inspect(source);
             SeedInitial(existing);
+            await RefreshRegisteredFilesAsync(existing.InfoHash, cts.Token);
             return existing;
         }
 
@@ -134,6 +135,7 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
         var descriptor = await response.Content.ReadFromJsonAsync<TorrentDescriptor>(Json, cts.Token)
             ?? throw new InvalidOperationException("torrent-engine returned an empty descriptor.");
         SeedInitial(descriptor);
+        await RefreshRegisteredFilesAsync(descriptor.InfoHash, cts.Token);
         return descriptor;
     }
 
@@ -159,21 +161,11 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
 
     public async Task RemoveAsync(string infoHash, bool deleteFiles, CancellationToken cancellationToken)
     {
-        try
-        {
-            using var cts = ControlCts(cancellationToken);
-            using var response = await _http.DeleteAsync($"/downloads/{infoHash}?deleteFiles={deleteFiles.ToString().ToLowerInvariant()}", cts.Token);
-            // Treat a missing torrent as already-removed.
-            if (response.StatusCode != HttpStatusCode.NotFound)
-            {
-                response.EnsureSuccessStatusCode();
-            }
-        }
-        finally
-        {
-            _snapshots.TryRemove(infoHash, out _);
-            _files.TryRemove(infoHash, out _);
-        }
+        using var cts = ControlCts(cancellationToken);
+        using var response = await _http.DeleteAsync($"/downloads/{infoHash}?deleteFiles={deleteFiles.ToString().ToLowerInvariant()}", cts.Token);
+        if (response.StatusCode != HttpStatusCode.NotFound) response.EnsureSuccessStatusCode();
+        _snapshots.TryRemove(infoHash, out _);
+        _files.TryRemove(infoHash, out _);
     }
 
     public TorrentSnapshot? GetSnapshot(string infoHash) => _snapshots.GetValueOrDefault(infoHash);
@@ -247,10 +239,16 @@ public sealed class RemoteTorrentEngine : ITorrentEngine, IHostedService, IDispo
     {
         _snapshots.TryAdd(descriptor.InfoHash, new TorrentSnapshot(
             descriptor.InfoHash, descriptor.Name, "Downloading", Complete: false, 0, 0, 0, 0, 0, descriptor.TotalSize ?? 0));
-        if (descriptor.Files.Count > 0)
-        {
-            _files[descriptor.InfoHash] = descriptor.Files;
-        }
+    }
+
+    private async Task RefreshRegisteredFilesAsync(string infoHash, CancellationToken cancellationToken)
+    {
+        // Add/inspect descriptors describe metadata, not necessarily the manager's physical layout.
+        // In particular, older engines prefix a single-file torrent's name twice in that response.
+        // Only /files (also used by SSE handlers) is authoritative for save-relative paths. Never
+        // overwrite its cache with a late add response, and re-notify consumers on an idempotent add.
+        await CacheFilesAsync(infoHash, cancellationToken);
+        if (GetFiles(infoHash).Count > 0) MetadataReceived?.Invoke(this, infoHash);
     }
 
     /// <summary>Translates the absolute local save directory (<c>{catalogRoot}/.incoming/{id}</c>) into the

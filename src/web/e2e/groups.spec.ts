@@ -54,6 +54,7 @@ test("admin creates a manual group in Settings, browses its folder, edits member
   await expect(page.getByRole("button", { name: "Edit Weekend" })).toBeVisible();
   expect(writes[0].memberIds).toEqual([movie.id]);
   await page.goto("/groups");
+  await expect(page.getByRole("navigation").first().getByRole("link", { name: "Collections", exact: true })).toBeVisible();
   const navigation = await page.getByRole("navigation").first().getByRole("link").allTextContents();
   expect(navigation.indexOf("Groups")).toBe(navigation.indexOf("Series") + 1);
   expect(navigation.indexOf("Collections")).toBe(navigation.indexOf("Groups") + 1);

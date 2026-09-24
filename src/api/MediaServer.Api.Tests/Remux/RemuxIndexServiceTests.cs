@@ -120,7 +120,9 @@ public sealed class RemuxIndexServiceTests : IDisposable
             states.Add(json.RootElement.GetProperty("indexing").GetProperty("state").GetString()!);
             Assert.Equal(id, json.RootElement.GetProperty("sourceId").GetGuid());
         }
-        Assert.Equal(new[] { "indexing", "saving", "ready" }, states);
+        // A slow build can publish multiple indexing progress events; lifecycle transitions stay ordered.
+        Assert.Equal(new[] { "indexing", "saving", "ready" },
+            states.Where((state, index) => index == 0 || state != states[index - 1]));
     }
 
     [Fact]

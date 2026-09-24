@@ -1,5 +1,6 @@
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
+using MediaServer.Api.Torrents;
 
 namespace MediaServer.Api.Pipeline;
 
@@ -8,7 +9,7 @@ public static class IngestEndpoints
 {
     public static void MapIngestEndpoints(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/api/ingest").RequireAuthorization();
+        var group = routes.MapGroup("/api/ingest").RequireAuthorization().AddEndpointFilter<TorrentConflictFilter>();
 
         // Filters are additive and the shape is unchanged: an existing caller that passes nothing still
         // receives the whole list as an array. The window's total lives on IngestListPage, which the MCP

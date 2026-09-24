@@ -1,3 +1,6 @@
+using MediaServer.Api.IO;
+using MediaServer.Api.Torrents;
+using MediaServer.Api.Hosty;
 using System.Data.Common;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
@@ -29,9 +32,9 @@ public sealed class OrganizerServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Organize_moves_the_file_into_the_canonical_layout_and_clears_staging()
+    public async Task Organize_moves_the_file_and_leaves_unowned_staging_for_inspection()
     {
-        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
         var now = DateTimeOffset.UtcNow;
         var downloadId = Guid.NewGuid();
 
@@ -56,9 +59,9 @@ public sealed class OrganizerServiceTests : IDisposable
         Assert.True(File.Exists(result.AbsolutePath));
         Assert.Equal("movie", await File.ReadAllTextAsync(result.AbsolutePath));
 
-        // The move leaves nothing behind: the source file is gone and the .incoming staging folder is cleaned.
+        // The source moved, but no durable Download owner exists for recursive staging cleanup.
         Assert.False(File.Exists(stagingAbsolute));
-        Assert.False(Directory.Exists(Path.Combine(_root, CatalogPaths.IncomingDirName, downloadId.ToString("N"))));
+        Assert.True(Directory.Exists(Path.Combine(_root, CatalogPaths.IncomingDirName, downloadId.ToString("N"))));
 
         // The source-file row and the media item now point at the canonical path.
         Assert.Equal("Inception (2010)/Inception (2010).mkv", sourceFile.RelativePath);
@@ -68,7 +71,7 @@ public sealed class OrganizerServiceTests : IDisposable
     [Fact]
     public async Task Organize_in_place_keeps_an_already_canonical_scanned_file()
     {
-        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
         var now = DateTimeOffset.UtcNow;
 
         var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now };
@@ -96,7 +99,7 @@ public sealed class OrganizerServiceTests : IDisposable
     [Fact]
     public async Task Organize_gives_two_files_for_one_episode_distinct_versioned_paths()
     {
-        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
         var now = DateTimeOffset.UtcNow;
         var downloadId = Guid.NewGuid();
 
@@ -137,7 +140,7 @@ public sealed class OrganizerServiceTests : IDisposable
     [Fact]
     public async Task Organize_allocates_a_version_path_when_the_original_is_already_published()
     {
-        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
         var now = DateTimeOffset.UtcNow;
 
         var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now };
@@ -186,7 +189,7 @@ public sealed class OrganizerServiceTests : IDisposable
     [Fact]
     public async Task Organize_allocates_a_version_path_when_another_pending_ingest_owns_the_original()
     {
-        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
         var now = DateTimeOffset.UtcNow;
 
         var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now };
@@ -229,7 +232,7 @@ public sealed class OrganizerServiceTests : IDisposable
     public async Task Organize_recovers_a_version_label_from_an_already_canonical_scanned_file(
         string title, int year, string relativePath, string? expectedEdition)
     {
-        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
         var now = DateTimeOffset.UtcNow;
 
         var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root, NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now };
@@ -276,7 +279,7 @@ public sealed class OrganizerServiceTests : IDisposable
         }
         await _database.SaveChangesAsync();
         await WriteStagingFileAsync(source.RelativePath);
-        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
 
         var result = Assert.Single(await organizer.OrganizeAsync([source], catalog, CancellationToken.None));
 
@@ -298,7 +301,7 @@ public sealed class OrganizerServiceTests : IDisposable
         _database.AddRange(catalog, movie, ingest, source);
         await _database.SaveChangesAsync();
         var context = new IngestContext { Catalog = catalog, Item = ingest, SourceFiles = [source], Paths = CatalogPaths.For(catalog) };
-        var stage = new OrganizeStage(new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance));
+        var stage = new OrganizeStage(new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput())), _database, new DownloadRetentionService(_database, new FakeTorrentEngine(), new CatalogPathSandbox(), new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root }), new FilesystemInspector(), new FakeTorrentEngine(), new CatalogPathSandbox());
 
         var result = Assert.IsType<StageResult.Failed>(await stage.RunAsync(context, CancellationToken.None));
 
@@ -359,7 +362,7 @@ public sealed class OrganizerServiceTests : IDisposable
         await _database.SaveChangesAsync();
         await WriteStagingFileAsync(firstFile.RelativePath);
         await WriteStagingFileAsync(secondFile.RelativePath);
-        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
         _commands.Reads.Clear();
 
         var organized = await organizer.OrganizeAsync([firstFile, secondFile], catalog, CancellationToken.None);
@@ -413,7 +416,7 @@ public sealed class OrganizerServiceTests : IDisposable
         disk.Close();
         using var database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(disk).Options);
         var trackedSource = await database.SourceFiles.SingleAsync(file => file.Id == source.Id);
-        var organizer = new OrganizerService(database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance);
+        var organizer = new OrganizerService(database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance, new FilePlacementService(database, new FilesystemInspector(), new PlacementOutput()));
 
         var result = Assert.Single(await organizer.OrganizeAsync([trackedSource], catalog, CancellationToken.None));
 

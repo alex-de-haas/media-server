@@ -58,6 +58,7 @@ __pycache__/
 *.pyc
 
 # Apple clients
+src/apple/Config/Signing.local.xcconfig
 src/apple/**/.build/
 src/apple/**/xcuserdata/
 src/apple/**/*.xcworkspace/xcuserdata/

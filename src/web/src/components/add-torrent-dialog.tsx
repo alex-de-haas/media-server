@@ -31,7 +31,7 @@ export function AddTorrentDialog() {
   const filesId = useId();
   const [catalogId, setCatalogId] = useState("");
   const [magnet, setMagnet] = useState("");
-  const [keepSeeding, setKeepSeeding] = useState(false);
+  const [keepSeeding, setKeepSeeding] = useState<boolean | undefined>(undefined);
   const [files, setFiles] = useState<TorrentFile[]>([]);
 
   const selectedCatalog = catalogs.data?.find((catalog) => catalog.id === catalogId);
@@ -114,7 +114,7 @@ export function AddTorrentDialog() {
               <div className="flex flex-wrap items-center gap-3">
                 <Select
                   value={catalogId || null}
-                  onValueChange={(value) => setCatalogId((value as string | null) ?? "")}
+                  onValueChange={(value) => { setCatalogId((value as string | null) ?? ""); setKeepSeeding(undefined); }}
                   items={(catalogs.data ?? []).map((catalog) => ({ value: catalog.id, label: `${catalog.name} (${catalog.type})` }))}
                 >
                   <SelectTrigger id={catalogSelectId} className="w-full max-w-xs">
@@ -186,7 +186,7 @@ export function AddTorrentDialog() {
             )}
 
             <label className="flex items-center gap-2">
-              <Checkbox checked={keepSeeding} onCheckedChange={(checked) => setKeepSeeding(checked === true)} />
+              <Checkbox checked={keepSeeding ?? selectedCatalog?.defaultKeepSeeding ?? false} onCheckedChange={(checked) => setKeepSeeding(checked === true)} />
               <span>Keep seeding after download completes</span>
             </label>
 

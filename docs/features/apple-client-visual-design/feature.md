@@ -1,7 +1,7 @@
 # Apple Client Visual Design and Collections
 
 Created: 2026-09-06
-Updated: 2026-09-17
+Updated: 2026-09-24
 
 Collections reload through the store’s screen-appearance handler whenever the
 collection screen appears. The unsupported-server
@@ -13,6 +13,9 @@ is in flight; subsequent refreshes remain available after success or failure.
 
 The tvOS client follows the system light/dark appearance with an adaptive neutral canvas, system typography, and native card
 focus. Its top-level tabs are Home, Movies, Series, Groups, Collections, and Settings.
+Home and the four browsing roots use the tab bar as their screen label; they do not
+repeat Home, All Movies, All Series, Groups or Collections above the content.
+Home row headings and individual group/collection names remain in their own views.
 The Series tab explicitly renders its television symbol as a monochrome template,
 leaving its tint to the native tab bar for light/dark appearance, selection, and focus.
 
@@ -124,6 +127,10 @@ catalog type. Configuration is in web Settings; Apple TV reads the authenticated
 native group list and paged member routes using the generated Swift client.
 
 ## Testing Expectations
+
+- Home, Movies, Series, Groups and Collections do not repeat the selected tab name
+  above their content. Home row headings and individual group/collection detail
+  titles remain visible.
 
 - MediaKit tests cover collection decoding, bearer use, empty/unsupported/error
   distinctions, detail removal, continue-row filtering and completion refresh,

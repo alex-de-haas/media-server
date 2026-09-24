@@ -1,8 +1,8 @@
 # Apple Playback Buffering
 
-Status: On Hold
+Status: In Progress
 Created: 2026-09-22
-Updated: 2026-09-23
+Updated: 2026-09-24
 
 ## Goal and approval
 
@@ -20,6 +20,13 @@ while the user observes the existing RAM version on tvOS 27.
 The user also approved common diagnostics with caching disabled, memory caching or
 disk caching, plus a more compact overlay. This resumes implementation only; the
 physical-device cache experiment remains deferred.
+
+On 2026-09-24 the user explicitly requested review fixes, conflict resolution and
+merge. The earlier implementation and settings approvals preceded the code;
+the first published commit incorrectly recorded the overall plan as On Hold
+because the device experiment was deferred. This follow-up corrects the current
+status to In Progress without rewriting that commit. Implementation is complete;
+the unchecked device-verification deliverable below remains open after merge.
 
 ## Target behavior
 
@@ -82,13 +89,13 @@ testing while observing playback on tvOS 27. The device test remains open until
 the user reports the result. A
 successful build and unit tests do not establish that the original freeze is fixed.
 
-Verified again on 2026-09-23 in the isolated pull-request checkout:
+Verified again on 2026-09-24 after merging current main into the PR checkout:
 
 - `swift test --package-path src/apple/MediaKit --disable-automatic-resolution`:
   245 tests passed in 42 suites, including common diagnostics, native/loader
   transitions, disk storage/fallback and existing playback coverage.
 - The unsigned tvOS device build above succeeded; Apple client version is
-  0.14.1 → 0.15.0. The runtime manifest is unchanged.
+  0.14.2 → 0.15.0. The runtime manifest is unchanged.
 - `node scripts/docs-index.mjs --check` and `git diff --check`: passed.
 - No signing, installation, physical-device playback or on-device layout check was
   performed; the user has deferred installation. The

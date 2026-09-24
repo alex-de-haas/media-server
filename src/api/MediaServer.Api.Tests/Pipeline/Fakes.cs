@@ -82,7 +82,7 @@ public sealed class FakeTorrentEngine : ITorrentEngine
     public Task ResumeAsync(string infoHash, CancellationToken cancellationToken) => Task.CompletedTask;
     public Task StopAsync(string infoHash, CancellationToken cancellationToken) => Task.CompletedTask;
     public Task RemoveAsync(string infoHash, bool deleteFiles, CancellationToken cancellationToken) => Task.CompletedTask;
-    public TorrentSnapshot? GetSnapshot(string infoHash) => null;
+    public TorrentSnapshot? GetSnapshot(string infoHash) => new(infoHash, "Fixture", "Seeding", true, 100, 0, 0, 0, 0, 1024);
     public IReadOnlyList<TorrentSnapshot> GetAllSnapshots() => [];
     public IReadOnlyList<TorrentFileInfo> GetFiles(string infoHash) => [];
 }

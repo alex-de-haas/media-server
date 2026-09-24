@@ -9,7 +9,8 @@ namespace MediaServer.Api.Organizer;
 public sealed class OrganizerService(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
-    ILogger<OrganizerService> logger)
+    ILogger<OrganizerService> logger,
+    FilePlacementService placement)
     : IOrganizer
 {
     // Path equality follows the filesystem: case-insensitive on Windows and default macOS, ordinal elsewhere.
@@ -24,11 +25,10 @@ public sealed class OrganizerService(
         var paths = CatalogPaths.For(catalog);
         paths.EnsureCreated();
 
+        var downloadId = sourceFiles.Select(x => x.DownloadId).FirstOrDefault(x => x != null);
+        var download = downloadId is { } id ? await database.Downloads.FindAsync([id], cancellationToken) : null;
+        var copy = download is { KeepSeeding: true, StopRequested: false };
         var organized = new List<OrganizedFile>();
-        var stagingToClean = new HashSet<string>(StringComparer.Ordinal);
-        // Cleanup is recursive: spare roots holding an unorganized file even when a sibling moved out.
-        var stagingKept = new HashSet<string>(StringComparer.Ordinal);
-
         // Compare paths in SQL using the same Unicode/case rules as the filesystem; SQLite's NOCASE
         // only folds ASCII. Registration also applies when EF opens this connection for a later query.
         const string pathCollation = "organizer_path";
@@ -49,30 +49,14 @@ public sealed class OrganizerService(
                     .Select(source => source.SourceFileId);
                 var pending = database.SourceFiles
                     .Where(file => file.IngestItem!.CatalogId == catalog.Id &&
-                        EF.Functions.Collate(file.RelativePath, pathCollation) == candidate)
+                        (EF.Functions.Collate(file.RelativePath, pathCollation) == candidate ||
+                         EF.Functions.Collate(file.PlacementPath!, pathCollation) == candidate))
                     .Select(file => (Guid?)file.Id);
                 owners = (await published.Concat(pending).ToListAsync(cancellationToken)).ToHashSet();
                 claims.Add(candidate, owners);
             }
 
             return owners.Any(owner => owner != sourceFileId);
-        }
-
-        void KeepStaging(SourceFile file)
-        {
-            if (StagingRootOf(file.RelativePath) is { } root && sandbox.TryResolve(catalog, root, out var absolute))
-            {
-                stagingKept.Add(absolute);
-            }
-        }
-
-        // Companion audio tracks and subtitles are not organized here: their names derive from the video's
-        // canonical one, so they are placed afterwards (see SidecarPlacementService). Their staging root
-        // must survive this sweep — recursive deletion would take the only copy of a dub with it.
-        foreach (var companion in sourceFiles.Where(file =>
-            file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && MediaFormats.IsCompanion(file.RelativePath)))
-        {
-            KeepStaging(companion);
         }
 
         // Group by assigned media item so that when several files map to one movie/episode (e.g. a
@@ -121,7 +105,7 @@ public sealed class OrganizerService(
                 }
 
                 var extension = Path.GetExtension(sourceFile.RelativePath);
-                var canonicalRelative = await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
+                var canonicalRelative = sourceFile.PlacementPath ?? await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
 
                 // A file scanned from an already-organized library can already sit at its canonical path for a
                 // non-null edition — "<canonical stem> - <label>.<ext>", exactly what LibraryNaming writes for a
@@ -145,7 +129,7 @@ public sealed class OrganizerService(
                 // both disk and database claims, including claims whose files are temporarily missing.
                 var baseEdition = edition;
                 var versionNumber = 2;
-                while (!string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison) &&
+                while (sourceFile.PlacementPath is null && !string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison) &&
                        (File.Exists(canonicalAbsolute) || Directory.Exists(canonicalAbsolute) ||
                         await IsClaimedAsync(canonicalRelative, sourceFile.Id)))
                 {
@@ -162,15 +146,10 @@ public sealed class OrganizerService(
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(canonicalAbsolute)!);
                     // Never overwrite: a concurrent claimant makes this ingest fail safely and retry.
-                    File.Move(sourceAbsolute, canonicalAbsolute);
+                    sourceFile.Edition = edition; // Persist the chosen version with the destination reservation.
+                    await placement.PlaceAsync(sourceFile, sourceAbsolute, canonicalAbsolute, canonicalRelative, copy, cancellationToken);
 
-                    // The staging folder may go now that its file actually moved out. Recorded here rather
-                    // than before the move so a failed file never schedules its own staging root for cleanup.
-                    if (StagingRootOf(sourceFile.RelativePath) is { } stagingRoot &&
-                        sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
-                    {
-                        stagingToClean.Add(stagingAbsolute);
-                    }
+
                 }
 
                 sourceFile.RelativePath = canonicalRelative;
@@ -193,69 +172,14 @@ public sealed class OrganizerService(
                     libraryPathSet = true;
                 }
 
+                await database.SaveChangesAsync(cancellationToken);
                 organized.Add(new OrganizedFile(sourceFile.Id, item.Id, canonicalRelative, canonicalAbsolute));
             }
         }
 
         await database.SaveChangesAsync(cancellationToken);
 
-        var organizedIds = organized.Select(file => file.SourceFileId).ToHashSet();
-        foreach (var file in sourceFiles.Where(file =>
-            file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes) &&
-            !organizedIds.Contains(file.Id)))
-        {
-            KeepStaging(file);
-        }
-
-        // Skipped files (unmatchable extras the operator excluded) are never grouped/organized above, so a
-        // skip-only torrent ingest would otherwise leave its whole .incoming/<downloadId>/ staging — and the
-        // skipped files inside it — on disk forever. Note their staging roots here so the recursive cleanup
-        // below sweeps them. Scan-imported files sit outside .incoming/ (StagingRootOf → null) and are left
-        // in place; the operator's own on-disk file is never deleted by a skip.
-        foreach (var skipped in sourceFiles.Where(file => file.AssignmentStatus == SourceFileAssignmentStatus.Skipped))
-        {
-            if (StagingRootOf(skipped.RelativePath) is { } stagingRoot &&
-                sandbox.TryResolve(catalog, stagingRoot, out var stagingAbsolute))
-            {
-                stagingToClean.Add(stagingAbsolute);
-            }
-        }
-
-        // Remove emptied .incoming/<downloadId>/ staging folders (torrent leftovers: samples, .nfo, extras),
-        // except any still holding a file the organizer deliberately left alone.
-        foreach (var staging in stagingToClean.Except(stagingKept))
-        {
-            TryDeleteDirectory(staging);
-        }
-
         return organized;
-    }
-
-    /// <summary>The <c>.incoming/&lt;downloadId&gt;</c> staging root of a path, or null if it is not staged.</summary>
-    private static string? StagingRootOf(string relativePath)
-    {
-        if (!CatalogPaths.IsIncoming(relativePath))
-        {
-            return null;
-        }
-
-        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return segments.Length >= 2 ? $"{segments[0]}/{segments[1]}" : segments[0];
-    }
-
-    private void TryDeleteDirectory(string absolute)
-    {
-        try
-        {
-            if (Directory.Exists(absolute))
-            {
-                Directory.Delete(absolute, recursive: true);
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(exception, "Failed to remove staging folder {Path}", absolute);
-        }
     }
 
     /// <summary>

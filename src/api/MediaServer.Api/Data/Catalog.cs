@@ -4,7 +4,7 @@ namespace MediaServer.Api.Data;
 /// An operator-configured destination for content. The chosen catalog drives filename parsing,
 /// target paths, naming, seeding policy, and metadata language. <c>Root</c> is a single host
 /// directory on one filesystem containing sibling <c>files/</c> and <c>library/</c> subtrees so the
-/// organizer can hardlink between them.
+/// organizer can move files without copying between volumes.
 /// </summary>
 public sealed class Catalog
 {

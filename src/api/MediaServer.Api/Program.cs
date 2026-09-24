@@ -107,6 +107,10 @@ builder.Services.AddScoped<CatalogFileProbe>();
 builder.Services.AddScoped<CatalogHealthService>();
 builder.Services.AddHostedService<CatalogHealthWorker>();
 builder.Services.AddScoped<IOrganizer, OrganizerService>();
+builder.Services.AddScoped<FilePlacementService>();
+builder.Services.AddSingleton<IPlacementOutput, PlacementOutput>();
+builder.Services.AddScoped<DownloadRetentionService>();
+builder.Services.AddScoped<TemporaryDownloadService>();
 
 // Real-time SSE notifier + in-process pipeline queue.
 builder.Services.AddSingleton<SseRealtimeNotifier>();
@@ -132,6 +136,7 @@ else
 }
 
 builder.Services.AddHostedService<TorrentCoordinator>();
+builder.Services.AddHostedService<DownloadCleanupWorker>();
 builder.Services.AddScoped<TorrentService>();
 builder.Services.AddScoped<DownloadFileService>();
 builder.Services.AddScoped<DownloadDeletionService>();
@@ -569,6 +574,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapCatalogEndpoints();
 app.MapTorrentEndpoints();
+app.MapTemporaryDownloadEndpoints();
 app.MapTranscodeEndpoints();
 app.MapIngestEndpoints();
 app.MapLibraryEndpoints();

@@ -28,12 +28,10 @@ public sealed class IntakeStage : IPipelineStage
 }
 
 /// <summary>
-/// Waits for the torrent, then performs the download→identify hand-off: a completed, non-seeding download
-/// is dropped (its files stay in <c>.incoming/</c>, now owned by the ingest) so the rest of the pipeline
-/// runs torrent-free. While <c>keepSeeding</c> is on the item parks here until the operator stops seeding.
-/// Scan-originated items have no download and skip straight through.
+/// Waits for engine-confirmed completion. Retains the download as staging ownership evidence;
+/// releases non-seeding jobs before identify and leaves retained seeds running during publication.
 /// </summary>
-public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine engine, ICatalogPathSandbox sandbox, ILogger<DownloadStage> logger) : IPipelineStage
+public sealed class DownloadStage(ICatalogPathSandbox sandbox, ITorrentEngine engine, DownloadRetentionService retention) : IPipelineStage
 {
     public string Key => "download";
     public PipelinePhase Phase => PipelinePhase.Processing;
@@ -56,10 +54,7 @@ public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine 
                 return new StageResult.Failed("Torrent entered an error state.", Retryable: false);
             case DownloadState.Queued or DownloadState.Downloading:
                 return new StageResult.Deferred(TimeSpan.FromSeconds(30));
-            case DownloadState.Seeding:
-                // keepSeeding: the file stays seedable in .incoming/ and the item parks here until the
-                // operator stops seeding (TorrentService.StopSeedingAsync flips the state and re-drives).
-                return new StageResult.Deferred(TimeSpan.FromSeconds(30));
+
         }
 
         // Completed / StoppedSeeding: the transfer reports done. Guard against a phantom completion before
@@ -80,31 +75,13 @@ public sealed class DownloadStage(MediaServerDbContext database, ITorrentEngine 
                 "Remove it and add it again to download.", Retryable: false);
         }
 
-        // Hand off — drop the Download row first (re-parent its source files + the ingest item), then do a
-        // best-effort engine removal. The files stay in .incoming/, owned by the ingest (the download FKs are
-        // SET NULL). Persisting the DB change before the engine call means a transient engine error can't
-        // strand the pipeline with a half-applied hand-off. Done once, even if a later stage re-drives.
-        foreach (var sourceFile in context.SourceFiles)
-        {
-            sourceFile.DownloadId = null;
-        }
+        if (!download.EngineReleased && !download.StopRequested && engine.GetSnapshot(download.InfoHash)?.Complete != true)
+            return new StageResult.Deferred(TimeSpan.FromSeconds(15));
+        if (!download.KeepSeeding || download.StopRequested)
+            await retention.ReleaseAsync(download, cancellationToken);
 
-        context.Item.DownloadId = null;
-        database.Downloads.Remove(download);
-        await database.SaveChangesAsync(cancellationToken);
-
-        try
-        {
-            await engine.RemoveAsync(download.InfoHash, deleteFiles: false, cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        {
-            logger.LogWarning(exception, "Engine removal during hand-off of download {DownloadId} failed; files kept in .incoming/.", download.Id);
-        }
-
-        logger.LogInformation(
-            "Handed off download {DownloadId} to ingest {Ingest}: row removed, files kept in .incoming/.",
-            download.Id, context.Item.Id);
+        // Retain the durable handle and original root through publication and cleanup.
+        // Non-seeding jobs are released at Organize, before the first filesystem mutation.
         return StageResult.Done;
     }
 }
@@ -171,8 +148,8 @@ public sealed class SidecarStage(SidecarPlacementService placement) : IPipelineS
     }
 }
 
-/// <summary>Moves confirmed files into the canonical catalog layout (rename in place — no copy/hardlink).</summary>
-public sealed class OrganizeStage(IOrganizer organizer) : IPipelineStage
+/// <summary>Places library files by copy while seeding, or move after acknowledged engine release.</summary>
+public sealed class OrganizeStage(IOrganizer organizer, MediaServerDbContext database, DownloadRetentionService retention, MediaServer.Api.IO.IFilesystemInspector filesystem, ITorrentEngine engine, ICatalogPathSandbox sandbox) : IPipelineStage
 {
     public string Key => "organize";
     public PipelinePhase Phase => PipelinePhase.Processing;
@@ -183,7 +160,37 @@ public sealed class OrganizeStage(IOrganizer organizer) : IPipelineStage
 
     public async Task<StageResult> RunAsync(IngestContext context, CancellationToken cancellationToken)
     {
-        var organized = await organizer.OrganizeAsync(context.SourceFiles, context.Catalog, cancellationToken);
+        if (context.Download is { } download)
+        {
+            if (download.KeepSeeding && !download.StopRequested && engine.GetSnapshot(download.InfoHash)?.Complete != true)
+                return new StageResult.Deferred(TimeSpan.FromSeconds(15));
+            download.PlacementStarted = true;
+            await database.SaveChangesAsync(cancellationToken);
+            if (!download.KeepSeeding || download.StopRequested)
+                await retention.ReleaseAsync(download, cancellationToken);
+            else
+            {
+                var recoverable = new HashSet<Guid>();
+                foreach (var file in context.SourceFiles.Where(file => CatalogPaths.IsIncoming(file.RelativePath) && file.PlacementPath != null))
+                {
+                    if (!sandbox.TryResolve(context.Catalog, file.PlacementPath!, out var destination))
+                        throw new IOException("Cannot resolve reserved placement path.");
+                    var temporary = destination + $".ingest-{file.Id:N}.partial";
+                    if (File.Exists(temporary)) File.Delete(temporary);
+                    // The transfer helper verifies the persisted digest before adopting this output.
+                    if (file.PlacementHash is not null && File.Exists(destination)) recoverable.Add(file.Id);
+                }
+                var remaining = context.SourceFiles.Where(file => CatalogPaths.IsIncoming(file.RelativePath) &&
+                    file.AssignmentStatus == SourceFileAssignmentStatus.Confirmed && !recoverable.Contains(file.Id)).Sum(file => file.SizeBytes);
+                download.PlacementTotalBytes = context.SourceFiles.Where(file => file.AssignmentStatus is SourceFileAssignmentStatus.Confirmed or SourceFileAssignmentStatus.Sidecar).Sum(file => file.SizeBytes);
+                var available = filesystem.GetAvailableFreeBytes(context.Catalog.Root);
+                if (remaining > available)
+                    return new StageResult.AwaitingSpace(new InsufficientPlacementSpaceException(remaining, available).Message);
+            }
+        }
+        IReadOnlyList<OrganizedFile> organized;
+        try { organized = await organizer.OrganizeAsync(context.SourceFiles, context.Catalog, cancellationToken); }
+        catch (InsufficientPlacementSpaceException e) { return new StageResult.AwaitingSpace(e.Message); }
         var organizedIds = organized.Select(file => file.SourceFileId).ToHashSet();
         var unorganized = context.SourceFiles.FirstOrDefault(file =>
             file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes) &&

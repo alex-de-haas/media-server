@@ -87,6 +87,7 @@ public enum IngestStatus
     NeedsReview = 2,
     Failed = 3,
     Done = 4,
+    AwaitingSpace = 5,
 }
 
 /// <summary>Pipeline phase; acquisition stages (M5) sort before processing stages.</summary>

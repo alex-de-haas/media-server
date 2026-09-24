@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-22
+Updated: 2026-09-24
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -35,6 +35,15 @@ The Xcode project is written by hand and kept small by synchronized file groups 
 added to `MediaServerTV/` joins the target without the project file changing. XcodeGen or
 Tuist would be a tool everyone must install before they can build, which a project this
 size does not earn.
+
+## Local signing configuration
+
+Debug and Release use `src/apple/Config/Signing.xcconfig`. Its optional, Git-ignored
+`Signing.local.xcconfig` supplies `MEDIASERVER_TEAM`, which resolves the development
+team for builds started directly from Xcode. The shared project contains no personal
+team identifier. Command-line build-setting arguments can override the local choice;
+unsigned and simulator builds do not require the local file. Setup and provisioning
+requirements are documented in `src/apple/README.md`.
 
 ## Pairing
 
@@ -754,6 +763,10 @@ catalog type. Configuration is in web Settings; Apple TV reads the authenticated
 native group list and paged member routes using the generated Swift client.
 
 ## Testing Expectations
+
+- Resolve Debug and Release signing settings with a local team file and a command-line
+  override; verify unsigned builds work without the optional file and the local file
+  stays ignored by Git.
 
 - `PlaybackCompletionTests` covers natural completion with the local video fixture,
   replacement and unrelated items, duplicate notifications, and observer removal on stop.
