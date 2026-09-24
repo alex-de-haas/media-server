@@ -80,45 +80,39 @@ Revisit when the app has users other than its author.
 
 ## Signing and TestFlight
 
-Device builds read the team identifier from **`MEDIASERVER_TEAM`**, which the project references as
-`$(MEDIASERVER_TEAM)` rather than hard-coding — the identifier belongs to whoever is building, not to
-the repository:
+Device builds use `Config/Signing.xcconfig` in both Debug and Release. It optionally
+includes `Config/Signing.local.xcconfig`, which is ignored by Git and belongs to the
+developer's checkout. Set up this file once to build directly from Xcode:
 
 ```bash
-MEDIASERVER_TEAM=XXXXXXXXXX xcodebuild -project src/apple/MediaServerTV.xcodeproj \
-  -scheme MediaServerTV -destination 'platform=tvOS,name=<your Apple TV>' \
-  -allowProvisioningUpdates build
+cp src/apple/Config/Signing.local.xcconfig.example src/apple/Config/Signing.local.xcconfig
 ```
 
-`security find-identity -v -p codesigning` names the certificate; the team is the `OU` of its
-subject.
+Replace `YOUR_TEAM_ID` in the local file with your Apple Developer team identifier.
+Xcode reads the file as a build setting; no shell profile or macOS environment setup
+is required. Add your Apple account in Xcode Settings and ensure it has access to that
+team. Change the local file to switch teams instead of selecting a different team in
+the target editor, which can write an override into `project.pbxproj`.
 
-**Xcode rewrites this line.** Building from the IDE, or from `xcodebuild` with `MEDIASERVER_TEAM` set
-to something it cannot resolve, replaces `$(MEDIASERVER_TEAM)` with whatever it worked out — a real
-team identifier, or an empty string. Both have reached `main` from a `git add -A`. Stage the project
-file by name and read the diff, and prefer the unsigned verification build below, which does not touch
-it. `-allowProvisioningUpdates` registers the bundle identifier with the developer account the
-first time, which is a change to that account rather than to this machine.
+For command-line builds, a build-setting argument overrides the local value:
 
-**To check that it compiles, and nothing more, turn signing off:**
+```bash
+xcodebuild -project src/apple/MediaServerTV.xcodeproj -scheme MediaServerTV \
+  -destination 'platform=tvOS,name=<your Apple TV>' \
+  MEDIASERVER_TEAM=XXXXXXXXXX -allowProvisioningUpdates build
+```
+
+`-allowProvisioningUpdates` can register the bundle identifier and update provisioning
+with the developer account. It is not needed for unsigned compilation checks:
 
 ```bash
 xcodebuild -project src/apple/MediaServerTV.xcodeproj -scheme MediaServerTV \
   -destination 'generic/platform=tvOS' CODE_SIGNING_ALLOWED=NO build
 ```
 
-A signing build **resolves `$(MEDIASERVER_TEAM)` and writes the identifier back into the project**,
-which then rides along in whatever commit comes next and breaks device builds for everyone else. It
-has happened more than once. Without signing there is nothing to resolve, the project file is left
-alone, and the compile is the same — so this is the invocation for a verification build.
-
-Simulator builds ignore it entirely.
-
-Nothing is signed yet, and simulator builds do not need it to be: they sign themselves with
-"Sign to Run Locally" and need no account or team. It is **device** builds that stop on
-"Signing requires a development team", along with a TestFlight lane — both need an Apple
-Developer membership, which the distribution decision in the plan assumes and which has not
-been set up. When it is, the team identifier and the lane belong in this section.
+The optional include lets simulator/unsigned builds run without a local team file.
+A signed device build or archive still requires an appropriate certificate, provisioning
+profile and team access. TestFlight distribution requires Apple Developer membership.
 
 ## Versioning
 

@@ -1,0 +1,3 @@
+// Shared by Debug and Release. Keep the developer's team in the ignored local file.
+#include? "Signing.local.xcconfig"
+DEVELOPMENT_TEAM = $(MEDIASERVER_TEAM)

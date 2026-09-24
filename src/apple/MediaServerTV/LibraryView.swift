@@ -26,11 +26,11 @@ struct LibraryView: View {
             }
 
             Tab("Movies", systemImage: "film") {
-                shelf(library.movies, heading: "All Movies", empty: "No films yet.")
+                shelf(library.movies, empty: "No films yet.")
             }
 
             Tab {
-                shelf(library.series, heading: "All Series", empty: "No series yet.")
+                shelf(library.series, empty: "No series yet.")
             } label: {
                 Label {
                     Text("Series")
@@ -64,7 +64,7 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func shelf(_ items: [LibraryTitle], heading: String, empty: String) -> some View {
+    private func shelf(_ items: [LibraryTitle], empty: String) -> some View {
         switch library.state {
         case .idle, .loading:
             ProgressView("Reading the library")
@@ -85,8 +85,6 @@ struct LibraryView: View {
                 ScrollViewReader { scroll in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 44) {
-                            Text(heading).font(.title2.bold())
-                                .id("all-titles")
                             LibraryPosterGrid(items: items, library: library, loader: session.artwork,
                                               playback: PlaybackService(session: session), focus: $focusedMovie)
                         }.padding(CinemaStyle.inset)

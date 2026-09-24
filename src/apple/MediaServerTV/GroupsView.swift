@@ -36,7 +36,6 @@ struct GroupsView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 44) {
-                            Text("Groups").font(.largeTitle.bold())
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 360), spacing: 40)], spacing: 40) {
                                 ForEach(store.items) { group in
                                     NavigationLink {

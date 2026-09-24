@@ -25,7 +25,6 @@ struct HomeView: View {
             .padding(CinemaStyle.inset)
         }
         .focusScope(homeFocus)
-        .navigationTitle("Home")
         .task { await home.load() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await home.load() } }

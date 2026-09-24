@@ -36,7 +36,6 @@ struct CollectionsView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 40) {
-                            Text("Collections").font(.largeTitle.bold())
                             LazyVGrid(columns: CinemaStyle.columns, spacing: 54) {
                                 ForEach(store.items) { collection in
                                     PosterCard(title: collection.name, subtitle: "\(collection.itemCount) movies") {
