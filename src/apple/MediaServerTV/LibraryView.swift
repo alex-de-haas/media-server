@@ -82,15 +82,13 @@ struct LibraryView: View {
             Text(empty).font(.title2).foregroundStyle(.secondary)
         case .loaded:
             NavigationStack {
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 44) {
-                            LibraryPosterGrid(items: items, library: library, loader: session.artwork,
-                                              playback: PlaybackService(session: session), focus: $focusedMovie)
-                        }.padding(CinemaStyle.inset)
-                    }
-                    .focusScope(libraryFocus)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 44) {
+                        LibraryPosterGrid(items: items, library: library, loader: session.artwork,
+                                          playback: PlaybackService(session: session), focus: $focusedMovie)
+                    }.padding(CinemaStyle.inset)
                 }
+                .focusScope(libraryFocus)
             }
         }
     }
