@@ -155,7 +155,8 @@ final class DiskByteWindow: LoaderByteWindow {
 
     func trim(keepingFrom offset: Int64) throws {
         let next = min(end, max(start, offset))
-        for index in blocks where (index + 1) * Int64(blockSize) <= next {
+        let removable = blocks.filter { ($0 + 1) * Int64(blockSize) <= next }
+        for index in removable {
             if writer?.index == index { try writer?.handle.close(); writer = nil }
             if reader?.index == index { try reader?.handle.close(); reader = nil }
             try FileManager.default.removeItem(at: file(index))

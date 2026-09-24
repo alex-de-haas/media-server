@@ -155,7 +155,7 @@ public final class PlaybackDiagnostics {
         loggedStalls = 0
         droppedFrames = nil
         playerObservedMbps = nil
-        let observationID = observationID
+        let currentObservationID = observationID
 
         self.item = item
         stallObserver = NotificationCenter.default.addObserver(
@@ -164,14 +164,14 @@ public final class PlaybackDiagnostics {
             // The notification is posted on whatever thread noticed, which is not necessarily this
             // one. Hopping is required rather than assumed — `assumeIsolated` would trap.
             Task { @MainActor [weak self] in
-                guard let self, self.observationID == observationID else { return }
+                guard let self, self.observationID == currentObservationID else { return }
                 self.recordStall()
             }
         }
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.observationID == observationID else { return }
+                guard let self, self.observationID == currentObservationID else { return }
                 self.sample()
             }
         }
