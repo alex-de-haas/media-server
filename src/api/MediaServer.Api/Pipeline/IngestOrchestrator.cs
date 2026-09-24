@@ -22,10 +22,10 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
 
     public async Task DriveAsync(Guid ingestItemId, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         using var scope = scopeFactory.CreateScope();
         var services = scope.ServiceProvider;
         var database = services.GetRequiredService<MediaServerDbContext>();
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, ingestItemId, cancellationToken);
         var notifier = services.GetRequiredService<IRealtimeNotifier>();
         var jobService = services.GetRequiredService<JobService>();
         var stages = services.GetServices<IPipelineStage>().OrderBy(stage => stage.Order).ToList();
@@ -93,8 +93,6 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
             catch (MediaServer.Api.Organizer.InsufficientPlacementSpaceException exception)
             {
                 result = new StageResult.AwaitingSpace(exception.Message);
-                item.Stage = IngestStage.Organize;
-                item.StagesCompleted.Remove("organize");
             }
             catch (Exception exception)
             {

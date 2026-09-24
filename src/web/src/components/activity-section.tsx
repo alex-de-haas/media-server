@@ -78,10 +78,12 @@ export function ActivitySection() {
   const [tab, setTab] = useState<TabKey>("active");
   const [clearOpen, setClearOpen] = useState(false);
   // Realtime is pushed over SSE (see RealtimeBridge); these slow intervals are only a reconnect fallback.
-  const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 2000 });
+  const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 30000 });
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
-  // Live torrent progress/state is patched into this cache by SSE; the interval is a fallback only.
-  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 2000 });
+  // Torrent progress/state uses SSE. Placement byte progress is persisted separately, so poll faster
+  // only while an import is actively copying; otherwise keep the slow reconnect fallback.
+  const copyingIds = new Set(ingest.data?.filter((item) => item.status === "Running" && (item.stage === "Organize" || item.stage === "Probe")).map((item) => item.downloadId));
+  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: (query) => query.state.data?.some((download) => download.keepSeeding && !download.stopRequested && copyingIds.has(download.id)) ? 2000 : 30000 });
   // Engine-wide VPN tunnel status (null when downloading is in-process). Pushed over SSE; slow interval is a fallback.
   const vpn = useQuery({ queryKey: ["vpn"], queryFn: mediaServer.getVpnStatus, refetchInterval: 30000 });
   const dht = useQuery({ queryKey: ["dht"], queryFn: mediaServer.getDhtStatus, refetchInterval: 30000 });

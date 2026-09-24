@@ -24,6 +24,9 @@ for (const state of ["Downloading", "Paused"]) {
     await expect(page.getByText("Seeding after download: off. Click to turn on.", { exact: true })).toBeVisible();
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toBeEnabled();
+    // The mutation disables the trigger and closes its tooltip. Re-enter after it is enabled.
+    await page.getByRole("link", { name: "Activity", exact: true }).hover();
     await toggle.hover();
     await expect(page.getByText("Seeding after download: on. Click to turn off.", { exact: true })).toBeVisible();
     await expect(toggle).toBeEnabled();

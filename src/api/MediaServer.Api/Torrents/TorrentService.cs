@@ -147,21 +147,21 @@ public sealed class TorrentService(
 
     public async Task<bool> PauseAsync(Guid id, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterAsync(id, cancellationToken);
         var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (download is null)
         {
             return false;
         }
 
-        if (download.StopRequested || download.EngineReleased) throw new TorrentRequestException("This torrent is being released and cannot be resumed.");
+        if (download.StopRequested || download.EngineReleased) throw new TorrentRequestException("This torrent is being released and cannot be paused.");
         await engine.PauseAsync(download.InfoHash, cancellationToken);
         return true;
     }
 
     public async Task<bool> ResumeAsync(Guid id, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterAsync(id, cancellationToken);
         var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (download is null)
         {
@@ -179,7 +179,7 @@ public sealed class TorrentService(
     /// </summary>
     public async Task<bool> StopSeedingAsync(Guid id, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterAsync(id, cancellationToken);
         var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (download is null) return false;
         if (download.CompletedAt is null && download.State is not (DownloadState.Seeding or DownloadState.Completed or DownloadState.StoppedSeeding))
@@ -210,10 +210,12 @@ public sealed class TorrentService(
 
     public async Task<bool> SetSeedingPolicyAsync(Guid id, bool keepSeeding, CancellationToken ct)
     {
-        using var gate = await IngestMutationGate.EnterAsync(ct);
+        using var gate = await IngestMutationGate.EnterAsync(id, ct);
         var download = await database.Downloads.SingleOrDefaultAsync(x => x.Id == id, ct);
         if (download is null) return false;
-        if (download.PlacementStarted || download.StopRequested || download.EngineReleased)
+        if (download.StopRequested || download.EngineReleased)
+            throw new TorrentRequestException("This torrent is being released; its seeding policy can no longer be changed.");
+        if (download.PlacementStarted)
             throw new TorrentRequestException("Placement has started. Use Stop seeding and continue to release the original files.");
         download.KeepSeeding = keepSeeding;
         if (download.CompletedAt is not null)

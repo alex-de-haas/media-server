@@ -376,6 +376,153 @@ public sealed class RetainedDownloadTests
         Assert.Single(await verifyDb.MediaSources.ToListAsync());
     }
 
+    [Fact]
+    public async Task Cancelling_a_partially_placed_import_preserves_outputs_and_ownership()
+    {
+        var calls = 0;
+        var filesystem = IFilesystemInspector.Imposter();
+        filesystem.GetAvailableFreeBytes(Arg<string>.Any()).Returns((string _) => ++calls >= 3 ? 0L : 1_000_000L);
+        using var harness = new PipelineTestHarness(services => services.AddSingleton(filesystem.Instance()));
+        Match(harness);
+        var (ingestId, _, downloadId) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Inception.2010", "Inception.2010.HDR.mkv", keepSeeding: true,
+            additionalSourceRelativePaths: ["Inception.2010.SDR.mkv"]);
+        await harness.Orchestrator.DriveAsync(ingestId, default);
+        using var scope = harness.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.AwaitingSpace, (await db.IngestItems.SingleAsync()).Status);
+        var files = await db.SourceFiles.ToListAsync();
+        var placed = Assert.Single(files, x => !CatalogPaths.IsIncoming(x.RelativePath));
+        var root = (await db.Catalogs.SingleAsync()).Root;
+        var bytes = await File.ReadAllBytesAsync(Path.Combine(root, placed.RelativePath));
+        await Assert.ThrowsAsync<TorrentRequestException>(() => scope.ServiceProvider.GetRequiredService<DownloadDeletionService>().DeleteAsync(downloadId, true, default));
+        await Assert.ThrowsAsync<TorrentRequestException>(() => scope.ServiceProvider.GetRequiredService<IngestService>().DeleteAsync(ingestId, default));
+        // The maintenance/worker path cannot bypass the same protection.
+        var download = await db.Downloads.SingleAsync();
+        await Assert.ThrowsAsync<TorrentRequestException>(() => scope.ServiceProvider.GetRequiredService<DownloadRetentionService>().CleanupAsync(download, true, default));
+        Assert.False(download.CancellationRequested);
+        Assert.False(download.StopRequested);
+        Assert.False(download.CleanupRequested);
+        Assert.Equal(2, await db.SourceFiles.CountAsync());
+        Assert.Single(await db.IngestItems.ToListAsync());
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(root, placed.RelativePath)));
+        Assert.All(files, file => Assert.True(File.Exists(Path.Combine(root, file.OriginalRelativePath!))));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Sidecar_capacity_recovery_preserves_completed_video_stages(bool keepSeed)
+    {
+        var fail = true;
+        var output = IPlacementOutput.Imposter();
+        output.Create(Arg<string>.Any()).Returns((string path) => fail && path.Contains(".srt.ingest-")
+            ? new FailingOutput(path, 28) : File.Create(path));
+        using var harness = new PipelineTestHarness(services => services.AddSingleton(output.Instance()));
+        Match(harness);
+        var (ingestId, _, downloadId) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Inception.2010", "Inception.2010.mkv", keepSeeding: true,
+            additionalSourceRelativePaths: ["Inception.2010.eng.srt"]);
+        var videoProbes = 0;
+        var defaultProbe = harness.MediaProbe.OnProbe;
+        harness.MediaProbe.OnProbe = path => { if (path.EndsWith(".mkv")) videoProbes++; return defaultProbe(path); };
+        await harness.Orchestrator.DriveAsync(ingestId, default);
+        using (var scope = harness.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            var item = await db.IngestItems.SingleAsync();
+            Assert.Equal(IngestStatus.AwaitingSpace, item.Status);
+            Assert.Equal(IngestStage.Probe, item.Stage);
+            Assert.Contains("organize", item.StagesCompleted);
+            Assert.Contains("probe", item.StagesCompleted);
+            Assert.DoesNotContain("sidecar", item.StagesCompleted);
+            Assert.Single(await db.MediaSources.ToListAsync());
+            Assert.Empty(await db.MediaStreams.Where(x => x.IsExternal).ToListAsync());
+            if (keepSeed) await scope.ServiceProvider.GetRequiredService<IngestService>().RetryAsync(ingestId, default);
+            else await scope.ServiceProvider.GetRequiredService<TorrentService>().StopSeedingAsync(downloadId, default);
+        }
+        fail = false;
+        await harness.Orchestrator.DriveAsync(ingestId, default);
+        using var verify = harness.CreateScope();
+        var finalDb = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.Done, (await finalDb.IngestItems.SingleAsync()).Status);
+        Assert.Single(await finalDb.MediaSources.ToListAsync());
+        Assert.Single(await finalDb.MediaStreams.Where(x => x.IsExternal).ToListAsync());
+        Assert.Equal(1, videoProbes);
+    }
+
+    [Fact]
+    public async Task Occupied_unowned_sidecar_does_not_block_publication_or_discard_original()
+    {
+        using var harness = new PipelineTestHarness();
+        Match(harness);
+        var (ingestId, _, _) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Inception.2010", "Inception.2010.mkv", keepSeeding: true,
+            additionalSourceRelativePaths: ["Inception.2010.eng.srt"]);
+        var defaultProbe = harness.MediaProbe.OnProbe;
+        string? occupied = null;
+        harness.MediaProbe.OnProbe = path =>
+        {
+            if (path.EndsWith(".mkv"))
+            {
+                occupied = Path.ChangeExtension(path, "eng.srt");
+                File.WriteAllText(occupied, "unrelated subtitle");
+            }
+            return defaultProbe(path);
+        };
+        await harness.Orchestrator.DriveAsync(ingestId, default);
+        using var scope = harness.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.Done, (await db.IngestItems.SingleAsync()).Status);
+        Assert.NotNull((await db.MediaItems.SingleAsync()).PublicId);
+        Assert.Equal("unrelated subtitle", await File.ReadAllTextAsync(occupied!));
+        Assert.Empty(await db.MediaStreams.Where(x => x.IsExternal).ToListAsync());
+        var companion = await db.SourceFiles.SingleAsync(x => x.RelativePath.EndsWith(".srt"));
+        Assert.True(CatalogPaths.IsIncoming(companion.RelativePath));
+        Assert.Null(companion.PlacementPath);
+        var download = await db.Downloads.SingleAsync();
+        await scope.ServiceProvider.GetRequiredService<TorrentService>().StopSeedingAsync(download.Id, default);
+        Assert.True(Directory.Exists(download.SavePath));
+        Assert.Contains("protected", download.RetentionError);
+    }
+
+    [Fact]
+    public async Task One_ingest_gate_does_not_block_other_downloads_or_analysis()
+    {
+        using var harness = new PipelineTestHarness();
+        var (ingestId, _, downloadId) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "A", "A.mkv");
+        var (_, _, otherId) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "B", "B.mkv");
+        using var placementScope = harness.CreateScope();
+        using var gate = await IngestMutationGate.EnterIngestAsync(placementScope.ServiceProvider.GetRequiredService<MediaServerDbContext>(), ingestId, default);
+        using var blockedScope = harness.CreateScope();
+        var blocked = blockedScope.ServiceProvider.GetRequiredService<TorrentService>().PauseAsync(downloadId, default);
+        Assert.False(blocked.IsCompleted);
+        using var independentScope = harness.CreateScope();
+        Assert.True(await independentScope.ServiceProvider.GetRequiredService<TorrentService>().PauseAsync(otherId, default).WaitAsync(TimeSpan.FromSeconds(5)));
+        var db = independentScope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var analysis = new TemporaryDownloadService(db, independentScope.ServiceProvider.GetRequiredService<DownloadRetentionService>());
+        Assert.Equal(2, (await analysis.AnalyzeAsync(default).WaitAsync(TimeSpan.FromSeconds(5))).Count);
+        gate.Dispose();
+        Assert.True(await blocked.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Cancelled_gate_waiter_does_not_release_another_owners_lock()
+    {
+        var id = Guid.NewGuid();
+        using var held = await IngestMutationGate.EnterAsync(id, default);
+        using var cancel = new CancellationTokenSource();
+        var cancelled = IngestMutationGate.EnterAsync(id, cancel.Token);
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+        var next = IngestMutationGate.EnterAsync(id, default);
+        Assert.False(next.IsCompleted);
+        held.Dispose();
+        using var acquired = await next.WaitAsync(TimeSpan.FromSeconds(5));
+        held.Dispose(); // A lease is idempotent; it must not release the new owner's lock.
+        var last = IngestMutationGate.EnterAsync(id, default);
+        Assert.False(last.IsCompleted);
+        acquired.Dispose();
+        using var final = await last.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
     private sealed class FailingOutput : Stream
     {
         private readonly FileStream file;

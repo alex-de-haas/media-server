@@ -58,18 +58,21 @@ public sealed class TorrentCoordinator(
     {
         try
         {
-            using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
             using var scope = scopeFactory.CreateScope();
             var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
 
-            var active = await database.Downloads
+            var active = await database.Downloads.AsNoTracking()
                 .Where(download => !download.StopRequested && !download.EngineReleased && (download.State == DownloadState.Downloading
                                    || download.State == DownloadState.Queued
                                    || download.State == DownloadState.Seeding))
-                .ToListAsync(cancellationToken);
+                .Select(download => download.Id).ToListAsync(cancellationToken);
 
-            foreach (var download in active.Where(download => download.SourceUri is not null))
+            foreach (var id in active)
             {
+                using var gate = await IngestMutationGate.EnterAsync(id, cancellationToken);
+                var download = await database.Downloads.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+                if (download is null || download.SourceUri is null || download.StopRequested || download.EngineReleased ||
+                    download.State is not (DownloadState.Downloading or DownloadState.Queued or DownloadState.Seeding)) continue;
                 try
                 {
                     var source = ResolveResumeSource(download.SourceUri!);
@@ -185,16 +188,18 @@ public sealed class TorrentCoordinator(
 
     private async Task HandleMetadataAsync(string infoHash)
     {
-        using var gate = await IngestMutationGate.EnterAsync(CancellationToken.None);
         using var scope = scopeFactory.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var id = await database.Downloads.AsNoTracking().Where(x => x.InfoHash == infoHash).Select(x => (Guid?)x.Id).FirstOrDefaultAsync();
+        if (id is null) return;
+        using var gate = await IngestMutationGate.EnterAsync(id.Value, CancellationToken.None);
         var fileService = scope.ServiceProvider.GetRequiredService<DownloadFileService>();
         var filesystem = scope.ServiceProvider.GetRequiredService<IFilesystemInspector>();
         var pipelineQueue = scope.ServiceProvider.GetRequiredService<IPipelineQueue>();
 
         var download = await database.Downloads
             .Include(item => item.Catalog)
-            .FirstOrDefaultAsync(item => item.InfoHash == infoHash);
+            .FirstOrDefaultAsync(item => item.Id == id.Value);
         if (download is null || download.StopRequested || download.EngineReleased)
         {
             return;
@@ -223,13 +228,15 @@ public sealed class TorrentCoordinator(
 
     private async Task HandleCompletedAsync(string infoHash)
     {
-        using var gate = await IngestMutationGate.EnterAsync(CancellationToken.None);
         using var scope = scopeFactory.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var id = await database.Downloads.AsNoTracking().Where(x => x.InfoHash == infoHash).Select(x => (Guid?)x.Id).FirstOrDefaultAsync();
+        if (id is null) return;
+        using var gate = await IngestMutationGate.EnterAsync(id.Value, CancellationToken.None);
         var fileService = scope.ServiceProvider.GetRequiredService<DownloadFileService>();
         var pipelineQueue = scope.ServiceProvider.GetRequiredService<IPipelineQueue>();
 
-        var download = await database.Downloads.FirstOrDefaultAsync(item => item.InfoHash == infoHash);
+        var download = await database.Downloads.FirstOrDefaultAsync(item => item.Id == id.Value);
         if (download is null || download.StopRequested || download.EngineReleased)
         {
             return;
@@ -256,12 +263,14 @@ public sealed class TorrentCoordinator(
 
     private async Task HandleErroredAsync(string infoHash)
     {
-        using var gate = await IngestMutationGate.EnterAsync(CancellationToken.None);
         using var scope = scopeFactory.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var id = await database.Downloads.AsNoTracking().Where(x => x.InfoHash == infoHash).Select(x => (Guid?)x.Id).FirstOrDefaultAsync();
+        if (id is null) return;
+        using var gate = await IngestMutationGate.EnterAsync(id.Value, CancellationToken.None);
         var pipelineQueue = scope.ServiceProvider.GetRequiredService<IPipelineQueue>();
 
-        var download = await database.Downloads.FirstOrDefaultAsync(item => item.InfoHash == infoHash);
+        var download = await database.Downloads.FirstOrDefaultAsync(item => item.Id == id.Value);
         if (download is null || download.StopRequested || download.EngineReleased)
         {
             return;

@@ -48,7 +48,7 @@ public static class TorrentEndpoints
             }
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
-        var group = routes.MapGroup("/api/torrents").RequireAuthorization();
+        var group = routes.MapGroup("/api/torrents").RequireAuthorization().AddEndpointFilter<TorrentConflictFilter>();
 
         group.MapGet("/", async (TorrentService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListAsync(cancellationToken)));

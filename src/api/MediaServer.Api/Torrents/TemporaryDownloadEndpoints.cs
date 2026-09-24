@@ -14,7 +14,6 @@ public sealed class TemporaryDownloadService(MediaServerDbContext database, Down
 {
     public async Task<IReadOnlyList<TemporaryDownloadRoot>> AnalyzeAsync(CancellationToken ct)
     {
-        using var gate = await IngestMutationGate.EnterAsync(ct);
         var result = new List<TemporaryDownloadRoot>();
         var downloads = await database.Downloads.AsNoTracking().ToListAsync(ct);
         foreach (var catalog in await database.Catalogs.AsNoTracking().ToListAsync(ct))
@@ -54,10 +53,10 @@ public sealed class TemporaryDownloadService(MediaServerDbContext database, Down
 
     public async Task<IReadOnlyList<TemporaryDownloadCleanupResult>> CleanAsync(Guid[] ids, CancellationToken ct)
     {
-        using var gate = await IngestMutationGate.EnterAsync(ct);
         var result = new List<TemporaryDownloadCleanupResult>();
         foreach (var id in ids.Distinct())
         {
+            using var gate = await IngestMutationGate.EnterAsync(id, ct);
             var download = await database.Downloads.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (download is null || !await EligibleAsync(download, ct))
             {
@@ -75,8 +74,8 @@ public sealed class TemporaryDownloadService(MediaServerDbContext database, Down
     private async Task<bool> EligibleAsync(Download download, CancellationToken ct)
     {
         if (download.KeepSeeding || !download.StopRequested) return false;
-        if (download.CancellationRequested) return true;
-        var ingests = await database.IngestItems.Where(x => x.DownloadId == download.Id).ToListAsync(ct);
+        if (download.CancellationRequested) return !download.PlacementStarted;
+        var ingests = await database.IngestItems.AsNoTracking().Where(x => x.DownloadId == download.Id).ToListAsync(ct);
         if (!download.CleanupRequested || ingests.Any(x => x.Status != IngestStatus.Done)) return false;
         var ids = ingests.Select(x => x.Id).ToArray();
         var needed = await database.SourceFiles.Where(x => ids.Contains(x.IngestItemId) &&

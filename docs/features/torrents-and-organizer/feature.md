@@ -187,8 +187,10 @@ policy; the tooltip explains the next click. Clicking toggles the policy; it is
 disabled while saving and once file placement starts. The toggle also supports
 keyboard activation.
 `PUT /api/torrents/{id}/seeding-policy` changes the policy before placement starts.
-The pipeline, operator mutations and engine events share a writer gate; a policy
-change cannot switch an active file transfer. Retargeting staging to another
+The pipeline, operator mutations and engine events share a gate per download; a
+policy change cannot switch its active file transfer, while actions on unrelated
+downloads remain available. Ingest actions also hold a stable per-ingest gate across
+retention cleanup. Read-only staging analysis does not wait for placement. Retargeting staging to another
 catalog releases the engine first and ends seed retention.
 
 With `keepSeeding=true`, completed downloads pass through Identify, Organize,
@@ -220,7 +222,15 @@ canonical output reaches Probe. Copy digests allow a completed promotion to be
 recovered after an interrupted database update without adopting unrelated output.
 Failed cleanup of partial output is reported instead of silently discarded.
 `AwaitingSpace` does not consume automatic attempts and survives restart until an
-operator action. Copies of companions use the same transfer helper.
+operator action. Copies of companions use the same transfer helper. A capacity
+failure in Sidecars stays at Probe, preserving completed Organize and Probe work;
+recovery copies or moves only the remaining companions. An unowned occupied sidecar
+destination is left untouched without blocking publication; its original companion
+stays in staging, protected from cleanup until resolved.
+
+Activity uses the existing 30-second SSE reconnect fallback. Only downloads with
+retained seeding and an actively running placement stage use two-second polling
+for persisted copy byte progress.
 
 ## Identify
 
@@ -318,7 +328,10 @@ have more than one file when it carries alternate versions):
   `DELETE /api/library/seasons/{id}`, same `deleteFiles` option): the same removal for
   one episode or one whole season, pruning the containers it empties. See
   [File and directory management](../file-directory-management/feature.md#removal-semantics).
-- **Remove download** (`DELETE /api/torrents/{id}`) cancels unpublished work. Stop
+- **Remove download** (`DELETE /api/torrents/{id}`) cancels work before placement
+  starts. Once placement begins, torrent and ingest deletion return an actionable
+  409 instead of discarding ownership of partial library outputs. Retry or stop
+  seeding and continue first, then remove published files through the library. Stop
   and remove are acknowledged before staging deletion, and failures retain the
   ownership record with retryable cleanup state. Published seeds require the
   explicit stop-seeding action before their Activity history can be removed.
@@ -327,6 +340,9 @@ have more than one file when it carries alternate versions):
   only from source paths.
 
 ### Temporary download cleanup
+
+Lifecycle refusals from pause, resume, policy, stop-seeding and delete return HTTP
+409 with the reason; missing downloads remain 404 and invalid add requests remain 400.
 
 Settings exposes an administrator-only **Temporary download files** section backed
 by `GET /api/settings/temporary-downloads/` and
@@ -433,6 +449,10 @@ Backend tests should use xUnit. Required coverage:
 - Engine stop/remove acknowledgement precedes Move and cleanup; failed or lost replies retain ownership.
 - Capacity parking before and during Copy; no Probe or automatic retry exhaustion. Retry and partial Copy-to-Move fallback preserve completed paths and version names.
 - Copy cancellation and restart retain sources, remove private partial output, and revalidate completion.
+- Partial placement refuses destructive cancellation without losing files or ownership.
+- Per-download gates serialize one owner while unrelated actions and read-only analysis proceed.
+- Sidecar capacity recovery preserves completed video stages; unowned sidecar conflicts preserve both files.
+- Lifecycle refusal responses carry HTTP 409 and an actionable reason.
 - Published seed teardown preserves library/history. Cleanup failures retain durable evidence and support explicit retry.
 - Cleanup preview/apply protects active, review, incomplete, linked and unknown roots; apply rechecks current state.
 - Move/copy preserve extensions, source mappings and multi-version/season-pack naming. Cleanup waits for required companion work.

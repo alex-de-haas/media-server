@@ -9,7 +9,7 @@ public sealed class DownloadDeletionService(MediaServerDbContext database, Downl
 {
     public async Task<bool> DeleteAsync(Guid downloadId, bool deleteFiles, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterAsync(downloadId, cancellationToken);
         return await DeleteUnderLockAsync(downloadId, cancellationToken);
     }
 

@@ -218,6 +218,23 @@ stop seeding during and after import; verify cleanup retry after a locked file a
 restart. Confirm the published copy remains playable and protected/unknown staging
 is untouched. Do not run fault injection or cleanup on production media.
 
+## Review verification on 2026-09-24
+
+Review fixes scope mutation gates to one download, reject cancellation after placement,
+return lifecycle conflicts as HTTP 409, preserve completed video stages on sidecar
+capacity failures, and leave unowned occupied sidecars intact without blocking publication.
+Activity restores the slow SSE fallback outside active retained-copy progress.
+
+- `dotnet test src/api/MediaServer.Api.Tests --configuration Release --no-restore`:
+  2015 passed; Release compilation succeeded and native OpenAPI is unchanged.
+- `pnpm test`, `pnpm lint`, `pnpm build --webpack` in `src/web`: 156 unit tests
+  passed, lint passed, and production build/TypeScript validation passed.
+- Full Playwright suite against the production build on port 3199: 148 passed
+  without retries. Tooltip re-entry waits for mutation completion, and navigation
+  assertions wait for hydration. The API lifecycle test accepts repeated indexing
+  progress events while still asserting the exact state-transition order.
+- Manifest validation, docs index check and whitespace validation passed.
+
 ## Status and version outcome
 
 Approved for implementation on 2026-09-23. Runtime verification uses disposable data;

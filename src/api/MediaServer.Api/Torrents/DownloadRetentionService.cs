@@ -40,6 +40,9 @@ public sealed class DownloadRetentionService(
 
     public async Task<bool> CleanupAsync(Download download, bool cancelImport, CancellationToken ct)
     {
+        if (cancelImport && (download.PlacementStarted || await database.SourceFiles.AnyAsync(
+                x => x.DownloadId == download.Id && x.PlacementPath != null, ct)))
+            throw new TorrentRequestException("Placement has started. Retry the import or stop seeding and continue; remove library files after publication.");
         download.CleanupRequested = true;
         download.CancellationRequested |= cancelImport;
         await database.SaveChangesAsync(ct);
@@ -126,15 +129,19 @@ public sealed class DownloadCleanupWorker(IServiceScopeFactory scopes, ILogger<D
         {
             try
             {
-                using var gate = await IngestMutationGate.EnterAsync(stoppingToken);
                 using var scope = scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
                 var service = scope.ServiceProvider.GetRequiredService<DownloadRetentionService>();
                 var now = DateTimeOffset.UtcNow;
-                var pending = await db.Downloads.Where(x => x.CleanupRequested && x.CleanupAttempts < 5 &&
-                    (x.CleanupAfter == null || x.CleanupAfter <= now)).ToListAsync(stoppingToken);
-                foreach (var download in pending)
+                var pending = await db.Downloads.AsNoTracking().Where(x => x.CleanupRequested && x.CleanupAttempts < 5 &&
+                    (x.CleanupAfter == null || x.CleanupAfter <= now)).Select(x => x.Id).ToListAsync(stoppingToken);
+                foreach (var id in pending)
+                {
+                    using var gate = await IngestMutationGate.EnterAsync(id, stoppingToken);
+                    var download = await db.Downloads.FirstOrDefaultAsync(x => x.Id == id, stoppingToken);
+                    if (download is null || !download.CleanupRequested || download.CleanupAttempts >= 5 || download.CleanupAfter > DateTimeOffset.UtcNow) continue;
                     await service.CleanupAsync(download, download.CancellationRequested, stoppingToken);
+                }
             }
             catch (Exception e) when (e is not OperationCanceledException)
             { logger.LogWarning(e, "Temporary download cleanup failed."); }

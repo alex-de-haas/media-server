@@ -146,7 +146,7 @@ public sealed class IngestService(
 
     public async Task<bool> RetryAsync(Guid id, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -203,7 +203,7 @@ public sealed class IngestService(
 
     public async Task<MatchOutcome> MatchAsync(Guid id, MatchRequest request, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
         // The endpoint rejects an empty batch too; guarded here as well so an internal caller can't flip
         // the item to Pending and re-drive it having matched nothing. A file repeated across groups is
         // equally rejected: two identities claiming one file has no honest resolution order.
@@ -302,7 +302,7 @@ public sealed class IngestService(
     /// </summary>
     public async Task<SkipOutcome> SkipAsync(Guid id, SkipRequest request, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -361,7 +361,7 @@ public sealed class IngestService(
     /// </summary>
     public async Task<AssignExtrasOutcome> AssignExtrasAsync(Guid id, AssignExtrasRequest request, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
         // Same defensive guard as MatchAsync: an empty batch must not resolve the series or re-drive.
         if (request.SourceFileIds is not { Count: > 0 })
         {
@@ -469,7 +469,7 @@ public sealed class IngestService(
     /// </summary>
     public async Task<PinOutcome> PinAsync(Guid id, PinIdentityRequest request, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -537,7 +537,7 @@ public sealed class IngestService(
     /// </summary>
     public async Task<RetargetOutcome> RetargetAsync(Guid id, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -658,7 +658,7 @@ public sealed class IngestService(
     /// clearing only matters for a not-yet-identified item, which Identify will run normally next time.</summary>
     public async Task<bool> UnpinAsync(Guid id, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -682,7 +682,7 @@ public sealed class IngestService(
     /// </summary>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -709,13 +709,21 @@ public sealed class IngestService(
     /// </summary>
     public async Task<int> DeleteCompletedAsync(CancellationToken cancellationToken)
     {
-        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
-        // Live seeds and failed cleanup retain their owner record and remain on Active.
-        var items = await database.IngestItems
-            .Where(item => item.Status == IngestStatus.Done && item.DownloadId == null).ToListAsync(cancellationToken);
-        database.IngestItems.RemoveRange(items);
-        await database.SaveChangesAsync(cancellationToken);
-        return items.Count;
+        // Select without tracking, then revalidate each item after acquiring its own gate.
+        var ids = await database.IngestItems.AsNoTracking()
+            .Where(item => item.Status == IngestStatus.Done && item.DownloadId == null)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+        var removed = 0;
+        foreach (var id in ids)
+        {
+            using var gate = await IngestMutationGate.EnterIngestAsync(database, id, cancellationToken);
+            var item = await database.IngestItems.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            if (item is null || item.Status != IngestStatus.Done || item.DownloadId != null) continue;
+            database.IngestItems.Remove(item);
+            await database.SaveChangesAsync(cancellationToken);
+            removed++;
+        }
+        return removed;
     }
 
     private async Task<Dictionary<Guid, List<SourceFile>>> LoadSourceFilesAsync(

@@ -281,6 +281,12 @@ public sealed class SidecarPlacementService(
             return false;
         }
 
+        if (File.Exists(to) && companion.PlacementHash is null)
+        {
+            logger.LogWarning("Companion destination is occupied; leaving the original in place: {Path}", targetRelative);
+            return false;
+        }
+
         var download = companion.DownloadId is { } id ? await database.Downloads.FindAsync([id], ct) : null;
         await placement.PlaceAsync(companion, from, to, targetRelative,
             download is { KeepSeeding: true, StopRequested: false }, ct);
