@@ -53,7 +53,7 @@ public sealed class IngestTeardownTests
     }
 
     [Fact]
-    public async Task Keep_seeding_parks_the_ingest_at_the_download_stage()
+    public async Task Keep_seeding_publishes_an_independent_library_copy()
     {
         using var harness = new PipelineTestHarness();
         StrongMatch(harness);
@@ -66,8 +66,8 @@ public sealed class IngestTeardownTests
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
 
         var ingest = await database.IngestItems.SingleAsync(item => item.Id == ingestId);
-        Assert.NotEqual(IngestStatus.Done, ingest.Status); // parked, not published
-        Assert.Equal(IngestStage.Download, ingest.Stage);
+        Assert.Equal(IngestStatus.Done, ingest.Status);
+        Assert.Equal(IngestStage.Publish, ingest.Stage);
         Assert.Equal(downloadId, ingest.DownloadId); // download retained while seeding
 
         var download = await database.Downloads.SingleAsync(item => item.Id == downloadId);
@@ -75,7 +75,7 @@ public sealed class IngestTeardownTests
 
         var catalog = await database.Catalogs.SingleAsync(item => item.Id == catalogId);
         Assert.True(File.Exists(StagingPath(catalog, downloadId, "Inception.2010.1080p/movie.mkv"))); // still seeding from .incoming
-        Assert.False(await database.MediaItems.AnyAsync(item => item.Kind == MediaKind.Movie)); // not in the library yet
+        Assert.True(await database.MediaItems.AnyAsync(item => item.Kind == MediaKind.Movie && item.PublicId != null));
     }
 
     [Fact]
@@ -88,13 +88,10 @@ public sealed class IngestTeardownTests
 
         await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None); // parks at download (seeding)
 
-        // Operator stops seeding: flip the state and re-drive.
         using (var scope = harness.CreateScope())
         {
-            var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
-            var download = await database.Downloads.SingleAsync(item => item.Id == downloadId);
-            download.State = DownloadState.StoppedSeeding;
-            await database.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<MediaServer.Api.Torrents.TorrentService>()
+                .StopSeedingAsync(downloadId, CancellationToken.None);
         }
 
         await harness.Orchestrator.DriveAsync(ingestId, CancellationToken.None);
@@ -123,8 +120,8 @@ public sealed class IngestTeardownTests
 
         var ingest = await database.IngestItems.SingleAsync(item => item.Id == ingestId);
         Assert.Equal(IngestStatus.NeedsReview, ingest.Status); // parked at identify, after the hand-off
-        Assert.Null(ingest.DownloadId);
-        Assert.False(await database.Downloads.AnyAsync(download => download.Id == downloadId));
+        Assert.Equal(downloadId, ingest.DownloadId);
+        Assert.True(await database.Downloads.AnyAsync(download => download.Id == downloadId));
 
         // The file is retained in .incoming/, owned by the ingest, awaiting the operator's match.
         var catalog = await database.Catalogs.SingleAsync(item => item.Id == catalogId);

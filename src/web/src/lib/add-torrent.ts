@@ -21,7 +21,7 @@ export function buildAddTorrentTasks(options: {
   catalogId: string;
   magnet?: string;
   files: readonly TorrentFile[];
-  keepSeeding: boolean;
+  keepSeeding?: boolean;
 }): AddTorrentTask[] {
   const { catalogId, magnet, files, keepSeeding } = options;
   const tasks: AddTorrentTask[] = [];

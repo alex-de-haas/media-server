@@ -31,6 +31,19 @@ public sealed class Download
 
     public DateTimeOffset? CompletedAt { get; set; }
 
+    // Retained independently of Activity until engine release and owned staging cleanup succeed.
+    public bool StopRequested { get; set; }
+    public bool EngineReleased { get; set; }
+    public bool PlacementStarted { get; set; }
+    public bool CleanupRequested { get; set; }
+    public bool CancellationRequested { get; set; }
+    public int CleanupAttempts { get; set; }
+    public DateTimeOffset? CleanupAfter { get; set; }
+    public string? RetentionError { get; set; }
+    public long RetainedBytes { get; set; }
+    public long PlacementBytes { get; set; }
+    public long PlacementTotalBytes { get; set; }
+
     public Catalog? Catalog { get; set; }
 
     public ICollection<SourceFile> SourceFiles { get; set; } = new List<SourceFile>();

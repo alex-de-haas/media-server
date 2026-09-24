@@ -1,7 +1,7 @@
 # External Track Sidecars
 
 Created: 2026-07-27
-Updated: 2026-09-08
+Updated: 2026-09-23
 
 A release's separate audio tracks and subtitles are kept as files beside the
 library file they belong to, and recorded as external streams of its media
@@ -24,11 +24,17 @@ videos were not present destroyed the track. Nothing destroys one now.
 It is also why this app no longer ships `ffmpeg` — with merging delegated and
 probing already delegated or read from headers, no binary is left to run.
 
+Retained torrent seeds keep their entire original tree: companion placement copies
+tracks through private temporary output instead of moving them. Without retention,
+placement moves tracks after acknowledged engine release. Durable download cleanup
+protects originals until required placements finish. See
+[torrents and organizer](../torrents-and-organizer/feature.md).
+
 ## What ingest does
 
 `SidecarStage` runs after Probe: the video has been organized by then, so its
 canonical name is known, and its `MediaSource` exists for the rows to attach to.
-Every mapped companion is moved next to it under a canonical name and recorded as
+Every mapped companion is placed next to it under a canonical name and recorded as
 an external `MediaStream`.
 
 Both audio and subtitle companions are admitted from a torrent's file list in the
@@ -44,9 +50,9 @@ decision, and states which video the track lands beside — or, when no video he
 claims it, that it stays where it downloaded rather than being discarded.
 
 Companions are never organized by `OrganizerService` — their names derive from the
-video's — so its recursive staging sweep deliberately spares any root still
-holding one. Without that, the sweep would take the only copy of a dub with it.
-The emptied folders are cleared once the files are out.
+video's. Durable download cleanup protects roots still holding required tracks,
+then removes known disposable leftovers after placement and engine release.
+Retained seeds preserve the complete original tree.
 
 A release whose companions have no video in the batch — a dub-only torrent, or
 specials whose episodes ship elsewhere — keeps them where they are. That case used

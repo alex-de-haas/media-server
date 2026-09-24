@@ -28,7 +28,7 @@ public sealed class DownloadDeletionServiceTests : IDisposable
         Directory.CreateDirectory(_root);
     }
 
-    private DownloadDeletionService Service() => new(_database, _engine, NullLogger<DownloadDeletionService>.Instance);
+    private DownloadDeletionService Service() => new(_database, new DownloadRetentionService(_database, _engine, new CatalogPathSandbox(), new MediaServer.Api.Hosty.HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _root }));
 
     private Catalog SeedCatalog()
     {
@@ -77,7 +77,7 @@ public sealed class DownloadDeletionServiceTests : IDisposable
         Assert.False(await fresh.IngestItems.AnyAsync());
         Assert.False(await fresh.SourceFiles.AnyAsync());
         Assert.False(File.Exists(stagingFile));               // .incoming staging removed
-        Assert.Contains(_engine.Removed, r => r.InfoHash == download.InfoHash && r.DeleteFiles);
+        Assert.Contains(_engine.Removed, r => r.InfoHash == download.InfoHash && !r.DeleteFiles);
     }
 
     [Fact]

@@ -48,7 +48,7 @@ public static class TorrentEndpoints
             }
         }).RequireAuthorization(AppRoles.AdminPolicy);
 
-        var group = routes.MapGroup("/api/torrents").RequireAuthorization();
+        var group = routes.MapGroup("/api/torrents").RequireAuthorization().AddEndpointFilter<TorrentConflictFilter>();
 
         group.MapGet("/", async (TorrentService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListAsync(cancellationToken)));
@@ -64,6 +64,12 @@ public static class TorrentEndpoints
             {
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status400BadRequest);
             }
+        });
+
+        group.MapPut("/{id:guid}/seeding-policy", async (Guid id, SeedingPolicyRequest request, TorrentService service, CancellationToken ct) =>
+        {
+            try { return await service.SetSeedingPolicyAsync(id, request.KeepSeeding, ct) ? Results.NoContent() : Results.NotFound(); }
+            catch (TorrentRequestException e) { return Results.Problem(e.Message, statusCode: 409); }
         });
 
         group.MapPost("/{id:guid}/pause", async (Guid id, TorrentService service, CancellationToken cancellationToken) =>

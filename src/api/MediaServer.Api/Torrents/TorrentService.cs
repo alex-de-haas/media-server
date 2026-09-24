@@ -20,6 +20,7 @@ public sealed class TorrentService(
     HostyOptions hosty,
     IPipelineQueue pipelineQueue,
     DownloadDeletionService downloadDeletion,
+    DownloadRetentionService retention,
     ILogger<TorrentService> logger)
 {
     public async Task<DownloadResponse> AddAsync(AddTorrentRequest request, CancellationToken cancellationToken)
@@ -115,9 +116,11 @@ public sealed class TorrentService(
         }
         catch (Exception exception) when (exception is not TorrentRequestException)
         {
-            // Roll back the just-created rows so a failed start never leaves an orphaned download/ingest.
-            database.IngestItems.Remove(ingest);
-            database.Downloads.Remove(download);
+            // An add timeout may have reached the engine. Keep ownership evidence for safe cancellation.
+            download.State = DownloadState.Error;
+            download.RetentionError = $"Could not start the torrent: {exception.Message}";
+            ingest.Status = IngestStatus.Failed;
+            ingest.LastError = download.RetentionError;
             await database.SaveChangesAsync(cancellationToken);
             throw new TorrentRequestException($"Could not start the torrent: {exception.Message}");
         }
@@ -144,64 +147,80 @@ public sealed class TorrentService(
 
     public async Task<bool> PauseAsync(Guid id, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(id, cancellationToken);
         var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (download is null)
         {
             return false;
         }
 
+        if (download.StopRequested || download.EngineReleased) throw new TorrentRequestException("This torrent is being released and cannot be paused.");
         await engine.PauseAsync(download.InfoHash, cancellationToken);
         return true;
     }
 
     public async Task<bool> ResumeAsync(Guid id, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(id, cancellationToken);
         var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (download is null)
         {
             return false;
         }
 
+        if (download.StopRequested || download.EngineReleased) throw new TorrentRequestException("This torrent is being released and cannot be resumed.");
         await engine.ResumeAsync(download.InfoHash, cancellationToken);
         return true;
     }
 
     /// <summary>
-    /// Stops seeding a torrent. Seeding only happens while an ingest is parked at the download stage (it is
-    /// mutually exclusive with being in the library), so stopping seeding flips the download out of the
-    /// seeding state and re-drives the parked ingest — which then advances into identify and the
-    /// download→identify hand-off. One-way: there is no resume.
+    /// Ends retention after acknowledged engine release. Incomplete imports keep their original data;
+    /// published imports remove only their owned staging tree, preserving the library and history.
     /// </summary>
     public async Task<bool> StopSeedingAsync(Guid id, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(id, cancellationToken);
         var download = await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
-        if (download is null)
-        {
-            return false;
-        }
+        if (download is null) return false;
+        if (download.CompletedAt is null && download.State is not (DownloadState.Seeding or DownloadState.Completed or DownloadState.StoppedSeeding))
+            throw new TorrentRequestException("The download is not complete. Change its seeding policy instead.");
 
-        // Only a seeding torrent can stop seeding. Ignore the request for any other state (e.g. one still
-        // downloading) so a partial download is never advanced on partial files.
-        if (download.State != DownloadState.Seeding)
+        // Persist cleanup intent before releasing the engine; a restart cannot silently resume this seed.
+        download.CleanupRequested = true;
+        download.CleanupAttempts = 0;
+        download.CleanupAfter = null;
+        await retention.ReleaseAsync(download, cancellationToken);
+        var ingests = await database.IngestItems.Where(item => item.DownloadId == id).ToListAsync(cancellationToken);
+        foreach (var ingest in ingests.Where(item => item.Status != IngestStatus.Done))
         {
-            return true;
+            if (ingest.Status != IngestStatus.NeedsReview)
+            {
+                ingest.Status = IngestStatus.Pending;
+                ingest.NextAttemptAt = null;
+                ingest.AttemptCount = 0;
+                ingest.LeaseOwner = null;
+                ingest.LeaseUntil = null;
+                pipelineQueue.Enqueue(ingest.Id);
+            }
         }
-
-        await engine.StopAsync(download.InfoHash, cancellationToken);
-        download.State = DownloadState.StoppedSeeding;
-        download.KeepSeeding = false;
         await database.SaveChangesAsync(cancellationToken);
+        await retention.CleanupAsync(download, false, cancellationToken);
+        return true;
+    }
 
-        // Re-drive the parked ingest so the download→identify hand-off proceeds.
-        var ingestIds = await database.IngestItems
-            .Where(item => item.DownloadId == id)
-            .Select(item => item.Id)
-            .ToListAsync(cancellationToken);
-        foreach (var ingestId in ingestIds)
-        {
-            pipelineQueue.Enqueue(ingestId);
-        }
-
+    public async Task<bool> SetSeedingPolicyAsync(Guid id, bool keepSeeding, CancellationToken ct)
+    {
+        using var gate = await IngestMutationGate.EnterAsync(id, ct);
+        var download = await database.Downloads.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (download is null) return false;
+        if (download.StopRequested || download.EngineReleased)
+            throw new TorrentRequestException("This torrent is being released; its seeding policy can no longer be changed.");
+        if (download.PlacementStarted)
+            throw new TorrentRequestException("Placement has started. Use Stop seeding and continue to release the original files.");
+        download.KeepSeeding = keepSeeding;
+        if (download.CompletedAt is not null)
+            download.State = keepSeeding ? DownloadState.Seeding : DownloadState.Completed;
+        await database.SaveChangesAsync(ct);
         return true;
     }
 

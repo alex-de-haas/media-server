@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronDown, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, Trash2, Wand2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronDown, type LucideIcon, Pause, Play, RotateCw, SearchCheck, Square, Target, ToggleLeft, ToggleRight, Trash2, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { mediaServer, type Catalog, type DhtStatus, type Download, type IngestItem, type IngestSourceFile, type LibraryMoveJob, type TranscodeJob, type VpnStatus } from "@/lib/media-server";
 import { formatBytes, formatEta, formatPercent, formatSpeed, formatTimeAgo } from "@/lib/format";
@@ -60,10 +60,9 @@ function isDownloadPaused(download: Download): boolean {
   return /paus/i.test(download.engineState ?? download.state);
 }
 
-// A torrent kept seeding parks its ingest at the download stage (still seedable — shown with a Seeding
-// badge and a Stop seeding action); everything else still in flight is active; published is done.
+// Published imports remain Active while their torrent retains originals or cleanup is pending.
 function categoryOf(item: IngestItem, download: Download | undefined): Category {
-  if (download?.state === "Seeding") return "seeding";
+  if (item.status === "Done" && download) return "seeding";
   if (item.status !== "Done") return "active";
   return "done";
 }
@@ -79,10 +78,12 @@ export function ActivitySection() {
   const [tab, setTab] = useState<TabKey>("active");
   const [clearOpen, setClearOpen] = useState(false);
   // Realtime is pushed over SSE (see RealtimeBridge); these slow intervals are only a reconnect fallback.
-  const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 20000 });
+  const ingest = useQuery({ queryKey: ["ingest"], queryFn: mediaServer.listIngest, refetchInterval: 30000 });
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
-  // Live torrent progress/state is patched into this cache by SSE; the interval is a fallback only.
-  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: 20000 });
+  // Torrent progress/state uses SSE. Placement byte progress is persisted separately, so poll faster
+  // only while an import is actively copying; otherwise keep the slow reconnect fallback.
+  const copyingIds = new Set(ingest.data?.filter((item) => item.status === "Running" && (item.stage === "Organize" || item.stage === "Probe")).map((item) => item.downloadId));
+  const downloads = useQuery({ queryKey: ["downloads"], queryFn: mediaServer.listDownloads, refetchInterval: (query) => query.state.data?.some((download) => download.keepSeeding && !download.stopRequested && copyingIds.has(download.id)) ? 2000 : 30000 });
   // Engine-wide VPN tunnel status (null when downloading is in-process). Pushed over SSE; slow interval is a fallback.
   const vpn = useQuery({ queryKey: ["vpn"], queryFn: mediaServer.getVpnStatus, refetchInterval: 30000 });
   const dht = useQuery({ queryKey: ["dht"], queryFn: mediaServer.getDhtStatus, refetchInterval: 30000 });
@@ -546,6 +547,14 @@ function IngestRow({
       onError("resume download")(error);
     },
   });
+  const seedingPolicy = useMutation({
+    mutationFn: (keep: boolean) => mediaServer.setSeedingPolicy(download!.id, keep),
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["ingest"] }),
+      queryClient.invalidateQueries({ queryKey: ["downloads"] }),
+    ]),
+    onError: onError("change seeding policy"),
+  });
   const stopSeeding = useMutation({
     mutationFn: (id: string) => mediaServer.stopSeeding(id),
     onSuccess: () => {
@@ -643,7 +652,7 @@ function IngestRow({
   // non-obvious, actionable part, so surface it through the amber warning icon like a Failed/NeedsReview
   // item rather than as a body line. (Guarded to Pending so a Failed/NeedsReview warning still wins.)
   const vpnPaused = vpnDown && item.stage === "Download" && item.status === "Pending" && !item.lastError;
-  const warning = warningText(item) ?? (vpnPaused ? "VPN is down — transfer paused." : null);
+  const warning = download?.retentionError ?? warningText(item) ?? (vpnPaused ? "VPN is down — transfer paused." : null);
   const published = item.status === "Done" && item.mediaItemId != null;
 
   const meta = [catalog?.name, age && `added ${age}`, item.attemptCount > 0 && `attempt ${item.attemptCount}/5`]
@@ -651,11 +660,11 @@ function IngestRow({
     .join(" · ");
   const showFiles = category === "active" && item.status !== "NeedsReview" && item.sourceFiles.length > 0;
 
-  const transferring = download !== undefined && !DOWNLOAD_DONE_STATES.includes(download.state);
+  const transferring = download !== undefined && download.completedAt == null && !download.stopRequested && !DOWNLOAD_DONE_STATES.includes(download.state);
 
   return (
     <ActivityCard>
-      {category === "active" && (
+      {category !== "done" && (
         <IngestStepper
           stage={item.stage}
           stagesCompleted={item.stagesCompleted}
@@ -701,7 +710,7 @@ function IngestRow({
                 <TooltipContent>Pinned — Identify will match this exact {isEpisodic ? "series" : "title"}.</TooltipContent>
               </Tooltip>
             )}
-            {category === "seeding" && <Badge variant="secondary">Seeding</Badge>}
+            {category === "seeding" && <Badge variant="secondary">{download?.stopRequested ? "Cleanup pending" : published ? (download?.state === "Error" ? "In library / Seeding error" : "In library / Seeding") : "Seeding"}</Badge>}
             {warning && (
               <Tooltip>
                 <TooltipTrigger
@@ -748,8 +757,36 @@ function IngestRow({
                 <IconAction label="Pause" icon={<Pause />} onClick={togglePause} />
               )
             )}
-            {category === "seeding" && download && (
-              <IconAction label="Stop seeding" icon={<Square />} pending={stopSeeding.isPending} onClick={() => stopSeeding.mutate(download.id)} />
+            {download && !published && !download.stopRequested && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Keep seeding after download"
+                      aria-pressed={download.keepSeeding}
+                      aria-busy={seedingPolicy.isPending}
+                      disabled={download.placementStarted || seedingPolicy.isPending}
+                      className={download.keepSeeding ? "text-emerald-600 hover:text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}
+                      onClick={() => seedingPolicy.mutate(!download.keepSeeding)}
+                    >
+                      {download.keepSeeding ? <ToggleRight /> : <ToggleLeft />}
+                    </Button>
+                  }
+                />
+                <TooltipContent>
+                  {download.keepSeeding ? "Seeding after download: on." : "Seeding after download: off."}{" "}
+                  {download.placementStarted
+                    ? "Cannot change after file placement starts."
+                    : seedingPolicy.isPending
+                      ? "Saving…"
+                      : download.keepSeeding ? "Click to turn off." : "Click to turn on."}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {download && !transferring && item.status !== "AwaitingSpace" && (
+              <IconAction label={download.stopRequested ? "Retry cleanup" : published ? "Stop seeding and remove originals" : "Stop seeding and continue"} icon={<Square />} pending={stopSeeding.isPending} onClick={() => stopSeeding.mutate(download.id)} />
             )}
             {identityAction && (
               <IconAction
@@ -761,15 +798,28 @@ function IngestRow({
             {(item.status === "Failed" || (item.status === "NeedsReview" && role === "admin")) && (
               <IconAction label="Retry" icon={<RotateCw />} pending={retry.isPending} onClick={() => retry.mutate()} />
             )}
-            {role === "admin" && (
+            {role === "admin" && !(published && download) && item.status !== "AwaitingSpace" && (
               <IconAction label="Remove" icon={<Trash2 />} destructive pending={remove.isPending} onClick={() => setConfirmOpen(true)} />
             )}
           </>
         }
       />
 
+      {download?.retentionError && <p role="alert" className="text-sm text-amber-600">{download.retentionError}</p>}
+      {item.status === "AwaitingSpace" && download && (
+        <div role="alert" className="flex flex-col gap-2 text-sm">
+          <p className="text-amber-600">{item.lastError}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" disabled={retry.isPending || stopSeeding.isPending} onClick={() => retry.mutate()}>Retry</Button>
+            <Button size="sm" variant="outline" disabled={retry.isPending || stopSeeding.isPending} onClick={() => stopSeeding.mutate(download.id)}>Stop seeding and continue</Button>
+          </div>
+        </div>
+      )}
+      {item.stage === "Organize" && item.status === "Running" && download?.keepSeeding && (
+        <ActivityStats>Copying to library · {formatBytes(download.placementBytes ?? 0)} / {formatBytes(download.placementTotalBytes ?? 0)}</ActivityStats>
+      )}
       {category === "active" && transferring && download && <DownloadProgress download={download} vpnDown={vpnDown} />}
-      {category === "seeding" && download && <SeedingStats download={download} />}
+      {category === "seeding" && download && !download.stopRequested && <SeedingStats download={download} />}
 
       {identityAction?.dialog === "match" && (
         <IngestReviewDialog
@@ -929,6 +979,7 @@ function SeedingStats({ download }: { download: Download }) {
     <ActivityStats>
       <span>↑ {formatSpeed(download.uploadRateBytesPerSecond)}</span>
       <span>ratio {download.ratio?.toFixed(2) ?? "—"}</span>
+      <span>{formatBytes(download.sizeBytes)} retained</span>
       <span>{download.peers ?? 0} peers</span>
     </ActivityStats>
   );

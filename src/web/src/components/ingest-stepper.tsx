@@ -40,7 +40,7 @@ export function IngestStepper({
   function kindFor(index: number): StepKind {
     if (allDone || completed.has(STAGES[index]) || index < currentIndex) return "done";
     if (index === currentIndex) {
-      if (status === "Failed" || status === "NeedsReview") return "attention";
+      if (status === "Failed" || status === "NeedsReview" || status === "AwaitingSpace") return "attention";
       if (activity === "paused") return "paused";
       if (activity === "running" || status === "Running") return "running";
       return "active";
