@@ -1,3 +1,4 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
@@ -37,7 +38,8 @@ public sealed class TorrentServiceListTests : IDisposable
         new FilesystemInspector(),
         new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _tempRoot },
         new PipelineQueue(),
-        new DownloadDeletionService(_database, new FakeTorrentEngine(), NullLogger<DownloadDeletionService>.Instance),
+        new DownloadDeletionService(_database, new DownloadRetentionService(_database, new FakeTorrentEngine(), new CatalogPathSandbox(), new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _tempRoot })),
+        new DownloadRetentionService(_database, new FakeTorrentEngine(), new CatalogPathSandbox(), new HostyOptions { AppId = "test", CoreOrigin = "http://localhost", AppDataDir = _tempRoot }),
         NullLogger<TorrentService>.Instance);
 
     [Fact]
@@ -76,6 +78,7 @@ public sealed class TorrentServiceListTests : IDisposable
             Id = Guid.NewGuid(), InfoHash = "hash", Name = "old", CatalogId = catalog.Id, SourceType = TorrentSourceType.Magnet,
             State = DownloadState.Completed, SavePath = Path.Combine(_tempRoot, ".incoming", "old"), AddedAt = now.AddMinutes(-5),
         };
+        stale.SavePath = CatalogPaths.For(_tempRoot).IncomingFor(stale.Id);
         _database.AddRange(catalog, stale);
         await _database.SaveChangesAsync();
 

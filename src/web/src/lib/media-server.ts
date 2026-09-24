@@ -80,6 +80,12 @@ export interface Download {
   catalogId: string;
   state: string;
   keepSeeding: boolean;
+  placementStarted?: boolean;
+  stopRequested?: boolean;
+  cleanupPending?: boolean;
+  retentionError?: string | null;
+  placementBytes?: number;
+  placementTotalBytes?: number;
   addedAt: string;
   completedAt: string | null;
   engineState: string | null;
@@ -1013,6 +1019,9 @@ export const mediaServer = {
     }),
   pauseDownload: (id: string) => send(`/torrents/${id}/pause`, "POST"),
   resumeDownload: (id: string) => send(`/torrents/${id}/resume`, "POST"),
+  analyzeTemporaryDownloads: () => apiJson<TemporaryDownloadRoot[]>(`${BASE}/settings/temporary-downloads/`),
+  cleanTemporaryDownloads: (ids: string[]) => apiJson<{ id: string; cleaned: boolean; error: string | null }[]>(`${BASE}/settings/temporary-downloads/clean`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids }) }),
+  setSeedingPolicy: (id: string, keepSeeding: boolean) => send(`/torrents/${id}/seeding-policy`, "PUT", { keepSeeding }),
   stopSeeding: (id: string) => send(`/torrents/${id}/stop-seeding`, "POST"),
   removeDownload: (id: string, deleteFiles: boolean) =>
     send(`/torrents/${id}?deleteFiles=${deleteFiles}`, "DELETE"),
@@ -1242,3 +1251,13 @@ export const mediaServer = {
   setWatchHistoryEntryTime: (entryId: string, watchedAt: string) =>
     send(`/watch-history/entries/${entryId}`, "PATCH", { watchedAt }),
 };
+
+export interface TemporaryDownloadRoot {
+  id: string | null;
+  catalogId: string;
+  catalog: string;
+  path: string;
+  bytes: number | null;
+  state: string;
+  canClean: boolean;
+}

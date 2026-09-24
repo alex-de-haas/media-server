@@ -22,6 +22,7 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
 
     public async Task DriveAsync(Guid ingestItemId, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         using var scope = scopeFactory.CreateScope();
         var services = scope.ServiceProvider;
         var database = services.GetRequiredService<MediaServerDbContext>();
@@ -30,7 +31,7 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
         var stages = services.GetServices<IPipelineStage>().OrderBy(stage => stage.Order).ToList();
 
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == ingestItemId, cancellationToken);
-        if (item is null || item.Status is IngestStatus.Done or IngestStatus.NeedsReview)
+        if (item is null || item.Status is IngestStatus.Done or IngestStatus.NeedsReview or IngestStatus.AwaitingSpace)
         {
             return; // Nothing to do, or parked awaiting operator review.
         }
@@ -47,12 +48,12 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
             return;
         }
 
-        // The download is transient: it backs a torrent ingest only until the download→identify hand-off
-        // drops it, and a scan-import ingest never has one. Either way the source files are owned by the
-        // ingest item, so the rest of the pipeline runs the same with or without a download.
+        // A torrent handle owns staging through import and retained seeding; scanned files have none.
         var download = item.DownloadId is { } downloadId
             ? await database.Downloads.FirstOrDefaultAsync(candidate => candidate.Id == downloadId, cancellationToken)
             : null;
+
+        if (download?.CancellationRequested == true) return;
 
         var sourceFiles = await database.SourceFiles.Where(file => file.IngestItemId == item.Id).ToListAsync(cancellationToken);
 
@@ -89,10 +90,16 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
                 // re-drives it after the lease expires on the next start.
                 throw;
             }
+            catch (MediaServer.Api.Organizer.InsufficientPlacementSpaceException exception)
+            {
+                result = new StageResult.AwaitingSpace(exception.Message);
+                item.Stage = IngestStage.Organize;
+                item.StagesCompleted.Remove("organize");
+            }
             catch (Exception exception)
             {
                 logger.LogError(exception, "Stage {Stage} threw for ingest {IngestItem}.", stage.Key, item.Id);
-                result = new StageResult.Failed(exception.Message, Retryable: true);
+                result = new StageResult.Failed(exception.GetBaseException().Message, Retryable: true);
             }
 
             switch (result)
@@ -121,6 +128,11 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
                     await ParkAsync(database, notifier, item, IngestStatus.NeedsReview, review.Reason, null, cancellationToken);
                     return;
 
+                case StageResult.AwaitingSpace space:
+                    await jobService.CompleteAsync(job, cancellationToken);
+                    await ParkAsync(database, notifier, item, IngestStatus.AwaitingSpace, space.Warning, null, cancellationToken);
+                    return;
+
                 case StageResult.Failed failed:
                     // A stage that threw mid-save (e.g. a unique-index violation) leaves its rejected
                     // changes tracked on this shared context; left in place, the very next SaveChangesAsync
@@ -143,9 +155,10 @@ public sealed class IngestOrchestrator(IServiceScopeFactory scopeFactory, ILogge
             }
         }
 
-        // All processing stages succeeded. The download was already stopped and its row dropped at the
-        // download→identify hand-off (see DownloadStage), so publishing just finalizes the item.
+        // Publication is independent of seed retention and cleanup; a cleanup failure cannot unpublish.
         await FinishAsync(database, notifier, item, IngestStatus.Done, null, cancellationToken);
+        if (download is not null && (!download.KeepSeeding || download.StopRequested))
+            await services.GetRequiredService<DownloadRetentionService>().CleanupAsync(download, false, cancellationToken);
     }
 
     private async Task<bool> TryClaimAsync(MediaServerDbContext database, IngestItem item, CancellationToken cancellationToken)

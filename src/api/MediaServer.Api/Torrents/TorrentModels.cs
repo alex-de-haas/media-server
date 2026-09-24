@@ -37,6 +37,13 @@ public sealed record DownloadResponse(
     int? CompletePieces,
     long? EtaSeconds)
 {
+    public bool PlacementStarted { get; init; }
+    public bool StopRequested { get; init; }
+    public bool CleanupPending { get; init; }
+    public string? RetentionError { get; init; }
+    public long PlacementBytes { get; init; }
+    public long PlacementTotalBytes { get; init; }
+
     public static DownloadResponse From(Download download, TorrentSnapshot? snapshot)
     {
         // Once a download reaches a state where the content is fully on disk and library-ready, it is
@@ -62,7 +69,7 @@ public sealed record DownloadResponse(
             snapshot?.UploadRateBytesPerSecond,
             snapshot?.Ratio,
             snapshot?.Peers,
-            snapshot?.SizeBytes,
+            snapshot?.SizeBytes ?? (download.RetainedBytes > 0 ? download.RetainedBytes : null),
             snapshot?.Seeds,
             snapshot?.Leeches,
             snapshot?.AvailablePeers,
@@ -73,9 +80,19 @@ public sealed record DownloadResponse(
             snapshot?.TotalPieces,
             snapshot?.CompletePieces,
             // Engine ETA is already null when complete/stalled; never show an ETA on a finished download.
-            contentComplete ? null : snapshot?.EtaSeconds);
+            contentComplete ? null : snapshot?.EtaSeconds)
+        {
+            PlacementStarted = download.PlacementStarted,
+            StopRequested = download.StopRequested,
+            CleanupPending = download.CleanupRequested,
+            RetentionError = download.RetentionError,
+            PlacementBytes = download.PlacementBytes,
+            PlacementTotalBytes = download.PlacementTotalBytes,
+        };
     }
 }
 
 /// <summary>Raised for invalid add requests (bad source, missing catalog, insufficient space).</summary>
 public sealed class TorrentRequestException(string message) : Exception(message);
+
+public sealed record SeedingPolicyRequest(bool KeepSeeding);

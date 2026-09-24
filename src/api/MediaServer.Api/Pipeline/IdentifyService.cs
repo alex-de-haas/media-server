@@ -318,6 +318,10 @@ public sealed class IdentifyService(
             .FirstOrDefaultAsync(cancellationToken)
             // No live or ghost row in this catalog — a tombstone elsewhere (or catalog-less after its
             // catalog was deleted) is adopted instead, so a re-downloaded title finds its history.
+            // Another version in this same batch can already have created the identity without saving.
+            ?? database.MediaItems.Local.FirstOrDefault(item => item.CatalogId == catalog.Id &&
+                item.Kind == MediaKind.Movie && item.IdentityProvider == candidate.Reference.Provider &&
+                item.IdentityProviderId == candidate.Reference.Id)
             ?? await FindTombstoneAsync(MediaKind.Movie, candidate.Reference.Provider, candidate.Reference.Id,
                 seasonNumber: null, episodeNumber: null, cancellationToken);
 

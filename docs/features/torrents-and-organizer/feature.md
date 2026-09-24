@@ -1,25 +1,21 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-09-11
+Updated: 2026-09-24
 
 ## Description
 
 Media Server downloads torrents via the external, VPN-isolated `torrent-engine` app, then
 runs each completed file through a single ingest pipeline that identifies it,
-**moves it into the catalog's canonical layout**, probes it, enriches metadata,
+**places it in the catalog's canonical layout**, probes it, enriches metadata,
 and publishes it. Torrent state, progress, and seeding status are streamed to the
 UI in real time over SSE.
 
-> **Model change (2026-06-21):** the previous design kept two on-disk trees per
-> catalog — `files/` (the seed copy) and `library/` (clean hardlinks) — sharing
-> inodes via hardlinks so a torrent could seed indefinitely while the library
-> showed clean names. That is gone. There is now **one** tree: published media
-> lives in canonical folders **directly at the catalog root**, and downloads use a
-> transient `.incoming/` staging directory. No hardlinks, no `files/`, no
-> `library/`. Seeding exists **only during the download stage**. This is a
-> backward-incompatible change: there is no migration — existing databases and
-> on-disk layouts are discarded.
+Media Server owns each catalog's `.incoming/<downloadId>` directory and gives its
+path to the generic Torrent Engine. Import and seed retention are independent:
+retained torrents keep the original tree and publish independent library copies;
+other torrents are stopped and removed from the engine before files are moved.
+There are no hardlinks and no separate Torrent Engine UI or ownership API.
 
 ## On-Disk Layout
 
@@ -35,10 +31,9 @@ Each catalog root contains:
     Season 01/<Show> S01E01.mkv
 ```
 
-- `.incoming/` is the only transient area. A file lives there while it downloads
-  and (optionally) seeds. The moment the pipeline advances past download, the
-  chosen playable file is **moved** out of `.incoming/` into its canonical path;
-  the rest of that download's `.incoming/<downloadId>/` folder is deleted.
+- `.incoming/` holds downloading data and retained seed originals. Organize copies
+  required videos when seeding is retained, or moves them after engine release.
+  Companion tracks follow the same policy. Cleanup waits for required placements.
 - Everything outside `.incoming/` is the durable library and is the **only**
   subtree the read/scan/Jellyfin surfaces expose. A file is "in the library" iff a
   published `MediaSource` row points at it — the distinction is database state, not
@@ -167,43 +162,65 @@ Stages (skipped individually via `IngestItem.StagesCompleted` for resume):
 | Stage | Torrent entry | Scan entry | What it does |
 | --- | --- | --- | --- |
 | `intake` | ✓ | – | Ensure catalog layout exists. |
-| `download` | ✓ | – | Wait for the torrent. While `keepSeeding`, the item **parks here** (file stays seedable in `.incoming/`) until the operator stops seeding. |
+| `download` | ✓ | – | Wait for engine-confirmed completion, including rechecks after restart. Release non-seeding jobs with files retained; keep the durable Download owner. |
 | `identify` | ✓ | ✓ (entry) | Parse name → provider search → create/reuse `MediaItem`. Low-confidence → `NeedsReview`. |
-| `organize` | ✓ | ✓ | **Move** each file from its current path to the canonical root path derived from the confirmed metadata (rename in place — no copy, no hardlink). Several files mapped to one item (e.g. a black-and-white and a regular cut of an episode) get distinct version-tagged names. See *Version collisions* below. |
+| `organize` | ✓ | ✓ | Copy or move each file to its canonical path derived from confirmed metadata. Copies use private temporary output, completed-byte verification and promotion. Several files mapped to one item (e.g. a black-and-white and a regular cut of an episode) get distinct version-tagged names. See *Version collisions* below. |
 | `probe` | ✓ | ✓ | ffprobe each file in place → one `MediaSource` (+ `MediaStream`s) per file; multiple sources surface as selectable versions. |
 | `enrich` | ✓ | ✓ | Fetch/cache provider metadata + images. |
 | `publish` | ✓ | ✓ | Assign the stable public id; the item becomes browsable/playable. |
 
-### The download → identify hand-off
+### Download ownership, policy and retention
 
-A `Download` is a **transient transfer object**. It exists only while the torrent
-is downloading or seeding. When the pipeline advances from `download` to
-`identify`:
+`Download` persists the original staging root, info hash, source URI, policy, stop
+intent, engine-release acknowledgement and cleanup attempts independently of
+canonical `SourceFile.RelativePath`. `OriginalRelativePath` records the torrent
+path; engine metadata events update existing files after they have moved.
+The remote client uses the registered torrent's `/files` response for physical
+save-relative paths, including after an idempotent add on restart. Add/inspection
+descriptor paths do not enter that cache: older engines can prefix a single-file
+torrent's name twice there, and a late add response must not overwrite live paths.
 
-- The torrent is stopped (seeding ends).
-- The `Download` row is **deleted**. Ownership of the file transfers to the
-  `IngestItem`: `SourceFile` rows are owned by the `IngestItem` (not the download)
-  and their path becomes catalog-root-relative (initially `.incoming/...`).
+The add dialog inherits the catalog default unless explicitly overridden.
+Downloading and paused Activity cards show an icon toggle alongside the other
+right-aligned actions. Its on/off icon and tooltip reflect the current seeding
+policy; the tooltip explains the next click. Clicking toggles the policy; it is
+disabled while saving and once file placement starts. The toggle also supports
+keyboard activation.
+`PUT /api/torrents/{id}/seeding-policy` changes the policy before placement starts.
+The pipeline, operator mutations and engine events share a writer gate; a policy
+change cannot switch an active file transfer. Retargeting staging to another
+catalog releases the engine first and ends seed retention.
 
-So after download there is no torrent and no seeding — just a file in `.incoming/`
-attached to an ingest, moving through identify → organize → publish.
+With `keepSeeding=true`, completed downloads pass through Identify, Organize,
+Probe, Sidecars, Enrich and Publish while the original tree continues seeding.
+Samples, skipped files and other torrent payload stay intact. Published seeds
+remain in Activity's Active tab with completed stages, upload statistics, retained
+bytes and **In library / Seeding**. An upload error does not unpublish the media.
 
-### Seeding
+**Stop seeding and remove originals** persists stop intent, awaits engine stop and
+removal with `deleteFiles=false`, then cleans only owned staging and obsolete
+app-owned torrent metadata. Library files and history remain. Before publication,
+**Stop seeding and continue** releases the engine but preserves required originals
+until processing completes. Restart does not re-add torrents with stop intent.
+A lost successful removal reply is reconciled through idempotent removal, including
+an already-missing torrent. Unavailable engines cannot acknowledge release.
 
-Seeding is bound to the download stage and is mutually exclusive with being in the
-library:
+### Capacity recovery
 
-- `keepSeeding = false` (default per catalog, overridable per torrent): the moment
-  the download completes, the pipeline advances to identify (torrent stopped).
-- `keepSeeding = true`: the ingest **parks at the download stage** and the torrent
-  keeps seeding from `.incoming/`. The item is **not yet in the library**. When the
-  operator clicks **Stop seeding**, the ingest advances to identify and the rest of
-  the pipeline runs.
+Organize checks the remaining copy space on the destination volume. Insufficient
+space parks the ingest as `AwaitingSpace` at Organize, with required/available bytes
+and exactly two recovery actions: **Retry** or **Stop seeding and continue**.
+The latter retries remaining placements with Move after engine acknowledgement.
+A failed stop keeps the original data and the durable handle. Move failures remain
+ordinary Organize failures; a move is not guaranteed to succeed on a full disk.
 
-This is the deliberate trade-off of the single-tree model: you can seed a fresh
-grab, or have it in the library, but not both at once. (Private-tracker users who
-must hold ratio keep `keepSeeding` on and accept the title is library-visible only
-after they stop seeding.)
+Disk-full errors during copying follow the same parked flow. Private partial output
+is closed and deleted, completed per-file placements survive, and no incomplete
+canonical output reaches Probe. Copy digests allow a completed promotion to be
+recovered after an interrupted database update without adopting unrelated output.
+Failed cleanup of partial output is reported instead of silently discarded.
+`AwaitingSpace` does not consume automatic attempts and survives restart until an
+operator action. Copies of companions use the same transfer helper.
 
 ## Identify
 
@@ -230,7 +247,7 @@ When a file enters identify (post-download, or via scan):
 
 Releases often ship dubs and subtitles as separate per-episode files (a "Rus
 Sound" folder of `.mka`s and a "RUS Subs" folder next to the episodes). Ingest
-**keeps them as files**: after Probe, the `Sidecars` stage moves each matched
+**keeps them as files**: after Probe, the `Sidecars` stage places each matched
 companion next to its library file under a canonical name and records it as an
 external `MediaStream`. See
 [external-track-sidecars](../external-track-sidecars/feature.md).
@@ -241,9 +258,8 @@ destroyed the track — so merging is now a separate operation, run later and on
 when asked, and it produces a new version rather than rewriting the original.
 
 - Companions are **not organized** by the organizer: their names derive from the
-  video's canonical one, so they are placed afterwards. The organizer's recursive
-  staging sweep therefore spares any root still holding one — without that it
-  would take the only copy of a dub with it.
+  video's canonical one, so they are placed afterwards. Cleanup protects any root
+  still holding required companion tracks.
 - A track's language and title come from its own container when it has tags (a
   `.mka` carries both), and from its path otherwise (`AudioTrackLabeler`: "Rus
   Sound", `…rus.mka` → `rus`; a per-group folder such as `[AniDUB]` becomes the
@@ -253,26 +269,19 @@ when asked, and it produces a new version rather than rewriting the original.
 - A dub-only batch (tracks matched to items with no video in the ingest) **keeps**
   its tracks where they are, rather than discarding them as it used to.
 
-## Organize (move/rename)
+## Organize (copy or move)
 
-Because there is one tree on one filesystem, organize is a **move**, not a
-hardlink:
+Organize names each assigned playable file using confirmed metadata and reserves
+its destination. A retained seed uses an independent copy; other files use
+`File.Move` without overwrite. Within one filesystem this keeps the rename fast
+path. The extension and container remain unchanged.
 
-1. Skip non-playable payload (samples/junk; archives are not extracted in v1).
-2. For each assigned playable file, build the canonical catalog-root-relative path
-   from the confirmed metadata (movie template, or `Show/Season NN/Show SxxEyy`),
-   preserving the file's extension (organize never changes the container — playback
-   is Direct Play/Stream only).
-3. **Move** the file there. For torrent items the source is `.incoming/...`; for
-   scanned items the source is wherever it currently sits in the root. The
-   `SourceFile` path and the `MediaItem.LibraryPath` are updated to the canonical
-   path.
-4. After a torrent's playable files are moved out, delete its now-stale
-   `.incoming/<downloadId>/` staging folder.
-
-A move within one filesystem is atomic and frees no extra space (one copy exists
-throughout). Re-running an organized file keeps its canonical path and version label.
-An existing destination is preserved; a different source gets a free version path.
+Each successful placement updates `SourceFile` and `MediaItem.LibraryPath` before
+the next file starts. Retrying preserves the chosen destination and edition;
+completed files do not become new versions. The original path stays recorded.
+A move interrupted between filesystem success and its database update fails safely
+if its source is missing; broader automatic recovery of such moves remains outside
+this feature. Byte count alone is not treated as proof of content integrity.
 
 ### Version collisions
 
@@ -309,14 +318,30 @@ have more than one file when it carries alternate versions):
   `DELETE /api/library/seasons/{id}`, same `deleteFiles` option): the same removal for
   one episode or one whole season, pruning the containers it empties. See
   [File and directory management](../file-directory-management/feature.md#removal-semantics).
-- **Remove download** (`DELETE /api/torrents/{id}`) only applies while a download
-  exists (download/seeding stage). It stops the torrent and clears its
-  `.incoming/` data and in-flight ingest. After the download→identify hand-off
-  there is no download to remove — the item is governed by library removal.
+- **Remove download** (`DELETE /api/torrents/{id}`) cancels unpublished work. Stop
+  and remove are acknowledged before staging deletion, and failures retain the
+  ownership record with retryable cleanup state. Published seeds require the
+  explicit stop-seeding action before their Activity history can be removed.
+- **Clear completed Activity** excludes every retained download, including cleanup
+  failures. History deletion never recursively deletes legacy staging inferred
+  only from source paths.
 
-There is no more "removing a torrent leaves watchable content via the other
-hardlink" subtlety: once published the canonical file(s) are governed by library
-removal.
+### Temporary download cleanup
+
+Settings exposes an administrator-only **Temporary download files** section backed
+by `GET /api/settings/temporary-downloads/` and
+`POST /api/settings/temporary-downloads/clean` (`ids`). Analysis reports sizes,
+ownership, purpose and eligibility. Preview lists the exact selected directories;
+apply revalidates current ownership, use, root containment and link protection.
+Active downloads, retained seeds, review and required staged files are protected.
+Unknown legacy directories are report-only; their age, name or absence from Activity
+is not deletion authority.
+
+Cleanup failures remain in `Download` with an error, attempt count and next attempt.
+The worker retries up to five times with bounded backoff; explicit settings cleanup
+resets exhausted attempts. Owned leftover files such as `.nfo` are removed only
+after required processing finishes. A cleanup failure does not invalidate published
+media. All root deletion is preceded by acknowledged engine release.
 
 ## Remapping
 
@@ -353,7 +378,7 @@ the catalog root.
   `NeedsReview` for the operator. Already-published files are skipped (idempotent).
 - Imported files are indistinguishable from torrent-published ones afterwards: a
   canonical file + `MediaItem` + `MediaSource`, with no `Download`. (This is the
-  same end state a torrent reaches after the download→identify hand-off.)
+  import state a torrent reaches while its retained download owns staging separately.)
 
 Because import publishes the file in place (then renames to canonical), the
 operator's original file becomes the library file. Deleting such an item with
@@ -367,7 +392,10 @@ Internal endpoints (under `/api`, behind Host identity):
 POST   /api/torrents/add           # { source, catalogId, keepSeeding? }
 POST   /api/torrents/{id}/pause
 POST   /api/torrents/{id}/resume
-POST   /api/torrents/{id}/stop-seeding   # advances a parked, seeding ingest into identify
+POST   /api/torrents/{id}/stop-seeding   # release seed; preserve required originals or clean published staging
+PUT    /api/torrents/{id}/seeding-policy # change keepSeeding before placement starts
+GET    /api/settings/temporary-downloads/ # analyze owned and unknown staging (admin)
+POST   /api/settings/temporary-downloads/clean # revalidate and clean selected ids (admin)
 DELETE /api/torrents/{id}
 GET    /api/torrents
 GET    /api/vpn                    # engine-wide VPN tunnel status (null when downloading is disabled)
@@ -398,13 +426,16 @@ Backend tests should use xUnit. Required coverage:
 - Add from magnet links and `.torrent` files with a chosen catalog; download lands
   under `.incoming/`.
 - Pause, resume, stop-seeding, delete, and error-state transitions.
-- `keepSeeding` policy resolution (per-torrent override of catalog default) and the
-  "park at download while seeding" behavior.
-- The download→identify hand-off deletes the `Download` and re-parents source files
-  to the ingest.
-- Organize **moves** the file to the canonical path (extension preserved,
-  source-file mapping, season-pack handling) and clears the `.incoming/` staging
-  folder.
+- Catalog-default and explicit seeding policy, placement cutoff, completion and control races.
+- Remote add and restart use registered file paths; failed file-list refreshes never
+  publish provisional descriptor paths or create phantom single-file duplicates.
+- Publication with independent copies while original videos, companions and incidental files remain seedable.
+- Engine stop/remove acknowledgement precedes Move and cleanup; failed or lost replies retain ownership.
+- Capacity parking before and during Copy; no Probe or automatic retry exhaustion. Retry and partial Copy-to-Move fallback preserve completed paths and version names.
+- Copy cancellation and restart retain sources, remove private partial output, and revalidate completion.
+- Published seed teardown preserves library/history. Cleanup failures retain durable evidence and support explicit retry.
+- Cleanup preview/apply protects active, review, incomplete, linked and unknown roots; apply rechecks current state.
+- Move/copy preserve extensions, source mappings and multi-version/season-pack naming. Cleanup waits for required companion work.
 - Successive downloads of the same season retain distinct file contents and canonical version paths,
   including after completed-ingest cleanup; retries preserve allocated names.
 - Destination collisions preserve published versions, pending-ingest files, untracked files, and
@@ -435,4 +466,5 @@ Backend tests should use xUnit. Required coverage:
   `PUT`; a user gets the indicator without a menu.
 - Free-space pre-check refuses oversized `.torrent` downloads and notifies for
   magnets.
-- Progress/speed/ratio are not persisted; only state transitions are written.
+- Torrent speed/ratio remain live; placement byte progress and cleanup lifecycle are persisted.
+- Web Activity renders completed stages plus retained seeding, capacity recovery actions and cleanup errors; Settings restricts temporary cleanup to administrators.

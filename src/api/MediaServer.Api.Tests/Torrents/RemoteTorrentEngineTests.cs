@@ -133,6 +133,7 @@ public sealed class RemoteTorrentEngineTests
 
     private sealed class StubHandler(HttpStatusCode status, string? body) : HttpMessageHandler
     {
+        public Queue<HttpResponseMessage> Responses { get; } = new();
         public HttpRequestMessage? Request { get; private set; }
         public string? RequestBody { get; private set; }
 
@@ -140,6 +141,7 @@ public sealed class RemoteTorrentEngineTests
         {
             Request = request;
             RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            if (Responses.TryDequeue(out var scripted)) return scripted;
             var response = new HttpResponseMessage(status);
             if (body is not null)
             {
@@ -154,6 +156,49 @@ public sealed class RemoteTorrentEngineTests
         new(new HttpClient(handler) { BaseAddress = new Uri("http://engine.local/") },
             new MediaServerSettings(),
             NullLogger<RemoteTorrentEngine>.Instance);
+
+    [Theory]
+    [InlineData(HttpStatusCode.Created)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task AddAsync_UsesRegisteredFilePathsAndNotifiesConsumers(HttpStatusCode status)
+    {
+        const string hash = "0123456789012345678901234567890123456789";
+        var handler = new StubHandler(HttpStatusCode.OK,
+            """[{"index":0,"relativePath":"Movie.avi","length":2164832256}]""");
+        handler.Responses.Enqueue(new HttpResponseMessage(status)
+        {
+            Content = new StringContent("""{"infoHash":"0123456789012345678901234567890123456789","name":"Movie.avi","totalSize":2164832256,"hasMetadata":true,"files":[{"index":0,"relativePath":"Movie.avi/Movie.avi","length":2164832256}]}""", Encoding.UTF8, "application/json"),
+        });
+        using var engine = Engine(handler);
+        IReadOnlyList<TorrentFileInfo>? notifiedFiles = null;
+        engine.MetadataReceived += (_, id) => notifiedFiles = engine.GetFiles(id);
+
+        await engine.AddAsync(new TorrentSource.Magnet($"magnet:?xt=urn:btih:{hash}"),
+            Path.Combine(Path.GetTempPath(), ".incoming", "test"), true, CancellationToken.None);
+
+        Assert.Equal($"/downloads/{hash}/files", handler.Request!.RequestUri!.AbsolutePath);
+        Assert.Equal("Movie.avi", Assert.Single(engine.GetFiles(hash)).RelativePath);
+        Assert.Equal("Movie.avi", Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<TorrentFileInfo>>(notifiedFiles)).RelativePath);
+    }
+
+    [Fact]
+    public async Task AddAsync_FailedFileRefreshDoesNotPublishDescriptorPaths()
+    {
+        var handler = new StubHandler(HttpStatusCode.ServiceUnavailable, null);
+        handler.Responses.Enqueue(new HttpResponseMessage(HttpStatusCode.Created)
+        {
+            Content = new StringContent("""{"infoHash":"h","name":"Movie.avi","totalSize":2164832256,"hasMetadata":true,"files":[{"index":0,"relativePath":"Movie.avi/Movie.avi","length":2164832256}]}""", Encoding.UTF8, "application/json"),
+        });
+        using var engine = Engine(handler);
+        var notified = false;
+        engine.MetadataReceived += (_, _) => notified = true;
+
+        await engine.AddAsync(new TorrentSource.Magnet("magnet:?xt=urn:btih:0123456789012345678901234567890123456789"),
+            Path.Combine(Path.GetTempPath(), ".incoming", "test"), true, CancellationToken.None);
+
+        Assert.Empty(engine.GetFiles("h"));
+        Assert.False(notified);
+    }
 
     [Fact]
     public async Task GetVpnProfilesAsync_ParsesTheEngineList()

@@ -43,7 +43,7 @@ public sealed class DownloadFileService(MediaServerDbContext database)
             .Where(file => file.IngestItemId == ingestItemId)
             .ToListAsync(cancellationToken);
 
-        var byPath = existing.ToDictionary(file => file.RelativePath, StringComparer.Ordinal);
+        var byPath = existing.ToDictionary(file => file.OriginalRelativePath ?? file.RelativePath, StringComparer.Ordinal);
         var now = DateTimeOffset.UtcNow;
         var result = new List<SourceFile>();
 
@@ -66,6 +66,7 @@ public sealed class DownloadFileService(MediaServerDbContext database)
                     IngestItemId = ingestItemId,
                     DownloadId = downloadId,
                     RelativePath = relativePath,
+                    OriginalRelativePath = relativePath,
                     TorrentFileIndex = file.Index,
                     SizeBytes = file.Length,
                     AssignmentStatus = SourceFileAssignmentStatus.Unassigned,

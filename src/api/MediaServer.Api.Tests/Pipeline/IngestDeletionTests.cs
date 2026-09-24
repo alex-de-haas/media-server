@@ -57,7 +57,7 @@ public sealed class IngestDeletionTests
     }
 
     [Fact]
-    public async Task DeleteAsync_of_a_download_less_item_erases_its_incoming_staging()
+    public async Task DeleteAsync_of_a_download_less_item_preserves_unverified_staging()
     {
         using var harness = new PipelineTestHarness();
         var (ingestId, catalogId, downloadId) = await harness.SeedCompletedDownloadAsync(CatalogType.Movie, "Movie.mkv", "Movie.mkv");
@@ -85,7 +85,7 @@ public sealed class IngestDeletionTests
         using var verify = harness.CreateScope();
         var db2 = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
         Assert.False(await db2.IngestItems.AnyAsync(i => i.Id == ingestId));
-        Assert.False(File.Exists(staging)); // .incoming staging erased
+        Assert.True(File.Exists(staging)); // No linked download owner: report-only legacy staging.
     }
 
     private static async Task<string> StagingCatalogRootAsync(PipelineTestHarness harness, Guid catalogId)
@@ -105,7 +105,7 @@ public sealed class IngestDeletionTests
     }
 
     [Fact]
-    public async Task DeleteCompletedAsync_removes_only_done_items_and_clears_their_staging()
+    public async Task DeleteCompletedAsync_removes_only_history_and_preserves_unverified_staging()
     {
         using var harness = new PipelineTestHarness();
 
@@ -148,9 +148,9 @@ public sealed class IngestDeletionTests
         Assert.False(await db2.IngestItems.AnyAsync(i => i.Id == doneB));
         Assert.False(await db2.SourceFiles.AnyAsync(f => f.IngestItemId == doneA || f.IngestItemId == doneB));
         Assert.True(await db2.IngestItems.AnyAsync(i => i.Id == pending));
-        // The Done items' .incoming/ staging is erased, matching DeleteAsync; the pending item's stays.
-        Assert.False(File.Exists(Staging(downloadA, "A.mkv")));
-        Assert.False(File.Exists(Staging(downloadB, "B.mkv")));
+        // Clearing history does not establish ownership of legacy staging; all originals remain.
+        Assert.True(File.Exists(Staging(downloadA, "A.mkv")));
+        Assert.True(File.Exists(Staging(downloadB, "B.mkv")));
         Assert.True(File.Exists(Staging(downloadC, "C.mkv")));
     }
 

@@ -24,6 +24,7 @@ public sealed class IngestService(
     AppSettingsService appSettings,
     IPipelineQueue queue,
     DownloadDeletionService downloadDeletion,
+    DownloadRetentionService retention,
     ICatalogPathSandbox sandbox,
     IFilesystemInspector filesystem,
     ILogger<IngestService> logger)
@@ -145,6 +146,7 @@ public sealed class IngestService(
 
     public async Task<bool> RetryAsync(Guid id, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -201,6 +203,7 @@ public sealed class IngestService(
 
     public async Task<MatchOutcome> MatchAsync(Guid id, MatchRequest request, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         // The endpoint rejects an empty batch too; guarded here as well so an internal caller can't flip
         // the item to Pending and re-drive it having matched nothing. A file repeated across groups is
         // equally rejected: two identities claiming one file has no honest resolution order.
@@ -299,6 +302,7 @@ public sealed class IngestService(
     /// </summary>
     public async Task<SkipOutcome> SkipAsync(Guid id, SkipRequest request, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -357,6 +361,7 @@ public sealed class IngestService(
     /// </summary>
     public async Task<AssignExtrasOutcome> AssignExtrasAsync(Guid id, AssignExtrasRequest request, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         // Same defensive guard as MatchAsync: an empty batch must not resolve the series or re-drive.
         if (request.SourceFileIds is not { Count: > 0 })
         {
@@ -464,6 +469,7 @@ public sealed class IngestService(
     /// </summary>
     public async Task<PinOutcome> PinAsync(Guid id, PinIdentityRequest request, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -524,13 +530,14 @@ public sealed class IngestService(
     ///
     /// The ingest's staged files keep their catalog-relative paths (<c>.incoming/&lt;downloadId&gt;/…</c>,
     /// unique per download), so re-homing is one directory move and no row rewrite. Both catalogs must
-    /// sit on the same volume: <see cref="OrganizerService"/> hardlinks staging into the library with a
+    /// sit on the same volume: <see cref="OrganizerService"/> places staging into the library with a
     /// plain move, and a cross-volume copy belongs in a progress-reporting background job, not here —
     /// see <see cref="LibraryMoveService"/> for that path. Scan-imported ingests have no staging to
     /// move and are refused.
     /// </summary>
     public async Task<RetargetOutcome> RetargetAsync(Guid id, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -592,6 +599,9 @@ public sealed class IngestService(
             moves.Add((from, to));
         }
 
+        if (item.DownloadId is { } retainedId && await database.Downloads.FindAsync([retainedId], cancellationToken) is { } retained)
+            await retention.ReleaseAsync(retained, cancellationToken);
+
         CatalogPaths.For(target).EnsureCreated();
         foreach (var (from, to) in moves)
         {
@@ -648,6 +658,7 @@ public sealed class IngestService(
     /// clearing only matters for a not-yet-identified item, which Identify will run normally next time.</summary>
     public async Task<bool> UnpinAsync(Guid id, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -665,14 +676,13 @@ public sealed class IngestService(
     }
 
     /// <summary>
-    /// Removes an ingest. The operator is never asked about physical files — deletion is automatic by where
-    /// the file sits: an in-flight item delegates to download removal (stops the torrent, clears its
-    /// <c>.incoming/</c> staging and the engine's resume cache, drops the download + this ingest); a
-    /// post-hand-off item erases any <c>.incoming/</c> staging it still owns; a published item just drops the
-    /// tracking row, leaving its canonical library file. Returns false if it no longer exists.
+    /// Cancels an unpublished download through acknowledged release and durable staging cleanup.
+    /// Published seeds require explicit stop first. History-only deletion leaves library files and
+    /// unknown legacy staging untouched. Returns false when the ingest no longer exists.
     /// </summary>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
         var item = await database.IngestItems.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
         if (item is null)
         {
@@ -683,129 +693,29 @@ public sealed class IngestService(
         // cache, and drops the download together with this ingest.
         if (item.DownloadId is { } downloadId)
         {
-            await downloadDeletion.DeleteAsync(downloadId, deleteFiles: true, cancellationToken);
+            await downloadDeletion.DeleteUnderLockAsync(downloadId, cancellationToken);
             return true;
         }
 
-        // No download (scan import, or after the hand-off). Note any .incoming/ staging folders this ingest
-        // owns so they can be erased once the rows are gone; canonical (published) files are left untouched.
-        var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == item.CatalogId, cancellationToken);
-        var stagingDirs = (await database.SourceFiles
-                .Where(file => file.IngestItemId == id)
-                .Select(file => file.RelativePath)
-                .ToListAsync(cancellationToken))
-            .Where(CatalogPaths.IsIncoming)
-            .Select(StagingRootOf)
-            .OfType<string>()
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        database.IngestItems.Remove(item); // SourceFile rows cascade away with it.
+        database.IngestItems.Remove(item);
         await database.SaveChangesAsync(cancellationToken);
-
-        if (catalog is not null)
-        {
-            foreach (var staging in stagingDirs)
-            {
-                if (sandbox.TryResolve(catalog, staging, out var absolute))
-                {
-                    TryDeleteDirectory(absolute);
-                }
-            }
-        }
 
         return true;
     }
 
     /// <summary>
-    /// Clears every published (<see cref="IngestStatus.Done"/>) item — the "Delete all" on the Done tab.
-    /// Published rows have already handed off their download (DownloadId is null), so they are dropped in a
-    /// single batch after noting any <c>.incoming/</c> staging to erase; the rare row that still holds a
-    /// download falls back to the per-item <see cref="DeleteAsync"/>. Library files are left untouched.
-    /// Returns how many rows were removed.
+    /// Clears completed history only after its retained download has finished cleanup.
+    /// Canonical library files and unknown legacy staging remain untouched.
     /// </summary>
     public async Task<int> DeleteCompletedAsync(CancellationToken cancellationToken)
     {
+        using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
+        // Live seeds and failed cleanup retain their owner record and remain on Active.
         var items = await database.IngestItems
-            .Where(item => item.Status == IngestStatus.Done)
-            .ToListAsync(cancellationToken);
-        if (items.Count == 0)
-        {
-            return 0;
-        }
-
-        var removed = 0;
-
-        // A published item handed its download off long before reaching Done, so DownloadId is null. Should one
-        // ever defy that, fall back to the single-item path so its torrent + files are torn down correctly.
-        foreach (var item in items.Where(item => item.DownloadId is not null))
-        {
-            if (await DeleteAsync(item.Id, cancellationToken))
-            {
-                removed++;
-            }
-        }
-
-        var batch = items.Where(item => item.DownloadId is null).ToList();
-        if (batch.Count == 0)
-        {
-            return removed;
-        }
-
-        // Note any .incoming/ staging the batch still owns (paired with its catalog) before the rows — and
-        // their cascading source files — are gone, then drop every row in one round-trip. Published library
-        // files are left untouched.
-        var ingestIds = batch.Select(item => item.Id).ToList();
-        var catalogIds = batch.Select(item => item.CatalogId).Distinct().ToList();
-        var catalogById = await database.Catalogs
-            .Where(catalog => catalogIds.Contains(catalog.Id))
-            .ToDictionaryAsync(catalog => catalog.Id, cancellationToken);
-        var catalogByIngest = batch.ToDictionary(item => item.Id, item => item.CatalogId);
-        var stagingDirs = (await database.SourceFiles
-                .Where(file => ingestIds.Contains(file.IngestItemId))
-                .Select(file => new { file.IngestItemId, file.RelativePath })
-                .ToListAsync(cancellationToken))
-            .Where(file => CatalogPaths.IsIncoming(file.RelativePath))
-            .Select(file => (CatalogId: catalogByIngest[file.IngestItemId], Staging: StagingRootOf(file.RelativePath)))
-            .Where(pair => pair.Staging is not null)
-            .Distinct()
-            .ToList();
-
-        database.IngestItems.RemoveRange(batch); // SourceFile rows cascade away with them.
+            .Where(item => item.Status == IngestStatus.Done && item.DownloadId == null).ToListAsync(cancellationToken);
+        database.IngestItems.RemoveRange(items);
         await database.SaveChangesAsync(cancellationToken);
-        removed += batch.Count;
-
-        foreach (var (catalogId, staging) in stagingDirs)
-        {
-            if (catalogById.TryGetValue(catalogId, out var catalog) && sandbox.TryResolve(catalog, staging!, out var absolute))
-            {
-                TryDeleteDirectory(absolute);
-            }
-        }
-
-        return removed;
-    }
-
-    /// <summary>The <c>.incoming/&lt;downloadId&gt;</c> staging root of a path, or null if it is not staged.</summary>
-    private static string? StagingRootOf(string relativePath)
-    {
-        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return segments.Length >= 2 ? $"{segments[0]}/{segments[1]}" : null;
-    }
-
-    private void TryDeleteDirectory(string absolute)
-    {
-        try
-        {
-            if (Directory.Exists(absolute))
-            {
-                Directory.Delete(absolute, recursive: true);
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(exception, "Failed to remove staging folder {Path}", absolute);
-        }
+        return items.Count;
     }
 
     private async Task<Dictionary<Guid, List<SourceFile>>> LoadSourceFilesAsync(

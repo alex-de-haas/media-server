@@ -58,13 +58,14 @@ public sealed class TorrentCoordinator(
     {
         try
         {
+            using var gate = await IngestMutationGate.EnterAsync(cancellationToken);
             using var scope = scopeFactory.CreateScope();
             var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
 
             var active = await database.Downloads
-                .Where(download => download.State == DownloadState.Downloading
+                .Where(download => !download.StopRequested && !download.EngineReleased && (download.State == DownloadState.Downloading
                                    || download.State == DownloadState.Queued
-                                   || download.State == DownloadState.Seeding)
+                                   || download.State == DownloadState.Seeding))
                 .ToListAsync(cancellationToken);
 
             foreach (var download in active.Where(download => download.SourceUri is not null))
@@ -184,6 +185,7 @@ public sealed class TorrentCoordinator(
 
     private async Task HandleMetadataAsync(string infoHash)
     {
+        using var gate = await IngestMutationGate.EnterAsync(CancellationToken.None);
         using var scope = scopeFactory.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
         var fileService = scope.ServiceProvider.GetRequiredService<DownloadFileService>();
@@ -193,7 +195,7 @@ public sealed class TorrentCoordinator(
         var download = await database.Downloads
             .Include(item => item.Catalog)
             .FirstOrDefaultAsync(item => item.InfoHash == infoHash);
-        if (download is null)
+        if (download is null || download.StopRequested || download.EngineReleased)
         {
             return;
         }
@@ -221,13 +223,14 @@ public sealed class TorrentCoordinator(
 
     private async Task HandleCompletedAsync(string infoHash)
     {
+        using var gate = await IngestMutationGate.EnterAsync(CancellationToken.None);
         using var scope = scopeFactory.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
         var fileService = scope.ServiceProvider.GetRequiredService<DownloadFileService>();
         var pipelineQueue = scope.ServiceProvider.GetRequiredService<IPipelineQueue>();
 
         var download = await database.Downloads.FirstOrDefaultAsync(item => item.InfoHash == infoHash);
-        if (download is null)
+        if (download is null || download.StopRequested || download.EngineReleased)
         {
             return;
         }
@@ -237,17 +240,14 @@ public sealed class TorrentCoordinator(
 
         if (download.State is not (DownloadState.Completed or DownloadState.Seeding or DownloadState.StoppedSeeding))
         {
-            // keepSeeding parks the ingest at the download stage (seeding is mutually exclusive with being
-            // in the library) and leaves the engine's auto-seed running until the operator stops it.
-            // Otherwise mark it Completed and stop uploading now so the download→identify hand-off proceeds.
+            // Completion advances import independently of seed retention. The pipeline owns the
+            // acknowledged engine-release barrier for downloads that should not keep seeding.
             download.State = download.KeepSeeding ? DownloadState.Seeding : DownloadState.Completed;
             download.CompletedAt = DateTimeOffset.UtcNow;
+            download.RetainedBytes = engine.GetSnapshot(infoHash)?.SizeBytes ?? engine.GetFiles(infoHash).Sum(x => x.Length);
             await database.SaveChangesAsync();
 
-            if (!download.KeepSeeding)
-            {
-                await engine.StopAsync(infoHash, CancellationToken.None);
-            }
+            // Organize owns the acknowledged stop/remove barrier before moving files.
         }
 
         await notifier.DownloadStateChangedAsync(new DownloadStateChanged(download.Id, download.State.ToString(), download.Name));
@@ -256,12 +256,13 @@ public sealed class TorrentCoordinator(
 
     private async Task HandleErroredAsync(string infoHash)
     {
+        using var gate = await IngestMutationGate.EnterAsync(CancellationToken.None);
         using var scope = scopeFactory.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
         var pipelineQueue = scope.ServiceProvider.GetRequiredService<IPipelineQueue>();
 
         var download = await database.Downloads.FirstOrDefaultAsync(item => item.InfoHash == infoHash);
-        if (download is null)
+        if (download is null || download.StopRequested || download.EngineReleased)
         {
             return;
         }

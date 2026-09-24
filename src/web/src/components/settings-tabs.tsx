@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/components/app-shell";
+import { TemporaryDownloadsSection } from "@/components/temporary-downloads-section";
 import { GroupsSection } from "@/components/groups-section";
 import { CatalogsSection } from "@/components/catalogs-section";
 import { InfuseAccessSection } from "@/components/infuse-access-section";
@@ -32,6 +33,7 @@ export function SettingsTabs() {
       <TabsContent value="general" className="flex flex-col gap-6">
         <ReleaseGroupSettingsSection />
         <InfuseAccessSection />
+        {isAdmin && <TemporaryDownloadsSection />}
       </TabsContent>
       {isAdmin && <TabsContent value="catalogs"><CatalogsSection /></TabsContent>}
       {isAdmin && <TabsContent value="groups"><GroupsSection /></TabsContent>}

@@ -29,7 +29,7 @@ public sealed class PipelineTestHarness : IDisposable
     private readonly SqliteConnection _connection;
     private readonly ServiceProvider _provider;
 
-    public PipelineTestHarness()
+    public PipelineTestHarness(Action<IServiceCollection>? configure = null)
     {
         Root = Path.Combine(Path.GetTempPath(), "ms-pipeline-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Root);
@@ -59,6 +59,9 @@ public sealed class PipelineTestHarness : IDisposable
 
         services.AddScoped<AppSettingsService>();
         services.AddScoped<IOrganizer, OrganizerService>();
+        services.AddScoped<FilePlacementService>();
+        services.AddSingleton<IPlacementOutput, PlacementOutput>();
+        services.AddScoped<DownloadRetentionService>();
         services.AddScoped<SidecarPlacementService>();
         services.AddScoped<IdentifyService>();
         services.AddScoped<PersonSyncService>();
@@ -94,6 +97,7 @@ public sealed class PipelineTestHarness : IDisposable
         services.AddScoped<MediaServer.Api.Watchlist.WatchlistLibraryLinker>();
         services.AddSingleton<IngestOrchestrator>();
 
+        configure?.Invoke(services);
         _provider = services.BuildServiceProvider();
 
         using var scope = _provider.CreateScope();

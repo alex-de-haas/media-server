@@ -66,6 +66,12 @@ public static class TorrentEndpoints
             }
         });
 
+        group.MapPut("/{id:guid}/seeding-policy", async (Guid id, SeedingPolicyRequest request, TorrentService service, CancellationToken ct) =>
+        {
+            try { return await service.SetSeedingPolicyAsync(id, request.KeepSeeding, ct) ? Results.NoContent() : Results.NotFound(); }
+            catch (TorrentRequestException e) { return Results.Problem(e.Message, statusCode: 409); }
+        });
+
         group.MapPost("/{id:guid}/pause", async (Guid id, TorrentService service, CancellationToken cancellationToken) =>
             await service.PauseAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound());
 

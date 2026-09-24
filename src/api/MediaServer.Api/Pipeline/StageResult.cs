@@ -19,6 +19,8 @@ public abstract record StageResult
     /// <summary>Transient: the reconciler retries after the delay (e.g. waiting on a download).</summary>
     public sealed record Deferred(TimeSpan RetryAfter) : StageResult;
 
+    public sealed record AwaitingSpace(string Warning) : StageResult;
+
     public sealed record Failed(string Error, bool Retryable) : StageResult;
 
     public static readonly StageResult Done = new Completed();
