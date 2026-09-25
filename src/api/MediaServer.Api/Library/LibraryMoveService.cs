@@ -1,3 +1,4 @@
+using MediaServer.Api.Bluray;
 using System.Diagnostics;
 using System.IO.Pipelines;
 using MediaServer.Api.Catalogs;
@@ -324,13 +325,13 @@ public sealed class LibraryMoveService(
                 return null;
             }
 
-            if (!File.Exists(oldAbsolute))
+            if (!BlurayPaths.Exists(oldAbsolute))
             {
                 logger.LogWarning("Move source file missing on disk: {Path}", oldAbsolute);
                 return null;
             }
 
-            var extension = Path.GetExtension(mediaSource.Path);
+            var extension = mediaSource.Kind == MediaSourceKind.Bluray ? "" : Path.GetExtension(mediaSource.Path);
             var (versionName, newRelative) = ResolveDistinctPath(
                 target, targetLeaf, targetLeaf.Kind == MediaKind.Episode ? series : null,
                 extension, mediaSource.VersionName, source.Name, used);
@@ -393,7 +394,7 @@ public sealed class LibraryMoveService(
         var totalBytes = 0L;
         for (var i = 0; i < moves.Count; i++)
         {
-            sizes[i] = SafeFileLength(moves[i].OldAbsolute);
+            sizes[i] = moves[i].Source.Kind == MediaSourceKind.Bluray ? BlurayPaths.Size(moves[i].OldAbsolute) : SafeFileLength(moves[i].OldAbsolute);
             totalBytes += sizes[i];
         }
 
@@ -457,15 +458,18 @@ public sealed class LibraryMoveService(
                 continue;
             }
 
+            if (move.Source.Kind == MediaSourceKind.Bluray) BlurayPaths.ValidateAncestors(move.NewAbsolute);
             Directory.CreateDirectory(Path.GetDirectoryName(move.NewAbsolute)!);
+            if (Directory.Exists(move.NewAbsolute)) throw new IOException("A directory already exists at the move destination.");
             if (File.Exists(move.NewAbsolute))
             {
                 File.Delete(move.NewAbsolute); // Idempotent re-run: replace a stale leftover at the destination.
             }
 
+            move.DestinationStarted = true;
             if (sameVolume)
             {
-                File.Move(move.OldAbsolute, move.NewAbsolute);
+                BlurayPaths.Move(move.OldAbsolute, move.NewAbsolute);
                 copiedBytes += sizes[index];
                 await ReportAsync();
             }
@@ -474,7 +478,7 @@ public sealed class LibraryMoveService(
                 // Copy through a bounded pipe (see CopyFileAsync) so the target disk sees one continuous
                 // stream, with progress advancing as bytes actually land on it. The source is deleted only
                 // after commit.
-                await CopyFileAsync(move.OldAbsolute, move.NewAbsolute,
+                await CopySourceAsync(move.OldAbsolute, move.NewAbsolute,
                     async written =>
                     {
                         copiedBytes += written;
@@ -496,6 +500,21 @@ public sealed class LibraryMoveService(
     /// honest — the final fsync also means the data is durably on disk before the caller commits and
     /// deletes the source. Both streams stay fully asynchronous, so a stopped job cancels mid-copy.
     /// </summary>
+    private static async Task CopySourceAsync(string source, string destination, Func<int, Task> progress, CancellationToken ct)
+    {
+        if (!Directory.Exists(source)) { await CopyFileAsync(source, destination, progress, ct); return; }
+        BlurayPaths.ValidateTree(source);
+        BlurayPaths.ValidateAncestors(destination);
+        Directory.CreateDirectory(destination);
+        foreach (var member in BlurayPaths.Members(source))
+        {
+            foreach (var directory in Directory.EnumerateDirectories(member, "*", SearchOption.AllDirectories).Prepend(member))
+                Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
+            foreach (var file in Directory.EnumerateFiles(member, "*", SearchOption.AllDirectories))
+                await CopyFileAsync(file, Path.Combine(destination, Path.GetRelativePath(source, file)), progress, ct);
+        }
+    }
+
     private static async Task CopyFileAsync(
         string sourcePath, string destinationPath, Func<int, Task> onBytesWrittenAsync, CancellationToken cancellationToken)
     {
@@ -618,21 +637,21 @@ public sealed class LibraryMoveService(
         {
             try
             {
-                if (string.Equals(move.OldAbsolute, move.NewAbsolute, PathComparison) || !File.Exists(move.NewAbsolute))
+                if (!move.DestinationStarted || string.Equals(move.OldAbsolute, move.NewAbsolute, PathComparison) || (!File.Exists(move.NewAbsolute) && !Directory.Exists(move.NewAbsolute)))
                 {
                     continue;
                 }
 
                 if (sameVolume)
                 {
-                    if (!File.Exists(move.OldAbsolute))
+                    if (!BlurayPaths.Exists(move.OldAbsolute))
                     {
-                        File.Move(move.NewAbsolute, move.OldAbsolute); // Put the renamed file back.
+                        BlurayPaths.Move(move.NewAbsolute, move.OldAbsolute); // Put the renamed file back.
                     }
                 }
                 else
                 {
-                    File.Delete(move.NewAbsolute); // Drop the copy; the source is untouched.
+                    BlurayPaths.Delete(move.NewAbsolute); // Drop the copy; the source is untouched.
                 }
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -887,9 +906,9 @@ public sealed class LibraryMoveService(
     {
         try
         {
-            if (File.Exists(absolute))
+            if (BlurayPaths.Exists(absolute))
             {
-                File.Delete(absolute);
+                BlurayPaths.Delete(absolute);
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -936,7 +955,10 @@ public sealed class LibraryMoveService(
 
     /// <summary>One planned file relocation plus the target leaf its media source is (re)assigned to.</summary>
     private sealed record SourceMove(
-        MediaSource Source, MediaItem TargetLeaf, string OldAbsolute, string NewRelative, string NewAbsolute, string? VersionName, bool IsMerge);
+        MediaSource Source, MediaItem TargetLeaf, string OldAbsolute, string NewRelative, string NewAbsolute, string? VersionName, bool IsMerge)
+    {
+        public bool DestinationStarted { get; set; }
+    }
 
     /// <summary>A source episode re-pointed under the merge target's season <paramref name="SeasonNumber"/>.</summary>
     private sealed record EpisodePlacement(MediaItem Episode, int SeasonNumber);

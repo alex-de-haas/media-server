@@ -54,10 +54,10 @@ public sealed class TranscodeOutputImporter(
             return true;
         }
 
-        if (job.Kind == TranscodeJobKind.Join && job.ExpectedDurationSeconds is not > 0)
+        if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) && job.ExpectedDurationSeconds is not > 0)
             throw new IOException("The join duration is not confirmed yet; retrying before import.");
         var result = await probe.ProbeAsync(absolute, cancellationToken);
-        if (job.Kind == TranscodeJobKind.Join && (result.DurationTicks <= 0 ||
+        if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) && (result.DurationTicks <= 0 ||
             (job.ExpectedDurationSeconds is { } expected && Math.Abs(result.DurationTicks / (double)TimeSpan.TicksPerSecond - expected) > 0.5)))
         {
             job.Error = "The joined output has an unexpected duration; it was not added to the library.";
@@ -129,6 +129,7 @@ public sealed class TranscodeOutputImporter(
     /// from the probe so the label always reflects the produced file, not just the requested settings.</summary>
     private static string VersionLabel(TranscodeJob job, ProbeResult result)
     {
+        if (job.Kind == TranscodeJobKind.Bluray) return job.Name ?? "Blu-ray MKV";
         if (job.Kind == TranscodeJobKind.Join)
         {
             // Recover the reserved edition from the durable path, including after a restart.

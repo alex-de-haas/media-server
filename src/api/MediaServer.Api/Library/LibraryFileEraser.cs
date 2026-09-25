@@ -29,9 +29,9 @@ public sealed class LibraryFileEraser(ICatalogPathSandbox sandbox, ILogger<Libra
         var root = CatalogPaths.For(catalog).Root;
         try
         {
-            if (File.Exists(absolute))
+            if (Bluray.BlurayPaths.Exists(absolute))
             {
-                File.Delete(absolute);
+                Bluray.BlurayPaths.Delete(absolute);
                 CleanEmptyParents(Path.GetDirectoryName(absolute), root);
             }
         }

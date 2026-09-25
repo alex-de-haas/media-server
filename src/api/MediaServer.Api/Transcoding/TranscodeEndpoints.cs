@@ -23,7 +23,7 @@ public static class TranscodeEndpoints
         {
             var available = engine is not DisabledTranscodeEngine;
             var tooling = available ? await engine.GetToolingAsync(cancellationToken) : TranscodeTooling.None;
-            return Results.Ok(new { available, dolbyVisionConversion = tooling.DolbyVisionConversion, videoPartJoining = tooling.VideoPartJoining });
+            return Results.Ok(new { available, dolbyVisionConversion = tooling.DolbyVisionConversion, videoPartJoining = tooling.VideoPartJoining, blurayImport = tooling.BlurayImport });
         });
 
         // Every language tag a track edit may carry — the canonical forms plus the spellings that fold onto
@@ -58,6 +58,19 @@ public static class TranscodeEndpoints
         // composes. Its own route rather than a mode of that one: it shares no field with a conversion, and
         // folding two disjoint request shapes into one body would make every field on both conditionally
         // valid.
+        group.MapGet("/bluray/{sourceId:guid}", async (Guid sourceId, string? playlistId, VideoPartJoinService service, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await service.InspectBlurayAsync(sourceId, playlistId, ct)); }
+            catch (TranscodeRequestException ex) { return Results.Problem(ex.Message, statusCode: 400); }
+        });
+        group.MapPost("/bluray", async (CreateBlurayRequest request, VideoPartJoinService service, CancellationToken ct) =>
+        {
+            try { var job = await service.CreateBlurayAsync(request, ct); return Results.Created($"/api/transcode/{job.Id}", job); }
+            catch (Library.LibraryFileBusyException ex) { return Results.Problem(ex.Message, statusCode: 409); }
+            catch (TranscodeConflictException ex) { return Results.Problem(ex.Message, statusCode: 409); }
+            catch (TranscodeRequestException ex) { return Results.Problem(ex.Message, statusCode: 400); }
+        });
+
         group.MapPost("/join", async (CreateJoinRequest request, VideoPartJoinService service, CancellationToken ct) =>
         {
             try

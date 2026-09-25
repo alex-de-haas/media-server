@@ -44,7 +44,7 @@ public sealed class LibrarySourceService(
         }
 
         if (sourceId is { } id &&
-            !await database.MediaSources.AnyAsync(source => source.Id == id && source.MediaItemId == itemId, cancellationToken))
+            !await database.MediaSources.AnyAsync(source => source.Id == id && source.MediaItemId == itemId && source.Kind == MediaSourceKind.File, cancellationToken))
         {
             return false;
         }
@@ -91,8 +91,9 @@ public sealed class LibrarySourceService(
             return RenameVersionResult.NotFound;
         }
 
+        if (source.Kind == MediaSourceKind.Bluray) edition ??= "Blu-ray";
         var oldRelative = source.Path;
-        var newRelative = await CanonicalPathAsync(catalog, item, Path.GetExtension(oldRelative), edition, cancellationToken);
+        var newRelative = await CanonicalPathAsync(catalog, item, source.Kind == MediaSourceKind.Bluray ? "" : Path.GetExtension(oldRelative), edition, cancellationToken);
         if (newRelative is null)
         {
             // An episode's name is built from its series, so a series row that is gone leaves nothing to
@@ -127,7 +128,7 @@ public sealed class LibrarySourceService(
             return RenameVersionResult.Conflict("The file path couldn't be resolved inside the catalog.");
         }
 
-        if (!File.Exists(oldAbsolute))
+        if (!Bluray.BlurayPaths.Exists(oldAbsolute))
         {
             return RenameVersionResult.MissingFile;
         }
@@ -137,7 +138,7 @@ public sealed class LibrarySourceService(
         // restamp the stored path/label; on a case-sensitive filesystem the rename happens for real.
         var sameFileOnDisk = string.Equals(oldAbsolute, newAbsolute, PathComparison);
 
-        if (!sameFileOnDisk && File.Exists(newAbsolute))
+        if (!sameFileOnDisk && (File.Exists(newAbsolute) || Directory.Exists(newAbsolute)))
         {
             return RenameVersionResult.Conflict("Another version already uses this name.");
         }
@@ -146,8 +147,9 @@ public sealed class LibrarySourceService(
         {
             try
             {
+                if (source.Kind == MediaSourceKind.Bluray) Bluray.BlurayPaths.ValidateAncestors(newAbsolute);
                 Directory.CreateDirectory(Path.GetDirectoryName(newAbsolute)!);
-                File.Move(oldAbsolute, newAbsolute);
+                Bluray.BlurayPaths.Move(oldAbsolute, newAbsolute);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -189,7 +191,7 @@ public sealed class LibrarySourceService(
             {
                 try
                 {
-                    File.Move(newAbsolute, oldAbsolute);
+                    Bluray.BlurayPaths.Move(newAbsolute, oldAbsolute);
                 }
                 catch (Exception rollback) when (rollback is IOException or UnauthorizedAccessException)
                 {

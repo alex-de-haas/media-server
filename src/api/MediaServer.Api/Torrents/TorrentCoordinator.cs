@@ -214,6 +214,7 @@ public sealed class TorrentCoordinator(
         }
 
         await fileService.UpsertSourceFilesAsync(download.Id, files, CancellationToken.None);
+        if (await BlockSeriesDiscAsync(database, download, files)) return;
 
         // Magnet free-space check: size is only known now. Cannot refuse retroactively, so warn.
         if (snapshot is { SizeBytes: > 0 } && download.Catalog is { } catalog &&
@@ -244,6 +245,7 @@ public sealed class TorrentCoordinator(
 
         // Ensure source files exist (a re-added complete torrent may skip the metadata path).
         await fileService.UpsertSourceFilesAsync(download.Id, engine.GetFiles(infoHash), CancellationToken.None);
+        if (await BlockSeriesDiscAsync(database, download, engine.GetFiles(infoHash))) return;
 
         if (download.State is not (DownloadState.Completed or DownloadState.Seeding or DownloadState.StoppedSeeding))
         {
@@ -259,6 +261,24 @@ public sealed class TorrentCoordinator(
 
         await notifier.DownloadStateChangedAsync(new DownloadStateChanged(download.Id, download.State.ToString(), download.Name));
         await EnqueueIngestAsync(database, pipelineQueue, download.Id);
+    }
+
+    private async Task<bool> BlockSeriesDiscAsync(MediaServerDbContext database, Download download, IReadOnlyList<TorrentFileInfo> files)
+    {
+        if (!files.Any(f => Bluray.BlurayPaths.RootOfMember(f.RelativePath) is not null)) return false;
+        var type = await database.Catalogs.Where(c => c.Id == download.CatalogId).Select(c => c.Type).SingleAsync();
+        if (type == CatalogType.Movie) return false;
+        download.State = DownloadState.Error;
+        var items = await database.IngestItems.Where(i => i.DownloadId == download.Id).ToListAsync();
+        foreach (var item in items)
+        {
+            item.Status = IngestStatus.Failed;
+            item.LastError = "BDMV is supported only in movie catalogs. Downloaded data has been retained.";
+        }
+        await database.SaveChangesAsync();
+        await engine.StopAsync(download.InfoHash, CancellationToken.None);
+        await notifier.DownloadStateChangedAsync(new DownloadStateChanged(download.Id, download.State.ToString(), download.Name));
+        return true;
     }
 
     private async Task HandleErroredAsync(string infoHash)

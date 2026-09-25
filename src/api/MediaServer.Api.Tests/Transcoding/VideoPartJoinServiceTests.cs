@@ -1,4 +1,5 @@
 using Imposter.Abstractions;
+using MediaServer.Api.Bluray;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -28,6 +29,7 @@ public sealed class VideoPartJoinServiceTests : IDisposable
     private IMediaProbe _probe = null!;
     private JobSnapshot? _snapshot;
     private bool _available = true;
+    private bool _bluray;
     private Exception? _submissionError;
     private TranscodeJobRequest? _submitted;
     private int _submissions;
@@ -53,7 +55,7 @@ public sealed class VideoPartJoinServiceTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "part1.mkv"), "first original");
         File.WriteAllText(Path.Combine(_root, "part2.mkv"), "second original");
         var engine = ITranscodeEngine.Imposter();
-        engine.GetToolingAsync(Arg<CancellationToken>.Any()).Returns((CancellationToken ct) => Task.FromResult(new TranscodeTooling(false, _available)));
+        engine.GetToolingAsync(Arg<CancellationToken>.Any()).Returns((CancellationToken ct) => Task.FromResult(new TranscodeTooling(false, _available, _bluray)));
         engine.CreateAsync(Arg<TranscodeJobRequest>.Any(), Arg<CancellationToken>.Any())
             .Returns(async (TranscodeJobRequest request, CancellationToken ct) =>
             {
@@ -71,6 +73,9 @@ public sealed class VideoPartJoinServiceTests : IDisposable
             return _snapshot!;
         });
         engine.CancelAsync(Arg<string>.Any(), Arg<CancellationToken>.Any()).Returns(Task.CompletedTask);
+        engine.InspectBlurayAsync(Arg<string?>.Any(), Arg<string>.Any(), Arg<string?>.Any(), Arg<CancellationToken>.Any())
+            .Returns(Task.FromResult(new BlurayInspection("revision", 28,
+                [new("00001", 2, 0, ["00001.m2ts"], [new(0, "video", "AVC", null, null, true, false, "160x90", null, null), new(1, "audio", "AC-3", "en", null, true, false, null, 6, null)])])));
         _engine = engine.Instance();
         var probe = IMediaProbe.Imposter();
         probe.ProbeAsync(Arg<string>.Any(), Arg<CancellationToken>.Any()).Returns(async (string path, CancellationToken ct) =>
@@ -92,6 +97,75 @@ public sealed class VideoPartJoinServiceTests : IDisposable
             new TranscodeOutputImporter(db, new CatalogPathSandbox(), _probe, NullLogger<TranscodeOutputImporter>.Instance), NullLogger<VideoPartJoinService>.Instance);
     }
     private Task<TranscodeJobResponse> Create(params Guid[] ids) => Service().CreateAsync(new(ids.Length == 0 ? [_first, _second] : ids), default);
+
+    private async Task PrepareDisc()
+    {
+        _bluray = true;
+        var source = await Db.MediaSources.SingleAsync(s => s.Id == _first);
+        source.Kind = MediaSourceKind.Bluray;
+        source.Container = "bdmv";
+        source.Path = "disc";
+        (await Db.MediaItems.SingleAsync()).DefaultSourceId = _second;
+        Directory.CreateDirectory(Path.Combine(_root, "disc/BDMV"));
+        File.WriteAllText(Path.Combine(_root, "disc/BDMV/index.bdmv"), "original");
+        await Db.SaveChangesAsync();
+    }
+    private CreateBlurayRequest DiscRequest => new(_first, new("revision", "00001", 0, [new(1, "en", null, true)], []));
+
+    [Fact]
+    public async Task Blu_ray_job_is_durable_and_imports_once_without_changing_the_preferred_file()
+    {
+        await PrepareDisc();
+        await Service().CreateBlurayAsync(DiscRequest, default);
+        var job = await Db.TranscodeJobs.SingleAsync();
+        Assert.Equal(TranscodeJobKind.Bluray, job.Kind);
+        Assert.NotNull(job.BluraySelectionJson);
+        Assert.Equal(job.Id, _submitted!.ClientJobId);
+        Assert.Equal("00001", _submitted.Bluray!.PlaylistId);
+        var output = Path.Combine(_root, job.OutputPath!);
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        File.WriteAllText(output, "output");
+        _snapshot = Snapshot(job.EngineJobId, "Completed");
+        await Service().ReconcileAsync(job, default);
+        await Service().ReconcileAsync(job, default);
+        Assert.True(job.OutputImported);
+        Assert.Equal(3, await Db.MediaSources.CountAsync());
+        Assert.Equal(_second, (await Db.MediaItems.SingleAsync()).DefaultSourceId);
+        Assert.True(File.Exists(Path.Combine(_root, "disc/BDMV/index.bdmv")));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{")]
+    [InlineData("null")]
+    [InlineData("{}")]
+    [InlineData("{\"Revision\":\"r\",\"PlaylistId\":\"00001\",\"VideoTrackId\":0,\"Audio\":[null],\"Subtitles\":[]}")]
+    public async Task Corrupted_disc_selection_fails_clearly_without_resubmitting(string? json)
+    {
+        await PrepareDisc();
+        await Service().CreateBlurayAsync(DiscRequest, default);
+        var job = await Db.TranscodeJobs.SingleAsync();
+        job.BluraySelectionJson = json;
+        job.LastSubmissionAt = null;
+        _snapshot = null;
+        await Db.SaveChangesAsync();
+        await Service().ReconcileAsync(job, default);
+        Assert.Equal(TranscodeJobState.Failed, job.State);
+        Assert.Contains("saved Blu-ray selection", job.Error);
+        Assert.Equal(1, _submissions);
+        Assert.True(Directory.Exists(Path.Combine(_root, "disc/BDMV")));
+    }
+
+    [Fact]
+    public async Task Blu_ray_refuses_a_stale_selection_before_persisting_a_job()
+    {
+        await PrepareDisc();
+        await Assert.ThrowsAsync<TranscodeRequestException>(() => Service().CreateBlurayAsync(
+            DiscRequest with { Selection = DiscRequest.Selection with { Revision = "stale" } }, default));
+        Assert.Empty(await Db.TranscodeJobs.ToListAsync());
+        Assert.Equal(0, _submissions);
+    }
 
     [Theory]
     [InlineData("part1.mkv", "Parts - Joined.mkv")]

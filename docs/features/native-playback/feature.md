@@ -1,7 +1,7 @@
 # Native Playback
 
 Created: 2026-08-04
-Updated: 2026-09-11
+Updated: 2026-09-24
 
 ## Description
 
@@ -204,6 +204,12 @@ that judges what can be played, and the remux path that writes the sample entry.
 ## Indexing progress
 
 Apple TV presents the attempted version's [indexing progress](../indexing-progress/feature.md) while a `packaging_pending` refusal is active. Completion invites a new Play attempt; index readiness alone does not promise codec support.
+
+## Blu-ray source integration
+
+[Blu-ray sources](../bluray-import/feature.md) are directory sources for movies.
+Their import, manual MKV preparation and playback availability are documented
+separately; internal disc clips are not individual library versions.
 
 ## Testing Expectations
 

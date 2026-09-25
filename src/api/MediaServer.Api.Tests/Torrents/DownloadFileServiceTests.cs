@@ -78,6 +78,32 @@ public sealed class DownloadFileServiceTests : IDisposable
         Assert.Equal(2_000_000_000, file.SizeBytes);
     }
 
+    [Fact]
+    public async Task Bluray_members_become_one_source_and_keep_companion_certificate()
+    {
+        TorrentFileInfo[] files = [new(0, "Film/BDMV/index.bdmv", 20), new(1, "Film/BDMV/PLAYLIST/00001.mpls", 30),
+            new(2, "Film/BDMV/STREAM/00001.m2ts", 2_000_000_000), new(3, "Film/CERTIFICATE/id.bdmv", 10),
+            new(4, "Bonus.m2ts", 2_000_000_000)];
+        await Service().UpsertSourceFilesAsync(_downloadId, files, CancellationToken.None);
+        var result = await Service().UpsertSourceFilesAsync(_downloadId, files, CancellationToken.None);
+        Assert.Equal(2, result.Count);
+        var disc = Assert.Single(result, f => f.Kind == MediaSourceKind.Bluray);
+        Assert.EndsWith("/Film", disc.RelativePath);
+        Assert.Equal(2_000_000_060, disc.SizeBytes);
+        Assert.Equal("[0,1,2,3]", disc.DiscFileIndexesJson);
+        Assert.DoesNotContain(result, f => f.RelativePath.Contains("BDMV/"));
+    }
+
+    [Fact]
+    public async Task Root_level_disc_has_a_staging_root_source()
+    {
+        var result = await Service().UpsertSourceFilesAsync(_downloadId,
+            [new(0, "BDMV/index.bdmv", 20), new(1, "BDMV/STREAM/00000.m2ts", 100)], CancellationToken.None);
+        var disc = Assert.Single(result);
+        Assert.Equal(MediaSourceKind.Bluray, disc.Kind);
+        Assert.Equal(MediaServer.Api.Catalogs.CatalogPaths.IncomingRelative(_downloadId), disc.RelativePath);
+    }
+
     private MediaServerDbContext Fresh() =>
         new(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
 

@@ -40,6 +40,9 @@ public sealed class TorrentService(
             throw new TorrentRequestException($"Could not parse the torrent source: {exception.Message}");
         }
 
+        if (catalog.Type != CatalogType.Movie && descriptor.Files.Any(f => Bluray.BlurayPaths.RootOfMember(f.RelativePath) is not null))
+            throw new TorrentRequestException("BDMV downloads are supported only in movie catalogs.");
+
         // Block only an actively-managed torrent. A stale download for this info hash — orphaned (no ingest),
         // or whose only ingest(s) failed (e.g. a phantom completion the operator is re-adding) — is reclaimed:
         // drop it along with its staging and engine resume state, then add fresh below.

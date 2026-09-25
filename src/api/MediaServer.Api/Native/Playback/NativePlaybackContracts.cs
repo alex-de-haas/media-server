@@ -48,6 +48,7 @@ public enum NativePlaybackDecision
 /// </summary>
 public static class NativePlaybackReasons
 {
+    public const string RequiresConversion = "requires_conversion";
     public const string UnsupportedVideoCodec = "unsupported_video_codec";
     public const string UnsupportedAudioCodec = "unsupported_audio_codec";
     public const string UnsupportedDynamicRange = "unsupported_dynamic_range";

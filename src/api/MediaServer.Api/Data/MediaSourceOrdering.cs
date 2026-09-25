@@ -9,7 +9,10 @@ namespace MediaServer.Api.Data;
 public static class MediaSourceOrdering
 {
     public static IReadOnlyList<MediaSource> OrderByDefault(this IEnumerable<MediaSource> sources, Guid? defaultSourceId) =>
-        sources.OrderByDefault(defaultSourceId, source => source.Id, source => source.CreatedAt);
+        sources.OrderBy(source => source.Kind == MediaSourceKind.Bluray)
+            .ThenByDescending(source => source.Id == defaultSourceId)
+            .ThenBy(source => source.CreatedAt)
+            .ThenBy(source => source.Id).ToList();
 
     /// <summary>
     /// The same order over a projection of the sources — whatever shape a caller read instead of the entity —

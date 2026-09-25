@@ -1,3 +1,4 @@
+using MediaServer.Api.Bluray;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Watchlist;
@@ -67,7 +68,7 @@ public sealed class DownloadStage(ICatalogPathSandbox sandbox, ITorrentEngine en
         }
 
         var anyFileOnDisk = context.SourceFiles.Any(file =>
-            sandbox.TryResolve(context.Catalog, file.RelativePath, out var absolute) && File.Exists(absolute));
+            sandbox.TryResolve(context.Catalog, file.RelativePath, out var absolute) && BlurayPaths.Exists(absolute));
         if (!anyFileOnDisk)
         {
             return new StageResult.Failed(
@@ -193,7 +194,7 @@ public sealed class OrganizeStage(IOrganizer organizer, MediaServerDbContext dat
         catch (InsufficientPlacementSpaceException e) { return new StageResult.AwaitingSpace(e.Message); }
         var organizedIds = organized.Select(file => file.SourceFileId).ToHashSet();
         var unorganized = context.SourceFiles.FirstOrDefault(file =>
-            file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes) &&
+            file.MediaItemId is not null && BlurayPaths.IsImportable(file) &&
             !organizedIds.Contains(file.Id));
         if (unorganized is not null)
         {
@@ -221,7 +222,7 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
         // regular cut of one episode) becomes a multi-version item: every source is probed and exposed,
         // and clients render a version picker keyed by MediaSourceId.
         var assignedFiles = context.SourceFiles
-            .Where(file => file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes));
+            .Where(file => file.MediaItemId is not null && BlurayPaths.IsImportable(file));
 
         foreach (var sourceFile in assignedFiles)
         {
@@ -234,7 +235,7 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
 
             var mediaItemId = sourceFile.MediaItemId!.Value;
             var absolute = Path.Combine(context.Catalog.Root, sourceFile.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(absolute))
+            if (!BlurayPaths.Exists(absolute))
             {
                 return new StageResult.Failed(
                     $"Organized source file is missing on disk: {sourceFile.RelativePath}.", Retryable: false);
@@ -247,6 +248,20 @@ public sealed class ProbeStage(IMediaProbe probe, MediaServerDbContext database)
                 continue;
             }
 
+            if (sourceFile.Kind == MediaSourceKind.Bluray)
+            {
+                if (context.Catalog.Type != CatalogType.Movie)
+                    return new StageResult.Failed("BDMV is supported only in movie catalogs.", Retryable: false);
+                BlurayPaths.ValidateStructure(absolute);
+                database.MediaSources.Add(new MediaSource
+                {
+                    Id = Guid.NewGuid(), MediaItemId = mediaItemId, SourceFileId = sourceFile.Id,
+                    Kind = MediaSourceKind.Bluray, Container = "bdmv", Path = sourceFile.RelativePath,
+                    SizeBytes = sourceFile.SizeBytes, VersionName = sourceFile.Edition ?? "Blu-ray",
+                    CreatedAt = DateTimeOffset.UtcNow,
+                });
+                continue;
+            }
             var result = await probe.ProbeAsync(absolute, cancellationToken);
             var source = new MediaSource
             {

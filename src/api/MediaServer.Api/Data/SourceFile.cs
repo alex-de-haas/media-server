@@ -9,6 +9,14 @@ public sealed class SourceFile
 {
     public Guid Id { get; set; }
 
+    public MediaSourceKind Kind { get; set; }
+
+    /// <summary>Persisted before moving a disc, so interrupted member moves can be resumed.</summary>
+    public string? PendingLibraryPath { get; set; }
+
+    /// <summary>The torrent indexes owned by a disc; no member is independently selectable as a clip.</summary>
+    public string? DiscFileIndexesJson { get; set; }
+
     /// <summary>Owning ingest item — durable for the file's whole lifetime.</summary>
     public Guid IngestItemId { get; set; }
 

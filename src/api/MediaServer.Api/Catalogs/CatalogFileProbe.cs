@@ -40,5 +40,5 @@ public sealed class CatalogFileProbe(MediaServerDbContext database, ICatalogPath
 
     /// <summary>Whether one catalog-relative path resolves to a file that is there.</summary>
     public bool Resolves(Catalog catalog, string relativePath) =>
-        sandbox.TryResolve(catalog, relativePath, out var absolute) && File.Exists(absolute);
+        sandbox.TryResolve(catalog, relativePath, out var absolute) && MediaServer.Api.Bluray.BlurayPaths.Exists(absolute);
 }

@@ -20,7 +20,7 @@ public sealed class OrganizerServiceTests : IDisposable
     private readonly ClaimCommandCapture _commands = new();
     private readonly SqliteConnection _connection;
     private readonly MediaServerDbContext _database;
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "ms-org-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Combine(OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath(), "ms-org-" + Guid.NewGuid().ToString("N"));
 
     public OrganizerServiceTests()
     {
@@ -66,6 +66,49 @@ public sealed class OrganizerServiceTests : IDisposable
         // The source-file row and the media item now point at the canonical path.
         Assert.Equal("Inception (2010)/Inception (2010).mkv", sourceFile.RelativePath);
         Assert.Equal("Inception (2010)/Inception (2010).mkv", movie.LibraryPath);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Organize_bluray_preserves_active_seed_data_and_moves_after_release(bool keepSeeding)
+    {
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance,
+            new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
+        var now = DateTimeOffset.UtcNow;
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Type = CatalogType.Movie, Root = _root,
+            NamingTemplate = "{Title} ({Year})", CreatedAt = now, UpdatedAt = now };
+        var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie,
+            Title = "Disc", Year = 2000, AddedAt = now, UpdatedAt = now };
+        var download = new Download { Id = Guid.NewGuid(), CatalogId = catalog.Id, InfoHash = new string('a', 40),
+            SavePath = _root, KeepSeeding = keepSeeding, EngineReleased = !keepSeeding };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Stage = IngestStage.Organize,
+            Status = IngestStatus.Running, CreatedAt = now, UpdatedAt = now };
+        var relative = $"{CatalogPaths.IncomingRelative(download.Id)}/disc";
+        var source = MakeSource(ingest.Id, movie.Id, relative, 0, now);
+        source.Kind = MediaSourceKind.Bluray;
+        source.DownloadId = download.Id;
+        _database.AddRange(catalog, movie, download, ingest, source);
+        await _database.SaveChangesAsync();
+        var bdmv = Directory.CreateDirectory(Path.Combine(_root, relative, "BDMV")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(bdmv, "index.bdmv"), "disc");
+
+        if (keepSeeding)
+        {
+            var error = await Assert.ThrowsAsync<IOException>(() => organizer.OrganizeAsync([source], catalog, CancellationToken.None));
+            Assert.Contains("Stop seeding", error.Message);
+            Assert.Equal("disc", await File.ReadAllTextAsync(Path.Combine(bdmv, "index.bdmv")));
+            Assert.Equal(relative, source.RelativePath);
+            Assert.Null(source.PendingLibraryPath);
+        }
+        else
+        {
+            var result = Assert.Single(await organizer.OrganizeAsync([source], catalog, CancellationToken.None));
+            Assert.False(Directory.Exists(bdmv));
+            Assert.Equal("disc", await File.ReadAllTextAsync(Path.Combine(result.AbsolutePath, "BDMV", "index.bdmv")));
+            Assert.Equal(relative, source.OriginalRelativePath);
+            Assert.Null(source.PendingLibraryPath);
+        }
     }
 
     [Fact]

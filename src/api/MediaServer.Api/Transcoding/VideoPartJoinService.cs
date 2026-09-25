@@ -12,7 +12,7 @@ namespace MediaServer.Api.Transcoding;
 public sealed record CreateJoinRequest(IReadOnlyList<Guid> SourceIds);
 
 /// <summary>Durable join admission, engine submission and completion. Original sources are never changed.</summary>
-public sealed class VideoPartJoinService(MediaServerDbContext database, ITranscodeEngine engine,
+public sealed partial class VideoPartJoinService(MediaServerDbContext database, ITranscodeEngine engine,
     ICatalogPathSandbox sandbox, MediaServerSettings settings, LibraryMoveGuard moveGuard,
     TranscodeOutputImporter importer, ILogger<VideoPartJoinService> logger)
 {
@@ -76,7 +76,7 @@ public sealed class VideoPartJoinService(MediaServerDbContext database, ITransco
         {
             await SubmitAsync(job, engineRequest, ct);
         }
-        catch (JoinRejectedException exception)
+        catch (Exception exception) when (exception is JoinRejectedException or TranscodeRequestException)
         {
             Fail(job, exception.Message);
             await database.SaveChangesAsync(CancellationToken.None);
@@ -124,9 +124,30 @@ public sealed class VideoPartJoinService(MediaServerDbContext database, ITransco
                 throw new TranscodeRequestException("Both parts and their output must be under configured media mounts shared with the engine.");
             return new(label, relative);
         }
-        var first = Mount(job.InputPath); var second = Mount(job.SecondInputPath); var output = Mount(job.OutputPath);
+        var first = Mount(job.InputPath); var output = Mount(job.OutputPath);
+        if (job.Kind == TranscodeJobKind.Bluray)
+            return new(first.MountLabel, first.Path, output.MountLabel, output.Path, null, null, null,
+                ClientJobId: job.Id, Bluray: ReadBluraySelection(job.BluraySelectionJson));
+        var second = Mount(job.SecondInputPath);
         return new(first.MountLabel, first.Path, output.MountLabel, output.Path, null, null, null,
             JoinInputs: [first, second], ClientJobId: job.Id);
+    }
+
+    private static MediaServer.Api.Bluray.BluraySelection ReadBluraySelection(string? json)
+    {
+        const string message = "The saved Blu-ray selection is missing or invalid. Inspect the disc and create a new MKV job.";
+        try
+        {
+            var selection = string.IsNullOrWhiteSpace(json) ? null
+                : System.Text.Json.JsonSerializer.Deserialize<MediaServer.Api.Bluray.BluraySelection>(json);
+            if (selection is null || string.IsNullOrWhiteSpace(selection.Revision) ||
+                selection.PlaylistId is not { Length: 5 } || !selection.PlaylistId.All(char.IsAsciiDigit) ||
+                selection.VideoTrackId < 0 || selection.Audio is not { Count: > 0 } || selection.Subtitles is null ||
+                selection.Audio.Concat(selection.Subtitles).Any(t => t is null || t.Id < 0))
+                throw new TranscodeRequestException(message);
+            return selection;
+        }
+        catch (System.Text.Json.JsonException) { throw new TranscodeRequestException(message); }
     }
 
     private async Task SubmitAsync(TranscodeJob job, TranscodeJobRequest request, CancellationToken ct)
@@ -215,7 +236,7 @@ public sealed class VideoPartJoinService(MediaServerDbContext database, ITransco
                 await database.SaveChangesAsync(ct);
             }
         }
-        catch (JoinRejectedException exception)
+        catch (Exception exception) when (exception is JoinRejectedException or TranscodeRequestException)
         {
             Fail(job, exception.Message);
             await database.SaveChangesAsync(ct);

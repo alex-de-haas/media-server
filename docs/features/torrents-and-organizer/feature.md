@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-09-24
+Updated: 2026-09-25
 
 ## Description
 
@@ -434,6 +434,12 @@ Alongside the per-torrent frames it carries the two engine-wide health events,
 `vpnStatusChanged` and `dhtStatusChanged` (see
 [Engine health indicators](#engine-health-indicators)). Neither is persisted — both
 are live indicators only.
+
+## Blu-ray source integration
+
+[Blu-ray sources](../bluray-import/feature.md) are directory sources for movies.
+Their import, manual MKV preparation and playback availability are documented
+separately; internal disc clips are not individual library versions.
 
 ## Testing Expectations
 

@@ -1,3 +1,4 @@
+using MediaServer.Api.Bluray;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
@@ -50,7 +51,8 @@ public sealed class OrganizerService(
                 var pending = database.SourceFiles
                     .Where(file => file.IngestItem!.CatalogId == catalog.Id &&
                         (EF.Functions.Collate(file.RelativePath, pathCollation) == candidate ||
-                         EF.Functions.Collate(file.PlacementPath!, pathCollation) == candidate))
+                         EF.Functions.Collate(file.PlacementPath!, pathCollation) == candidate ||
+                         EF.Functions.Collate(file.PendingLibraryPath!, pathCollation) == candidate))
                     .Select(file => (Guid?)file.Id);
                 owners = (await published.Concat(pending).ToListAsync(cancellationToken)).ToHashSet();
                 claims.Add(candidate, owners);
@@ -63,7 +65,7 @@ public sealed class OrganizerService(
         // black-and-white and a regular cut of the same episode) each gets a distinct canonical path —
         // alternate versions of one item — instead of colliding on the (item, path) unique index.
         var groups = sourceFiles
-            .Where(file => file.MediaItemId is not null && MediaFormats.IsPlayableMedia(file.RelativePath, file.SizeBytes))
+            .Where(file => file.MediaItemId is not null && BlurayPaths.IsImportable(file))
             .GroupBy(file => file.MediaItemId!.Value);
 
         foreach (var group in groups)
@@ -90,7 +92,7 @@ public sealed class OrganizerService(
             for (var index = 0; index < filesInGroup.Count; index++)
             {
                 var sourceFile = filesInGroup[index];
-                var edition = sourceFile.Edition ?? editions?[index];
+                var edition = sourceFile.Edition ?? editions?[index] ?? (sourceFile.Kind == MediaSourceKind.Bluray ? "Blu-ray" : null);
 
                 if (!sandbox.TryResolve(catalog, sourceFile.RelativePath, out var sourceAbsolute))
                 {
@@ -98,14 +100,14 @@ public sealed class OrganizerService(
                     continue;
                 }
 
-                if (!File.Exists(sourceAbsolute))
+                if (!BlurayPaths.Exists(sourceAbsolute) && sourceFile.PendingLibraryPath is null)
                 {
                     logger.LogWarning("Source file missing for organize: {Path}", sourceAbsolute);
                     continue;
                 }
 
-                var extension = Path.GetExtension(sourceFile.RelativePath);
-                var canonicalRelative = sourceFile.PlacementPath ?? await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
+                var extension = sourceFile.Kind == MediaSourceKind.Bluray ? "" : Path.GetExtension(sourceFile.RelativePath);
+                var canonicalRelative = sourceFile.PendingLibraryPath ?? sourceFile.PlacementPath ?? await BuildLibraryPathAsync(catalog, item, extension, edition, cancellationToken);
 
                 // A file scanned from an already-organized library can already sit at its canonical path for a
                 // non-null edition — "<canonical stem> - <label>.<ext>", exactly what LibraryNaming writes for a
@@ -129,7 +131,7 @@ public sealed class OrganizerService(
                 // both disk and database claims, including claims whose files are temporarily missing.
                 var baseEdition = edition;
                 var versionNumber = 2;
-                while (sourceFile.PlacementPath is null && !string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison) &&
+                while (sourceFile.PendingLibraryPath is null && sourceFile.PlacementPath is null && !string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison) &&
                        (File.Exists(canonicalAbsolute) || Directory.Exists(canonicalAbsolute) ||
                         await IsClaimedAsync(canonicalRelative, sourceFile.Id)))
                 {
@@ -144,15 +146,28 @@ public sealed class OrganizerService(
                 // A case-only path change on a case-insensitive filesystem maps to the same file — skip the move.
                 if (!string.Equals(sourceAbsolute, canonicalAbsolute, PathComparison))
                 {
+                    if (sourceFile.Kind == MediaSourceKind.Bluray) BlurayPaths.ValidateAncestors(canonicalAbsolute);
                     Directory.CreateDirectory(Path.GetDirectoryName(canonicalAbsolute)!);
                     // Never overwrite: a concurrent claimant makes this ingest fail safely and retry.
-                    sourceFile.Edition = edition; // Persist the chosen version with the destination reservation.
-                    await placement.PlaceAsync(sourceFile, sourceAbsolute, canonicalAbsolute, canonicalRelative, copy, cancellationToken);
-
+                    sourceFile.Edition = edition;
+                    if (sourceFile.Kind == MediaSourceKind.Bluray)
+                    {
+                        if (copy)
+                            throw new IOException("Stop seeding this download before organizing its Blu-ray directory; disc copying while seeding is not supported yet.");
+                        if (catalog.Type != CatalogType.Movie || item.Kind != MediaKind.Movie)
+                            throw new IOException("BDMV import is supported only for movies.");
+                        sourceFile.OriginalRelativePath ??= sourceFile.RelativePath;
+                        sourceFile.PendingLibraryPath = canonicalRelative;
+                        await database.SaveChangesAsync(cancellationToken);
+                        BlurayPaths.MoveMembers(sourceAbsolute, canonicalAbsolute);
+                    }
+                    else
+                        await placement.PlaceAsync(sourceFile, sourceAbsolute, canonicalAbsolute, canonicalRelative, copy, cancellationToken);
 
                 }
 
                 sourceFile.RelativePath = canonicalRelative;
+                sourceFile.PendingLibraryPath = null;
                 sourceFile.Edition = edition;
                 sourceFile.UpdatedAt = DateTimeOffset.UtcNow;
 

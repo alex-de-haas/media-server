@@ -188,6 +188,8 @@ public sealed class NativePlaybackResolver(
             return No(NativePlaybackReasons.NoFile);
         }
 
+        if (string.Equals(container, "bdmv", StringComparison.OrdinalIgnoreCase)) return No(NativePlaybackReasons.RequiresConversion);
+
         var video = Picture(streams);
         if (video is not null && !Supports(profile.VideoCodecs, video.Codec))
         {

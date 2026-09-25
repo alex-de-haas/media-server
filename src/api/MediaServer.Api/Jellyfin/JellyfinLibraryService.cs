@@ -524,7 +524,7 @@ public sealed class JellyfinLibraryService(
         }
 
         var sources = await database.MediaSources.AsNoTracking()
-            .Where(source => source.MediaItemId == item.Id)
+            .Where(source => source.MediaItemId == item.Id && source.Kind == MediaSourceKind.File)
             .ToListAsync(cancellationToken);
         if (sources.Count == 0)
         {
@@ -735,7 +735,7 @@ public sealed class JellyfinLibraryService(
         {
             var sources = await database.MediaSources.AsNoTracking()
                 .Include(source => source.Streams)
-                .Where(source => itemIds.Contains(source.MediaItemId))
+                .Where(source => itemIds.Contains(source.MediaItemId) && source.Kind == MediaSourceKind.File)
                 .ToListAsync(cancellationToken);
             sourcesByItem = sources.GroupBy(source => source.MediaItemId)
                 .ToDictionary(group => group.Key, group => (IReadOnlyList<MediaSource>)group.ToList());

@@ -23,7 +23,7 @@ public static class LibraryFileMutation
     }
 
     private static IQueryable<TranscodeJob> ActiveJoins(MediaServerDbContext db) => db.TranscodeJobs.Where(job =>
-        job.Kind == TranscodeJobKind.Join && (job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running ||
+        (job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) && (job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running ||
             job.State == TranscodeJobState.Completed && !job.OutputImported));
 
     public static Task<bool> HasJoinAsync(MediaServerDbContext db, Guid itemId, CancellationToken ct) =>

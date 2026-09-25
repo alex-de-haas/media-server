@@ -398,6 +398,8 @@ export interface MediaStream {
 }
 
 export interface LibraryMediaSource {
+  sourceKind?: "File" | "Bluray";
+  playbackAvailability?: "File" | "RequiresConversion";
   indexing?: IndexingStatus | null;
   id: string;
   versionName: string | null;
@@ -1028,10 +1030,14 @@ export const mediaServer = {
 
   // Whether the transcode-engine dependency is attached. The Media tab works without it — versions and the
   // default-version pick are database-side — so only the conversion controls key off this.
-  transcodeAvailability: () => apiJson<{ available: boolean; dolbyVisionConversion: boolean; videoPartJoining?: boolean }>(`${BASE}/transcode/availability`),
+  transcodeAvailability: () => apiJson<{ available: boolean; dolbyVisionConversion: boolean; videoPartJoining?: boolean; blurayImport?: boolean }>(`${BASE}/transcode/availability`),
   // The language tags a track edit may carry, from the service that validates them — so the dialog cannot
   // accept a value the API then refuses.
   transcodeLanguages: () => apiJson<string[]>(`${BASE}/transcode/languages`),
+  inspectBluray: (sourceId: string, playlistId?: string) => apiJson<BlurayInspection>(`${BASE}/transcode/bluray/${sourceId}${playlistId ? `?playlistId=${encodeURIComponent(playlistId)}` : ""}`),
+  createBlurayMkv: (sourceId: string, selection: BluraySelection, versionName: string) => apiJson<TranscodeJob>(`${BASE}/transcode/bluray`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceId, selection, versionName }),
+  }),
   joinVideoParts: (sourceIds: string[]) => apiJson<TranscodeJob>(`${BASE}/transcode/join`, {
     method: "POST", body: JSON.stringify({ sourceIds }), headers: { "content-type": "application/json" },
   }),
@@ -1260,4 +1266,20 @@ export interface TemporaryDownloadRoot {
   bytes: number | null;
   state: string;
   canClean: boolean;
+}
+
+export interface BlurayTrack {
+  id: number; type: string; codec: string; language: string | null; title: string | null;
+  default: boolean; forced: boolean; pixelDimensions: string | null; channels: number | null; dolbyVision: string | null;
+}
+export interface BlurayPlaylist {
+  id: string; durationSeconds: number; chapters: number; clips: string[]; tracks: BlurayTrack[]; error: string | null;
+}
+export interface BlurayInspection { revision: string; sizeBytes: number; playlists: BlurayPlaylist[] }
+export interface BlurayTrackSelection { id: number; language: string | null; title: string | null; default: boolean; forced: boolean }
+export interface BluraySelection {
+  revision: string; playlistId: string; videoTrackId: number; audio: BlurayTrackSelection[]; subtitles: BlurayTrackSelection[];
+}
+export function isBluraySource(source: LibraryMediaSource): boolean {
+  return source.sourceKind === "Bluray" || source.container.toLowerCase() === "bdmv";
 }

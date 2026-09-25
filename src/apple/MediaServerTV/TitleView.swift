@@ -301,6 +301,7 @@ struct TitleView: View {
         case .unsupportedAudioCodec, .packagingUnsupportedAudio: "This soundtrack cannot be played here"
         case .unsupportedDynamicRange: "This needs a display this one is not"
         case .noAudioTrack: "This copy has no sound"
+        case .requiresConversion: "Create an MKV first"
         case .noFile: "The file is missing"
         case .packagingUnavailable, .unknown: "This cannot be played"
         }
@@ -318,6 +319,8 @@ struct TitleView: View {
             "Forcing SDR in Settings may help."
         case .noAudioTrack:
             "Nothing to hear, so nothing was offered."
+        case .requiresConversion:
+            "This Blu-ray disc needs to be converted to MKV from its Media tab in the web app."
         case .noFile:
             "The server knows about this title but cannot find the file."
         case .packagingUnavailable:

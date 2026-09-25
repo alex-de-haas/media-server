@@ -7,6 +7,8 @@ public sealed class MediaSource
 {
     public Guid Id { get; set; }
 
+    public MediaSourceKind Kind { get; set; }
+
     public Guid MediaItemId { get; set; }
 
     public Guid? SourceFileId { get; set; }

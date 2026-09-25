@@ -69,13 +69,13 @@ public sealed class TranscodeCoordinator(
 
         var active = await database.TranscodeJobs
             .Where(job => job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running ||
-                job.Kind == TranscodeJobKind.Join && job.State == TranscodeJobState.Completed && !job.OutputImported)
+                (job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) && job.State == TranscodeJobState.Completed && !job.OutputImported)
             .ToListAsync(cancellationToken);
 
         var completed = new List<TranscodeJob>();
         foreach (var job in active)
         {
-            if (job.Kind == TranscodeJobKind.Join)
+            if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray))
             {
                 await scope.ServiceProvider.GetRequiredService<VideoPartJoinService>().ReconcileAsync(job, cancellationToken);
                 continue;
@@ -110,7 +110,7 @@ public sealed class TranscodeCoordinator(
         }
 
         // Joins reconcile on the timer under the same mutation gate as submit/cancel/delete.
-        if (job.Kind == TranscodeJobKind.Join) return;
+        if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray)) return;
         var before = job.State;
         Apply(job, engine.GetSnapshot(engineJobId));
         await database.SaveChangesAsync();
