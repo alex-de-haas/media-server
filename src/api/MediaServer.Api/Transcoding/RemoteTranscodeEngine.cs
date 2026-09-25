@@ -111,7 +111,13 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
             request.DolbyVision);
 
         using var cts = ControlCts(cancellationToken);
-        using var response = request.JoinInputs is { } inputs
+        using var response = request.Bluray is { } selection
+            ? await _http.PostAsJsonAsync("/jobs/bluray", new
+            {
+                mountLabel = request.InputMountLabel, path = request.InputRelativePath,
+                outputPath = request.OutputRelativePath, request.ClientJobId, selection,
+            }, Json, cts.Token)
+            : request.JoinInputs is { } inputs
             ? await _http.PostAsJsonAsync("/jobs/join", new
             {
                 inputs, request.OutputMountLabel, outputPath = request.OutputRelativePath, request.ClientJobId,
@@ -122,7 +128,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         // status code, so a caller gets an actionable message.
         if (!response.IsSuccessStatusCode)
         {
-            if (request.JoinInputs is not null && ((int)response.StatusCode >= 500 ||
+            if ((request.JoinInputs is not null || request.Bluray is not null) && ((int)response.StatusCode >= 500 ||
                 response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests))
                 throw new HttpRequestException("The engine submission could not be confirmed; retry with the same job id.");
             var detail = await ReadEngineErrorAsync(response, cts.Token);
@@ -157,6 +163,17 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         }
     }
 
+    public async Task<MediaServer.Api.Bluray.BlurayInspection> InspectBlurayAsync(string? mountLabel, string path, string? playlistId, CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromMinutes(3));
+        using var response = await _http.PostAsJsonAsync("/bluray/inspect", new { mountLabel, path, playlistId }, Json, timeout.Token);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException(await ReadEngineErrorAsync(response, timeout.Token) ?? "Blu-ray inspection is unavailable.");
+        return await response.Content.ReadFromJsonAsync<MediaServer.Api.Bluray.BlurayInspection>(Json, timeout.Token)
+            ?? throw new HttpRequestException("The engine returned no disc inspection.");
+    }
+
     public async Task<JobSnapshot?> InspectAsync(string jobId, CancellationToken ct)
     {
         using var timeout = ControlCts(ct);
@@ -175,7 +192,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         {
             using var cts = ControlCts(cancellationToken);
             var hardware = await _http.GetFromJsonAsync<WireHardware>("/hardware", Json, cts.Token);
-            return new TranscodeTooling(hardware?.Tools?.DolbyVisionConversion == true, hardware?.VideoPartJoining == true);
+            return new TranscodeTooling(hardware?.Tools?.DolbyVisionConversion == true, hardware?.VideoPartJoining == true, hardware?.Tools?.BlurayImport == true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -350,7 +367,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
     /// <summary>The engine's <c>GET /hardware</c>, read for its <c>tools</c> block alone.</summary>
     private sealed record WireHardware(WireTools? Tools, bool VideoPartJoining = false);
 
-    private sealed record WireTools(bool DolbyVisionConversion, string? DoviTool, string? Mkvtoolnix);
+    private sealed record WireTools(bool DolbyVisionConversion, string? DoviTool, string? Mkvtoolnix, bool BlurayImport = false);
 
     /// <summary>The engine's <c>outputs</c> entry — one stream written to its own file. <c>Codec</c> is left
     /// null for a stream copy, which is what every extraction but a text-subtitle conversion asks for.</summary>

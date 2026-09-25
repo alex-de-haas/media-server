@@ -11,10 +11,16 @@ struct PlaybackSelectionTests {
         signalling: nil, sourceDynamicRange: "SDR", audioStreamId: nil, subtitleStreamId: nil))
 
     @Test("A chosen remux retains its refusal even when the original plays",
-          arguments: [PlaybackRefusal.packagingPending, .unsupportedAudioCodec, .noFile])
+          arguments: [PlaybackRefusal.packagingPending, .unsupportedAudioCodec, .noFile, .requiresConversion])
     func chosenRefusal(reason: PlaybackRefusal) {
         let remux = PlaybackPlan.refused(reason, source: "remux")
         #expect(PlaybackPlan.select(from: [original, remux], preferring: "remux") == remux)
+    }
+
+    @Test("A disc requires an explicit MKV operation, not a retry")
+    func discConversionReason() {
+        #expect(PlaybackRefusal("requires_conversion") == .requiresConversion)
+        #expect(!PlaybackRefusal.requiresConversion.isPending)
     }
 
     @Test("A removed selected version never falls back to the original")
@@ -33,7 +39,7 @@ struct PlaybackSelectionTests {
     }
 
     @Test("Automatic selection skips a pending or unsupported first copy",
-          arguments: [PlaybackRefusal.packagingPending, .unsupportedAudioCodec])
+          arguments: [PlaybackRefusal.packagingPending, .unsupportedAudioCodec, .requiresConversion])
     func automaticSelection(reason: PlaybackRefusal) {
         let pending = PlaybackPlan.refused(reason, source: "remux")
         #expect(PlaybackPlan.select(from: [pending, original], preferring: nil) == original)

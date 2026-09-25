@@ -58,6 +58,7 @@ public enum PlaybackRefusal: Equatable, Sendable {
     case packagingUnsupportedAudio
     case packagingUnsupportedVideo
     case noFile
+    case requiresConversion
     case unknown(String)
 
     init(_ reason: String?) {
@@ -70,6 +71,7 @@ public enum PlaybackRefusal: Equatable, Sendable {
         case "packaging_pending": self = .packagingPending
         case "packaging_unsupported_audio": self = .packagingUnsupportedAudio
         case "packaging_unsupported_video": self = .packagingUnsupportedVideo
+        case "requires_conversion": self = .requiresConversion
         case "no_file": self = .noFile
         case let other: self = .unknown(other ?? "unspecified")
         }

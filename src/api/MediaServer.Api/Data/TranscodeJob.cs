@@ -16,6 +16,8 @@ public sealed class TranscodeJob
 {
     public Guid Id { get; set; }
 
+    public string? BluraySelectionJson { get; set; }
+
     /// <summary>Whether this job composes a new version or writes the source's tracks out beside it.</summary>
     public TranscodeJobKind Kind { get; set; }
 

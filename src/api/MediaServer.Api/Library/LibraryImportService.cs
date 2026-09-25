@@ -1,3 +1,4 @@
+using MediaServer.Api.Bluray;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
@@ -57,7 +58,7 @@ public sealed class LibraryImportService(
             .Where(job => job.CatalogId == catalogId)
             .Select(job => job.OutputPath)
             .ToListAsync(cancellationToken);
-        var known = new HashSet<string>(publishedPaths.Concat(queuedPaths).Concat(transcodeOutputs), PathComparer);
+        var known = new HashSet<string>(publishedPaths.Concat(queuedPaths).Concat(transcodeOutputs.OfType<string>()), PathComparer);
 
         var scanned = 0;
         var skipped = 0;
@@ -69,7 +70,7 @@ public sealed class LibraryImportService(
             long size;
             try
             {
-                size = new FileInfo(absolute).Length;
+                size = BlurayPaths.Size(absolute);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -81,7 +82,13 @@ public sealed class LibraryImportService(
             var relative = ToRelative(paths.Root, absolute);
 
             // Skip non-playable junk (samples) the same way the torrent path does.
-            if (!MediaFormats.IsPlayableMedia(relative, size))
+            if (BlurayPaths.IsDisc(absolute) && catalog.Type != CatalogType.Movie)
+            {
+                skipped++;
+                logger.LogWarning("BDMV at {Path} cannot be imported into a series or anime catalog.", relative);
+                continue;
+            }
+            if (!BlurayPaths.IsDisc(absolute) && !MediaFormats.IsPlayableMedia(relative, size))
             {
                 continue;
             }
@@ -112,6 +119,7 @@ public sealed class LibraryImportService(
                 IngestItemId = ingestId,
                 DownloadId = null,
                 RelativePath = relative,
+                Kind = BlurayPaths.IsDisc(absolute) ? MediaSourceKind.Bluray : MediaSourceKind.File,
                 SizeBytes = size,
                 AssignmentStatus = SourceFileAssignmentStatus.Unassigned,
                 CreatedAt = now,
@@ -141,10 +149,26 @@ public sealed class LibraryImportService(
             return [];
         }
 
-        var incoming = Path.GetFullPath(paths.IncomingDir) + Path.DirectorySeparatorChar;
-        return Directory.EnumerateFiles(paths.Root, "*", SearchOption.AllDirectories)
-            .Where(MediaFormats.IsVideo)
-            .Where(file => !Path.GetFullPath(file).StartsWith(incoming, PathComparison));
+        var result = new List<string>();
+        void Walk(string directory)
+        {
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) return;
+            if (BlurayPaths.IsDisc(directory)) result.Add(directory);
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                if (string.Equals(entry, paths.IncomingDir, PathComparison)) continue;
+                if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0) continue;
+                if (Directory.Exists(entry))
+                {
+                    var name = Path.GetFileName(entry);
+                    if (name.Equals("BDMV", StringComparison.OrdinalIgnoreCase) || name.Equals("CERTIFICATE", StringComparison.OrdinalIgnoreCase)) continue;
+                    Walk(entry);
+                }
+                else if (MediaFormats.IsVideo(entry)) result.Add(entry);
+            }
+        }
+        Walk(paths.Root);
+        return result;
     }
 
     private static string ToRelative(string root, string absolute) =>

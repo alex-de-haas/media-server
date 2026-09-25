@@ -5,7 +5,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AudioLines, Captions, Check, ChevronDown, FileOutput, FileQuestion, Film, Pencil, Shrink, Star, Trash2, type LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
+import { BlurayDialog } from "@/components/bluray-dialog";
+import { mediaServer, isBluraySource, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
 import { JoinPartsControl } from "@/components/join-parts-dialog";
 import { ExtractDialog } from "@/components/extract-dialog";
 import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
@@ -42,6 +43,7 @@ export interface MediaOwner {
   id: string;
   kind: string;
   title: string;
+  runtimeTicks?: number | null;
 }
 
 /**
@@ -86,13 +88,14 @@ export function MediaSources({
   return (
     <section className="flex flex-col gap-3">
       {admin && showConversions && <Conversions itemIds={[owner.id]} onSettled={changed} />}
-      {canManage && owner.kind === "Movie" && sources.length > 1 && <JoinPartsControl sources={sources} itemId={owner.id} />}
+      {canManage && owner.kind === "Movie" && sources.filter(s => !isBluraySource(s)).length > 1 && <JoinPartsControl sources={sources.filter(s => !isBluraySource(s))} itemId={owner.id} />}
       {sources.length ? (
         sources.map((source) => (
           <SourceCard
             key={source.id}
             source={source}
             itemId={owner.id}
+            runtimeTicks={owner.runtimeTicks}
             canManage={canManage}
             isDefault={source.id === defaultSourceId}
             hasMultiple={sources.length > 1}
@@ -258,6 +261,7 @@ function StreamSection({ group }: { group: StreamGroup }) {
 function SourceCard({
   source,
   itemId,
+  runtimeTicks,
   canManage,
   isDefault,
   hasMultiple,
@@ -265,6 +269,7 @@ function SourceCard({
 }: {
   source: LibraryMediaSource;
   itemId: string;
+  runtimeTicks?: number | null;
   canManage: boolean;
   isDefault: boolean;
   hasMultiple: boolean;
@@ -280,7 +285,9 @@ function SourceCard({
     // would just be a 401 on every version card.
     enabled: canManage,
   });
-  const canConvert = canManage && (transcode?.available ?? false);
+  const disc = isBluraySource(source);
+  const [blurayOpen, setBlurayOpen] = useState(false);
+  const canConvert = !disc && canManage && (transcode?.available ?? false);
   const [convertOpen, setConvertOpen] = useState(false);
   const [extractOpen, setExtractOpen] = useState(false);
   // Sidecars the Convert dialog opens with already checked — set when it is reached through Merge below.
@@ -294,7 +301,7 @@ function SourceCard({
   const rangeNote = dolbyVisionNote(picture?.dolbyVision);
 
   // The default only matters when a title has several versions; clients play MediaSources[0].
-  const showDefault = hasMultiple;
+  const showDefault = hasMultiple && !disc;
 
   // Header meta: container · size · duration · overall bitrate. The container often omits an overall
   // bitrate (typical for MKV), so fall back to the average derived from size ÷ duration — display only.
@@ -307,7 +314,7 @@ function SourceCard({
   const metaParts = [
     source.container,
     formatBytes(source.sizeBytes),
-    formatRuntime(source.durationTicks),
+    disc ? null : formatRuntime(source.durationTicks),
     bitrateKbps ? `${bitrateKbps.toLocaleString()} kbps` : null,
   ].filter(Boolean);
 
@@ -334,7 +341,7 @@ function SourceCard({
             {rangeNote ? <span className="text-muted-foreground text-xs">{rangeNote}</span> : null}
           </div>
           <p className="text-muted-foreground mt-1 font-mono text-xs">{metaParts.join(" · ")}</p>
-          <IndexingIndicator id={source.id} snapshot={source.indexing} />
+          {disc ? <p className="mt-2 text-muted-foreground">Requires conversion to MKV before playback.</p> : <IndexingIndicator id={source.id} snapshot={source.indexing} />}
         </div>
         {canManage && (
           <div className="flex shrink-0 items-center gap-1">
@@ -379,6 +386,11 @@ function SourceCard({
           </div>
         )}
       </div>
+      {disc && canManage && <div className="mt-3">
+        <Button variant="outline" disabled={!transcode?.blurayImport} onClick={() => setBlurayOpen(true)}>Create MKV</Button>
+        {!transcode?.blurayImport && <p className="mt-2 text-muted-foreground">Connect a Transcode Engine with Blu-ray import support to create MKV.</p>}
+        {blurayOpen && <BlurayDialog source={source} runtimeTicks={runtimeTicks} onClose={() => setBlurayOpen(false)} />}
+      </div>}
       <dl className="mt-2 flex flex-col gap-1.5">
         {groupStreams(source.streams).map((group) => (
           <StreamSection key={group.type} group={group} />

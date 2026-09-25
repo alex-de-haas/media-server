@@ -96,6 +96,7 @@ public sealed class LibraryMaintenanceService(
         var reprobed = 0;
         foreach (var source in sources)
         {
+            if (source.Kind == MediaSourceKind.Bluray) continue;
             if (!sandbox.TryResolve(catalog, source.Path, out var absolute) || !File.Exists(absolute))
             {
                 logger.LogWarning(

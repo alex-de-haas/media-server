@@ -787,7 +787,9 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
   // be the larger half of what changed. An extraction encodes nothing, so none of that applies — what it
   // produces is a count of files, and the codec/quality columns would only ever read "Remux".
   const meta = (
-    joining
+    job.kind === "Bluray"
+      ? ["Create MKV · Blu-ray", age && `added ${age}`]
+      : joining
       ? ["Join parts · 2 files", age && `added ${age}`]
       : extraction
       ? [`Extract · ${job.outputPaths.length} ${job.outputPaths.length === 1 ? "file" : "files"}`, age && `added ${age}`]

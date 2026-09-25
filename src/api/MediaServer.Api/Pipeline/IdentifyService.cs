@@ -81,7 +81,13 @@ public sealed class IdentifyService(
                 continue;
             }
 
-            var name = DeriveName(sourceFile.RelativePath, fallbackName);
+            if (sourceFile.Kind == MediaSourceKind.Bluray && catalog.Type != CatalogType.Movie)
+            {
+                sourceFile.AssignmentStatus = SourceFileAssignmentStatus.NeedsReview;
+                reviewReasons.Add("BDMV is supported only in movie catalogs.");
+                continue;
+            }
+            var name = DeriveName(sourceFile.Kind == MediaSourceKind.Bluray ? sourceFile.RelativePath + ".mkv" : sourceFile.RelativePath, fallbackName);
             var parsed = parser.Parse(name, catalog.Type, releaseGroups);
 
             // The identity this file resolves to, and whether it lands as an episode of a series or as a

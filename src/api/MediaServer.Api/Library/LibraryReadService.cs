@@ -875,7 +875,9 @@ public sealed class LibraryReadService(
             Indexing = stream.IsExternal && stream.StreamType == StreamType.Audio
                 ? ReadIndexing(stream.Id, stream.ExternalPath, Path.GetExtension(stream.ExternalPath)?.TrimStart('.'), catalog) : null,
         }).ToList(),
-        ReadIndexing(source.Id, source.Path, source.Container, catalog));
+        source.Kind == MediaSourceKind.Bluray ? null : ReadIndexing(source.Id, source.Path, source.Container, catalog),
+        source.Kind.ToString(),
+        source.Kind == MediaSourceKind.Bluray ? "RequiresConversion" : "File");
 
     private Remux.IndexingStatus? ReadIndexing(Guid key, string? path, string? container, Catalog? catalog) =>
         indexing is not null && sandbox is not null && catalog is not null && path is not null

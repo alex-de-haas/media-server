@@ -1,7 +1,7 @@
 # File and Directory Management
 
 Created: 2026-06-15
-Updated: 2026-09-08
+Updated: 2026-09-24
 
 ## Description
 
@@ -114,6 +114,12 @@ the source after the database commit, with a free-space pre-check on the target
 volume (mirroring the torrent add check). The owning `IngestItem.CatalogId` follows
 the item. Only movies and series (not episodes, seasons, or unmatched videos) move
 in v1.
+
+## Blu-ray source integration
+
+[Blu-ray sources](../bluray-import/feature.md) are directory sources for movies.
+Their import, manual MKV preparation and playback availability are documented
+separately; internal disc clips are not individual library versions.
 
 ## Testing Expectations
 

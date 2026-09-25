@@ -17,7 +17,7 @@ public sealed class NativeMediaResolver(MediaServerDbContext database, ICatalogP
     public async Task<ResolvedStream?> ResolveSourceAsync(Guid mediaSourceId, CancellationToken cancellationToken)
     {
         var row = await database.MediaSources.AsNoTracking()
-            .Where(source => source.Id == mediaSourceId)
+            .Where(source => source.Id == mediaSourceId && source.Kind == MediaSourceKind.File)
             .Join(database.MediaItems.AsNoTracking(), source => source.MediaItemId, item => item.Id,
                 (source, item) => new { source.Path, item.CatalogId, item.PublicId, item.RemovedAt })
             .FirstOrDefaultAsync(cancellationToken);
@@ -50,7 +50,7 @@ public sealed class NativeMediaResolver(MediaServerDbContext database, ICatalogP
         }
 
         var owner = await database.MediaSources.AsNoTracking()
-            .Where(source => source.Id == mediaSourceId)
+            .Where(source => source.Id == mediaSourceId && source.Kind == MediaSourceKind.File)
             .Join(database.MediaItems.AsNoTracking(), source => source.MediaItemId, item => item.Id,
                 (source, item) => new { item.CatalogId, item.PublicId, item.RemovedAt })
             .FirstOrDefaultAsync(cancellationToken);

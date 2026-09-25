@@ -189,14 +189,14 @@ public sealed class TranscodeService(
                 return false;
             }
 
-            if (job.Kind == TranscodeJobKind.Join)
+            if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray))
             {
                 job.CancellationRequested = true;
                 await database.SaveChangesAsync(cancellationToken);
             }
         }
         await engine.CancelAsync(job.EngineJobId, cancellationToken);
-        if (job.Kind == TranscodeJobKind.Join) return true;
+        if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray)) return true;
 
         if (job.State is TranscodeJobState.Queued or TranscodeJobState.Running)
         {
@@ -219,12 +219,12 @@ public sealed class TranscodeService(
                 return false;
             }
 
-            if (job.Kind == TranscodeJobKind.Join &&
+            if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) &&
                 (job.State is TranscodeJobState.Queued or TranscodeJobState.Running ||
                  job.State == TranscodeJobState.Completed && !job.OutputImported))
                 throw new LibraryFileBusyException();
             // Imported versions are removed through the library, not through job history.
-            if (job.Kind == TranscodeJobKind.Join && job.OutputImported) deleteOutput = false;
+            if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) && job.OutputImported) deleteOutput = false;
             engineJobId = job.EngineJobId;
             database.TranscodeJobs.Remove(job);
             await database.SaveChangesAsync(cancellationToken);

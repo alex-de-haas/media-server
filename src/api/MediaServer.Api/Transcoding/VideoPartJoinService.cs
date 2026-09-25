@@ -12,7 +12,7 @@ namespace MediaServer.Api.Transcoding;
 public sealed record CreateJoinRequest(IReadOnlyList<Guid> SourceIds);
 
 /// <summary>Durable join admission, engine submission and completion. Original sources are never changed.</summary>
-public sealed class VideoPartJoinService(MediaServerDbContext database, ITranscodeEngine engine,
+public sealed partial class VideoPartJoinService(MediaServerDbContext database, ITranscodeEngine engine,
     ICatalogPathSandbox sandbox, MediaServerSettings settings, LibraryMoveGuard moveGuard,
     TranscodeOutputImporter importer, ILogger<VideoPartJoinService> logger)
 {
@@ -124,7 +124,11 @@ public sealed class VideoPartJoinService(MediaServerDbContext database, ITransco
                 throw new TranscodeRequestException("Both parts and their output must be under configured media mounts shared with the engine.");
             return new(label, relative);
         }
-        var first = Mount(job.InputPath); var second = Mount(job.SecondInputPath); var output = Mount(job.OutputPath);
+        var first = Mount(job.InputPath); var output = Mount(job.OutputPath);
+        if (job.Kind == TranscodeJobKind.Bluray)
+            return new(first.MountLabel, first.Path, output.MountLabel, output.Path, null, null, null,
+                ClientJobId: job.Id, Bluray: System.Text.Json.JsonSerializer.Deserialize<MediaServer.Api.Bluray.BluraySelection>(job.BluraySelectionJson!));
+        var second = Mount(job.SecondInputPath);
         return new(first.MountLabel, first.Path, output.MountLabel, output.Path, null, null, null,
             JoinInputs: [first, second], ClientJobId: job.Id);
     }

@@ -12,7 +12,7 @@ public sealed class LibraryImportServiceTests : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly MediaServerDbContext _database;
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "ms-import-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Combine(OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath(), "ms-import-" + Guid.NewGuid().ToString("N"));
 
     public LibraryImportServiceTests()
     {
@@ -39,6 +39,38 @@ public sealed class LibraryImportServiceTests : IDisposable
         var absolute = Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
         File.WriteAllBytes(absolute, new byte[bytes]);
+    }
+
+    [Fact]
+    public async Task Disc_scan_groups_clips_and_leaves_a_sibling_movie_independent()
+    {
+        var catalog = SeedCatalog();
+        WriteFile("Film/BDMV/index.bdmv");
+        WriteFile("Film/BDMV/STREAM/00001.m2ts");
+        WriteFile("Film/CERTIFICATE/id.bdmv");
+        WriteFile("Film/Bonus.mkv");
+        var report = await Service().ImportAsync(catalog.Id, CancellationToken.None);
+        Assert.Equal(2, report!.Imported);
+        var disc = Assert.Single(await _database.SourceFiles.ToListAsync(), s => s.Kind == MediaSourceKind.Bluray);
+        Assert.Equal("Film", disc.RelativePath);
+        Assert.Equal(3072, disc.SizeBytes);
+        Assert.Equal(0, (await Service().ImportAsync(catalog.Id, CancellationToken.None))!.Imported);
+    }
+
+    [Theory]
+    [InlineData(CatalogType.Series)]
+    [InlineData(CatalogType.Anime)]
+    public async Task Series_and_anime_scans_never_import_disc_clips(CatalogType type)
+    {
+        var catalog = SeedCatalog();
+        catalog.Type = type;
+        await _database.SaveChangesAsync();
+        WriteFile("Show/BDMV/index.bdmv");
+        WriteFile("Show/BDMV/STREAM/00001.m2ts");
+        var report = await Service().ImportAsync(catalog.Id, CancellationToken.None);
+        Assert.Equal(0, report!.Imported);
+        Assert.Equal(1, report.Skipped);
+        Assert.Empty(await _database.SourceFiles.ToListAsync());
     }
 
     [Fact]

@@ -2257,6 +2257,14 @@
           },
           "indexing": {
             "$ref": "#/components/schemas/IndexingStatus"
+          },
+          "sourceKind": {
+            "type": "string",
+            "default": "File"
+          },
+          "playbackAvailability": {
+            "type": "string",
+            "default": "File"
           }
         }
       },

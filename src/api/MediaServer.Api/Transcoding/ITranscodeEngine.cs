@@ -27,7 +27,8 @@ public sealed record TranscodeJobRequest(
     /// dual-layer profile 7 to single-layer 8.1; null keeps it as it is.</summary>
     string? DolbyVision = null,
     IReadOnlyList<EngineJoinInput>? JoinInputs = null,
-    Guid? ClientJobId = null);
+    Guid? ClientJobId = null,
+    MediaServer.Api.Bluray.BluraySelection? Bluray = null);
 
 /// <summary>A mounted video part, in playback order.</summary>
 public sealed record EngineJoinInput(string? MountLabel, string Path);
@@ -35,7 +36,7 @@ public sealed record EngineJoinInput(string? MountLabel, string Path);
 /// <summary>What the engine has beyond ffmpeg. <see cref="DolbyVisionConversion"/> is whether it carries the
 /// tools a profile 7 → 8.1 rewrite runs on (<c>dovi_tool</c> and MKVToolNix); a consumer offers the option
 /// only when it does, because an engine without them refuses the job rather than copying silently.</summary>
-public sealed record TranscodeTooling(bool DolbyVisionConversion, bool VideoPartJoining = false)
+public sealed record TranscodeTooling(bool DolbyVisionConversion, bool VideoPartJoining = false, bool BlurayImport = false)
 {
     public static readonly TranscodeTooling None = new(false);
 }
@@ -119,6 +120,9 @@ public sealed record JobSnapshot(
 /// </summary>
 public interface ITranscodeEngine
 {
+    Task<MediaServer.Api.Bluray.BlurayInspection> InspectBlurayAsync(string? mountLabel, string path, string? playlistId, CancellationToken ct) =>
+        throw new InvalidOperationException("The engine does not support Blu-ray inspection.");
+
     /// <summary>Creates a job on the engine (the engine probes the input, enqueues it, and runs it as soon
     /// as a worker is free) and returns the descriptor.</summary>
     Task<JobDescriptor> CreateAsync(TranscodeJobRequest request, CancellationToken cancellationToken);

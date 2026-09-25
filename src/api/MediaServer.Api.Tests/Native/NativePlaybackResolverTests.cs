@@ -116,6 +116,16 @@ public sealed class NativePlaybackResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task Disc_never_receives_a_playback_url_even_when_packaging_is_ready()
+    {
+        AddSource("bdmv", "hevc", "Dolby Vision", ("ac3", 6));
+        var response = await ResolveOneAsync(AppleTv(), packaging: true);
+        Assert.Equal(NativePlaybackDecision.Unsupported, response.Decision);
+        Assert.Equal(NativePlaybackReasons.RequiresConversion, response.Reason);
+        Assert.Null(response.Url);
+    }
+
+    [Fact]
     public async Task A_remux_url_carries_the_very_tracks_the_answer_reports()
     {
         // The picker ticks what the answer names, so if the URL and the answer could disagree a viewer

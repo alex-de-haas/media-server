@@ -146,7 +146,9 @@ public sealed record MediaSourceDto(
     int? Bitrate,
     long DurationTicks,
     IReadOnlyList<MediaStreamDto> Streams,
-    Remux.IndexingStatus? Indexing = null);
+    Remux.IndexingStatus? Indexing = null,
+    string SourceKind = "File",
+    string PlaybackAvailability = "File");
 
 public sealed record MediaStreamDto(
     // A sidecar is a file of its own and can be merged in or removed on its own, so it has to be

@@ -1437,6 +1437,10 @@ public enum Components {
             public var streams: [Components.Schemas.MediaStreamDto]
             /// - Remark: Generated from `#/components/schemas/MediaSourceDto/indexing`.
             public var indexing: Components.Schemas.IndexingStatus?
+            /// - Remark: Generated from `#/components/schemas/MediaSourceDto/sourceKind`.
+            public var sourceKind: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/MediaSourceDto/playbackAvailability`.
+            public var playbackAvailability: Swift.String?
             /// Creates a new `MediaSourceDto`.
             ///
             /// - Parameters:
@@ -1449,6 +1453,8 @@ public enum Components {
             ///   - durationTicks:
             ///   - streams:
             ///   - indexing:
+            ///   - sourceKind:
+            ///   - playbackAvailability:
             public init(
                 id: Swift.String,
                 versionName: Swift.String? = nil,
@@ -1458,7 +1464,9 @@ public enum Components {
                 bitrate: Swift.Int32? = nil,
                 durationTicks: Swift.Int64,
                 streams: [Components.Schemas.MediaStreamDto],
-                indexing: Components.Schemas.IndexingStatus? = nil
+                indexing: Components.Schemas.IndexingStatus? = nil,
+                sourceKind: Swift.String? = nil,
+                playbackAvailability: Swift.String? = nil
             ) {
                 self.id = id
                 self.versionName = versionName
@@ -1469,6 +1477,8 @@ public enum Components {
                 self.durationTicks = durationTicks
                 self.streams = streams
                 self.indexing = indexing
+                self.sourceKind = sourceKind
+                self.playbackAvailability = playbackAvailability
             }
             public enum CodingKeys: String, CodingKey {
                 case id
@@ -1480,6 +1490,8 @@ public enum Components {
                 case durationTicks
                 case streams
                 case indexing
+                case sourceKind
+                case playbackAvailability
             }
         }
         /// - Remark: Generated from `#/components/schemas/MediaStreamDto`.

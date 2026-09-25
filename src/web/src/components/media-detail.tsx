@@ -1,5 +1,7 @@
 "use client";
 
+import { isBluraySource } from "@/lib/media-server";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
@@ -125,7 +127,7 @@ function MovieMedia({ item }: { item: LibraryDetail }) {
   const moving = useActiveMove(item.id) !== undefined;
   return (
     <MediaSources
-      owner={{ id: item.id, kind: item.kind, title: item.title }}
+      owner={{ id: item.id, kind: item.kind, title: item.title, runtimeTicks: item.runtimeTicks }}
       sources={item.mediaSources}
       defaultSourceId={item.defaultSourceId}
       moving={moving}
@@ -854,6 +856,10 @@ function InfuseLaunch({ item }: { item: LibraryDetail }) {
   const deepLink = isSeries
     ? infuseDeepLink({ kind: "series", tmdbId: item.tmdbId })
     : infuseDeepLink({ kind: "movie", tmdbId: item.tmdbId }, { play: true });
+
+  if (!isSeries && item.mediaSources.length > 0 && item.mediaSources.every(isBluraySource)) {
+    return <p className="text-muted-foreground text-sm">Create an MKV from the Media tab to play this Blu-ray.</p>;
+  }
 
   if (!deepLink) {
     return null;

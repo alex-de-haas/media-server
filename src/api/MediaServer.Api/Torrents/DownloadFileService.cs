@@ -1,3 +1,5 @@
+using MediaServer.Api.Bluray;
+using System.Text.Json;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using MediaServer.Api.Media;
@@ -33,8 +35,12 @@ public sealed class DownloadFileService(MediaServerDbContext database)
         // along with the videos — external audio and subtitles alike: Identify matches them to their
         // episode and the sidecar stage places them beside it. A companion that never became a SourceFile
         // could not reach that stage and would be swept as an untracked staging leftover.
-        var playable = files
-            .Where(file => MediaFormats.IsPlayableMedia(file.RelativePath, file.Length) || MediaFormats.IsCompanion(file.RelativePath))
+        var discRoots = files.Select(f => BlurayPaths.RootOfMember(f.RelativePath)).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var discMembers = discRoots.ToDictionary(root => root, root => files.Where(f => BlurayPaths.IsMember(f.RelativePath, root)).ToList());
+        var candidates = files.Where(file => !discRoots.Any(root => BlurayPaths.IsMember(file.RelativePath, root))).ToList();
+        candidates.AddRange(discMembers.Select(pair => new TorrentFileInfo(pair.Value.Min(f => f.Index), pair.Key, pair.Value.Sum(f => f.Length))));
+        var playable = candidates
+            .Where(file => discMembers.ContainsKey(file.RelativePath) || MediaFormats.IsPlayableMedia(file.RelativePath, file.Length) || MediaFormats.IsCompanion(file.RelativePath))
             .GroupBy(file => file.RelativePath, StringComparer.Ordinal)
             .Select(group => group.First())
             .ToList();
@@ -50,9 +56,12 @@ public sealed class DownloadFileService(MediaServerDbContext database)
         foreach (var file in playable)
         {
             // The file's current location relative to the catalog root: under .incoming/<downloadId>/.
-            var relativePath = $"{incomingPrefix}/{file.RelativePath}";
+            var relativePath = string.IsNullOrEmpty(file.RelativePath) ? incomingPrefix : $"{incomingPrefix}/{file.RelativePath}";
+            var disc = discMembers.GetValueOrDefault(file.RelativePath);
             if (byPath.TryGetValue(relativePath, out var current))
             {
+                current.Kind = disc is null ? MediaSourceKind.File : MediaSourceKind.Bluray;
+                current.DiscFileIndexesJson = disc is null ? null : JsonSerializer.Serialize(disc.Select(f => f.Index));
                 current.SizeBytes = file.Length;
                 current.TorrentFileIndex = file.Index;
                 current.UpdatedAt = now;
@@ -63,6 +72,8 @@ public sealed class DownloadFileService(MediaServerDbContext database)
                 var created = new SourceFile
                 {
                     Id = Guid.NewGuid(),
+                    Kind = disc is null ? MediaSourceKind.File : MediaSourceKind.Bluray,
+                    DiscFileIndexesJson = disc is null ? null : JsonSerializer.Serialize(disc.Select(f => f.Index)),
                     IngestItemId = ingestItemId,
                     DownloadId = downloadId,
                     RelativePath = relativePath,
