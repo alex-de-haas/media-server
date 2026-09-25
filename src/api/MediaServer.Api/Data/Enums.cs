@@ -3,7 +3,6 @@ namespace MediaServer.Api.Data;
 public enum MediaSourceKind { File = 0, Bluray = 1 }
 
 /// <summary>Catalog type drives the name parser, metadata provider, and Jellyfin collection type.</summary>
-
 public enum CatalogType
 {
     Movie = 0,

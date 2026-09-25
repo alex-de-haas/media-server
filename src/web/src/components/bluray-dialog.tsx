@@ -84,9 +84,12 @@ function TrackSelection({ sourceId, playlist, inspection, onClose }: {
   const audio = tracks("audio");
   const subtitles = tracks("subtitles");
   const mutation = useMutation({
-    mutationFn: () => mediaServer.createBlurayMkv(sourceId, {
-      revision: inspection.revision, playlistId: playlist.id, videoTrackId: video!.id, audio, subtitles,
-    }, name),
+    mutationFn: async () => {
+      if (!video || !audio.length) throw new Error("Choose a playlist with video and at least one audio track.");
+      return mediaServer.createBlurayMkv(sourceId, {
+        revision: inspection.revision, playlistId: playlist.id, videoTrackId: video.id, audio, subtitles,
+      }, name);
+    },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] }); toast.success("MKV creation queued"); onClose(); },
   });
   function update(id: number, change: Partial<BlurayTrackSelection>) {
@@ -99,7 +102,7 @@ function TrackSelection({ sourceId, playlist, inspection, onClose }: {
       return next;
     });
   }
-  return <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); mutation.mutate(); }}>
+  return <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); if (video && audio.length && !mutation.isPending) mutation.mutate(); }}>
     <p className="text-sm">Primary video: {video ? `${video.codec} ${video.pixelDimensions ?? ""}` : "Unavailable"}. Chapters are preserved.</p>
     {["audio", "subtitles"].map(type => <fieldset key={type} className="flex flex-col gap-3" disabled={mutation.isPending}>
       <legend className="mb-2 font-medium">{type === "audio" ? "Audio — select at least one" : "Subtitles — optional"}</legend>

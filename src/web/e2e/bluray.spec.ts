@@ -48,3 +48,32 @@ test("playlist and explicit track settings become a separate MKV job", async ({ 
   expect(payload.selection.subtitles).toEqual([{ id: 4, language: "en", title: null, default: false, forced: true }]);
   await expect(dialog).toBeHidden();
 });
+
+for (const missing of ["video", "audio"] as const) {
+  test(`invalid playlist cannot submit when ${missing} is missing`, async ({ page }) => {
+    await setupApp(page, { detail: { m1: discDetail() }, transcodeAvailable: true });
+    await page.route("**/api/proxy/api/transcode/availability", route => route.fulfill({ json: { available: true, blurayImport: true } }));
+    const tracks = [
+      { id: 0, type: "video", codec: "HEVC" },
+      { id: 1, type: "audio", codec: "AC-3", default: true, forced: false },
+    ].filter(t => t.type !== missing);
+    await page.route("**/api/proxy/api/transcode/bluray/disc1*", route => route.fulfill({ json: {
+      revision: "abc", sizeBytes: 1000, playlists: [{ id: "00001", durationSeconds: 7200, chapters: 17, clips: ["00011.m2ts"], tracks, error: null }],
+    } }));
+    let submissions = 0;
+    await page.route("**/api/proxy/api/transcode/bluray", route => { submissions++; return route.fulfill({ status: 400, json: { error: "Unexpected submission" } }); });
+    const errors: Error[] = [];
+    page.on("pageerror", error => errors.push(error));
+    await page.goto("/movies/m1");
+    await page.getByRole("button", { name: "Create MKV", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Playlist", { exact: true }).selectOption("00001");
+    await expect(dialog.getByLabel("Version name")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Create MKV", exact: true })).toBeDisabled();
+    await dialog.getByLabel("Version name").press("Enter");
+    await dialog.locator("form").evaluate(form => (form as HTMLFormElement).requestSubmit());
+    await expect(dialog).toBeVisible();
+    expect(submissions).toBe(0);
+    expect(errors).toEqual([]);
+  });
+}

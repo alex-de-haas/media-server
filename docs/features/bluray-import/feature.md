@@ -24,8 +24,8 @@ returns `requires_conversion` without a URL; Apple explains preparation in the w
 interface. Jellyfin playback candidates and direct media resolution exclude discs.
 A file version retains its usual playback eligibility and default preference.
 
-Rename, catalog move and deletion recognize disc directories. Deletion removes
-BDMV/CERTIFICATE members and retains unrelated siblings. Active MKV jobs reserve
+Rename, catalog move and deletion operate only on owned BDMV/CERTIFICATE
+members and retain unrelated siblings. An empty old disc root is removed. Active MKV jobs reserve
 the source against conflicting library mutations. Disc operations refuse symbolic
 links in the owned tree or destination ancestry.
 
@@ -54,7 +54,8 @@ MKVToolNix 81 or newer. Media Server itself invokes no media executables.
 Older or absent engines leave the disc importable and disable Create MKV.
 
 Jobs persist their selection and stable client ID before submission. Uncertain
-responses are reconciled using that same ID. The engine binds selection to a disc
+responses are reconciled using that same ID. Missing or corrupt stored selections
+fail with an actionable request to inspect the disc and create a new job. The engine binds selection to a disc
 revision, checks free space and writes to a temporary output. It checks tracks,
 flags, titles, chapters, duration and probed picture characteristics before
 no-overwrite publication. Available input Dolby Vision configuration records are
@@ -75,7 +76,8 @@ video. Engine restarts preserve job records and mark interrupted work failed.
 - Engine tests cover MPLS timing and chapters, malformed/multi-angle input,
   selected track mapping, mounted paths, revision changes, restart recovery and
   rejection of changed HDR/Dolby Vision configuration.
-- Playwright covers unavailable-engine presentation and playlist/track submission.
+- Playwright covers unavailable-engine presentation, playlist/track submission
+  and keyboard/form submission with missing required tracks.
   MediaKit tests cover the conversion-required reason and mixed-version selection.
 - The [remaining acceptance plan](plan.md) includes actual 1080p, multi-clip, UHD/HDR
   and Dolby Vision output checks, Infuse compatibility and coordinated release.

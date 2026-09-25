@@ -134,6 +134,29 @@ public sealed class VideoPartJoinServiceTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_root, "disc/BDMV/index.bdmv")));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{")]
+    [InlineData("null")]
+    [InlineData("{}")]
+    [InlineData("{\"Revision\":\"r\",\"PlaylistId\":\"00001\",\"VideoTrackId\":0,\"Audio\":[null],\"Subtitles\":[]}")]
+    public async Task Corrupted_disc_selection_fails_clearly_without_resubmitting(string? json)
+    {
+        await PrepareDisc();
+        await Service().CreateBlurayAsync(DiscRequest, default);
+        var job = await Db.TranscodeJobs.SingleAsync();
+        job.BluraySelectionJson = json;
+        job.LastSubmissionAt = null;
+        _snapshot = null;
+        await Db.SaveChangesAsync();
+        await Service().ReconcileAsync(job, default);
+        Assert.Equal(TranscodeJobState.Failed, job.State);
+        Assert.Contains("saved Blu-ray selection", job.Error);
+        Assert.Equal(1, _submissions);
+        Assert.True(Directory.Exists(Path.Combine(_root, "disc/BDMV")));
+    }
+
     [Fact]
     public async Task Blu_ray_refuses_a_stale_selection_before_persisting_a_job()
     {

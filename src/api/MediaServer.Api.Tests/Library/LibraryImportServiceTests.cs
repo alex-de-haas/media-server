@@ -42,6 +42,25 @@ public sealed class LibraryImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Scan_follows_the_configured_root_link_but_ignores_linked_children()
+    {
+        var catalog = SeedCatalog();
+        WriteFile("Movie/film.mkv");
+        var link = _root + "-link";
+        Directory.CreateSymbolicLink(link, _root);
+        Directory.CreateSymbolicLink(Path.Combine(_root, "loop"), _root);
+        try
+        {
+            catalog.Root = link;
+            await _database.SaveChangesAsync();
+            var report = await Service().ImportAsync(catalog.Id, default);
+            Assert.Equal(1, report!.Imported);
+            Assert.Equal("Movie/film.mkv", (await _database.SourceFiles.SingleAsync()).RelativePath);
+        }
+        finally { Directory.Delete(Path.Combine(_root, "loop")); Directory.Delete(link); }
+    }
+
+    [Fact]
     public async Task Disc_scan_groups_clips_and_leaves_a_sibling_movie_independent()
     {
         var catalog = SeedCatalog();

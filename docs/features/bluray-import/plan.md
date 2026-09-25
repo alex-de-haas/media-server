@@ -403,7 +403,7 @@ For implementation:
 
 ## PR verification record — 2026-09-25
 
-The draft integrates current `main`, including retained torrent placement and the
+The PR integrates current `main`, including retained torrent placement and the
 Apple signing/cache work. The original repository folders remain the dev sources.
 Media Server versions 0.84.0 → 0.85.0 and Apple versions 0.15.0 → 0.16.0 replace
 the earlier baselines. Transcode Engine remains 0.11.0 → 0.12.0.
@@ -415,13 +415,22 @@ the earlier baselines. Transcode Engine remains 0.11.0 → 0.12.0.
 - Native Swift regeneration passed; 246 MediaKit tests and the unsigned tvOS
   simulator Debug build passed.
 - Manifest validation, documentation index and diff whitespace checks passed.
-- Transcode Engine Release build and all 360 tests passed. The companion draft is
+- Transcode Engine Release build and all 360 tests passed. The companion PR is
   [Transcode Engine #42](https://github.com/alex-de-haas/transcode-engine/pull/42).
 - Real-disc inspection established that Maximka playlists 00005 and 00013 are
   byte-identical. A chapter failure exposed MKVToolNix's removal of a short final
   mark; the engine now explicitly retains it, with regression tests. These checks
   do not establish complete real-disc or Dolby Vision acceptance.
 
+The user authorized merging the reviewed first implementation on 2026-09-25.
 The remaining unchecked deliverables, including directory copying while seeding,
 protection diagnostics, lifecycle/client acceptance and full UHD/Dolby Vision
-payload validation, keep both feature PRs in draft.
+payload validation, remain open; merging does not establish acceptance of them.
+
+
+Review verification on 2026-09-25: the Release solution build and all 2,038 API
+xUnit tests pass, including corrupt saved selections, owned-member moves and
+configured-root symlink scans. ESLint, all 162 Vitest tests, the production build
+and all four Blu-ray Playwright scenarios pass. Browser regressions cover Enter
+and direct form submission without required video/audio tracks. Apple sources
+are unchanged by these review fixes; the prior 246-test/client-build results stand.

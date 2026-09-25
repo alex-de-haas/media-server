@@ -152,7 +152,6 @@ public sealed class LibraryImportService(
         var result = new List<string>();
         void Walk(string directory)
         {
-            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) return;
             if (BlurayPaths.IsDisc(directory)) result.Add(directory);
             foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
             {

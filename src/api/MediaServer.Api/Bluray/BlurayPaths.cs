@@ -87,7 +87,11 @@ public static class BlurayPaths
 
     public static void Move(string source, string destination)
     {
-        if (Directory.Exists(source)) { ValidateTree(source); ValidateAncestors(destination); Directory.Move(source, destination); }
+        if (Directory.Exists(source))
+        {
+            MoveMembers(source, destination);
+            if (!Directory.EnumerateFileSystemEntries(source).Any()) Directory.Delete(source);
+        }
         else File.Move(source, destination);
     }
 

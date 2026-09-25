@@ -27,6 +27,22 @@ public sealed class BlurayPathsTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(target, "BDMV")));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Rename_and_catalog_move_only_relocate_owned_members(bool hasSibling)
+    {
+        Write("source/BDMV/index.bdmv"); Write("source/CERTIFICATE/id.bdmv");
+        if (hasSibling) Write("source/unowned.txt");
+        var source = Path.Combine(root, "source"); var target = Path.Combine(root, "target");
+        BlurayPaths.Move(source, target);
+        Assert.True(File.Exists(Path.Combine(target, "BDMV/index.bdmv")));
+        Assert.True(File.Exists(Path.Combine(target, "CERTIFICATE/id.bdmv")));
+        Assert.Equal(hasSibling, Directory.Exists(source));
+        Assert.False(File.Exists(Path.Combine(target, "unowned.txt")));
+        if (hasSibling) Assert.Equal("disc", File.ReadAllText(Path.Combine(source, "unowned.txt")));
+    }
+
     [Fact]
     public void Organization_recovers_after_one_member_was_moved()
     {

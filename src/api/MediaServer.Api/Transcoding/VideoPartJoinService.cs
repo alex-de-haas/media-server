@@ -76,7 +76,7 @@ public sealed partial class VideoPartJoinService(MediaServerDbContext database, 
         {
             await SubmitAsync(job, engineRequest, ct);
         }
-        catch (JoinRejectedException exception)
+        catch (Exception exception) when (exception is JoinRejectedException or TranscodeRequestException)
         {
             Fail(job, exception.Message);
             await database.SaveChangesAsync(CancellationToken.None);
@@ -127,10 +127,27 @@ public sealed partial class VideoPartJoinService(MediaServerDbContext database, 
         var first = Mount(job.InputPath); var output = Mount(job.OutputPath);
         if (job.Kind == TranscodeJobKind.Bluray)
             return new(first.MountLabel, first.Path, output.MountLabel, output.Path, null, null, null,
-                ClientJobId: job.Id, Bluray: System.Text.Json.JsonSerializer.Deserialize<MediaServer.Api.Bluray.BluraySelection>(job.BluraySelectionJson!));
+                ClientJobId: job.Id, Bluray: ReadBluraySelection(job.BluraySelectionJson));
         var second = Mount(job.SecondInputPath);
         return new(first.MountLabel, first.Path, output.MountLabel, output.Path, null, null, null,
             JoinInputs: [first, second], ClientJobId: job.Id);
+    }
+
+    private static MediaServer.Api.Bluray.BluraySelection ReadBluraySelection(string? json)
+    {
+        const string message = "The saved Blu-ray selection is missing or invalid. Inspect the disc and create a new MKV job.";
+        try
+        {
+            var selection = string.IsNullOrWhiteSpace(json) ? null
+                : System.Text.Json.JsonSerializer.Deserialize<MediaServer.Api.Bluray.BluraySelection>(json);
+            if (selection is null || string.IsNullOrWhiteSpace(selection.Revision) ||
+                selection.PlaylistId is not { Length: 5 } || !selection.PlaylistId.All(char.IsAsciiDigit) ||
+                selection.VideoTrackId < 0 || selection.Audio is not { Count: > 0 } || selection.Subtitles is null ||
+                selection.Audio.Concat(selection.Subtitles).Any(t => t is null || t.Id < 0))
+                throw new TranscodeRequestException(message);
+            return selection;
+        }
+        catch (System.Text.Json.JsonException) { throw new TranscodeRequestException(message); }
     }
 
     private async Task SubmitAsync(TranscodeJob job, TranscodeJobRequest request, CancellationToken ct)
@@ -219,7 +236,7 @@ public sealed partial class VideoPartJoinService(MediaServerDbContext database, 
                 await database.SaveChangesAsync(ct);
             }
         }
-        catch (JoinRejectedException exception)
+        catch (Exception exception) when (exception is JoinRejectedException or TranscodeRequestException)
         {
             Fail(job, exception.Message);
             await database.SaveChangesAsync(ct);
