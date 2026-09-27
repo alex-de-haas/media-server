@@ -371,11 +371,24 @@ public sealed class IdentifyService(
         var records = await provider.FetchAsync(
             new ProviderRef(movie.IdentityProvider, movie.IdentityProviderId), MediaKind.Movie,
             [string.IsNullOrWhiteSpace(catalog.MetadataLanguage) ? "en-US" : catalog.MetadataLanguage], cancellationToken);
+        // An empty response can mean a provider outage or rate limit, not a missing original title.
+        // Fail before placement so the pipeline retries instead of permanently pinning a fallback name.
+        if (records.Count == 0)
+        {
+            throw new HttpRequestException(
+                $"No movie metadata returned by {movie.IdentityProvider} for {movie.IdentityProviderId}; retry identification before choosing a library folder.");
+        }
+
         var original = records.FirstOrDefault(record => !string.IsNullOrWhiteSpace(record.OriginalTitle));
         if (original is not null)
         {
             movie.OriginalTitle = original.OriginalTitle;
             movie.OriginalLanguage ??= original.OriginalLanguage;
+        }
+        else
+        {
+            logger.LogWarning("Movie metadata from {Provider} for {Id} contains no original title; using the identified title for library naming.",
+                movie.IdentityProvider, movie.IdentityProviderId);
         }
     }
 

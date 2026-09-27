@@ -305,7 +305,10 @@ unchanged.
 
 Identification fetches the movie's original title before Organize, including
 manual matches, pinned identities and remap targets. The later Enrich stage still
-fetches localized metadata and artwork. An already placed movie in the same
+fetches localized metadata and artwork. An empty metadata response fails Identify
+before placement and follows the existing retry policy, with the error recorded
+on the ingest. Only a received record whose original title is blank permits the
+display-title fallback, with a warning in the logs. An already placed movie in the same
 catalog keeps its existing folder and uses that folder's name as the file stem,
 so later metadata changes, new versions and version-label edits do not split it
 across localized and original-name folders. Moving into another catalog derives
@@ -485,6 +488,8 @@ Backend tests should use xUnit. Required coverage:
   blank originals fall back to the display title. Unicode, custom templates and
   edition labels remain valid. Later metadata changes and additional versions
   retain an existing movie folder; a different destination catalog uses its own template.
+- Empty identify-time metadata responses retain staging files and record a retryable
+  error; a later successful fetch places the movie under its original title.
 - Successive downloads of the same season retain distinct file contents and canonical version paths,
   including after completed-ingest cleanup; retries preserve allocated names.
 - Destination collisions preserve published versions, pending-ingest files, untracked files, and

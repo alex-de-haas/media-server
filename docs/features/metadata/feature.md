@@ -18,7 +18,10 @@ additional sources can be added without schema churn.
   original title is language-independent; the identified display title stays
   unchanged. Existing original titles and already placed movie paths need no
   additional identify-time fetch. Full localized metadata and artwork are still
-  populated by Enrich. See [movie naming](../torrents-and-organizer/feature.md#movie-naming).
+  populated by Enrich. An empty metadata response fails identification before
+  placement and uses the pipeline's retry policy; a returned record without an
+  original title logs a warning and permits the display-title fallback.
+  See [movie naming](../torrents-and-organizer/feature.md#movie-naming).
 - Items carry a canonical provider identity plus a provider **dictionary**
   (`providers: { "tmdb": 27205 }`). The canonical identity drives the stable
   Jellyfin item id; the dictionary lets multiple sources coexist as aliases or
@@ -65,9 +68,10 @@ additional sources can be added without schema churn.
 - Each playable source file must ultimately map to a movie or an episode. A movie
   batch may resolve to **several different movies** — see
   [multi-movie-ingest](../multi-movie-ingest/feature.md).
-- A localized match names the created item in that language, so its canonical
-  library folder is localized too (`Назад в будущее (1985)/`). Library naming
-  follows the matched title; it is not translated back to a canonical language.
+- A localized match keeps the created item's display title in that language.
+  New movie folders use the provider's original title instead: identifying
+  `Назад в будущее` creates `Back to the Future (1985)/`. A received metadata
+  record without an original title permits falling back to the identified title.
 - Match results are cached against the stable public item ID and the source-file
   assignment, so a later remap can rebuild clean paths and downstream metadata.
 
@@ -224,3 +228,5 @@ coverage:
 - Manual match override and refresh behavior.
 - Original movie titles are available before Organize for search, pinned and
   manual identities, with a display-title fallback for missing originals.
+- Empty metadata responses defer placement through identify retries; recovery
+  produces the original-title path without leaving a localized fallback folder.
