@@ -1,7 +1,7 @@
 # Recommendations
 
 Created: 2026-07-25
-Updated: 2026-09-19
+Updated: 2026-09-27
 
 ## Description
 
@@ -248,6 +248,38 @@ answers what only the library can.
   watched and hidden titles shortens nothing.
 - Every candidate carries its own artwork; there is no poster lookup or cache.
 
+### Short-lived ranking cache
+
+Ordinary web and native feed requests share an in-memory cache of ranked
+candidates. Returning to Home reuses its ranking even when navigation recreates
+the browser document and its React Query client.
+
+- Entries belong to one authenticated app user and one ranking limit. Kind and
+  response-size filtering still run after ranking; the Home pool cannot stand
+  in for the larger recommendations-page pool.
+- Results, including empty ones, expire five minutes after a successful build.
+  Reads do not extend that lifetime. The cache holds at most 128 entries and
+  evicts the least recently used entry when full.
+- Every read checks the existing taste-profile input stamp and popularity bias.
+  Changes to plays, ratings, favorites, hides, watchlist inputs, library
+  generation, or the popularity slider trigger a rebuild. Time-dependent
+  weights and remote-provider changes are bounded by the five-minute lifetime.
+- Library availability, watched/hidden exclusions, and artwork are read live
+  for every response. Cached candidates never become a cached HTTP response.
+- Concurrent requests for the same key build once. A fixed set of 64 lock
+  stripes bounds synchronization memory; unrelated keys on the same stripe can
+  wait for each other. Each caller uses its own scoped database context, and a
+  cancelled waiter does not cancel another request's build.
+- Failed or cancelled builds are not stored. If inputs change during a build,
+  its result is returned to that caller with live projection but is not retained
+  for subsequent requests.
+- Explicit `seed` requests bypass this cache. The Jellyfin shelf retains its
+  separate daily refresh lifecycle.
+
+The cache is local to the API process. Startup, eviction, expiry, and changed
+inputs require a synchronous calculation; the first cold request still waits
+for the engine.
+
 ## API
 
 ```http
@@ -397,7 +429,14 @@ a separate local row. Normal recommendation availability still excludes tombston
   read as a miss rather than as a title with no votes.
 - `RecommendationFeedServiceTests` — in-library marking and title precedence,
   watched and hidden exclusion, per-user isolation, filtering after ranking
-  keeping the feed full, and multi-copy titles.
+  keeping the feed full, and multi-copy titles. Warm Home requests across fresh
+  database contexts skip generation, while kind/limit filtering, live artwork
+  and availability, input/preference changes, hide/undo, and seed/shelf bypass
+  preserve their behavior.
+- `RecommendationRankingCacheTests` — empty-result reuse, absolute expiry from
+  build completion, user/limit isolation, stamp/preference changes, concurrent
+  readers, cancellation and failure recovery, changes during generation, and
+  bounded least-recently-used retention.
 - `RecommendationShelfServiceTests` — held-only contents, rank preserved,
   read-time exclusion of watched and hidden titles, concurrent readers building
   once, an empty generation not rebuilt on every read but rebuilt once its TTL

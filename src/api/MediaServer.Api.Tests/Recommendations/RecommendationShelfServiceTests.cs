@@ -80,6 +80,7 @@ public sealed class RecommendationShelfServiceTests : IDisposable
         services.AddScoped<IRecommendationGenerator>(provider =>
             SeedListGenerator.Recommendations(provider.GetRequiredService<ITmdbRecommendationSource>()));
         services.AddScoped<RecommendationEngine>();
+        services.AddSingleton<RecommendationRankingCache>();
         services.AddScoped<RecommendationFeedService>();
         services.AddScoped<RecommendationShelfService>();
         services.AddSingleton<RecommendationShelfRefresher>();

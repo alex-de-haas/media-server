@@ -24,9 +24,11 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     private readonly StubSource _tmdb = new();
     private Guid _seedId;
     private readonly LibraryFacetIndexCache _indexCache = new();
+    private readonly RecommendationRankingCache _rankingCache;
 
     public RecommendationFeedServiceTests()
     {
+        _rankingCache = new RecommendationRankingCache(_time);
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
         _database = new MediaServerDbContext(
@@ -277,8 +279,205 @@ public sealed class RecommendationFeedServiceTests : IDisposable
 
 
 
-    private RecommendationFeedService Service() => new(
-        _database, Engine(), TestSettings.English, NullLogger<RecommendationFeedService>.Instance);
+    [Fact]
+    public async Task ReturningHomeWithANewRequestScopeReusesRanking()
+    {
+        Suggest("1", "2");
+        var first = await Build(limit: 12);
+        var calls = _tmdb.AskedFor.Count;
+        Assert.True(calls > 0);
+
+        using var nextRequest = new MediaServerDbContext(
+            new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        var second = await Service(nextRequest).BuildAsync(_userId, null, 12, CancellationToken.None);
+
+        Assert.NotNull(second);
+        Assert.Equal(first.Items, second.Items);
+        Assert.Equal(first.Rung, second.Rung);
+        Assert.Equal(calls, _tmdb.AskedFor.Count);
+    }
+
+    [Fact]
+    public async Task WarmRankingStillAppliesKindAndResponseLimits()
+    {
+        Suggest("1", "2");
+        SuggestSeries("3", "A series");
+        await Build(limit: 12);
+        var calls = _tmdb.AskedFor.Count;
+
+        var movies = await Build(RecommendationKind.Movie, limit: 1);
+        var series = await Build(RecommendationKind.Series, limit: 12);
+
+        Assert.Equal("Movie", Assert.Single(movies.Items).Kind);
+        Assert.Equal("Series", Assert.Single(series.Items).Kind);
+        Assert.Equal(calls, _tmdb.AskedFor.Count);
+    }
+
+    [Fact]
+    public async Task LargerRankingLimitsDoNotReuseTheHomePool()
+    {
+        Suggest("1");
+        await Build(limit: 12);
+        var calls = _tmdb.AskedFor.Count;
+        await Build(limit: 60);
+        Assert.True(_tmdb.AskedFor.Count > calls);
+    }
+
+    [Fact]
+    public async Task WarmRankingProjectsCurrentArtworkAndPublishedAvailability()
+    {
+        var held = AddItem(MediaKind.Movie, "Held", "1");
+        Suggest("1");
+        Assert.Null(Assert.Single((await Build()).Items).PosterUrl);
+        var calls = _tmdb.AskedFor.Count;
+
+        // Artwork is not part of the ranking stamp: it must still be resolved on a warm read.
+        _database.ImageAssets.Add(new ImageAsset
+        {
+            Id = Guid.NewGuid(), MediaItemId = held.Id, ImageType = ImageType.Primary,
+            Provider = "tmdb", RemotePath = "https://cdn/new.jpg", Tag = "new",
+        });
+        _database.SaveChanges();
+        Assert.Equal("https://cdn/new.jpg", Assert.Single((await Build()).Items).PosterUrl);
+        Assert.Equal(calls, _tmdb.AskedFor.Count);
+
+        // An unpublished item must not retain a dead detail link, even if the ranking stamp holds.
+        held.PublicId = null;
+        _database.SaveChanges();
+        var unpublished = Assert.Single((await Build()).Items);
+        Assert.False(unpublished.InLibrary);
+        Assert.Null(unpublished.MediaItemId);
+        Assert.Equal(calls, _tmdb.AskedFor.Count);
+    }
+
+    [Fact]
+    public async Task HideAndUndoInvalidateAWarmRanking()
+    {
+        Suggest("1");
+        Assert.Single((await Build()).Items);
+        var identity = new RecommendationIdentity(RecommendationKind.Movie, "1");
+        var calls = _tmdb.AskedFor.Count;
+
+        await Service().HideAsync(_userId, identity, _time.GetUtcNow(), CancellationToken.None);
+        Assert.Empty((await Build()).Items);
+        Assert.True(_tmdb.AskedFor.Count > calls);
+        calls = _tmdb.AskedFor.Count;
+
+        await Service().UnhideAsync(_userId, identity, CancellationToken.None);
+        Assert.Single((await Build()).Items);
+        Assert.True(_tmdb.AskedFor.Count > calls);
+    }
+
+    [Theory]
+    [InlineData("play")]
+    [InlineData("rating")]
+    [InlineData("favorite")]
+    [InlineData("watchlist")]
+    [InlineData("library")]
+    [InlineData("metadata")]
+    public async Task ChangedInputsRebuildAWarmRanking(string change)
+    {
+        var held = AddItem(MediaKind.Movie, "Candidate", "1");
+        Suggest("1", "2");
+        await Build();
+        var calls = _tmdb.AskedFor.Count;
+
+        switch (change)
+        {
+            case "play":
+                AddPlay(held.Id);
+                break;
+            case "rating":
+            case "favorite":
+                _database.UserItemData.Add(new UserItemData
+                {
+                    Id = Guid.NewGuid(), AppUserId = _userId, MediaItemId = held.Id,
+                    Rating = change == "rating" ? 5 : null, IsFavorite = change == "favorite",
+                });
+                break;
+            case "watchlist":
+                var tracked = new TrackedTitle
+                {
+                    Id = Guid.NewGuid(), Kind = MediaKind.Movie, IdentityProvider = "tmdb",
+                    IdentityProviderId = "1", Title = "Candidate",
+                };
+                _database.TrackedTitles.Add(tracked);
+                _database.WatchlistEntries.Add(new WatchlistEntry
+                {
+                    Id = Guid.NewGuid(), AppUserId = _userId, TrackedTitleId = tracked.Id,
+                    CreatedAt = _time.GetUtcNow(),
+                });
+                break;
+            case "library":
+                AddItem(MediaKind.Movie, "New title", "999");
+                break;
+            case "metadata":
+                _database.MetadataRecords.Add(new MetadataRecord
+                {
+                    Id = Guid.NewGuid(), MediaItemId = held.Id, Provider = "tmdb", Language = "en-US",
+                    Genres = ["Drama"], FetchedAt = _time.GetUtcNow(),
+                });
+                break;
+        }
+        _database.SaveChanges();
+
+        var result = await Build();
+        Assert.True(_tmdb.AskedFor.Count > calls);
+        if (change is "play" or "rating")
+            Assert.DoesNotContain(result.Items, item => item.TmdbId == "1");
+    }
+
+    [Fact]
+    public async Task PopularityChangesRebuildAndReturnTheCurrentPreference()
+    {
+        Suggest("1");
+        await Build();
+        var calls = _tmdb.AskedFor.Count;
+
+        await new RecommendationPreferenceStore(_database).SetPopularityBiasAsync(
+            _userId, 1.5, _time.GetUtcNow(), CancellationToken.None);
+
+        Assert.Equal(1.5, (await Build()).PopularityBias);
+        Assert.True(_tmdb.AskedFor.Count > calls);
+    }
+
+    [Fact]
+    public async Task AnotherUsersInputsNeitherInvalidateNorReceiveMyRanking()
+    {
+        var held = AddItem(MediaKind.Movie, "Mine", "1");
+        Suggest("1");
+        await Build();
+        var calls = _tmdb.AskedFor.Count;
+        MarkPlayed(held.Id, _otherUserId);
+
+        Assert.Single((await Build()).Items);
+        Assert.Equal(calls, _tmdb.AskedFor.Count);
+        var other = await Service().BuildAsync(_otherUserId, null, 20, CancellationToken.None);
+        Assert.NotNull(other);
+        Assert.Empty(other.Items);
+    }
+
+    [Fact]
+    public async Task ExplicitSeedsAndShelfBuildsBypassTheOrdinaryFeedCache()
+    {
+        var held = AddItem(MediaKind.Movie, "Held", "1");
+        Suggest("1");
+        await Build();
+
+        for (var repeat = 0; repeat < 2; repeat++)
+        {
+            _tmdb.AskedFor.Clear();
+            await BuildSeeded(held.Id);
+            Assert.Equal([new RecommendationIdentity(RecommendationKind.Movie, "1")], _tmdb.AskedFor);
+            _tmdb.AskedFor.Clear();
+            await Service().BuildShelfAsync(_userId, 100, CancellationToken.None);
+            Assert.NotEmpty(_tmdb.AskedFor);
+        }
+    }
+
+    private RecommendationFeedService Service(MediaServerDbContext? database = null) => new(
+        database ?? _database, Engine(database ?? _database), TestSettings.English,
+        NullLogger<RecommendationFeedService>.Instance, _rankingCache);
 
     /// <summary>
     /// The real engine, with only the behavioural seed generator wired.
@@ -289,17 +488,17 @@ public sealed class RecommendationFeedServiceTests : IDisposable
     /// local generators would make every assertion depend on what the fixture's library happens to
     /// hold, which is the opposite of what is being tested here.
     /// </remarks>
-    private RecommendationEngine Engine() => new(
-        _database,
-        new RecommendationSeedSelector(_database, _time),
+    private RecommendationEngine Engine(MediaServerDbContext database) => new(
+        database,
+        new RecommendationSeedSelector(database, _time),
         [SeedListGenerator.Recommendations(_tmdb)],
-        new TitleFacetReader(_database),
+        new TitleFacetReader(database),
         _indexCache,
         new TasteProfileCache(),
-        new TasteProfileBuilder(_database, new TitleFacetReader(_database), _indexCache, _time),
+        new TasteProfileBuilder(database, new TitleFacetReader(database), _indexCache, _time),
         new RecommendationScorer(),
         new RecommendationReranker(),
-        new RecommendationPreferenceStore(_database),
+        new RecommendationPreferenceStore(database),
         NullLogger<RecommendationEngine>.Instance);
 
 
@@ -426,6 +625,7 @@ public sealed class RecommendationFeedServiceTests : IDisposable
 
     public void Dispose()
     {
+        _rankingCache.Dispose();
         _database.Dispose();
         _connection.Dispose();
     }
