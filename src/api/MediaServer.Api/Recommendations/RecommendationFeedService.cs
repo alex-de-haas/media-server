@@ -1,6 +1,7 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Metadata;
+using MediaServer.Api.Recommendations.Profile;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Recommendations;
@@ -60,7 +61,8 @@ public sealed class RecommendationFeedService(
     MediaServerDbContext database,
     RecommendationEngine engine,
     MediaServerSettings settings,
-    ILogger<RecommendationFeedService> logger)
+    ILogger<RecommendationFeedService> logger,
+    RecommendationRankingCache rankingCache)
 {
     /// <summary>How many the engine is asked for before filtering. Bounded, since each candidate costs work.</summary>
     internal const int PerRequest = 50;
@@ -102,8 +104,16 @@ public sealed class RecommendationFeedService(
 
         // Rank generously, then filter: excluding watched and hidden titles afterwards would otherwise
         // eat into the limit and hand back a short feed.
-        var ranked = await engine.RankAsync(
-            appUserId, Math.Max(limit * 4, PerRequest), cancellationToken, seedOverride);
+        var rankingLimit = Math.Max(limit * 4, PerRequest);
+        var ranked = seedOverride is not null
+            ? await engine.RankAsync(appUserId, rankingLimit, cancellationToken, seedOverride)
+            : await rankingCache.GetAsync(
+                appUserId, rankingLimit,
+                async ct => new RecommendationRankingStamp(
+                    await TasteProfileCache.StampOfAsync(appUserId, database, ct),
+                    await new RecommendationPreferenceStore(database).PopularityBiasAsync(appUserId, ct)),
+                ct => engine.RankAsync(appUserId, rankingLimit, ct),
+                cancellationToken);
         var items = await ProjectAsync(appUserId, ranked.Candidates, kind, limit, cancellationToken);
 
         var preference = await database.RecommendationPreferences.AsNoTracking()

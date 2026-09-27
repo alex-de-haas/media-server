@@ -213,6 +213,7 @@ builder.Services.AddSingleton<MediaServer.Api.Recommendations.Profile.TasteProfi
 builder.Services.AddScoped<ITmdbRecommendationSource, TmdbRecommendationSource>();
 builder.Services.AddScoped<RecommendationReranker>();
 builder.Services.AddScoped<RecommendationEngine>();
+builder.Services.AddSingleton<RecommendationRankingCache>();
 // Generators are an implementation detail of the built-in source, never user-facing toggles. Order
 // matters only for which one first claims a candidate's reason, so the cheapest and most specific
 // come first and the broad behavioural lists fill in behind them.
