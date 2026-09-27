@@ -163,6 +163,26 @@ public sealed class TitleScoringTests
 public sealed class LibraryNamingTests
 {
     [Fact]
+    public void Movie_original_title_uses_custom_template_sanitization_and_edition()
+    {
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Root = "/root", Type = CatalogType.Movie, NamingTemplate = "{Year} - {Title}" };
+        var movie = new MediaItem { CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Localized", OriginalTitle = "Original: Title?", Year = 1988 };
+
+        Assert.Equal("1988 - Original Title/1988 - Original Title - Extended.mkv",
+            LibraryNaming.ForMovie(catalog, movie, ".MKV", "Extended"));
+    }
+
+    [Fact]
+    public void Movie_moving_to_another_catalog_uses_original_title_and_destination_template()
+    {
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Movies", Root = "/root", Type = CatalogType.Movie, NamingTemplate = "{Year} - {Title}" };
+        var movie = new MediaItem { CatalogId = Guid.NewGuid(), Kind = MediaKind.Movie, Title = "Localized", OriginalTitle = "Original", Year = 1988,
+            LibraryPath = "Localized (1988)/Localized (1988).mkv" };
+
+        Assert.Equal("1988 - Original/1988 - Original.mkv", LibraryNaming.ForMovie(catalog, movie, ".mkv"));
+    }
+
+    [Fact]
     public void Movie_path_uses_template_and_preserves_extension()
     {
         var catalog = new Catalog { Name = "Movies", Root = "/root", Type = CatalogType.Movie, NamingTemplate = "{Title} ({Year})" };
