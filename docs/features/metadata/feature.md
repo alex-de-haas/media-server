@@ -1,7 +1,7 @@
 # Metadata
 
 Created: 2026-06-15
-Updated: 2026-09-09
+Updated: 2026-09-27
 
 ## Description
 
@@ -13,6 +13,12 @@ additional sources can be added without schema churn.
 
 - An `IMetadataProvider` abstraction encapsulates search, match, fetch, and image
   retrieval. TMDb is the first implementation.
+- Movie identification also fetches the original title before filesystem placement,
+  using the catalog metadata language or `en-US` for that detail request. The
+  original title is language-independent; the identified display title stays
+  unchanged. Existing original titles and already placed movie paths need no
+  additional identify-time fetch. Full localized metadata and artwork are still
+  populated by Enrich. See [movie naming](../torrents-and-organizer/feature.md#movie-naming).
 - Items carry a canonical provider identity plus a provider **dictionary**
   (`providers: { "tmdb": 27205 }`). The canonical identity drives the stable
   Jellyfin item id; the dictionary lets multiple sources coexist as aliases or
@@ -216,3 +222,5 @@ coverage:
   episode index order untouched.
 - Backfill on adding a language.
 - Manual match override and refresh behavior.
+- Original movie titles are available before Organize for search, pinned and
+  manual identities, with a display-title fallback for missing originals.

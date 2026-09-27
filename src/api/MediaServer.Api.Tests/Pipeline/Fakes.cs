@@ -28,8 +28,9 @@ public sealed class FakeMetadataProvider : IMetadataProvider
     {
         OnFetch?.Invoke(reference);
         Fetched.Add(reference.Id);
+        // No invented original name: naming tests supply explicit originals through a provider mock.
         var records = languages.Select(language => new ProviderMetadata(
-            reference, language, $"Title {language}", "Original Title", "en",
+            reference, language, $"Title {language}", null, "en",
             "Overview", "Tagline", ["Drama"], null, 7.5, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(120).Ticks, "{}")).ToList();
         return Task.FromResult<IReadOnlyList<ProviderMetadata>>(records);
     }

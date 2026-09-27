@@ -19,8 +19,20 @@ public static class LibraryNaming
     /// </summary>
     public static string ForMovie(Catalog catalog, MediaItem movie, string extension, string? edition = null)
     {
-        var baseName = RenderTemplate(catalog.NamingTemplate, movie.Title, movie.Year);
+        var title = string.IsNullOrWhiteSpace(movie.OriginalTitle) ? movie.Title : movie.OriginalTitle;
+        var baseName = RenderTemplate(catalog.NamingTemplate, title, movie.Year);
         var folder = Sanitize(baseName);
+
+        // Keep versions together after a metadata refresh or a naming-rule change. Moving to another
+        // catalog still uses that catalog's template; an existing destination movie keeps its folder.
+        if (movie.CatalogId == catalog.Id && !string.IsNullOrWhiteSpace(movie.LibraryPath) &&
+            !CatalogPaths.IsIncoming(movie.LibraryPath) &&
+            Path.GetDirectoryName(movie.LibraryPath) is { Length: > 0 } existingFolder)
+        {
+            folder = existingFolder.Replace('\\', '/');
+            baseName = Path.GetFileName(folder);
+        }
+
         return Combine(folder, Sanitize(baseName + EditionSuffix(edition)) + NormalizeExtension(extension));
     }
 

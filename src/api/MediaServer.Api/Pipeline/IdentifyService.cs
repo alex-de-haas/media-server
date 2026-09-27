@@ -334,6 +334,7 @@ public sealed class IdentifyService(
         if (existing is not null)
         {
             await AdoptIfTombstoneAsync(existing, catalog, cancellationToken);
+            await ResolveMovieOriginalTitleAsync(catalog, existing, cancellationToken);
             return existing;
         }
 
@@ -351,8 +352,31 @@ public sealed class IdentifyService(
             AddedAt = now,
             UpdatedAt = now,
         };
+        await ResolveMovieOriginalTitleAsync(catalog, movie, cancellationToken);
         database.MediaItems.Add(movie);
         return movie;
+    }
+
+    private async Task ResolveMovieOriginalTitleAsync(Catalog catalog, MediaItem movie, CancellationToken cancellationToken)
+    {
+        // Organize runs before Enrich. Resolve the language-independent name here for automatic,
+        // pinned and manual matches (including remaps), without changing the localized display title.
+        // An already placed movie retains its folder and needs no extra metadata request.
+        if (!string.IsNullOrWhiteSpace(movie.OriginalTitle) || !string.IsNullOrWhiteSpace(movie.LibraryPath) ||
+            movie.IdentityProvider is null || movie.IdentityProviderId is null)
+        {
+            return;
+        }
+
+        var records = await provider.FetchAsync(
+            new ProviderRef(movie.IdentityProvider, movie.IdentityProviderId), MediaKind.Movie,
+            [string.IsNullOrWhiteSpace(catalog.MetadataLanguage) ? "en-US" : catalog.MetadataLanguage], cancellationToken);
+        var original = records.FirstOrDefault(record => !string.IsNullOrWhiteSpace(record.OriginalTitle));
+        if (original is not null)
+        {
+            movie.OriginalTitle = original.OriginalTitle;
+            movie.OriginalLanguage ??= original.OriginalLanguage;
+        }
     }
 
     /// <summary>Gets or creates the series container for a provider identity (no season/episode).</summary>

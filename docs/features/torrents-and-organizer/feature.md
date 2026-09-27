@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-09-25
+Updated: 2026-09-27
 
 ## Description
 
@@ -293,6 +293,25 @@ A move interrupted between filesystem success and its database update fails safe
 if its source is missing; broader automatic recovery of such moves remains outside
 this feature. Byte count alone is not treated as proof of content integrity.
 
+### Movie naming
+
+Movie naming renders the catalog's `{Title}` token from `OriginalTitle`, falling
+back to the identified display title when the original is null, empty or blank.
+The default remains `{Title} ({Year})` for both folder and file stem; edition
+suffixes, extension normalization and invalid-character sanitization still apply.
+Original titles retain their original script, independently of the search language
+and the language used to display the movie in clients. Series and extra naming is
+unchanged.
+
+Identification fetches the movie's original title before Organize, including
+manual matches, pinned identities and remap targets. The later Enrich stage still
+fetches localized metadata and artwork. An already placed movie in the same
+catalog keeps its existing folder and uses that folder's name as the file stem,
+so later metadata changes, new versions and version-label edits do not split it
+across localized and original-name folders. Moving into another catalog derives
+the path from the destination template and original title, unless merging into
+an existing destination movie. No bulk rename of existing media runs on upgrade.
+
 ### Version collisions
 
 Version labels normally come from `EditionLabeler`, which diffs the names of files that share one
@@ -462,6 +481,10 @@ Backend tests should use xUnit. Required coverage:
 - Published seed teardown preserves library/history. Cleanup failures retain durable evidence and support explicit retry.
 - Cleanup preview/apply protects active, review, incomplete, linked and unknown roots; apply rechecks current state.
 - Move/copy preserve extensions, source mappings and multi-version/season-pack naming. Cleanup waits for required companion work.
+- New movie paths use original titles for automatic, manual and pinned matches;
+  blank originals fall back to the display title. Unicode, custom templates and
+  edition labels remain valid. Later metadata changes and additional versions
+  retain an existing movie folder; a different destination catalog uses its own template.
 - Successive downloads of the same season retain distinct file contents and canonical version paths,
   including after completed-ingest cleanup; retries preserve allocated names.
 - Destination collisions preserve published versions, pending-ingest files, untracked files, and
