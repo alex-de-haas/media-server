@@ -1,7 +1,7 @@
 # Convert Dialog
 
 Created: 2026-07-29
-Updated: 2026-09-10
+Updated: 2026-09-29
 
 This dialog composes a new version from one video file — a movie's or an episode's. It
 submits a single job to the
@@ -278,7 +278,9 @@ none of them removes a tag:
   the operator emptied rather than filled.
 - **A dropped track's language stops mattering.** Typing a bad tag and then unchecking
   the track unblocks the submit — the edit is not built for a track that is not in the
-  output, so there is nothing left to be wrong.
+  output, so there is nothing left to be wrong. This also excludes name edits for
+  dropped embedded audio and subtitle tracks. Dropping every subtitle sends an empty
+  selection without metadata edits for those tracks, including when copying the video.
 
 The same vocabulary is shared with the probe, but not the same decision: an
 unrecognized tag *in a file* is kept, because it is what the file claims and dropping
@@ -315,7 +317,8 @@ it would unlabel a labelled track. Only typed input is refused.
   merge needs; a language corrected in the dialog, a bad tag blocking the submit, and
   only the changed field travelling; every spelling the API accepts accepted here too,
   a dropped track unblocking the submit its bad tag was holding, and a cleared field
-  sending no edit at all.
+  sending no edit at all; a remux dropping every subtitle after editing its name or
+  language sending an empty subtitle selection without a default or stale edits.
 - `detail.spec.ts`, sizing — the quality estimate shown for the default level and
   following the level actually selected; a re-encoded row stating both its before and
   its after; the split line on a source whose dubs outweigh its picture, with the

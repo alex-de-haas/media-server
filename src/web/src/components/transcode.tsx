@@ -325,8 +325,8 @@ export function TranscodeDialog({
       // Only tracks that end up in the output can carry an edit: an unchecked sidecar has no output stream
       // to write to, and the API refuses the edit rather than dropping it silently.
       const editable = new Set([
-        ...audioStreams.map((stream) => stream.id),
-        ...subtitleStreams.map((stream) => stream.id),
+        ...audioStreams.filter(isKept).map((stream) => stream.id),
+        ...subtitleStreams.filter(isKept).map((stream) => stream.id),
         ...mergeStreamIds,
       ]);
       const metadataEdits = [...editable]
