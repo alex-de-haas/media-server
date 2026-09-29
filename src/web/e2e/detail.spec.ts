@@ -570,6 +570,43 @@ test("dropping a track clears the bad language that was blocking the submit", as
   await expect(dialog.getByRole("button", { name: /^Start convert/ })).toBeEnabled();
 });
 
+for (const edit of ["none", "name", "language"] as const) {
+  test(`remux without subtitles omits dropped tracks' ${edit} edits and default`, async ({ page }) => {
+    await setupApp(page, {
+      library: [aMovie("m1", "Escape from New York")],
+      detail: { m1: escapeFromNewYork() },
+      transcodeAvailable: true,
+    });
+
+    await page.goto("/movies/m1");
+    await page.getByRole("button", { name: "Convert to a smaller version" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("combobox", { name: "Video", exact: true }).click();
+    await page.getByRole("option", { name: "Keep original video — lossless, HDR-safe" }).click();
+
+    const subtitle = dialog.getByRole("checkbox", { name: "Copy eng", exact: true });
+    await subtitle.locator("xpath=ancestor::li").getByRole("button", { name: "Default", exact: true }).click();
+    if (edit === "name") {
+      await dialog.getByRole("textbox", { name: "Name for eng", exact: true }).fill("English subtitles");
+    } else if (edit === "language") {
+      await dialog.getByRole("textbox", { name: "Language for eng", exact: true }).fill("rsu");
+      await expect(dialog.getByRole("button", { name: /^Start convert/ })).toBeDisabled();
+    }
+    await subtitle.uncheck();
+
+    const submitted = page.waitForRequest(
+      (request) => request.url().includes("/api/proxy/api/transcode") && request.method() === "POST",
+    );
+    await dialog.getByRole("button", { name: /^Start convert/ }).click();
+    const body = (await submitted).postDataJSON();
+    expect(body.videoCodec).toBe("copy");
+    expect(body.subtitleStreamIndexes).toEqual([]);
+    expect(body.defaultSubtitleStreamIndex).toBeUndefined();
+    expect(body.metadataEdits).toEqual([]);
+    await expect(dialog).not.toBeVisible();
+  });
+}
+
 test("clearing a language means keep, not erase", async ({ page }) => {
   // There is no override that removes a tag, so sending "" would fail the whole submit over a field the
   // operator emptied rather than filled.
