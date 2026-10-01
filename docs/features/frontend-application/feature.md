@@ -1,12 +1,12 @@
 # Frontend Application
 
 Created: 2026-06-15
-Updated: 2026-09-22
+Updated: 2026-09-30
 
 ## Description
 
 The `web` service is a Next.js application providing the browser experience for
-catalogs, downloads, the automation pipeline, playback, and admin settings. It runs in
+catalogs, downloads, the automation pipeline, watch history, and admin settings. It runs in
 the authenticated Hosty Shell as a sandboxed iframe app and acts as a
 backend-for-frontend (BFF): it holds the Hosty app-origin session and proxies
 REST and SignalR to the `api` service, so the browser stays same-origin and
@@ -38,7 +38,17 @@ section).
   `Series` and `Anime` catalogs. Offline catalogs remain selectable and are
   labelled accordingly. Detail pages (`/movies/[id]`, `/series/[id]`) provide a
   backdrop hero, overview, watched status with the latest dated watch, a favorite toggle, and a persistent horizontal
-  Cast carousel above the detail sections. Portrait cards link to person pages;
+  Cast carousel above the detail sections. Hero posters and their loading placeholders
+  keep a 2:3 aspect ratio at 112 × 168 px on mobile and 160 × 240 px from the small
+  breakpoint upward, independent of the height of adjacent metadata and actions.
+  The top overflow menu holds Log watch for movies, Track / remind me for titles
+  with a TMDb ID, Trailer when a trailer URL is available, and IMDb/TMDb links
+  when the corresponding IDs are available.
+  TMDb links open the movie or TV page according to the title kind. These actions
+  are available to all viewers; library administration remains admin-only.
+  The hero omits Log watch, tracking, Trailer, and provider links while retaining watch
+  status and in-progress viewing controls.
+  Portrait cards link to person pages;
   arrows, keyboard navigation, and swiping reveal more cast members. The shared
   carousel maps arrow keys to its orientation: left/right horizontally and
   up/down vertically. Movie
@@ -75,8 +85,10 @@ section).
   deletion, and **Choose poster…** — the cached posters for the title with the text
   language of each spelled out, overriding the automatic [artwork
   language](../artwork-language/feature.md) choice for a title that came out
-  ambiguous. **Playback is not in-browser** — Play deep-links to an Infuse/Jellyfin
-  client.
+  ambiguous. **The web UI is a library manager without playback controls.**
+  Movie, series, and episode pages do not launch players or offer playback links.
+  Playback starts in a separate native or Jellyfin-compatible client. Watch status,
+  history, ratings, and progress management remain available in the web UI.
 - **Downloads** (`/downloads`) — torrent list with live progress, ratio, and
   seeding status; add (with catalog + `keepSeeding`, showing each catalog's free
   space and refusing oversized `.torrent` downloads), pause, resume, stop seeding,
@@ -198,6 +210,10 @@ correction actions, paging, and related-row behavior.
 
 ## Testing Expectations
 
+- Movie, series, and episode details omit player-launch and playback-link controls.
+- Detail overflow tests cover viewer access to tracking and provider links, movie/TV
+  TMDb URL selection, missing provider IDs, and logging a watch from the menu.
+  Hero resume controls and episode-row watch controls remain covered separately.
 - Movie and series detail tests cover the persistent Cast carousel, ordered sections without tabs,
   person links, previous/next and keyboard controls, a single actor, and keyboard
   access to offscreen actors on a narrow viewport without page overflow.

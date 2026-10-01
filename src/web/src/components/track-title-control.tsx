@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ReminderDialog } from "@/components/reminder-dialog";
 
 /**
- * The "Track / remind me" control on Movie/Series detail pages: opens the shared reminder dialog for the
+ * The "Track / remind me" control in title previews: opens the shared reminder dialog for the
  * catalog title (with calendar-only tracking as the secondary action). Lights up when the title is
  * already on the user's calendar.
  */
@@ -28,13 +28,7 @@ export function TrackTitleControl({
 }) {
   const [open, setOpen] = useState(false);
 
-  const watchlist = useQuery({ queryKey: ["watchlist"], queryFn: watchlistApi.list });
-  // The kind is part of the identity: TMDb's movie and tv id spaces overlap, so matching on the id alone
-  // would show a tracked series as this movie's state — and hand its trackedTitleId to a movie reminder.
-  const tracked = useMemo(
-    () => watchlist.data?.find((item) => item.provider === "tmdb" && item.providerId === tmdbId && item.kind === kind),
-    [watchlist.data, tmdbId, kind],
-  );
+  const tracked = useTrackedTitle(tmdbId, kind);
   const hasReminder = tracked?.reminders.some((reminder) => reminder.active) ?? false;
 
   return (
@@ -61,5 +55,15 @@ export function TrackTitleControl({
         onOpenChange={setOpen}
       />
     </>
+  );
+}
+
+export function useTrackedTitle(tmdbId: string | null, kind: string) {
+  const watchlist = useQuery({ queryKey: ["watchlist"], queryFn: watchlistApi.list, enabled: !!tmdbId && (kind === "Movie" || kind === "Series") });
+  // The kind is part of the identity: TMDb's movie and tv id spaces overlap, so matching on the id alone
+  // would show a tracked series as this movie's state — and hand its trackedTitleId to a movie reminder.
+  return useMemo(
+    () => watchlist.data?.find((item) => item.provider === "tmdb" && item.providerId === tmdbId && item.kind === kind),
+    [watchlist.data, tmdbId, kind],
   );
 }
