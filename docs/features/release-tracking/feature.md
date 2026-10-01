@@ -1,7 +1,7 @@
 # Release Tracking
 
 Created: 2026-07-14
-Updated: 2026-07-28
+Updated: 2026-09-30
 
 > Near-term slice of the M5 [Watchlist and discovery](../watchlist-and-discovery.md)
 > vision. This spec covers **only** tracking: a per-user calendar of movie/series
@@ -399,7 +399,7 @@ The gap recomputes whenever the library or the schedule changes, so it never dri
   Movie/Series detail page: release **type** (filtered to the title's kind), **lead**
   (on the day / 1 / 2 / a week before), and **time** (default 09:00). For a not-yet
   announced date the same dialog just resolves to *pending*.
-- **Detail pages** — a "Track / remind me" control on Movie and Series detail pages
+- **Detail pages** — a "Track / remind me" item in the top overflow menu on Movie and Series detail pages
   for catalog titles, opening that same dialog (with the series episode-tracking
   opt-in).
 - **Settings** — the `WATCH_REGION` country (default `US`, separate from

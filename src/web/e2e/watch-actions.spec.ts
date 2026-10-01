@@ -20,7 +20,8 @@ for (const action of ["finish", "dismiss"] as const) {
     await expect(page.getByRole("button", { name: /^Mark (un)?watched$/ })).toHaveCount(0);
     await page.getByRole("button", { name: action === "finish" ? "Finish watching Arrival" : "Remove Arrival from Continue watching" }).click();
     await expect(page.getByRole("button", { name: "Finish watching Arrival" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Log watch", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(page.getByRole("menuitem", { name: "Log watch…" })).toBeVisible();
     expect(called).toBe(1);
     expect(data.playCount).toBe(action === "finish" ? 2 : 1);
   });

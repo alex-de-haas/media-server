@@ -10,13 +10,14 @@ import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { WatchTimeDialog } from "@/components/watch-time-dialog";
 
-export function WatchControls({ id, title, userData, removed = false, compact = false, statusOnly = false }: {
+export function WatchControls({ id, title, userData, removed = false, compact = false, statusOnly = false, showLogWatch = true }: {
   id: string;
   title: string;
   userData: UserItemData | null;
   removed?: boolean;
   compact?: boolean;
   statusOnly?: boolean;
+  showLogWatch?: boolean;
 }) {
   const [logging, setLogging] = useState(false);
   const client = useQueryClient();
@@ -52,7 +53,7 @@ export function WatchControls({ id, title, userData, removed = false, compact = 
           <Button variant="ghost" size={compact ? "icon-sm" : "sm"} aria-label={`Remove ${title} from Continue watching`} title="Remove from Continue watching" disabled={mutation.isPending} onClick={() => mutation.mutate("dismiss")}>
             <X data-icon="inline-start" />{!compact && "Clear progress"}
           </Button>
-        </> : <Button variant="outline" size="sm" onClick={() => setLogging(true)}>
+        </> : showLogWatch && <Button variant="outline" size="sm" onClick={() => setLogging(true)}>
           <CalendarPlus data-icon="inline-start" /> Log watch
         </Button>}
         <WatchTimeDialog open={logging} onOpenChange={setLogging} heading="Log a watch" description={`Record a viewing of ${title}.`} confirmLabel="Log watch" pending={mutation.isPending} onSubmit={(watchedAt) => mutation.mutate({ watchedAt })} />

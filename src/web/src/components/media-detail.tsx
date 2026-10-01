@@ -1,12 +1,10 @@
 "use client";
 
-import { isBluraySource } from "@/lib/media-server";
-
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CalendarPlus, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FolderInput, Heart, Image as ImageIcon, Link2, MoreVertical, Play, RefreshCw, Star, Trash2, User, Wand2 } from "lucide-react";
+import { ArrowLeft, BellRing, CalendarPlus, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FolderInput, Heart, Image as ImageIcon, MoreVertical, RefreshCw, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -21,16 +19,16 @@ import {
   type UserItemData,
 } from "@/lib/media-server";
 import { Conversions, MediaSources } from "@/components/media-sources";
-import { infuseDeepLink, openInfuse } from "@/lib/infuse";
 import { personHref } from "@/components/poster-card";
 import { PosterPickerDialog } from "@/components/poster-picker-dialog";
 import { RemapDialog } from "@/components/remap-dialog";
 import { StarRating } from "@/components/star-rating";
-import { TrackTitleControl } from "@/components/track-title-control";
+import { useTrackedTitle } from "@/components/track-title-control";
 import { MoveToCatalogDialog } from "@/components/move-to-catalog-dialog";
 import { ApiError } from "@/lib/api";
 import { MovieWatchHistory } from "@/components/movie-watch-history";
 import { RelatedMovies } from "@/components/related-movies";
+import { ReminderDialog } from "@/components/reminder-dialog";
 import { WatchTimeDialog } from "@/components/watch-time-dialog";
 import { QUERIES_AFFECTED_BY_HISTORY_CHANGE } from "@/lib/watch-history-calendar";
 import { episodeLabel, episodeMediaLine, formatAirDate, formatEta, formatRuntime, formatSpeed } from "@/lib/format";
@@ -90,7 +88,7 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-2">
         <BackLink href={backHref} label={backLabel} />
-        <ItemActions id={item.id} title={item.title} kind={item.kind} catalogId={item.catalogId} backHref={backHref} removed={!!item.removedAt} />
+        <ItemActions item={item} backHref={backHref} />
       </div>
       <Hero item={item} />
       {item.kind === "Movie" && <MovieWatchHistory key={item.id} id={item.id} title={item.title} removed={!!item.removedAt} />}
@@ -218,7 +216,7 @@ function MediaDetailSkeleton() {
     <div className="flex flex-col gap-6">
       <Skeleton className="h-5 w-28" />
       <div className="flex gap-4 sm:gap-6">
-        <Skeleton className="aspect-[2/3] w-28 shrink-0 rounded-md sm:w-40" />
+        <Skeleton className="aspect-[2/3] w-28 shrink-0 self-start rounded-md sm:w-40" />
         <div className="flex flex-1 flex-col gap-3 pt-2">
           <Skeleton className="h-9 w-2/3" />
           <Skeleton className="h-4 w-40" />
@@ -233,12 +231,15 @@ function MediaDetailSkeleton() {
   );
 }
 
-/**
- * The page's overflow menu. It carries two kinds of action: logging a watch, which any signed-in user
- * may do to their own history, and library administration. Logging remains reachable here even
- * while the hero offers the two actions for an in-progress viewing.
- */
-function ItemActions({ id, title, kind, catalogId, backHref, removed }: { id: string; title: string; kind: string; catalogId: string | null; backHref: string; removed: boolean }) {
+/** Personal actions, provider links, and role-gated library administration. */
+function ItemActions({ item, backHref }: { item: LibraryDetail; backHref: string }) {
+  const { id, title, kind, catalogId } = item;
+  const removed = !!item.removedAt;
+  const [trackingOpen, setTrackingOpen] = useState(false);
+  const tracked = useTrackedTitle(item.tmdbId, kind);
+  const canTrack = !!item.tmdbId && (kind === "Movie" || kind === "Series");
+  const hasReminder = tracked?.reminders.some((reminder) => reminder.active) ?? false;
+  const tmdbUrl = canTrack ? `https://www.themoviedb.org/${kind === "Movie" ? "movie" : "tv"}/${item.tmdbId}` : null;
   const { role } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -312,7 +313,7 @@ function ItemActions({ id, title, kind, catalogId, backHref, removed }: { id: st
   });
 
   const canLogWatch = kind === "Movie";
-  if (role !== "admin" && !canLogWatch) {
+  if (role !== "admin" && !canLogWatch && !canTrack && !item.imdbId && !item.trailerUrl) {
     return null;
   }
 
@@ -333,7 +334,28 @@ function ItemActions({ id, title, kind, catalogId, backHref, removed }: { id: st
               Log watch…
             </DropdownMenuItem>
           )}
-          {canLogWatch && role === "admin" && <DropdownMenuSeparator />}
+          {canTrack && (
+            <DropdownMenuItem onClick={() => setTrackingOpen(true)} className={cn(tracked && "text-brand")}>
+              {hasReminder ? <BellRing /> : <CalendarPlus />}
+              {tracked ? "Tracked" : "Track / remind me"}
+            </DropdownMenuItem>
+          )}
+          {item.trailerUrl && (
+            <DropdownMenuItem onClick={() => openExternal(item.trailerUrl!)}>
+              <Clapperboard /> Trailer
+            </DropdownMenuItem>
+          )}
+          {item.imdbId && (
+            <DropdownMenuItem onClick={() => openExternal(`https://www.imdb.com/title/${item.imdbId}/`)}>
+              <ExternalLink /> View on IMDb
+            </DropdownMenuItem>
+          )}
+          {tmdbUrl && (
+            <DropdownMenuItem onClick={() => openExternal(tmdbUrl)}>
+              <ExternalLink /> View on TMDb
+            </DropdownMenuItem>
+          )}
+          {(canLogWatch || canTrack || item.imdbId || item.trailerUrl) && role === "admin" && <DropdownMenuSeparator />}
           {role === "admin" && removed && (
             <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
               <Trash2 /> Delete permanently…
@@ -375,6 +397,14 @@ function ItemActions({ id, title, kind, catalogId, backHref, removed }: { id: st
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {item.tmdbId && (kind === "Movie" || kind === "Series") && (
+        <ReminderDialog
+          target={{ trackedTitleId: tracked?.trackedTitleId, providerRef: { provider: "tmdb", id: item.tmdbId }, kind, title, year: item.year, posterUrl: item.posterUrl }}
+          showTrackOnly={!tracked}
+          open={trackingOpen}
+          onOpenChange={setTrackingOpen}
+        />
+      )}
       {canLogWatch && (
         <WatchTimeDialog
           open={logWatchOpen}
@@ -609,7 +639,7 @@ function Hero({ item }: { item: LibraryDetail }) {
       <div className="from-background/65 absolute inset-0 bg-linear-to-r to-transparent" />
       <div className="relative mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-6 pb-10 sm:pt-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
-          <div className="bg-background/40 aspect-[2/3] w-28 shrink-0 overflow-hidden rounded-md shadow-lg ring-1 ring-black/10 sm:w-40">
+          <div className="bg-background/40 aspect-[2/3] w-28 shrink-0 self-start overflow-hidden rounded-md shadow-lg ring-1 ring-black/10 sm:w-40">
             {item.posterUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={item.posterUrl} alt={item.title} className="h-full w-full object-cover" />
@@ -666,8 +696,7 @@ function Hero({ item }: { item: LibraryDetail }) {
             )}
 
             <div className="flex flex-wrap gap-2">
-              {!item.removedAt && <InfuseLaunch item={item} />}
-              <WatchControls id={item.id} title={item.title} userData={item.userData} removed={!!item.removedAt} statusOnly={item.kind === "Series"} />
+              <WatchControls id={item.id} title={item.title} userData={item.userData} removed={!!item.removedAt} statusOnly={item.kind === "Series"} showLogWatch={false} />
               <Button
                 variant="outline"
                 onClick={() => item.removedAt && isFavorite ? setClearMark("favorite") : favorite.mutate(!isFavorite)}
@@ -685,31 +714,6 @@ function Hero({ item }: { item: LibraryDetail }) {
                   pending={rating.isPending}
                   onChange={(next) => item.removedAt && next === null ? setClearMark("rating") : rating.mutate(next)}
                 />
-              )}
-              {item.tmdbId && (item.kind === "Movie" || item.kind === "Series") && (
-                <TrackTitleControl
-                  tmdbId={item.tmdbId}
-                  kind={item.kind}
-                  title={item.title}
-                  year={item.year}
-                  posterUrl={item.posterUrl}
-                />
-              )}
-              {item.trailerUrl && (
-                <Button variant="outline" onClick={() => openExternal(item.trailerUrl!)}>
-                  <Clapperboard className="size-4" aria-hidden /> Trailer
-                </Button>
-              )}
-              {item.imdbId && (
-                <Button
-                  variant="secondary"
-                  aria-label="View on IMDb"
-                  className="border-transparent bg-[#f5c518] text-black hover:bg-[#e4b915] hover:text-black"
-                  onClick={() => openExternal(`https://www.imdb.com/title/${item.imdbId}/`)}
-                >
-                  <span className="font-semibold tracking-normal">IMDb</span>
-                  <ExternalLink className="size-4" aria-hidden />
-                </Button>
               )}
             </div>
           </div>
@@ -842,49 +846,6 @@ function KeywordTags({ keywords }: { keywords: string[] }) {
       </div>
     </section>
   );
-}
-
-// Opens a trailer / IMDb page in a new tab, severing the opener for safety. The `noopener` window
-// feature already nulls `opener`, but not every browser honours it, so clear it explicitly too.
-/**
- * Launches Infuse for the item via a TMDb library deep link (movies auto-play; series open to the show),
- * with a copy-link fallback for when the popup is blocked or Infuse isn't installed. Renders nothing when
- * the item has no TMDb id to deep-link to.
- */
-function InfuseLaunch({ item }: { item: LibraryDetail }) {
-  const isSeries = item.kind === "Series";
-  const deepLink = isSeries
-    ? infuseDeepLink({ kind: "series", tmdbId: item.tmdbId })
-    : infuseDeepLink({ kind: "movie", tmdbId: item.tmdbId }, { play: true });
-
-  if (!isSeries && item.mediaSources.length > 0 && item.mediaSources.every(isBluraySource)) {
-    return <p className="text-muted-foreground text-sm">Create an MKV from the Media tab to play this Blu-ray.</p>;
-  }
-
-  if (!deepLink) {
-    return null;
-  }
-
-  return (
-    <>
-      <Button onClick={() => openInfuse(deepLink)}>
-        <Play className="size-4" aria-hidden /> {isSeries ? "Open in Infuse" : "Play in Infuse"}
-      </Button>
-      <Button variant="outline" size="icon" aria-label="Copy Infuse link" onClick={() => copyInfuseLink(deepLink)}>
-        <Link2 className="size-4" aria-hidden />
-      </Button>
-    </>
-  );
-}
-
-async function copyInfuseLink(deepLink: string) {
-  try {
-    await navigator.clipboard.writeText(deepLink);
-    toast.success("Infuse link copied");
-  } catch {
-    // Clipboard can be denied; show the link so the operator can copy it by hand.
-    toast.error("Couldn’t copy the link", { description: deepLink });
-  }
 }
 
 interface SeasonGroup {
@@ -1123,11 +1084,6 @@ function EpisodeRow({
     onError: (error) => toast.error(errorMessage(error)),
   });
 
-  const deepLink = infuseDeepLink(
-    { kind: "episode", seriesTmdbId: episode.seriesTmdbId, season: episode.seasonNumber, episode: episode.episodeNumber },
-    { play: true },
-  );
-
   return (
     <li className="flex flex-col">
       {/* Two groups that may wrap: the still with its facts, and the actions. On a phone an admin's full
@@ -1180,11 +1136,6 @@ function EpisodeRow({
         </div>
         <div className="ml-auto flex max-w-full flex-wrap items-center gap-3">
           <WatchControls id={episode.id} title={`${label} ${episode.title}`} userData={episode.userData} />
-          {deepLink && (
-            <Button variant="ghost" size="icon-sm" aria-label="Play in Infuse" onClick={() => openInfuse(deepLink)}>
-              <Play />
-            </Button>
-          )}
           {role === "admin" && (
             <Button variant="ghost" size="icon-sm" aria-label="Fix match" onClick={() => setRemapOpen(true)}>
               <Wand2 />

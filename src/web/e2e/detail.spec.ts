@@ -15,7 +15,9 @@ test("opens a movie detail page and records a dated watch", async ({ page }) => 
   const played = page.waitForRequest(
     (request) => request.url().includes("/api/proxy/api/library/m1/watches") && request.method() === "POST",
   );
-  await page.getByRole("button", { name: "Log watch", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Log watch", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Log watch…" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Log watch", exact: true }).click();
   await played;
 });
@@ -116,7 +118,7 @@ test("the time field starts fresh on every open, not where it was left", async (
   await expect(page.getByRole("dialog").getByLabel("Watched at")).not.toHaveValue("2019-01-05T20:00");
 });
 
-test("a viewer who is not an admin still gets Log watch, and nothing else", async ({ page }) => {
+test("a viewer who is not an admin gets personal actions without administration", async ({ page }) => {
   // The menu used to be admin-only; logging a play against your own history is not an admin act.
   await setupApp(page, {
     role: "user",
@@ -132,26 +134,15 @@ test("a viewer who is not an admin still gets Log watch, and nothing else", asyn
   await expect(page.getByRole("menuitem", { name: "Move to catalog…" })).toHaveCount(0);
 });
 
-test("plays a movie through an Infuse deep link", async ({ page }) => {
+test("movie details offer library controls without playback launch or copy links", async ({ page }) => {
   await setupApp(page, {
     library: [aMovie("m1", "Arrival")],
     detail: { m1: movieDetail("m1", "Arrival", "329865") },
   });
-
-  // Capture the deep link the page launches (window.open) instead of actually following the custom scheme.
-  await page.addInitScript(() => {
-    (window as unknown as { __infuse: string[] }).__infuse = [];
-    window.open = ((url?: string | URL) => {
-      (window as unknown as { __infuse: string[] }).__infuse.push(String(url));
-      return null;
-    }) as typeof window.open;
-  });
-
   await page.goto("/movies/m1");
-  await page.getByRole("button", { name: "Play in Infuse" }).click();
-
-  const opened = await page.evaluate(() => (window as unknown as { __infuse: string[] }).__infuse);
-  expect(opened).toContain("infuse://movie/329865?play");
+  await expect(page.getByRole("heading", { name: "Arrival" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Play in Infuse|Open in Infuse|Copy Infuse link/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add favorite" })).toBeVisible();
 });
 
 test("shows and opens the IMDb movie link", async ({ page }) => {
@@ -170,13 +161,51 @@ test("shows and opens the IMDb movie link", async ({ page }) => {
 
   await page.goto("/movies/m1");
 
-  const imdb = page.getByRole("button", { name: "View on IMDb" });
+  await expect(page.getByRole("button", { name: "View on IMDb" })).toHaveCount(0);
+  await page.getByRole("button", { name: "More actions" }).click();
+  const imdb = page.getByRole("menuitem", { name: "View on IMDb" });
   await expect(imdb).toBeVisible();
   await expect(imdb).toContainText("IMDb");
 
   await imdb.click();
   const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
   expect(opened).toContain("https://www.imdb.com/title/tt2543164/");
+});
+
+for (const kind of ["Movie", "Series"] as const) {
+  test(`${kind} viewers can open tracking and the correct TMDb page from More actions`, async ({ page }) => {
+    const detail = kind === "Movie" ? movieDetail("item", "Arrival", "329865") : seriesDetail("item", "Severance", "95396");
+    await setupApp(page, { role: "user", detail: { item: detail } });
+    await page.addInitScript(() => {
+      (window as unknown as { __opened: string[] }).__opened = [];
+      window.open = ((url?: string | URL) => {
+        (window as unknown as { __opened: string[] }).__opened.push(String(url));
+        return null;
+      }) as typeof window.open;
+    });
+    await page.goto(`/${kind === "Movie" ? "movies" : "series"}/item`);
+    await expect(page.getByRole("button", { name: "Track / remind me", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Log watch", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(page.getByRole("menuitem", { name: "View on IMDb" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Refresh metadata" })).toHaveCount(0);
+    await page.getByRole("menuitem", { name: "Track / remind me" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText(detail.title);
+    await expect(dialog.getByRole("button", { name: "Set reminder" })).toBeVisible();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: "View on TMDb" }).click();
+    const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+    expect(opened).toContain(`https://www.themoviedb.org/${kind === "Movie" ? "movie/329865" : "tv/95396"}`);
+  });
+}
+
+test("a movie without provider IDs omits tracking and provider links", async ({ page }) => {
+  await setupApp(page, { role: "user", detail: { m1: movieDetail("m1", "Arrival") } });
+  await page.goto("/movies/m1");
+  await page.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("menuitem")).toHaveText(["Log watch…"]);
 });
 
 test("keeps movie cast in a carousel above media and tags", async ({ page }, testInfo) => {
@@ -1078,7 +1107,7 @@ test("an episode row shows its still, air date and synopsis, and a placeholder w
 });
 
 test("an episode row keeps its title readable on a phone by dropping the actions under the facts", async ({ page }) => {
-  // The worst case: an admin (every control) with an Infuse deep link, a still, and a long title.
+  // The worst case: an admin (every control) with a still and a long title.
   await page.setViewportSize({ width: 375, height: 812 });
   await setupApp(page, {
     library: [aSeries("s1", "Severance")],
@@ -1096,6 +1125,7 @@ test("an episode row keeps its title readable on a phone by dropping the actions
   await page.goto("/series/s1");
   await page.getByRole("button", { name: /^Season 1 ·/ }).click();
 
+  await expect(page.getByRole("button", { name: /Play in Infuse|Open in Infuse|Copy Infuse link/ })).toHaveCount(0);
   const pilot = page.getByRole("listitem").filter({ hasText: "S01E01" });
   const still = await pilot.locator("img").boundingBox();
   const expand = await pilot.getByRole("button", { name: "Show media of S01E01" }).boundingBox();
