@@ -1,7 +1,7 @@
 # Torrents and Organizer
 
 Created: 2026-06-15
-Updated: 2026-09-27
+Updated: 2026-10-01
 
 ## Description
 
@@ -462,6 +462,13 @@ are live indicators only.
 [Blu-ray sources](../bluray-import/feature.md) are directory sources for movies.
 Their import, manual MKV preparation and playback availability are documented
 separately; internal disc clips are not individual library versions.
+
+## Operator verification
+
+On 2026-10-01, the owner confirmed the ordinary retained-torrent flow: torrent
+activity continues while a copy appears in the library; stopping removes the
+torrent original and preserves the library file. Remaining Windows/Docker fixture,
+interruption/recovery and copied-file playback checks are tracked in [the plan](plan.md).
 
 ## Testing Expectations
 

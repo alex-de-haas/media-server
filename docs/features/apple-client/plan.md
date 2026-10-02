@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-08-02
-Updated: 2026-09-07
+Updated: 2026-10-01
 
 > **Umbrella epic.** This document owns the decisions, the platform split, and the
 > playback spike that everything else depends on. The features it spans keep their
@@ -230,11 +230,11 @@ not one PR per layer.
    transcode queue, the ingest review queue, and the storage view.
 9. **`apple-client-platform`** — Top Shelf, widgets, Live Activities, App
    Intents/Shortcuts, Spotlight, Handoff, SharePlay, and the Watch remote.
-10. **[Apple client visual design](../apple-client-visual-design/plan.md)** —
+10. **[Apple client visual design](../apple-client-visual-design/feature.md)** —
     cinematic tvOS title screens, poster/focus refinement, Continue Watching,
     Settings and pairing presentation, and a top-level Collections tab with the
-    native collection routes it needs. Its plan owns these deliverables; core
-    storage and playback-loading work remain in their existing plans.
+    native collection routes it needs. Implemented and accepted by the owner on
+    2026-10-01; core storage and playback-loading work remain in their existing plans.
 
 ## Deliverables
 

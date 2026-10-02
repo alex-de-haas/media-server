@@ -105,12 +105,16 @@ public enum PlaybackPlan: Equatable, Sendable {
 
 extension PlaybackPlan {
     /// An explicit choice keeps its verdict, including pending or missing, without substituting a copy.
-    static func select(from plans: [PlaybackPlan], preferring mediaSourceId: String?) -> PlaybackPlan {
+    static func select(from plans: [PlaybackPlan], preferring mediaSourceId: String?,
+                       sourceOrder: [String] = []) -> PlaybackPlan {
         if let mediaSourceId {
             return plans.first { $0.mediaSourceId == mediaSourceId }
                 ?? .refused(.noFile, source: mediaSourceId)
         }
-        return plans.first(where: \.isPlayable) ?? plans.first ?? .refused(.noFile, source: "")
+        // Detail order puts the library default first. Resolve responses need not use that order.
+        let ordered = sourceOrder.compactMap { id in plans.first { $0.mediaSourceId == id } }
+            + plans.filter { !sourceOrder.contains($0.mediaSourceId) }
+        return ordered.first(where: \.isPlayable) ?? ordered.first ?? .refused(.noFile, source: "")
     }
 
     /// The plan for each of a title's copies, in the order the server listed them.

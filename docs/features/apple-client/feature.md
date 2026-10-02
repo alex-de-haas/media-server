@@ -1,7 +1,7 @@
 # Apple Client
 
 Created: 2026-08-10
-Updated: 2026-09-24
+Updated: 2026-10-01
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by
@@ -502,6 +502,15 @@ used and there is a loader of our own.
 
 A title's own screen is fetched when it opens: versions ordered so the default leads, audio
 and subtitle tracks, and a mark against the ones beside the file rather than inside it.
+The playback checkmark is populated from capability resolution on opening the screen.
+Automatic selection follows this default-first order and skips incompatible copies;
+Play/Resume resolves again with the same order. An explicit version selection remains
+exact, including a refusal when that version cannot play.
+
+Switching browsing tabs resets the incoming tab to its root before presentation,
+preserving the outgoing screen throughout the transition. Returning opens the Home,
+Movies, Series, Groups or Collections root; ordinary Back within the current tab
+still returns to the parent screen.
 
 A started title is marked as started and **not** with a progress bar. The feed carries a
 resume position but no runtime, so there is no fraction to draw, and a full-width bar for

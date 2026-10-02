@@ -1,7 +1,7 @@
 # Apple Client Visual Design and Collections
 
 Created: 2026-09-06
-Updated: 2026-09-24
+Updated: 2026-10-02
 
 Collections reload through the store’s screen-appearance handler whenever the
 collection screen appears. The unsupported-server
@@ -18,6 +18,10 @@ repeat Home, All Movies, All Series, Groups or Collections above the content.
 Home row headings and individual group/collection names remain in their own views.
 The Series tab explicitly renders its television symbol as a monochrome template,
 leaving its tint to the native tab bar for light/dark appearance, selection, and focus.
+Selecting a different tab resets the incoming browsing navigation stack in the
+same update that selects it. The outgoing screen retains its artwork and layout
+during the transition. Returning to Home, Movies, Series, Groups or Collections
+opens that tab's root. Back within the active tab retains ordinary parent-screen navigation.
 
 [Home](../apple-tv-home/feature.md) owns Continue Watching, Next Up, and held
 recommendations. Movies and Series retain complete poster grids. Home refreshes
@@ -52,6 +56,12 @@ backdrop use the system-themed neutral background. The title, facts, Play/Resume
 text with no line limit, focus highlight, button, or sheet. Long descriptions
 scroll with the detail screen. All sources
 appear as selectable inline rows with a checkmark identifying the playback choice.
+On detail load, the client resolves device compatibility and marks the first playable
+version in the title's default-first order. Without a default, the title's source
+order applies. Play/Resume uses the same selection and refreshes the resolution;
+an explicit choice keeps its own verdict even when another copy is playable.
+While the initial resolution is pending, a status message replaces an assumed
+selection; a failed request offers manual selection or a retry through Play.
 Each row shows the edition name (or Original when unnamed), container, video
 codec, and file size on the left. Available dynamic-range badges (including the
 Dolby Vision profile) and fallback notices sit on the right. The HDR10 fallback
@@ -89,6 +99,9 @@ Collections uses the existing TMDb movie franchise model and the owned-movie
 threshold of two. It spans catalogs. The tab remains visible with an empty
 state when no franchise qualifies. Members open the ordinary title screen and
 retain release order, with unknown years last and stable ID tie-breaking.
+Collection details use compact header spacing and explicitly request a visible tab
+bar so focusing movie cards does not require hiding the navigation. Larger grids
+remain scrollable.
 
 The native surface provides authenticated reads:
 
@@ -114,9 +127,7 @@ Debug builds support `--cinema-preview`, which opens the real views with a
 local `ClientTransport` fixture. It uses no stored credentials and connects to
 no server. The additional `--preview-light` argument renders the local fixture in light
 appearance; ordinary launches follow the system. Release builds do not include
-this mode. SwiftUI previews cover the
-library's long titles and missing artwork. Remaining integration and device
-acceptance checks are tracked in [the plan](plan.md).
+this mode. SwiftUI previews cover the library's long titles and missing artwork.
 
 ## Groups
 
@@ -126,7 +137,36 @@ standard title poster grid. Each group has a fixed Movie, Series, or Anime
 catalog type. Configuration is in web Settings; Apple TV reads the authenticated
 native group list and paged member routes using the generated Swift client.
 
+## Acceptance record
+
+On 2026-10-01, after testing the interface on Apple TV and reporting the version
+checkmark, Collections tab-bar and tab-navigation issues, the owner confirmed that
+the corrected behavior works and explicitly accepted the visual-design feature
+for closure. The incoming-tab reset also resolves the reported poster flicker.
+On 2026-10-02, the owner additionally confirmed light/dark backdrops and previews
+and HDR/Dolby Vision caption readability. The owner explicitly removed the remaining
+QR pairing/expiry, accessibility (including VoiceOver, increased contrast and Reduce
+Motion), and detailed device-rendering acceptance gates from this feature's scope
+and requested closure without another plan or TODO. Those unperformed checks are
+waived, not recorded as passed. This closes the plan under the owner's revised scope.
+
+The acceptance fixes target Apple client 0.16.1; the runtime manifest is unchanged.
+`swift test --package-path src/apple/MediaKit --disable-automatic-resolution`
+passed all 250 tests in 42 suites. The unsigned tvOS simulator build passed, and
+the unsigned `generic/platform=tvOS` build passed again after the incoming-tab
+reset correction. Interactive simulator verification was limited by Device Hub
+window-access timeouts; the final device confirmation comes from the owner.
+
 ## Testing Expectations
+
+- Automatic version marking and Play/Resume agree for one/multiple sources,
+  default/no-default ordering and an incompatible default. Manual selection never
+  silently falls back to a different source; technical details follow the marked source.
+- Verify collection down/up focus for one and multiple rows with the tab bar fully
+  visible. Switching away from a nested browsing screen and returning opens the root
+  in every browsing tab; Back within the active tab still returns to the parent.
+  During tab transitions, the outgoing posters remain visible until the screen leaves;
+  selecting the current tab again does not reset its navigation.
 
 - Home, Movies, Series, Groups and Collections do not repeat the selected tab name
   above their content. Home row headings and individual group/collection detail
@@ -140,8 +180,3 @@ native group list and paged member routes using the generated Swift client.
   Shared collection and Jellyfin tests guard existing behavior.
 - Build tvOS with Xcode and exercise focus, back navigation, tab switching,
   full synopsis layout and technical-detail sheet navigation, and visual fallbacks in the simulator.
-- Check the Series tab icon in both appearances while unselected, focused, and
-  selected, including returning focus to the content and switching to another tab.
-  Its tint must follow the native tab label and remain visible against the tab background.
-- Validate real artwork, pairing QR scanning, playback, Siri Remote focus, and
-  accessibility on Apple TV against a Core-managed instance before acceptance.

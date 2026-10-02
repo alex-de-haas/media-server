@@ -60,13 +60,15 @@ public final class PlaybackService {
     /// The copy to play.
     ///
     /// A viewer who picked a version gets its exact verdict, including pending or missing.
-    /// Otherwise the first copy the server said it could
-    /// deliver, because a title can hold a 4K copy this device cannot open beside a 1080p one it can.
+    /// Otherwise the first playable copy in sourceOrder (the title's default-first order),
+    /// or server response order when none is supplied. A title can hold a 4K copy this
+    /// device cannot open beside a 1080p one it can.
     ///
     /// An explicit choice never falls back to another copy, even when that other copy plays.
     public func plan(
         for itemId: String,
         preferring mediaSourceId: String? = nil,
+        sourceOrder: [String] = [],
         audioStreamId: String? = nil,
         subtitleStreamId: String? = nil,
         subtitlesOff: Bool = false
@@ -74,7 +76,7 @@ public final class PlaybackService {
         let plans = try await plans(
             for: itemId, audioStreamId: audioStreamId, subtitleStreamId: subtitleStreamId,
             subtitlesOff: subtitlesOff)
-        return PlaybackPlan.select(from: plans, preferring: mediaSourceId)
+        return PlaybackPlan.select(from: plans, preferring: mediaSourceId, sourceOrder: sourceOrder)
     }
 
     /// Opens a playback session. The id it returns is what progress and stop are reported against.

@@ -31,6 +31,9 @@ struct TitleView: View {
     @State private var detailRetry = 0
     // Nil keeps automatic playback selection until the viewer chooses a version.
     @State private var chosenVersion: String?
+    @State private var automaticVersion: String?
+    @State private var selectionFailed = false
+    private var selectedVersion: String? { chosenVersion ?? automaticVersion }
     @State private var showsTechnicalDetails = false
     @FocusState private var focusedPlayPosition: Double?
 
@@ -98,6 +101,19 @@ struct TitleView: View {
             for await connected in library.indexing.connections() {
                 guard !Task.isCancelled else { break }
                 if connected { await refresh() }
+            }
+        }
+        .task(id: detail) {
+            guard let detail, !detail.isSeries, chosenVersion == nil else { return }
+            automaticVersion = nil
+            selectionFailed = false
+            do {
+                let answer = try await playback.plan(for: itemID, sourceOrder: detail.versions.map(\.id))
+                guard !Task.isCancelled, playing == nil else { return }
+                automaticVersion = answer.mediaSourceId
+            } catch {
+                guard !Task.isCancelled else { return }
+                selectionFailed = true
             }
         }
         .fullScreenCover(item: $playing) { stream in
@@ -221,7 +237,9 @@ struct TitleView: View {
         do {
             // The version the viewer picked, not whichever the server listed first. A picker that
             // changes what is listed and not what happens is worse than no picker at all.
-            let answer = try await playback.plan(for: itemID, preferring: chosenVersion)
+            let answer = try await playback.plan(for: itemID, preferring: chosenVersion,
+                                                 sourceOrder: detail.versions.map(\.id))
+            automaticVersion = answer.mediaSourceId
             plan = answer
 
             guard case .play(let stream) = answer else { return }
@@ -361,14 +379,22 @@ struct TitleView: View {
                 } else { refusalNotice(refusal) }
             }
 
-            if let version = detail.versions.first(where: { $0.id == chosenVersion }) ?? detail.versions.first {
+            if !detail.versions.isEmpty {
                 VStack(alignment: .leading, spacing: 20) {
                     versions(detail.versions)
-                    Button("Audio, subtitles & file details") {
-                        showsTechnicalDetails = true
+                    if selectedVersion == nil {
+                        Text(selectionFailed
+                             ? "Choose a version, or press Play to retry automatic selection."
+                             : "Checking playback version…")
+                            .font(.callout).foregroundStyle(.secondary)
                     }
-                    .sheet(isPresented: $showsTechnicalDetails) {
-                        tracks(version)
+                    if let version = detail.versions.first(where: { $0.id == selectedVersion }) {
+                        Button("Audio, subtitles & file details") {
+                            showsTechnicalDetails = true
+                        }
+                        .sheet(isPresented: $showsTechnicalDetails) {
+                            tracks(version)
+                        }
                     }
                 }
                 .padding(.top, 20)
@@ -468,7 +494,7 @@ struct TitleView: View {
                     chosenVersion = version.id
                 } label: {
                     HStack(spacing: 20) {
-                        Image(systemName: version.id == chosenVersion ? "checkmark.circle.fill" : "circle")
+                        Image(systemName: version.id == selectedVersion ? "checkmark.circle.fill" : "circle")
                         VStack(alignment: .leading, spacing: 10) {
                             Text(version.versionName.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } ?? "Original")
                             indexingIndicator(version.id, snapshot: version.indexing)
@@ -486,7 +512,7 @@ struct TitleView: View {
                     .padding(.vertical, 8)
                 }
                 .buttonStyle(.bordered)
-                .accessibilityValue(version.id == chosenVersion ? "Selected for playback" : "")
+                .accessibilityValue(version.id == selectedVersion ? "Selected for playback" : "")
             }
         }
     }
