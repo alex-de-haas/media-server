@@ -1,7 +1,7 @@
 # Apple Client Visual Design and Collections
 
 Created: 2026-09-06
-Updated: 2026-10-01
+Updated: 2026-10-02
 
 Collections reload through the store’s screen-appearance handler whenever the
 collection screen appears. The unsupported-server
@@ -143,9 +143,12 @@ On 2026-10-01, after testing the interface on Apple TV and reporting the version
 checkmark, Collections tab-bar and tab-navigation issues, the owner confirmed that
 the corrected behavior works and explicitly accepted the visual-design feature
 for closure. The incoming-tab reset also resolves the reported poster flicker.
-This is owner-reported device acceptance; individual QR-expiry, accessibility and
-appearance-matrix results were not separately recorded. These scenarios remain
-part of the regression expectations below rather than being claimed as agent-run tests.
+On 2026-10-02, the owner additionally confirmed light/dark backdrops and previews
+and HDR/Dolby Vision caption readability. The owner explicitly removed the remaining
+QR pairing/expiry, accessibility (including VoiceOver, increased contrast and Reduce
+Motion), and detailed device-rendering acceptance gates from this feature's scope
+and requested closure without another plan or TODO. Those unperformed checks are
+waived, not recorded as passed. This closes the plan under the owner's revised scope.
 
 The acceptance fixes target Apple client 0.16.1; the runtime manifest is unchanged.
 `swift test --package-path src/apple/MediaKit --disable-automatic-resolution`
@@ -177,8 +180,3 @@ window-access timeouts; the final device confirmation comes from the owner.
   Shared collection and Jellyfin tests guard existing behavior.
 - Build tvOS with Xcode and exercise focus, back navigation, tab switching,
   full synopsis layout and technical-detail sheet navigation, and visual fallbacks in the simulator.
-- Check the Series tab icon in both appearances while unselected, focused, and
-  selected, including returning focus to the content and switching to another tab.
-  Its tint must follow the native tab label and remain visible against the tab background.
-- Validate real artwork, pairing QR scanning, playback, Siri Remote focus, and
-  accessibility on Apple TV against a Core-managed instance before acceptance.
