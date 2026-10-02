@@ -7,9 +7,12 @@ import SwiftUI
 /// SSD or the spinning disk is an operator's concern, not a viewer's. `catalogId` travels on every item,
 /// so a filter can be laid over this later without touching how any of it is loaded.
 struct LibraryView: View {
+    private enum TabID: Hashable { case home, movies, series, groups, collections, settings }
     let session: ServerSession
     let pairing: PairingSession
     @State private var library: LibraryStore
+    @State private var selectedTab = TabID.home
+    @State private var navigationGeneration: [TabID: Int] = [:]
     @Namespace private var libraryFocus
     @FocusState private var focusedMovie: String?
 
@@ -20,17 +23,29 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        TabView {
-            Tab("Home", systemImage: "house") {
+        TabView(selection: Binding(
+            get: { selectedTab },
+            set: { next in
+                guard next != selectedTab else { return }
+                // Reset the incoming stack in the same update that selects it. The outgoing
+                // view keeps its artwork and layout intact throughout the tab transition.
+                navigationGeneration[next, default: 0] += 1
+                selectedTab = next
+            }
+        )) {
+            Tab("Home", systemImage: "house", value: TabID.home) {
                 NavigationStack { HomeView(session: session, library: library) }
+                    .id(navigationGeneration[.home, default: 0])
             }
 
-            Tab("Movies", systemImage: "film") {
+            Tab("Movies", systemImage: "film", value: TabID.movies) {
                 shelf(library.movies, empty: "No films yet.")
+                    .id(navigationGeneration[.movies, default: 0])
             }
 
-            Tab {
+            Tab(value: TabID.series) {
                 shelf(library.series, empty: "No series yet.")
+                    .id(navigationGeneration[.series, default: 0])
             } label: {
                 Label {
                     Text("Series")
@@ -42,20 +57,22 @@ struct LibraryView: View {
                 }
             }
 
-            Tab("Groups", systemImage: "folder") {
+            Tab("Groups", systemImage: "folder", value: TabID.groups) {
                 NavigationStack { GroupsView(session: session, library: library) }
+                    .id(navigationGeneration[.groups, default: 0])
             }
 
-            Tab("Collections", systemImage: "square.stack") {
+            Tab("Collections", systemImage: "square.stack", value: TabID.collections) {
                 NavigationStack {
                     CollectionsView(session: session, library: library)
                 }
+                .id(navigationGeneration[.collections, default: 0])
             }
 
             // Sign out and the dynamic-range override live here. They were on the screen this replaced,
             // and a viewer with a dark picture and no way to change server or force SDR is worse off
             // than one who could never browse.
-            Tab("Settings", systemImage: "gearshape") {
+            Tab("Settings", systemImage: "gearshape", value: TabID.settings) {
                 SettingsView(paired: session.paired, pairing: pairing)
             }
         }

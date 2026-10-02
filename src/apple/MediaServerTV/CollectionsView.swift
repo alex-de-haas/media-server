@@ -79,11 +79,11 @@ private struct CollectionDetailView: View {
     var body: some View {
         ScrollView {
             if let detail {
-                VStack(alignment: .leading, spacing: 50) {
+                VStack(alignment: .leading, spacing: 32) {
                     VStack(alignment: .leading, spacing: 16) {
                         Text(detail.name).font(.system(size: 64, weight: .bold))
                         Text("\(detail.items.count) movies · In release order").foregroundStyle(.secondary)
-                    }.padding(.vertical, 70)
+                    }.padding(.vertical, 24)
                     LibraryPosterGrid(items: detail.items, library: library, loader: session.artwork,
                                       playback: PlaybackService(session: session))
                 }.padding(CinemaStyle.inset)
@@ -95,6 +95,7 @@ private struct CollectionDetailView: View {
                 }.padding(CinemaStyle.inset)
             } else { ProgressView().padding(120) }
         }
+        .toolbarVisibility(.visible, for: .tabBar)
         .background(alignment: .top) {
             CinemaBackdrop(url: detail?.backdropPath.flatMap { URL(string: $0, relativeTo: library.server) },
                            loader: session.artwork).frame(height: 700).ignoresSafeArea()

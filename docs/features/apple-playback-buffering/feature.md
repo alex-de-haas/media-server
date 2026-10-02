@@ -1,7 +1,7 @@
 # Apple Playback Buffering
 
 Created: 2026-09-22
-Updated: 2026-09-22
+Updated: 2026-10-02
 
 ## Behavior
 
@@ -90,9 +90,23 @@ layout compact; cache-specific rows disappear on the native path.
 An old open-ended request is not necessarily stuck, and a cached next byte does
 not prove that every needed sample is available. These figures support diagnosis;
 they do not classify the cause automatically. A photograph after a freeze can
-capture its retained snapshot. The [plan](plan.md) tracks the outstanding user
-test on the affected Apple TV; macOS tests and a tvOS build do not establish that
-the original playback interruption is fixed.
+capture its retained snapshot.
+
+## Device experiment outcome
+
+On 2026-10-02, the owner reported that the buffers work on the device but
+occasional playback freezes still occur. This completes the bounded buffering
+experiment with a remaining playback problem, not evidence that caching eliminates
+stalls. The report does not include exact client/server versions, per-mode results
+or diagnostic snapshots, and does not establish which component causes the freezes.
+The owner also reports occasional audio loss while video continues; seeking about
+ten seconds restores sound, including at the same position on replay. Severe freezes
+can end with a dark screen and resumed playback, while shorter hitches clear by
+themselves. Their causes and any relationship remain unconfirmed.
+
+At the owner's direction, root-cause investigation and subsequent fixes are tracked
+separately in the [playback stalls and audio loss investigation](../apple-playback-stall-investigation/plan.md),
+which is On Hold. The cache implementation and diagnostics remain available.
 
 ## Testing Expectations
 

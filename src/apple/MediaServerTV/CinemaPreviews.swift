@@ -18,7 +18,9 @@ private struct CinemaPreviewTransport: ClientTransport {
         }
         let cards = (0..<3).map(card).joined(separator: ",")
         let json: String
-        if path.contains("/home/resume") {
+        if path.contains("/playback/resolve") {
+            json = #"{"itemId":"preview","sources":[{"mediaSourceId":"source-0","decision":"DirectPlay","url":"/preview.mp4"},{"mediaSourceId":"source-1","decision":"DirectPlay","url":"/alternate.mp4"}]}"#
+        } else if path.contains("/home/resume") {
             json = #"[{"id":"movie-0","kind":"Movie","navId":"movie-0","navKind":"Movie","title":"The Long Journey Across the Silent Northern Sea","userData":{"key":"0","playbackPositionTicks":25350000000,"playCount":0,"isFavorite":false,"played":false}}]"#
         } else if path.contains("/home/nextup") {
             json = #"[{"id":"episode-2","kind":"Episode","navId":"series-0","navKind":"Series","title":"The Northern Sea","subtitle":"S01E02 · The Lighthouse"}]"#

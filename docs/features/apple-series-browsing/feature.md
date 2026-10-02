@@ -1,7 +1,7 @@
 # Apple Series Browsing
 
 Created: 2026-09-08
-Updated: 2026-09-09
+Updated: 2026-10-01
 
 The tvOS series detail screen presents a horizontal season selector above a
 horizontal rail of episode cards. Focusing or selecting a season updates the rail
@@ -74,6 +74,15 @@ it through the catalog's Refresh metadata action. There is no automatic full
 library re-enrichment at upgrade. A provider without episode support returns no
 episode metadata instead of copying the whole show's title and artwork.
 
+## Device acceptance
+
+On 2026-10-01, the owner confirmed that the Apple TV series-browsing acceptance
+checklist passes: catalog metadata refresh provides episode-specific stills and
+synopses, season navigation and episode playback work, audio/subtitle selection
+works, resume persists, and returning restores the selected season and episode.
+This is owner-reported physical-device acceptance; exact client/server versions
+and the tested series were not recorded.
+
 ## Testing Expectations
 
 - `NativeEpisodeTests`: route authentication/public-surface metadata, series/season
@@ -89,5 +98,6 @@ episode metadata instead of copying the whole show's title and artwork.
 - Build the tvOS target and run `--cinema-preview --series-preview` in a simulator
   to exercise the three-season, 18-episode fixture, horizontal focus, episode
   details, source controls and Back restoration.
-- Real-device playback, resume persistence and audio/subtitle acceptance remain
-  tracked in [the plan](plan.md); simulator checks do not establish those results.
+- Verify real-device playback, resume persistence, audio/subtitle selection,
+  episode-specific metadata after catalog refresh, and season/card focus restoration
+  on Apple TV; simulator checks alone do not establish those results.

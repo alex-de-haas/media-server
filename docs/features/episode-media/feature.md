@@ -1,7 +1,7 @@
 # Episode Media
 
 Created: 2026-09-08
-Updated: 2026-09-22
+Updated: 2026-10-01
 
 An episode has the media surface a movie has — its versions, the tracks inside
 them, the sidecars beside them, and every conversion the
@@ -137,7 +137,7 @@ were never probed carries none.
   the row survives at all is a question of removal semantics, shaped in
   [file-directory-management](../file-directory-management/plan.md).
 - Extras have no surface; nothing here adds one. The Apple client's episode screens
-  are [apple-series-browsing](../apple-series-browsing/plan.md)'s.
+  are [apple-series-browsing](../apple-series-browsing/feature.md)'s.
 - Log watch stays on movies; a whole title moves between catalogs, never one episode.
 
 ## Testing Expectations

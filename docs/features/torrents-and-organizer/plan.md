@@ -2,7 +2,7 @@
 
 Status: In Progress
 Created: 2026-09-23
-Updated: 2026-09-24
+Updated: 2026-10-01
 
 ## Owner direction and scope
 
@@ -158,13 +158,27 @@ active seeds are protected; ending a seed is the explicit Activity action above.
   Core-managed instance; run disposable filesystem regressions inside its Docker container.
 - [x] Complete operator acceptance on the local development instance; the owner
   confirmed that the feature works on 2026-09-24 after testing the updated runtime.
-- [ ] Complete real-engine acceptance with disposable media on a Windows/Docker
-  fixture: validate live seeding during/after publication, stop during a long copy,
-  locked-file cleanup retry and process restart, and playback of the copied file.
+- [x] Confirm the ordinary retained-torrent publication and stop/cleanup flow with
+  the operator: copying publishes the file while the torrent remains active;
+  stopping removes the torrent original and preserves the library copy. The owner
+  reported this result on 2026-10-01.
+- [ ] Complete the remaining real-engine acceptance with disposable media on a
+  Windows/Docker fixture: verify live seeding during/after publication on that
+  fixture, stop during a long copy, locked-file cleanup retry and process restart,
+  compare source/copy hashes and verify playback of the copied file after teardown.
   Automated tests cover the filesystem and lifecycle boundaries with a controlled
   engine; no separate Windows fixture is available, and production fault injection
   remains excluded by the approved scope.
 - [ ] After that acceptance passes, remove this plan and regenerate the docs index.
+
+## Operator verification on 2026-10-01
+
+The owner reports that torrent activity continues, the file is copied and appears
+in the library, and stopping the torrent removes its original while the library
+file remains. This confirms the ordinary publication/teardown flow. The report
+does not specify the operating system/runtime, playback or hash checks, stopping
+during copying, file-lock recovery or process restart; the remaining fixture
+acceptance above is therefore still open.
 
 ## Verification recorded on 2026-09-23
 
