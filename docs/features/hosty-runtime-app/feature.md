@@ -292,7 +292,9 @@ The `web` UI runs inside the Hosty Shell sandboxed iframe. It must:
 - use relative URLs or `HOSTY_CORE_PUBLIC_ORIGIN`, never hard-coded origins;
 - keep client routing compatible with `ui.entrypoint.path`;
 - avoid reading Host cookies, Host local storage, or the parent DOM;
-- avoid top-level redirects, frame busting, and popup auth flows;
+- avoid embedded top-level redirects and frame busting; use the SDK Core popup
+  opened directly by a user click, with SDK validation of message source, origin
+  and state;
 - validate SignalR transport (WebSocket, SSE, long-polling fallback) through the
   Core-managed runtime, because behavior can depend on the embed route.
 
@@ -307,7 +309,8 @@ pages) carries the SDK's `hosty-shell-chrome` class and is hidden by an unlayere
 CSS rule whenever the mode is not `standalone`, because a surrounding shell already
 renders that navigation. Session recovery keeps branching on the structural frame
 heuristic (`detectLaunchMode`) when choosing between the embedded
-`hosty:auth-required` postMessage flow and the standalone Core `/open` redirect.
+SDK Core popup (`web_message`) flow and the standalone guarded Core redirect.
+Shell does not mint or exchange app grants on behalf of the frame.
 
 ## Capabilities
 
@@ -346,7 +349,10 @@ servers can validate UI and business logic only.
   the tab bar while `?hosty_launch=embedded` hides it, and that the parameter is
   cleaned from the URL.
 
-- Cover code-exchange effect replay with a delayed response: only one exchange
-  occurs, the active effect reveals the page, and unmounted effects stay inactive.
-  Verify Dashboard → Home, Dashboard → Movies, and returning to the first page
-  through the Core-managed development runtime without a second page click.
+- Cover the app identity probe status, recovery parameters and activity metadata,
+  plus bearer transport for JSON and SSE requests and rejection of other origins.
+  The SDK owns code-exchange deduplication and effect-replay coverage.
+- Verify the embedded Core popup returns access to the original frame when app
+  cookies are blocked. Check Dashboard → Home, Dashboard → Movies, and returning
+  to the first page through the Core-managed runtime without another sign-in.
+  A full reload may require sign-in again because the fallback grant is memory-only.
