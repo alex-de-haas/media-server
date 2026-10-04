@@ -1,31 +1,5 @@
-// Client-side API helpers. Requests go to the same-origin BFF (`/api/...`), which proxies to the
-// backend. The identity cookie rides along via `credentials: "include"`; when the cross-site
-// cookie is blocked we additionally send the in-memory/sessionStorage bearer fallback.
-
-const STORAGE_KEY = "hosty_identity";
-let bearerToken: string | null = null;
-
-export function setBearerToken(token: string | null): void {
-  bearerToken = token;
-  if (typeof window === "undefined") {
-    return;
-  }
-  if (token) {
-    window.sessionStorage.setItem(STORAGE_KEY, token);
-  } else {
-    window.sessionStorage.removeItem(STORAGE_KEY);
-  }
-}
-
-export function getBearerToken(): string | null {
-  if (bearerToken) {
-    return bearerToken;
-  }
-  if (typeof window !== "undefined") {
-    bearerToken = window.sessionStorage.getItem(STORAGE_KEY);
-  }
-  return bearerToken;
-}
+// SDK transport keeps the app grant in memory and supplies the cookie-free iframe fallback.
+import { appFetch } from "@hosty-sdk/app/browser-auth";
 
 export class ApiError extends Error {
   constructor(
@@ -42,13 +16,7 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers);
-  const token = getBearerToken();
-  if (token && !headers.has("authorization")) {
-    headers.set("authorization", `Bearer ${token}`);
-  }
-
-  const response = await fetch(path, { ...init, headers, credentials: "include" });
+  const response = await appFetch(path, init);
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     const parsed = parseJsonBody(body);

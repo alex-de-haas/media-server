@@ -100,7 +100,7 @@ describe("resolveHostSession", () => {
 
     expect(await resolveHostSession("hostyg_x")).toEqual({
       status: "active",
-      session: { userId: "user_1", email: "user@example.com", displayName: "User", role: "admin" },
+      session: { userId: "user_1", email: "user@example.com", displayName: "User", role: "admin", activeUntil: null, activityRequired: false },
     });
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];

@@ -8,9 +8,8 @@ import { Activity, CalendarDays, Film, Folder, Home, Layers, Settings, Tv, type 
 import { apiJson, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RealtimeBridge } from "@/components/realtime-bridge";
-import { SessionRecovery } from "@/components/session-recovery";
 import type { SessionFailureStatus } from "@/lib/host-auth";
-import { readRecoveryParams, SHELL_DUPLICATED_CHROME_CLASS } from "@hosty-sdk/app";
+import { SHELL_DUPLICATED_CHROME_CLASS } from "@hosty-sdk/app";
 
 export interface Session {
   userId: string;
@@ -48,16 +47,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (session.isError) {
     const failure = sessionFailureStatus(session.error);
     if (failure) {
-      const recovery = readRecoveryParams(session.error instanceof ApiError ? session.error.body : null);
-      return (
-        <SessionRecovery
-          status={failure}
-          // The session route always sends the app id; the literal mirrors hostyServerEnv's own
-          // fallback for the pathological case of a failure body without it.
-          appId={recovery.appId ?? "com.haas.media-server"}
-          corePublicOrigin={recovery.corePublicOrigin}
-        />
-      );
+      const messages = {
+        forbidden: "You are signed in to Hosty but are not allowed to use this app.",
+        unavailable: "Can’t reach Hosty right now. Try again shortly.",
+        misconfigured: "This app is not configured correctly on the host. Contact the administrator.",
+        expired: "Renew access through Hosty to continue.",
+        "not-present": "Renew access through Hosty to continue.",
+      };
+      return <ShellMessage>{messages[failure]}</ShellMessage>;
     }
     return <ShellMessage>Could not load your session. Try reloading.</ShellMessage>;
   }
