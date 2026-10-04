@@ -43,7 +43,7 @@ test("non-admin cannot see or use Catalogs", async ({ page }) => {
 test("an expired session without a reachable Core shows the sign-in card", async ({ page }) => {
   await setupApp(page, { role: null });
   await page.goto("/");
-  await expect(page.getByText("Your Hosty session ended.")).toBeVisible();
+  await expect(page.getByText("Sign in through Hosty to use this app.")).toBeVisible();
   await expect(page.getByText(/machine running Hosty/)).toBeVisible();
 });
 

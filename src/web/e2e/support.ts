@@ -82,10 +82,11 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
 
   await page.route("**/api/auth/session", (route) =>
     role
-      ? route.fulfill({ json: session(role) })
+      ? route.fulfill({ json: { ...session(role), status: "active", recovery: { appId: "com.haas.media-server", corePublicOrigin: mock.recoveryOrigin ?? null } } })
       : route.fulfill({
           status: mock.sessionStatus ?? 401,
           json: {
+            status: mock.sessionStatus === 403 ? "forbidden" : "expired",
             error: mock.sessionStatus === 403 ? "forbidden" : "unauthenticated",
             recovery: {
               appId: "com.haas.media-server",

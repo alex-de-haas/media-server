@@ -24,6 +24,8 @@ export interface HostSession {
   email: string | null;
   displayName: string | null;
   role: AppRole;
+  activeUntil?: string | null;
+  activityRequired?: boolean;
 }
 
 export type SessionFailureStatus = AppSessionFailureStatus;
@@ -59,6 +61,8 @@ export async function resolveHostSession(token: string | null): Promise<SessionR
       // The app's own role mapper applied to the raw host role: no assertion needed, and
       // an unexpected SDK appRole value can never leak into the session contract.
       role: mapHostRole(resolution.identity.hostRole),
+      ...(resolution.identity.activeUntil !== undefined ? { activeUntil: resolution.identity.activeUntil } : {}),
+      ...(resolution.identity.activityRequired !== undefined ? { activityRequired: resolution.identity.activityRequired } : {}),
     },
   };
 }

@@ -2,7 +2,7 @@
 // the native EventSource) so we can attach the identity bearer — EventSource can't set headers, and the
 // Shell embeds us cross-site where the cookie alone may be blocked. Reconnects with backoff.
 
-import { getBearerToken } from "@/lib/api";
+import { appFetch } from "@hosty-sdk/app/browser-auth";
 
 export interface SseHandlers {
   onEvent: (event: string, data: unknown) => void;
@@ -23,15 +23,12 @@ export function openEventStream(path: string, handlers: SseHandlers): () => void
     }
 
     controller = new AbortController();
-    const token = getBearerToken();
     try {
-      const response = await fetch(path, {
+      const response = await appFetch(path, {
         method: "GET",
         headers: {
           accept: "text/event-stream",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
-        credentials: "include",
         cache: "no-store",
         signal: controller.signal,
       });

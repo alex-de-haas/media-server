@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-06-15
-Updated: 2026-09-19
+Updated: 2026-10-04
 
 ## Description
 
@@ -130,7 +130,10 @@ Two independent auth domains.
 
 **UI (Core-owned).** The browser only ever talks to the `web` origin.
 
-1. Shell opens `web` with a one-time `?code`.
+1. Shell opens the app origin. The SDK `AppIdentityBridge` probes `/api/auth/session`.
+   When embedded and unauthenticated, its sign-in button opens Core with `responseMode=web_message`.
+   Core returns a single-use code to the initiating frame, with popup source, origin and state
+   checks. Standalone recovery uses a guarded redirect through Core and a one-time `?code`.
 2. `web` exchanges it at `POST {HOSTY_CORE_ORIGIN}/api/auth/apps/token`.
 3. `web` stores the returned app identity token in an app-origin HttpOnly cookie.
    Derive cookie attributes from the effective protocol: `SameSite=None; Secure`
@@ -138,7 +141,7 @@ Two independent auth domains.
    embedded in a cross-site Shell iframe, browser privacy controls (Safari ITP,
    third-party cookie deprecation) may block this cookie. The session must
    therefore also support a header-based fallback: the browser keeps the identity
-   token in memory / `sessionStorage` and sends it as `Authorization: Bearer` on
+   token in memory only and sends it as `Authorization: Bearer` on
    requests to `web`. Partitioned cookies (CHIPS) may be used where supported, but
    the header fallback is the robust cross-browser path.
 4. `web` revalidates via `POST {HOSTY_CORE_ORIGIN}/api/auth/apps/revalidate` with
@@ -148,13 +151,16 @@ Two independent auth domains.
    `X-Docker-Host-Identity` header.) `api` never trusts unsigned or client-set
    headers or cookies.
 
-The web provider shares one code-exchange promise across React effect replays.
-Each active effect waits for that exchange before rendering the app, including
-the first page opened from Shell in development Strict Mode. An unmounted effect
-does not update readiness, and replaying an effect does not consume the code twice.
+The SDK owns code exchange and recovery, including React Strict Mode effect replay. App content
+mounts only after the bridge validates the session. JSON API requests and SSE connections use
+SDK `appFetch`, sharing the same origin-bound in-memory grant and refusing credential-bearing
+redirects. The app does not ask Shell to mint credentials or store a bearer in sessionStorage.
+Signing in in another tab is not used to authenticate the embedded frame.
 
-Page-to-page navigation inside the open app uses the app-origin session cookie,
-so the app does not re-exchange a code on every Shell click.
+The session probe returns a structured status, recovery origins and active-session metadata.
+The bridge keeps authenticated content mounted during activity renewal so a popup can restore
+access without discarding the current page. Navigation within the app retains the grant; a full
+reload can require a new sign-in when the browser blocks third-party cookies.
 
 After validation, Media Server upserts an internal app user in SQLite. Hosty
 admins map to Media Server `admin`; other assigned Hosty users map to Media
@@ -286,7 +292,9 @@ The `web` UI runs inside the Hosty Shell sandboxed iframe. It must:
 - use relative URLs or `HOSTY_CORE_PUBLIC_ORIGIN`, never hard-coded origins;
 - keep client routing compatible with `ui.entrypoint.path`;
 - avoid reading Host cookies, Host local storage, or the parent DOM;
-- avoid top-level redirects, frame busting, and popup auth flows;
+- avoid embedded top-level redirects and frame busting; use the SDK Core popup
+  opened directly by a user click, with SDK validation of message source, origin
+  and state;
 - validate SignalR transport (WebSocket, SSE, long-polling fallback) through the
   Core-managed runtime, because behavior can depend on the embed route.
 
@@ -301,7 +309,8 @@ pages) carries the SDK's `hosty-shell-chrome` class and is hidden by an unlayere
 CSS rule whenever the mode is not `standalone`, because a surrounding shell already
 renders that navigation. Session recovery keeps branching on the structural frame
 heuristic (`detectLaunchMode`) when choosing between the embedded
-`hosty:auth-required` postMessage flow and the standalone Core `/open` redirect.
+SDK Core popup (`web_message`) flow and the standalone guarded Core redirect.
+Shell does not mint or exchange app grants on behalf of the frame.
 
 ## Capabilities
 
@@ -340,7 +349,10 @@ servers can validate UI and business logic only.
   the tab bar while `?hosty_launch=embedded` hides it, and that the parameter is
   cleaned from the URL.
 
-- Cover code-exchange effect replay with a delayed response: only one exchange
-  occurs, the active effect reveals the page, and unmounted effects stay inactive.
-  Verify Dashboard → Home, Dashboard → Movies, and returning to the first page
-  through the Core-managed development runtime without a second page click.
+- Cover the app identity probe status, recovery parameters and activity metadata,
+  plus bearer transport for JSON and SSE requests and rejection of other origins.
+  The SDK owns code-exchange deduplication and effect-replay coverage.
+- Verify the embedded Core popup returns access to the original frame when app
+  cookies are blocked. Check Dashboard → Home, Dashboard → Movies, and returning
+  to the first page through the Core-managed runtime without another sign-in.
+  A full reload may require sign-in again because the fallback grant is memory-only.
