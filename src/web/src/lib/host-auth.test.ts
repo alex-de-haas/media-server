@@ -54,28 +54,28 @@ describe("resolveHostSession", () => {
 
   it("classifies a missing service token as misconfigured, not a session problem", async () => {
     delete process.env.HOSTY_APP_SERVICE_TOKEN;
-    expect(await resolveHostSession("hostyg_x")).toEqual({ status: "misconfigured" });
+    expect(await resolveHostSession("hostyg_x")).toEqual({ status: "misconfigured", error: { code: "app_service_token_missing" } });
   });
 
   it("maps Core 401 to expired (recoverable)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(401, { code: "token_expired" })));
-    expect(await resolveHostSession("hostyg_x")).toEqual({ status: "expired" });
+    expect(await resolveHostSession("hostyg_x")).toEqual({ status: "expired", error: { code: "token_expired" } });
   });
 
   it("maps Core 403 to forbidden (terminal)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(403, { code: "user_disabled" })));
-    expect(await resolveHostSession("hostyg_x")).toEqual({ status: "forbidden" });
+    expect(await resolveHostSession("hostyg_x")).toEqual({ status: "forbidden", error: { code: "user_disabled" } });
   });
 
   it("maps Core 5xx and network failures to unavailable (transient)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(500, { code: "boom" })));
-    expect(await resolveHostSession("hostyg_a")).toEqual({ status: "unavailable" });
+    expect(await resolveHostSession("hostyg_a")).toEqual({ status: "unavailable", error: { code: "boom" } });
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new TypeError("fetch failed");
     }));
-    expect(await resolveHostSession("hostyg_b")).toEqual({ status: "unavailable" });
+    expect(await resolveHostSession("hostyg_b")).toEqual({ status: "unavailable", error: { code: "app_session_revalidation_error" } });
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>", { status: 200 })));
-    expect(await resolveHostSession("hostyg_c")).toEqual({ status: "unavailable" });
+    expect(await resolveHostSession("hostyg_c")).toEqual({ status: "unavailable", error: { code: "core_response_invalid" } });
   });
 
   it("treats a token minted for a different app as forbidden", async () => {
@@ -83,7 +83,7 @@ describe("resolveHostSession", () => {
       "fetch",
       vi.fn(async () => jsonResponse(200, { ...activePayload, appId: "other.app" })),
     );
-    expect(await resolveHostSession("hostyg_x")).toEqual({ status: "forbidden" });
+    expect(await resolveHostSession("hostyg_x")).toEqual({ status: "forbidden", error: { code: "app_identity_app_mismatch" } });
   });
 
   it("treats an active grant without a subject as expired (probe/auth-path consistency)", async () => {

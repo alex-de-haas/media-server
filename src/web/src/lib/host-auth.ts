@@ -32,7 +32,7 @@ export type SessionFailureStatus = AppSessionFailureStatus;
 
 export type SessionResolution =
   | { status: "active"; session: HostSession }
-  | { status: SessionFailureStatus };
+  | { status: SessionFailureStatus; error?: { code: string } };
 
 export function readIdentityToken(request: NextRequest): string | null {
   return readAppIdentityToken(request.headers, hostyAppConfig);
@@ -50,7 +50,10 @@ export function readSessionRecoveryParams() {
 export async function resolveHostSession(token: string | null): Promise<SessionResolution> {
   const resolution: AppSessionResolution = await resolveAppSession(token, hostyAppConfig);
   if (resolution.status !== "active") {
-    return { status: resolution.status };
+    return {
+      status: resolution.status,
+      ...(resolution.error ? { error: { code: resolution.error.code } } : {}),
+    };
   }
   return {
     status: "active",
