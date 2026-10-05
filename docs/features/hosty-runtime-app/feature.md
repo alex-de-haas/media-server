@@ -183,7 +183,12 @@ exchange and asynchronous recovery integration.
 
 The force-dynamic session probe awaits server-side recovery discovery and returns
 `appId`, `corePublicOrigin` and `appAuthProtocol` with its session status and activity
-metadata. Core `/api/auth/apps/protocol` discovery is uncached. Protocol 1 requires
+metadata. Failure responses retain the existing HTTP/status and string `error`
+contract and expose only the safe Core rejection code at `appSession.error.code`.
+The SDK clears rejected embedded grants from memory and sessionStorage after a
+probe; `reauth_required`, ordinary access denial and transient failures keep the grant.
+Upstream diagnostic messages are not included. Core `/api/auth/apps/protocol`
+discovery is uncached. Protocol 1 requires
 a definite metadata 404 followed by a valid running `hosty-core` status with a
 version below `0.120.0`; errors or malformed metadata fail closed. Once protocol 2
 is observed for a configured Core origin, transient failures or older metadata
