@@ -444,6 +444,10 @@ MCP tools in M6 (see [root](../../root.md) roadmap):
 All reads are scoped to the authenticated `AppUser`; the shared `TrackedTitle` /
 `TrackedRelease` data is joined in but never mutated on another user's behalf.
 
+## Links
+
+- [Watch-history calendar](../watch-history-calendar/feature.md)
+
 ## Testing Expectations
 
 Backend tests use xUnit and Imposter (mock the TMDb client). Required coverage:
@@ -478,7 +482,3 @@ Backend tests use xUnit and Imposter (mock the TMDb client). Required coverage:
 - No accidental cross-product read: the shared watchlist test context throws on EF's
   `MultipleCollectionIncludeWarning`, so a load that pulls two collections fails the
   suite until it opts into `AsSplitQuery()`.
-
-## Links
-
-- [Watch-history calendar](../watch-history-calendar/feature.md)

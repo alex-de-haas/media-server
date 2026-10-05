@@ -417,12 +417,9 @@ uses the `RowVersion` token to detect concurrent edits, so the reconciler and
 operator actions never double-drive the same item.
 
 `IngestStage` enumerates the v1 **processing** stages and is the persisted
-`IngestItem.Stage`. Acquisition stages, planned in [watchlist and discovery](../watchlist-and-discovery/plan.md), use the same `IPipelineStage`
-contract but are ordered before `Intake` via `Order` and operate on
-watchlist/release entities — they do not extend `IngestStage`, because an
-`IngestItem` only exists once acquisition hands a torrent to `Intake`. Stage
-ordering therefore lives on the stage (`Phase` + `Order`), not in the
-processing-only `IngestStage` enum.
+`IngestItem.Stage`. Stage ordering lives on the stage (`Phase` + `Order`), not in the
+`IngestStage` enum. No acquisition stage exists; its design is in the
+[watchlist and discovery plan](../watchlist-and-discovery/plan.md).
 
 ## Contract: IMetadataProvider
 
@@ -504,6 +501,10 @@ public interface ICatalogPathSandbox     // see file-directory-management / secu
 - `MediaSource`/`MediaStream` → `MediaSources[]`/`MediaStreams[]`.
 - `UserData` → `BaseItemDto.UserData`.
 
+## Links
+
+- [Watch-history calendar](../watch-history-calendar/feature.md)
+
 ## Testing Expectations
 
 Backend tests use xUnit and Imposter. Required coverage:
@@ -521,7 +522,3 @@ Backend tests use xUnit and Imposter. Required coverage:
 - `IMetadataProvider` multi-language fetch and candidate scoring (mock provider).
 - `ICatalogPathSandbox` containment and traversal/symlink rejection.
 - Credential lockout counters and token hashing.
-
-## Links
-
-- [Watch-history calendar](../watch-history-calendar/feature.md)

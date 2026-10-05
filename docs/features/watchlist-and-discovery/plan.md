@@ -79,6 +79,10 @@ flowchart LR
 - Release tracking already provides the per-user watchlist, the typed release schedule and the
   release calendar this plan builds on.
 - `IContentSource` and the acquisition entities below are not in the code yet.
+- Acquisition stages are designed to use the same `IPipelineStage` contract, ordered before `Intake` via
+  `Order` and operate on watchlist and release entities. They do not extend `IngestStage`, because
+  an `IngestItem` only exists once acquisition hands a torrent to `Intake`; stage ordering therefore
+  lives on the stage (`Phase` + `Order`), not in the processing-only `IngestStage` enum.
 
 ## Target Domain Additions
 

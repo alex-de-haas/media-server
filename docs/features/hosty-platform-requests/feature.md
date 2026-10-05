@@ -637,3 +637,11 @@ considered and rejected: it would rewrite ownership of the operator's media libr
   remove-with-data must keep working).
 - Existing installations with root-owned catalog roots have a documented migration
   or remain functional.
+
+## Testing Expectations
+
+- An entry marked Implemented names the Hosty version or date that shipped it, and Media Server's
+  use of it is covered by the owning feature's tests (storage mounts, backups, notifications,
+  native-client auth, secrets, service discovery).
+- When the platform ships or changes a requested capability, the entry's status and the consuming
+  feature document change in the same PR.

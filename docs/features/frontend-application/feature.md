@@ -210,6 +210,11 @@ route with retained metadata and personal controls, without Media or playback.
 See [Movie detail context](../movie-detail-context/feature.md) for access rules,
 correction actions, paging, and related-row behavior.
 
+## Links
+
+- [Watch-history calendar](../watch-history-calendar/feature.md)
+- [Catalogs](../catalogs/feature.md)
+
 ## Testing Expectations
 
 - Movie, series, and episode details omit player-launch and playback-link controls.
@@ -249,8 +254,3 @@ coverage:
   the seasons.
 - Series grid captions carrying the aggregated format badges, and none for a series
   with no probed episode.
-
-## Links
-
-- [Watch-history calendar](../watch-history-calendar/feature.md)
-- [Catalogs](../catalogs/feature.md)
