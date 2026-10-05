@@ -1,7 +1,10 @@
-# Torrents and Organizer
+---
+created: 2026-06-15
+updated: 2026-10-05
+summary: Torrents download through the external torrent-engine app and each file runs through one ingest pipeline into the catalog.
+---
 
-Created: 2026-06-15
-Updated: 2026-10-01
+# Torrents and Organizer
 
 ## Description
 
@@ -47,7 +50,7 @@ cross-app dependency that runs the BitTorrent client (MonoTorrent) VPN-isolated 
 its own container. Media Server drives it over the app's HTTP control API + SSE
 stream through `RemoteTorrentEngine` (the `ITorrentEngine` abstraction), discovered
 via the injected `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`. See
-[Torrent engine app](../../ideas/torrent-engine-app.md).
+[Torrent Engine](https://github.com/alex-de-haas/torrent-engine).
 
 Engine capabilities (driven through `ITorrentEngine`):
 
@@ -86,7 +89,7 @@ control API. All peer connectivity (the fixed TCP/UDP listen port, DHT/PEX/LSD, 
 encryption, port mapping) and the VPN tunnel + killswitch live in the `torrent-engine`
 app and are configured there. This also sidesteps the docker bridge-NAT throughput
 collapse that plagued the old in-process engine, by tunnelling all peer connections
-through a single VPN flow. See [Torrent engine app](../../ideas/torrent-engine-app.md).
+through a single VPN flow. See [Torrent Engine](https://github.com/alex-de-haas/torrent-engine).
 
 ### Engine health indicators
 

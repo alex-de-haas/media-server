@@ -1,7 +1,10 @@
-# Frontend Application
+---
+created: 2026-06-15
+updated: 2026-10-05
+summary: The Next.js web app embedded in Hosty Shell that acts as a backend-for-frontend for the api service.
+---
 
-Created: 2026-06-15
-Updated: 2026-09-30
+# Frontend Application
 
 ## Description
 
@@ -16,8 +19,7 @@ iframe-safe.
 
 Navigation is a **top tab bar**: primary tabs available to all users, with
 admin-only surfaces behind a right-aligned admin menu. Detail pages are push
-routes, not tabs. (Decisions recorded 2026-06-18; see the M3.5 milestone in
-`implementation-plan.md`.) The tab bar renders only in `standalone` launches;
+routes, not tabs. (Decisions recorded 2026-06-18.) The tab bar renders only in `standalone` launches;
 under a shell it is hidden as duplicated chrome — the shell renders the manifest
 `ui.navigation` pages instead (see the hosty-runtime-app feature's Launch Mode
 section).
@@ -250,6 +252,5 @@ coverage:
 
 ## Links
 
-- [Catalog library browsing idea](../../ideas/catalog-library-browsing.md)
 - [Watch-history calendar](../watch-history-calendar/feature.md)
 - [Catalogs](../catalogs/feature.md)

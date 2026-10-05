@@ -3,7 +3,7 @@ namespace MediaServer.Api.Configuration;
 /// <summary>
 /// Application settings injected by Hosty from the manifest <c>settings</c> block (as environment
 /// variables with the declared keys) plus the catalog-root mounts. Secrets and global toggles come
-/// from here, never the database (see <c>docs/features/domain-model.md</c>).
+/// from here, never the database (see <c>docs/features/domain-model/feature.md</c>).
 /// </summary>
 public sealed class MediaServerSettings
 {
@@ -45,7 +45,7 @@ public sealed class MediaServerSettings
     /// Base URL of the external <c>torrent-engine</c> app, injected as the cross-app dependency
     /// <c>HOSTY_DEPENDENCY_TORRENT_ENGINE_URL</c>. When set, downloading is delegated to that app over
     /// HTTP/SSE; when null, downloading is disabled (see <see cref="MediaServer.Api.Torrents.DisabledTorrentEngine"/>). The
-    /// engine is a required dependency — see <c>docs/ideas/torrent-engine-app.md</c>.
+    /// engine is a required dependency — see <c>docs/features/torrents-and-organizer/feature.md</c>.
     /// </summary>
     public string? TorrentEngineUrl { get; init; }
 
@@ -54,7 +54,7 @@ public sealed class MediaServerSettings
     /// <c>HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL</c>. When set, transcoding is delegated to that app over
     /// HTTP/SSE; when null, transcoding is disabled (see
     /// <see cref="MediaServer.Api.Transcoding.DisabledTranscodeEngine"/>). The engine is an optional
-    /// dependency — see <c>docs/ideas/transcode-engine-app.md</c>.
+    /// dependency — see <c>docs/features/convert-dialog/feature.md</c>.
     /// </summary>
     public string? TranscodeEngineUrl { get; init; }
 

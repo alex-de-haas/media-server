@@ -1,7 +1,10 @@
-# Metadata
+---
+created: 2026-06-15
+updated: 2026-09-27
+summary: Provider-agnostic metadata enrichment with TMDb as the first provider.
+---
 
-Created: 2026-06-15
-Updated: 2026-09-27
+# Metadata
 
 ## Description
 
@@ -147,7 +150,7 @@ link between items:
   franchise" only exists once a person/collection is deduplicated by provider
   identity into its own row and joined back to the items. Cast and crew are
   written to `Person` + `MediaItemPerson` on every enrich (see
-  [Domain model](../domain-model.md)); each `Person` is shared library-wide by
+  [Domain model](../domain-model/feature.md)); each `Person` is shared library-wide by
   `(Provider, ProviderId)`, and the join carries the per-item credit (character,
   job, billing order).
 

@@ -1,7 +1,10 @@
-# Hosty Runtime App
+---
+created: 2026-06-15
+updated: 2026-10-05
+summary: The Hosty manifest, runtime profiles, environment, identity, user directory and backups of Media Server.
+---
 
-Created: 2026-06-15
-Updated: 2026-10-04
+# Hosty Runtime App
 
 ## Description
 
@@ -82,8 +85,7 @@ network shared with guests it is now reachable by them.
   target** (`defaultRuntime: docker`). Unblocked now that Hosty Core provides the
   external host-path mount model for catalog roots (`externalMounts`, injected as
   `HOSTY_MOUNT_{KEY}`) and Cloudflare-tunnel ingress (see
-  [Storage and data](../storage-and-data/feature.md) and
-  [Implementation plan](../implementation-plan.md)).
+  [Storage and data](../storage-and-data/feature.md)).
 
 Keep the same service keys, endpoint keys, setting keys, data semantics, and UI
 navigation across profiles so switching runtime is reviewable and reversible.
@@ -106,7 +108,7 @@ by `RemoteTorrentEngine`. All peer connectivity, the raw listen port, and port
 mapping live in that app. When the dependency is unconfigured, a
 `DisabledTorrentEngine` keeps the rest of the app working (see
 [Torrents and organizer](../torrents-and-organizer/feature.md) and
-[Torrent engine app](../../ideas/torrent-engine-app.md)).
+[Torrent Engine](https://github.com/alex-de-haas/torrent-engine)).
 
 ## Runtime Environment
 
@@ -214,11 +216,7 @@ Next.js hot reload; API source edits need a restart with the current `dotnet run
 
 ## Sample Manifest
 
-The authoritative manifest is `manifest.json` at the repo root.
-[Implementation plan §4](../implementation-plan.md) keeps the original planning copy,
-now historical — it predates the torrent-engine extraction and still shows the
-removed raw `torrent` port and the `TORRENT_ENABLE_PORT_MAPPING` /
-`TORRENT_BIND_ADDRESS` settings. The real `app.0.1` schema uses **arrays** (not
+The authoritative manifest is `manifest.json` at the repo root. The real `app.0.1` schema uses **arrays** (not
 objects) for `services` and `endpoints`, a top-level `runtimeProfiles` list, and
 per-service `runtimes` keyed by profile key:
 

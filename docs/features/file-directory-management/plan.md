@@ -1,8 +1,11 @@
-# File and Directory Management
+---
+status: Draft
+created: 2026-09-08
+updated: 2026-09-08
+summary: Decide what happens to a movie or episode once its last version has been deleted.
+---
 
-Status: Draft
-Created: 2026-09-08
-Updated: 2026-09-08
+# File and Directory Management
 
 ## Goal
 

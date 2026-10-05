@@ -1,7 +1,10 @@
-# Watch-History Calendar
+---
+created: 2026-07-24
+updated: 2026-09-22
+summary: The calendar's Watched view, a screening diary over each user's play history.
+---
 
-Created: 2026-07-24
-Updated: 2026-09-22
+# Watch-History Calendar
 
 ## Description
 

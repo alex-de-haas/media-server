@@ -1,7 +1,10 @@
-# Catalogs
+---
+created: 2026-06-15
+updated: 2026-10-05
+summary: Operator-configured catalogs that drive parsing, target paths, naming, seeding policy and metadata language.
+---
 
-Created: 2026-06-15
-Updated: 2026-09-08
+# Catalogs
 
 ## Description
 
@@ -193,7 +196,7 @@ changing the canonical identity automatically.
 ## Scanning
 
 The database is the **source of truth**. Items are created by the pipeline's
-Publish stage (see [Automation pipeline](../automation-pipeline.md)). One scan
+Publish stage (see [Automation pipeline](../automation-pipeline/feature.md)). One scan
 syncs a catalog with its disk in both directions, always excluding `.incoming/`
 — see [Catalog maintenance](../catalog-maintenance/feature.md) for the whole
 action, including what it does about files that are gone:
@@ -256,7 +259,6 @@ Without a telemetry listener, no activities are allocated.
 
 ## Links
 
-- [Catalog library browsing idea](../../ideas/catalog-library-browsing.md)
 - [Frontend application](../frontend-application/feature.md)
 
 ## Card metadata reads

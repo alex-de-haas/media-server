@@ -1,7 +1,10 @@
-# MCP Tools
+---
+created: 2026-09-01
+updated: 2026-09-16
+summary: Media Server use cases as MCP tools, plus the agent skill that teaches the server's vocabulary.
+---
 
-Created: 2026-09-01
-Updated: 2026-09-16
+# MCP Tools
 
 This server's use cases as MCP tools, so an agent on the host can answer *"do I have this?"*,
 *"why has this not appeared?"*, *"get me this"*, and repair a bad identification without the

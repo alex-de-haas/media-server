@@ -1,8 +1,11 @@
-# External Subtitle Delivery — plan
+---
+status: On Hold
+created: 2026-07-27
+updated: 2026-07-27
+summary: Parked capability to deliver a sidecar subtitle file to a client without merging it into the video.
+---
 
-Status: On Hold
-Created: 2026-07-27
-Updated: 2026-07-27
+# External Subtitle Delivery — plan
 
 Parked deliberately. The capability is recorded here rather than as a remark
 inside another document, so that it is visible in the index and can be picked up
@@ -41,16 +44,16 @@ can stay a sidecar and still be usable.
 
 ## Deliverables
 
-- [ ] **Delivery endpoint** in the Jellyfin surface, resolving the external path
+- [ ] D1. **Delivery endpoint** in the Jellyfin surface, resolving the external path
       through the catalog sandbox rather than trusting the stored path.
-- [ ] **`DeliveryUrl` on `MediaStreamDto`**, populated for external subtitle
+- [ ] D2. **`DeliveryUrl` on `MediaStreamDto`**, populated for external subtitle
       streams.
-- [ ] **Format handling** — at minimum passthrough of the stored file; conversion
+- [ ] D3. **Format handling** — at minimum passthrough of the stored file; conversion
       between subtitle formats is explicitly not in scope.
-- [ ] **Unit tests** covering the route, the sandbox check, and the DTO.
-- [ ] **Docs.** `feature.md` for this folder; update
+- [ ] D4. **Unit tests** covering the route, the sandbox check, and the DTO.
+- [ ] D5. **Docs.** `feature.md` for this folder; update
       `jellyfin-compatibility/feature.md`.
-- [ ] **Version bump** — new functionality, so a minor bump while the app is `0.x`.
+- [ ] D6. **Version bump** — new functionality, so a minor bump while the app is `0.x`.
 
 ## Open questions
 

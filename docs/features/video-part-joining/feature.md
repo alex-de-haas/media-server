@@ -1,7 +1,10 @@
-# Video Part Joining
+---
+created: 2026-09-10
+updated: 2026-09-11
+summary: Join two versions of a movie into one Matroska version from the Media tab.
+---
 
-Created: 2026-09-10
-Updated: 2026-09-11
+# Video Part Joining
 
 ## Joining two parts of one movie
 

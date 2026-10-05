@@ -1,7 +1,10 @@
-# Apple Client Visual Design and Collections
+---
+created: 2026-09-06
+updated: 2026-10-02
+summary: Apple client visual design and collections, including refresh behavior and the unsupported-server retry.
+---
 
-Created: 2026-09-06
-Updated: 2026-10-02
+# Apple Client Visual Design and Collections
 
 Collections reload through the store’s screen-appearance handler whenever the
 collection screen appears. The unsupported-server

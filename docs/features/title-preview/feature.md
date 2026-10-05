@@ -1,7 +1,10 @@
-# Title Preview
+---
+created: 2026-07-25
+updated: 2026-07-25
+summary: A dialog that describes titles the instance does not hold, from recommendations, the calendar and search.
+---
 
-Created: 2026-07-25
-Updated: 2026-07-25
+# Title Preview
 
 A dialog that says what a title *is* — overview, facts, cast, trailer — for titles
 the instance does not hold: the discoveries in the recommendation feed, the rows on
@@ -11,7 +14,7 @@ looked up on TMDb in another tab.
 
 Acquisition is not part of it, as everywhere else: the actions are Track/remind, Not
 interested, and — when the title turns out to be held after all — a link to its library
-page. See [Watchlist and discovery](../watchlist-and-discovery.md) and
+page. See [Watchlist and discovery](../watchlist-and-discovery/plan.md) and
 [Recommendation providers](../recommendation-providers/feature.md).
 
 ## The dialog

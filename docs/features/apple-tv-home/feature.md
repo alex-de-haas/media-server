@@ -1,7 +1,10 @@
-# Apple TV Home
+---
+created: 2026-09-08
+updated: 2026-09-08
+summary: The tvOS Home tab with Continue Watching, Next Up and Recommendations rows.
+---
 
-Created: 2026-09-08
-Updated: 2026-09-08
+# Apple TV Home
 
 ## Navigation and rails
 

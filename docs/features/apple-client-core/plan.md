@@ -1,8 +1,11 @@
-# Apple Client Core — plan
+---
+status: In Progress
+created: 2026-08-10
+updated: 2026-08-31
+summary: Phase 2 of the Apple client epic, the first release worth using, built on the finished server APIs.
+---
 
-Status: In Progress
-Created: 2026-08-10
-Updated: 2026-08-31
+# Apple Client Core — plan
 
 > Phase 2 of the [Apple client](../apple-client/plan.md) epic, and the first
 > release worth using. Every server half it needs is built and verified:
@@ -74,45 +77,45 @@ the pairing screen again if the access token itself has gone.
 
 ### Phase 1 — pairing
 
-- [x] **Server address entry**, with `GET /native/v1/server/public` as the check
+- [x] D1. **Server address entry**, with `GET /native/v1/server/public` as the check
       that something is there. What a viewer types is not a URL, so it is normalised:
       a bare host becomes `https`, an explicit `http` is kept for a server on the local
       network, and a path, query or fragment is dropped rather than carried in front of
       every route. Bonjour discovery is deliberately out: it fails
       exactly where this library lives — across subnets and through the tunnel —
       and typing an address once is not the friction worth solving first.
-- [x] **The device-code screen**: the `userCode` at 120pt monospaced, the
+- [x] D2. **The device-code screen**: the `userCode` at 120pt monospaced, the
       `verificationUri` beside it — or, when the host runs no Shell and Core returns
       none, where to look instead rather than an address Core invented. The poll runs
       while the screen is up and is cancelled on `onDisappear`.
-- [x] **The whole chain to an app identity token**, steps 1–6 above, with the
+- [x] D3. **The whole chain to an app identity token**, steps 1–6 above, with the
       silent re-run of 5–6 when the app grant lapses. One constraint had to be read out
       of Core rather than guessed: `redirectUri` is checked against the app's installed
       endpoint origins even though nothing navigates and the code comes back in the
       body — so the address the viewer typed is what gets sent.
-- [x] **Keychain storage**, both credentials in **one** item: a device holding a Core
+- [x] D4. **Keychain storage**, both credentials in **one** item: a device holding a Core
       token and no app grant, or the reverse, is a state nothing knows how to resume
       from. `kSecAttrAccessibleAfterFirstUnlock`, because a television unlocks itself
       and anything stricter would leave the app unable to read its own credential on a
       cold boot.
-- [x] **The states that are not "signed in"**: a code that expired, an approval that
+- [x] D5. **The states that are not "signed in"**: a code that expired, an approval that
       was denied, a Core too old to have the device routes, a throttled host, an
       account not assigned to the app, and an address that answers but is not a Media
       Server. Each says which it is, in a sentence a viewer can act on.
 
 ### Phase 2 — the local mirror
 
-- [ ] **A SQLite mirror fed by `GET /native/v1/sync?cursor=`**, so browsing costs
+- [ ] D6. **A SQLite mirror fed by `GET /native/v1/sync?cursor=`**, so browsing costs
       no round trip. The cursor is opaque and carries the schema version, so a
       server that has moved on can order a reset rather than be guessed at.
-- [ ] **The reset path**, exercised rather than assumed: a pruned cursor range must
+- [ ] D7. **The reset path**, exercised rather than assumed: a pruned cursor range must
       produce a clean re-snapshot and not a blind client.
-- [ ] **Tombstones and purges**, which are the reason the change log exists — a
+- [ ] D8. **Tombstones and purges**, which are the reason the change log exists — a
       purge leaves nothing behind and cannot be discovered any other way.
 
 ### Phase 3 — browsing
 
-- [x] **Refresh on a refusal, not only on a clock.** Found while verifying against
+- [x] D9. **Refresh on a refusal, not only on a clock.** Found while verifying against
       production on 2026-08-14: the exchange returns an `expiresAt` thirty days out,
       which is the grant's *absolute* cap — but the grant also lapses after seven days
       idle, and nothing in the token says so. A television left alone for a week
@@ -120,7 +123,7 @@ the pairing screen again if the access token itself has gone.
       report it paired. The first authenticated request is what discovers it, so a `401`
       has to trigger the silent re-mint that `restore()` already knows how to do.
       Untestable before there is an authenticated request to make, which is this phase.
-- [x] **The library**, in the shape tvOS expects: two tabs — Movies and Series —
+- [x] D10. **The library**, in the shape tvOS expects: two tabs — Movies and Series —
       over a focus-driven poster grid, catalogs deliberately mixed because whether a
       film sits on the SSD or the spinning disk is an operator's concern. `catalogId`
       travels on every title, so a filter lays over this later without touching how any
@@ -136,37 +139,37 @@ the pairing screen again if the access token itself has gone.
       internet, and browsing stops being visible to TMDb. That route is
       bearer-authenticated, so `AsyncImage` cannot be used and there is a loader of our
       own.
-- [x] **A title**, with its versions ordered so the default leads, its audio and
+- [x] D11. **A title**, with its versions ordered so the default leads, its audio and
       subtitle tracks, and a mark against the ones that live beside the file rather than
       inside it. Fetched when the screen opens rather than carried by the feed: versions
       and tracks for every title would be most of a database sent to browse a grid.
-- [x] **Resume and watched**, on the poster itself — a bar for a title in progress and
+- [x] D12. **Resume and watched**, on the poster itself — a bar for a title in progress and
       a tick for a finished one, because a bar at 100 % reads as "nearly done".
 
 ### Phase 4 — playback
 
-- [x] **`POST /native/v1/playback/resolve`** with the real profile from
+- [x] D13. **`POST /native/v1/playback/resolve`** with the real profile from
       `MediaKit.CapabilityProfile`, narrowed by the viewer's `PlaybackPreferences`.
-- [x] **`AVPlayerViewController`, not a custom player.** Recorded as a Phase 0
+- [x] D14. **`AVPlayerViewController`, not a custom player.** Recorded as a Phase 0
       deliverable of the epic and still the right answer: the transport bar, the
       skip gestures and the Siri remote's whole vocabulary are free and cannot be
       reimplemented to the same standard.
-- [x] **Track selection** — done on the server instead, in #172 on 2026-08-10.
+- [x] D15. **Track selection** — done on the server instead, in #172 on 2026-08-10.
       The container now carries every audio track a sample entry can be written for and
       every text subtitle, each kind with the viewer's choice first and only that one
       marked enabled, so `AVPlayerViewController`'s own picker switches dubs with no
       second request and no re-buffer. Each track states its language, so the menu reads
       as English and Russian rather than six lines of "Undetermined". The client-side
       picker this deliverable described is not needed and is not being built.
-- [x] **Every refusal reason shown as itself.** The server answers
+- [x] D16. **Every refusal reason shown as itself.** The server answers
       `packaging_pending`, `packaging_unsupported_audio`,
       `packaging_unsupported_video`, `unsupported_dynamic_range` and the rest
       precisely so a client need not say "cannot play this". `packaging_pending`
       is the interesting one: it means *not yet*, the walk is coming, and retrying
       later works — so it is a state with a retry, not an error.
-- [x] **Sessions**: start, progress, stop, feeding the watch history the web client
+- [x] D17. **Sessions**: start, progress, stop, feeding the watch history the web client
       already shows.
-- [x] **Dolby Vision confirmed on hardware.** 2026-08-17, on the Apple TV 4K
+- [x] D18. **Dolby Vision confirmed on hardware.** 2026-08-17, on the Apple TV 4K
       (2nd generation, tvOS 26.6): the badge appears and a 33.7 GB profile 8.1 film
       plays without stutter, with responsive seeking.
 
@@ -181,7 +184,7 @@ the pairing screen again if the access token itself has gone.
       user's: 6–8 GB two-track files had always played smoothly, on the same
       hardware and network, before any of that work. Track count predicted the
       failure; size and bitrate predicted nothing.
-- [x] **A track picker of our own.** The debt from #208, paid on 2026-08-29. It sits
+- [x] D19. **A track picker of our own.** The debt from #208, paid on 2026-08-29. It sits
       in the transport bar beside AVKit's own controls, and switching resolves the same
       edition with a different `audioStreamId`, replaces the item and seeks back to
       where the viewer was.
@@ -189,7 +192,7 @@ the pairing screen again if the access token itself has gone.
       The stored preference turned out never to have reached this surface at all:
       `NativeTrackSelector` existed and was called from nowhere, so the URL carried no
       choice and the packager took whichever audio track came first. It does now.
-- [ ] **Startup on a television.** Ten seconds to first frame on the Apple TV
+- [ ] D20. **Startup on a television.** Ten seconds to first frame on the Apple TV
       against three on a Mac. The session start came off the critical path on
       2026-08-29 — it was always best effort and never something to wait on — so what
       a viewer waits for is now `resolve` and then the player.
@@ -208,18 +211,18 @@ so no real server could be decoded — and the fixture that should have caught i
 been written from the model rather than from the document. Building browsing first
 would have meant a dozen more models written the same way.
 
-- [x] **A Swift client generated from `src/api/openapi/MediaServer.Api_native.json`**,
+- [x] D21. **A Swift client generated from `src/api/openapi/MediaServer.Api_native.json`**,
       with Apple's `swift-openapi-generator`. The Swift target holds a **symlink** to
       that document rather than a copy, so there is one in the repository and drift
       between them is not possible.
-- [x] **Decide generator or hand-written** — generator, and the **command** plugin
+- [x] D22. **Decide generator or hand-written** — generator, and the **command** plugin
       rather than the build plugin. This repository already generates, commits and
       then diffs in CI, twice over; a build plugin would instead add a trust prompt
       in Xcode and a code-generation step to every clean build.
       `scripts/generate-apple-client.sh` regenerates and records the document's hash,
       and CI compares it on Linux — the generator needs a Mac, so the check is the
       hash rather than a regeneration.
-- [ ] **Operation ids on the server.** Without them the generator names operations
+- [ ] D23. **Operation ids on the server.** Without them the generator names operations
       from their paths, and the idiomatic naming strategy papers over it —
       `getNativeV1ServerPublic` reads acceptably but is derived, not declared. Adding
       `.WithName(...)` to the native routes would name them once for every consumer
@@ -227,12 +230,12 @@ would have meant a dozen more models written the same way.
 
 ### Closing the plan
 
-- [ ] **`feature.md`** for this feature, created by the PR that ships the
+- [ ] D24. **`feature.md`** for this feature, created by the PR that ships the
       behaviour.
-- [ ] **Epic deliverable** — check off "Constituent plans" in
+- [ ] D25. **Epic deliverable** — check off "Constituent plans" in
       [`apple-client/plan.md`](../apple-client/plan.md) once this is Ready.
-- [ ] **Index** — `node scripts/docs-index.mjs --fix`.
-- [ ] **Version** — the client versions on `MARKETING_VERSION`, not
+- [ ] D26. **Index** — `node scripts/docs-index.mjs --fix`.
+- [ ] D27. **Version** — the client versions on `MARKETING_VERSION`, not
       `manifest.json`. Nothing here moves the server's version.
 
 ## Open questions

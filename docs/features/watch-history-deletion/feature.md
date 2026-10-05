@@ -1,7 +1,10 @@
-# Watch-History Deletion
+---
+created: 2026-08-05
+updated: 2026-09-19
+summary: A user can delete one recorded play from their own watch history.
+---
 
-Created: 2026-08-05
-Updated: 2026-09-19
+# Watch-History Deletion
 
 ## Description
 

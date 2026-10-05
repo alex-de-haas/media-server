@@ -1,7 +1,10 @@
-# Apple Series Browsing
+---
+created: 2026-09-08
+updated: 2026-10-01
+summary: The tvOS series screen with a season selector above a rail of episode cards.
+---
 
-Created: 2026-09-08
-Updated: 2026-10-01
+# Apple Series Browsing
 
 The tvOS series detail screen presents a horizontal season selector above a
 horizontal rail of episode cards. Focusing or selecting a season updates the rail

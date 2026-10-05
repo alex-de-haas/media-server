@@ -1,7 +1,10 @@
-# Movie Detail Context
+---
+created: 2026-09-19
+updated: 2026-09-22
+summary: The web movie page with personal viewing history, cast, media, related movies and tags.
+---
 
-Created: 2026-09-19
-Updated: 2026-09-22
+# Movie Detail Context
 
 ## Movie page
 

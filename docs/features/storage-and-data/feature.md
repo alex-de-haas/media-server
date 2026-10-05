@@ -1,7 +1,10 @@
-# Storage and Data
+---
+created: 2026-06-15
+updated: 2026-08-11
+summary: Backed-up app data in an embedded SQLite database, separate from the large catalog roots that hold media.
+---
 
-Created: 2026-06-15
-Updated: 2026-08-11
+# Storage and Data
 
 ## Description
 
@@ -63,7 +66,7 @@ SQLite is single-writer, so the app minimizes and serializes writes:
   probe, enrich, publish).
 - The orchestrator claims an ingest item with a lease (`LeaseOwner`/`LeaseUntil`)
   and uses an optimistic-concurrency token, so the reconciler and operator actions
-  never double-drive the same item (see [Domain model](../domain-model.md)).
+  never double-drive the same item (see [Domain model](../domain-model/feature.md)).
 - No write transaction is held open across I/O (ffprobe, provider HTTP): do the
   long operation first, then a short write.
 

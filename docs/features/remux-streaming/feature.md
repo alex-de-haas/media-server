@@ -1,7 +1,10 @@
-# Remux Streaming
+---
+created: 2026-08-08
+updated: 2026-09-10
+summary: Matroska sources served to native clients as computed MP4 containers without a second copy on disk.
+---
 
-Created: 2026-08-08
-Updated: 2026-09-10
+# Remux Streaming
 
 A Matroska source is served to a native client as an MP4, without a second copy on
 disk and without producing anything at play time. The container is **computed**: an

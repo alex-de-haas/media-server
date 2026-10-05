@@ -1,7 +1,10 @@
-# Watch-History Manual Entries
+---
+created: 2026-08-09
+updated: 2026-09-22
+summary: Users can log, date or re-date a viewing in their own watch history.
+---
 
-Created: 2026-08-09
-Updated: 2026-09-22
+# Watch-History Manual Entries
 
 ## Description
 

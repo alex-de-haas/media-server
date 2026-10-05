@@ -1,7 +1,10 @@
-# Track Extraction
+---
+created: 2026-08-07
+updated: 2026-09-10
+summary: Write a version's embedded audio and subtitle tracks out as files beside it, recorded as external streams.
+---
 
-Created: 2026-08-07
-Updated: 2026-09-10
+# Track Extraction
 
 A version's embedded audio and subtitle tracks can be written out as files beside
 it, each recorded as an external `MediaStream` of the same source. A movie's version

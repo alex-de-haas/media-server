@@ -1,7 +1,10 @@
-# Recommendations
+---
+created: 2026-07-25
+updated: 2026-09-27
+summary: A what-to-watch-next surface built from the viewer's history and ratings and the library, with TMDb for similarity.
+---
 
-Created: 2026-07-25
-Updated: 2026-09-27
+# Recommendations
 
 ## Description
 
@@ -307,7 +310,7 @@ returns the same feed envelope.
   is held, and its reason.
 - A held title links to its detail page. A discovery's poster opens the
   [title preview](../title-preview/feature.md) and the card offers **Track**;
-  acquisition stays in [Watchlist and discovery](../watchlist-and-discovery.md).
+  acquisition stays in [Watchlist and discovery](../watchlist-and-discovery/plan.md).
 - Hiding is one click, so undo is one click: the toast carries it.
 
 ## Jellyfin surface — the Recommended view

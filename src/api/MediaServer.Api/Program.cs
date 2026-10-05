@@ -144,7 +144,7 @@ builder.Services.AddScoped<DownloadDeletionService>();
 // Transcode engine. Re-encoding is delegated to the external transcode-engine app (an optional dependency)
 // over HTTP/SSE; it runs ffmpeg with the host's /dev/dri passed through for VAAPI hardware encoding. When no
 // dependency URL is injected, a disabled engine keeps the rest of the app working while transcoding is
-// unavailable. See docs/ideas/transcode-engine-app.md.
+// unavailable. See docs/features/convert-dialog/feature.md.
 if (settings.TranscodeEngineUrl is { Length: > 0 } transcodeEngineUrl)
 {
     builder.Services.AddSingleton(serviceProvider => new RemoteTranscodeEngine(

@@ -1,7 +1,10 @@
-# Media Probe Providers
+---
+created: 2026-07-27
+updated: 2026-09-04
+summary: File probing through the transcode engine first and the app's own container-header reader as a fallback.
+---
 
-Created: 2026-07-27
-Updated: 2026-09-04
+# Media Probe Providers
 
 Probing a library file runs through two providers behind one `IMediaProbe`. The
 external `transcode-engine` leads, because it runs `ffprobe` and therefore knows

@@ -1,7 +1,10 @@
-# Stream Title Editing
+---
+created: 2026-07-27
+updated: 2026-07-29
+summary: Correct a track's name and language while submitting a conversion or a merge.
+---
 
-Created: 2026-07-27
-Updated: 2026-07-29
+# Stream Title Editing
 
 An operator can correct a track's **name and language** while submitting a
 conversion or a merge, instead of living with whatever the release wrote. Real

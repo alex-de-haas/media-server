@@ -1,8 +1,11 @@
-# Publish While Seeding and Clean Media-Owned Staging
+---
+status: In Progress
+created: 2026-09-23
+updated: 2026-10-01
+summary: Publish files while they seed and keep Media Server-owned staging clean on each catalog's filesystem.
+---
 
-Status: In Progress
-Created: 2026-09-23
-Updated: 2026-10-01
+# Publish While Seeding and Clean Media-Owned Staging
 
 ## Owner direction and scope
 
@@ -143,33 +146,33 @@ active seeds are protected; ending a seed is the explicit Activity action above.
 
 ## Deliverables
 
-- [x] Persist seeding policy, placement cutoff, original paths and retention lifecycle.
-- [x] Implement safe Copy/Move placement, progress, capacity parking, independent
+- [x] D1. Persist seeding policy, placement cutoff, original paths and retention lifecycle.
+- [x] D2. Implement safe Copy/Move placement, progress, capacity parking, independent
   companion copies and retry/fallback without duplicate completed versions.
-- [x] Confirm engine release before move/deletion; retain failed/uncertain operation
+- [x] D3. Confirm engine release before move/deletion; retain failed/uncertain operation
   evidence and exclude stop intent from startup resume.
-- [x] Publish while seeding and provide Activity stop/cleanup controls without
+- [x] D4. Publish while seeding and provide Activity stop/cleanup controls without
   deleting library data or erasing live ownership through history clearing.
-- [x] Add durable cleanup with bounded retries and administrator settings analysis,
+- [x] D5. Add durable cleanup with bounded retries and administrator settings analysis,
   selected-candidate preview/apply and protection of unknown or active roots.
-- [x] Add backend and UI regression coverage, update feature documentation, and bump
+- [x] D6. Add backend and UI regression coverage, update feature documentation, and bump
   the runtime app from 0.83.0 to 0.84.0.
-- [x] Verify the new admin API and UI/BFF using real Hosty identity in a separate
+- [x] D7. Verify the new admin API and UI/BFF using real Hosty identity in a separate
   Core-managed instance; run disposable filesystem regressions inside its Docker container.
-- [x] Complete operator acceptance on the local development instance; the owner
+- [x] D8. Complete operator acceptance on the local development instance; the owner
   confirmed that the feature works on 2026-09-24 after testing the updated runtime.
-- [x] Confirm the ordinary retained-torrent publication and stop/cleanup flow with
+- [x] D9. Confirm the ordinary retained-torrent publication and stop/cleanup flow with
   the operator: copying publishes the file while the torrent remains active;
   stopping removes the torrent original and preserves the library copy. The owner
   reported this result on 2026-10-01.
-- [ ] Complete the remaining real-engine acceptance with disposable media on a
+- [ ] D10. Complete the remaining real-engine acceptance with disposable media on a
   Windows/Docker fixture: verify live seeding during/after publication on that
   fixture, stop during a long copy, locked-file cleanup retry and process restart,
   compare source/copy hashes and verify playback of the copied file after teardown.
   Automated tests cover the filesystem and lifecycle boundaries with a controlled
   engine; no separate Windows fixture is available, and production fault injection
   remains excluded by the approved scope.
-- [ ] After that acceptance passes, remove this plan and regenerate the docs index.
+- [ ] D11. After that acceptance passes, remove this plan and regenerate the docs index.
 
 ## Operator verification on 2026-10-01
 

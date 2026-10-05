@@ -1,7 +1,10 @@
-# Library Item Tombstones
+---
+created: 2026-07-26
+updated: 2026-09-19
+summary: Deleted items a user favorited, rated or watched survive as unpublished tombstones that keep that history.
+---
 
-Created: 2026-07-26
-Updated: 2026-09-19
+# Library Item Tombstones
 
 Deleting a movie, series, season, or episode no longer erases the user's
 relationship with it. An item some user favorited, rated, or has at least one

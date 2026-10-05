@@ -1,7 +1,10 @@
-# Single Catalog per Title
+---
+created: 2026-07-26
+updated: 2026-08-31
+summary: A movie or series exists in at most one catalog, a deliberate constraint until multi-catalog membership exists.
+---
 
-Created: 2026-07-26
-Updated: 2026-08-31
+# Single Catalog per Title
 
 A movie or series exists in at most one catalog. The constraint is deliberate
 and temporary: real multi-catalog membership (one record belonging to several

@@ -1,7 +1,10 @@
-# Jellyfin Compatibility
+---
+created: 2026-06-15
+updated: 2026-09-22
+summary: A Jellyfin-compatible API subset that lets clients such as Infuse browse, Direct Play and sync progress.
+---
 
-Created: 2026-06-15
-Updated: 2026-09-22
+# Jellyfin Compatibility
 
 ## Description
 

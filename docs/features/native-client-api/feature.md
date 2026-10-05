@@ -1,7 +1,10 @@
-# Native Client API
+---
+created: 2026-08-04
+updated: 2026-09-15
+summary: The /native/v1 HTTP surface for Media Server's own clients, carrying what the domain actually holds.
+---
 
-Created: 2026-08-04
-Updated: 2026-09-15
+# Native Client API
 
 ## Description
 

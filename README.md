@@ -5,8 +5,7 @@ A self-hosted media server delivered as a [Hosty](../docker-host) runtime app
 organizes/identifies/probes media automatically, and exposes a
 Jellyfin-compatible streaming surface for native clients such as Infuse.
 
-Planning docs live in [`docs/`](docs/root.md); the execution plan and milestones
-are in [`docs/features/implementation-plan.md`](docs/features/implementation-plan.md).
+Feature documentation and plans live in [`docs/`](docs/root.md).
 
 ## Repository layout
 

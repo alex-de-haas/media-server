@@ -1,8 +1,11 @@
-# Blu-ray Import and MKV Creation
+---
+status: In Progress
+created: 2026-09-24
+updated: 2026-09-25
+summary: Remaining Blu-ray import work, from protection diagnostics and HDR preservation to grouping BDMV during ingest.
+---
 
-Status: In Progress
-Created: 2026-09-24
-Updated: 2026-09-25
+# Blu-ray Import and MKV Creation
 
 ## Goal
 
@@ -262,75 +265,75 @@ job-owned temporary output, never the disc or another job's file.
   [part joining](../video-part-joining/feature.md) must not accidentally accept a
   directory as a file. Existing operations remain available on the resulting MKV.
 
-## Deliverables and phases
+## Deliverables
 
 These phases form one complete feature PR in Media Server. The engine dependency
 ships through its own coordinated feature PR and independent release.
 
 ### Phase 1 — contract and engine implementation
 
-- [x] Define disc ownership, inspect/create schemas, capabilities, playlist/track
+- [x] D1. Define disc ownership, inspect/create schemas, capabilities, playlist/track
   identity and job recovery in the [feature contract](feature.md). The companion
   engine plan is `transcode-engine/docs/features/bluray-import/plan.md`.
-- [ ] Validate protection diagnostics against protected and damaged samples; do not
+- [ ] D2. Validate protection diagnostics against protected and damaged samples; do not
   infer encryption merely from a folder name or a generic probe failure.
-- [ ] Implement UHD/HDR and Dolby Vision preservation through Transcode Engine,
+- [ ] D3. Implement UHD/HDR and Dolby Vision preservation through Transcode Engine,
   including the distinction between copying the original picture and an explicitly
   selected profile conversion. Cover metadata/layer handling with automated tests;
   real-disc acceptance follows in Phase 4.
-- [x] Implement engine inspection, MKV jobs, no-overwrite publication, cancellation,
+- [x] D4. Implement engine inspection, MKV jobs, no-overwrite publication, cancellation,
   restart handling, changed-input checks and output validation.
-- [ ] Exercise cancellation and publication interruption during actual disc jobs.
+- [ ] D5. Exercise cancellation and publication interruption during actual disc jobs.
 
 ### Phase 2 — durable disc sources and ingest
 
-- [ ] Integrate directory copying with retained torrent placement so BDMV can be
+- [ ] D6. Integrate directory copying with retained torrent placement so BDMV can be
   published while seeding. The current safety guard requires stopping seeding
   before moving a disc; file-based retained placement remains unchanged.
 
-- [x] Add source-kind/member/inspection persistence and backwards-compatible
+- [x] D7. Add source-kind/member/inspection persistence and backwards-compatible
   migrations; keep existing file-source behavior and data intact.
-- [ ] Group BDMV during torrent selection and catalog discovery; retain complete
+- [ ] D8. Group BDMV during torrent selection and catalog discovery; retain complete
   structure, identify the parent release, suppress clips and handle incomplete or
   out-of-scope discs explicitly, including blocking series/anime BDMV at known
   torrent selection, later magnet detection and catalog scan.
-- [x] Implement directory organization, restart reconciliation and cleanup ordering;
+- [x] D9. Implement directory organization, restart reconciliation and cleanup ordering;
   publish valid discs independently of conversion or engine availability.
-- [ ] Extend scan, refresh, rename, move, deletion and job admission protections to
+- [ ] D10. Extend scan, refresh, rename, move, deletion and job admission protections to
   the owned disc tree, including offline catalogs and paths containing symlinks.
 
 ### Phase 3 — preparation and playback availability
 
-- [x] Add library source availability and the web Create MKV workflow, including
+- [x] D11. Add library source availability and the web Create MKV workflow, including
   inspection retry, playlist selection, track settings and dependency errors.
-- [x] Integrate durable job submission, progress, cancellation, output validation,
+- [x] D12. Integrate durable job submission, progress, cancellation, output validation,
   idempotent import, naming collisions, preference handling and remux indexing.
-- [x] Guard direct/remux/playback resolution and update native/OpenAPI/Swift
+- [x] D13. Guard direct/remux/playback resolution and update native/OpenAPI/Swift
   conversion-required reason handling.
-- [ ] Verify the Jellyfin/Infuse policy on the actual client for disc-only titles.
-- [x] Add backend xUnit tests with Imposter, web browser coverage and Apple
+- [ ] D14. Verify the Jellyfin/Infuse policy on the actual client for disc-only titles.
+- [x] D15. Add backend xUnit tests with Imposter, web browser coverage and Apple
   availability/reason tests; exercise the workflow with synthetic and mocked
   fixtures without waiting for representative real discs.
 
 ### Phase 4 — real-disc verification, release and documentation
 
-- [ ] Obtain representative 1080p, multi-clip, UHD/HDR and UHD Dolby Vision discs
+- [ ] D16. Obtain representative 1080p, multi-clip, UHD/HDR and UHD Dolby Vision discs
   and run the end-to-end acceptance matrix. Verify playlist timing, chapters,
   selected tracks, HDR signalling and Dolby Vision metadata/enhancement-layer
   preservation on the actual MKV output; record tool versions and results. The
   user-supplied Battlefield Earth file list and BDInfo are a 1080p scenario
   reference, not a downloaded fixture or proof of runtime compatibility.
-- [ ] Resolve failures discovered by real-disc verification in the engine and
+- [ ] D17. Resolve failures discovered by real-disc verification in the engine and
   integration. Do not mark mandatory UHD/Dolby Vision support complete based only
   on successful job submission, a process exit code or ordinary 1080p tests.
-- [x] Document implemented source, job and playback behavior and Testing
+- [x] D18. Document implemented source, job and playback behavior and Testing
   Expectations; cross-link affected ingest, native playback and file management.
-- [ ] Reconcile documentation with real-disc acceptance evidence before release.
-- [x] Prepare independent versions: Media Server 0.84.0 → 0.85.0, Transcode
+- [ ] D19. Reconcile documentation with real-disc acceptance evidence before release.
+- [x] D20. Prepare independent versions: Media Server 0.84.0 → 0.85.0, Transcode
   Engine 0.11.0 → 0.12.0 and Apple client 0.15.0 → 0.16.0.
-- [ ] Record real-disc validation evidence and confirm coordinated engine 0.12.0
+- [ ] D21. Record real-disc validation evidence and confirm coordinated engine 0.12.0
   deployment before release; refresh the version baseline if intervening changes ship.
-- [ ] Complete every deliverable, delete this plan and regenerate the index in the
+- [ ] D22. Complete every deliverable, delete this plan and regenerate the index in the
   completing PR. Use one feature PR per repository, regular merge commits, and PR
   sections Summary, Changes, Verification, deliverables and version outcome.
 

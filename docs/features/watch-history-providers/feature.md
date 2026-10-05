@@ -1,7 +1,10 @@
-# Watch History
+---
+created: 2026-08-05
+updated: 2026-09-11
+summary: Per-user play history entries and aggregate item data as the local source of truth for watch state.
+---
 
-Created: 2026-08-05
-Updated: 2026-09-11
+# Watch History
 
 ## Per-play history
 

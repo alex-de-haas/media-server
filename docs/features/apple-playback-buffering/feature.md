@@ -1,7 +1,10 @@
-# Apple Playback Buffering
+---
+created: 2026-09-22
+updated: 2026-10-02
+summary: Apple client playback caching in memory or on disk, or native AVPlayer buffering when the cache is off.
+---
 
-Created: 2026-09-22
-Updated: 2026-10-02
+# Apple Playback Buffering
 
 ## Behavior
 

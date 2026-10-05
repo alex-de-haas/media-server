@@ -1,7 +1,10 @@
-# Catalog Maintenance
+---
+created: 2026-08-31
+updated: 2026-09-08
+summary: Scan for media and Refresh metadata keep each catalog in step with its disk and its metadata sources.
+---
 
-Created: 2026-08-31
-Updated: 2026-09-08
+# Catalog Maintenance
 
 The library keeps itself in step with two actions, both offered per catalog and
 over every catalog at once, and both also run on their own:

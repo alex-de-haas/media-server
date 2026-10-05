@@ -1,8 +1,11 @@
-# Remux Streaming — plan
+---
+status: In Progress
+created: 2026-08-05
+updated: 2026-08-15
+summary: Remaining remux streaming work before a native client can play the whole library.
+---
 
-Status: In Progress
-Created: 2026-08-05
-Updated: 2026-08-15
+# Remux Streaming — plan
 
 > Part of the [Apple client](../apple-client/plan.md) epic, and the last server
 > piece before a client can play the library.
@@ -269,17 +272,17 @@ written outside either repository and kept afterwards, in
 [`scripts/remux-prototype/`](../../../scripts/remux-prototype/README.md), only
 because a nightly `/tmp` cleanup had already destroyed it once.
 
-- [x] **Byte identity** — answered 2026-08-07: **video holds, audio needs de-lacing,
+- [x] D1. **Byte identity** — answered 2026-08-07: **video holds, audio needs de-lacing,
       and the design survives.** See
       [Byte identity](#byte-identity-measured-2026-08-07).
-- [x] **Synthesise an MP4 from an index** — done 2026-08-08, and the `mdat`-wraps-the-
+- [x] D2. **Synthesise an MP4 from an index** — done 2026-08-08, and the `mdat`-wraps-the-
       source simplification holds.
-- [x] **Dolby Vision on the Apple TV** from that synthesised file — confirmed on the
+- [x] D3. **Dolby Vision on the Apple TV** from that synthesised file — confirmed on the
       television.
-- [x] **Seeking** across it — 0.35 s, 0.35 s and 2.51 s over a 2 h 12 m film.
-- [ ] **The index walk on the slow disk** — how long, and how large the result. The
+- [x] D4. **Seeking** across it — 0.35 s, 0.35 s and 2.51 s over a 2 h 12 m film.
+- [ ] D5. **The index walk on the slow disk** — how long, and how large the result. The
       only item this hardware cannot answer: the dev machine is an SSD.
-- [x] **Written outcome**, below.
+- [x] D6. **Written outcome**, below.
 
 #### Outcome of the prototype (2026-08-08)
 
@@ -336,15 +339,15 @@ rewriting rather than encoding tooling, so they do not change the answer.
 
 ### Phase 1 — the index
 
-- [x] **An MKV indexer** producing, per track, the sample table: timestamp, size,
+- [x] D7. **An MKV indexer** producing, per track, the sample table: timestamp, size,
       offset in the source, keyframe flag. Built by walking cluster and block headers
       rather than reading payloads. The EBML primitives were lifted out of
       `ContainerHeader` into a shared `Ebml` reader first, so the two walkers cannot
       drift apart.
-- [x] **De-lacing** — fixed, EBML and Xiph, so a laced audio block becomes one index
+- [x] D8. **De-lacing** — fixed, EBML and Xiph, so a laced audio block becomes one index
       entry per frame. A lacing header that does not add up leaves the block whole
       rather than slicing it into samples that point outside it.
-- [x] **Storage** — one file per media source under the app data directory, beside
+- [x] D9. **Storage** — one file per media source under the app data directory, beside
       the torrents rather than in the database: an index is derived, large next to a
       row, rebuildable, and of no interest to a backup. Timestamps and offsets climb
       in small steps, so the file stores the steps as variable-length integers rather
@@ -354,14 +357,14 @@ rewriting rather than encoding tooling, so they do not change the answer.
       carries the source's length and last-write time, so a file that was replaced
       invalidates its own index. Written aside and moved into place, so an
       interrupted build leaves nothing to mistake for an index.
-- [x] **Built in the background**, so no viewer waits for it. A worker walks one
+- [x] D10. **Built in the background**, so no viewer waits for it. A worker walks one
       source at a time — several at once would be slower in total on a spinning disk
       and would make everything else on it worse — and there is no queue to keep in
       sync: the database knows which sources exist and the store knows which have an
       index, so the outstanding work is a query and a restart resumes without
       remembering anything. Orphaned indexes are pruned once per process, since
       nothing else removes a file when its title is deleted.
-- [x] **Measured on a real film from the slow disk** — taken as an *observation on
+- [x] D11. **Measured on a real film from the slow disk** — taken as an *observation on
       production* rather than as a test, decided on 2026-08-09, and answered by the
       first production run the same day. 26 films in 57 minutes back to back: a median
       of 97 s each, a mean of 131 s.
@@ -391,17 +394,17 @@ rewriting rather than encoding tooling, so they do not change the answer.
 
       What the first run did surface was the index footprint — 1.2 GB over 147 files,
       43 % of it in four — which is the deliverable below.
-- [x] **Only describable tracks are walked.** Added 2026-08-09, out of the measurement
+- [x] D12. **Only describable tracks are walked.** Added 2026-08-09, out of the measurement
       above. A sample table for a track no sample entry can be written for is bytes
       nobody can ever point at: one film's TrueHD track was 96 % of its own index. The
       track stays listed so ordinals and refusal reasons still line up; its frames are
       not recorded. `RemuxCodecs.WantsSamples` answers this once for the walk and the
       synthesiser both, and the index format goes to v3 so every stored index rebuilds.
-- [x] **Unit tests** over crafted Matroska written by hand — all three lacing forms,
+- [x] D13. **Unit tests** over crafted Matroska written by hand — all three lacing forms,
       block groups whose keyframe answer is the absence of a `ReferenceBlock` rather
       than a flag, and a lacing header that does not add up. ffmpeg cannot produce a
       laced test file, so the builder writes one directly.
-- [x] **Unit tests for the awkward sources.** Timestamps that are not monotonic in
+- [x] D14. **Unit tests for the awkward sources.** Timestamps that are not monotonic in
       file order are covered where the composition table is built. Cover art turned
       out to be a different shape than the trap described: in this library it is a
       Matroska *attachment*, which the indexer never sees because it reads only
@@ -412,35 +415,35 @@ rewriting rather than encoding tooling, so they do not change the answer.
 
 ### Phase 2 — the synthesiser
 
-- [x] **Compute the container from the index**: `ftyp`, `moov` and an `mdat` that
+- [x] D15. **Compute the container from the index**: `ftyp`, `moov` and an `mdat` that
       wraps the source verbatim, so an output offset is the header's length plus the
       source offset. `hvcC` and `avcC` are carried from `CodecPrivate`, `dvvC` from
       the Dolby Vision mapping, `colr` from the `Colour` element when the container
       states one and left out rather than guessed when it does not. `dvh1` is offered
       only for HEVC that came with a configuration, and only when asked for. Verified
       through AVFoundation and by decoding both streams.
-- [ ] **Answer an arbitrary byte range** by resolving it to samples and reading those
+- [ ] D16. **Answer an arbitrary byte range** by resolving it to samples and reading those
       from the source, with the total length declared, since AVFoundation refuses an
       undeclared one.
-- [x] **Decide fragmented or not, by measurement** — answered by the prototype:
+- [x] D17. **Decide fragmented or not, by measurement** — answered by the prototype:
       **non-fragmented**, 7 requests against the fragmented file's 3309.
-- [x] **Track selection** so the output carries what the viewer chose — video first,
+- [x] D18. **Track selection** so the output carries what the viewer chose — video first,
       then the chosen dub, then subtitles only when they were asked for. The choice
       arrives as stream indexes, which are positions in the file rather than Matroska
       track numbers, so the index carries both. A stale choice falls back to the
       first track of its kind rather than playing nothing.
-- [x] **A sidecar dub folded in as a track.** The output takes several inputs, one
+- [x] D19. **A sidecar dub folded in as a track.** The output takes several inputs, one
       `mdat` per wrapped file, and a sample offset may point into any of them. An
       external `.mka` is indexed in the background like any other Matroska file, keyed
       by its stream row, and the endpoint names tracks by stream id rather than by
       position — a sidecar has no position in the container. Verified on a real dub
       file: video from one file, audio from another, in one MP4.
-- [x] **A sidecar subtitle folded in.** `.srt`, `.ass`, `.ssa` and `.vtt` are parsed
+- [x] D20. **A sidecar subtitle folded in.** `.srt`, `.ass`, `.ssa` and `.vtt` are parsed
       per request into cues — no index, because a film's dialogue is a hundred
       kilobytes — and join the embedded path at the point where both are simply a list
       of cues. Verified on a real file: parsed, rewritten as `tx3g`, and extracted back
       with its timings intact to the millisecond.
-- [x] **Subtitle conversion** — the one thing that cannot be referenced the way audio
+- [x] D21. **Subtitle conversion** — the one thing that cannot be referenced the way audio
       and video can. A SubRip or ASS sample is not a valid MP4 subtitle sample: MP4
       wants `tx3g`, which is a length-prefixed string, and the gaps between cues need
       empty samples that exist nowhere in Matroska. So the text is rewritten and
@@ -449,46 +452,46 @@ rewriting rather than encoding tooling, so they do not change the answer.
       wraps the source untouched. ASS rows give up their fields and override codes;
       styling is lost, which the epic already accepted. A cue with no stated duration
       is dropped rather than guessed at, because MP4 has no "until the next one".
-- [x] **Unit tests for the conversion** — markup stripped, ASS fields and overrides
+- [x] D22. **Unit tests for the conversion** — markup stripped, ASS fields and overrides
       removed, a comma inside the text not mistaken for a separator, gaps becoming
       empty samples, and a real film's subtitle track rewritten and read back with
       its timings intact.
-- [ ] **Subtitle conversion for HLS**, which wants WebVTT or IMSC1 rather than
+- [ ] D23. **Subtitle conversion for HLS**, which wants WebVTT or IMSC1 rather than
       `tx3g`, and segmented to match.
-- [ ] **An HLS renderer over the same index** — a media playlist cut at keyframe
+- [ ] D24. **An HLS renderer over the same index** — a media playlist cut at keyframe
       boundaries and segments rendered from the same sample table, so the second
       transport is a second output rather than a second pipeline.
-- [ ] **Unit tests**: a range spanning a fragment boundary, the first and last byte,
+- [ ] D25. **Unit tests**: a range spanning a fragment boundary, the first and last byte,
       a range beyond the end, the sample entry surviving into the output, and a
       segment boundary landing on a keyframe.
 
 ### Phase 3 — serving it
 
-- [x] **A `Transport` axis on the contract** — `byteRange | hls` beside `Decision`,
+- [x] D26. **A `Transport` axis on the contract** — `byteRange | hls` beside `Decision`,
       because HLS is another way to deliver a repackaging rather than a fourth kind
       of decision. Only `byteRange` exists so far.
-- [x] **`api` serves the synthesised bytes** by byte range at
+- [x] D27. **`api` serves the synthesised bytes** by byte range at
       `/native/v1/media/{id}/remux`, under the same signed URL token, sandbox and
       visibility rules as the direct path. The header and the untouched source are
       presented as one seekable stream, so ranges are handled by the framework's own
       file result rather than by hand — which matters, since AVFoundation refuses a
       server that will not declare a total length and reads a truncated answer to an
       explicit range as a failure.
-- [ ] **`api` serves HLS**, once there is an HLS renderer to serve.
-- [x] **Availability reflects reality**, so `resolve` answers `remux` with a URL. The
+- [ ] D28. **`api` serves HLS**, once there is an HLS renderer to serve.
+- [x] D29. **Availability reflects reality**, so `resolve` answers `remux` with a URL. The
       placeholder flag is gone: readiness is now asked per source, in one query for
       all the editions of a title rather than one round trip each.
-- [x] **A source with no index yet** answers `unsupported` with `packaging_pending`,
+- [x] D30. **A source with no index yet** answers `unsupported` with `packaging_pending`,
       which is a different thing from `packaging_unavailable` and deliberately so: a
       container nothing can index will never become playable, while a file the walk
       has not reached will. A client that knows the difference shows "preparing" and
       retries instead of showing "unavailable" forever. The URL itself answers 503
       for the same case.
-- [x] **`GET /native/v1/server` reports the packaging capability.** It is a property
+- [x] D31. **`GET /native/v1/server` reports the packaging capability.** It is a property
       of the build rather than of the deployment — packaging needs no engine and no
       configuration — so it is simply true. Whether a *particular* source is ready is a
       different question, and `resolve` answers that per source.
-- [x] **Unit tests** over what the served bytes are subject to: an unpublished or
+- [x] D32. **Unit tests** over what the served bytes are subject to: an unpublished or
       tombstoned item is unreachable, a missing file is, an index built against an
       older version of the file is not used, a source the walk has not reached says so
       rather than saying no, the tag changes when the chosen tracks do, and a chosen
@@ -520,69 +523,69 @@ Two operational facts worth keeping, both of which cost time to find:
 - **Port 7000 on macOS is the AirPlay receiver.** Probing it returns a confident
   `403` from `Server: AirTunes`, which reads exactly like the app refusing a request.
 
-- [x] **A whole film end to end on an Apple TV**, including seeking across it —
+- [x] D33. **A whole film end to end on an Apple TV**, including seeking across it —
       played and seeked across; an unattended watch of the whole thing is still
       untried.
-- [ ] **Time to first frame from cold**, on a source on the slow disk.
-- [ ] **60–80 Mbit/s**, the bitrate class never yet exercised.
-- [ ] **Several concurrent clients.**
-- [ ] **Multi-audio, sidecar audio, and subtitles** folded into the output.
-- [ ] **DV profiles 5 and 8.**
-- [x] **E-AC-3** as an `ec-3` entry with a `dec3` descriptor: the access unit's
+- [ ] D34. **Time to first frame from cold**, on a source on the slow disk.
+- [ ] D35. **60–80 Mbit/s**, the bitrate class never yet exercised.
+- [ ] D36. **Several concurrent clients.**
+- [ ] D37. **Multi-audio, sidecar audio, and subtitles** folded into the output.
+- [ ] D38. **DV profiles 5 and 8.**
+- [x] D39. **E-AC-3** as an `ec-3` entry with a `dec3` descriptor: the access unit's
       substreams are walked so the descriptor can count the dependent ones, and the
       frame duration is read from the blocks it carries rather than assumed to be
       1536. Verified on an Atmos track — repackaged, still reported as Dolby Digital
       Plus with Atmos, and decoding.
-- [ ] **E-AC-3 with dependent substreams.** A unit carrying extra channels in dependent
+- [ ] D40. **E-AC-3 with dependent substreams.** A unit carrying extra channels in dependent
       substreams needs their `chanmap` read, the channel count adjusted and `chan_loc`
       written; until then such a track is left out rather than advertised as its base
       layout. Nothing in this library uses them.
-- [ ] **Choosing what goes into the index.** Every describable track is now indexed and
+- [ ] D41. **Choosing what goes into the index.** Every describable track is now indexed and
       every one of them is carried into the container, which makes "what is worth
       indexing" a question with consequences rather than a detail. A library holding six
       dubs per film pays for six sample tables in the index and six more in every header.
       A setting — by language, or by count, or simply "only what a viewer has ever
       asked for" — would let that be tuned per instance instead of assumed. Raised
       2026-08-10; not designed.
-- [x] **Take the source reads out of synthesis.** Done 2026-08-15. The walk keeps the
+- [x] D42. **Take the source reads out of synthesis.** Done 2026-08-15. The walk keeps the
       converted cue text, the first audio unit, and whether an audio track's frames all
       carry the same number of samples — the last answered over every frame rather than
       sixty-four probes. Format version 5; indexes grow to about 9 MB for a thirteen-track
       film.
-- [x] **Keep the parsed index in memory.** Done 2026-08-15, and it was the larger of the
+- [x] D43. **Keep the parsed index in memory.** Done 2026-08-15, and it was the larger of the
       two by a distance: warm first-byte went 83 ms to **2.4 ms**. The header cache alone had
       not moved it, because `store.Load` still re-read and decoded nine megabytes per
       request — which only showed up once the cold figure stopped being the thing measured.
-- [ ] **Subtitle files in legacy encodings.** They are read as UTF-8, so a
+- [ ] D44. **Subtitle files in legacy encodings.** They are read as UTF-8, so a
       single-byte-encoded file comes out with its accents wrong.
-- [x] **AAC**, shipped 2026-08-09 with `mp4a` and an `esds`. The config is carried from
+- [x] D45. **AAC**, shipped 2026-08-09 with `mp4a` and an `esds`. The config is carried from
       `CodecPrivate` verbatim and only read for the rate, the channels and the frame
       length; explicit SBR and PS, a zero channel configuration and everything that is
       not plain AAC are refused rather than guessed at. Priming is trimmed by an edit
       list. Verified by decoding a synthesised file and its source to PCM and comparing:
       byte-identical. This unblocks the 64 anime episodes.
-- [ ] **FLAC**, which needs `fLaC` with a `dfLa`. The 14 extras beside those episodes
+- [ ] D46. **FLAC**, which needs `fLaC` with a `dfLa`. The 14 extras beside those episodes
       carry nothing else — `1/2 tracks; skipped A_FLAC x1` — so AAC does not reach them.
       The awkward part is not the descriptor: FLAC permits a variable block size, and the
       index records no per-sample duration for audio, so a variable-block file cannot be
       given a timing table without one.
-- [ ] **The AC-3 head offset.** A round trip on 2026-08-09 measured AC-3 landing 256
+- [ ] D47. **The AC-3 head offset.** A round trip on 2026-08-09 measured AC-3 landing 256
       samples — 5.3 ms — later than the same source decoded from its Matroska. Below the
       threshold at which a lagging soundtrack is perceptible, and the container states no
       delay to act on, so it is recorded rather than guessed at. Closing it means finding
       where the 256 comes from, not hard-coding it.
-- [ ] **Confirm the measurements above on tvOS.** Everything in "What AVFoundation
+- [ ] D48. **Confirm the measurements above on tvOS.** Everything in "What AVFoundation
       demands" was measured on macOS, which has already proven the more permissive of
       the two in this project.
 
 ### Closing the plan
 
-- [x] **`feature.md`** — created with the first shipped behaviour, describing what is
+- [x] D49. **`feature.md`** — created with the first shipped behaviour, describing what is
       there now rather than what is intended.
-- [x] **Update [native-playback](../native-playback/feature.md)** where it said
+- [x] D50. **Update [native-playback](../native-playback/feature.md)** where it said
       packaging does not exist yet.
-- [ ] **Index** — `node scripts/docs-index.mjs --fix`.
-- [ ] **Version bump** — new functionality, so a minor; read `manifest.json` when
+- [ ] D51. **Index** — `node scripts/docs-index.mjs --fix`.
+- [ ] D52. **Version bump** — new functionality, so a minor; read `manifest.json` when
       the work lands.
 
 ## Open questions

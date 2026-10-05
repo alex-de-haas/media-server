@@ -1,8 +1,11 @@
-# Apple Client — plan
+---
+status: In Progress
+created: 2026-08-02
+updated: 2026-10-01
+summary: Umbrella epic for the Apple client, owning its decisions, platform split and the playback spike the other features depend on.
+---
 
-Status: In Progress
-Created: 2026-08-02
-Updated: 2026-10-01
+# Apple Client — plan
 
 > **Umbrella epic.** This document owns the decisions, the platform split, and the
 > playback spike that everything else depends on. The features it spans keep their
@@ -245,21 +248,21 @@ The umbrella's own work. Everything else belongs to the features above.
 The whole epic rests on decision 2 being true. This phase answers it with a
 throwaway spike, on real hardware and real files, before any surface is designed.
 
-- [x] **Packaging prototype** — a script (not the engine, not yet) that turns real
+- [x] D1. **Packaging prototype** — a script (not the engine, not yet) that turns real
       MKV remuxes from this library into an HLS/fMP4 playlist by stream copy.
       Done on a 4K Dolby Vision remux and a 1080p HEVC HDR10 one; see the results
       below. No H.264 source was exercised — this library's samples are HEVC, and
       H.264 is the case least at risk.
-- [x] **Playback on an Apple TV 4K** — both packages played on the device
+- [x] D2. **Playback on an Apple TV 4K** — both packages played on the device
       (tvOS 26.5) with zero stalls and zero dropped frames, including 4K HEVC at
       26.5 Mbit/s. See the device pass below. Seeking went unmeasured on an MP4
       until 2026-08-07, when a fragmented file was seeked forward and back in
       under 2.5 s, holding the Dolby Vision badge throughout.
-- [x] **HDR and Dolby Vision on the device** — reached by dropping HLS for a plain
+- [x] D3. **HDR and Dolby Vision on the device** — reached by dropping HLS for a plain
       MP4 over byte ranges: `hvc1` + `dvvC` gives HDR10, and forcing the `dvh1`
       sample entry gives Dolby Vision, both bright and correct on the television.
       Confirmed for fragmented and non-fragmented alike.
-- [ ] **Playback presentation belongs to `AVPlayerViewController`** — record it
+- [ ] D4. **Playback presentation belongs to `AVPlayerViewController`** — record it
       wherever the client's playback surface is specified. The spike proved one
       concrete failure, not a universal law: a SwiftUI `VideoPlayer` inside a
       `ZStack` under an overlay composited into the SDR layer, giving a dark
@@ -268,7 +271,7 @@ throwaway spike, on real hardware and real files, before any surface is designed
       owns the presentation, and custom UI is added only through its supported
       overlay APIs** (`contentOverlayView`, `customOverlayViewController`), never
       by compositing a player into an app-drawn view hierarchy.
-- [x] **Decide how the file is produced** — the question that replaces segment
+- [x] D5. **Decide how the file is produced** — the question that replaces segment
       boundaries, answered on 2026-08-07: **not on the fly**. AVFoundation walks the
       whole file's box headers before showing a frame, so the sample table must exist
       before playback and a `sidx` does not change that. What that requires is an
@@ -285,13 +288,13 @@ throwaway spike, on real hardware and real files, before any surface is designed
       `.hevc` and re-importing it with a hand-set frame rate — the very path it
       then recorded as a liability — so a result obtained that way does not
       validate a pipeline that will not use it.
-- [ ] **Audio passthrough on the receiver** — the pass packaged a single AC-3
+- [ ] D6. **Audio passthrough on the receiver** — the pass packaged a single AC-3
       track and never exercised E-AC-3/Atmos passthrough, which is the half of
       "picture and sound" still unanswered.
-- [ ] **Higher-bitrate headroom** — the 4K sample is 26.5 Mbit/s and played with
+- [ ] D7. **Higher-bitrate headroom** — the 4K sample is 26.5 Mbit/s and played with
       room to spare, but the 60–80 Mbit/s remux this deliverable originally named
       was never tried.
-- [ ] **Subtitles on the panel** — the `tx3g` track decodes: `RemuxSubtitlesTests`
+- [ ] D8. **Subtitles on the panel** — the `tx3g` track decodes: `RemuxSubtitlesTests`
       plays a synthesised file through AVPlayer on macOS and reads the cue back out
       of it. What that cannot answer is what the *television* draws — where the words
       land, at what size, and whether switching between tracks and Off holds — because
@@ -303,28 +306,28 @@ throwaway spike, on real hardware and real files, before any surface is designed
 > streaming session to expire. They are recorded here rather than deleted because
 > the reasoning that removed them is worth keeping.
 
-- [x] **Dolby Vision: find a muxer that signals it.** GPAC `MP4Box` writes `dvvC`,
+- [x] D9. **Dolby Vision: find a muxer that signals it.** GPAC `MP4Box` writes `dvvC`,
       preserves every RPU, and can force the `dvh1` sample entry that actually
       engages DV. ffmpeg does none of it. See below for the timing trap that comes
       with GPAC.
-- [x] **Decide which sample entry to serve, and to whom.** Settled and shipped:
+- [x] D10. **Decide which sample entry to serve, and to whom.** Settled and shipped:
       `NativePlaybackResolver.SignallingFor` answers from the client's declared
       dynamic range — `dvh1` for a client reporting Dolby Vision, `hvc1` + `dvvC`
       for everything else — and it was the first real consumer of the capability
       negotiation, as expected. Verified in Dolby Vision on an Apple TV 4K.
-- [ ] **Audit the library for Dolby Vision profile 5**, where a source served as
+- [ ] D11. **Audit the library for Dolby Vision profile 5**, where a source served as
       cross-compatible would not degrade gracefully the way the 8.1 sample does.
-- [x] **Settle the GPAC elementary-stream detour.** It no longer exists. Nothing on
+- [x] D12. **Settle the GPAC elementary-stream detour.** It no longer exists. Nothing on
       the serving path runs GPAC, ffmpeg or any external tool: `Mp4Synthesizer`
       writes `dvvC` and the `dvh1` entry itself, from the configuration Matroska
       already carries in its `BlockAdditionMapping`. The frame-timing trap the
       detour brought with it went with it.
-- [x] **Multi-track packaging** — shipped. Several audio tracks, a viewer's chosen
+- [x] D13. **Multi-track packaging** — shipped. Several audio tracks, a viewer's chosen
       dub including one in a **sidecar file** carried as a second `mdat`, and text
       subtitles rewritten as `tx3g` tracks rather than converted to WebVTT. The
       alternative this deliverable left open — leaving subtitles as tracks in the
       file — is the one that was taken.
-- [x] **Written outcome** in this document: remux by stream copy into an **MP4
+- [x] D14. **Written outcome** in this document: remux by stream copy into an **MP4
       served over byte ranges**, computed from a pre-built index, `dvh1` for Dolby
       Vision clients. No fallback was needed — HLS was the thing dropped, not the
       approach.
@@ -569,28 +572,28 @@ profile-5 rendition, which means re-encoding and is out of scope.
 
 ### Phase 0.1 — foundations
 
-- [x] **Repository layout** — `src/apple/` holds the `MediaKit` package and
+- [x] D15. **Repository layout** — `src/apple/` holds the `MediaKit` package and
       `MediaServerTV` beside its Xcode project, with a README covering the build, the
       simulator, CI, signing and versioning. The project file is written by hand and
       kept small by synchronized file groups: XcodeGen or Tuist would be a tool
       everyone must install before they can build, which a project this size does not
       earn.
-- [x] **CI decision** — **local builds only**, decided on 2026-08-09. macOS runners
+- [x] D16. **CI decision** — **local builds only**, decided on 2026-08-09. macOS runners
       cost roughly ten times the Linux ones this repository already uses, and until
       there is a client worth protecting they would break more often than they would
       catch anything. `MediaKit` runs under `swift test` in a second, which is where
       the logic worth protecting lives. The `api` and `web` workflows are untouched.
       Revisit when the client has users other than its author.
-- [x] **Versioning note in `AGENTS.md`** — written. The clients ship through
+- [x] D17. **Versioning note in `AGENTS.md`** — written. The clients ship through
       TestFlight rather than through Core, so `MARKETING_VERSION` is theirs and
       `manifest.json` is the server's, and a change touching only `src/apple/` leaves
       the manifest alone.
-- [ ] **Constituent plans** — the server halves are done: `native-client-api` and
+- [ ] D18. **Constituent plans** — the server halves are done: `native-client-api` and
       `remux-streaming` were both written, approved and built, and the API shape is
       settled. What remains is the client side of this item: a plan for the first
       screens — pairing with the server, browsing the library, and playing a title —
       written before any of it is built.
-- [x] **Build the capability profile from the device.** `MediaKit.CapabilityProfile`
+- [x] D19. **Build the capability profile from the device.** `MediaKit.CapabilityProfile`
       reads `VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC)` and
       `AVPlayer.eligibleForHDRPlayback` at runtime, behind a `DeviceCapabilities`
       protocol so the branches are testable without hardware. Dolby Vision is claimed
@@ -603,7 +606,7 @@ profile-5 rendition, which means re-encoding and is out of scope.
       hardware decodes but the server has no sample entry for — claiming it would
       earn a refusal at the request instead of an honest `unsupported` at resolve
       time.
-- [x] **Per-device escape hatches** — `PlaybackPreferences` narrows the detected
+- [x] D20. **Per-device escape hatches** — `PlaybackPreferences` narrows the detected
       profile before it is sent, so the server's own negotiation does the work and
       there is no second decision path to keep in step. `automatic / hdr10 / sdr`,
       and an override can only ever narrow: a viewer choosing HDR10 on a device that
@@ -618,13 +621,13 @@ profile-5 rendition, which means re-encoding and is out of scope.
 
 ### Closing the plan
 
-- [ ] **`feature.md` for the umbrella** grown to describe the client as a whole. It
+- [ ] D21. **`feature.md` for the umbrella** grown to describe the client as a whole. It
       exists as of 2026-08-10, created by the PR that first shipped behaviour as
       `AGENTS.md` requires, and today describes the foundations and the capability
       profile. It follows the code from here, created
       when the first client behaviour ships.
-- [ ] **Index** — `node scripts/docs-index.mjs --fix`.
-- [ ] **Version** — this document alone is documentation-only: no version bump.
+- [ ] D22. **Index** — `node scripts/docs-index.mjs --fix`.
+- [ ] D23. **Version** — this document alone is documentation-only: no version bump.
       Each constituent feature bumps `manifest.json` only if it changes the server
       app; a PR touching nothing but `src/apple/` does not.
 
