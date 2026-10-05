@@ -1,7 +1,10 @@
-# Convert Dialog
+---
+created: 2026-07-29
+updated: 2026-09-29
+summary: The dialog that composes a new version from one video file as a single transcode-engine job.
+---
 
-Created: 2026-07-29
-Updated: 2026-09-29
+# Convert Dialog
 
 This dialog composes a new version from one video file — a movie's or an episode's. It
 submits a single job to the

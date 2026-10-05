@@ -1,7 +1,10 @@
-# Background Tasks and Progress
+---
+created: 2026-06-15
+updated: 2026-09-10
+summary: Background jobs for long-running work with observable, restart-safe state and progress reporting to the UI.
+---
 
-Created: 2026-06-15
-Updated: 2026-09-10
+# Background Tasks and Progress
 
 ## Description
 
@@ -32,7 +35,7 @@ job state that survives restarts.
 
 Each job has: job id, type, related entity (e.g. ingest item, torrent), status,
 progress 0–100, attempt count, and optional error. Pipeline stages (see
-[Automation pipeline](../automation-pipeline.md)) emit jobs so the UI can show the
+[Automation pipeline](../automation-pipeline/feature.md)) emit jobs so the UI can show the
 full flow per item, not just isolated tasks.
 
 Torrent download progress is a special case: it is **not persisted** to the
@@ -82,7 +85,7 @@ reconciler resumes non-terminal items and re-drives stuck work with bounded
 retries and backoff. The reconciler claims each item with a lease
 (`LeaseOwner`/`LeaseUntil`) before driving it, so it never double-processes an
 item the orchestrator or an operator action is already handling (see
-[Domain model](../domain-model.md)).
+[Domain model](../domain-model/feature.md)).
 
 ## Testing Expectations
 

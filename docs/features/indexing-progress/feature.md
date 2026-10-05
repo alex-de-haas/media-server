@@ -1,7 +1,10 @@
-# Indexing Progress
+---
+created: 2026-09-10
+updated: 2026-09-11
+summary: Media cards show background remux preparation per file and per external audio track.
+---
 
-Created: 2026-09-10
-Updated: 2026-09-11
+# Indexing Progress
 
 ## Behavior
 

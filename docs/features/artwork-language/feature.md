@@ -1,7 +1,10 @@
-# Artwork Language
+---
+created: 2026-08-15
+updated: 2026-08-15
+summary: Which cached poster, backdrop and logo each surface shows, and the operator's per-title override.
+---
 
-Created: 2026-08-15
-Updated: 2026-08-15
+# Artwork Language
 
 ## Description
 

@@ -1,8 +1,11 @@
-# Recoverable Library Moves
+---
+status: On Hold
+created: 2026-09-23
+updated: 2026-09-23
+summary: Parked work to recover interrupted library moves without losing file ownership or overwriting another version.
+---
 
-Status: On Hold
-Created: 2026-09-23
-Updated: 2026-09-23
+# Recoverable Library Moves
 
 ## Goal and owner decision
 
@@ -21,17 +24,19 @@ bytes, hashes or complete operation history remain to establish the cause.
 Current organization uses File.Move; these observations do not establish a defect
 in File.Move or prove that the torrent engine recreated the source.
 
-## Remaining deliverables if resumed
+## Deliverables
 
-- [ ] Persist per-file move intent/outcome before filesystem mutation, including
+These remain to be done if the work is resumed.
+
+- [ ] D1. Persist per-file move intent/outcome before filesystem mutation, including
   source/destination and sufficient evidence for recovery after DB-save failure.
-- [ ] Recover interrupted moves idempotently; preserve both files and request review
+- [ ] D2. Recover interrupted moves idempotently; preserve both files and request review
   for ambiguous destinations, including different same-size files. Preserve existing
   alternate-version collision handling and same-filesystem rename behavior.
-- [ ] Add focused probe/open and move diagnostics that distinguish missing files,
+- [ ] D3. Add focused probe/open and move diagnostics that distinguish missing files,
   access failure and unreadable headers without claiming full-file integrity from
   a successful probe.
-- [ ] Add fault-injection coverage around move and DB persistence, verify known-fixture
+- [ ] D4. Add fault-injection coverage around move and DB persistence, verify known-fixture
   hashes on disposable Windows/Docker storage, update current behavior docs and bump
   the runtime version when implementation ships.
 

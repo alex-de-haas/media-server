@@ -36,4 +36,5 @@ code is **single-use**, so re-run the script for a new session (do not cache the
 - Underlying commands (what `scripts/dev.sh` wraps):
   `hosty apps start com.haas.media-server` then
   `hosty apps open com.haas.media-server --user <email> --format url`.
-- Full dev loop and platform contracts: `docs/features/implementation-plan.md`.
+- Full dev loop and platform contracts: `docs/features/build-and-deployment/feature.md` and
+  `docs/features/hosty-runtime-app/feature.md`.

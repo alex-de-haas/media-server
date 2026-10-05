@@ -1,7 +1,10 @@
-# Collections (Movie Franchises)
+---
+created: 2026-06-24
+updated: 2026-09-19
+summary: Owned movies grouped into TMDb franchise collections in the web UI and as a Jellyfin boxsets library.
+---
 
-Created: 2026-06-24
-Updated: 2026-09-19
+# Collections (Movie Franchises)
 
 Movies the operator owns are grouped into the franchise they belong to, and the
 grouping is browsable on both surfaces: a Collections page in the web UI, and a

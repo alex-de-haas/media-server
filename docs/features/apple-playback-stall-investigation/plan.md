@@ -1,8 +1,11 @@
-# Apple Playback Stalls and Audio Dropouts
+---
+status: On Hold
+created: 2026-10-02
+updated: 2026-10-02
+summary: Find and fix why Apple TV playback occasionally freezes or loses audio, one symptom at a time.
+---
 
-Status: On Hold
-Created: 2026-10-02
-Updated: 2026-10-02
+# Apple Playback Stalls and Audio Dropouts
 
 ## Goal and owner direction
 
@@ -48,35 +51,35 @@ loading, AVPlayer behavior, network delivery, server range/remux processing and
 storage latency as candidate boundaries until measurements distinguish them.
 Do not assume that a larger buffer or a packaging change is the remedy.
 
-## Deliverables and phases
+## Deliverables
 
 ### Phase 1 — reproduce and localize
 
-- [ ] Record a reproducible source/track selection, playback position and observation
+- [ ] D1. Record a reproducible source/track selection, playback position and observation
   duration, exact client/server/tvOS versions, device, network path and cache mode.
-- [ ] Reproduce and distinguish the severe freeze/dark-screen recovery and the
+- [ ] D2. Reproduce and distinguish the severe freeze/dark-screen recovery and the
   shorter self-recovering hitch; identify the actual recovery trigger from logs.
-- [ ] Reproduce audio loss with uninterrupted video, recording the selected audio
+- [ ] D3. Reproduce audio loss with uninterrupted video, recording the selected audio
   track, output route, seek direction/distance and sound at the same position after replay.
-- [ ] Capture diagnostic snapshots at freezes and recoveries and correlate them
+- [ ] D4. Capture diagnostic snapshots at freezes and recoveries and correlate them
   with timed server requests and storage/network observations. Record any missing
   telemetry needed to distinguish the candidate boundaries.
-- [ ] Compare disabled, memory and disk cache modes on the same remux source under
+- [ ] D5. Compare disabled, memory and disk cache modes on the same remux source under
   controlled conditions; account for direct play bypassing the application cache.
-- [ ] Establish the failing boundary and supported root-cause hypothesis for each
+- [ ] D6. Establish the failing boundary and supported root-cause hypothesis for each
   problem, including competing explanations and reproducers suitable for validating
   corrections. Determine whether the freeze variants and audio loss share a cause.
 
 ### Phase 2 — correct and verify
 
-- [ ] Define the smallest evidence-supported correction and its affected components
+- [ ] D7. Define the smallest evidence-supported correction and its affected components
   before implementation; coordinate with their existing plans without duplicating work.
-- [ ] Implement the correction and appropriate regression coverage, preserving
+- [ ] D8. Implement the correction and appropriate regression coverage, preserving
   source/track selection, seeking, resume and bounded resource use.
-- [ ] Repeat the failing device scenario and baseline comparisons; record stalls,
+- [ ] D9. Repeat the failing device scenario and baseline comparisons; record stalls,
   recoveries, audio continuity and observation duration. Automatic recovery alone
   is not uninterrupted playback; seeking to restore sound is not a fix.
-- [ ] Update affected reality documentation, record verification and version outcomes,
+- [ ] D10. Update affected reality documentation, record verification and version outcomes,
   remove this plan after all deliverables are complete, and regenerate the docs index.
 
 ## Interactions and open questions

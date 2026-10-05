@@ -1,7 +1,10 @@
-# Security
+---
+created: 2026-06-15
+updated: 2026-08-04
+summary: Protection of catalogs, torrents, settings and streams across Hosty identity and Jellyfin client credentials.
+---
 
-Created: 2026-06-15
-Updated: 2026-08-04
+# Security
 
 ## Description
 

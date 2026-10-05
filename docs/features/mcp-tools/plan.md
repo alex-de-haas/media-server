@@ -1,8 +1,11 @@
-# MCP Tools — plan
+---
+status: In Progress
+created: 2026-09-01
+updated: 2026-09-03
+summary: The remaining MCP tool work, which can only be judged by what a running agent does with the tools.
+---
 
-Status: In Progress
-Created: 2026-09-01
-Updated: 2026-09-03
+# MCP Tools — plan
 
 > Every deliverable this plan originally defined has shipped — see [feature.md](feature.md). One new
 > one is below, and the rest of what is left cannot be asserted in a unit test: the project has no
@@ -11,7 +14,7 @@ Updated: 2026-09-03
 
 ## Deliverables
 
-- [ ] **Accept scoped access tokens on `/api/mcp`.** A delegated token is what the AI Gateway carries
+- [ ] D1. **Accept scoped access tokens on `/api/mcp`.** A delegated token is what the AI Gateway carries
       and what the surface authenticates today; a scoped token is what an *external* agent client
       keeps in its own configuration, introspected against Core on every call rather than verified
       locally — which is what lets revoking it take effect at once. `HostyScopedTokenClient` arrived

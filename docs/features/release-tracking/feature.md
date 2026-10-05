@@ -1,14 +1,17 @@
+---
+created: 2026-07-14
+updated: 2026-09-30
+summary: A per-user calendar of TMDb release dates with reminders, without any downloading.
+---
+
 # Release Tracking
 
-Created: 2026-07-14
-Updated: 2026-09-30
-
-> Near-term slice of the M5 [Watchlist and discovery](../watchlist-and-discovery.md)
+> Near-term slice of the M5 [Watchlist and discovery](../watchlist-and-discovery/plan.md)
 > vision. This spec covers **only** tracking: a per-user calendar of movie/series
 > release dates sourced from TMDb, plus reminders on the releases a user cares
 > about. It deliberately excludes acquisition — no content-source search, no
 > release matching/scoring, no auto-grab, no handoff to `Intake`. Those stay in
-> [Watchlist and discovery](../watchlist-and-discovery.md) and build on top of the
+> [Watchlist and discovery](../watchlist-and-discovery/plan.md) and build on top of the
 > entities defined here.
 
 ## Description
@@ -67,7 +70,7 @@ In scope:
   a per-reminder lead time and notify time, delivered as a per-user notification.
 - An **Upcoming/Calendar** surface plus "add to calendar" from detail pages.
 
-Out of scope (owned by [Watchlist and discovery](../watchlist-and-discovery.md)):
+Out of scope (owned by [Watchlist and discovery](../watchlist-and-discovery/plan.md)):
 
 - `IContentSource`, source/indexer search, release parsing and scoring.
 - Auto-grab / operator-approval of a release, and the handoff into the `Intake`
@@ -119,7 +122,7 @@ TMDb requests, and keeps the eventual acquisition action — inherently a
 shared-library operation — attachable at the global level later.
 
 This supersedes the single reserved `WatchlistItem` sketch in the
-[domain model](../domain-model.md#entities--discovery-future-m5); its `CatalogId`
+[domain model](../watchlist-and-discovery/plan.md#discovery-entities); its `CatalogId`
 and `Quality` fields move to the deferred acquisition layer.
 
 ```mermaid
@@ -361,7 +364,7 @@ no new persisted state.
 
 - **Series** — join the linked series' episode children (each `MediaItem` episode
   carries `IdentitySeasonNumber`/`IdentityEpisodeNumber`; see
-  [domain model](../domain-model.md#entities--catalog--media)) to compute **Owned**,
+  [domain model](../domain-model/feature.md#entities--catalog--media)) to compute **Owned**,
   **Aired** (air date `<= now`), and **Missing-aired** (`Aired − Owned`) — the "you
   have S1–S2, S3E1 aired but you don't have it" signal; the UI shows "behind by N".
 - **Movies** — a linked movie held only in poor quality can still be tracked for its
@@ -409,7 +412,7 @@ The gap recomputes whenever the library or the schedule changes, so it never dri
 
 ## Reserved Seams for Acquisition
 
-The acquisition layer in [Watchlist and discovery](../watchlist-and-discovery.md)
+The acquisition layer in [Watchlist and discovery](../watchlist-and-discovery/plan.md)
 builds on these entities without reshaping them:
 
 - The `IPipelineStage` `Acquisition` phase and `IContentSource` contract are
@@ -440,6 +443,10 @@ MCP tools in M6 (see [root](../../root.md) roadmap):
 
 All reads are scoped to the authenticated `AppUser`; the shared `TrackedTitle` /
 `TrackedRelease` data is joined in but never mutated on another user's behalf.
+
+## Links
+
+- [Watch-history calendar](../watch-history-calendar/feature.md)
 
 ## Testing Expectations
 
@@ -475,7 +482,3 @@ Backend tests use xUnit and Imposter (mock the TMDb client). Required coverage:
 - No accidental cross-product read: the shared watchlist test context throws on EF's
   `MultipleCollectionIncludeWarning`, so a load that pulls two collections fails the
   suite until it opts into `AsSplitQuery()`.
-
-## Links
-
-- [Watch-history calendar](../watch-history-calendar/feature.md)

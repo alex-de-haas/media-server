@@ -1,7 +1,10 @@
-# Dolby Vision Profile
+---
+created: 2026-09-04
+updated: 2026-09-08
+summary: Distinguishes playable Dolby Vision from Dolby Vision shown as HDR10 and converts the latter losslessly.
+---
 
-Created: 2026-09-04
-Updated: 2026-09-08
+# Dolby Vision Profile
 
 The library tells apart the Dolby Vision a client will play from the Dolby Vision it will
 quietly show as HDR10, and offers a lossless way to turn the second kind into the first.

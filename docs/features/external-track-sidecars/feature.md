@@ -1,7 +1,10 @@
-# External Track Sidecars
+---
+created: 2026-07-27
+updated: 2026-09-23
+summary: A release's separate audio and subtitle files stay beside their library file as external streams.
+---
 
-Created: 2026-07-27
-Updated: 2026-09-23
+# External Track Sidecars
 
 A release's separate audio tracks and subtitles are kept as files beside the
 library file they belong to, and recorded as external streams of its media

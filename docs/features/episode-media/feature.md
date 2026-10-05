@@ -1,7 +1,10 @@
-# Episode Media
+---
+created: 2026-09-08
+updated: 2026-10-01
+summary: Episodes get the same media surface as movies, with versions, tracks, sidecars and conversions.
+---
 
-Created: 2026-09-08
-Updated: 2026-10-01
+# Episode Media
 
 An episode has the media surface a movie has — its versions, the tracks inside
 them, the sidecars beside them, and every conversion the

@@ -1,7 +1,10 @@
-# Hosty Platform Requests
+---
+created: 2026-06-15
+updated: 2026-10-05
+summary: A standing register of what Media Server has asked the Hosty platform for, with each request's status.
+---
 
-Created: 2026-06-15
-Updated: 2026-09-11
+# Hosty Platform Requests
 
 ## Description
 
@@ -60,7 +63,7 @@ Core injects the active binds at runtime as comma-joined `label=path` entries, e
 these are bind mounts; under `dev` they are the configured host paths read directly).
 The label is the per-bind key Media Server forwards to the torrent-engine (`mountLabel`)
 so it picks the downloads mount on the same host path — see
-[Torrent engine app](../../ideas/torrent-engine-app.md).
+[Torrent Engine downloads mounts](https://github.com/alex-de-haas/torrent-engine/blob/main/docs/features/downloads-mounts/feature.md).
 
 **How Media Server uses it.** Reads the injected roots and uses a transient
 `.incoming/` staging dir plus the canonical media tree under each for download and
@@ -343,7 +346,7 @@ predates this merge, so docker delivery needs a Core build that includes it.
 > torrent engine was extracted into the standalone `torrent-engine` app, which now
 > owns the raw listen port (behind its VPN). The capability is still required by the
 > platform — it is just the `torrent-engine` app, not media-server, that declares the
-> pinned raw port. See [Torrent engine app](../../ideas/torrent-engine-app.md).
+> pinned raw port. See [Torrent Engine](https://github.com/alex-de-haas/torrent-engine).
 
 **Problem.** The torrent engine needs a stable raw listen port for peer
 connectivity and DHT, ideally with router port mapping. Hosty only manages and
@@ -500,8 +503,7 @@ Why the `web → api` hop has no channel today:
   mapped).
 
 So there is no Core-provided way for `web` to learn `api`'s internal address. This
-is the same gap tracked as Open Risk #2 in the
-[implementation plan](../implementation-plan.md). It blocks a clean `web → api` proxy;
+was Open Risk #2 of the original implementation plan. It blocks a clean `web → api` proxy;
 the `docker` profile (the v1 delivery target) cannot ship it without the security
 regression below.
 
@@ -635,3 +637,11 @@ considered and rejected: it would rewrite ownership of the operator's media libr
   remove-with-data must keep working).
 - Existing installations with root-owned catalog roots have a documented migration
   or remain functional.
+
+## Testing Expectations
+
+- An entry marked Implemented names the Hosty version or date that shipped it, and Media Server's
+  use of it is covered by the owning feature's tests (storage mounts, backups, notifications,
+  native-client auth, secrets, service discovery).
+- When the platform ships or changes a requested capability, the entry's status and the consuming
+  feature document change in the same PR.

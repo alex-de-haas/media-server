@@ -1,8 +1,11 @@
-# File and Directory Management
+---
+status: Draft
+created: 2026-09-08
+updated: 2026-10-05
+summary: Decide what happens to a movie or episode once its last version has been deleted.
+---
 
-Status: Draft
-Created: 2026-09-08
-Updated: 2026-09-08
+# File and Directory Management
 
 ## Goal
 
@@ -47,7 +50,10 @@ Not decided. The candidates, written as a diff against `feature.md`:
 
 ## Deliverables
 
-None until the target behaviour is chosen.
+- [ ] D1. Choose the target behaviour with the owner — prune, keep with an explicit "no file"
+      state, or refuse — and whether movies and episodes behave alike.
+- [ ] D2. Implement the chosen behaviour for movies and episodes, with tests, and move it into
+      `feature.md`.
 
 ## Verification
 

@@ -1,7 +1,10 @@
-# Native Playback
+---
+created: 2026-08-04
+updated: 2026-09-24
+summary: Native playback negotiation, initial track selection and watch recording under /native/v1/playback.
+---
 
-Created: 2026-08-04
-Updated: 2026-09-24
+# Native Playback
 
 ## Description
 

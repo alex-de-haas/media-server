@@ -1,7 +1,10 @@
-# Multi-Movie Ingest (Franchise Packs)
+---
+created: 2026-07-24
+updated: 2026-09-10
+summary: A franchise pack download imports as separate movies, each with its own folder and metadata.
+---
 
-Created: 2026-07-24
-Updated: 2026-09-10
+# Multi-Movie Ingest (Franchise Packs)
 
 ## Description
 

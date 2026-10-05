@@ -1,7 +1,10 @@
-# Cache Storage
+---
+created: 2026-08-11
+updated: 2026-08-11
+summary: Remux indexes and downloaded artwork live in the Hosty cache directory, persistent but never backed up.
+---
 
-Created: 2026-08-11
-Updated: 2026-08-11
+# Cache Storage
 
 The app declares the Hosty cache directory (docker-host
 `docs/features/app-cache-storage/feature.md`) and keeps its remux indexes and

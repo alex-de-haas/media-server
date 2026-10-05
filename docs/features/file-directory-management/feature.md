@@ -1,7 +1,10 @@
-# File and Directory Management
+---
+created: 2026-06-15
+updated: 2026-09-24
+summary: File operations happen only as catalog automation and stay confined to configured catalog roots.
+---
 
-Created: 2026-06-15
-Updated: 2026-09-24
+# File and Directory Management
 
 ## Description
 

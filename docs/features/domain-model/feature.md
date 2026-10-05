@@ -1,13 +1,15 @@
-# Domain Model
+---
+created: 2026-06-15
+updated: 2026-10-05
+summary: The persistent EF Core entities and the core pipeline and metadata extension contracts.
+---
 
-Status: Implemented
-Created: 2026-06-15
-Updated: 2026-07-24
+# Domain Model
 
 ## Description
 
 This document specifies the persistent entities (EF Core over SQLite) and the
-core extension contracts (`IPipelineStage`, `IMetadataProvider`, `IContentSource`)
+core extension contracts (`IPipelineStage`, `IMetadataProvider`)
 plus the supporting service interfaces they depend on. It is the design reference
 for M0–M1; signatures are illustrative C#, not final code.
 
@@ -24,7 +26,7 @@ Conventions:
   can be refreshed or re-linked.
 - Flexible/provider-shaped data is stored in **JSON columns** (SQLite JSON1 /
   EF Core JSON mapping), not in a document database (see
-  [Storage and data](storage-and-data/feature.md)).
+  [Storage and data](../storage-and-data/feature.md)).
 - Catalogs are operator-managed at runtime → a DB table. Secrets and global
   toggles come from Hosty app settings/env, not the DB.
 
@@ -52,7 +54,7 @@ erDiagram
   AppUser ||--o{ MediaAccessCredential : "creates"
   AppUser ||--o{ AccessToken : "uses"
   AppUser ||--o{ PlaybackSession : "plays"
-  AppUser ||--o{ WatchlistEntry : "watchlist (future)"
+  AppUser ||--o{ WatchlistEntry : "watchlist"
 ```
 
 ## Entities — Catalog & Media
@@ -112,7 +114,7 @@ Because `PublicId` embeds `CatalogId`, **moving an item to another catalog**
 re-mints it (the Jellyfin id changes; clients re-sync). The internal `Id` is
 preserved on a re-point, so `UserData` and cached metadata survive the move; a merge
 into an existing target item folds the sources in and prunes the source row instead.
-See [File and directory management](file-directory-management/feature.md#move-semantics).
+See [File and directory management](../file-directory-management/feature.md#move-semantics).
 
 Unmatched videos are not exposed to Jellyfin clients — their temporary identity
 stays internal to the review queue and admin UI — so a client-visible `PublicId`
@@ -197,7 +199,7 @@ refreshed on a staleness window keyed off `DetailsFetchedAt`.
 
 A `Person` is **shared** across every item it is credited on; per-item credit
 details live on the join, not here. Enrich upserts people by `(Provider,
-ProviderId)` and never duplicates a person per item. See [Metadata](metadata/feature.md).
+ProviderId)` and never duplicates a person per item. See [Metadata](../metadata/feature.md).
 
 **MediaItemPerson** — credit join linking a `Person` to a `MediaItem`
 
@@ -238,7 +240,7 @@ and ETA are **not persisted**. The torrent engine reports them in memory and
 broadcasts them over the realtime stream; only state transitions are written to
 the database, and a transition (e.g. Completed) is what triggers downstream
 pipeline actions. See
-[Storage and data](storage-and-data/feature.md) and [Background tasks](background-tasks/feature.md).
+[Storage and data](../storage-and-data/feature.md) and [Background tasks](../background-tasks/feature.md).
 
 **SourceFile** (one playable file flowing through an ingest)
 
@@ -260,7 +262,7 @@ Each playable media file eventually maps to exactly one movie or one episode.
 Remapping changes the `SourceFile -> MediaItem` assignment and **moves** the
 canonical file to the new naming (an atomic rename, no hardlink rebuild).
 
-**IngestItem** (pipeline state machine — see [Automation pipeline](automation-pipeline.md))
+**IngestItem** (pipeline state machine — see [Automation pipeline](../automation-pipeline/feature.md))
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -353,21 +355,6 @@ by other Hosty runtime apps.
 | PositionTicks | long |
 | StartedAt / LastProgressAt | DateTime |
 
-## Entities — Discovery (future, M5)
-
-The near-term **release-tracking** slice splits this reserved `WatchlistItem`
-sketch into a global title/schedule part (`TrackedTitle`, `TrackedRelease`) and a
-per-user subscription part (`WatchlistEntry`, `ReleaseReminder`,
-`ReminderDelivery`); its `CatalogId`
-and `Quality` fields move to the deferred acquisition layer. See
-[Release tracking](release-tracking/feature.md) for those entities.
-
-**WatchlistItem** *(superseded by the release-tracking split above)*: Id,
-Providers (JSON), Type, CatalogId (FK), Monitored, Quality (JSON preferences),
-CreatedAt.
-**ContentSourceConfig** *(acquisition)*: Id, Name, Type, Config (JSON without raw
-secrets), SecretRefs (JSON references to Hosty-managed secrets), Enabled.
-
 ## Enums
 
 ```csharp
@@ -430,12 +417,9 @@ uses the `RowVersion` token to detect concurrent edits, so the reconciler and
 operator actions never double-drive the same item.
 
 `IngestStage` enumerates the v1 **processing** stages and is the persisted
-`IngestItem.Stage`. Acquisition stages (M5) implement the same `IPipelineStage`
-contract but are ordered before `Intake` via `Order` and operate on
-watchlist/release entities — they do not extend `IngestStage`, because an
-`IngestItem` only exists once acquisition hands a torrent to `Intake`. Stage
-ordering therefore lives on the stage (`Phase` + `Order`), not in the
-processing-only `IngestStage` enum.
+`IngestItem.Stage`. Stage ordering lives on the stage (`Phase` + `Order`), not in the
+`IngestStage` enum. No acquisition stage exists; its design is in the
+[watchlist and discovery plan](../watchlist-and-discovery/plan.md).
 
 ## Contract: IMetadataProvider
 
@@ -466,35 +450,7 @@ public record RemoteImage(ImageType Type, string? Language, string RemotePath, i
 
 Identify uses `SearchAsync` + scoring (auto-match vs review threshold); enrich uses
 `FetchAsync`/`GetImagesAsync` to populate `MetadataRecord` and `ImageAsset` keyed
-by `provider + language`. See [Metadata](metadata/feature.md).
-
-## Contract: IContentSource (future, M5)
-
-Provider-agnostic (not Torznab-specific); each source is a custom implementation.
-
-```csharp
-public interface IContentSource
-{
-    string Key { get; }
-    ContentSourceCapabilities Capabilities { get; }   // movie/series search, paging
-
-    Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(
-        ReleaseQuery query, CancellationToken ct);
-}
-
-public record ReleaseQuery(MediaKind Kind, string Title, int? Year,
-                           int? Season = null, int? Episode = null);
-
-public record ReleaseCandidate(
-    string Title, string DownloadUri,        // magnet or .torrent URL
-    int? Year, int? Season, int? Episode,
-    string? Resolution, string? Quality,
-    long? SizeBytes, int? Seeders);
-```
-
-A matcher scores candidates against a `WatchlistItem` and quality preferences,
-grabs the best (or queues for approval), and hands the result to the pipeline's
-`Intake` stage. See [Watchlist and discovery](watchlist-and-discovery.md).
+by `provider + language`. See [Metadata](../metadata/feature.md).
 
 ## Supporting Service Interfaces
 
@@ -545,6 +501,10 @@ public interface ICatalogPathSandbox     // see file-directory-management / secu
 - `MediaSource`/`MediaStream` → `MediaSources[]`/`MediaStreams[]`.
 - `UserData` → `BaseItemDto.UserData`.
 
+## Links
+
+- [Watch-history calendar](../watch-history-calendar/feature.md)
+
 ## Testing Expectations
 
 Backend tests use xUnit and Imposter. Required coverage:
@@ -562,7 +522,3 @@ Backend tests use xUnit and Imposter. Required coverage:
 - `IMetadataProvider` multi-language fetch and candidate scoring (mock provider).
 - `ICatalogPathSandbox` containment and traversal/symlink rejection.
 - Credential lockout counters and token hashing.
-
-## Links
-
-- [Watch-history calendar](watch-history-calendar/feature.md)

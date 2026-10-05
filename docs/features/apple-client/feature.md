@@ -1,7 +1,10 @@
-# Apple Client
+---
+created: 2026-08-10
+updated: 2026-10-01
+summary: The first-party Apple client that pairs a television with a server, browses the library and plays it through server-side repackaging.
+---
 
-Created: 2026-08-10
-Updated: 2026-10-01
+# Apple Client
 
 The first-party client for Apple platforms. It exists because AVFoundation will not open
 Matroska and this library is Matroska — the server answers that by

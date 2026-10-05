@@ -1,7 +1,10 @@
-# Build and Deployment
+---
+created: 2026-06-15
+updated: 2026-10-05
+summary: How Media Server is developed under the dev profile and delivered as docker images through GitHub Actions.
+---
 
-Created: 2026-06-15
-Updated: 2026-09-08
+# Build and Deployment
 
 ## Description
 
@@ -52,8 +55,8 @@ hosty apps logs com.haas.media-server
   and tests against; both move together in one change.
 - `docker` is the default install profile; `dev` is used for local development.
   Catalog roots are bound through Hosty external host-path mounts (see
-  [Storage and data](../storage-and-data/feature.md)). Image build/publish lands in M4 (see
-  [Implementation plan](../implementation-plan.md)).
+  [Storage and data](../storage-and-data/feature.md)). Production images
+  are described below.
 
 ### Base images
 

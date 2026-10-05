@@ -1,8 +1,10 @@
-# Automation Pipeline
+---
+created: 2026-06-15
+updated: 2026-10-05
+summary: The staged ingest pipeline that carries an added torrent through identification, download, organization, probing and enrichment to playback.
+---
 
-Status: Implemented
-Created: 2026-06-15
-Updated: 2026-06-21
+# Automation Pipeline
 
 ## Description
 
@@ -16,22 +18,20 @@ This is the key difference from earlier, manual-step systems.
 The pipeline is an **ordered, extensible set of stages** operating on an ingest
 item. It is split into two phases:
 
-- **Acquisition (`ACQ`)** — decides *what* to download. Optional and added over
-  time (watchlist, release calendar, content sources). It ends by handing a
-  magnet/`.torrent` plus a target catalog to Intake.
+- **Acquisition (`ACQ`)** — decides *what* to download and hands a magnet/`.torrent`
+  plus a target catalog to Intake. No acquisition stage exists yet: an operator adds
+  the torrent. The stages are planned in
+  [watchlist and discovery](../watchlist-and-discovery/plan.md).
 - **Processing (`PROC`)** — turns an acquired download into a published library
   item. This is the v1 core.
 
 ```mermaid
 flowchart LR
-  subgraph ACQ["Acquisition (future, extensible)"]
-    CAL["Release calendar"] --> WISH["Watchlist"] --> SRCH["Source search"] --> GRAB["Grab release"]
-  end
+  ADD["Operator adds a torrent"] --> INTAKE
   subgraph PROC["Processing (v1)"]
     INTAKE["Intake"] --> ID["Identify / map files"] --> DL["Download"]
     DL --> ORG["Organize"] --> PROBE["Probe"] --> ENRICH["Enrich metadata"] --> PUB["Publish"]
   end
-  GRAB --> INTAKE
   ID -. low confidence .-> REVIEW["Review queue"]
   REVIEW -. operator match .-> DL
 ```
@@ -66,7 +66,7 @@ episode.
 **catalog scan** is a second entry point: it creates an ingest **at `Identify`**
 for each media file already present in the catalog root with no published source,
 then runs the same identify → organize → probe → enrich → publish tail — for
-onboarding a hand-copied collection (see [Catalogs](catalogs/feature.md)).
+onboarding a hand-copied collection (see [Catalogs](../catalogs/feature.md)).
 
 **Seeding** lives only on the `Download` stage and is mutually exclusive with
 being in the library: with `keepSeeding` the ingest parks at `Download` (the file
@@ -89,10 +89,10 @@ the hand-off and the rest of the pipeline.
 - **Non-blocking.** A single item entering the review queue (ambiguous match)
   does not block other items in the pipeline.
 - **Observable.** Each stage emits background job events (see
-  [Background tasks](background-tasks/feature.md)) consumed by the UI activity view.
+  [Background tasks](../background-tasks/feature.md)) consumed by the UI activity view.
 - **Database is source of truth.** Publish writes items to the database; the
   reconcile scan only checks the catalog root against it, while the import scan
-  ingests orphan files through the pipeline (see [Catalogs](catalogs/feature.md)).
+  ingests orphan files through the pipeline (see [Catalogs](../catalogs/feature.md)).
 
 ## Ingest Item State
 
@@ -120,14 +120,6 @@ passed is recorded so re-entry resumes at the correct point.
   episode. Remap **moves/renames** the canonical file and re-runs probe/enrich/
   publish where needed.
 - The operator can re-run identify/enrich/probe for any item.
-
-## Extension Points (future)
-
-- `ACQ` stages: release calendar polling, watchlist matching, content-source
-  search, and release grabbing (see [Watchlist and discovery](watchlist-and-discovery.md)).
-- MCP tools: pipeline operations (`add_torrent`, `rescan`, `download_status`,
-  `search_content`) are shaped as discrete commands so an AI agent can drive them
-  through MCP.
 
 ## Testing Expectations
 

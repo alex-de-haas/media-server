@@ -1,7 +1,10 @@
-# Manual and Smart Groups
+---
+created: 2026-09-15
+updated: 2026-09-15
+summary: Manual and smart groups that organize titles independently of catalogs and franchise collections.
+---
 
-Created: 2026-09-15
-Updated: 2026-09-15
+# Manual and Smart Groups
 
 ## Behavior
 

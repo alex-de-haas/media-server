@@ -1,7 +1,10 @@
-# Blu-ray Sources and MKV Creation
+---
+created: 2026-09-24
+updated: 2026-09-25
+summary: BDMV discs import as durable Blu-ray sources, and administrators create MKV versions from a chosen playlist.
+---
 
-Created: 2026-09-24
-Updated: 2026-09-25
+# Blu-ray Sources and MKV Creation
 
 ## Library sources
 

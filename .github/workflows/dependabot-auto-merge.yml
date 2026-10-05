@@ -1,7 +1,7 @@
 name: Dependabot auto-merge
 
 # Turns Hosty App SDK bumps into no-touch updates, per the platform's SDK update model
-# (docker-host docs/ideas/hosty-app-sdk.md, decision 13): the app tracks the current SDK,
+# (docker-host docs/features/hosty-app-sdk/feature.md): the app tracks the current SDK,
 # and the bump chore is eliminated by automation rather than by floating versions.
 #
 # Deliberately narrow: only PRs authored by Dependabot, and only those in the `hosty-sdk`
