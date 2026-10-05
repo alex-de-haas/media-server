@@ -33,10 +33,15 @@ export async function GET(request: NextRequest) {
   if (resolution.status !== "active") {
     const failure = FAILURE_RESPONSES[resolution.status];
     return NextResponse.json(
-      { status: resolution.status, error: failure.error, recovery: readSessionRecoveryParams() },
+      {
+        status: resolution.status,
+        error: failure.error,
+        ...(resolution.error ? { appSession: { status: resolution.status, error: resolution.error } } : {}),
+        recovery: await readSessionRecoveryParams(),
+      },
       { status: failure.status, headers: { "cache-control": "no-store" } },
     );
   }
 
-  return NextResponse.json({ ...resolution.session, status: "active", recovery: readSessionRecoveryParams() }, { headers: { "cache-control": "no-store" } });
+  return NextResponse.json({ ...resolution.session, status: "active", recovery: await readSessionRecoveryParams() }, { headers: { "cache-control": "no-store" } });
 }
