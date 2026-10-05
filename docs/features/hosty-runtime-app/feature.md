@@ -402,7 +402,10 @@ browser sign-in flow.
 - Cover the app identity probe status, asynchronous recovery protocol metadata
   and activity metadata, plus bearer transport for JSON and SSE requests and
   rejection of other origins. Verify protocol discovery errors fail closed and an
-  observed protocol 2 never downgrades. The SDK owns callback exchange
+  observed protocol 2 never downgrades. Network-mocked browser cases require
+  unavailable/Retry with no Core navigation when recovery is unverified and
+  validate app-Origin, state and public-only S256 fields on protocol-2 intent
+  form navigation. They do not replace real Core-managed acceptance. The SDK owns callback exchange
   deduplication, effect replay, popup source/origin/state and local proof coverage.
 - Cover local code-only or malformed-verifier 400 without a Core call, missing
   service-token 503, the service bearer and `redirect: "error"`. A wrong verifier

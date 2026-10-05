@@ -40,7 +40,8 @@ function serve<T>(value: Served<T> | undefined, fallback: T): T {
 export interface AppMock {
   role?: "admin" | "user" | null; // null → unauthenticated (401, or sessionStatus)
   sessionStatus?: 401 | 403; // failure status when role is null (default 401)
-  recoveryOrigin?: string; // browser-reachable Core origin in the failure body (default null)
+  recoveryOrigin?: string; // browser-reachable Core origin in the probe body (default null)
+  appAuthProtocol?: 1 | 2 | null; // server-verified protocol: default 2 with a Core origin, otherwise null
   library?: unknown[] | { status: number };
   recent?: unknown[];
   resume?: unknown[];
@@ -79,19 +80,21 @@ export interface AppMock {
 
 export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
   const role = mock.role === undefined ? "admin" : mock.role;
+  const recovery = {
+    appId: "com.haas.media-server",
+    corePublicOrigin: mock.recoveryOrigin ?? null,
+    appAuthProtocol: mock.appAuthProtocol === undefined ? (mock.recoveryOrigin ? 2 : null) : mock.appAuthProtocol,
+  };
 
   await page.route("**/api/auth/session", (route) =>
     role
-      ? route.fulfill({ json: { ...session(role), status: "active", recovery: { appId: "com.haas.media-server", corePublicOrigin: mock.recoveryOrigin ?? null } } })
+      ? route.fulfill({ json: { ...session(role), status: "active", recovery } })
       : route.fulfill({
           status: mock.sessionStatus ?? 401,
           json: {
             status: mock.sessionStatus === 403 ? "forbidden" : "expired",
             error: mock.sessionStatus === 403 ? "forbidden" : "unauthenticated",
-            recovery: {
-              appId: "com.haas.media-server",
-              corePublicOrigin: mock.recoveryOrigin ?? null,
-            },
+            recovery,
           },
         }),
   );
