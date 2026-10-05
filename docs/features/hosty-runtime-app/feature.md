@@ -133,11 +133,9 @@ The SDK `AppIdentityBridge` probes `/api/auth/session` and mounts protected cont
 only after session validation. JSON API requests and SSE connections use SDK
 `appFetch` on the same app origin and refuse credential-bearing redirects.
 
-The app's proof-aware exchange and asynchronous recovery integration are verified
-against the unpublished SDK `0.21.0` candidate. The checked-in web dependency
-remains `@hosty-sdk/app: ^0.19.1`; this source integration does not establish a
-published SDK release or deployment. SDK publication and registry dependency
-rollout remain tracked in Hosty's existing `app-code-exchange` plan.
+The web dependency is `@hosty-sdk/app: ^0.21.0`, with SDK `0.21.0` resolved from
+npm in the checked-in pnpm lockfile. The app uses the published SDK's proof-aware
+exchange and asynchronous recovery integration.
 
 1. Every sign-in attempt has an independent cryptographically random private
    verifier and public state. The SDK derives a public S256 challenge using the
