@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-06-15
-Updated: 2026-10-04
+Updated: 2026-10-05
 
 ## Description
 
@@ -128,39 +128,81 @@ The app must read these instead of hard-coding ports, origins, or paths.
 
 Two independent auth domains.
 
-**UI (Core-owned).** The browser only ever talks to the `web` origin.
+**UI (Core-owned).** Shell opens the `web` origin without a user credential.
+The SDK `AppIdentityBridge` probes `/api/auth/session` and mounts protected content
+only after session validation. JSON API requests and SSE connections use SDK
+`appFetch` on the same app origin and refuse credential-bearing redirects.
 
-1. Shell opens the app origin. The SDK `AppIdentityBridge` probes `/api/auth/session`.
-   When embedded and unauthenticated, its sign-in button opens Core with `responseMode=web_message`.
-   Core returns a single-use code to the initiating frame, with popup source, origin and state
-   checks. Standalone recovery uses a guarded redirect through Core and a one-time `?code`.
-2. `web` exchanges it at `POST {HOSTY_CORE_ORIGIN}/api/auth/apps/token`.
-3. `web` stores the returned app identity token in an app-origin HttpOnly cookie.
-   Derive cookie attributes from the effective protocol: `SameSite=None; Secure`
-   over https, `SameSite=Lax` without `Secure` on plain http. Because the app is
-   embedded in a cross-site Shell iframe, browser privacy controls (Safari ITP,
-   third-party cookie deprecation) may block this cookie. The session must
-   therefore also support a header-based fallback: the browser keeps the identity
-   token in memory only and sends it as `Authorization: Bearer` on
-   requests to `web`. Partitioned cookies (CHIPS) may be used where supported, but
-   the header fallback is the robust cross-browser path.
-4. `web` revalidates via `POST {HOSTY_CORE_ORIGIN}/api/auth/apps/revalidate` with
-   `Authorization: Bearer <HOSTY_APP_SERVICE_TOKEN>` before extending trust.
-5. `web` forwards the validated Host user identity to `api` as a bearer token that
-   `api` re-validates against Core. (Hosty Core also accepts this identity as the
-   `X-Docker-Host-Identity` header.) `api` never trusts unsigned or client-set
-   headers or cookies.
+The app's proof-aware exchange and asynchronous recovery integration are verified
+against the unpublished SDK `0.21.0` candidate. The checked-in web dependency
+remains `@hosty-sdk/app: ^0.19.1`; this source integration does not establish a
+published SDK release or deployment. SDK publication and registry dependency
+rollout remain tracked in Hosty's existing `app-code-exchange` plan.
 
-The SDK owns code exchange and recovery, including React Strict Mode effect replay. App content
-mounts only after the bridge validates the session. JSON API requests and SSE connections use
-SDK `appFetch`, sharing the same origin-bound in-memory grant and refusing credential-bearing
-redirects. The app does not ask Shell to mint credentials or store a bearer in sessionStorage.
-Signing in in another tab is not used to authenticate the embedded frame.
+1. Every sign-in attempt has an independent cryptographically random private
+   verifier and public state. The SDK derives a public S256 challenge using the
+   maintained portable SHA-256 implementation. Popup proof stays in the initiating
+   document's memory; navigation proof uses a bounded, short-lived app-origin
+   `sessionStorage` entry. The verifier never appears in a URL, a Core form, a
+   parent-frame message, or a log. A callback requires a matching local attempt,
+   state and exact app callback before exchange; state alone does not prove it.
+2. For protocol 2, an app-origin browser form posts the public challenge, state,
+   callback and mode to Core `/api/apps/{appId}/sign-in-intent`. Core validates the
+   exact browser `Origin` and navigation context, binds the intent to a unique
+   HttpOnly Core browser nonce, and redirects to `/open?requestId=...`. Arbitrary
+   `/open` GET challenge parameters cannot issue a code. Core's cookie hostname is
+   isolated from every app endpoint hostname, including endpoints on other ports.
+   An initial embedded document attempts silent recovery once, then offers an
+   app-owned popup opened synchronously by a user action. A known silent iframe
+   intent with a blocked nonce returns only state-correlated `login_required`,
+   without a code or consumed intent. Standalone recovery uses guarded navigation;
+   native clients intercept the app-initiated public proof GET before network
+   access and correlate in-place renewal results with the unchanged app document.
+3. The browser posts `{ code, codeVerifier }` to `/api/auth/app-code`; the SDK
+   server handler exchanges it at
+   `POST {HOSTY_CORE_ORIGIN}/api/auth/apps/token` with
+   `Authorization: Bearer <HOSTY_APP_SERVICE_TOKEN>`. A code-only or malformed-proof
+   request returns 400 locally without contacting Core. A missing or blank service
+   token returns 503 `app_service_token_missing` before exchange. A valid-shaped
+   wrong proof returns Core's 401 `invalid_code` and does not consume the code.
+   Core checks the service app audience as well as the proof before consumption.
+   Both browser-to-app and server-to-Core proof POSTs use `redirect: "error"` and
+   `cache: "no-store"`.
+4. `web` stores the returned app identity token in its `hosty_identity` HttpOnly
+   app-origin cookie. Cookie lifetime follows the token: HTTPS uses
+   `SameSite=None; Secure`, and HTTP uses `SameSite=Lax` without `Secure`. Embedded
+   launches also keep the grant in memory and app-origin `sessionStorage` for the
+   current tab, restoring it before the first probe after reload when third-party
+   cookies are blocked. Standalone launches do not store this grant in
+   `sessionStorage`; neither mode uses `localStorage`. The app's Core audience
+   remains `com.haas.media-server`, separate from Core login and other app sessions.
+5. `web` revalidates with Core `/api/auth/apps/revalidate` using its app service
+   bearer before extending trust. It forwards the validated Host user identity to
+   `api` as a bearer token that `api` revalidates against Core. Core also accepts
+   this identity as `X-Docker-Host-Identity`. The API never trusts unsigned or
+   client-set user headers or cookies. Proof exchange does not replace this second
+   validation boundary.
 
-The session probe returns a structured status, recovery origins and active-session metadata.
-The bridge keeps authenticated content mounted during activity renewal so a popup can restore
-access without discarding the current page. Navigation within the app retains the grant; a full
-reload can require a new sign-in when the browser blocks third-party cookies.
+The force-dynamic session probe awaits server-side recovery discovery and returns
+`appId`, `corePublicOrigin` and `appAuthProtocol` with its session status and activity
+metadata. Core `/api/auth/apps/protocol` discovery is uncached. Protocol 1 requires
+a definite metadata 404 followed by a valid running `hosty-core` status with a
+version below `0.120.0`; errors or malformed metadata fail closed. Once protocol 2
+is observed for a configured Core origin, transient failures or older metadata
+cannot downgrade it. The browser uses this app-local response instead of fetching
+Core metadata across origins.
+
+The SDK deduplicates callback exchange through React Strict Mode effect replay.
+When attempt storage is unavailable, it skips silent recovery and full navigation;
+an explicit popup retains proof in memory and fails closed if blocked. It never
+downgrades to an unbound code exchange. Logout and explicit `token_invalid`,
+`token_revoked`, `token_expired` or `token_app_mismatch` rejection clear stored and
+in-memory grants; `reauth_required` retains the grant for renewal. Storage errors
+leave the mounted document's in-memory grant usable, and stale probes cannot erase
+a newer grant. The bridge keeps authenticated content mounted during renewal,
+preserving the current page. A same-tab embedded reload restores its stored grant;
+closing the tab ends that storage. Shell and other tabs do not supply credentials
+to the app frame.
 
 After validation, Media Server upserts an internal app user in SQLite. Hosty
 admins map to Media Server `admin`; other assigned Hosty users map to Media
@@ -292,9 +334,10 @@ The `web` UI runs inside the Hosty Shell sandboxed iframe. It must:
 - use relative URLs or `HOSTY_CORE_PUBLIC_ORIGIN`, never hard-coded origins;
 - keep client routing compatible with `ui.entrypoint.path`;
 - avoid reading Host cookies, Host local storage, or the parent DOM;
-- avoid embedded top-level redirects and frame busting; use the SDK Core popup
-  opened directly by a user click, with SDK validation of message source, origin
-  and state;
+- allow the SDK silent initial-load navigation only inside the initiating app
+  frame, before content mounts; mounted-page renewal uses an app-owned popup
+  opened directly by a user action, with message source, origin, state and local
+  proof validation, preserving the page and avoiding frame busting;
 - validate SignalR transport (WebSocket, SSE, long-polling fallback) through the
   Core-managed runtime, because behavior can depend on the embed route.
 
@@ -307,10 +350,11 @@ persisted for the tab, then the frame heuristic — and stamp it onto `<html>` a
 `data-hosty-launch`. The top tab bar (wordmark plus the manifest `ui.navigation`
 pages) carries the SDK's `hosty-shell-chrome` class and is hidden by an unlayered
 CSS rule whenever the mode is not `standalone`, because a surrounding shell already
-renders that navigation. Session recovery keeps branching on the structural frame
-heuristic (`detectLaunchMode`) when choosing between the embedded
-SDK Core popup (`web_message`) flow and the standalone guarded Core redirect.
-Shell does not mint or exchange app grants on behalf of the frame.
+renders that navigation. Session recovery follows the resolved embedded, native
+or standalone launch mode: embedded initial-load silent recovery and popup
+renewal, native intercepted proof navigation and correlated in-place completion,
+or standalone guarded Core navigation. Shell does not mint or exchange app grants
+on behalf of the frame.
 
 ## Capabilities
 
@@ -324,12 +368,15 @@ are not declared here.
 hosty core start
 hosty apps install . --runtime dev
 hosty apps start com.haas.media-server
-hosty apps open com.haas.media-server --user user@hosty.local --mode shell
+hosty apps open com.haas.media-server --mode shell
 ```
 
 Identity, Shell embedding, assignments, scoped directory, redirects, WebSockets,
 and SSE must be checked through this Core-managed lifecycle. Standalone dev
-servers can validate UI and business logic only.
+servers can validate UI and business logic only. `apps open` carries no user
+credential and has no `--user` option; normal Core browser login selects the user.
+`apps identity --user` remains a diagnostic helper for direct API probes, not the
+browser sign-in flow.
 
 ## Testing Expectations
 
@@ -349,10 +396,24 @@ servers can validate UI and business logic only.
   the tab bar while `?hosty_launch=embedded` hides it, and that the parameter is
   cleaned from the URL.
 
-- Cover the app identity probe status, recovery parameters and activity metadata,
-  plus bearer transport for JSON and SSE requests and rejection of other origins.
-  The SDK owns code-exchange deduplication and effect-replay coverage.
-- Verify the embedded Core popup returns access to the original frame when app
-  cookies are blocked. Check Dashboard → Home, Dashboard → Movies, and returning
-  to the first page through the Core-managed runtime without another sign-in.
-  A full reload may require sign-in again because the fallback grant is memory-only.
+- Cover the app identity probe status, asynchronous recovery protocol metadata
+  and activity metadata, plus bearer transport for JSON and SSE requests and
+  rejection of other origins. Verify protocol discovery errors fail closed and an
+  observed protocol 2 never downgrades. The SDK owns callback exchange
+  deduplication, effect replay, popup source/origin/state and local proof coverage.
+- Cover local code-only or malformed-verifier 400 without a Core call, missing
+  service-token 503, the service bearer and `redirect: "error"`. A wrong verifier
+  returns 401 without consuming a real Core-issued code; the correct verifier
+  succeeds once. Verify Origin-plus-nonce binding and silent blocked-cookie
+  fallback through the Core-managed runtime.
+- Verify the embedded popup returns access to the original frame with app cookies
+  blocked. Check Dashboard → Home, Dashboard → Movies, and returning to the first
+  page without another sign-in; reload the same embedded tab and verify its grant
+  is restored. Cover storage exceptions, standalone no-grant-storage, logout,
+  explicit rejected-token cleanup, `reauth_required` retention, stale probes and
+  renewal without page loss.
+- Retain web-to-API Core revalidation tests and the separation of Media-owned
+  Jellyfin credentials from the Hosty app identity flow.
+- Registry installation and production builds use the published SDK dependency
+  and lockfile; a candidate-tarball build alone is not publication or deployment
+  evidence.

@@ -13,13 +13,16 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 it("lets the SDK identify a missing embedded session and the Core recovery destination", async () => {
-  const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({ version: 2 })); vi.stubGlobal("fetch", fetch);
   const response = await GET(new NextRequest("https://media.test/api/auth/session"));
   expect(response.status).toBe(401);
   expect(await response.json()).toMatchObject({ status: "not-present", recovery: {
-    appId: "com.haas.media-server", corePublicOrigin: "https://core.example.test",
+    appId: "com.haas.media-server", corePublicOrigin: "https://core.example.test", appAuthProtocol: 2,
   } });
-  expect(fetch).not.toHaveBeenCalled();
+  expect(fetch).toHaveBeenCalledOnce();
+  const [target, init] = fetch.mock.calls[0]!;
+  expect(String(target)).toBe("http://core.test/api/auth/apps/protocol");
+  expect(init).toMatchObject({ cache: "no-store", redirect: "error" });
 });
 
 it("accepts the popup grant without cookies and exposes active status and renewal metadata", async () => {
