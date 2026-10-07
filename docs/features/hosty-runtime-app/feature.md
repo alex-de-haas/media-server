@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-10-05
+updated: 2026-10-07
 summary: The Hosty manifest, runtime profiles, environment, identity, user directory and backups of Media Server.
 ---
 
@@ -89,6 +89,24 @@ network shared with guests it is now reachable by them.
 
 Keep the same service keys, endpoint keys, setting keys, data semantics, and UI
 navigation across profiles so switching runtime is reviewable and reversible.
+
+### Source Repository
+
+The manifest declares the Git source repository
+`https://github.com/alex-de-haas/media-server.git`, tracking `main`. The manifest
+is at the repository root; `source.paths` limits source inspection and discard to
+`src/api` and `src/web`, the runtime app's two service directories. The separately
+versioned Apple client is outside this source scope.
+
+A feed installation can select the `dev` profile using a Core-managed checkout
+of that repository. Local directory installs keep their local source override.
+The web service's `dev` setup runs `pnpm install --frozen-lockfile`, so a fresh
+checkout has its published dependencies before `pnpm dev` starts. The operator
+provides `pnpm` on Core's process PATH.
+The production default stays `docker`; source metadata does not change images,
+ports, commands, service dependencies, data or mounts. The web setup is specific
+to development. Core's repository-document
+API also discovers this repository from the installed app's source declaration.
 
 ## Endpoints
 
@@ -393,6 +411,10 @@ browser sign-in flow.
 - The manifest itself is validated against the Core contract through the local
   lifecycle above (`hosty apps install . --runtime dev`); no automated test
   substitutes for it.
+- Verify a manifest/feed installation can switch from `docker` to `dev`, with
+  Core materializing the declared Git source and the web setup installing from
+  the checked-in pnpm lockfile. Preserve the complete Docker runtime, API dev
+  runtime and production default; the web dev runtime changes only its setup.
 - After changes to the tab bar or the launch bridges, verify a plain tab shows
   the tab bar while `?hosty_launch=embedded` hides it, and that the parameter is
   cleaned from the URL.

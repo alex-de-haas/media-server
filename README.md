@@ -74,7 +74,7 @@ cd src/api && dotnet test && dotnet run --project MediaServer.Api
 cd src/web && pnpm install && pnpm test && pnpm dev
 ```
 
-## Install from a manifest URL (docker runtime)
+## Install from a manifest URL
 
 For a non-development install, point Hosty Core straight at the published
 `manifest.json` — no clone, no local checkout. Because `defaultRuntime` is
@@ -91,9 +91,13 @@ hosty apps open com.haas.media-server --user <you@example.com>
 ```
 
 - `install` defaults to the `docker` runtime here (`defaultRuntime: docker`); pass
-  `--runtime docker` to be explicit. A URL install supports `docker` only —
-  `--runtime dev` needs a local checkout, since the manifest ships no
-  `source.repository` for Core to clone.
+  `--runtime docker` to be explicit. The manifest also declares the official Git
+  repository, so `--runtime dev` uses a Core-managed checkout of `main` without
+  requiring a local clone. Core installs the web dependencies with
+  `pnpm install --frozen-lockfile` before starting the development services.
+- A Docker install can switch to `dev` through Core's reviewed runtime-switch
+  flow. Stop the app before switching; Core preserves its data and settings and
+  prepares the declared source checkout.
 - The `main` manifest tracks the `:latest` images — swap `main` for a release tag
   (e.g. `v0.1.0`) to pin a specific build.
 
