@@ -4,7 +4,7 @@
   "feeds": [
     {
       "id": "qa",
-      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/media-server/ab37411f08560f32f8321448c5ec873050c761d4/manifest.json",
+      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/media-server/30ffa8e65e42856b58ec58af30083172e12ba3be/manifest.json",
       "default": true
     }
   ]
