@@ -3,8 +3,8 @@
   "appId": "com.haas.media-server",
   "feeds": [
     {
-      "id": "main",
-      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/media-server/main/manifest.json",
+      "id": "qa",
+      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/media-server/ab37411f08560f32f8321448c5ec873050c761d4/manifest.json",
       "default": true
     }
   ]
