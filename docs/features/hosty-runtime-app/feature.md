@@ -154,9 +154,9 @@ only after identity and required-permission readiness. The existing `/api/auth/s
 continues to provide the app-owned profile and role for page queries. JSON API requests and SSE connections use SDK
 `appFetch` on the same app origin and refuse credential-bearing redirects.
 
-The web dependency is `@hosty-sdk/app: ^0.22.0`. The
-[Hosty Overlay adoption plan](../hosty-overlay/plan.md) tracks registry lockfile
-finalization after publication. The app retains proof-aware exchange, asynchronous
+The web dependency is `@hosty-sdk/app: ^0.22.1`, with published SDK 0.22.1 resolved
+in the registry lockfile. The [Hosty Overlay](../hosty-overlay/feature.md) owns the
+access presentation. The app retains proof-aware exchange, asynchronous
 recovery and its existing session/profile API.
 
 1. Every sign-in attempt has an independent cryptographically random private

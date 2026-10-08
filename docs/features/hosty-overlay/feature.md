@@ -24,14 +24,14 @@ tree; changing the authenticated Host user reloads the document, resetting its
 in-memory application state and caches. Application APIs retain their own access
 checks.
 
-## Release Dependency
+## SDK Dependency
 
-The package manifest requires SDK `^0.22.0`. Candidate validation uses the built,
-published-layout package from
+The package manifest requires SDK `^0.22.1`, and the checked-in registry lockfile
+resolves published npm version `0.22.1` with its registry integrity. This release
+includes the Overlay and renewal-metadata fix from
 [Hosty PR #559](https://github.com/alex-de-haas/docker-host/pull/559).
-The existing registry lockfile still records SDK 0.21.0; the migration remains a
-draft until the registry lockfile and frozen-install checks in [plan.md](plan.md)
-are complete. A local candidate package is not evidence of an npm release.
+Compatible SDK updates arrive through the existing Dependabot group and the normal
+application build/release process.
 
 ## Testing Expectations
 
@@ -41,7 +41,11 @@ are complete. A local candidate package is not evidence of an npm release.
 - Verify ordinary Core password login both standalone and embedded in Shell;
   verify same-user renewal, actor switching and hidden/inert content while blocked.
 - Validate app manifest rendering/structure and the generated documentation index.
-- After SDK publication, regenerate the registry lockfile and repeat installation
-  and checks using the frozen lockfile. Do not commit a local tarball dependency.
+- Verify installation and checks using the committed registry lockfile. Do not
+  commit a local tarball dependency.
 
-Candidate verification passes 179 unit tests, lint, the production build and 159 mocked-BFF browser tests.
+Registry verification with SDK 0.22.1 passes `pnpm install --frozen-lockfile`,
+179 unit tests, lint, the production build and 159 mocked-BFF browser tests with
+Next.js 16.3.8. Manifest and documentation validation pass. Earlier Core-managed
+candidate acceptance covers standalone and Shell-embedded password login with the
+actual web/API services and an empty disposable library.
