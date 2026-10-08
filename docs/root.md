@@ -210,6 +210,7 @@ Plans: 6 In Progress · 3 Draft · 3 On Hold.
 - [File and Directory Management](features/file-directory-management/feature.md) — File operations happen only as catalog automation and stay confined to configured catalog roots. · [plan](features/file-directory-management/plan.md): Draft, 0/2, updated 2026-10-05
 - [Frontend Application](features/frontend-application/feature.md) — The Next.js web app embedded in Hosty Shell that acts as a backend-for-frontend for the api service.
 - [Manual and Smart Groups](features/groups/feature.md) — Manual and smart groups that organize titles independently of catalogs and franchise collections.
+- [Hosty Overlay](features/hosty-overlay/feature.md) — HostyOverlay coordinates identity recovery, required-permission readiness and protected content visibility at the application root.
 - [Hosty Platform Requests](features/hosty-platform-requests/feature.md) — A standing register of what Media Server has asked the Hosty platform for, with each request's status.
 - [Hosty Runtime App](features/hosty-runtime-app/feature.md) — The Hosty manifest, runtime profiles, environment, identity, user directory and backups of Media Server.
 - [Indexing Progress](features/indexing-progress/feature.md) — Media cards show background remux preparation per file and per external audio track.
