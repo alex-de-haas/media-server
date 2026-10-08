@@ -43,7 +43,7 @@ test("non-admin cannot see or use Catalogs", async ({ page }) => {
 test("an expired session without verified recovery shows unavailable and Retry", async ({ page, baseURL }) => {
   await setupApp(page, { role: null });
   await page.goto("/");
-  await expect(page.getByText("Can’t reach Hosty right now.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cannot reach Hosty" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in via Hosty" })).toHaveCount(0);
   await expect(page).toHaveURL(`${baseURL}/`);
@@ -57,7 +57,7 @@ test("a configured Core origin with unknown protocol never navigates to Core", a
     await route.abort();
   });
   await page.goto("/");
-  await expect(page.getByText("Can’t reach Hosty right now.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cannot reach Hosty" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
   await expect(page).toHaveURL(`${baseURL}/`);
   expect(requests).toEqual([]);
@@ -122,6 +122,6 @@ test("an expired session posts an app-origin protocol-2 intent with public S256 
 test("a denied session shows access denied with no sign-in affordance", async ({ page }) => {
   await setupApp(page, { role: null, sessionStatus: 403 });
   await page.goto("/");
-  await expect(page.getByText(/not allowed to use this app/)).toBeVisible();
+  await expect(page.getByText("Your account does not have access to this app.")).toBeVisible();
   await expect(page.getByRole("link", { name: /Sign in/ })).toHaveCount(0);
 });

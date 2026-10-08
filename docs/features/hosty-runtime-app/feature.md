@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-10-07
+updated: 2026-10-08
 summary: The Hosty manifest, runtime profiles, environment, identity, user directory and backups of Media Server.
 ---
 
@@ -149,13 +149,15 @@ The app must read these instead of hard-coding ports, origins, or paths.
 Two independent auth domains.
 
 **UI (Core-owned).** Shell opens the `web` origin without a user credential.
-The SDK `AppIdentityBridge` probes `/api/auth/session` and mounts protected content
-only after session validation. JSON API requests and SSE connections use SDK
+The SDK `HostyOverlay` probes `/api/hosty/session` and mounts protected content
+only after identity and required-permission readiness. The existing `/api/auth/session`
+continues to provide the app-owned profile and role for page queries. JSON API requests and SSE connections use SDK
 `appFetch` on the same app origin and refuse credential-bearing redirects.
 
-The web dependency is `@hosty-sdk/app: ^0.21.0`, with SDK `0.21.0` resolved from
-npm in the checked-in pnpm lockfile. The app uses the published SDK's proof-aware
-exchange and asynchronous recovery integration.
+The web dependency is `@hosty-sdk/app: ^0.22.0`. The
+[Hosty Overlay adoption plan](../hosty-overlay/plan.md) tracks registry lockfile
+finalization after publication. The app retains proof-aware exchange, asynchronous
+recovery and its existing session/profile API.
 
 1. Every sign-in attempt has an independent cryptographically random private
    verifier and public state. The SDK derives a public S256 challenge using the

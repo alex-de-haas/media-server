@@ -86,6 +86,13 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     appAuthProtocol: mock.appAuthProtocol === undefined ? (mock.recoveryOrigin ? 2 : null) : mock.appAuthProtocol,
   };
 
+  await page.route("**/api/hosty/session", (route) =>
+    route.fulfill({ json: role
+      ? { ...session(role), status: "active", recovery, hosty: { version: 1, setup: "ready" } }
+      : { status: mock.sessionStatus === 403 ? "forbidden" : "expired", recovery },
+    }),
+  );
+
   await page.route("**/api/auth/session", (route) =>
     role
       ? route.fulfill({ json: { ...session(role), status: "active", recovery } })
