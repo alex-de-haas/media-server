@@ -1,6 +1,6 @@
 ---
 created: 2026-09-01
-updated: 2026-09-16
+updated: 2026-10-10
 summary: Media Server use cases as MCP tools, plus the agent skill that teaches the server's vocabulary.
 ---
 
@@ -27,27 +27,33 @@ nothing in the build or the runtime says a word about either.
 
 ## Authenticated By The Credential Agents Actually Carry
 
-`/api/mcp` authenticates a **delegated token** — the short-TTL credential Core signs for this app when
-an agent calls on an operator's behalf — and nothing else. Core still answers "who is this" and this
-app still answers "what may they do"; the app builds no identity system of its own.
+`/api/mcp` accepts legacy delegated tokens and Core-introspected MCP credentials.
+It is separate from ordinary app-session authentication; an app login grant alone does
+not authorize tools. Legacy delegated tokens are validated locally with
+`HOSTY_DELEGATED_TOKEN_PUBLIC_KEY` and retain their existing tool permissions.
 
-**It does not use the scheme in front of every other route, and that distinction is the whole
-section.** The identity scheme revalidates an *app identity token* against Core, and Core rejects a
-delegated one outright because the credential type is inside the signed input. Authenticating this
-route the ordinary way therefore refused every agent call with a 401 while browser traffic kept
-working — which made a wrong scheme look like a configuration problem for as long as it took to read
-the two credentials apart. Validation is local, against the key Core injects as
-`HOSTY_DELEGATED_TOKEN_PUBLIC_KEY`, so it costs no round trip.
+Other bearers use `HostyScopedTokenClient.IntrospectMcpAsync` from HostySdk.App 0.8.0.
+The app asks Core on **every request**, including initialization and discovery, using
+its own service credential. There is no positive-token cache: revocation, disabled users,
+and removed app access take effect on the next request. Tool calls include the tool
+name in introspection for Core's audit trail. MCP responses use `Cache-Control: no-store`.
 
-The acting Hosty user is resolved to this app's own account the same way the identity scheme resolves
-it. A Host user with no account here is **authenticated with no account** — a third state, not an
-error: the tools that touch personal state refuse it rather than answering for nobody, because for
-nobody every title is unwatched, which reads as a fact about the library. Administrator is read from
-the token's Host role, since a delegated token never becomes a `ClaimsPrincipal` and has no claim to
-carry the app's mapped role.
+External scoped tokens require `mcp:read` and expose only the fourteen read tools.
+The same fail-closed classification controls discovery and direct invocation: only a
+boolean `annotations.readOnlyHint: true` qualifies as a read. A guessed write tool
+returns `isError: true` before dispatch, even when the token belongs to an administrator.
+An online credential permits changes only when Core identifies its calling assistant
+with `callerAppId` and grants both `mcp:read` and `mcp:invoke`. There is no `mcp:write`
+scope. Existing app-user and administrator checks apply after credential permissions.
 
-Scoped access tokens — the credential an external agent client keeps in its configuration — are not
-accepted yet; that is tracked in [plan.md](plan.md).
+Missing or inactive credentials receive HTTP 401; an active credential without
+`mcp:read` receives 403. Unavailable or unreadable Core introspection receives 503,
+without exposing credentials or treating an outage as revocation.
+
+The acting Host user is looked up in this app's accounts, without creating an account
+or borrowing another person's state. An authenticated Host user without an app account
+can read shared library data, while personal tools refuse. Administrator status comes
+from the validated Host role and never expands the credential's scopes.
 
 ## The Handshake Is Acknowledged With 202
 
@@ -171,5 +177,9 @@ give one tool argument shapes that share nothing.
 - **The notification acknowledgement on the wire**: 202, an empty body, and no content type,
   asserted on the executed response — an empty 200 is an ordinary result object and only wrong once
   it is serialized.
-- **Not verified live.** No agent has called these tools through a running Core, and the remaining
-  checks that need one are tracked in [plan.md](plan.md).
+- **Scoped credential enforcement**: verify uncached revocation, exact scopes, assistant mutation
+  grants, subject-to-account resolution, every hidden write tool refused on direct invocation,
+  missing/malformed annotations, 401/403/503 distinctions, and caller cancellation.
+- **Live acceptance** uses a disposable Core-managed dev runtime, ordinary browser sign-in,
+  actual TMDb reads, and self-generated media clips. All eight scenarios are recorded in
+  the [2026-10-10 acceptance review](../../reviews/2026-10-10-mcp-tools-acceptance.md).

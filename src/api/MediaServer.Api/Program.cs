@@ -382,16 +382,18 @@ builder.Services.AddRateLimiter(options =>
 // Identity validation against Core (HostySdk.App): validators, the platform-decided 30s
 // positive cache, the hosty-core HttpClient, and the Hosty authentication scheme. The role
 // mapper turns the raw Host role into this app's admin/user claim.
+var hostySdkOptions = new HostyAppOptions
+{
+    AppId = hosty.AppId,
+    CoreOrigin = hosty.CoreOrigin,
+    CorePublicOrigin = hosty.CorePublicOrigin,
+    ServiceToken = hosty.ServiceToken,
+    AppDataDir = hosty.AppDataDir,
+    RunningInContainer = hosty.RunningInContainer,
+};
+builder.Services.AddHostyScopedTokens(hostySdkOptions);
 var hostyAuth = builder.Services.AddHostyAppAuthentication(
-    new HostyAppOptions
-    {
-        AppId = hosty.AppId,
-        CoreOrigin = hosty.CoreOrigin,
-        CorePublicOrigin = hosty.CorePublicOrigin,
-        ServiceToken = hosty.ServiceToken,
-        AppDataDir = hosty.AppDataDir,
-        RunningInContainer = hosty.RunningInContainer,
-    },
+    hostySdkOptions,
     configure: options =>
     {
         options.MapHostRole = role =>
