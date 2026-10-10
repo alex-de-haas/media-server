@@ -1,7 +1,7 @@
 ---
 status: In Progress
 created: 2026-08-02
-updated: 2026-10-01
+updated: 2026-10-10
 summary: Umbrella epic for the Apple client, owning its decisions, platform split and the playback spike the other features depend on.
 ---
 
@@ -262,8 +262,9 @@ throwaway spike, on real hardware and real files, before any surface is designed
       MP4 over byte ranges: `hvc1` + `dvvC` gives HDR10, and forcing the `dvh1`
       sample entry gives Dolby Vision, both bright and correct on the television.
       Confirmed for fragmented and non-fragmented alike.
-- [ ] D4. **Playback presentation belongs to `AVPlayerViewController`** — record it
-      wherever the client's playback surface is specified. The spike proved one
+- [x] D4. **Playback presentation belongs to `AVPlayerViewController`** — recorded in
+      [the client feature](feature.md#avkit-is-the-only-player) and implemented by
+      [`PlayerView`](../../../src/apple/MediaServerTV/PlayerView.swift). The spike proved one
       concrete failure, not a universal law: a SwiftUI `VideoPlayer` inside a
       `ZStack` under an overlay composited into the SDR layer, giving a dark
       picture and no display switch. The rule that follows is narrower and keeps
@@ -588,11 +589,12 @@ profile-5 rendition, which means re-encoding and is out of scope.
       TestFlight rather than through Core, so `MARKETING_VERSION` is theirs and
       `manifest.json` is the server's, and a change touching only `src/apple/` leaves
       the manifest alone.
-- [ ] D18. **Constituent plans** — the server halves are done: `native-client-api` and
-      `remux-streaming` were both written, approved and built, and the API shape is
-      settled. What remains is the client side of this item: a plan for the first
-      screens — pairing with the server, browsing the library, and playing a title —
-      written before any of it is built.
+- [x] D18. **Constituent plans** — the server plans produced
+      [native-client-api](../native-client-api/feature.md) and
+      [remux-streaming](../remux-streaming/feature.md); the client plan is
+      [apple-client-core](../apple-client-core/plan.md), with pairing, browsing and
+      playback implemented. Its remaining deliverables and the remaining remux
+      work stay in their own plans.
 - [x] D19. **Build the capability profile from the device.** `MediaKit.CapabilityProfile`
       reads `VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC)` and
       `AVPlayer.eligibleForHDRPlayback` at runtime, behind a `DeviceCapabilities`
@@ -621,11 +623,10 @@ profile-5 rendition, which means re-encoding and is out of scope.
 
 ### Closing the plan
 
-- [ ] D21. **`feature.md` for the umbrella** grown to describe the client as a whole. It
-      exists as of 2026-08-10, created by the PR that first shipped behaviour as
-      `AGENTS.md` requires, and today describes the foundations and the capability
-      profile. It follows the code from here, created
-      when the first client behaviour ships.
+- [x] D21. **`feature.md` for the umbrella** — [the feature](feature.md) describes
+      pairing, browsing, playback, track selection, diagnostics and the shared
+      client foundations, with links to the related client features and testing
+      expectations.
 - [ ] D22. **Index** — `node scripts/docs-index.mjs --fix`.
 - [ ] D23. **Version** — this document alone is documentation-only: no version bump.
       Each constituent feature bumps `manifest.json` only if it changes the server

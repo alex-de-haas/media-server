@@ -1,18 +1,17 @@
 ---
 status: In Progress
 created: 2026-08-05
-updated: 2026-08-15
+updated: 2026-10-10
 summary: Remaining remux streaming work before a native client can play the whole library.
 ---
 
 # Remux Streaming — plan
 
-> Part of the [Apple client](../apple-client/plan.md) epic, and the last server
-> piece before a client can play the library.
-> [`native-playback`](../native-playback/feature.md) already answers `remux` for a
-> source whose codecs a client can decode and whose container it cannot open — but
-> only when packaging is available, which today it never is. This makes it
-> available.
+> Part of the [Apple client](../apple-client/plan.md) epic. Byte-range MP4 remux
+> is implemented and described in [feature.md](feature.md).
+> [`native-playback`](../native-playback/feature.md) negotiates it for supported
+> sources whose indexes are ready. Remaining work includes codec coverage,
+> measurements and device acceptance; HLS remains deferred below.
 
 Phase 0 was a *gate* — a throwaway prototype whose only job was to find out whether
 the design is possible — and it closed on 2026-08-08. The remaining open questions
@@ -215,26 +214,22 @@ model is needed** — which retires an open question an earlier revision carried
 
 ### Choosing between them
 
-**By capability, with a manual override.** Settled in discussion on 2026-08-08.
+**By capability, with a manual override** was the two-transport design discussed
+on 2026-08-08: MP4 for Dolby Vision-capable clients playing Dolby Vision sources,
+HLS otherwise, with a setting to override the choice. HLS was deferred on
+2026-08-09, so that selection rule is not implemented: supported remux playback
+uses MP4 over byte ranges. The deferred HLS deliverables remain open; the Apple
+client's current override narrows dynamic range, not transport.
 
-The client already declares what it can open through `NativeCapabilityProfile`, so
-the server picks: a client that reports Dolby Vision support, playing a source that
-carries it, is served MP4 over byte ranges; everything else is served HLS. A setting
-overrides the choice, which turns "the picture is not what I expected" from a bug
-report into a switch — the pattern
-[Swiftfin](https://github.com/jellyfin/Swiftfin) uses with `forceDVTranscode` and its
-`auto / mostCompatible / directPlay / custom` compatibility mode.
-
-### The contract needs a second axis
+### The contract carries a separate transport axis
 
 `NativePlaybackDecision` today is `DirectPlay | Remux | Unsupported`, which describes
 *what* is done to the streams. HLS is not a fourth kind of that — it is a different
 way to **deliver** a repackage. Conflating them ages badly.
 
-So `Decision` keeps its meaning and a `Transport` axis joins it —
-`byteRange | hls` — carried on `NativePlaybackResolution` and expressible as a client
-preference. The client does not exist yet, so this costs nothing now and would be a
-breaking change later.
+`Decision` keeps its meaning and `NativePlaybackResolution` carries a separate
+`Transport` axis. D26 is implemented; `byteRange` is the only available transport.
+The planned `hls` transport still depends on D23–D25 and D28.
 
 ### What is not being built
 
@@ -422,9 +417,13 @@ rewriting rather than encoding tooling, so they do not change the answer.
       states one and left out rather than guessed when it does not. `dvh1` is offered
       only for HEVC that came with a configuration, and only when asked for. Verified
       through AVFoundation and by decoding both streams.
-- [ ] D16. **Answer an arbitrary byte range** by resolving it to samples and reading those
-      from the source, with the total length declared, since AVFoundation refuses an
-      undeclared one.
+- [x] D16. **Answer an arbitrary byte range** —
+      [`SynthesizedMp4Stream`](../../../src/api/MediaServer.Api/Remux/SynthesizedMp4Stream.cs)
+      exposes the computed header and untouched source parts as one seekable stream
+      with a known total length. The native remux endpoint enables the framework's
+      range processing. Offsets map directly to header or source parts under the
+      chosen D15 layout; serving a range does not require gathering samples.
+      Existing stream tests cover length, boundaries, seeks and reads past the end.
 - [x] D17. **Decide fragmented or not, by measurement** — answered by the prototype:
       **non-fragmented**, 7 requests against the fragmented file's 3309.
 - [x] D18. **Track selection** so the output carries what the viewer chose — video first,
@@ -463,7 +462,9 @@ rewriting rather than encoding tooling, so they do not change the answer.
       transport is a second output rather than a second pipeline.
 - [ ] D25. **Unit tests**: a range spanning a fragment boundary, the first and last byte,
       a range beyond the end, the sample entry surviving into the output, and a
-      segment boundary landing on a keyframe.
+      segment boundary landing on a keyframe. The byte-range stream and MP4 sample
+      entries already have coverage; the HLS fragment/segment cases keep this item
+      open until that renderer exists.
 
 ### Phase 3 — serving it
 
@@ -588,19 +589,18 @@ Two operational facts worth keeping, both of which cost time to find:
 - [ ] D52. **Version bump** — new functionality, so a minor; read `manifest.json` when
       the work lands.
 
-## Open questions
+## Resolved dependencies and remaining interactions
 
-- **Whether folding a sidecar in can avoid the engine.** Everything else on the
-  serving path is container parsing and byte arithmetic, but a sidecar is a second
-  file whose samples have to join the output, and a subtitle sidecar needs rewriting
-  as well. Phase 2 answers it by building the plain case first and seeing what the
-  sidecar case actually needs; if it needs the engine, that one operation routes
-  there and the rest does not.
-- **Whether the source's own signalling should be recorded too.** Nothing captures
-  what a file says about itself today, so direct play serves Dolby Vision blind (see
-  [media-probe-providers](../media-probe-providers/plan.md)). It does not block this
-  feature — here we author the container — but the index walk touches the same
-  headers, so the two may be cheaper built together.
+- **Sidecars do not need the engine on the serving path.** D19–D22 implement
+  indexed external audio and text subtitle conversion in-process. Device
+  acceptance of those tracks remains open in D37.
+- **Dolby Vision source signalling is stored.** The probe providers persist the
+  profile, level, base-layer compatibility id and enhancement-layer flag, and
+  native playback uses them. See
+  [dolby-vision-profile](../dolby-vision-profile/feature.md). The original MP4
+  sample-entry tag remains a separate open item in
+  [media-probe-providers](../media-probe-providers/plan.md); remux writes its own
+  sample entry and does not depend on that addition.
 
 ## Verification steps
 

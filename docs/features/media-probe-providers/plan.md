@@ -1,109 +1,79 @@
 ---
 status: Draft
 created: 2026-08-04
-updated: 2026-09-04
-summary: Probe data the native client API promised but no schema carries yet.
+updated: 2026-10-10
+summary: Remaining chapter and video codec-tag storage, plus exposing probe provenance through client projections.
 ---
 
 # Media Probe Providers — plan
 
-> Gaps found while building
-> [native-client-api](../native-client-api/feature.md), which promised its item DTO
-> would carry them and then could not: none of them exists anywhere in the schema.
-> They are probe concerns, so they live here rather than in a client feature.
+> Remaining probe-data gaps for
+> [native-client-api](../native-client-api/feature.md) and the web detail page.
+> Provider provenance is already stored, and Dolby Vision detail shipped through
+> [dolby-vision-profile](../dolby-vision-profile/feature.md). Chapters, video codec
+> tags and the client projection of provenance remain open.
 
 ## Goal
 
-Record three things a probe already knows but currently discards, so a client can
-act on them.
+Persist chapters and video codec tags, and expose them alongside the stored probe
+provenance so clients can distinguish missing data from a provider's limitations.
+
+## Current baseline
+
+`MediaSource.ProbeSource` records `Engine` or `Header`. The
+`AddProbeSourceProvenance` migration adds the column; ingest, output import and
+metadata refresh populate it from `ProbeResult.Source`. Metadata refresh already
+uses it to find sources that were read by the header provider. See
+[Provenance](feature.md#provenance).
+
+Both providers also populate `DvProfile`, `DvLevel`, `DvBlSignalCompatibilityId`
+and `DvElPresent`. These fields are stored per video stream and used by the
+library projection and native playback resolver. The flat `HdrFormat` label stays
+for existing consumers; it is no longer the only stored dynamic-range detail.
 
 ## Target behavior
 
 Written as a diff against [feature.md](feature.md):
 
-- **Chapters.** A probe that reads them (the external engine does; the container
-  header reader may not) persists them per media source, and they reach clients
-  through the existing projections. Today there is no chapter table, column or
-  output at all, so a client cannot offer chapter navigation for anything.
-- **Provenance.** Which provider answered a probe is persisted on the media
-  source. Today it is not, so a thin stream list is indistinguishable from a
-  broken file — the feature document already says a header-read file "reports
-  less than one the external engine saw", and nothing downstream can tell which
-  happened.
-- **Dynamic range in detail.** `HdrFormat` today is one flat value, which cannot
-  express what a player needs to decide. See below.
-
-### Dynamic range needs more than one field
-
-The Apple client's resolver is correct today only because every scanned file
-happens to be Dolby Vision profile 8.1. Profiles 5 and 7 would break it, and
-nothing in the schema records which profile a file carries.
-
-[Swiftfin](https://github.com/jellyfin/Swiftfin), Jellyfin's own Apple client,
-models this as eleven values rather than one — `sdr`, `hdr10`, `hdr10Plus`, `hlg`,
-`dovi`, `doviWithHDR10`, `doviWithSDR`, `doviWithHLG`, `doviWithEL`,
-`doviWithHDR10Plus`, `doviWithELHDR10Plus` — and the granularity earns its keep in
-one place in particular:
-
-```swift
-if supportsHDR10 || supportsDolbyVision {
-    VideoRangeType.doviWithHDR10        // profile 8.1: playable even without DV support
-}
-if supportsDolbyVision {
-    VideoRangeType.dovi                 // profile 5: needs real DV hardware
-}
-```
-
-Profile 8.1 is announced when the device can do **HDR10 at all**, because its base
-layer is backward compatible; profile 5 is announced only with Dolby Vision hardware
-decode. One flat `HdrFormat` cannot carry that distinction, so a server holding it
-cannot answer "will this play on that device" correctly.
-
-Two further things a probe sees and discards, both needed by
-[remux-streaming](../remux-streaming/plan.md) and by direct play:
-
-- **The video codec tag** the file actually carries — `hvc1`, `hev1` or `dvh1`.
-  Apple rejects `hev1` outright, so a direct-played `.mp4` tagged that way fails
-  with nothing on the server able to predict it.
-- **The Dolby Vision profile and `bl_signal_compatibility_id`**, which is what
-  distinguishes 8.1 from 8.4 and decides whether a cross-compatible declaration is
-  honest.
-
-### Where the detail comes from
-
-Resolved 2026-09-04: from the container header, in both formats, by either provider.
-The 24-byte Dolby Vision configuration record is the payload of `dvcC`/`dvvC` in an MP4
-sample entry, which the header reader already reaches; in Matroska it is **not** in the
-codec private data but in the track's `BlockAdditionMapping` — `BlockAddIDType` dvcC or
-dvvC, the record in `BlockAddIDExtraData` — the element the remux indexer already reads.
-ffprobe's *DOVI configuration record* is this same record, so the engine path reads the
-same bytes through `dv_profile`, `dv_level`, `el_present_flag` and
-`dv_bl_signal_compatibility_id`. Byte 2 and 3 hold profile (7 bits), level (6 bits) and
-the rpu/el/bl flags; the upper nibble of byte 4 is the compatibility id. One consequence:
-the header reader starts reporting `Dolby Vision` for Matroska, which today it never does.
+- **Chapters.** Extend the probe result, persistence and client projections with
+  per-source chapters from providers that can read them. General library chapter
+  storage is still absent. Blu-ray inspection and chapter preservation in an
+  output MKV belong to [bluray-import](../bluray-import/feature.md) and do not
+  supply this library projection.
+- **Provenance.** Expose the existing `ProbeSource` through the shared library
+  projection to the web detail page and `/native/v1/items/{id}`. Storage and
+  refresh behavior already exist; clients do not yet receive this field.
+- **Video codec tag.** Persist the source's MP4 sample-entry tag (`hvc1`, `hev1`
+  or `dvh1`), read from the header or ffprobe's `codec_tag_string`, so direct-play
+  decisions can account for it. Matroska has no MP4 sample-entry tag. Remux writes
+  its own sample entry and does not depend on this addition.
 
 ## Deliverables
 
 - [ ] D1. **Chapter storage** — entity plus migration, populated by the providers that
       can supply them and left empty by those that cannot.
-- [ ] D2. **Provenance on the media source** — which provider answered, plus a
-      migration.
+- [x] D2. **Provenance on the media source** — `MediaSource.ProbeSource`, the
+      `AddProbeSourceProvenance` migration and population from `ProbeResult.Source`
+      already exist. Client exposure remains in D5.
 - [x] D3. **Dolby Vision detail** — the profile, level, base-layer compatibility id and
       enhancement-layer flag (`DvProfile`, `DvLevel`, `DvBlSignalCompatibilityId`,
       `DvElPresent`), stored per video stream, plus a migration and a bounded refresh
       fill-in for rows already labelled `Dolby Vision` without a profile. A flat
       `HdrFormat` stays for existing consumers; this sits beside it. Both providers supply
-      it — see *Where the detail comes from*. Shipped with
+      it — see [HDR says how sure it is](feature.md#hdr-says-how-sure-it-is). Shipped with
       [dolby-vision-profile](../dolby-vision-profile/feature.md).
 - [ ] D4. **Video codec tag** — `hvc1`, `hev1` or `dvh1` as the file carries it (MP4's sample
       entry; ffprobe's `codec_tag_string`; Matroska has none), stored per video stream. It
       is what would let direct play predict the `hev1` Apple rejects; the Dolby Vision
       detail above was split from it because that one had a title playing wrong today.
-- [ ] D5. **Surface all three** in the library projection, so the web detail page and
-      `/native/v1/items/{id}` gain them together.
+- [ ] D5. **Client projections** — expose chapters, the stored probe provenance and
+      video codec tags through the library projection, web detail page and
+      `/native/v1/items/{id}`. Preserve the existing Dolby Vision detail.
 - [ ] D6. **Unit tests** — a header-probed source yields no chapters and reports the
       header reader; an engine-probed one yields what the engine returned; a
-      profile-8.1 source and a profile-5 source are told apart.
+      profile-8.1 source and a profile-5 source remain distinguishable. Keep the
+      existing provider and Dolby Vision coverage while adding the missing chapter
+      and projection cases.
 - [ ] D7. **`feature.md` update**, index regeneration, and a minor version bump.
 
 ## Open questions
