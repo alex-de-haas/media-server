@@ -216,6 +216,98 @@ public sealed class CatalogScanServiceTests : IDisposable
         Assert.Single(await verify.MediaSources.Where(source => source.MediaItemId == movieId).ToListAsync());
     }
 
+    [Theory]
+    [InlineData(MediaKind.Movie, false, false)]
+    [InlineData(MediaKind.Movie, true, false)]
+    [InlineData(MediaKind.Episode, false, false)]
+    [InlineData(MediaKind.Episode, true, false)]
+    [InlineData(MediaKind.Movie, false, true)]
+    [InlineData(MediaKind.Episode, true, true)]
+    public async Task A_scan_racing_version_deletion_reconciles_the_current_survivors(
+        MediaKind kind, bool hasHistory, bool scanFirst)
+    {
+        var catalog = SeedCatalog(kind == MediaKind.Movie ? CatalogType.Movie : CatalogType.Series);
+        Guid itemId;
+        Guid? seriesId = null;
+        Guid? seasonId = null;
+        if (kind == MediaKind.Movie)
+        {
+            itemId = SeedMovie(catalog, "Title/missing.mkv", favorite: hasHistory);
+        }
+        else
+        {
+            var episode = SeedEpisode(catalog, "Title/missing.mkv", watched: hasHistory);
+            (seriesId, seasonId, itemId) = episode;
+        }
+        var survivingSourceId = AddSource(itemId, "Title/surviving.mkv");
+        WriteFile("Title/surviving.mkv");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var ct = timeout.Token;
+
+        // SQLite completes the disk-walk queries synchronously. Both operations queue at the gate,
+        // in the chosen order, after the scan has observed one missing file and one readable version.
+        var gate = await LibraryFileMutation.EnterAsync(ct);
+        Task<CatalogScanOutcome> scan;
+        Task<Exception?> deletion;
+        try
+        {
+            if (scanFirst)
+            {
+                scan = Service().ScanAsync(catalog.Id, ct);
+                deletion = DeleteSurvivorAsync();
+            }
+            else
+            {
+                deletion = DeleteSurvivorAsync();
+                scan = Service().ScanAsync(catalog.Id, ct);
+            }
+        }
+        finally
+        {
+            gate.Dispose();
+        }
+        await Task.WhenAll(scan, deletion).WaitAsync(ct);
+
+        var report = Assert.IsType<CatalogScanReport>((await scan).Report);
+        Assert.False(report.Offline);
+        Assert.Equal(2, report.SourcesChecked);
+        Assert.Equal(1, report.MissingFiles);
+        Assert.Equal(scanFirst ? 1 : 0, report.VersionsRemoved);
+        Assert.Equal(!scanFirst && hasHistory ? 1 : 0, report.TitlesGhosted);
+        Assert.Equal(!scanFirst && !hasHistory ? 1 : 0, report.TitlesPurged);
+        if (scanFirst) Assert.IsType<LastMediaSourceException>(await deletion);
+        else Assert.Null(await deletion);
+
+        await using var verify = Verify();
+        Assert.Equal(scanFirst ? 1 : 0, await verify.MediaSources.CountAsync(source => source.MediaItemId == itemId));
+        Assert.Equal(scanFirst, File.Exists(Path.Combine(_root, "Title/surviving.mkv")));
+        foreach (var id in new Guid?[] { itemId, seasonId, seriesId }.OfType<Guid>())
+        {
+            var item = await verify.MediaItems.SingleOrDefaultAsync(item => item.Id == id);
+            if (scanFirst) Assert.NotNull(Assert.IsType<MediaItem>(item).PublicId);
+            else if (hasHistory)
+            {
+                Assert.Null(Assert.IsType<MediaItem>(item).PublicId);
+                Assert.NotNull(item.RemovedAt);
+            }
+            else Assert.Null(item);
+        }
+        Assert.Equal(hasHistory && kind == MediaKind.Movie ? 1 : 0,
+            await verify.UserItemData.CountAsync(data => data.MediaItemId == itemId && data.IsFavorite));
+        Assert.Equal(hasHistory && kind == MediaKind.Episode ? 1 : 0,
+            await verify.PlaybackHistoryEntries.CountAsync(entry => entry.MediaItemId == itemId));
+        Assert.NotNull((await verify.Catalogs.SingleAsync()).LastScannedAt);
+
+        async Task<Exception?> DeleteSurvivorAsync()
+        {
+            await using var context = Verify();
+            var service = new LibraryDeleteService(context,
+                new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
+            return await Record.ExceptionAsync(async () =>
+                Assert.True(await service.DeleteSourceAsync(survivingSourceId, deleteFile: true, ct)));
+        }
+    }
+
     [Fact]
     public async Task A_gone_sidecar_drops_its_track_from_a_file_that_is_still_there()
     {

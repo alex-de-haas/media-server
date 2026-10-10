@@ -66,6 +66,12 @@ Paths are expressed relative to a catalog root, never as absolute host paths.
 
 ## Removal Semantics
 
+The owner approved the last-version refusal policy in chat on 2026-10-10, before
+implementation: refuse separate deletion and offer the existing movie or episode
+deletion dialog. This is the decision recorded by completed plan deliverable D1;
+D2 supplies the behavior and coverage below. The completed plan is removed under
+the documentation lifecycle rules.
+
 Whole-item removal and version removal have different scopes:
 
 - **Remove from library** (`DELETE /api/library/{id}`): removes the published item

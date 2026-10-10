@@ -1,6 +1,6 @@
 ---
 created: 2026-08-31
-updated: 2026-09-08
+updated: 2026-10-10
 summary: Scan for media and Refresh metadata keep each catalog in step with its disk and its metadata sources.
 ---
 
@@ -72,6 +72,14 @@ files are already gone, and user data is kept:
   title becomes a **tombstone** or is **purged** — see
   [Library item tombstones](../library-item-tombstones/feature.md).
 
+Survivor classification and removal share the file-mutation lock with version
+deletion. If an administrator removes the readable version during a scan's disk
+walk, reconciliation sees the current sources and tombstones or purges the item
+whose remaining files are gone. If the scan removes the missing version first,
+the administrator's separate deletion is refused because it now targets the last
+source. The scan report counts the resulting title removal and preserves history
+and ancestor pruning in either ordering.
+
 ### Saying so
 
 A scan that removed anything publishes one Core notification per catalog naming
@@ -137,7 +145,8 @@ hand-written track labels and sidecars all survive it.
   unreadable → offline and untouched; one readable file → the rest are real
   deletions), a missing root, an empty catalog, version and sidecar removal with
   pin survival, ghost-vs-purge, series pruning, recovery, and the all-catalogs
-  pass.
+  pass; a concurrent version deletion in either order, with movie/episode
+  tombstones, purges, retained history and ancestor pruning.
 - `CatalogHealthServiceTests` — an offline catalog stays offline while its root
   is back but empty.
 - `LibraryDeleteServiceTests` — the signal definition: history, rating or

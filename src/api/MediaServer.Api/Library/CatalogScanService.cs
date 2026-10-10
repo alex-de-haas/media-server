@@ -223,6 +223,10 @@ public sealed class CatalogScanService(
         IReadOnlyList<(Guid Id, string Path, Guid MediaItemId)> missing,
         CancellationToken cancellationToken)
     {
+        // Classify and remove under the same gate as version deletion. If an administrator removed
+        // the surviving version during the disk walk, this fresh query routes the now-unbacked item
+        // through whole-item removal. A later deletion must wait until reconciliation finishes.
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
         var missingIds = missing.Select(source => source.Id).ToHashSet();
         var survivingSources = await database.MediaSources.AsNoTracking()
             .Where(source => itemIds.Contains(source.MediaItemId) && !missingIds.Contains(source.Id))
@@ -264,7 +268,7 @@ public sealed class CatalogScanService(
         foreach (var source in missing.Where(source => keepers.Contains(source.MediaItemId)))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (await deleteService.DeleteSourceAsync(source.Id, deleteFile: false, cancellationToken))
+            if (await deleteService.DeleteSourceWithinMutationAsync(source.Id, deleteFile: false, cancellationToken))
             {
                 versionsRemoved++;
                 logger.LogInformation(

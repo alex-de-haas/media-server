@@ -338,6 +338,15 @@ public sealed class LibraryDeleteService(
     public async Task<bool> DeleteSourceAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
     {
         using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        return await DeleteSourceWithinMutationAsync(sourceId, deleteFile, cancellationToken);
+    }
+
+    /// <summary>
+    /// Deletes a version while the caller holds <see cref="LibraryFileMutation"/>'s gate. Catalog scans
+    /// hold it across survivor classification and removal so a concurrent delete cannot invalidate that decision.
+    /// </summary>
+    internal async Task<bool> DeleteSourceWithinMutationAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
+    {
         await LibraryFileMutation.RequireSourceAvailableAsync(database, sourceId, cancellationToken);
         var source = await database.MediaSources.AsNoTracking()
             .Where(candidate => candidate.Id == sourceId)
