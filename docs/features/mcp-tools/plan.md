@@ -1,5 +1,5 @@
 ---
-status: Ready
+status: In Progress
 created: 2026-09-01
 updated: 2026-10-10
 summary: Scoped MCP read access and eight live acceptance scenarios through a Core-managed runtime.
@@ -36,23 +36,23 @@ The existing tools are documented in [feature.md](feature.md).
 
 ## Deliverables
 
-- [ ] D1. Accept scoped `mcp:read` tokens with uncached MCP introspection, fail-closed
+- [x] D1. Accept scoped `mcp:read` tokens with uncached MCP introspection, fail-closed
   discovery and invocation, preserved delegated permissions, and regression coverage.
-- [ ] D2. Acceptance 1: install/start through Core and discover the annotated read tools
+- [x] D2. Acceptance 1: install/start through Core and discover the annotated read tools
   through `hosty mcp`.
 - [ ] D3. Acceptance 2: invoke every read tool as an agent, compare with the web UI,
   and demonstrate explicit truncation on a sufficiently large library.
-- [ ] D4. Acceptance 3: repair a real NeedsReview item through the four-tool workflow
+- [x] D4. Acceptance 3: repair a real NeedsReview item through the four-tool workflow
   and observe successful pipeline completion.
-- [ ] D5. Acceptance 4: observe personal-state refusal without an app account and
+- [x] D5. Acceptance 4: observe personal-state refusal without an app account and
   success for an authenticated caller with one.
 - [ ] D6. Acceptance 5: observe prompt scan acceptance on a minutes-long catalog scan
   and refusal to queue a duplicate while it is running.
-- [ ] D7. Acceptance 6: answer a natural-language viewing constraint with the engine's
+- [x] D7. Acceptance 6: answer a natural-language viewing constraint with the engine's
   `list_recommendations`, without hand-ranking library pages.
 - [ ] D8. Acceptance 7: execute the operator-language scenarios, including download
   lookup by film title and volunteering a completed but unidentified download.
-- [ ] D9. Acceptance 8: repair a multi-movie pack with multiple groups and an episode
+- [x] D9. Acceptance 8: repair a multi-movie pack with multiple groups and an episode
   ingest with per-file season/episode numbers, observing their published results.
 
 ## Delivery and verification

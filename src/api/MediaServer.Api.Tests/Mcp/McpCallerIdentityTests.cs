@@ -1,4 +1,7 @@
 using System.Security.Cryptography;
+using HostySdk.App;
+using Imposter.Abstractions;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using MediaServer.Api.Data;
@@ -35,6 +38,8 @@ public sealed class McpCallerIdentityTests : IDisposable
         Assert.NotNull(caller);
         Assert.Equal(appUserId, caller.AppUserId);
         Assert.Equal("host-user-1", caller.HostUserId);
+        Assert.True(caller.CanRead);
+        Assert.True(caller.CanMutate);
     }
 
     [Fact]
@@ -90,7 +95,23 @@ public sealed class McpCallerIdentityTests : IDisposable
         => Assert.Null(await Resolve(header));
 
     private Task<McpCaller?> Resolve(string? header) => McpCallerIdentity.ResolveAsync(
-        header, _context, CancellationToken.None, AppId, Convert.ToBase64String(_core.ExportSubjectPublicKeyInfo()));
+        header, _context, InactiveCore(), CancellationToken.None, appId: AppId,
+        publicKeyBase64: Convert.ToBase64String(_core.ExportSubjectPublicKeyInfo()));
+
+    private static HostyScopedTokenClient InactiveCore()
+    {
+        var factory = IHttpClientFactory.Imposter();
+        factory.CreateClient(Arg<string>.Any()).Returns(new HttpClient(new InactiveHandler())
+            { BaseAddress = new Uri("http://core.test") });
+        return new(factory.Instance(), new HostyAppOptions { CoreOrigin = "http://core.test", AppId = AppId, ServiceToken = "test-service" });
+    }
+
+    private sealed class InactiveHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent("{\"active\":false}", Encoding.UTF8, "application/json") });
+    }
 
     private string Mint(
         string subject, string role = "host.admin", string audience = AppId, DateTimeOffset? expiresAt = null)

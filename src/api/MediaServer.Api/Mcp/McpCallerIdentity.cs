@@ -4,67 +4,72 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.Mcp;
 
-/// <summary>Who is calling a tool, and whether this server treats them as an administrator.</summary>
-/// <param name="AppUserId">
-/// This app's own user id, or null when the Host user has none — someone who has never opened the
-/// app. Personal tools refuse on null rather than answering for a stranger.
-/// </param>
-public sealed record McpCaller(int? AppUserId, bool IsAdministrator, string HostUserId);
+/// <summary>The authenticated Host actor, app account, and credential's MCP permissions.</summary>
+/// <param name="AppUserId">Null for a Host user without an app account; personal tools refuse it.</param>
+public sealed record McpCaller(
+    int? AppUserId, bool IsAdministrator, string HostUserId, bool CanRead, bool CanMutate);
 
-/// <summary>
-/// Authenticates an MCP call from the delegated token it carries.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Deliberately not the app's ordinary authentication. An agent calling on an operator's behalf holds
-/// a short-TTL token Core signed for *this* app, while the identity scheme in front of every other
-/// route revalidates an app identity token against Core — which rejects a delegated one outright,
-/// because the credential type is inside the signed input. Authenticating this route the ordinary way
-/// refused every agent call with a 401 while browser traffic kept working, which is what made it look
-/// like a configuration problem rather than the wrong scheme.
-/// </para>
-/// <para>
-/// A separate type, not a few lines inside the endpoint, so the wiring can be asserted: this project
-/// has no integration harness, and left in a route lambda none of the decisions below would be
-/// reachable by a test.
-/// </para>
-/// </remarks>
+/// <summary>Authenticates MCP credentials separately from ordinary app sessions.</summary>
 public static class McpCallerIdentity
 {
-    /// <summary>The Host role a delegated token carries for an administrator.</summary>
-    /// <remarks>
-    /// The same string the authentication scheme maps in <c>Program.cs</c>. Compared here rather than
-    /// mapped through the app's own role, because a delegated token is not a session and never becomes
-    /// a <c>ClaimsPrincipal</c> — there is no claim to read it from.
-    /// </remarks>
     public const string HostAdminRole = "host.admin";
+    public const string McpInvokeScope = "mcp:invoke";
 
-    /// <summary>The caller, or null when the credential is missing, malformed, expired, or not ours.</summary>
+    /// <summary>
+    /// Legacy delegated tokens are verified locally. Other credentials are introspected on every
+    /// request, so revocation and changed app access take effect without a cache window.
+    /// </summary>
     public static async Task<McpCaller?> ResolveAsync(
         string? authorizationHeader,
         MediaServerDbContext database,
+        HostyScopedTokenClient scopedTokens,
         CancellationToken cancellationToken,
+        string? tool = null,
         string? appId = null,
         string? publicKeyBase64 = null)
     {
-        var actor = HostyDelegatedToken.Validate(
-            HostyDelegatedToken.ReadBearer(authorizationHeader), appId, publicKeyBase64);
-        if (actor is null)
+        var token = HostyDelegatedToken.ReadBearer(authorizationHeader);
+        if (string.IsNullOrWhiteSpace(token))
         {
             return null;
         }
 
-        // Resolved the way the identity scheme resolves it, against the same column. A Host user with
-        // no row here is authenticated and has no library state — which is a different answer from
-        // "unauthenticated", and the tools tell them apart.
+        var delegated = HostyDelegatedToken.Validate(token, appId, publicKeyBase64);
+        string subject;
+        string? role;
+        bool canRead;
+        bool canMutate;
+        if (delegated is not null)
+        {
+            subject = delegated.Subject;
+            role = delegated.Role;
+            canRead = true;
+            canMutate = true;
+        }
+        else
+        {
+            // Only this endpoint uses MCP-specific introspection. App-session authentication must
+            // continue rejecting assistant MCP-only grants on ordinary API routes.
+            var actor = await scopedTokens.IntrospectMcpAsync(token, tool, cancellationToken);
+            if (!actor.Active || string.IsNullOrWhiteSpace(actor.Sub))
+            {
+                return null;
+            }
+
+            subject = actor.Sub;
+            role = actor.Role;
+            canRead = actor.HasScope(HostyScopedTokenClient.McpReadScope);
+            canMutate = canRead && !string.IsNullOrWhiteSpace(actor.CallerAppId)
+                && actor.HasScope(McpInvokeScope);
+        }
+
         var appUserId = await database.AppUsers.AsNoTracking()
-            .Where(user => user.HostUserId == actor.Subject)
+            .Where(user => user.HostUserId == subject)
             .Select(user => (int?)user.Id)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return new McpCaller(
-            appUserId,
-            string.Equals(actor.Role, HostAdminRole, StringComparison.OrdinalIgnoreCase),
-            actor.Subject);
+        return new McpCaller(appUserId,
+            string.Equals(role, HostAdminRole, StringComparison.OrdinalIgnoreCase),
+            subject, canRead, canMutate);
     }
 }
