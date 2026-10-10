@@ -1,27 +1,67 @@
 ---
-status: In Progress
+status: Ready
 created: 2026-09-01
-updated: 2026-09-03
-summary: The remaining MCP tool work, which can only be judged by what a running agent does with the tools.
+updated: 2026-10-10
+summary: Scoped MCP read access and eight live acceptance scenarios through a Core-managed runtime.
+components: [src/api]
 ---
 
-# MCP Tools — plan
+# MCP Tools — scoped access and live acceptance
 
-> Every deliverable this plan originally defined has shipped — see [feature.md](feature.md). One new
-> one is below, and the rest of what is left cannot be asserted in a unit test: the project has no
-> integration harness, and those questions are about what an agent does with the tools, which only a
-> running agent answers.
+## Approval and scope
+
+The owner approved completion in chat on 2026-10-10: support `mcp:read`, run all eight
+live scenarios, and deliver one PR through CI and review to a regular merge commit.
+This replaces the unresolved `mcp:write` proposal: Core does not issue that scope.
+The existing tools are documented in [feature.md](feature.md).
+
+## Target behavior
+
+- Preserve locally validated legacy delegated credentials. For other bearers, use the
+  SDK's MCP-specific introspection against Core on every request, without a cache.
+  This also preserves support for Core's distinct assistant MCP credentials.
+- Require `mcp:read` for the online path. Only an assistant credential carrying
+  `mcp:invoke` may mutate; an external scoped token stays read-only even for an admin.
+  Read-only discovery omits write tools, and guessed write calls are refused before
+  dispatch. A missing or malformed read-only annotation never grants read access.
+- Preserve the existing app-user and administrator checks. An authenticated Host user
+  without an app account cannot read or change personal state on someone else's behalf.
+- Missing or inactive credentials receive 401, insufficient scope receives 403,
+  and unavailable or unreadable Core introspection receives 503. Pass the invoked tool
+  name to Core for audit without logging the bearer. Keep notification acknowledgements
+  at HTTP 202 with an empty body and no content type.
+- Validate against a disposable Core-managed dev environment, isolated from the
+  operator's library. Record actual observations for every acceptance scenario;
+  automated tests do not replace these checks.
 
 ## Deliverables
 
-- [ ] D1. **Accept scoped access tokens on `/api/mcp`.** A delegated token is what the AI Gateway carries
-      and what the surface authenticates today; a scoped token is what an *external* agent client
-      keeps in its own configuration, introspected against Core on every call rather than verified
-      locally — which is what lets revoking it take effect at once. `HostyScopedTokenClient` arrived
-      with SDK 0.6.0, so the mechanism exists. What does not is the decision this turns on: which
-      scopes gate which tools, and whether a token without `mcp:write` sees the write tools refused
-      or absent. Absent is the safer default and the harder one to explain, so it needs deciding
-      rather than defaulting.
+- [ ] D1. Accept scoped `mcp:read` tokens with uncached MCP introspection, fail-closed
+  discovery and invocation, preserved delegated permissions, and regression coverage.
+- [ ] D2. Acceptance 1: install/start through Core and discover the annotated read tools
+  through `hosty mcp`.
+- [ ] D3. Acceptance 2: invoke every read tool as an agent, compare with the web UI,
+  and demonstrate explicit truncation on a sufficiently large library.
+- [ ] D4. Acceptance 3: repair a real NeedsReview item through the four-tool workflow
+  and observe successful pipeline completion.
+- [ ] D5. Acceptance 4: observe personal-state refusal without an app account and
+  success for an authenticated caller with one.
+- [ ] D6. Acceptance 5: observe prompt scan acceptance on a minutes-long catalog scan
+  and refusal to queue a duplicate while it is running.
+- [ ] D7. Acceptance 6: answer a natural-language viewing constraint with the engine's
+  `list_recommendations`, without hand-ranking library pages.
+- [ ] D8. Acceptance 7: execute the operator-language scenarios, including download
+  lookup by film title and volunteering a completed but unidentified download.
+- [ ] D9. Acceptance 8: repair a multi-movie pack with multiple groups and an episode
+  ingest with per-file season/episode numbers, observing their published results.
+
+## Delivery and verification
+
+Run targeted authentication, authorization, protocol, and tool regressions, then the
+API build and full test suite and documentation validation. Bump only the runtime app
+version for the new capability. Update reality documentation and delete this plan in
+the same PR only after D1–D9 are complete. Include acceptance evidence in the PR, pass
+CI and review on the final head, and merge with a regular merge commit.
 
 ## Verification that needs a running host
 
