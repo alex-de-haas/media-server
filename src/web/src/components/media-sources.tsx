@@ -12,6 +12,7 @@ import { ExtractDialog } from "@/components/extract-dialog";
 import { TranscodeDialog, TranscodeJobRow, isTranscodeActive } from "@/components/transcode";
 import { dolbyVisionNote, dynamicRangeBadges, formatBytes, formatRuntime, pictureStream, versionStem } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
+import { ApiError } from "@/lib/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,6 +64,7 @@ export function MediaSources({
   moving,
   showConversions = true,
   onChanged,
+  onDeleteItem,
 }: {
   owner: MediaOwner;
   sources: LibraryMediaSource[];
@@ -71,6 +73,8 @@ export function MediaSources({
   /** The Conversions block above the versions — a movie's own. A series lists its episodes' jobs in one place. */
   showConversions?: boolean;
   onChanged?: () => void;
+  /** Opens the existing whole-item dialog when this is the last version. Never deletes immediately. */
+  onDeleteItem: () => void;
 }) {
   const { role } = useSession();
   const queryClient = useQueryClient();
@@ -100,6 +104,8 @@ export function MediaSources({
             isDefault={source.id === defaultSourceId}
             hasMultiple={sources.length > 1}
             onChanged={changed}
+            ownerKind={owner.kind}
+            onDeleteItem={onDeleteItem}
           />
         ))
       ) : (
@@ -266,6 +272,8 @@ function SourceCard({
   isDefault,
   hasMultiple,
   onChanged,
+  ownerKind,
+  onDeleteItem,
 }: {
   source: LibraryMediaSource;
   itemId: string;
@@ -274,6 +282,8 @@ function SourceCard({
   isDefault: boolean;
   hasMultiple: boolean;
   onChanged: () => void;
+  ownerKind: string;
+  onDeleteItem: () => void;
 }) {
   // The engine is an optional dependency. Everything else on this tab — the version list, renaming, the
   // default-version pick — is database-side and works without it, so only the convert control keys off this.
@@ -377,9 +387,9 @@ function SourceCard({
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Delete this version"
+              aria-label={hasMultiple ? "Delete this version" : `Delete ${ownerKind === "Episode" ? "episode" : "movie"}`}
               className="text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={() => setDeleteOpen(true)}
+              onClick={() => hasMultiple ? setDeleteOpen(true) : onDeleteItem()}
             >
               <Trash2 />
             </Button>
@@ -424,7 +434,7 @@ function SourceCard({
       {canManage && canConvert && (
         <ExtractDialog source={source} itemId={itemId} open={extractOpen} onOpenChange={setExtractOpen} />
       )}
-      {canManage && <DeleteVersionDialog source={source} open={deleteOpen} onOpenChange={setDeleteOpen} onChanged={onChanged} />}
+      {canManage && <DeleteVersionDialog source={source} open={deleteOpen} onOpenChange={setDeleteOpen} onChanged={onChanged} onDeleteItem={onDeleteItem} />}
     </div>
   );
 }
@@ -713,11 +723,13 @@ function DeleteVersionDialog({
   open,
   onOpenChange,
   onChanged,
+  onDeleteItem,
 }: {
   source: LibraryMediaSource;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChanged: () => void;
+  onDeleteItem: () => void;
 }) {
   const deleteFileId = useId();
   const [deleteFile, setDeleteFile] = useState(false);
@@ -736,7 +748,15 @@ function DeleteVersionDialog({
       onOpenChange(false);
       toast.success("Version removed");
     },
-    onError: (error) => toast.error("Couldn’t remove version", { description: errorMessage(error) }),
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409 && error.code === "last_media_source") {
+        onChanged();
+        onOpenChange(false);
+        onDeleteItem();
+        return;
+      }
+      toast.error("Couldn’t remove version", { description: errorMessage(error) });
+    },
   });
 
   return (

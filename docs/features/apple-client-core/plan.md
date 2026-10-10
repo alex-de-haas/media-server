@@ -1,8 +1,8 @@
 ---
 status: In Progress
 created: 2026-08-10
-updated: 2026-08-31
-summary: Phase 2 of the Apple client epic, the first release worth using, built on the finished server APIs.
+updated: 2026-10-10
+summary: Remaining local library mirror, television startup measurements and native operation naming for the Apple client.
 ---
 
 # Apple Client Core — plan
@@ -18,22 +18,24 @@ summary: Phase 2 of the Apple client epic, the first release worth using, built 
 ## Goal
 
 A viewer picks up the remote, finds a film, presses play, and watches it in Dolby
-Vision. Nothing before this delivers that: the server can already answer every
-question the client will ask, and no client asks them.
+Vision. The client already provides that flow, described in the
+[Apple client feature](../apple-client/feature.md). This plan retains the local
+mirror, television startup measurements, remaining native operation names and
+completion documentation.
 
 ## What exists, and what this adds
 
-The server side is done, which makes this plan unusually well-specified — it is
-written against a committed OpenAPI document rather than against an intention.
+The client uses the committed native OpenAPI document. Pairing, browsing and
+playback are implemented; the persistent local mirror remains open.
 
-| Already there | What this feature adds |
+| Server surface | Client state |
 | --- | --- |
-| `GET /native/v1/server/public`, anonymous | The pairing screen that consumes it |
-| Core's device authorization flow | Chaining it into an app identity token, and keeping it |
-| `GET /native/v1/sync?cursor=` over a change log | The local mirror it feeds |
-| `POST /native/v1/playback/resolve` | Sending a real capability profile and acting on the answer |
-| `/native/v1/media/{id}/remux` with signed URLs | An `AVPlayer` pointed at one |
-| `/native/v1/playback/sessions/*` | Progress reporting, resume, watched |
+| `GET /native/v1/server/public`, anonymous | Implemented pairing screen |
+| Core's device authorization flow | Implemented token exchange and Keychain storage |
+| `GET /native/v1/sync?cursor=` over a change log | In-memory browsing; persistent mirror, reset and purge handling remain in D6–D8 |
+| `POST /native/v1/playback/resolve` | Implemented capability negotiation and refusal handling |
+| `/native/v1/media/{id}/remux` with signed URLs | Implemented AVKit playback |
+| `/native/v1/playback/sessions/*` | Implemented progress reporting, resume and watched state |
 
 ## Pairing, which the app must not invent
 
@@ -222,21 +224,22 @@ would have meant a dozen more models written the same way.
       `scripts/generate-apple-client.sh` regenerates and records the document's hash,
       and CI compares it on Linux — the generator needs a Mac, so the check is the
       hash rather than a regeneration.
-- [ ] D23. **Operation ids on the server.** Without them the generator names operations
-      from their paths, and the idiomatic naming strategy papers over it —
-      `getNativeV1ServerPublic` reads acceptably but is derived, not declared. Adding
-      `.WithName(...)` to the native routes would name them once for every consumer
-      of the document. Raised while doing the above; not done.
+- [ ] D23. **Operation ids on the server.** Collections, groups, Home and episode
+      routes already declare names. Add `.WithName(...)` to the remaining native
+      routes and regenerate their clients; operations such as
+      `getNativeV1ServerPublic` still derive their names from paths.
 
 ### Closing the plan
 
 - [ ] D24. **`feature.md`** for this feature, created by the PR that ships the
       behaviour.
-- [ ] D25. **Epic deliverable** — check off "Constituent plans" in
-      [`apple-client/plan.md`](../apple-client/plan.md) once this is Ready.
+- [x] D25. **Epic deliverable** — "Constituent plans" (D18) in
+      [`apple-client/plan.md`](../apple-client/plan.md) is checked off. This plan
+      exists and its remaining implementation work stays open here.
 - [ ] D26. **Index** — `node scripts/docs-index.mjs --fix`.
-- [ ] D27. **Version** — the client versions on `MARKETING_VERSION`, not
-      `manifest.json`. Nothing here moves the server's version.
+- [ ] D27. **Version** — client changes use `MARKETING_VERSION`; server route or
+      contract changes in D23 also require an independent `manifest.json` bump.
+      Documentation-only reconciliation changes neither version.
 
 ## Open questions
 

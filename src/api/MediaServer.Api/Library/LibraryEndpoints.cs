@@ -265,16 +265,7 @@ public static class LibraryEndpoints
 
         // Delete a single media source / version (admin only). `deleteFile=true` also erases the file from
         // disk — used to drop the original after a verified transcode "replace".
-        group.MapDelete("/sources/{sourceId:guid}", async (Guid sourceId, bool? deleteFile, LibraryDeleteService deleteService, LibraryMoveGuard moveGuard, CancellationToken cancellationToken) =>
-        {
-            if (await moveGuard.IsSourceMovingAsync(sourceId, cancellationToken))
-            {
-                return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
-            }
-
-            var deleted = await deleteService.DeleteSourceAsync(sourceId, deleteFile ?? false, cancellationToken);
-            return deleted ? Results.NoContent() : Results.NotFound();
-        }).RequireAuthorization(AppRoles.AdminPolicy);
+        group.MapDelete("/sources/{sourceId:guid}", DeleteSourceAsync).RequireAuthorization(AppRoles.AdminPolicy);
 
         // Delete one sidecar — an external audio track or subtitle sitting beside a library file (admin
         // only). `deleteFile=true` also erases it from disk; without it only the entry goes. Merging a track
@@ -496,6 +487,27 @@ public static class LibraryEndpoints
         PinPosterResult.NotFound => Results.NotFound(),
         _ => Results.Problem(),
     };
+
+    /// <summary>Removes a version or directs a last-version caller to explicit whole-item deletion.</summary>
+    internal static async Task<IResult> DeleteSourceAsync(
+        Guid sourceId, bool? deleteFile, LibraryDeleteService deleteService,
+        LibraryMoveGuard moveGuard, CancellationToken cancellationToken)
+    {
+        if (await moveGuard.IsSourceMovingAsync(sourceId, cancellationToken))
+        {
+            return Results.Conflict(new { error = LibraryMoveGuard.MoveInProgressError });
+        }
+
+        try
+        {
+            var deleted = await deleteService.DeleteSourceAsync(sourceId, deleteFile ?? false, cancellationToken);
+            return deleted ? Results.NoContent() : Results.NotFound();
+        }
+        catch (LastMediaSourceException exception)
+        {
+            return Results.Conflict(new { error = LastMediaSourceException.ErrorCode, detail = exception.Message });
+        }
+    }
 
     /// <summary>Comma-separated genres, blanks dropped. Null when nothing usable was given.</summary>
     private static IReadOnlyList<string>? SplitGenres(string? value)

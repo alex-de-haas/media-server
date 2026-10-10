@@ -332,10 +332,21 @@ public sealed class LibraryDeleteService(
     /// history that fed off it); with <paramref name="deleteFile"/> it also erases the file from disk and
     /// unlinks the originating source file. The sidecars beside that file go with it: they hang off this
     /// source and nothing refers to them once it is gone. Returns false if no such source exists.
+    /// Throws <see cref="LastMediaSourceException"/> if no other version remains; the caller must use
+    /// whole-item deletion to choose what happens to files and user history.
     /// </summary>
     public async Task<bool> DeleteSourceAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
     {
         using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        return await DeleteSourceWithinMutationAsync(sourceId, deleteFile, cancellationToken);
+    }
+
+    /// <summary>
+    /// Deletes a version while the caller holds <see cref="LibraryFileMutation"/>'s gate. Catalog scans
+    /// hold it across survivor classification and removal so a concurrent delete cannot invalidate that decision.
+    /// </summary>
+    internal async Task<bool> DeleteSourceWithinMutationAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
+    {
         await LibraryFileMutation.RequireSourceAvailableAsync(database, sourceId, cancellationToken);
         var source = await database.MediaSources.AsNoTracking()
             .Where(candidate => candidate.Id == sourceId)
@@ -344,6 +355,15 @@ public sealed class LibraryDeleteService(
         if (source is null)
         {
             return false;
+        }
+
+        // Check under the mutation gate: two requests deleting different versions must not both
+        // observe another source and leave the item empty. A Blu-ray directory counts as a source.
+        if (!await database.MediaSources.AnyAsync(
+            candidate => candidate.MediaItemId == source.MediaItemId && candidate.Id != sourceId,
+            cancellationToken))
+        {
+            throw new LastMediaSourceException();
         }
 
         // Resolve the catalog and the sidecar paths up front (the rows are the source of truth for both)

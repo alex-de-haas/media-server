@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-09-24
+updated: 2026-10-10
 summary: File operations happen only as catalog automation and stay confined to configured catalog roots.
 ---
 
@@ -34,8 +34,8 @@ All file access is sandboxed to configured catalog roots (see
 - Move a published item's file(s) into **another catalog** (see Move Semantics).
 - Clear a download's `.incoming/` staging folder once its file moves out, or when
   the in-flight download is removed.
-- Delete a library item — a whole movie or series, one season, one episode, or a
-  single version — by removing its canonical file(s).
+- Delete a library item — a whole movie or series, one season, one episode — with
+  optional file deletion, or remove one version while another remains.
 - Import scan: enumerate the catalog root (excluding `.incoming/`) for orphan
   media files.
 - Stream large files without whole-file buffering.
@@ -57,6 +57,7 @@ GET    /api/files/resolve?catalogId={id}&path=...   # internal/debug only
 DELETE /api/library/{id}?deleteFiles={bool}         # removes the published item (and file if asked)
 DELETE /api/library/episodes/{id}?deleteFiles={bool} # removes one episode → { seasonRemoved, seriesRemoved }
 DELETE /api/library/seasons/{id}?deleteFiles={bool}  # removes one season  → { seasonRemoved, seriesRemoved }
+DELETE /api/library/sources/{id}?deleteFile={bool}   # removes one version only if another remains
 POST   /api/catalogs/{id}/scan                       # import scan of the catalog root
 POST   /api/library/{id}/move                        # move the item into another catalog → { jobId }
 ```
@@ -65,27 +66,48 @@ Paths are expressed relative to a catalog root, never as absolute host paths.
 
 ## Removal Semantics
 
-With one tree, one file backs one item:
+The owner approved the last-version refusal policy in chat on 2026-10-10, before
+implementation: refuse separate deletion and offer the existing movie or episode
+deletion dialog. This is the decision recorded by completed plan deliverable D1;
+D2 supplies the behavior and coverage below. The completed plan is removed under
+the documentation lifecycle rules.
 
-- **Remove from library** (`DELETE /api/library/{id}`): drops the DB rows;
-  `deleteFiles=true` also deletes the canonical file, `deleteFiles=false` leaves it
-  on disk for a later import scan to re-adopt. Accepts a published top-level movie or
-  series; a series takes its seasons, episodes, and extras with it.
+Whole-item removal and version removal have different scopes:
+
+- **Remove from library** (`DELETE /api/library/{id}`): removes the published item
+  and its sources; `deleteFiles=true` also deletes its files, while
+  `deleteFiles=false` leaves them on disk for a later import scan to re-adopt.
+  Accepts a published top-level movie or series; a series takes its seasons,
+  episodes, and extras with it. By default, user history, ratings and favorites
+  retain an unpublished [tombstone](../library-item-tombstones/feature.md).
+  `deleteUserData=true` explicitly purges that data too. Both options default off
+  in the existing item deletion dialog.
 - **Remove one episode or one season** (`DELETE /api/library/episodes/{id}`,
   `DELETE /api/library/seasons/{id}`, both admin): the same two modes, applied to part
   of a series. A season takes its episodes and the extras parented to it. Both then
-  prune what they emptied — a season once nothing carries its `SeasonId` any more, then
-  the series once nothing is left under it at all. Emptiness counts every remaining
-  child, so a leftover season-scoped extra keeps its season (and pruning around it would
-  fail the `Restrict` self-FK on `ParentId`). The response reports
+  prune what they emptied — a season once no published child carries its `SeasonId`,
+  then the series once no published child remains. A published season-scoped extra
+  keeps its season. Retained history keeps unpublished ancestors under the same
+  tombstone rules. The response reports
   `{ seasonRemoved, seriesRemoved }` so a caller standing on the series page knows when
-  that page is gone. Deleting an item drops the plays recorded against it — playback
-  history follows its media item by design.
+  that page is gone. `deleteUserData` has the same opt-in purge semantics as
+  top-level deletion.
 - **Remove one version** (`DELETE /api/library/sources/{id}`, admin): drops a single
   `MediaSource` of a movie or an episode, used to retire the original after a verified
-  transcode. The item stays, even with no version left — see [plan.md](plan.md).
-- Every removal above drops the item's `ImageAsset` rows; the cached artwork binaries
-  they pointed at are reclaimed later by the image-cache sweep (see
+  transcode. The item and user history stay. If no other source remains, the API
+  returns **409** with `error: last_media_source` before changing any rows or files.
+  The check runs inside the file-mutation lock, so concurrent requests cannot
+  remove the last two versions separately. Every source counts, including a
+  Blu-ray directory; streams and sidecars are not versions.
+- The last version's delete control opens the existing **Delete movie?** or
+  **Delete episode?** dialog and explains that the last version cannot be removed
+  separately. Opening or cancelling it changes nothing; files and user data remain
+  unchecked by default. A stale version list that receives `last_media_source`
+  refreshes its data and opens the same dialog for explicit confirmation, without
+  automatically deleting the item or carrying over a file-deletion choice.
+- Purging an item drops its `ImageAsset` rows; tombstones and version-only removal
+  retain its artwork. Cached artwork binaries with no remaining references are
+  reclaimed later by the image-cache sweep (see
   [Storage and data](../storage-and-data/feature.md)), not inline.
 - Any of these is refused with **409** while the owning item (for a season or episode,
   its series) is being moved to another catalog.
@@ -123,6 +145,8 @@ in v1.
 [Blu-ray sources](../bluray-import/feature.md) are directory sources for movies.
 Their import, manual MKV preparation and playback availability are documented
 separately; internal disc clips are not individual library versions.
+Removing an MKV while a disc remains is allowed: the title stays present with
+conversion-required availability. A lone disc follows the same last-source refusal.
 
 ## Testing Expectations
 
@@ -138,5 +162,13 @@ Backend tests should use xUnit and Imposter. Required coverage:
   while a leftover extra keeps its season; `deleteFiles` false leaves the file for a
   rescan and true erases it; a movie, a top-level series, or an unpublished row is
   refused; the source file is detached rather than deleted.
+- `LibrarySourceDeletionTests`: last-version refusal for movies and episodes with
+  either file-deletion choice preserves files, sidecars, streams, default source,
+  ingest ownership and user history; ordinary version removal and disc counting;
+  concurrent removals leave one source; HTTP 404, 409 with `last_media_source`, and
+  204 remain distinct.
+- Web `last-version-deletion.spec.ts`: movie and episode dialogs, cancellation,
+  safe defaults on every open, explicit file/history choices, ordinary version
+  deletion, stale-list conflicts, viewer permissions and MKV-plus-disc counting.
 - Import scan skips `.incoming/` and already-known files.
 - Large-file streaming stays inside catalog roots.

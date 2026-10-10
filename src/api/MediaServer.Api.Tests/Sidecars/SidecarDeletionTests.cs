@@ -170,6 +170,7 @@ public sealed class SidecarDeletionTests : IDisposable
     [Fact]
     public async Task Deleting_the_version_with_its_file_takes_its_sidecars_too()
     {
+        await AddReplacementVersionAsync();
         // Same reasoning one level down: the sidecars hang off this source, and its streams go with it.
         Assert.True(await Service().DeleteSourceAsync(_sourceId, deleteFile: true, CancellationToken.None));
 
@@ -180,11 +181,22 @@ public sealed class SidecarDeletionTests : IDisposable
     [Fact]
     public async Task Deleting_the_version_returns_its_sidecars_staged_rows_to_unassigned()
     {
+        await AddReplacementVersionAsync();
         await Service().DeleteSourceAsync(_sourceId, deleteFile: true, CancellationToken.None);
 
         var file = await _context.SourceFiles.SingleAsync(candidate => candidate.RelativePath == _sidecarRelative);
         Assert.Null(file.MediaItemId);
         Assert.Equal(SourceFileAssignmentStatus.Unassigned, file.AssignmentStatus);
+    }
+
+    private async Task AddReplacementVersionAsync()
+    {
+        _context.MediaSources.Add(new MediaSource
+        {
+            Id = Guid.NewGuid(), MediaItemId = _movieId, Container = "mkv",
+            Path = "The Rock (1996)/The Rock (1996) - converted.mkv", CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await _context.SaveChangesAsync();
     }
 
     private void Seed()
