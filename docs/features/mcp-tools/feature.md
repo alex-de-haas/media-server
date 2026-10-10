@@ -181,5 +181,5 @@ give one tool argument shapes that share nothing.
   grants, subject-to-account resolution, every hidden write tool refused on direct invocation,
   missing/malformed annotations, 401/403/503 distinctions, and caller cancellation.
 - **Live acceptance** uses a disposable Core-managed dev runtime, ordinary browser sign-in,
-  actual TMDb reads, and self-generated media clips. Remaining scenarios are tracked in
-  [plan.md](plan.md).
+  actual TMDb reads, and self-generated media clips. All eight scenarios are recorded in
+  the [2026-10-10 acceptance review](../../reviews/2026-10-10-mcp-tools-acceptance.md).
