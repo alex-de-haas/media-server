@@ -1,6 +1,6 @@
 ---
 created: 2026-09-08
-updated: 2026-10-01
+updated: 2026-10-10
 summary: Episodes get the same media surface as movies, with versions, tracks, sidecars and conversions.
 ---
 
@@ -28,13 +28,15 @@ before; an episode's expanded row renders the same component fed by the episode'
 own detail. The API accepts the same calls for either kind, and this is the one place
 that offers them, so the two cannot drift.
 
-Two things the owner decides:
+The owner supplies:
 
 - **`moving`** locks every control while a move is relocating these very files. An
   episode's move is its series', so a whole show's rows lock together. The API
   rejects those calls with a 409 anyway; they are simply not offered.
 - **`onChanged`** runs after anything here changes a version, beyond the owner's own
   detail query. An episode row uses it to refresh the season's summary lines.
+- **`onDeleteItem`** opens the owner's existing deletion dialog when the selected
+  source is the last version, including after a stale-list conflict from the API.
 
 The rename dialog previews the locked stem by reading it off the file name —
 what precedes the label's ` - ` — rather than composing `Title (Year)`, which is what
@@ -133,15 +135,17 @@ were never probed carries none.
   episode listing sees an episode's versions
   ([jellyfin-compatibility](../jellyfin-compatibility/feature.md)).
 
-## What stays as it was
+## Related behavior and limits
 
-- Deleting an episode's last version leaves the episode as a row with no file, which
-  is what deleting a movie's last version does. Parity is kept here on purpose; that
-  the row survives at all is a question of removal semantics, shaped in
-  [file-directory-management](../file-directory-management/plan.md).
+- An episode's last version cannot be removed separately, just like a movie's.
+  Its delete control offers the existing episode deletion dialog with files and
+  history preserved by default. The API also refuses a last-source request with
+  `409 last_media_source`. Confirmed episode deletion uses the existing tombstone
+  and empty-ancestor rules in
+  [file and directory management](../file-directory-management/feature.md#removal-semantics).
 - Extras have no surface; nothing here adds one. The Apple client's episode screens
   are [apple-series-browsing](../apple-series-browsing/feature.md)'s.
-- Log watch stays on movies; a whole title moves between catalogs, never one episode.
+- A whole title moves between catalogs, never one episode.
 
 ## Testing Expectations
 
@@ -179,3 +183,6 @@ were never probed carries none.
   shared component.
 - `catalog-browsing.spec.ts` — a series card carrying its badges, and none for a
   series with no probed episode.
+- `LibrarySourceDeletionTests` and `last-version-deletion.spec.ts` — last-version
+  refusal, the existing episode deletion dialog, cancellation and file/history
+  choices, plus recovery from a stale version list without automatic deletion.

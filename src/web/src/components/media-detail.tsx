@@ -59,6 +59,7 @@ import { useSession } from "@/components/app-shell";
  * episodes, each of which opens onto the same media surface. */
 export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref: string; backLabel: string }) {
   const router = useRouter();
+  const [deleteReason, setDeleteReason] = useState<"item" | "lastVersion" | null>(null);
   const detail = useQuery({
     queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id),
     retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2,
@@ -88,12 +89,12 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-2">
         <BackLink href={backHref} label={backLabel} />
-        <ItemActions item={item} backHref={backHref} />
+        <ItemActions item={item} backHref={backHref} deleteReason={deleteReason} onDeleteRequest={setDeleteReason} />
       </div>
       <Hero item={item} />
       {item.kind === "Movie" && <MovieWatchHistory key={item.id} id={item.id} title={item.title} removed={!!item.removedAt} />}
       <CastCarousel key={`cast-${item.id}`} cast={item.cast} />
-      {!item.removedAt && <DetailMedia item={item} backHref={backHref} />}
+      {!item.removedAt && <DetailMedia item={item} backHref={backHref} onDeleteItem={() => setDeleteReason("lastVersion")} />}
       {item.kind === "Movie" && <RelatedMovies id={item.id} backHref={backHref} />}
       <section aria-label="Tags" className="flex min-w-0 flex-col gap-3">
         <h2 className="text-lg font-semibold tracking-tight">Tags</h2>
@@ -103,7 +104,7 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
   );
 }
 
-function DetailMedia({ item, backHref }: { item: LibraryDetail; backHref: string }) {
+function DetailMedia({ item, backHref, onDeleteItem }: { item: LibraryDetail; backHref: string; onDeleteItem: () => void }) {
   const mediaLabel = item.kind === "Series" ? "Episodes" : "Media";
 
   return (
@@ -114,14 +115,14 @@ function DetailMedia({ item, backHref }: { item: LibraryDetail; backHref: string
       {item.kind === "Series" ? (
         <SeriesEpisodes seriesId={item.id} seasons={item.seasons} backHref={backHref} />
       ) : (
-        <MovieMedia item={item} />
+        <MovieMedia item={item} onDeleteItem={onDeleteItem} />
       )}
     </section>
   );
 }
 
 // A movie's Media section: the shared media surface, owned by the movie and locked while it moves.
-function MovieMedia({ item }: { item: LibraryDetail }) {
+function MovieMedia({ item, onDeleteItem }: { item: LibraryDetail; onDeleteItem: () => void }) {
   const moving = useActiveMove(item.id) !== undefined;
   return (
     <MediaSources
@@ -129,6 +130,7 @@ function MovieMedia({ item }: { item: LibraryDetail }) {
       sources={item.mediaSources}
       defaultSourceId={item.defaultSourceId}
       moving={moving}
+      onDeleteItem={onDeleteItem}
     />
   );
 }
@@ -232,7 +234,12 @@ function MediaDetailSkeleton() {
 }
 
 /** Personal actions, provider links, and role-gated library administration. */
-function ItemActions({ item, backHref }: { item: LibraryDetail; backHref: string }) {
+function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
+  item: LibraryDetail;
+  backHref: string;
+  deleteReason: "item" | "lastVersion" | null;
+  onDeleteRequest: (reason: "item" | "lastVersion" | null) => void;
+}) {
   const { id, title, kind, catalogId } = item;
   const removed = !!item.removedAt;
   const [trackingOpen, setTrackingOpen] = useState(false);
@@ -243,7 +250,8 @@ function ItemActions({ item, backHref }: { item: LibraryDetail; backHref: string
   const { role } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const confirmOpen = deleteReason !== null;
+  const setConfirmOpen = (open: boolean) => onDeleteRequest(open ? "item" : null);
   const [remapOpen, setRemapOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [logWatchOpen, setLogWatchOpen] = useState(false);
@@ -443,7 +451,9 @@ function ItemActions({ item, backHref }: { item: LibraryDetail; backHref: string
           <DeleteItemDialog
             open={confirmOpen}
             onOpenChange={setConfirmOpen}
+            heading={deleteReason === "lastVersion" ? "Delete movie?" : undefined}
             title={title}
+            detail={deleteReason === "lastVersion" ? "This is the last version. It cannot be removed separately; delete the movie instead." : undefined}
             onConfirm={(options) => {
               remove.mutate(options);
               setConfirmOpen(false);
@@ -1061,7 +1071,7 @@ function EpisodeRow({
 }) {
   const { role } = useSession();
   const [remapOpen, setRemapOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState<"item" | "lastVersion" | null>(null);
   const [expanded, setExpanded] = useState(false);
   const invalidate = useEpisodeInvalidation(seriesId);
   const afterDelete = useAfterChildDelete(seriesId, backHref);
@@ -1078,7 +1088,7 @@ function EpisodeRow({
   const remove = useMutation({
     mutationFn: (options: DeleteItemOptions) => mediaServer.deleteEpisode(episode.id, options.deleteFiles, options.deleteUserData),
     onSuccess: (result) => {
-      setDeleteOpen(false);
+      setDeleteReason(null);
       afterDelete(result, label);
     },
     onError: (error) => toast.error(errorMessage(error)),
@@ -1147,17 +1157,18 @@ function EpisodeRow({
               size="icon-sm"
               aria-label={`Delete ${label}`}
               disabled={remove.isPending}
-              onClick={() => setDeleteOpen(true)}
+              onClick={() => setDeleteReason("item")}
             >
               <Trash2 />
             </Button>
           )}
           {role === "admin" && (
             <DeleteItemDialog
-              open={deleteOpen}
-              onOpenChange={setDeleteOpen}
+              open={deleteReason !== null}
+              onOpenChange={(open) => setDeleteReason(open ? "item" : null)}
               heading="Delete episode?"
               title={`${label} · ${episode.title}`}
+              detail={deleteReason === "lastVersion" ? "This is the last version. It cannot be removed separately; delete the episode instead." : undefined}
               onConfirm={(options) => remove.mutate(options)}
             />
           )}
@@ -1189,7 +1200,7 @@ function EpisodeRow({
       </div>
       {expanded && (
         <div className="border-t p-3">
-          <EpisodeMedia episode={episode} seriesId={seriesId} moving={moving} />
+          <EpisodeMedia episode={episode} seriesId={seriesId} moving={moving} onDeleteItem={() => setDeleteReason("lastVersion")} />
         </div>
       )}
     </li>
@@ -1198,7 +1209,7 @@ function EpisodeRow({
 
 // The expanded row: the episode's versions on the same surface a movie's Media section uses. Fetched on
 // expand, so a long season never carries every episode's stream list in one listing.
-function EpisodeMedia({ episode, seriesId, moving }: { episode: Episode; seriesId: string; moving: boolean }) {
+function EpisodeMedia({ episode, seriesId, moving, onDeleteItem }: { episode: Episode; seriesId: string; moving: boolean; onDeleteItem: () => void }) {
   const invalidate = useEpisodeInvalidation(seriesId);
   const detail = useQuery({ queryKey: ["library-detail", episode.id], queryFn: () => mediaServer.getLibraryDetail(episode.id) });
 
@@ -1218,6 +1229,7 @@ function EpisodeMedia({ episode, seriesId, moving }: { episode: Episode; seriesI
       moving={moving}
       showConversions={false}
       onChanged={invalidate}
+      onDeleteItem={onDeleteItem}
     />
   );
 }

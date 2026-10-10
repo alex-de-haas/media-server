@@ -1,7 +1,7 @@
 ---
 status: In Progress
 created: 2026-09-24
-updated: 2026-09-25
+updated: 2026-10-10
 summary: Remaining Blu-ray import work, from protection diagnostics and HDR preservation to grouping BDMV during ingest.
 ---
 
@@ -242,12 +242,11 @@ job-owned temporary output, never the disc or another job's file.
 
 ## Interactions with existing plans
 
-- [File and directory management](../file-directory-management/feature.md) needs
-  directory-aware operations for a disc source. Its
-  [open last-source policy](../file-directory-management/plan.md) remains separate:
-  removing an MKV while BDMV remains is not last-source removal. The title stays
-  present and returns to conversion-required availability. Do not silently decide
-  the general zero-source policy in this feature.
+- [File and directory management](../file-directory-management/feature.md#removal-semantics)
+  refuses separate deletion of the last source and offers whole-item deletion.
+  Disc sources count as versions: removing an MKV while BDMV remains is allowed.
+  The title stays present and returns to conversion-required availability.
+  Directory-aware operations must preserve this rule.
 - [Catalog maintenance](../catalog-maintenance/feature.md) must distinguish a
   missing disc from an unavailable catalog mount, check owned members, and avoid
   producing tombstones merely because a directory fails `File.Exists`.
