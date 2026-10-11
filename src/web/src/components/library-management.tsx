@@ -105,7 +105,7 @@ function ManagementContent({ kind, id }: { kind: "Movie" | "Series"; id?: string
   const hidden = search.get("hidden")?.split(",") ?? ["year"];
   const focused = !!id && kind === "Movie";
   const backHref = tableKind === "Episode" ? `/manage/series/${id}` : focused ? listHref : currentHref;
-  const seriesParams = new URLSearchParams([...search.entries()].filter(([key]) => !["offset", "expanded", "sort"].includes(key)));
+  const seriesParams = new URLSearchParams([...search.entries()].filter(([key]) => !["offset", "expanded", "sort", "descending"].includes(key)));
   const affectedParams = new URLSearchParams(seriesParams);
   if (!affectedParams.has("view") || affectedParams.get("view") === "all") affectedParams.set("view", "attention");
   const clear = () => { setSearchDraft(null); window.history.pushState(null, "", pathname); };

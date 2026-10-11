@@ -45,6 +45,8 @@ Series rows include stored season/episode totals and a distinct affected-episode
 count. Issue sorting uses that distinct episode count, even when one episode has
 several affected versions. Those counts describe the library, not provider completeness. Opening a
 series gives `/manage/series/{id}`, season controls and a paginated episode table.
+Series drill-down keeps source filters and starts with ascending episode chronology,
+resetting both the series list's sort key and direction.
 The affected count opens the current issue subset; an unfiltered count opens
 Needs attention. `episode={id}` focuses an episode. Multi-episode ranges retain
 labels such as `S01E01-E02`. Version details load only for expanded episodes.

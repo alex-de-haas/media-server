@@ -57,16 +57,23 @@ test("browse preserves personal actions and exposes only a Manage link", async (
   await expect(page.locator("#source-dv7")).toBeVisible();
 });
 
-test("series issue count opens the episode subset and source details are lazy", async ({ page }) => {
-  const episode = managementRow("e1", "Pilot", { kind: "Episode", parentIndexNumber: 1, indexNumber: 1, indexNumberEnd: 2, issueCount: 1 });
-  await setupApp(page, { detail: { s1: { ...seriesDetail("s1", "Severance"), seasons: [aSeason("season1", 1, 1)] } }, episodes: { s1: [anEpisode("e1", 1, 1, "Pilot")] },
-    management: q => managementPage(q.get("kind") === "Episode" ? [episode] : [managementRow("s1", "Severance", { kind: "Series", affectedEpisodes: 1, episodeCount: 2 })]) });
-  await page.goto("/manage/series?view=all");
-  await page.getByRole("link", { name: "1", exact: true }).click();
-  await expect(page).toHaveURL(/\/manage\/series\/s1\?.*view=attention/);
-  await expect(page.getByText("S01E01-E02", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Show versions of Pilot" })).toBeVisible();
-});
+for (const [link, sort, view] of [["1", "issues", "attention"], ["Severance", "title", "all"]] as const) {
+  test(`series ${sort} drill-down resets ordering, preserves filters and loads versions lazily`, async ({ page }) => {
+    const episode = managementRow("e1", "Pilot", { kind: "Episode", parentIndexNumber: 1, indexNumber: 1, indexNumberEnd: 2, issueCount: 1 });
+    const episodeRequests: URLSearchParams[] = [];
+    await setupApp(page, { detail: { s1: { ...seriesDetail("s1", "Severance"), seasons: [aSeason("season1", 1, 1)] } }, episodes: { s1: [anEpisode("e1", 1, 1, "Pilot")] },
+      management: q => {
+        if (q.get("kind") === "Episode") episodeRequests.push(q);
+        return managementPage(q.get("kind") === "Episode" ? [episode] : [managementRow("s1", "Severance", { kind: "Series", affectedEpisodes: 1, episodeCount: 2 })]);
+      } });
+    await page.goto(`/manage/series?view=all&resolution=2160p&sort=${sort}&descending=true`);
+    await page.getByRole("link", { name: link, exact: true }).click();
+    await expect(page).toHaveURL(`/manage/series/s1?view=${view}&resolution=2160p`);
+    await expect(page.getByText("S01E01-E02", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show versions of Pilot" })).toBeVisible();
+    expect(episodeRequests.some(q => q.get("sort") === "episode" && q.get("descending") === "false")).toBe(true);
+  });
+}
 
 test("management remains usable on a narrow viewport and when embedded", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
