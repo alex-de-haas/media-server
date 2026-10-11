@@ -80,6 +80,8 @@ under React lint checks, and remove unused declarations.
 Technical conditions and issue predicates match the same source and its selected
 picture stream. Cover art does not displace the picture. Search, filtering,
 counting and stable sorting (with ID ties) execute in SQLite before pagination.
+Episode chronology sorts both season and episode numbers in the requested
+direction; equal numbers retain the same ID tie-breaker across pages.
 Quick counts use the current technical/search filters before the selected view;
 they overlap and are not additive. Size sums each stored source once, with unknown
 sizes labeled explicitly. Lists do not load tracks or probe the filesystem.
@@ -153,7 +155,8 @@ MKV can remain unknown/preparing until background indexing observes it.
 - xUnit SQLite tests cover mixed disc/file versions, DV alternatives, missing
   probes/profiles, offline/unanchored storage, preparation states, native rule
   parity, cover-art selection, removed exclusion, same-source filters, distinct
-  episode counts, stable paging, literal search and bounded SQL command counts.
+  episode counts, ascending/descending episode chronology, stable paging,
+  literal search and bounded SQL command counts.
 - Endpoint tests assert administrator versus authenticated-viewer policy metadata,
   query-default binding and rejection of invalid page windows.
 - Indexing snapshot tests cover expiry, restart and preservation of known failure.

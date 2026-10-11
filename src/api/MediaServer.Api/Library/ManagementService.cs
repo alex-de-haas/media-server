@@ -280,7 +280,9 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
             "issues" when q.Kind == "Series" => q.Descending ? filtered.OrderByDescending(r => r.Affected) : filtered.OrderBy(r => r.Affected),
             "issues" => q.Descending ? filtered.OrderByDescending(r => r.Issues) : filtered.OrderBy(r => r.Issues),
             "year" => q.Descending ? filtered.OrderByDescending(r => r.Year) : filtered.OrderBy(r => r.Year),
-            "episode" => filtered.OrderBy(r => r.Season).ThenBy(r => r.Number),
+            "episode" => q.Descending
+                ? filtered.OrderByDescending(r => r.Season).ThenByDescending(r => r.Number)
+                : filtered.OrderBy(r => r.Season).ThenBy(r => r.Number),
             _ => q.Descending ? filtered.OrderByDescending(r => r.Title) : filtered.OrderBy(r => r.Title),
         };
         var page = await ordered.ThenBy(r => r.Id).Skip(q.Offset).Take(q.Limit).ToListAsync(ct);

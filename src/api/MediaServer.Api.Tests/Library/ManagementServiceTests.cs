@@ -207,6 +207,36 @@ public sealed class ManagementServiceTests : IDisposable
         Assert.Null(first.Items.Concat(second.Items).Single(i => i.Id == b.Id).SizeBytes);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Episode_chronology_respects_direction_and_keeps_tied_numbers_stable_across_pages(bool descending)
+    {
+        var series = Item("Show", MediaKind.Series);
+        var firstEpisode = Item("Last alphabetically", MediaKind.Episode, series.Id);
+        firstEpisode.ParentIndexNumber = 1; firstEpisode.IndexNumber = 1;
+        var secondEpisode = Item("First alphabetically", MediaKind.Episode, series.Id);
+        secondEpisode.ParentIndexNumber = 1; secondEpisode.IndexNumber = 2;
+        secondEpisode.Id = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var tiedEpisode = Item("Another entry", MediaKind.Episode, series.Id);
+        tiedEpisode.ParentIndexNumber = 1; tiedEpisode.IndexNumber = 2;
+        tiedEpisode.Id = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var nextSeason = Item("Middle alphabetically", MediaKind.Episode, series.Id);
+        nextSeason.ParentIndexNumber = 2; nextSeason.IndexNumber = 1;
+        await database.Context.SaveChangesAsync();
+
+        var query = new ManagementQuery(Kind: "Episode", SeriesId: series.Id, Sort: "episode", Descending: descending, Limit: 2);
+        var firstPage = await service.ListAsync(query, default);
+        var secondPage = await service.ListAsync(query with { Offset = 2 }, default);
+        var expected = descending
+            ? new[] { nextSeason.Id, secondEpisode.Id, tiedEpisode.Id, firstEpisode.Id }
+            : new[] { firstEpisode.Id, secondEpisode.Id, tiedEpisode.Id, nextSeason.Id };
+        Assert.Equal(4, firstPage.Total);
+        Assert.Equal(4, secondPage.Total);
+        Assert.Equal(expected.Take(2), firstPage.Items.Select(item => item.Id));
+        Assert.Equal(expected.Skip(2), secondPage.Items.Select(item => item.Id));
+    }
+
     [Fact]
     public async Task Recent_indexing_observations_distinguish_preparing_ready_and_failed()
     {
