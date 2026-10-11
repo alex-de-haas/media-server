@@ -18,6 +18,26 @@ public sealed class IndexingProgress(RemuxIndexStore store, SseRealtimeNotifier 
     private readonly Dictionary<Guid, Entry> _entries = [];
     private long _revision = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
     private const int Capacity = 512;
+    private readonly Dictionary<Guid, (string State, DateTimeOffset At)> _observed = [];
+
+    /// <summary>Recent background observations for library summaries; never stats media on a list read.</summary>
+    internal IReadOnlyDictionary<Guid, string> Snapshot()
+    {
+        lock (_gate)
+            return _observed.Where(pair => clock.GetUtcNow() - pair.Value.At < TimeSpan.FromMinutes(10))
+                .ToDictionary(pair => pair.Key, pair => pair.Value.State);
+    }
+
+    internal void Observe(Guid key, string state)
+    {
+        lock (_gate)
+        {
+            if (_observed.Count >= 10000 && !_observed.ContainsKey(key))
+                _observed.Remove(_observed.MinBy(pair => pair.Value.At).Key);
+            if (state == "waiting" && _entries.TryGetValue(key, out var entry)) state = entry.Status.State;
+            _observed[key] = (state, clock.GetUtcNow());
+        }
+    }
 
     private sealed record Entry(RemuxIndexService.Candidate Candidate, long Length, DateTime Modified,
         IndexingStatus Status, long PublishedAt);
@@ -103,6 +123,7 @@ public sealed class IndexingProgress(RemuxIndexStore store, SseRealtimeNotifier 
 
     private void Publish(Entry entry)
     {
+        Observe(entry.Candidate.Key, entry.Status.State);
         var candidate = entry.Candidate;
         // Candidates only come from published, visible items. Legacy callers without ownership do not broadcast.
         if (candidate.ItemId != Guid.Empty)

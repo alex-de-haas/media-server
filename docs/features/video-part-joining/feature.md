@@ -1,14 +1,14 @@
 ---
 created: 2026-09-10
-updated: 2026-09-11
-summary: Join two versions of a movie into one Matroska version from the Media tab.
+updated: 2026-10-11
+summary: Join two versions of a movie into one Matroska version from the management table.
 ---
 
 # Video Part Joining
 
 ## Joining two parts of one movie
 
-An administrator opens **Join parts** in a movie's Media tab, selects two versions
+An administrator opens **Join parts** in an expanded movie in Library Management, selects two versions
 as **Part 1** and **Part 2**, and swaps them if necessary. The dialog shows their
 filenames, durations and expected combined duration. The output is a new **Joined**
 version in a Matroska file beside Part 1. Its filename uses the movie's catalog

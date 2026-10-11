@@ -1,6 +1,6 @@
 ---
 created: 2026-09-08
-updated: 2026-10-10
+updated: 2026-10-11
 summary: Episodes get the same media surface as movies, with versions, tracks, sidecars and conversions.
 ---
 
@@ -23,9 +23,9 @@ gates were what was left of "for now".
 
 The version cards, stream sections, sidecar list, the rename and delete dialogs and
 the Conversions block live in `media-sources.tsx`, owned by an item — its id, kind
-and title — rather than by "the movie". A movie's Media section renders it exactly as
-before; an episode's expanded row renders the same component fed by the episode's
-own detail. The API accepts the same calls for either kind, and this is the one place
+and title. Expanded movie and episode rows in
+[Library Management](../library-management/feature.md) render this component
+with the owning item's detail. The API accepts the same calls for either kind, and this is the one place
 that offers them, so the two cannot drift.
 
 The owner supplies:
@@ -51,11 +51,8 @@ has a version at…".
 Library seasons appear in a multiple-open accordion, collapsed on every page
 entry. Each heading includes the number of episode entries in the library (for
 example, **Season 1 · 8 episodes**). Clicking it or activating it with the keyboard expands its
-episodes; opening one season does not close another. Season deletion remains a
-separate admin control inside the rounded accordion border, before the disclosure
-arrow at the right edge, available while collapsed. Seasons retained for extras
-still appear and show their empty episode message when expanded. Conversions
-remain visible above the accordion, even when all seasons are collapsed.
+episodes; opening one season does not close another. Seasons retained for extras
+still appear. Season deletion and conversion jobs belong to Management.
 Expanded episodes have horizontal separators between rows, without an inner
 border around the list.
 
@@ -70,17 +67,13 @@ border around the list.
   rides on `EpisodeDto.media`, computed in one query for the whole listing —
   filtered through the episode rows rather than an id list, so a long-running show
   never runs into SQLite's parameter limit.
-- Every row **expands**. Expanded, it fetches `GET /api/library/{episodeId}` — on
-  expand, so a 200-episode listing does not carry 200 stream lists — and shows what a
-  movie's Media section shows: versions, tracks, sidecars, and for an admin the controls:
-  pin default, rename, convert, extract, merge, delete version, remove sidecar. A
-  viewer sees the media and none of the controls.
-- A **Conversions** block sits above the seasons for an admin, listing the jobs of
-  every episode of the series. A job card names its output file, which carries the
-  episode code, so nothing is lost by not listing them per row. When the last active
-  job finishes, the episode listing and every open row's detail refresh, as the movie
-  section refreshes its version list.
-- **Refresh media data** in the series `⋮` menu fans out over the series' episodes
+- Browsing rows keep personal controls and an administrator-only Manage link.
+  Management pages the episode list and lazily fetches detail when an episode
+  expands, exposing every version, track and applicable source operation.
+- A **Conversions** block in the expanded management episode lists its related
+  jobs. Completion refreshes both the episode summary and open source detail;
+  Activity remains the shared job list.
+- **Refresh media data** in the series management menu fans out over the series' episodes
   on the server: a series row holds no file of its own, so a refresh asked of it is a
   refresh of its episodes' — one gesture per title, as on a movie. There is no
   per-episode control inside the expanded row.
@@ -173,14 +166,9 @@ were never probed carries none.
   asks for them.
 - Vitest (`format.test.ts`) — the summary line's order and omissions, "No file"; the
   locked stem for a movie, an episode, no label, a drifted label, no extension.
-- `detail.spec.ts` — seasons initially collapsed, independent expansion and keyboard
-  collapse, reset on reload, retained empty seasons and deletion while collapsed; the summary on a row and "No file" on one without a source,
-  expanding fetching the episode's detail once and listing its versions, a viewer
-  seeing the media and none of the controls, an admin opening Convert and Extract
-  from an episode's version with copy that fits either kind, the rename preview
-  carrying the episode's own stem, and an episode's job listed above the seasons.
-  The movie media, convert, extract and sidecar cases pass unmodified against the
-  shared component.
+- `detail.spec.ts` and `management.spec.ts` — browsing season accordions and
+  personal controls, management episode paging and lazy versions, retained
+  seasons, deletion, conversion/extraction dialogs and episode rename stems.
 - `catalog-browsing.spec.ts` — a series card carrying its badges, and none for a
   series with no probed episode.
 - `LibrarySourceDeletionTests` and `last-version-deletion.spec.ts` — last-version

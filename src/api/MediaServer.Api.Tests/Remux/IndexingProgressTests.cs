@@ -105,12 +105,26 @@ public sealed class IndexingProgressTests : IDisposable
         Assert.Equal("waiting", restarted.Read(_source.Key, _source.AbsolutePath, "mkv")!.State);
     }
 
+    [Fact]
+    public void Management_snapshot_uses_only_recent_observations_and_preserves_a_known_failure()
+    {
+        _progress.Start(_source);
+        _progress.Finish(_source.Key, "failed");
+        _progress.Observe(_source.Key, "waiting");
+        Assert.Equal("failed", _progress.Snapshot()[_source.Key]);
+        for (var second = 0; second < 601; second++) _clock.Advance();
+        Assert.Empty(_progress.Snapshot());
+        _progress.Observe(Guid.NewGuid(), "ready");
+        Assert.Single(_progress.Snapshot());
+    }
+
     private IndexingStatus? Read() => _progress.Read(_source.Key, _source.AbsolutePath, "mkv");
     public void Dispose() => Directory.Delete(_root, true);
 
     private sealed class Clock : TimeProvider
     {
         private long _timestamp;
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch.AddTicks(_timestamp);
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
         public override long GetTimestamp() => _timestamp;
         public void Advance() => _timestamp += TimeSpan.TicksPerSecond;

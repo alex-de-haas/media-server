@@ -218,6 +218,7 @@ Plans: 5 In Progress · 2 Draft · 3 On Hold.
 - [Recoverable Library Moves](features/ingest-move-recovery/plan.md) — Parked work to recover interrupted library moves without losing file ownership or overwriting another version. · On Hold, 0/4, updated 2026-09-23
 - [Jellyfin Compatibility](features/jellyfin-compatibility/feature.md) — A Jellyfin-compatible API subset that lets clients such as Infuse browse, Direct Play and sync progress.
 - [Library Item Tombstones](features/library-item-tombstones/feature.md) — Deleted items a user favorited, rated or watched survive as unpublished tombstones that keep that history.
+- [Library Management](features/library-management/feature.md) — Administrator movie and series tables with expandable versions, source diagnostics and filters, separated from personal library browsing.
 - [MCP Tools](features/mcp-tools/feature.md) — Media Server use cases as MCP tools, plus the agent skill that teaches the server's vocabulary.
 - [Media Probe Providers](features/media-probe-providers/feature.md) — File probing through the transcode engine first and the app's own container-header reader as a fallback. · [plan](features/media-probe-providers/plan.md): Draft, 2/7, updated 2026-10-10
 - [Metadata](features/metadata/feature.md) — Provider-agnostic metadata enrichment with TMDb as the first provider.
@@ -235,7 +236,7 @@ Plans: 5 In Progress · 2 Draft · 3 On Hold.
 - [Title Preview](features/title-preview/feature.md) — A dialog that describes titles the instance does not hold, from recommendations, the calendar and search.
 - [Torrents and Organizer](features/torrents-and-organizer/feature.md) — Torrents download through the external torrent-engine app and each file runs through one ingest pipeline into the catalog. · [plan](features/torrents-and-organizer/plan.md): In Progress, 9/11, updated 2026-10-01
 - [Track Extraction](features/track-extraction/feature.md) — Write a version's embedded audio and subtitle tracks out as files beside it, recorded as external streams.
-- [Video Part Joining](features/video-part-joining/feature.md) — Join two versions of a movie into one Matroska version from the Media tab.
+- [Video Part Joining](features/video-part-joining/feature.md) — Join two versions of a movie into one Matroska version from the management table.
 - [Watch-History Calendar](features/watch-history-calendar/feature.md) — The calendar's Watched view, a screening diary over each user's play history.
 - [Watch-History Deletion](features/watch-history-deletion/feature.md) — A user can delete one recorded play from their own watch history.
 - [Watch-History Manual Entries](features/watch-history-manual-entries/feature.md) — Users can log, date or re-date a viewing in their own watch history.

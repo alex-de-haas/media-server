@@ -1,4 +1,5 @@
 "use client";
+import { ManagementJobLink } from "@/components/management-job-link";
 
 import { useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -883,6 +884,7 @@ function ActivityGroup({ icon: Icon, label, children }: { icon: LucideIcon; labe
 function MoveProgressRow({ move }: { move: LibraryMoveJob }) {
   return (
     <ActivityCard>
+      <ManagementJobLink id={move.itemId} />
       <ActivityCardHeader
         title={
           <>

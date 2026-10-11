@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BellRing, CalendarPlus, Check, ChevronDown, Clapperboard, Clock, ExternalLink, FolderInput, Heart, Image as ImageIcon, MoreVertical, RefreshCw, Star, Trash2, User, Wand2 } from "lucide-react";
+import { ArrowLeft, BellRing, CalendarPlus, Check, Clapperboard, Clock, ExternalLink, FolderInput, Heart, Image as ImageIcon, MoreVertical, RefreshCw, Star, Trash2, User, Wand2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import {
   mediaServer,
@@ -18,7 +18,7 @@ import {
   type Studio,
   type UserItemData,
 } from "@/lib/media-server";
-import { Conversions, MediaSources } from "@/components/media-sources";
+import { MediaSources } from "@/components/media-sources";
 import { personHref } from "@/components/poster-card";
 import { PosterPickerDialog } from "@/components/poster-picker-dialog";
 import { RemapDialog } from "@/components/remap-dialog";
@@ -54,9 +54,10 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/app-shell";
+import { managementHref, managementApi } from "@/lib/management";
+import { AvailabilityNotice, useLibraryAvailability } from "@/components/library-availability";
 
-/** Movie or series detail page. Branches on `kind`: a movie's Media section lists its versions; a series lists its
- * episodes, each of which opens onto the same media surface. */
+/** Personal browsing detail with compact media summaries and links to administrator management. */
 export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref: string; backLabel: string }) {
   const router = useRouter();
   const [deleteReason, setDeleteReason] = useState<"item" | "lastVersion" | null>(null);
@@ -92,9 +93,10 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
         <ItemActions item={item} backHref={backHref} deleteReason={deleteReason} onDeleteRequest={setDeleteReason} />
       </div>
       <Hero item={item} />
+      {!item.removedAt && <TitleAvailability id={item.id} />}
       {item.kind === "Movie" && <MovieWatchHistory key={item.id} id={item.id} title={item.title} removed={!!item.removedAt} />}
       <CastCarousel key={`cast-${item.id}`} cast={item.cast} />
-      {!item.removedAt && <DetailMedia item={item} backHref={backHref} onDeleteItem={() => setDeleteReason("lastVersion")} />}
+      {!item.removedAt && <DetailMedia item={item} />}
       {item.kind === "Movie" && <RelatedMovies id={item.id} backHref={backHref} />}
       <section aria-label="Tags" className="flex min-w-0 flex-col gap-3">
         <h2 className="text-lg font-semibold tracking-tight">Tags</h2>
@@ -104,35 +106,68 @@ export function MediaDetail({ id, backHref, backLabel }: { id: string; backHref:
   );
 }
 
-function DetailMedia({ item, backHref, onDeleteItem }: { item: LibraryDetail; backHref: string; onDeleteItem: () => void }) {
+function DetailMedia({ item }: { item: LibraryDetail }) {
   const mediaLabel = item.kind === "Series" ? "Episodes" : "Media";
 
   return (
     <section aria-label={mediaLabel} className="flex min-w-0 flex-col gap-3">
       <h2 className="text-lg font-semibold tracking-tight">{mediaLabel}</h2>
-      <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
-      <MoveProgress itemId={item.id} />
+
       {item.kind === "Series" ? (
-        <SeriesEpisodes seriesId={item.id} seasons={item.seasons} backHref={backHref} />
+        <SeriesEpisodes seriesId={item.id} seasons={item.seasons} />
       ) : (
-        <MovieMedia item={item} onDeleteItem={onDeleteItem} />
+        <p className="text-muted-foreground text-sm">{item.mediaSources.length} {item.mediaSources.length === 1 ? "version" : "versions"} · {Array.from(new Set(item.mediaSources.flatMap(source => source.streams.filter(stream => stream.type === "Video" && !stream.isExternal).map(stream => stream.displayTitle || stream.codec).filter(Boolean)))).join(" · ") || "Media information pending"}</p>
       )}
     </section>
   );
 }
 
-// A movie's Media section: the shared media surface, owned by the movie and locked while it moves.
-function MovieMedia({ item, onDeleteItem }: { item: LibraryDetail; onDeleteItem: () => void }) {
-  const moving = useActiveMove(item.id) !== undefined;
-  return (
-    <MediaSources
-      owner={{ id: item.id, kind: item.kind, title: item.title, runtimeTicks: item.runtimeTicks }}
-      sources={item.mediaSources}
-      defaultSourceId={item.defaultSourceId}
-      moving={moving}
-      onDeleteItem={onDeleteItem}
-    />
-  );
+function TitleAvailability({ id }: { id: string }) {
+  const availability = useLibraryAvailability([id]);
+  return <AvailabilityNotice value={availability.get(id)} />;
+}
+
+/** Shared source editor, mounted only by the guarded management surface. */
+export function ManagedItem({ id, backHref, query = "", seriesId, sourceId, showActions = true }: {
+  id: string; backHref: string; query?: string; seriesId?: string; sourceId?: string; showActions?: boolean;
+}) {
+  const detail = useQuery({ queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id), retry: false });
+  const diagnostics = useQuery({ queryKey: ["management", "sources", id, query], queryFn: () => managementApi.sources(id, query) });
+  const moving = useActiveMove(seriesId ?? id) !== undefined;
+  const focusedSource = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sourceId || !detail.data || focusedSource.current === sourceId) return;
+    const element = document.getElementById(`source-${sourceId}`);
+    if (element) { element.scrollIntoView({ block: "nearest" }); focusedSource.current = sourceId; }
+  }, [sourceId, detail.data]);
+  const [deleteReason, setDeleteReason] = useState<"item" | "lastVersion" | null>(null);
+  if (detail.isPending) return <p role="status">Loading versions…</p>;
+  if (detail.isError) return <div className="flex items-center gap-3"><p>This item is unavailable or has been merged.</p><Button variant="outline" onClick={() => detail.refetch()}>Retry</Button><Link href={backHref}>Back to list</Link></div>;
+  const item = detail.data;
+  return <div className="flex min-w-0 flex-col gap-3">
+    <div className="flex items-center justify-between gap-2">{showActions && <span className="font-medium">{item.title}</span>}<ItemActions management showTrigger={showActions} moveOwnerId={seriesId} item={item} backHref={backHref} deleteReason={deleteReason} onDeleteRequest={setDeleteReason} /></div>
+    {item.removedAt ? <p className="text-muted-foreground text-sm">Removed from the library. Retained personal history remains available in the library.</p> : <>
+      <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
+      <MoveProgress itemId={seriesId ?? id} />
+      {diagnostics.isError && <div role="alert">Diagnostics could not be loaded. <Button variant="link" onClick={() => diagnostics.refetch()}>Retry</Button></div>}
+      <MediaSources owner={{ id, kind: item.kind, title: item.title, runtimeTicks: item.runtimeTicks }} sources={item.mediaSources} defaultSourceId={item.defaultSourceId}
+        moving={moving} diagnostics={diagnostics.data} highlightMatches={hasDiagnosticFilter(query)} onDeleteItem={() => setDeleteReason("lastVersion")} />
+    </>}
+  </div>;
+}
+
+function hasDiagnosticFilter(query: string) {
+  const params = new URLSearchParams(query);
+  return ["sourceKind", "resolution", "codec", "hdr", "dvProfile", "state"].some(key => params.has(key)) || !["all", "active", null].includes(params.get("view"));
+}
+
+export function ManagementTitleActions({ id, backHref, seriesId }: { id: string; backHref: string; seriesId?: string }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState<"item" | "lastVersion" | null>(null);
+  const detail = useQuery({ queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id), enabled: open });
+  if (detail.isError) return <Button variant="ghost" size="sm" onClick={() => detail.refetch()}>Retry actions</Button>;
+  return open && detail.data ? <ItemActions management moveOwnerId={seriesId} defaultOpen item={detail.data} backHref={backHref} deleteReason={reason} onDeleteRequest={setReason} />
+    : <Button variant="ghost" size="sm" disabled={detail.isFetching} onClick={() => setOpen(true)}>{detail.isError ? "Retry actions" : "Actions"}</Button>;
 }
 
 // The in-flight cross-catalog move for this item, if any. Shares the ["library-move-jobs"] cache with the
@@ -234,7 +269,11 @@ function MediaDetailSkeleton() {
 }
 
 /** Personal actions, provider links, and role-gated library administration. */
-function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
+export function ItemActions({ item, backHref, deleteReason, onDeleteRequest, management = false, moveOwnerId, defaultOpen = false, showTrigger = true }: {
+  showTrigger?: boolean;
+  moveOwnerId?: string;
+  defaultOpen?: boolean;
+  management?: boolean;
   item: LibraryDetail;
   backHref: string;
   deleteReason: "item" | "lastVersion" | null;
@@ -244,7 +283,7 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
   const removed = !!item.removedAt;
   const [trackingOpen, setTrackingOpen] = useState(false);
   const tracked = useTrackedTitle(item.tmdbId, kind);
-  const canTrack = !!item.tmdbId && (kind === "Movie" || kind === "Series");
+  const canTrack = !management && !!item.tmdbId && (kind === "Movie" || kind === "Series");
   const hasReminder = tracked?.reminders.some((reminder) => reminder.active) ?? false;
   const tmdbUrl = canTrack ? `https://www.themoviedb.org/${kind === "Movie" ? "movie" : "tv"}/${item.tmdbId}` : null;
   const { role } = useSession();
@@ -258,15 +297,15 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
   const [posterOpen, setPosterOpen] = useState(false);
   // While a move is relocating this item's files, everything that mutates the item or reads its files is
   // locked (the API rejects it with a 409 anyway) — only the provider-side metadata refresh stays usable.
-  const moving = useActiveMove(id) !== undefined;
+  const moving = useActiveMove(moveOwnerId ?? id) !== undefined;
 
   const remove = useMutation({
-    mutationFn: (options: DeleteItemOptions) => mediaServer.deleteLibraryItem(id, options.deleteFiles, options.deleteUserData),
-    onSuccess: () => {
-      for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
+    mutationFn: async (options: DeleteItemOptions): Promise<ChildDeleteResult | void> => kind === "Episode" ? mediaServer.deleteEpisode(id, options.deleteFiles, options.deleteUserData) : mediaServer.deleteLibraryItem(id, options.deleteFiles, options.deleteUserData),
+    onSuccess: (result) => {
+      for (const key of [["management"], ["library-availability"], ["library-detail"], ["episodes"], ["library"], ["recent"], ["resume"], ["nextup"]]) {
         queryClient.invalidateQueries({ queryKey: key });
       }
-      router.push(backHref);
+      router.push(result?.seriesRemoved ? "/manage/series" : backHref);
       toast.success("Item deleted");
     },
     onError: (error) => toast.error("Couldn’t delete item", { description: errorMessage(error) }),
@@ -286,6 +325,7 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
     mutationFn: () => mediaServer.refreshMetadata(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
+      queryClient.invalidateQueries({ queryKey: ["management"] });
       toast.success("Metadata refreshed");
     },
     onError: (error) => toast.error("Couldn’t refresh metadata", { description: errorMessage(error) }),
@@ -299,6 +339,8 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["library-detail"] });
       queryClient.invalidateQueries({ queryKey: ["episodes", id] });
+      queryClient.invalidateQueries({ queryKey: ["management"] });
+      queryClient.invalidateQueries({ queryKey: ["library-availability"] });
       toast.success("Media data refreshed");
     },
     onError: (error) => toast.error("Couldn’t refresh media data", { description: errorMessage(error) }),
@@ -320,14 +362,14 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
     onError: (error) => toast.error("Couldn’t log this watch", { description: errorMessage(error) }),
   });
 
-  const canLogWatch = kind === "Movie";
+  const canLogWatch = !management && kind === "Movie";
   if (role !== "admin" && !canLogWatch && !canTrack && !item.imdbId && !item.trailerUrl) {
     return null;
   }
 
   return (
     <>
-      <DropdownMenu>
+      {showTrigger && <DropdownMenu defaultOpen={defaultOpen}>
         <DropdownMenuTrigger
           render={
             <Button variant="ghost" size="icon-sm" aria-label="More actions">
@@ -336,6 +378,7 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
           }
         />
         <DropdownMenuContent>
+          {role === "admin" && !management && <DropdownMenuItem render={<Link href={managementHref(kind, id)} />}>Manage</DropdownMenuItem>}
           {canLogWatch && (
             <DropdownMenuItem onClick={() => setLogWatchOpen(true)}>
               <CalendarPlus />
@@ -348,12 +391,12 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
               {tracked ? "Tracked" : "Track / remind me"}
             </DropdownMenuItem>
           )}
-          {item.trailerUrl && (
+          {!management && item.trailerUrl && (
             <DropdownMenuItem onClick={() => openExternal(item.trailerUrl!)}>
               <Clapperboard /> Trailer
             </DropdownMenuItem>
           )}
-          {item.imdbId && (
+          {!management && item.imdbId && (
             <DropdownMenuItem onClick={() => openExternal(`https://www.imdb.com/title/${item.imdbId}/`)}>
               <ExternalLink /> View on IMDb
             </DropdownMenuItem>
@@ -363,14 +406,15 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
               <ExternalLink /> View on TMDb
             </DropdownMenuItem>
           )}
-          {(canLogWatch || canTrack || item.imdbId || item.trailerUrl) && role === "admin" && <DropdownMenuSeparator />}
-          {role === "admin" && removed && (
+          {(canLogWatch || canTrack || item.imdbId || item.trailerUrl) && role === "admin" && management && <DropdownMenuSeparator />}
+          {role === "admin" && management && removed && (
             <DropdownMenuItem variant="destructive" onClick={() => setConfirmOpen(true)}>
               <Trash2 /> Delete permanently…
             </DropdownMenuItem>
           )}
-          {role === "admin" && !removed && (
+          {role === "admin" && management && !removed && (
             <>
+              {kind !== "Episode" && <>
               <DropdownMenuItem disabled={refresh.isPending} onClick={() => refresh.mutate()}>
                 <RefreshCw className={cn(refresh.isPending && "animate-spin")} aria-hidden />
                 Refresh metadata
@@ -385,6 +429,7 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
                 <ImageIcon />
                 Choose poster…
               </DropdownMenuItem>
+              </>}
               {/* Series are corrected per episode (in the episode list), not at the series level. */}
               {kind !== "Series" && (
                 <DropdownMenuItem disabled={moving} onClick={() => setRemapOpen(true)}>
@@ -392,10 +437,10 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
                   Fix match…
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem disabled={moving} onClick={() => setMoveOpen(true)}>
+              {kind !== "Episode" && <DropdownMenuItem disabled={moving} onClick={() => setMoveOpen(true)}>
                 <FolderInput />
                 {moving ? "Moving to catalog…" : "Move to catalog…"}
-              </DropdownMenuItem>
+              </DropdownMenuItem>}
               <DropdownMenuItem variant="destructive" disabled={moving} onClick={() => setConfirmOpen(true)}>
                 <Trash2 />
                 Delete…
@@ -403,7 +448,7 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
             </>
           )}
         </DropdownMenuContent>
-      </DropdownMenu>
+      </DropdownMenu>}
 
       {item.tmdbId && (kind === "Movie" || kind === "Series") && (
         <ReminderDialog
@@ -432,7 +477,7 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
 
       {/* Gated with the menu items that open them: a viewer who cannot reach the action has no use for
           its dialog in the tree. */}
-      {role === "admin" && removed && (
+      {role === "admin" && management && removed && (
         <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -446,14 +491,14 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
           </AlertDialogContent>
         </AlertDialog>
       )}
-      {role === "admin" && !removed && catalogId && (
+      {role === "admin" && management && !removed && catalogId && (
         <>
           <DeleteItemDialog
             open={confirmOpen}
             onOpenChange={setConfirmOpen}
-            heading={deleteReason === "lastVersion" ? "Delete movie?" : undefined}
+            heading={kind === "Episode" ? "Delete episode?" : deleteReason === "lastVersion" ? "Delete movie?" : undefined}
             title={title}
-            detail={deleteReason === "lastVersion" ? "This is the last version. It cannot be removed separately; delete the movie instead." : undefined}
+            detail={deleteReason === "lastVersion" ? `This is the last version. It cannot be removed separately; delete the ${kind === "Episode" ? "episode" : "movie"} instead.` : undefined}
             onConfirm={(options) => {
               remove.mutate(options);
               setConfirmOpen(false);
@@ -464,18 +509,28 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
 
           <RemapDialog
             itemId={id}
-            mode="movie"
+            mode={kind === "Episode" ? "episode" : "movie"}
+            defaultSeason={item.parentIndexNumber ?? 1}
+            defaultEpisode={item.indexNumber ?? 1}
             currentTitle={title}
             open={remapOpen}
             onOpenChange={setRemapOpen}
-            onRemapped={(targetId) => {
+            onRemapped={async (targetId) => {
               setRemapOpen(false);
-              for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
+              for (const key of [["management"], ["library-availability"], ["library-detail"], ["episodes"], ["library"], ["recent"], ["resume"], ["nextup"]]) {
                 queryClient.invalidateQueries({ queryKey: key });
               }
-              // The corrected movie is a different item — navigate to its detail page.
-              if (targetId !== id) {
-                router.replace(`${backHref}/${targetId}`);
+              // An episode can keep its ID while changing series; resolve its current owner after remapping.
+              if (kind === "Episode") {
+                try {
+                  const target = await managementApi.location(targetId);
+                  router.replace(managementHref(target.kind, target.id, target.seriesId ?? undefined));
+                } catch (error) {
+                  toast.error("Couldn’t open the corrected episode", { description: errorMessage(error) });
+                  router.replace("/manage/series");
+                }
+              } else if (targetId !== id) {
+                router.replace(`${managementHref(kind, targetId)}?return=${encodeURIComponent(backHref)}`);
               } else {
                 queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
               }
@@ -490,10 +545,10 @@ function ItemActions({ item, backHref, deleteReason, onDeleteRequest }: {
             open={moveOpen}
             onOpenChange={setMoveOpen}
             onMoveStarted={() => {
-              // The move runs in the background — stay here and watch it on the Media section (like a conversion).
+              // The move runs in the background; progress stays in the expanded management detail.
               // The library views refresh now and again from the job's completion event; if a merge removes
               // this item, its detail refetch after completion surfaces "not found" with the back link.
-              for (const key of [["library"], ["recent"], ["resume"], ["nextup"]]) {
+              for (const key of [["management"], ["library-availability"], ["library-detail"], ["episodes"], ["library"], ["recent"], ["resume"], ["nextup"]]) {
                 queryClient.invalidateQueries({ queryKey: key });
               }
             }}
@@ -900,17 +955,13 @@ function groupIntoSeasons(seasons: SeasonSummary[], episodes: Episode[]): Season
 function SeriesEpisodes({
   seriesId,
   seasons,
-  backHref,
 }: {
   seriesId: string;
   seasons: SeasonSummary[] | null;
-  backHref: string;
 }) {
-  const { role } = useSession();
   const episodes = useQuery({ queryKey: ["episodes", seriesId], queryFn: () => mediaServer.listEpisodes(seriesId) });
   // A move relocates the whole show, so every episode's controls lock together.
-  const moving = useActiveMove(seriesId) !== undefined;
-  const invalidate = useEpisodeInvalidation(seriesId);
+  const availability = useLibraryAvailability((episodes.data ?? []).map(episode => episode.id));
 
   if (episodes.isPending) {
     return <p className="text-muted-foreground text-sm">Loading episodes…</p>;
@@ -921,13 +972,10 @@ function SeriesEpisodes({
     return <EmptyDetailPanel>No episodes available.</EmptyDetailPanel>;
   }
 
-  const episodeIds = (episodes.data ?? []).map((episode) => episode.id);
+
 
   return (
     <section className="flex flex-col gap-4">
-      {/* Every episode's jobs in one place, where a movie's Media section keeps its own: a job card names its
-          output file, which carries the episode code, so nothing is lost by not listing them per row. */}
-      {role === "admin" && episodeIds.length > 0 && <Conversions itemIds={episodeIds} onSettled={invalidate} />}
       <Accordion key={seriesId} multiple defaultValue={[]} className="rounded-lg border">
         {groups.map((group) => (
           <AccordionItem key={group.key} value={group.key}>
@@ -940,21 +988,12 @@ function SeriesEpisodes({
                   </span>
                 </span>
               </AccordionTrigger>
-              <div className="absolute top-1/2 right-10 -translate-y-1/2">
-                <SeasonDeleteControl
-                  season={group.seasonNumber}
-                  seasonId={group.seasonId}
-                  episodeCount={group.episodes.length}
-                  seriesId={seriesId}
-                  backHref={backHref}
-                />
-              </div>
             </div>
             <AccordionContent className="px-3 pb-3">
               {group.episodes.length ? (
                 <ul className="flex flex-col divide-y">
                   {group.episodes.map((episode) => (
-                    <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} moving={moving} backHref={backHref} />
+                    <EpisodeRow key={episode.id} episode={episode} seriesId={seriesId} availability={availability.get(episode.id)} />
                   ))}
                 </ul>
               ) : (
@@ -974,7 +1013,7 @@ function SeriesEpisodes({
 function useEpisodeInvalidation(seriesId: string) {
   const queryClient = useQueryClient();
   return () => {
-    for (const key of [["episodes", seriesId], ["library-detail"], ["library"], ["nextup"], ["resume"], ["recent"]]) {
+    for (const key of [["management"], ["library-availability"], ["episodes", seriesId], ["library-detail"], ["library"], ["nextup"], ["resume"], ["recent"]]) {
       queryClient.invalidateQueries({ queryKey: key });
     }
   };
@@ -983,8 +1022,8 @@ function useEpisodeInvalidation(seriesId: string) {
 // Deleting the last episode prunes its season, and a series left with nothing under it goes too — in which
 // case this page no longer exists and we head back to the library.
 function useAfterChildDelete(seriesId: string, backHref: string) {
-  const router = useRouter();
   const invalidate = useEpisodeInvalidation(seriesId);
+  const router = useRouter();
   return (result: ChildDeleteResult, removed: string) => {
     invalidate();
     if (result.seriesRemoved) {
@@ -996,7 +1035,7 @@ function useAfterChildDelete(seriesId: string, backHref: string) {
   };
 }
 
-function SeasonDeleteControl({
+export function SeasonDeleteControl({
   season,
   seasonId,
   episodeCount,
@@ -1011,6 +1050,7 @@ function SeasonDeleteControl({
   backHref: string;
 }) {
   const { role } = useSession();
+  const moving = useActiveMove(seriesId) !== undefined;
   const [open, setOpen] = useState(false);
   const afterDelete = useAfterChildDelete(seriesId, backHref);
 
@@ -1033,7 +1073,7 @@ function SeasonDeleteControl({
         variant="ghost"
         size="icon-sm"
         aria-label={`Delete season ${season}`}
-        disabled={remove.isPending}
+        disabled={remove.isPending || moving}
         onClick={() => setOpen(true)}
       >
         <Trash2 />
@@ -1061,21 +1101,13 @@ function EmptyDetailPanel({ children }: { children: string }) {
 function EpisodeRow({
   episode,
   seriesId,
-  moving,
-  backHref,
+  availability,
 }: {
   episode: Episode;
   seriesId: string;
-  moving: boolean;
-  backHref: string;
+  availability?: import("@/lib/management").LibraryAvailability;
 }) {
   const { role } = useSession();
-  const [remapOpen, setRemapOpen] = useState(false);
-  const [deleteReason, setDeleteReason] = useState<"item" | "lastVersion" | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const invalidate = useEpisodeInvalidation(seriesId);
-  const afterDelete = useAfterChildDelete(seriesId, backHref);
-
   const isPlayed = episode.userData?.played ?? false;
   const resume = !isPlayed && episode.userData?.playedPercentage ? Math.min(episode.userData.playedPercentage, 100) : null;
   const runtime = formatRuntime(episode.runtimeTicks);
@@ -1084,15 +1116,6 @@ function EpisodeRow({
   // A double-episode file reads "S01E01-E02", so the season no longer looks like it skipped an episode.
   // The title stays the first episode's — TMDb has no combined title for the range and one is not invented.
   const label = episodeLabel(episode.seasonNumber, episode.episodeNumber, episode.episodeNumberEnd);
-
-  const remove = useMutation({
-    mutationFn: (options: DeleteItemOptions) => mediaServer.deleteEpisode(episode.id, options.deleteFiles, options.deleteUserData),
-    onSuccess: (result) => {
-      setDeleteReason(null);
-      afterDelete(result, label);
-    },
-    onError: (error) => toast.error(errorMessage(error)),
-  });
 
   return (
     <li className="flex flex-col">
@@ -1132,11 +1155,12 @@ function EpisodeRow({
             {/* The synopsis is clamped so a season scans as a list; opening the row — which is where the
                 rest of the episode lives — lets it run to its end. */}
             {episode.overview && (
-              <p className={cn("text-muted-foreground mt-1 text-xs", !expanded && "line-clamp-3")}>{episode.overview}</p>
+              <p className={cn("text-muted-foreground mt-1 text-xs", "line-clamp-3")}>{episode.overview}</p>
             )}
             {/* What is on disk, at a glance: the default version's picture and size, and how many versions
                 there are. The full surface — every version, track and control — is one click down. */}
             <p className="text-muted-foreground mt-1 truncate font-mono text-xs">{episodeMediaLine(episode.media)}</p>
+            <AvailabilityNotice value={availability} />
             {resume != null && (
               <span className="bg-secondary mt-1 block h-1 max-w-32 overflow-hidden rounded-full">
                 <span className="bg-brand block h-full" style={{ width: `${resume}%` }} />
@@ -1146,90 +1170,9 @@ function EpisodeRow({
         </div>
         <div className="ml-auto flex max-w-full flex-wrap items-center gap-3">
           <WatchControls id={episode.id} title={`${label} ${episode.title}`} userData={episode.userData} />
-          {role === "admin" && (
-            <Button variant="ghost" size="icon-sm" aria-label="Fix match" onClick={() => setRemapOpen(true)}>
-              <Wand2 />
-            </Button>
-          )}
-          {role === "admin" && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Delete ${label}`}
-              disabled={remove.isPending}
-              onClick={() => setDeleteReason("item")}
-            >
-              <Trash2 />
-            </Button>
-          )}
-          {role === "admin" && (
-            <DeleteItemDialog
-              open={deleteReason !== null}
-              onOpenChange={(open) => setDeleteReason(open ? "item" : null)}
-              heading="Delete episode?"
-              title={`${label} · ${episode.title}`}
-              detail={deleteReason === "lastVersion" ? "This is the last version. It cannot be removed separately; delete the episode instead." : undefined}
-              onConfirm={(options) => remove.mutate(options)}
-            />
-          )}
-          {role === "admin" && (
-            <RemapDialog
-              itemId={episode.id}
-              mode="episode"
-              currentTitle={`${label} · ${episode.title}`}
-              defaultSeason={episode.seasonNumber ?? 1}
-              defaultEpisode={episode.episodeNumber ?? 1}
-              open={remapOpen}
-              onOpenChange={setRemapOpen}
-              onRemapped={() => {
-                setRemapOpen(false);
-                invalidate();
-              }}
-            />
-          )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={expanded ? `Hide media of ${label}` : `Show media of ${label}`}
-            aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            <ChevronDown className={cn("transition-transform", !expanded && "-rotate-90")} />
-          </Button>
+          {role === "admin" && <Link className="text-primary text-xs underline" href={managementHref("Episode", episode.id, seriesId)}>Manage</Link>}
         </div>
       </div>
-      {expanded && (
-        <div className="border-t p-3">
-          <EpisodeMedia episode={episode} seriesId={seriesId} moving={moving} onDeleteItem={() => setDeleteReason("lastVersion")} />
-        </div>
-      )}
     </li>
-  );
-}
-
-// The expanded row: the episode's versions on the same surface a movie's Media section uses. Fetched on
-// expand, so a long season never carries every episode's stream list in one listing.
-function EpisodeMedia({ episode, seriesId, moving, onDeleteItem }: { episode: Episode; seriesId: string; moving: boolean; onDeleteItem: () => void }) {
-  const invalidate = useEpisodeInvalidation(seriesId);
-  const detail = useQuery({ queryKey: ["library-detail", episode.id], queryFn: () => mediaServer.getLibraryDetail(episode.id) });
-
-  if (detail.isPending) {
-    return <p className="text-muted-foreground text-sm">Loading media…</p>;
-  }
-
-  if (detail.isError || !detail.data) {
-    return <p className="text-muted-foreground text-sm">This episode’s media could not be loaded.</p>;
-  }
-
-  return (
-    <MediaSources
-      owner={{ id: episode.id, kind: "Episode", title: episode.title }}
-      sources={detail.data.mediaSources}
-      defaultSourceId={detail.data.defaultSourceId}
-      moving={moving}
-      showConversions={false}
-      onChanged={invalidate}
-      onDeleteItem={onDeleteItem}
-    />
   );
 }

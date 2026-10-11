@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { managementHref } from "@/lib/management";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Heart, Star, Trash2 } from "lucide-react";
@@ -39,7 +41,9 @@ import {
 export function RemovedTitleDialog({
   title,
   onOpenChange,
+  management = false,
 }: {
+  management?: boolean;
   title: RemovedTitle | null;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -133,7 +137,8 @@ export function RemovedTitleDialog({
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {title.isFavorite && (
+                {role === "admin" && !management && <Link className="text-primary text-sm underline" href={`${managementHref(title.kind, title.id)}?removed=1`}>Manage</Link>}
+                {!management && title.isFavorite && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -143,7 +148,7 @@ export function RemovedTitleDialog({
                     Unfavorite
                   </Button>
                 )}
-                {title.userRating != null && (
+                {!management && title.userRating != null && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -153,7 +158,7 @@ export function RemovedTitleDialog({
                     Clear rating
                   </Button>
                 )}
-                {role === "admin" && (
+                {role === "admin" && management && (
                   <Button
                     variant="ghost"
                     size="sm"

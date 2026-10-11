@@ -15,12 +15,9 @@ async function openMedia(page: Page, kind: Kind, sources = [source("original")],
     detail: { item: detail, series: seriesDetail("series", "Severance") },
     episodes: { series: [anEpisode("item", 1, 1, "Pilot")] },
   });
-  await page.goto(kind === "movie" ? "/movies/item" : "/series/series");
-  if (kind === "episode") {
-    await page.getByRole("button", { name: /^Season 1 ·/ }).click();
-    await page.getByRole("button", { name: "Show media of S01E01" }).click();
-  }
-  await expect(page.getByText("original.mkv", { exact: true })).toBeVisible();
+  await page.goto(kind === "movie" ? "/manage/movies/item" : "/manage/series/series?episode=item");
+  if (role === "admin") await expect(page.getByText("original.mkv", { exact: true })).toBeVisible();
+  else await expect(page.getByText("Administrator access required")).toBeVisible();
   return detail;
 }
 

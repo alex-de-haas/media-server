@@ -12,7 +12,7 @@ for (const kind of ["movie", "episode"] as const) {
     };
     const detail = { ...(kind === "movie" ? movieDetail(id, "Arrival") : episodeDetail(id, "Pilot")), mediaSources: [source] };
     await setupApp(page, {
-      role: "user",
+      role: "admin",
       library: kind === "movie" ? [aMovie(id, "Arrival")] : [aSeries("s1", "Series")],
       detail: { [id]: detail, s1: seriesDetail("s1", "Series") },
       episodes: { s1: [anEpisode(id, 1, 1, "Pilot")] },
@@ -33,11 +33,7 @@ for (const kind of ["movie", "episode"] as const) {
     });
     let reads = 0;
     page.on("request", request => { if (request.url().endsWith(`/api/library/${id}`)) reads++; });
-    await page.goto(kind === "movie" ? `/movies/${id}` : "/series/s1");
-    if (kind === "episode") {
-      await page.getByRole("button", { name: /^Season 1 ·/ }).click();
-      await page.getByRole("button", { name: "Show media" }).click();
-    }
+    await page.goto(kind === "movie" ? `/manage/movies/${id}` : `/manage/series/s1?episode=${id}`);
     await expect(page.getByText("Waiting for indexing", { exact: true })).toBeVisible();
     const initialReads = reads;
     const emit = async (state: string, revision: number, percent: number | null = null) => {

@@ -1,3 +1,5 @@
+import type { ManagementItem, ManagementPage, SourceDiagnostic, LibraryAvailability } from "../src/lib/management";
+import type { LibraryDetail, Episode } from "../src/lib/media-server";
 import type { Page } from "@playwright/test";
 
 // Mocks the same-origin BFF (`/api/auth/session`, `/api/proxy/api/**`) so the UI can be driven without
@@ -38,6 +40,9 @@ function serve<T>(value: Served<T> | undefined, fallback: T): T {
 }
 
 export interface AppMock {
+  management?: (query: URLSearchParams) => ManagementPage;
+  diagnostics?: Record<string, SourceDiagnostic[]>;
+  availability?: LibraryAvailability[];
   role?: "admin" | "user" | null; // null → unauthenticated (401, or sessionStatus)
   sessionStatus?: 401 | 403; // failure status when role is null (default 401)
   recoveryOrigin?: string; // browser-reachable Core origin in the probe body (default null)
@@ -111,6 +116,29 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     const path = requestUrl.pathname.replace("/api/proxy/api", "");
     const method = route.request().method();
 
+    if (path === "/library/availability") return route.fulfill({ json: mock.availability ?? [] });
+    if (path === "/management/items") {
+      if (mock.management) return route.fulfill({ json: mock.management(requestUrl.searchParams) });
+      const q = requestUrl.searchParams;
+      const kind = q.get("kind") ?? "Movie";
+      const episodes = (mock.episodes?.[q.get("seriesId") ?? ""] ?? []) as Episode[];
+      const details = Object.values(mock.detail ?? {}) as LibraryDetail[];
+      const rows = details.filter(item => item.kind === kind && !item.removedAt && (!q.get("itemId") || item.id === q.get("itemId")))
+        .map(item => managementRow(item.id, item.title, { kind: item.kind, year: item.year, versionCount: item.mediaSources?.length ?? 0,
+          indexNumber: item.indexNumber, indexNumberEnd: item.indexNumberEnd, parentIndexNumber: item.parentIndexNumber }));
+      if (kind === "Episode") for (const episode of episodes) {
+        if ((!q.get("itemId") || episode.id === q.get("itemId")) && !rows.some(row => row.id === episode.id))
+          rows.push(managementRow(episode.id, episode.title, { kind, indexNumber: episode.episodeNumber, indexNumberEnd: episode.episodeNumberEnd, parentIndexNumber: episode.seasonNumber }));
+      }
+      return route.fulfill({ json: managementPage(rows.filter(row => !q.get("season") || row.parentIndexNumber === Number(q.get("season")))) });
+    }
+    const sourceOwner = path.match(/^\/management\/items\/([^/]+)\/sources$/)?.[1];
+    if (sourceOwner) return route.fulfill({ json: mock.diagnostics?.[sourceOwner] ?? [] });
+    const locationOwner = path.match(/^\/management\/items\/([^/]+)\/location$/)?.[1];
+    if (locationOwner) {
+      const detail = mock.detail?.[locationOwner] as LibraryDetail | undefined;
+      return detail ? route.fulfill({ json: { id: detail.id, kind: detail.kind, seriesId: Object.entries(mock.episodes ?? {}).find(([, items]) => (items as Episode[]).some(item => item.id === detail.id))?.[0] ?? null } }) : route.fulfill({ status: 404 });
+    }
     if (path === "/library") {
       if (mock.library && !Array.isArray(mock.library)) {
         return route.fulfill({ status: mock.library.status, json: { error: "boom" } });
@@ -274,6 +302,8 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
 
     const detailId = path.match(/^\/library\/([^/]+)$/)?.[1];
     if (detailId && mock.detail?.[detailId]) return route.fulfill({ json: mock.detail[detailId] });
+    const episode = detailId && (Object.values(mock.episodes ?? {}).flat() as Episode[]).find(item => item.id === detailId);
+    if (episode) return route.fulfill({ json: { ...episodeDetail(episode.id, episode.title), indexNumber: episode.episodeNumber, parentIndexNumber: episode.seasonNumber } });
 
     const episodesSeriesId = path.match(/^\/library\/([^/]+)\/episodes$/)?.[1];
     if (episodesSeriesId) return route.fulfill({ json: mock.episodes?.[episodesSeriesId] ?? [] });
@@ -551,3 +581,12 @@ export const aTranscodeJob = (id: string, mediaItemId: string, name: string, sta
   etaSeconds: null,
   outputSizeBytes: null,
 });
+
+export function managementRow(id: string, title: string, overrides: Partial<ManagementItem> = {}): ManagementItem {
+  return { id, title, kind: "Movie", year: 2026, catalogId: "c1", catalogName: "Movies", versionCount: 1, sizeBytes: 1024,
+    availability: "available", issueCount: 0, affectedEpisodes: 0, episodeCount: 0, seasonCount: 0, activeOperations: 0,
+    indexNumber: null, indexNumberEnd: null, parentIndexNumber: null, ...overrides };
+}
+export function managementPage(items: ManagementItem[], overrides: Partial<ManagementPage> = {}): ManagementPage {
+  return { items, total: items.length, limit: 25, offset: 0, counts: { all: items.length, attention: 0, unavailable: 0, bluray: 0, "dolby-vision": 0, active: 0 }, reference: "Apple/tvOS · HDR10 and Dolby Vision · stored media facts", ...overrides };
+}

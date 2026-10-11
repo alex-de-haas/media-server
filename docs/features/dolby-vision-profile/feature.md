@@ -1,6 +1,6 @@
 ---
 created: 2026-09-04
-updated: 2026-09-08
+updated: 2026-10-11
 summary: Distinguishes playable Dolby Vision from Dolby Vision shown as HDR10 and converts the latter losslessly.
 ---
 
@@ -38,7 +38,7 @@ that pass reaches past provenance. See
 ## What a viewer sees
 
 Every stream DTO carries `dolbyVision: { profile, level, blCompatibilityId, enhancementLayer }`
-or null. The web version card — a movie's on its Media tab, an episode's in its expanded row,
+or null. The web version card — in an expanded movie or episode in Library Management,
 and the episode's summary line beside it — shows the dynamic range as badges — `HDR10`,
 `HDR10+`, `HLG`, `Dolby Vision 8.1`, `Dolby Vision 7` — one per format the probe named, so a
 `Dolby Vision · HDR10` value yields two; profile 8 is named by its base layer, the others by profile alone,

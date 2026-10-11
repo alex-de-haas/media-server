@@ -74,7 +74,7 @@ function useRealtime() {
       onStatus: (connected) => {
         queryClient.setQueryData(["indexing-connected"], connected);
         if (connected) {
-          queryClient.invalidateQueries({ queryKey: ["library-detail"] });
+          invalidate(queryClient, ["management"], ["library-availability"], ["library-detail"]);
           invalidate(queryClient, ["downloads"], ["ingest"], ["vpn"], ["dht"], ["catalog-refresh-jobs"], ["library-move-jobs"]);
         }
       },
@@ -86,6 +86,8 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
   switch (event) {
     case "indexingChanged":
       applyIndexingEvent(queryClient, data);
+      if (["ready", "failed", "waiting"].includes((data as { indexing?: { state?: string } }).indexing?.state ?? ""))
+        invalidate(queryClient, ["management"], ["library-availability"]);
       break;
     case "downloadProgress":
       patchDownload(queryClient, data as DownloadProgressEvent);
@@ -97,7 +99,7 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
       invalidate(queryClient, ["ingest"]);
       // A published item changes the library, its collections, and the Home rails.
       if ((data as IngestStageEvent).status === "Done") {
-        invalidate(queryClient, ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"]);
+        invalidate(queryClient, ["management"], ["library-availability"], ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"]);
       }
       break;
     case "vpnStatusChanged":
@@ -124,6 +126,7 @@ function handleEvent(queryClient: QueryClient, event: string, data: unknown): vo
 // Catalog refresh jobs drive their own UI (a progress bar on the catalog row); a move relocates an item
 // between catalogs; every other job type just nudges the activity view to refetch.
 function handleJobEvent(queryClient: QueryClient, event: string, job: JobEvent): void {
+  if (event !== "jobProgress") invalidate(queryClient, ["management"], ["library-availability"]);
   if (job.type === CATALOG_REFRESH_JOB && job.relatedId) {
     patchCatalogRefresh(queryClient, event, job);
     return;
@@ -175,7 +178,7 @@ function patchLibraryMove(queryClient: QueryClient, event: string, job: JobEvent
   }
 
   if (done) {
-    invalidate(queryClient, ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"], ["ingest"]);
+    invalidate(queryClient, ["management"], ["library-availability"], ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"], ["ingest"]);
     // relatedId is the resulting top-level item; on a merge it differs from the item the move started on,
     // whose (now deleted) detail page must also learn its fate — refresh both.
     if (job.relatedId) {
@@ -199,7 +202,7 @@ function patchCatalogRefresh(queryClient: QueryClient, event: string, job: JobEv
   });
 
   if (event === "jobCompleted") {
-    invalidate(queryClient, ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"]);
+    invalidate(queryClient, ["management"], ["library-availability"], ["library"], ["collections"], ["groups"], ["recent"], ["resume"], ["nextup"]);
   }
 }
 

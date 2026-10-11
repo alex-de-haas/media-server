@@ -293,6 +293,7 @@ builder.Services.AddHostedService<DatabaseSnapshotWorker>();
 // Internal UI-facing read layer for the `/api` (camelCase) surface — projects the domain into UI DTOs.
 // Surface-neutral: it shares the domain + UserDataService with Jellyfin but never the Jellyfin DTOs.
 builder.Services.AddScoped<LibraryReadService>();
+builder.Services.AddScoped<ManagementService>();
 builder.Services.AddScoped<MovieWatchHistoryService>();
 builder.Services.AddScoped<RelatedMoviesService>();
 builder.Services.AddScoped<PersonReadService>();
@@ -581,6 +582,7 @@ app.MapTemporaryDownloadEndpoints();
 app.MapTranscodeEndpoints();
 app.MapIngestEndpoints();
 app.MapLibraryEndpoints();
+app.MapManagementEndpoints();
 app.MapMcpEndpoints();
 app.MapPersonEndpoints();
 app.MapCollectionEndpoints();

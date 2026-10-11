@@ -1,5 +1,7 @@
 "use client";
 
+import { availabilityLabels, diagnosticReason, type SourceDiagnostic } from "@/lib/management";
+import Link from "next/link";
 import { IndexingIndicator } from "@/components/indexing-status";
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -63,9 +65,13 @@ export function MediaSources({
   defaultSourceId,
   moving,
   showConversions = true,
+  diagnostics,
+  highlightMatches = false,
   onChanged,
   onDeleteItem,
 }: {
+  diagnostics?: SourceDiagnostic[];
+  highlightMatches?: boolean;
   owner: MediaOwner;
   sources: LibraryMediaSource[];
   defaultSourceId: string | null;
@@ -82,6 +88,8 @@ export function MediaSources({
   const canManage = admin && !moving;
   const changed = () => {
     queryClient.invalidateQueries({ queryKey: ["library-detail", owner.id] });
+    queryClient.invalidateQueries({ queryKey: ["management"] });
+    queryClient.invalidateQueries({ queryKey: ["library-availability"] });
     onChanged?.();
   };
 
@@ -94,9 +102,18 @@ export function MediaSources({
       {admin && showConversions && <Conversions itemIds={[owner.id]} onSettled={changed} />}
       {canManage && owner.kind === "Movie" && sources.filter(s => !isBluraySource(s)).length > 1 && <JoinPartsControl sources={sources.filter(s => !isBluraySource(s))} itemId={owner.id} />}
       {sources.length ? (
-        sources.map((source) => (
+        sources.map((source) => {
+          const diagnostic = diagnostics?.find(value => value.id === source.id);
+          return <div key={source.id} id={`source-${source.id}`} className="flex min-w-0 flex-col gap-2 scroll-mt-6">
+          {diagnostic && <div className="flex flex-wrap items-center gap-2 text-xs" aria-label="Source diagnostics">
+            <Badge variant="outline">{availabilityLabels[diagnostic.availability]}</Badge>
+            {highlightMatches && diagnostic.matchesFilter && <Badge variant="secondary">Matches filters</Badge>}
+            {diagnostic.reason && <span>{diagnosticReason(diagnostic.reason)}</span>}
+            {diagnostic.dolbyVisionFallback && <span>Dolby Vision profile 7 · HDR10 fallback on Apple/tvOS</span>}
+            {diagnostic.dolbyVisionUnknown && <span>Dolby Vision profile unknown</span>}
+            {diagnostic.reason === "storage_unavailable" && <Link className="underline" href="/settings?tab=catalogs">Catalog settings</Link>}
+          </div>}
           <SourceCard
-            key={source.id}
             source={source}
             itemId={owner.id}
             runtimeTicks={owner.runtimeTicks}
@@ -107,7 +124,8 @@ export function MediaSources({
             ownerKind={owner.kind}
             onDeleteItem={onDeleteItem}
           />
-        ))
+          </div>;
+        })
       ) : (
         <EmptyMediaPanel>No media sources available.</EmptyMediaPanel>
       )}
