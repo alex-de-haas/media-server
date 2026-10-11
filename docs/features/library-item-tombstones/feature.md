@@ -1,6 +1,6 @@
 ---
 created: 2026-07-26
-updated: 2026-09-19
+updated: 2026-10-11
 summary: Deleted items a user favorited, rated or watched survive as unpublished tombstones that keep that history.
 ---
 
@@ -122,9 +122,11 @@ signal; another user's marks alone do not grant access. See
 [Movie detail context](../movie-detail-context/feature.md).
 
 A removed **series** card still opens the summary dialog with subtree unfavorite,
-clear rating, and admin-only permanent deletion. Movie detail exposes personal
-rating/favorite changes, individual watch edits, logging, and the same admin
-permanent-delete action. Clearing a final mark still purges an untouched ghost;
+clear rating, and an administrator Manage link. Movie detail exposes personal
+rating/favorite changes, individual watch edits and logging. Permanent deletion
+lives in [Library Management](../library-management/feature.md), reached from the
+movie menu or removed-series dialog; access still requires the caller's own
+retained signal. Clearing a final mark still purges an untouched ghost;
 a caller losing their last mark returns to the removed movie list even if
 another user's marks keep the record alive.
 
@@ -153,6 +155,6 @@ another user's marks keep the record alive.
   ghost; another user's play keeps it; a published title is untouched.
 - Web e2e (`removed-titles.spec.ts`, `movie-detail-context.spec.ts`) — the toggle's
   default-off, hidden-when-empty and URL behavior; movie detail navigation and
-  personal actions; admin-only permanent deletion; unchanged series dialogs.
+  personal actions; admin-only permanent deletion; series personal dialogs and management links.
 - Web e2e (`detail.spec.ts`) — both delete checkboxes and the query
   parameters they drive.

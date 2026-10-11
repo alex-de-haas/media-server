@@ -1,6 +1,6 @@
 ---
 created: 2026-09-24
-updated: 2026-09-25
+updated: 2026-10-11
 summary: BDMV discs import as durable Blu-ray sources, and administrators create MKV versions from a chosen playlist.
 ---
 
@@ -34,7 +34,8 @@ links in the owned tree or destination ancestry.
 
 ## Manual MKV creation
 
-Administrators use Create MKV in the Media view. Inspection lists playlist IDs,
+Administrators use Create MKV on a disc source in
+[Library Management](../library-management/feature.md). Inspection lists playlist IDs,
 clip sequences, duration and chapter counts. The picker explains playlists,
 sorts usable entries by descending duration, and puts entries within 10% of the
 movie's metadata runtime first as possible main-film candidates. When none match

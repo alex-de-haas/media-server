@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-10-05
+updated: 2026-10-11
 summary: The Next.js web app embedded in Hosty Shell that acts as a backend-for-frontend for the api service.
 ---
 
@@ -18,12 +18,15 @@ iframe-safe.
 ## Pages
 
 Navigation is a **top tab bar**: primary tabs available to all users, with
-admin-only surfaces behind a right-aligned admin menu. Detail pages are push
+admin-only media management linked from contextual movie/series toolbars. Detail pages are push
 routes, not tabs. (Decisions recorded 2026-06-18.) The tab bar renders only in `standalone` launches;
 under a shell it is hidden as duplicated chrome — the shell renders the manifest
 `ui.navigation` pages instead (see the hosty-runtime-app feature's Launch Mode
 section).
 
+- **Management** (`/manage/movies`, `/manage/series`) — administrator tables with
+  source diagnostics, technical filters and expandable versions. See
+  [Library Management](../library-management/feature.md).
 - **Home** (`/`) — overview rails built from playback state: Continue Watching
   (resume), Next Up, and Recently Added, plus an admin-only ops strip (active
   downloads, items needing review, catalog warnings).
@@ -54,36 +57,34 @@ section).
   arrows, keyboard navigation, and swiping reveal more cast members. The shared
   carousel maps arrow keys to its orientation: left/right horizontally and
   up/down vertically. Movie
-  details show a Media section (resolution/codec/audio), with Tags at the end
+  details show a compact Media summary, with Tags at the end
   of the page. Series details show Episodes grouped by season followed by Tags.
   Seasons form an accordion, all collapsed on page entry; each season opens
   independently, including with the keyboard. Only library seasons appear, and
-  the season delete control remains separate from its disclosure trigger; an episode whose file
+  season deletion belongs to Management; an episode whose file
   holds a consecutive range is labelled `S01E01-E02` (matching the on-disk name)
   so the season does not look like it skipped an episode — the title stays the
   first episode's, as that is all the provider has. Every episode row leads with
   the episode's still (16:9, lazy-loaded; a "No preview" placeholder when none is
   cached, never the show's backdrop), then its title, one fact line with the air
   date (the provider's calendar day, formatted in UTC so it never shifts a day
-  west of Greenwich) and runtime, and its synopsis clamped to three lines — the
-  clamp lifts when the row is opened. A watched episode carries the same check
+  west of Greenwich) and runtime, and its synopsis clamped to three lines.
+  A watched episode carries the same check
   badge in the still's corner that a poster card does. Its actions show status,
   latest dated watch, and Log watch; an in-progress episode offers Finish watching
   and Clear progress instead. Below those sits a one-line summary of what
   is on disk (`HEVC 2160p · Dolby Vision 7 · 38.2 GB · 2 versions`, or "No file"),
-  and the row expands onto the same media surface a movie's Media section is —
-  versions, tracks, sidecars, and for an admin every control that changes them;
-  the episode's detail is fetched when the row opens. An admin also
-  sees a Conversions block above the seasons listing every episode's jobs, and
-  **Refresh media data** in the series menu, which fans out over its episodes.
+  and administrators follow Manage to the episode's versions. File paths,
+  tracks, source mutations, conversion jobs and series administration live in
+  [Library Management](../library-management/feature.md).
   See [episode-media](../episode-media/feature.md). Seasons come from the detail's
   season rollup, so a season the API kept after its last episode went — one holding
   only extras — still gets a heading (reading "No episodes in this season") instead of
-  vanishing from the section. In the Episodes section an admin can also delete a single episode
-  row or a whole season from its heading; both confirm first, with a "Delete files from
-  disk" checkbox that defaults to off, and both return to the library grid when the
+  vanishing from the section. In Management an admin can delete a single episode
+  row or a whole season; both confirm first, with a "Delete files from
+  disk" checkbox that defaults to off, and both return to series management when the
   delete leaves the series with nothing in it.
-  Detail admin controls support metadata refresh, remap where applicable,
+  Management controls support metadata refresh, remap where applicable,
   deletion, and **Choose poster…** — the cached posters for the title with the text
   language of each spelled out, overriding the automatic [artwork
   language](../artwork-language/feature.md) choice for a title that came out
@@ -200,7 +201,7 @@ on its card — and a series whose episodes were never probed carries none.
 
 ## Indexing progress
 
-Movie media cards and expanded episode media cards display [indexing progress](../indexing-progress/feature.md), including independent external audio preparation. The existing SSE bridge updates percentages without polling; reconnect refreshes detail snapshots.
+Expanded movie and episode management cards display [indexing progress](../indexing-progress/feature.md), including independent external audio preparation. The existing SSE bridge updates percentages without polling; reconnect refreshes detail snapshots.
 
 ## Movie history and related titles
 
@@ -244,13 +245,13 @@ coverage:
   torrent's size, and no readout while the size is unknown.
 - Episode and season deletion: the actions exist only for an admin, the request
   carries `deleteFiles` only when the checkbox is ticked, a delete that prunes the
-  series navigates back to the library grid, and a season with no episodes left is
+  series navigates back to series management, and a season with no episodes left is
   still listed and still deletable.
 - Episode media: the summary line on a row and "No file" on one without a source,
-  expanding a row fetching the episode's detail once and listing its versions, a
-  viewer seeing the media and none of the controls, an admin opening the Convert
+  expanding a management row fetching the episode's detail once and listing its versions,
+  viewers retaining personal controls in browsing, an admin opening the Convert
   and Extract dialogs from an episode's version with copy that fits either kind, the
-  rename preview carrying the episode's own stem, and an episode's job listed above
-  the seasons.
+  rename preview carrying the episode's own stem, and an episode's job listed
+  with its expanded management detail.
 - Series grid captions carrying the aggregated format badges, and none for a series
   with no probed episode.

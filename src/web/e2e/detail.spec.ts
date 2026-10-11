@@ -307,7 +307,7 @@ test("merging opens the convert dialog with those tracks checked, instead of sta
     transcodeAvailable: true,
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
 
   // Checking a sidecar in the Media section and pressing Merge must not submit anything on its own — the point
   // of the change is that the job is composed first.
@@ -362,7 +362,7 @@ test("extracting writes the container's own tracks out as files, and refuses the
     transcodeAvailable: true,
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Extract tracks to files" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -405,7 +405,7 @@ test("the quality level reaches every encoder, and an audio track can be re-enco
     transcodeAvailable: true,
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -478,7 +478,7 @@ test("a file whose dubs outweigh its picture says so before the video controls",
     transcodeAvailable: true,
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -506,7 +506,7 @@ test("a source that recorded no per-track bitrate shows no estimate rather than 
     transcodeAvailable: true,
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -528,7 +528,7 @@ test("a track's language can be corrected, and a tag nobody knows blocks the sub
     transcodeLanguages: ["eng", "ger", "rus", "ukr"],
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -564,7 +564,7 @@ test("the language field accepts every spelling the API does", async ({ page }) 
     transcodeLanguages: ["de", "deu", "eng", "ger", "por", "pt", "ru", "rus"],
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -585,7 +585,7 @@ test("dropping a track clears the bad language that was blocking the submit", as
     transcodeAvailable: true,
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -607,7 +607,7 @@ for (const edit of ["none", "name", "language"] as const) {
       transcodeAvailable: true,
     });
 
-    await page.goto("/movies/m1");
+    await page.goto("/manage/movies/m1");
     await page.getByRole("button", { name: "Convert to a smaller version" }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("combobox", { name: "Video", exact: true }).click();
@@ -645,7 +645,7 @@ test("clearing a language means keep, not erase", async ({ page }) => {
     transcodeAvailable: true,
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Convert to a smaller version" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -703,7 +703,7 @@ test("tells sidecar dubs from sidecar subtitles, by kind and by file name", asyn
     },
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
 
   await expect(page.getByText("4 separate files beside this version")).toBeVisible();
 
@@ -760,7 +760,7 @@ test("a sidecar with specs reads like an embedded track", async ({ page }) => {
     },
   });
 
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
 
   // The specs lead and the release name trails in quotes — the shape an embedded track has.
   await expect(page.getByText(/rus AC3 5\.1\s*“Гаврилов”\s*·\s*48 kHz/)).toBeVisible();
@@ -852,8 +852,7 @@ test("admin deletes one episode, keeping the files unless asked", async ({ page 
     episodes: { s1: [anEpisode("e1", 1, 1, "Good News About Hell"), anEpisode("e2", 1, 2, "Half Loop")] },
   });
 
-  await page.goto("/series/s1");
-  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
+  await page.goto("/manage/series/s1");
 
   // Keeping the files — and the watch history — is the default: a delete must not silently remove
   // media from disk, and watched state survives as a tombstone unless explicitly purged.
@@ -862,11 +861,12 @@ test("admin deletes one episode, keeping the files unless asked", async ({ page 
       request.url().includes("/api/proxy/api/library/episodes/e1?deleteFiles=false&deleteUserData=false") &&
       request.method() === "DELETE",
   );
-  await page.getByRole("button", { name: "Delete S01E01" }).click();
+  await page.getByRole("row").filter({ hasText: "S01E01" }).getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Delete…", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Delete episode?" })).toBeVisible();
   await page.getByRole("button", { name: "Remove from library" }).click();
   await kept;
-  await expect(page).toHaveURL(/\/series\/s1$/);
+  await expect(page).toHaveURL(/\/manage\/series\/s1$/);
 
   // Ticking the boxes is what escalates to erasing the file and purging the history.
   const erased = page.waitForRequest(
@@ -874,7 +874,8 @@ test("admin deletes one episode, keeping the files unless asked", async ({ page 
       request.url().includes("/api/proxy/api/library/episodes/e2?deleteFiles=true&deleteUserData=true") &&
       request.method() === "DELETE",
   );
-  await page.getByRole("button", { name: "Delete S01E02" }).click();
+  await page.getByRole("row").filter({ hasText: "S01E02" }).getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Delete…", exact: true }).click();
   await page.getByRole("checkbox", { name: /Delete files from disk/ }).click();
   await page.getByRole("checkbox", { name: /Also delete watch history and favorites/ }).click();
   await page.getByRole("button", { name: "Delete + remove files" }).click();
@@ -885,13 +886,13 @@ test("admin deletes a whole season and leaves when the series is pruned", async 
   await setupApp(page, {
     role: "admin",
     library: [aSeries("s1", "Severance")],
-    detail: { s1: seriesDetail("s1", "Severance", "95396") },
+    detail: { s1: { ...seriesDetail("s1", "Severance", "95396"), seasons: [aSeason("season-1", 1, 1)] } },
     episodes: { s1: [anEpisode("e1", 1, 1, "Good News About Hell")] },
     // Its only season goes, so nothing is left under the series and the server prunes it too.
     childDelete: { seasonRemoved: true, seriesRemoved: true },
   });
 
-  await page.goto("/series/s1");
+  await page.goto("/manage/series/s1");
 
   const deleted = page.waitForRequest(
     (request) =>
@@ -904,7 +905,7 @@ test("admin deletes a whole season and leaves when the series is pruned", async 
   await deleted;
 
   // The page it was called from no longer exists.
-  await expect(page).toHaveURL(/\/series$/);
+  await expect(page).toHaveURL(/\/manage\/series$/);
 });
 
 test("a season left with only extras still shows up and stays deletable", async ({ page }) => {
@@ -919,11 +920,11 @@ test("a season left with only extras still shows up and stays deletable", async 
     episodes: { s1: [anEpisode("e1", 1, 1, "Good News About Hell")] },
   });
 
-  await page.goto("/series/s1");
-  await page.getByRole("button", { name: /^Season 2 ·/ }).click();
+  await page.goto("/manage/series/s1");
+  await page.getByRole("button", { name: "Season 2", exact: true }).click();
 
-  await expect(page.getByRole("heading", { name: "Season 2 · 0 episodes", exact: true })).toBeVisible();
-  await expect(page.getByText("No episodes in this season.")).toBeVisible();
+  await expect(page).toHaveURL(/season=2/);
+  await expect(page.getByText("No titles match these filters.")).toBeVisible();
 
   const deleted = page.waitForRequest(
     (request) =>
@@ -960,8 +961,8 @@ test("admin fixes a misidentified movie and lands on the corrected item", async 
     remapTargetId: "m2",
   });
 
-  await page.goto("/movies/m1");
-  await page.getByRole("button", { name: "More actions" }).click();
+  await page.goto("/manage/movies/m1");
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
   await page.getByRole("menuitem", { name: /Fix match/ }).click();
 
   await page.getByRole("textbox", { name: "Movie title" }).fill("Arrival");
@@ -973,8 +974,8 @@ test("admin fixes a misidentified movie and lands on the corrected item", async 
   await page.getByRole("button", { name: /Arrival \(2016\)/ }).click();
   await remapped;
 
-  await expect(page).toHaveURL(/\/movies\/m2$/);
-  await expect(page.getByRole("heading", { name: "Arrival" })).toBeVisible();
+  await expect(page).toHaveURL(/\/manage\/movies\/m2\?return=/);
+  await expect(page.getByRole("button", { name: "Hide versions of Arrival" })).toBeVisible();
 });
 
 test("pins a poster from the detail page when the automatic choice is ambiguous", async ({ page }) => {
@@ -1007,8 +1008,8 @@ test("pins a poster from the detail page when the automatic choice is ambiguous"
     },
   });
 
-  await page.goto("/movies/m1");
-  await page.getByRole("button", { name: "More actions" }).click();
+  await page.goto("/manage/movies/m1");
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
   await page.getByRole("menuitem", { name: "Choose poster…" }).click();
 
   await expect(page.getByRole("dialog")).toContainText("Choose a poster");
@@ -1128,7 +1129,7 @@ test("an episode row keeps its title readable on a phone by dropping the actions
   await expect(page.getByRole("button", { name: /Play in Infuse|Open in Infuse|Copy Infuse link/ })).toHaveCount(0);
   const pilot = page.getByRole("listitem").filter({ hasText: "S01E01" });
   const still = await pilot.locator("img").boundingBox();
-  const expand = await pilot.getByRole("button", { name: "Show media of S01E01" }).boundingBox();
+  const expand = await pilot.getByRole("link", { name: "Manage", exact: true }).boundingBox();
   const title = await pilot.getByText("Good News About Hell, and Other Things That Happened").boundingBox();
   expect(still && expand && title).toBeTruthy();
   // The controls sit below the still rather than squeezing the text column to nothing…
@@ -1161,19 +1162,10 @@ test("an episode row summarises what is on disk and expands onto the media surfa
   // Nothing is fetched for a row until it is opened — a long season must not carry every stream list.
   expect(detailRequests).toBe(0);
 
-  await page.getByRole("button", { name: "Show media of S01E01" }).click();
-  await expect(page.getByText("Severance S01E01 - HEVC 1080p.mkv")).toBeVisible();
-  await expect(page.getByText("2160p HEVC")).toBeVisible();
-  await expect(page.getByText("eng EAC3 5.1")).toBeVisible();
-  expect(detailRequests).toBe(1);
-
-  // A viewer sees the media and none of the controls.
+  await expect(page.getByRole("button", { name: "Show media of S01E01" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Manage", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Rename version" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Convert to a smaller version" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Delete this version" })).toHaveCount(0);
-
-  await page.getByRole("button", { name: "Hide media of S01E01" }).click();
-  await expect(page.getByText("2160p HEVC")).toHaveCount(0);
+  expect(detailRequests).toBe(0);
 });
 
 test("an admin converts and extracts from an episode version, and sees its job above the seasons", async ({ page }) => {
@@ -1186,15 +1178,13 @@ test("an admin converts and extracts from an episode version, and sees its job a
     transcodeJobs: [aTranscodeJob("job-9", "e1", "Severance S01E01 - Remux.mkv")],
   });
 
-  await page.goto("/series/s1");
-  await page.getByRole("button", { name: /^Season 1 ·/ }).click();
+  await page.goto("/manage/series/s1?episode=e1");
 
   // Every episode's jobs in one place, above the seasons: the card is named by its output file, which
   // carries the episode code, so no per-row block is needed.
   await expect(page.getByText("Conversions")).toBeVisible();
   await expect(page.getByText("Severance S01E01 - Remux.mkv")).toBeVisible();
 
-  await page.getByRole("button", { name: "Show media of S01E01" }).click();
   const cards = page.getByRole("button", { name: "Convert to a smaller version" });
   await expect(cards).toHaveCount(2);
 

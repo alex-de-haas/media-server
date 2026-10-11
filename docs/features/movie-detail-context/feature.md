@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-updated: 2026-09-22
+updated: 2026-10-11
 summary: The web movie page with personal viewing history, cast, media, related movies and tags.
 ---
 
@@ -10,8 +10,9 @@ summary: The web movie page with personal viewing history, cast, media, related 
 
 The web movie page combines the retained description with personal viewing history
 and related movies. The history section sits below the synopsis, followed by a
-persistent Cast carousel and a Media section. Collection and similar-movie rows
-follow Media, with Tags as the final section on the page. All sections remain
+persistent Cast carousel and a compact Media summary. Technical source details and
+operations live in [Library Management](../library-management/feature.md).
+Collection and similar-movie rows follow Media, with Tags as the final section on the page. All sections remain
 visible without switching tabs. Series pages share the Cast carousel, followed
 by Episodes and finally Tags.
 
@@ -95,7 +96,8 @@ The caller can set/change/clear a rating or favorite and log/correct/delete
 watches. Clearing a rating or favorite asks for confirmation explaining that the
 movie leaves the caller's removed list after their last mark. Deletion of a
 viewing explains the same consequence. Admins retain an explicitly confirmed
-permanent-delete action that removes all users' data for that title.
+permanent-delete action in [Library Management](../library-management/feature.md)
+that removes all users' data for that title; the browsing menu links to it.
 
 Removed detail and personal writes require the caller's own retained history,
 favorite, or rating. A title retained solely by another user returns 404. After

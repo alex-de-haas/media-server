@@ -1,4 +1,5 @@
 "use client";
+import { ManagementJobLink } from "@/components/management-job-link";
 
 import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -811,13 +812,13 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
         meta={meta}
         // Waiting for an encoder slot — the queued line replaces the bar and stats below, like a queued move.
         note={job.state === "Queued" ? <ActivityQueued /> : undefined}
-        actions={
+        actions={<><ManagementJobLink id={job.mediaItemId} sourceId={job.mediaSourceId} />{
           active ? (
             <IconAction label="Cancel" icon={<X />} pending={cancel.isPending} onClick={() => cancel.mutate()} />
           ) : (
             <IconAction label="Dismiss" icon={<Trash2 />} destructive pending={remove.isPending} onClick={() => remove.mutate()} />
           )
-        }
+        }</>}
       />
       {/* Stats below the bar (percent · speed × · ETA), mirroring the move and download cards. A terminal job
           keeps the stat line for its outcome, without a bar; a queued one says so in the header instead. */}

@@ -1,6 +1,6 @@
 ---
 created: 2026-07-29
-updated: 2026-09-29
+updated: 2026-10-11
 summary: The dialog that composes a new version from one video file as a single transcode-engine job.
 ---
 
@@ -26,11 +26,11 @@ moved on.
 The whole surface follows the engine's availability, since it has nothing to talk to
 without it. The media surface itself does not: listing versions and picking which one
 plays is database-side and works with no engine attached. The surface is one component
-for a movie's Media tab and an episode's expanded row
+for expanded movies and episodes in Library Management
 ([episode-media](../episode-media/feature.md)), so the dialog is reached the same way
 from either.
 
-Sequentially joining two video parts is a separate [Join parts](../video-part-joining/feature.md) action in a movie's Media tab.
+Sequentially joining two video parts is a separate [Join parts](../video-part-joining/feature.md) action in an expanded movie in Library Management.
 
 ## What it composes
 

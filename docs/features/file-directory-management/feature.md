@@ -1,10 +1,14 @@
 ---
 created: 2026-06-15
-updated: 2026-10-10
+updated: 2026-10-11
 summary: File operations happen only as catalog automation and stay confined to configured catalog roots.
 ---
 
 # File and Directory Management
+
+Web file operations live in [Library Management](../library-management/feature.md):
+source actions in expanded movie/episode rows, title actions on their parent rows,
+and season actions in series management. Browsing retains personal actions.
 
 ## Description
 

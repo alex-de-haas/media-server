@@ -50,9 +50,11 @@ public sealed class RemuxIndexService(
         {
             if (store.IsCurrent(candidate.Key, candidate.AbsolutePath))
             {
+                progress?.Observe(candidate.Key, "ready");
                 continue;
             }
 
+            progress?.Observe(candidate.Key, "waiting");
             pending.Add(candidate);
             if (pending.Count >= limit)
             {

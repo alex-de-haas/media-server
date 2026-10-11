@@ -10,7 +10,7 @@ function discDetail() {
 
 test("a disc needs conversion and an older engine cannot create MKV", async ({ page }) => {
   await setupApp(page, { detail: { m1: discDetail() }, transcodeAvailable: true });
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await expect(page.getByText("Requires conversion to MKV before playback.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Create MKV", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Play in Infuse", exact: true })).toHaveCount(0);
@@ -30,7 +30,7 @@ test("playlist and explicit track settings become a separate MKV job", async ({ 
     revision: "abc", sizeBytes: 1000, playlists: [{ id: "00001", durationSeconds: 7200, chapters: 17, clips: ["00011.m2ts"], tracks: route.request().url().includes("playlistId") ? tracks : [], error: null }],
   } }));
   await page.route("**/api/proxy/api/transcode/bluray", route => route.fulfill({ json: { ...aTranscodeJob("b1", "m1", "Blu-ray MKV"), kind: "Bluray" } }));
-  await page.goto("/movies/m1");
+  await page.goto("/manage/movies/m1");
   await page.getByRole("button", { name: "Create MKV", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Playlist", { exact: true }).selectOption("00001");
@@ -64,7 +64,7 @@ for (const missing of ["video", "audio"] as const) {
     await page.route("**/api/proxy/api/transcode/bluray", route => { submissions++; return route.fulfill({ status: 400, json: { error: "Unexpected submission" } }); });
     const errors: Error[] = [];
     page.on("pageerror", error => errors.push(error));
-    await page.goto("/movies/m1");
+    await page.goto("/manage/movies/m1");
     await page.getByRole("button", { name: "Create MKV", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Playlist", { exact: true }).selectOption("00001");

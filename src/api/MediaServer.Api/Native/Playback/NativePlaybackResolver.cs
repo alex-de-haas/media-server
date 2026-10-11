@@ -181,78 +181,22 @@ public sealed class NativePlaybackResolver(
         NativeCapabilityProfile profile,
         RemuxReadinessState readiness)
     {
-        static Verdict No(string reason) => new(NativePlaybackDecision.Unsupported, reason);
-
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return No(NativePlaybackReasons.NoFile);
-        }
-
-        if (string.Equals(container, "bdmv", StringComparison.OrdinalIgnoreCase)) return No(NativePlaybackReasons.RequiresConversion);
-
         var video = Picture(streams);
-        if (video is not null && !Supports(profile.VideoCodecs, video.Codec))
-        {
-            // Re-encoding is out of scope for this surface, so an undecodable picture is the end of it.
-            return No(NativePlaybackReasons.UnsupportedVideoCodec);
-        }
-
-        // A sidecar dub counts: the client can fetch it as its own file, so a source whose embedded
-        // audio is all unplayable is still playable with one.
         var audio = streams.Where(stream => stream.StreamType == StreamType.Audio).ToList();
-        if (audio.Count == 0)
-        {
-            return No(NativePlaybackReasons.NoAudioTrack);
-        }
-
-        if (!audio.Any(track => Supports(profile.AudioCodecs, track.Codec) && WithinChannels(profile, track)))
-        {
-            return No(NativePlaybackReasons.UnsupportedAudioCodec);
-        }
-
-        // Can this client manage the source's range at all? Separate question from which signalling we
-        // would write, and the only one that applies to a file served as it is.
-        if (!CanPresent(video?.HdrFormat, profile))
-        {
-            return No(NativePlaybackReasons.UnsupportedDynamicRange);
-        }
-
-        if (Supports(profile.Containers, container))
-        {
-            return new Verdict(NativePlaybackDecision.DirectPlay, null);
-        }
-
-        // The client's support is not the question from here on: we have to write the sample entries, and
-        // what we can describe is a shorter list than what a client can decode. These come before the
-        // readiness check because they are permanent answers — a picture or a soundtrack nothing here can
-        // describe will not become describable when the walk reaches the file, and reporting "not yet"
-        // about a source that will never work is the more misleading of the two.
-        if (video is not null && !RemuxCodecs.CanPackageVideo(video.Codec))
-        {
-            // A remux with no picture is not a remux. AV1 is the case that reaches here: a recent Apple
-            // TV decodes it, so nothing on the client's side of the question ruled it out.
-            return No(NativePlaybackReasons.PackagingUnsupportedVideo);
-        }
-
-        // And one whose only audio track we cannot describe would play as a silent film.
-        if (!streams.Any(stream =>
-                stream.StreamType == StreamType.Audio && RemuxCodecs.CanPackageAudio(stream.Codec)))
-        {
-            return No(NativePlaybackReasons.PackagingUnsupportedAudio);
-        }
-
-        // The codecs are fine and only the container is not, which is a packaging problem. Saying so
-        // honestly beats offering a URL that will not open.
-        if (readiness != RemuxReadinessState.Ready)
-        {
-            // Two different answers, and the difference matters to a client: a container nothing can
-            // index will never become playable, while a file the walk has not reached yet will.
-            return No(readiness == RemuxReadinessState.Pending
-                ? NativePlaybackReasons.PackagingPending
-                : NativePlaybackReasons.PackagingUnavailable);
-        }
-
-        return new Verdict(NativePlaybackDecision.Remux, null);
+        var direct = Supports(profile.Containers, container);
+        var facts = new PlaybackFacts(
+            !string.IsNullOrWhiteSpace(path),
+            string.Equals(container, "bdmv", StringComparison.OrdinalIgnoreCase),
+            video is null || Supports(profile.VideoCodecs, video.Codec),
+            audio.Count > 0,
+            audio.Any(track => Supports(profile.AudioCodecs, track.Codec) && WithinChannels(profile, track)),
+            CanPresent(video?.HdrFormat, profile), direct,
+            video is null || RemuxCodecs.CanPackageVideo(video.Codec),
+            audio.Any(track => RemuxCodecs.CanPackageAudio(track.Codec)), readiness);
+        var reason = PlaybackEligibility.Evaluate(facts);
+        return reason is not null
+            ? new Verdict(NativePlaybackDecision.Unsupported, reason)
+            : new Verdict(direct ? NativePlaybackDecision.DirectPlay : NativePlaybackDecision.Remux, null);
     }
 
     /// <summary>

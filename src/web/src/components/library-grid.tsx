@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { availabilityBadge, useLibraryAvailability } from "@/components/library-availability";
 import { AlertTriangle } from "lucide-react";
 import { useSession } from "@/components/app-shell";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
@@ -66,6 +68,7 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
     queryFn: () => mediaServer.listLibrary({ kind, catalogId: effectiveCatalogId }),
     refetchInterval: 5000,
   });
+  const availability = useLibraryAvailability((library.data ?? []).map(item => item.id));
   const itemLabel = kind === "Series" ? "series" : "movies";
   const emptyMessage = selectedCatalog
     ? `No ${itemLabel} in ${selectedCatalog.name} yet.`
@@ -95,6 +98,7 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         <div className="flex flex-wrap items-center gap-4">
+          {role === "admin" && <Link className={buttonVariants({ variant: "outline", size: "sm" })} href={`/manage/${kind === "Series" ? "series" : "movies"}`}>Management</Link>}
           {ghosts.length > 0 && (
             <div className="flex items-center gap-2">
               <Checkbox
@@ -168,6 +172,7 @@ export function LibraryGrid({ title, kind, catalogId }: { title: string; kind: L
                 subtitle={[item.year, ...(item.videoFormats ?? [])].filter((value) => value != null).join(" · ")}
                 posterUrl={item.posterUrl}
                 userData={item.userData}
+                badge={availabilityBadge(availability.get(item.id))}
               />
             ))}
           </div>
