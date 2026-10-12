@@ -29,7 +29,7 @@ public sealed class CatalogScanServiceTests : IDisposable
 
     public CatalogScanServiceTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = new SqliteConnection($"Data Source=ms-scan-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         _connection.Open();
         _database = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
         _database.Database.Migrate();
@@ -49,12 +49,13 @@ public sealed class CatalogScanServiceTests : IDisposable
     }
 
     /// <summary>
-    /// A second context on the same connection. The removal path writes through <c>ExecuteUpdate</c>,
+    /// A second context with its own connection to the same in-memory database. The removal path writes through <c>ExecuteUpdate</c>,
     /// which bypasses the change tracker, so the seeding context would keep answering with the rows as
-    /// they were before the scan touched them.
+    /// they were before the scan touched them. Concurrent operations must not share a SqliteConnection:
+    /// the scan still stamps LastScannedAt after releasing the mutation gate to a waiting deletion.
     /// </summary>
     private MediaServerDbContext Verify() =>
-        new(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection).Options);
+        new(new DbContextOptionsBuilder<MediaServerDbContext>().UseSqlite(_connection.ConnectionString).Options);
 
     private CatalogScanService Service()
     {
