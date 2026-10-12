@@ -129,6 +129,7 @@ public sealed class TranscodeOutputImporter(
     /// from the probe so the label always reflects the produced file, not just the requested settings.</summary>
     private static string VersionLabel(TranscodeJob job, ProbeResult result)
     {
+        if (job.VersionName is { } versionName) return versionName;
         if (job.Kind == TranscodeJobKind.Bluray) return job.Name ?? "Blu-ray MKV";
         if (job.Kind == TranscodeJobKind.Join)
         {

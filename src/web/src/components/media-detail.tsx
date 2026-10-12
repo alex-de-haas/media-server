@@ -47,7 +47,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { WatchControls } from "@/components/watch-controls";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -144,13 +144,13 @@ export function ManagedItem({ id, backHref, query = "", seriesId, sourceId, show
   if (detail.isPending) return <p role="status">Loading versions…</p>;
   if (detail.isError) return <div className="flex items-center gap-3"><p>This item is unavailable or has been merged.</p><Button variant="outline" onClick={() => detail.refetch()}>Retry</Button><Link href={backHref}>Back to list</Link></div>;
   const item = detail.data;
-  return <div className="flex min-w-0 flex-col gap-3">
-    <div className="flex items-center justify-between gap-2">{showActions && <span className="font-medium">{item.title}</span>}<ItemActions management showTrigger={showActions} moveOwnerId={seriesId} item={item} backHref={backHref} deleteReason={deleteReason} onDeleteRequest={setDeleteReason} /></div>
+  return <div className="flex min-w-0 flex-col gap-2">
+    <div className={showActions ? "flex items-center justify-between gap-2" : "contents"}>{showActions && <span className="font-medium">{item.title}</span>}<ItemActions management showTrigger={showActions} moveOwnerId={seriesId} item={item} backHref={backHref} deleteReason={deleteReason} onDeleteRequest={setDeleteReason} /></div>
     {item.removedAt ? <p className="text-muted-foreground text-sm">Removed from the library. Retained personal history remains available in the library.</p> : <>
-      <ContentLocation catalogName={item.catalogName} catalogRoot={item.catalogRoot} path={item.contentPath} />
       <MoveProgress itemId={seriesId ?? id} />
       {diagnostics.isError && <div role="alert">Diagnostics could not be loaded. <Button variant="link" onClick={() => diagnostics.refetch()}>Retry</Button></div>}
       <MediaSources owner={{ id, kind: item.kind, title: item.title, runtimeTicks: item.runtimeTicks }} sources={item.mediaSources} defaultSourceId={item.defaultSourceId}
+        location={<ContentLocation catalogRoot={item.catalogRoot} path={item.contentPath} />}
         moving={moving} diagnostics={diagnostics.data} highlightMatches={hasDiagnosticFilter(query)} onDeleteItem={() => setDeleteReason("lastVersion")} />
     </>}
   </div>;
@@ -161,13 +161,12 @@ function hasDiagnosticFilter(query: string) {
   return ["sourceKind", "resolution", "codec", "hdr", "dvProfile", "state"].some(key => params.has(key)) || !["all", "active", null].includes(params.get("view"));
 }
 
-export function ManagementTitleActions({ id, backHref, seriesId }: { id: string; backHref: string; seriesId?: string }) {
+export function ManagementTitleActions({ id, backHref, seriesId, libraryHref }: { id: string; backHref: string; seriesId?: string; libraryHref?: string }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<"item" | "lastVersion" | null>(null);
   const detail = useQuery({ queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id), enabled: open });
-  if (detail.isError) return <Button variant="ghost" size="sm" onClick={() => detail.refetch()}>Retry actions</Button>;
-  return open && detail.data ? <ItemActions management moveOwnerId={seriesId} defaultOpen item={detail.data} backHref={backHref} deleteReason={reason} onDeleteRequest={setReason} />
-    : <Button variant="ghost" size="sm" disabled={detail.isFetching} onClick={() => setOpen(true)}>{detail.isError ? "Retry actions" : "Actions"}</Button>;
+  return open && detail.data ? <ItemActions management moveOwnerId={seriesId} libraryHref={libraryHref} defaultOpen item={detail.data} backHref={backHref} deleteReason={reason} onDeleteRequest={setReason} />
+    : <Button variant="ghost" size="icon-sm" aria-label={detail.isError ? "Retry actions" : "More actions"} aria-haspopup="menu" aria-busy={detail.isFetching} title={detail.isError ? "Retry actions" : "More actions"} disabled={detail.isFetching} onClick={() => { setOpen(true); if (detail.isError) void detail.refetch(); }}><MoreVertical aria-hidden /></Button>;
 }
 
 // The in-flight cross-catalog move for this item, if any. Shares the ["library-move-jobs"] cache with the
@@ -221,29 +220,21 @@ function MoveProgress({ itemId }: { itemId: string }) {
   );
 }
 
-// Where the title lives on disk, shown atop the media/episodes tab: the catalog it belongs to, that
-// catalog's root host path, and the catalog-root-relative folder holding its files (when on disk).
+// The full folder path in Management, combining the catalog root and the title's relative folder.
 function ContentLocation({
-  catalogName,
   catalogRoot,
   path,
 }: {
-  catalogName: string;
   catalogRoot: string;
   path: string | null;
 }) {
+  const fullPath = catalogRoot && path
+    ? `${catalogRoot.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
+    : catalogRoot || path || "—";
   return (
-    <dl className="text-muted-foreground bg-secondary/40 grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-xs">
-      <dt>Catalog</dt>
-      <dd className="text-foreground break-words">{catalogName || "—"}</dd>
-      <dt>Path</dt>
-      <dd className="text-foreground font-mono break-all">{catalogRoot || "—"}</dd>
-      {path && (
-        <>
-          <dt>Folder</dt>
-          <dd className="text-foreground font-mono break-all">{path}</dd>
-        </>
-      )}
+    <dl className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
+      <dt className="shrink-0">Path</dt>
+      <dd className="text-foreground truncate font-mono" title={fullPath}>{fullPath}</dd>
     </dl>
   );
 }
@@ -269,9 +260,10 @@ function MediaDetailSkeleton() {
 }
 
 /** Personal actions, provider links, and role-gated library administration. */
-export function ItemActions({ item, backHref, deleteReason, onDeleteRequest, management = false, moveOwnerId, defaultOpen = false, showTrigger = true }: {
+export function ItemActions({ item, backHref, deleteReason, onDeleteRequest, management = false, moveOwnerId, libraryHref, defaultOpen = false, showTrigger = true }: {
   showTrigger?: boolean;
   moveOwnerId?: string;
+  libraryHref?: string;
   defaultOpen?: boolean;
   management?: boolean;
   item: LibraryDetail;
@@ -378,7 +370,15 @@ export function ItemActions({ item, backHref, deleteReason, onDeleteRequest, man
           }
         />
         <DropdownMenuContent>
-          {role === "admin" && !management && <DropdownMenuItem render={<Link href={managementHref(kind, id)} />}>Manage</DropdownMenuItem>}
+          {libraryHref && <>
+            <DropdownMenuGroup>
+              <DropdownMenuItem render={<Link href={libraryHref} />}>
+                <ExternalLink aria-hidden /> Open in library
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+          </>}
+          {role === "admin" && !management && <DropdownMenuItem render={<Link href={managementHref(kind, id, undefined, item.removedAt ? { removed: "1" } : undefined)} />}>Manage</DropdownMenuItem>}
           {canLogWatch && (
             <DropdownMenuItem onClick={() => setLogWatchOpen(true)}>
               <CalendarPlus />
@@ -530,7 +530,7 @@ export function ItemActions({ item, backHref, deleteReason, onDeleteRequest, man
                   router.replace("/manage/series");
                 }
               } else if (targetId !== id) {
-                router.replace(`${managementHref(kind, targetId)}?return=${encodeURIComponent(backHref)}`);
+                router.replace(managementHref(kind, targetId, undefined, { return: backHref }));
               } else {
                 queryClient.invalidateQueries({ queryKey: ["library-detail", id] });
               }

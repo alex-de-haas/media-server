@@ -914,6 +914,9 @@ export interface TranscodeJob {
 }
 
 export interface CreateTranscodeInput {
+  /** Output version label and filename suffix; omission keeps automatic naming. */
+  versionName?: string;
+  videoStreamIndex?: number;
   sourceId: string;
   videoCodec?: string;
   hardwareAcceleration?: string;
@@ -1030,7 +1033,7 @@ export const mediaServer = {
 
   // Whether the transcode-engine dependency is attached. The Media tab works without it — versions and the
   // default-version pick are database-side — so only the conversion controls key off this.
-  transcodeAvailability: () => apiJson<{ available: boolean; dolbyVisionConversion: boolean; videoPartJoining?: boolean; blurayImport?: boolean }>(`${BASE}/transcode/availability`),
+  transcodeAvailability: () => apiJson<{ available: boolean; dolbyVisionConversion: boolean; videoPartJoining?: boolean; blurayImport?: boolean; explicitVideoSelection?: boolean }>(`${BASE}/transcode/availability`),
   // The language tags a track edit may carry, from the service that validates them — so the dialog cannot
   // accept a value the API then refuses.
   transcodeLanguages: () => apiJson<string[]>(`${BASE}/transcode/languages`),

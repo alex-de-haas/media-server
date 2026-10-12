@@ -5,7 +5,8 @@ public sealed record ManagementQuery(
     int? Season = null, string? Search = null, string View = "all", string? SourceKind = null,
     string? Resolution = null, string? Codec = null, string? Hdr = null, string? DvProfile = null,
     string? State = null, int? MinVersions = null, int? MaxVersions = null,
-    string Sort = "title", bool Descending = false, int Limit = 25, int Offset = 0);
+    string Sort = "title", bool Descending = false, int Limit = 25, int Offset = 0,
+    Guid? FocusId = null);
 
 public sealed record ManagementItemDto(
     Guid Id, string Kind, string Title, int? Year, Guid? CatalogId, string CatalogName,

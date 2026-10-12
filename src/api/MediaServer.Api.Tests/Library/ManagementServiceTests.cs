@@ -306,6 +306,57 @@ public sealed class ManagementServiceTests : IDisposable
         Assert.Empty(reads.ChangeTracker.Entries());
     }
 
+    [Fact]
+    public async Task Movie_focus_resolves_the_containing_page_without_filtering_the_list()
+    {
+        var items = Enumerable.Range(0, 60).Select(n => Item($"Film {n:000}")).ToArray();
+        var removed = Item("Earlier removed"); removed.RemovedAt = DateTimeOffset.UtcNow;
+        var unpublished = Item("Earlier unpublished"); unpublished.PublicId = null;
+        Item("Earlier series", MediaKind.Series);
+        await database.Context.SaveChangesAsync();
+        var commands = new CommandCounter();
+        await using var reads = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>()
+            .UseSqlite(database.Context.Database.GetDbConnection()).AddInterceptors(commands).Options);
+        var page = await new ManagementService(reads, new MediaServerSettings()).ListAsync(new(FocusId: items[42].Id), default);
+        Assert.Equal(60, page.Total);
+        Assert.Equal(25, page.Offset);
+        Assert.Equal(25, page.Items.Count);
+        Assert.Contains(page.Items, item => item.Id == items[42].Id);
+        Assert.Equal("Film 025", page.Items[0].Title);
+        Assert.InRange(commands.Count, 1, 10);
+        Assert.Empty(reads.ChangeTracker.Entries());
+    }
+
+    [Fact]
+    public async Task Movie_focus_uses_the_same_equal_title_order_as_regular_pagination()
+    {
+        for (var n = 0; n < 8; n++) Item("Same title");
+        await database.Context.SaveChangesAsync();
+        var ordered = await service.ListAsync(new(Limit: 100), default);
+        for (var index = 0; index < ordered.Items.Count; index++)
+        {
+            var page = await service.ListAsync(new(Limit: 3, FocusId: ordered.Items[index].Id), default);
+            Assert.Equal(index / 3 * 3, page.Offset);
+            Assert.Contains(page.Items, item => item.Id == ordered.Items[index].Id);
+        }
+    }
+
+    [Fact]
+    public async Task Missing_removed_and_filtered_focus_does_not_hide_the_normal_list()
+    {
+        var visible = Item("Visible");
+        var removed = Item("Removed"); removed.RemovedAt = DateTimeOffset.UtcNow;
+        await database.Context.SaveChangesAsync();
+        foreach (var id in new[] { Guid.NewGuid(), removed.Id })
+        {
+            var page = await service.ListAsync(new(FocusId: id), default);
+            Assert.Equal(0, page.Offset);
+            Assert.Equal(visible.Id, Assert.Single(page.Items).Id);
+        }
+        Assert.Empty((await service.ListAsync(new(FocusId: visible.Id, Search: "Other"), default)).Items);
+        await Assert.ThrowsAsync<ManagementValidationException>(() => service.ListAsync(new(FocusId: visible.Id, Sort: "size"), default));
+    }
+
     private sealed class CommandCounter : DbCommandInterceptor
     {
         public int Count { get; private set; }

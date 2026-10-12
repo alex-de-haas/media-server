@@ -12,4 +12,15 @@ describe("management navigation", () => {
     const q = new URLSearchParams(managementQuery(new URLSearchParams(), "Episode", "e1", "s1"));
     expect(q.get("itemId")).toBe("e1"); expect(q.get("seriesId")).toBe("s1"); expect(q.get("sort")).toBe("episode");
   });
+  it("locates a movie in the shared list without filtering out its neighbours", () => {
+    expect(managementHref("Movie", "m1")).toBe("/manage/movies?focus=m1&expanded=m1");
+    const href = managementHref("Movie", "m1", undefined, { removed: "1" });
+    const search = new URLSearchParams(href.split("?")[1]);
+    expect(search.get("removed")).toBe("1");
+    expect(search.get("focus")).toBe("m1");
+    const query = new URLSearchParams(managementQuery(search, "Movie"));
+    expect(query.get("focusId")).toBe("m1");
+    expect(query.has("itemId")).toBe(false);
+    expect(query.has("removed")).toBe(false);
+  });
 });

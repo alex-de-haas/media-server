@@ -28,15 +28,16 @@ public sealed record TranscodeJobRequest(
     string? DolbyVision = null,
     IReadOnlyList<EngineJoinInput>? JoinInputs = null,
     Guid? ClientJobId = null,
-    MediaServer.Api.Bluray.BluraySelection? Bluray = null);
+    MediaServer.Api.Bluray.BluraySelection? Bluray = null,
+    int? VideoStreamIndex = null);
 
 /// <summary>A mounted video part, in playback order.</summary>
 public sealed record EngineJoinInput(string? MountLabel, string Path);
 
-/// <summary>What the engine has beyond ffmpeg. <see cref="DolbyVisionConversion"/> is whether it carries the
+/// <summary>Optional engine tooling and versioned workflow capabilities. <see cref="DolbyVisionConversion"/> is whether it carries the
 /// tools a profile 7 → 8.1 rewrite runs on (<c>dovi_tool</c> and MKVToolNix); a consumer offers the option
 /// only when it does, because an engine without them refuses the job rather than copying silently.</summary>
-public sealed record TranscodeTooling(bool DolbyVisionConversion, bool VideoPartJoining = false, bool BlurayImport = false)
+public sealed record TranscodeTooling(bool DolbyVisionConversion, bool VideoPartJoining = false, bool BlurayImport = false, bool ExplicitVideoSelection = false)
 {
     public static readonly TranscodeTooling None = new(false);
 }

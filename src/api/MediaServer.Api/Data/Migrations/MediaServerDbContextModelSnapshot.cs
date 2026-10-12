@@ -1355,13 +1355,13 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("OriginalRelativePath")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PendingLibraryPath")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PlacementHash")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PlacementPath")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PendingLibraryPath")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("RelativePath")
@@ -1676,6 +1676,9 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.Property<int>("State")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("VersionName")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("VideoCodec")
                         .IsRequired()

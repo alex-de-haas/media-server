@@ -9,6 +9,7 @@ namespace MediaServer.Api.Tests.Transcoding;
 internal sealed class RecordingTranscodeEngine : ITranscodeEngine
 {
     private int _created;
+    public TranscodeTooling Tooling { get; set; } = TranscodeTooling.None;
 
     public TranscodeJobRequest? Seen { get; private set; }
 
@@ -30,7 +31,7 @@ internal sealed class RecordingTranscodeEngine : ITranscodeEngine
 
     public IReadOnlyList<JobSnapshot> GetAllSnapshots() => [];
 
-    public Task<TranscodeTooling> GetToolingAsync(CancellationToken cancellationToken) => Task.FromResult(TranscodeTooling.None);
+    public Task<TranscodeTooling> GetToolingAsync(CancellationToken cancellationToken) => Task.FromResult(Tooling);
 
 #pragma warning disable CS0067 // The consumer surface raises these; nothing here does.
     public event EventHandler<string>? JobStarted;

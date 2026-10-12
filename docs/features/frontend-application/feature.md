@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-10-11
+updated: 2026-10-12
 summary: The Next.js web app embedded in Hosty Shell that acts as a backend-for-frontend for the api service.
 ---
 
@@ -106,8 +106,9 @@ section).
   monospace tabular stat line (percent, transferred/total bytes for a download,
   rates, ETA). Work that is waiting shows a
   queued line instead of a bar. The same card renders a conversion wherever it
-  appears, including the Conversions block on movie detail and above a series'
-  seasons.
+  appears, including the inline Conversions block in Management. Cancelling a
+  conversion requires confirmation. Management hides completed and cancelled jobs
+  automatically and keeps failures visible; Activity retains the full history.
 - **Groups** (`/groups`, `/groups/{id}`) — folders between Series and Collections,
   opening the standard movie or series poster grid. Each manual or smart group
   has one catalog type. See [Groups](../groups/feature.md).
@@ -249,8 +250,7 @@ coverage:
   still listed and still deletable.
 - Episode media: the summary line on a row and "No file" on one without a source,
   expanding a management row fetching the episode's detail once and listing its versions,
-  viewers retaining personal controls in browsing, an admin opening the Convert
-  and Extract dialogs from an episode's version with copy that fits either kind, the
+  viewers retaining personal controls in browsing, an admin opening fixed Convert confirmations and extracting selected tracks from an episode version, the
   rename preview carrying the episode's own stem, and an episode's job listed
   with its expanded management detail.
 - Series grid captions carrying the aggregated format badges, and none for a series

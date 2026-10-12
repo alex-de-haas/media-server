@@ -9,12 +9,16 @@ function discDetail() {
 }
 
 test("a disc needs conversion and an older engine cannot create MKV", async ({ page }) => {
-  await setupApp(page, { detail: { m1: discDetail() }, transcodeAvailable: true });
+  await setupApp(page, { detail: { m1: discDetail() }, transcodeAvailable: true,
+    diagnostics: { m1: [{ id: "disc1", availability: "blocked", reason: "requires_conversion", dolbyVisionFallback: false, dolbyVisionUnknown: false, matchesFilter: false }] },
+  });
   await page.goto("/manage/movies/m1");
-  await expect(page.getByText("Requires conversion to MKV before playback.")).toBeVisible();
+  await expect(page.getByText("Requires conversion", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create MKV", exact: true })).toBeDisabled();
+  await page.locator("#source-disc1 [data-slot=tooltip-trigger]").hover();
+  await expect(page.getByText("Connect a Transcode Engine with Blu-ray import support to create MKV.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Play in Infuse", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Convert to a smaller version" })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /^Select .* track/ })).toHaveCount(0);
 });
 
 test("playlist and explicit track settings become a separate MKV job", async ({ page }) => {

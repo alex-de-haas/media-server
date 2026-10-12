@@ -43,6 +43,9 @@ public sealed class TranscodeJob
     /// <summary>Output file name (the version label shown once it is picked up as a new source).</summary>
     public string? Name { get; set; }
 
+    /// <summary>Operator-chosen label for the output version; null retains legacy probe-based naming.</summary>
+    public string? VersionName { get; set; }
+
     /// <summary>Catalog-root-relative path of the input source file.</summary>
     public required string InputPath { get; set; }
 

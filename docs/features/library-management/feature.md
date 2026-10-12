@@ -1,6 +1,6 @@
 ---
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-12
 summary: Administrator movie and series tables with expandable versions, source diagnostics and filters, separated from personal library browsing.
 components: [src/api, src/web]
 ---
@@ -30,15 +30,63 @@ catalog, version count, stored source size, availability, source issues and acti
 operations. Sortable columns have explicit controls; Columns changes visibility.
 A labeled, keyboard-accessible disclosure opens every version inline, in the
 existing default-source order. Details and source diagnostics load only after
-expansion; title actions load details on demand. A filter selects movies, and
+expansion; title actions load details on demand. The title action trigger always
+uses a three-dot icon, and its menu includes Open in library for movies, series
+and episodes (opening the episode's series). A filter selects movies, and
 matching versions receive a label while alternatives stay visible. Version rows
 do not change the title count or pagination.
 
-A movie deep link, `/manage/movies/{id}`, uses the same table with the movie
-expanded. Source links add `source={id}` and target the source after lazy loading.
-A focused item that is removed or merged offers a useful empty/error return path;
-a retained movie remains manageable only when its existing detail authorization
-permits access. Correcting a movie match opens the surviving movie and carries a
+Expanded versions form a compact nested table with aligned file/track, type,
+format/details, size/rate, status and action columns. A package icon identifies a
+file container; Blu-ray sources keep their disc icon. Each container has its own
+keyboard-accessible disclosure for embedded video, audio, subtitle and other
+tracks. Track rows show the recorded metadata, bitrate, a Default badge and forced flags;
+an absent track bitrate stays unknown rather than using the container's rate.
+Embedded rows align their icons and names with the container. Separate audio and subtitle
+files use the same columns and type icons and remain visible when the container
+is collapsed. Origin labels distinguish Embedded from Separate file; external
+audio carries a Merge for playback hint. Availability belongs to the container.
+Embedded tracks come from one container; separate audio and subtitle files from
+any version of the same title can join that selection. Selecting a separate file
+first does not lock the container choice. A compact action row
+below the header offers Extract, Remux, Convert and Clear selection, with reasons
+for unavailable operations. Selecting another container requires clearing the
+embedded selection; collapsing its tracks preserves the selection. Removed sources
+and stream IDs are pruned, and changed selected facts close an open confirmation.
+
+Each eligible embedded audio/text-subtitle row also offers direct Extract. Batch
+extraction uses exactly the checked tracks. Remux and Convert require one video
+plus audio, optionally subtitles. They open fixed-selection confirmations with
+editable track names, including video. Convert also exposes codec, resolution,
+quality, encoder and selected-audio settings; Remux optionally rewrites eligible
+Dolby Vision 7 to 8.1. Containers expand through the chevron; track selection uses
+the row checkboxes. There is no second track picker or sidecar Merge button. See
+[Remux and Convert](../convert-dialog/feature.md).
+
+Administrators with no move lock can select tracks. Engine availability gates
+extraction; the explicit-video capability additionally gates Remux and Convert.
+Failed submissions preserve the selection; successful submissions clear it.
+
+The full content-folder path and Join parts share a slim toolbar. The path joins
+the catalog root and relative folder; the catalog name stays in the parent row.
+Indexing progress, Blu-ray
+import and existing version actions remain available. Long filenames wrap within
+their column, and the table scrolls locally when the viewport is narrow.
+
+Availability uses a labeled icon with restrained color in both title and version
+rows: green for Available, red for Unavailable, violet for Preparing and neutral
+for Not assessed. Amber marks source issues and Dolby Vision caveats without
+changing the availability assessment. Color never replaces the status text.
+
+Movie links open `/manage/movies?focus={id}&expanded={id}`. The list locates the
+movie's page in ascending title order and expands its versions alongside the other
+movies on that page. It replaces the temporary focus with the concrete offset, so
+paging, reload and browser history continue to work normally. Legacy
+`/manage/movies/{id}` addresses redirect to this list and preserve source,
+retained-title and return context; there is no separate movie management screen.
+Source links add `source={id}` and target the source after lazy loading.
+A missing or filtered-out focus leaves the list usable and offers retained-title
+management. Correcting a movie match opens the surviving movie and carries a
 return link to the originating list.
 
 Series rows include stored season/episode totals and a distinct affected-episode
@@ -56,9 +104,12 @@ their existing operation restrictions.
 Search, filters, sort direction, page size/offset, hidden columns and expanded
 IDs live in the management URL and survive reload and browser Back/Forward.
 Query-only changes use Next.js's integrated History API, so successive actions
-compose against the current URL. Deep links do not silently clear incompatible
-filters. Open in library links return to the browsing surface. Tables scroll
-locally on narrow screens rather than widening the page.
+compose against the current URL. A focus query respects its supplied filters;
+links from browsing and Activity open the ordinary unfiltered title list.
+Open in library links return to the browsing surface. Management lists
+and drill-down pages use the full available width with 24 px side padding in both
+standalone and embedded launches. Tables scroll locally on narrow screens rather
+than widening the page.
 
 ## Filters and query contract
 
@@ -78,6 +129,10 @@ under React lint checks, and remove unused declarations.
   `state`; `minVersions` / `maxVersions` apply to total owned versions.
 - `sort`: title, year, size, versions, issues or episode; `descending`;
   `limit` defaults to 25 and is bounded to 1–100; nonnegative `offset`.
+- `focusId`: optional movie ID for locating its containing page. Requires Movie,
+  ascending title order and no `itemId`. A bounded SQL rank query uses the same
+  title/ID ordering as pagination. Missing or excluded targets leave the requested
+  offset unchanged; this parameter never filters the list to one item.
 
 Technical conditions and issue predicates match the same source and its selected
 picture stream. Cover art does not displace the picture. Search, filtering,
@@ -103,7 +158,8 @@ detection, full-file validation or an Infuse compatibility promise. The shared
 `PlaybackEligibility` decision expression serves native negotiation and SQL
 projections; management does not create playback sessions or stream URLs.
 
-- BDMV sources require Create MKV; Blu-ray-derived MKV files are ordinary files.
+- BDMV sources show a single Requires conversion status and a Create MKV
+  icon in the source actions; Blu-ray-derived MKV files are ordinary files.
 - DV profile 7 carries an HDR10 fallback warning, rather than an automatic refusal.
 - Offline or unanchored catalog storage overrides source eligibility.
 - Missing media/DV-profile facts, including incomplete audio codecs, remain unknown. Unknown alternatives prevent a
@@ -141,12 +197,21 @@ navigating, including when its ID stays the same while the series changes.
 
 Removed titles stay outside published tables. Personal history stays in the
 library. Administrators reach permanent deletion from the retained movie's
-management entry or a removed series' Manage link; the series route uses
-`removed=1` and the caller's own removed-title list. These links do not broaden
-access to another user's retained history.
+management entry or a removed series' Manage link. Both use `removed=1` and the
+caller's own removed-title list to open the retained-title dialog. Movies use the
+shared movie list route; series retain their series route. These links do not
+broaden access to another user's retained history.
 
 Related conversion/move components remain the existing jobs; Activity is the
-shared operations page. Source mutations and coarse realtime events invalidate
+shared operations page. Inline Conversions cards omit Manage because their
+versions are already visible beneath them. Cancelling a queued or running job
+requires confirmation naming the job, both here and in Activity. A failed cancel
+keeps the job and confirmation available for retry. Completed and cancelled jobs
+automatically disappear from the inline section without deleting their history;
+the section disappears when no visible jobs remain. Failed jobs keep their error
+and dismissal control visible. Activity retains the full job history.
+Activity cards retain Manage and resolve the current owner before opening the
+shared movie list or series context. Source mutations and coarse realtime events invalidate
 management summaries, diagnostics and viewer availability. List/availability
 polling provides a 30-second reconciliation fallback. Expanded conversion
 completion refreshes source details without requiring collapse/reopen. A created
@@ -158,16 +223,25 @@ MKV can remain unknown/preparing until background indexing observes it.
   probes/profiles, offline/unanchored storage, preparation states, native rule
   parity, cover-art selection, removed exclusion, same-source filters, distinct
   episode counts, ascending/descending episode chronology, stable paging,
-  literal search and bounded SQL command counts.
+  literal search, focused movie pagination with equal-title ties and missing or
+  excluded targets, and bounded SQL command counts.
 - Endpoint tests assert administrator versus authenticated-viewer policy metadata,
-  query-default binding and rejection of invalid page windows.
+  query-default and focus binding, and rejection of invalid page windows.
 - Indexing snapshot tests cover expiry, restart and preservation of known failure.
 - Vitest covers management URL boundaries and episode targeting.
 - Playwright covers lazy expansion with all versions, filter match labels,
   reload/Back, multivalue technical filters, sorting/paging, direct links, viewer exclusion,
   personal-action separation, mobile/embedded layout and series drill-down.
-  Retained-series actions stay in management; corrected episodes open their current
-  series whether remapping preserves or replaces the episode ID.
+  Container disclosures work independently with Enter/Space, preserve external-file
+  selections and expose embedded track types, metadata and default/forced flags.
+  Legacy movie links resolve the containing page without hiding neighboring movies;
+  source targeting and Back navigation survive. Activity retains management links
+  while inline conversion cards omit them. Removed movies and series retain their
+  administrative actions in management. Conversion cancellation requires explicit
+  confirmation; declining or escaping sends no request, and a failed request keeps
+  the job visible. Polling removes completed/cancelled inline jobs without deleting
+  history, refreshes the versions and leaves failed jobs visible. Corrected episodes
+  open their current series whether remapping preserves or replaces the episode ID.
   Existing conversion, extraction, Blu-ray, joining, indexing, last-version,
   stale conflict, season deletion and retained-history scenarios run at their
   corresponding library or management entry points.

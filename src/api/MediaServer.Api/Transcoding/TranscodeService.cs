@@ -3,6 +3,7 @@ using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
 using MediaServer.Api.Library;
 using MediaServer.Api.Native.Playback;
+using MediaServer.Api.Organizer;
 using MediaServer.Api.Probe;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,6 +24,9 @@ public sealed class TranscodeService(
 {
     public async Task<TranscodeJobResponse> CreateAsync(CreateTranscodeRequest request, CancellationToken cancellationToken)
     {
+        // Serialize name admission with other library writers until the job owns its output path.
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
+        var versionName = NormalizeVersionName(request.VersionName);
         var source = await database.MediaSources
             .Include(candidate => candidate.MediaItem)
             .ThenInclude(item => item!.Catalog)
@@ -43,6 +47,11 @@ public sealed class TranscodeService(
 
         var catalog = item.Catalog ?? throw new TranscodeRequestException("Source's catalog is unavailable.");
 
+        var mergeStreams = await ResolveMergeStreamsAsync(request, source, cancellationToken);
+        var selectedVideo = ResolveVideoSelection(request, source, mergeStreams);
+        if (selectedVideo is not null && !(await engine.GetToolingAsync(cancellationToken)).ExplicitVideoSelection)
+            throw new TranscodeRequestException("Update Transcode Engine to use explicit video selection and video track names.");
+
         var isMerge = request.MergeStreamIds is { Count: > 0 };
         var codec = ResolveCodec(request, isMerge);
         var hardware = NormalizeHardware(request.HardwareAcceleration);
@@ -50,9 +59,9 @@ public sealed class TranscodeService(
         var dolbyVision = ResolveDolbyVision(request, codec, source.Streams);
 
         // Resolve track selection and target resolution against the source's probed streams.
-        var orderedAudio = source.Streams.Where(stream => stream.StreamType == StreamType.Audio)
+        var orderedAudio = source.Streams.Where(stream => !stream.IsExternal && stream.StreamType == StreamType.Audio)
             .OrderBy(stream => stream.Index).Select(stream => stream.Index).ToList();
-        var orderedSubtitles = source.Streams.Where(stream => stream.StreamType == StreamType.Subtitle)
+        var orderedSubtitles = source.Streams.Where(stream => !stream.IsExternal && stream.StreamType == StreamType.Subtitle)
             .OrderBy(stream => stream.Index).Select(stream => stream.Index).ToList();
 
         var audioSelection = ResolveSelection(request.AudioStreamIndexes, orderedAudio, "audio");
@@ -63,7 +72,7 @@ public sealed class TranscodeService(
         // Downscale only — never upscale, and never when remuxing (copy keeps the original picture untouched).
         // Max known video height (ignores a null/cover-art stream that might sort first); null only when no
         // video height is known at all, in which case we don't scale rather than risk an upscale.
-        var sourceHeight = source.Streams.Where(stream => stream.StreamType == StreamType.Video)
+        var sourceHeight = selectedVideo is not null ? selectedVideo.Height : source.Streams.Where(stream => !stream.IsExternal && stream.StreamType == StreamType.Video)
             .Max(stream => stream.Height);
         int? targetHeight = null;
         if (codec != "copy" && request.MaxHeight is { } requestedHeight)
@@ -89,7 +98,9 @@ public sealed class TranscodeService(
         // part of what separates its output from another's.
         var audioTargets = ResolveAudioTargets(request, source, audioSelection);
 
-        var outputRelative = BuildOutputRelative(
+        var outputRelative = versionName is not null
+            ? await NamedOutputRelativeAsync(catalog, item, source.Path, versionName, cancellationToken)
+            : BuildOutputRelative(
             source.Path,
             VersionLabel(codec, targetHeight, isMerge, qualityLevel, audioTargets?.Select(target => target.Codec).ToList(), dolbyVision is not null));
         if (!sandbox.TryResolve(catalog, outputRelative, out var outputAbsolute))
@@ -97,29 +108,41 @@ public sealed class TranscodeService(
             throw new TranscodeRequestException("Could not place the output inside the catalog.");
         }
 
-        // A leftover output file from a previously-deleted version must not block re-conversion: only refuse
-        // when a live version (MediaSource) still points at this output, or another transcode is already
-        // producing it. Any orphan file at this path is overwritten by ffmpeg's -y.
-        if (await database.MediaSources.AnyAsync(
-                candidate => candidate.MediaItemId == item.Id && candidate.Path == outputRelative, cancellationToken))
+        // Names and paths held by versions or active jobs cannot be reused. Explicitly named outputs also
+        // protect untracked files; legacy automatic naming retains its orphan-output retry behavior.
+        var existingVersions = await database.MediaSources.AsNoTracking()
+            .Where(candidate => candidate.MediaItem!.CatalogId == catalog.Id &&
+                (candidate.MediaItemId == item.Id || EF.Functions.Collate(candidate.Path, "NOCASE") == outputRelative))
+            .Select(candidate => new { candidate.MediaItemId, candidate.Path, candidate.VersionName })
+            .ToListAsync(cancellationToken);
+        if (existingVersions.Any(candidate =>
+                string.Equals(candidate.Path, outputRelative, StringComparison.OrdinalIgnoreCase) ||
+                (versionName is not null && candidate.MediaItemId == item.Id &&
+                    string.Equals(candidate.VersionName, versionName, StringComparison.OrdinalIgnoreCase))))
         {
-            throw new TranscodeRequestException(
-                $"This title already has a version at '{outputRelative}'. Delete that version first, or change the settings.");
+            throw new TranscodeVersionNameException("A version with this name already exists. Choose another name.");
         }
 
-        if (await database.TranscodeJobs.AnyAsync(
-                candidate => candidate.MediaItemId == item.Id && candidate.OutputPath == outputRelative &&
-                    (candidate.State == TranscodeJobState.Queued || candidate.State == TranscodeJobState.Running), cancellationToken))
+        var activeJobs = await database.TranscodeJobs.AsNoTracking()
+            .Where(candidate => candidate.CatalogId == catalog.Id &&
+                (candidate.State == TranscodeJobState.Queued || candidate.State == TranscodeJobState.Running))
+            .Select(candidate => new { candidate.MediaItemId, candidate.OutputPath, candidate.VersionName })
+            .ToListAsync(cancellationToken);
+        if (activeJobs.Any(candidate =>
+                string.Equals(candidate.OutputPath, outputRelative, StringComparison.OrdinalIgnoreCase) ||
+                (versionName is not null && candidate.MediaItemId == item.Id &&
+                    string.Equals(candidate.VersionName, versionName, StringComparison.OrdinalIgnoreCase))))
         {
-            throw new TranscodeRequestException($"A transcode is already producing '{outputRelative}'.");
+            throw new TranscodeVersionNameException("A version with this name is already being created. Choose another name.");
         }
+        if (versionName is not null && (File.Exists(outputAbsolute) || Directory.Exists(outputAbsolute)))
+            throw new TranscodeVersionNameException("A file with this version name already exists. Choose another name.");
 
         var input = ToMount(inputAbsolute)
             ?? throw new TranscodeRequestException("The catalog root is not bound as a media mount; transcoding needs the same host path bound into the transcode-engine.");
         var output = ToMount(outputAbsolute)
             ?? throw new TranscodeRequestException("The output path is not under a configured media mount.");
 
-        var mergeStreams = await ResolveMergeStreamsAsync(request, source, cancellationToken);
         var additionalInputs = ResolveMergeInputs(mergeStreams, catalog);
         var metadataOverrides = ResolveMetadataOverrides(request, source, mergeStreams);
 
@@ -131,7 +154,7 @@ public sealed class TranscodeService(
                     input.Label, input.Relative, output.Label, output.Relative, codec, hardware, qualityLevel,
                     targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
                     additionalInputs, metadataOverrides, audioTargets,
-                    DolbyVision: dolbyVision),
+                    DolbyVision: dolbyVision, VideoStreamIndex: request.VideoStreamIndex),
                 cancellationToken);
         }
         catch (InvalidOperationException exception)
@@ -148,6 +171,7 @@ public sealed class TranscodeService(
             MediaItemId = item.Id,
             CatalogId = catalog.Id,
             Name = Path.GetFileName(outputRelative),
+            VersionName = versionName,
             InputPath = source.Path,
             OutputPath = outputRelative,
             VideoCodec = codec,
@@ -243,6 +267,31 @@ public sealed class TranscodeService(
         return true;
     }
 
+    private static string? NormalizeVersionName(string? name)
+    {
+        if (name is null) return null;
+        if (!LibrarySourceService.TryNormalizeEdition(name, out var normalized, out var error))
+            throw new TranscodeVersionNameException(error);
+        if (normalized is null) throw new TranscodeVersionNameException("Enter a version name.");
+        if (normalized.Length > 120) throw new TranscodeVersionNameException("Use no more than 120 characters for the version name.");
+        return normalized;
+    }
+
+    private async Task<string> NamedOutputRelativeAsync(Catalog catalog, MediaItem item, string inputPath, string name, CancellationToken ct)
+    {
+        string canonical;
+        if (item.Kind == MediaKind.Episode)
+        {
+            var series = await database.MediaItems.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == item.SeriesId, ct)
+                ?? throw new TranscodeRequestException("The episode's series is unavailable.");
+            canonical = LibraryNaming.ForEpisode(series, item, ".mkv", name);
+        }
+        else canonical = LibraryNaming.ForMovie(catalog, item, ".mkv", name);
+        // Keep the physical folder, but do not accumulate the input version's suffix in the new name.
+        var directory = Path.GetDirectoryName(inputPath.Replace('\\', '/'))?.Replace('\\', '/');
+        return string.IsNullOrEmpty(directory) ? Path.GetFileName(canonical) : $"{directory}/{Path.GetFileName(canonical)}";
+    }
+
     /// <summary>Output is a sibling of the input with a descriptive version suffix (codec + resolution, or
     /// "Remux"), always in a Matroska (.mkv) container — the universal carrier that keeps every audio track,
     /// subtitle, attachment and HDR layer. The suffix captures the codec and target resolution; conversions
@@ -261,6 +310,19 @@ public sealed class TranscodeService(
 
         var name = $"{stem} - {label}.mkv";
         return directory.Length > 0 ? $"{directory}/{name}" : name;
+    }
+
+    /// <summary>Validates the fixed grid selection against this source before any engine call.</summary>
+    internal static MediaStream? ResolveVideoSelection(CreateTranscodeRequest request, MediaSource source, IReadOnlyList<MediaStream> mergeStreams)
+    {
+        if (request.VideoStreamIndex is not { } index) return null;
+        var video = source.Streams.FirstOrDefault(s => !s.IsExternal && s.StreamType == StreamType.Video && s.Index == index)
+            ?? throw new TranscodeRequestException("The selected video stream does not belong to this container.");
+        if (request.AudioStreamIndexes is null || request.SubtitleStreamIndexes is null)
+            throw new TranscodeRequestException("Explicit video selection requires explicit audio and subtitle selections.");
+        if (request.AudioStreamIndexes.Count == 0 && !mergeStreams.Any(s => s.StreamType == StreamType.Audio))
+            throw new TranscodeRequestException("Select at least one audio track.");
+        return video;
     }
 
     /// <summary>
@@ -325,7 +387,8 @@ public sealed class TranscodeService(
 
         // The picture, by the rule every other surface uses: the first video stream by index that is not a
         // still image, which is how a cover a muxer wrote as a video track is passed over.
-        var video = NativePlaybackResolver.PictureFor(streams.Where(stream => !stream.IsExternal));
+        var video = NativePlaybackResolver.PictureFor(streams.Where(stream => !stream.IsExternal &&
+            (request.VideoStreamIndex is null || stream.Index == request.VideoStreamIndex)));
         if (video is null)
         {
             throw new TranscodeRequestException("This version has no video stream to convert.");
@@ -482,13 +545,15 @@ public sealed class TranscodeService(
         }
 
         var streams = await database.MediaStreams
-            .Where(stream => stream.MediaSourceId == source.Id && stream.IsExternal && ids.Contains(stream.Id))
+            .Where(stream => stream.MediaSource!.MediaItemId == source.MediaItemId && stream.IsExternal &&
+                (stream.StreamType == StreamType.Audio || stream.StreamType == StreamType.Subtitle) && ids.Contains(stream.Id))
             .OrderBy(stream => stream.Index)
+            .ThenBy(stream => stream.Id)
             .ToListAsync(cancellationToken);
 
         if (streams.Count != ids.Distinct().Count())
         {
-            throw new TranscodeRequestException("One or more of the selected tracks is not a sidecar of this version.");
+            throw new TranscodeRequestException("One or more of the selected tracks is not an external audio or subtitle file of this title.");
         }
 
         return streams;
@@ -578,6 +643,14 @@ public sealed class TranscodeService(
                 ?? throw new TranscodeRequestException(
                     "A track edit names a track that is neither in this version nor among the tracks being merged.");
 
+            var included = embedded.StreamType switch
+            {
+                StreamType.Video => request.VideoStreamIndex == embedded.Index,
+                StreamType.Audio => request.AudioStreamIndexes?.Contains(embedded.Index) ?? true,
+                StreamType.Subtitle => request.SubtitleStreamIndexes?.Contains(embedded.Index) ?? true,
+                _ => false,
+            };
+            if (!included) throw new TranscodeRequestException("A track edit must name a selected track; video names require explicit video selection.");
             overrides.Add(new EngineMetadataOverride(0, embedded.Index, language, edit.Title));
         }
 

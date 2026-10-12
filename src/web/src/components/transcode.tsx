@@ -1,16 +1,28 @@
 "use client";
+import { audioBitrateFor, compositionReason, selectedOutputEstimate, trackJobInput, trackLabel, versionNameError, type TrackOperation } from "@/lib/track-actions";
+import { ApiError } from "@/lib/api";
 import { ManagementJobLink } from "@/components/management-job-link";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Info, Trash2, X } from "lucide-react";
+import { AlertTriangle, Trash2, X } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { mediaServer, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
-import { dolbyVisionLabel, formatBytes, formatEta, formatPercent, formatTimeAgo, objectAudioFormat, pictureStream, reencodeDynamicRangeWarning } from "@/lib/format";
+import { mediaServer, type LibraryMediaSource, type MediaStream, type TranscodeJob } from "@/lib/media-server";
+import { formatBytes, formatEta, formatPercent, formatTimeAgo, objectAudioFormat, reencodeDynamicRangeWarning } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 import { ActivityCard, ActivityCardHeader, ActivityProgress, ActivityQueued, ActivityStats, IconAction } from "@/components/activity-card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -19,14 +31,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const MODES = [
-  { value: "encode", label: "Re-encode — smaller file" },
-  { value: "copy", label: "Keep original video — lossless, HDR-safe" },
-];
 
 const CODECS = [
   { value: "hevc", label: "HEVC (H.265) — smaller files" },
@@ -47,25 +54,6 @@ const QUALITY = [
   { value: "balanced", label: "Balanced — noticeably smaller" },
   { value: "small", label: "Small — size first" },
 ];
-
-// What each level came out at on the file the engine's mapping was measured against — a 67.2 Mbps 4K HDR
-// remux, where high landed at 19.85 Mbps (the table is in the engine's compression-controls doc). Applied
-// as a share of this source's own video bitrate rather than quoted as one absolute figure, so the estimate
-// tracks the file in front of the operator. It is an anchor, not a prediction: a level asks for a picture,
-// and a source that is already an efficient encode has far less left to give up.
-const QUALITY_SHARE: Record<string, number> = {
-  highest: 0.44,
-  high: 0.3,
-  balanced: 0.18,
-  small: 0.1,
-};
-
-/** E-AC-3 bitrate for a track, by channel count. Sent explicitly so the row can state the resulting size;
- * left to the encoder these would be 448/192/96, which is thriftier than a library wants for 5.1. */
-function audioBitrateFor(channels: number | null): number {
-  if ((channels ?? 2) > 2) return 640;
-  return channels === 1 ? 128 : 256;
-}
 
 /** What one track weighs, at the bitrate the probe recorded for it. Null when the file stated none — the
  * caller then says nothing rather than carving up the source's overall rate, which measures the file and
@@ -95,10 +83,6 @@ function audioReEncodeHint(stream: MediaStream, durationSeconds: number): string
   return `${loss}${before ? `${formatBytes(before)} ` : ""}→ E-AC-3, ${layout}, ${kbps} kbps · about ${size}`;
 }
 
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
 const RESOLUTIONS = [
   { value: "source", label: "Keep original" },
   { value: "2160", label: "2160p (UHD)" },
@@ -113,502 +97,104 @@ export function isTranscodeActive(job: TranscodeJob): boolean {
   return ACTIVE_STATES.includes(job.state);
 }
 
-/** Dialog to start a transcode of one version — a movie's or an episode's — into a new version: re-encode
- * (optionally smaller) or a lossless remux, with per-track audio/subtitle selection and a choice of default
- * track. */
-export function TranscodeDialog({
-  source,
-  open,
-  onOpenChange,
-  preselectedSidecars,
-}: {
+/** A confirmation for the grid's fixed selection. Mount afresh for every operation. */
+export function TranscodeDialog({ source, selected, operation, onClose, onSubmitted }: {
   source: LibraryMediaSource;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** Sidecar stream ids to open with already checked — how the Media tab's Merge button arrives here. */
-  preselectedSidecars?: string[];
+  selected: MediaStream[];
+  operation: TrackOperation;
+  onClose: () => void;
+  onSubmitted: () => void;
 }) {
-  const audioStreams = source.streams.filter((stream) => stream.type === "Audio" && !stream.isExternal);
-  const subtitleStreams = source.streams.filter((stream) => stream.type === "Subtitle" && !stream.isExternal);
-  // The files beside the video. They are not tracks of this container — each is an input of its own — so
-  // they carry ids rather than indexes and are selected separately from the two lists above.
-  const sidecars = source.streams.filter((stream) => stream.isExternal);
-  // 100-ns ticks. Every size on this dialog is a bitrate times this, so they are all comparable with each
-  // other — and all absent together on a source whose tracks never recorded one.
-  const durationSeconds = source.durationTicks / 10_000_000;
-  // The picture, not the poster: a container with embedded cover art carries that as a video stream too, so
-  // the costliest one is the one an encode is actually about.
-  const videoBytes = source.streams
-    .filter((stream) => stream.type === "Video" && !stream.isExternal)
-    .reduce<number | null>((largest, stream) => {
-      const bytes = streamBytes(stream, durationSeconds);
-      return bytes !== null && (largest === null || bytes > largest) ? bytes : largest;
-    }, null);
-  // Only the tracks that state a bitrate. Leaving the silent ones out can only understate this side, which
-  // is the safe direction: the split below claims audio is the larger half, and it must never make that
-  // claim on a total it filled in itself.
-  const sizedAudio = audioStreams.filter((stream) => stream.bitrate);
-  const audioBytes = sizedAudio.reduce((total, stream) => total + (streamBytes(stream, durationSeconds) ?? 0), 0);
-  const audioOutweighsVideo = videoBytes !== null && audioBytes > videoBytes;
-  const sourceDefaultAudio = audioStreams.find((stream) => stream.isDefault)?.index ?? audioStreams[0]?.index ?? null;
-  const sourceDefaultSubtitle = subtitleStreams.find((stream) => stream.isDefault)?.index ?? null;
-  // The film, not a cover a muxer wrote as a video track — the same rule every server surface uses.
-  const picture = pictureStream(source.streams);
-  const hdr = picture?.hdrFormat ?? null;
-  // Profile-aware where the profile is recorded: a re-encode of profile 5 wrecks the colours, one of 8.4 lands
-  // on HLG, while 7 and 8.1 keep an HDR10 picture and lose only the dynamic layer.
-  const hdrWarning = reencodeDynamicRangeWarning(hdr, picture?.dolbyVision);
-  // The one Dolby Vision a copy can improve on: a dual-layer profile 7 — a UHD Blu-ray remux, which Apple TV
-  // and Infuse play as HDR10 — rewritten to the single-layer 8.1 they play as Dolby Vision. Offered only
-  // when the engine carries the tools for it; an engine without them refuses the job rather than copying.
-  const profile7 = picture?.dolbyVision?.profile === 7;
-  const { data: availability } = useQuery({
-    queryKey: ["transcode-availability"],
-    queryFn: () => mediaServer.transcodeAvailability(),
-    staleTime: 5 * 60 * 1000,
-    enabled: open && profile7,
-  });
-  const canConvertDolbyVision = profile7 && (availability?.dolbyVisionConversion ?? false);
-
-  const queryClient = useQueryClient();
-  const modeId = useId();
-  const codecId = useId();
-  const hardwareId = useId();
-  const resolutionId = useId();
-  const qualityId = useId();
-
-  // Opening from Merge means the operator already said "fold these in", and folding in is a copy unless
-  // they ask for more — so the dialog opens on "keep the video" rather than silently proposing a re-encode
-  // of a file they only wanted more tracks in.
-  const initialMode = preselectedSidecars?.length ? "copy" : "encode";
-  const [mode, setMode] = useState(initialMode);
+  const copy = operation === "remux";
+  const label = copy ? "Remux" : "Convert";
+  const [versionName, setVersionName] = useState(label);
+  const versionInput = useRef<HTMLInputElement>(null);
   const [codec, setCodec] = useState("hevc");
   const [hardware, setHardware] = useState("auto");
   const [resolution, setResolution] = useState("source");
   const [quality, setQuality] = useState("high");
-  const [convertDolbyVision, setConvertDolbyVision] = useState(false);
-  const dolbyVisionId = useId();
-  // Which kept audio tracks are re-encoded instead of copied, keyed by stream id. Empty is the old
-  // behaviour — every track copied byte for byte.
-  const [audioReEncoded, setAudioReEncoded] = useState<Set<string>>(() => new Set());
-  // Names and languages the operator corrected, keyed by stream id. Only what actually changed is sent: an
-  // untouched field keeps whatever the source stream carries, so correcting one track never freezes the
-  // others' metadata.
   const [titles, setTitles] = useState<Record<string, string>>({});
-  const [languages, setLanguages] = useState<Record<string, string>>({});
-  const [audioKept, setAudioKept] = useState<Set<number>>(() => new Set(audioStreams.map((stream) => stream.index)));
-  const [subtitleKept, setSubtitleKept] = useState<Set<number>>(() => new Set(subtitleStreams.map((stream) => stream.index)));
-  const [merged, setMerged] = useState<Set<string>>(() => new Set(preselectedSidecars ?? []));
-  const [defaultAudio, setDefaultAudio] = useState<number | null>(sourceDefaultAudio);
-  const [defaultSubtitle, setDefaultSubtitle] = useState<number | null>(sourceDefaultSubtitle);
-
-  // Reset the form each time the dialog (re)opens so a previous run's choices don't leak in.
-  const [wasOpen, setWasOpen] = useState(open);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) {
-      setMode(initialMode);
-      setCodec("hevc");
-      setHardware("auto");
-      setResolution("source");
-      setQuality("high");
-      setConvertDolbyVision(false);
-      setAudioReEncoded(new Set());
-      setTitles({});
-      setLanguages({});
-      setAudioKept(new Set(audioStreams.map((stream) => stream.index)));
-      setSubtitleKept(new Set(subtitleStreams.map((stream) => stream.index)));
-      setMerged(new Set(preselectedSidecars ?? []));
-      setDefaultAudio(sourceDefaultAudio);
-      setDefaultSubtitle(sourceDefaultSubtitle);
-    }
-  }
-
-  // The tags a language may be corrected to, from the service that validates them. Fetched once the dialog
-  // is open and only for as long as it stays a fixed list — an empty answer means "don't judge", so a failed
-  // fetch leaves the field permissive and lets the API have the last word rather than blocking a submit.
-  const { data: knownLanguages } = useQuery({
-    queryKey: ["transcode-languages"],
-    queryFn: mediaServer.transcodeLanguages,
-    staleTime: Infinity,
-    enabled: open,
-  });
-
-  const toggleAudio = (index: number, checked: boolean) => {
-    setAudioKept((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        next.add(index);
-      } else {
-        next.delete(index);
-      }
-      return next;
-    });
-    // Dropping the track that was the default leaves the type with no explicit default.
-    if (!checked && defaultAudio === index) {
-      setDefaultAudio(null);
-    }
-  };
-
-  const toggleSubtitle = (index: number, checked: boolean) => {
-    setSubtitleKept((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        next.add(index);
-      } else {
-        next.delete(index);
-      }
-      return next;
-    });
-    if (!checked && defaultSubtitle === index) {
-      setDefaultSubtitle(null);
-    }
-  };
-
-  const toggleSidecar = (id: string, checked: boolean) => {
-    setMerged((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
-      return next;
-    });
-  };
-
-  // Whether a track ends up in the output, and can therefore carry an edit at all.
-  const isKept = (stream: MediaStream) =>
-    stream.isExternal
-      ? merged.has(stream.id)
-      : stream.type === "Audio"
-        ? audioKept.has(stream.index)
-        : subtitleKept.has(stream.index);
-
-  // A language the API will refuse, flagged before the whole form is submitted rather than after.
-  //
-  // The comparison mirrors the service's own normalization: a BCP-47 region or script subtag is dropped
-  // ("pt-BR" is Portuguese), and the served list carries the spellings that fold onto a canonical tag, so
-  // "ru" and "deu" pass here exactly as they do there. Being stricter than the API is the one direction this
-  // check must never be wrong in — it would block a submit the server would have accepted.
-  //
-  // An empty list (the fetch failed, or has not landed) judges nothing.
-  const isBadLanguage = (value: string) => {
-    const primary = value.trim().split(/[-_]/)[0].toLowerCase();
-    return primary !== "" && !!knownLanguages?.length && !knownLanguages.includes(primary);
-  };
-
-  // Only tracks that are actually kept: typing a bad tag and then dropping the track has to unblock the
-  // submit, because that value is no longer going anywhere — the edit is not even built for it below.
-  const badLanguages = Object.entries(languages).filter(([id, value]) => {
-    const stream = source.streams.find((candidate) => candidate.id === id);
-    return stream !== undefined && isKept(stream) && isBadLanguage(value);
-  });
-
-  const convert = useMutation({
+  const [reencoded, setReencoded] = useState<string[]>([]);
+  const [dolbyVision, setDolbyVision] = useState(false);
+  const queryClient = useQueryClient();
+  const id = useId();
+  const video = selected.find(stream => stream.type === "Video");
+  const { data: availability } = useQuery({ queryKey: ["transcode-availability"], queryFn: mediaServer.transcodeAvailability, staleTime: 5 * 60 * 1000 });
+  const profile7 = video?.dolbyVision?.profile === 7;
+  const dvEligible = profile7 && source.container.toLowerCase() === "mkv" && availability?.dolbyVisionConversion;
+  const warning = !copy ? reencodeDynamicRangeWarning(video?.hdrFormat ?? null, video?.dolbyVision) : null;
+  const settings = { operation, versionName, titles, codec, hardware, quality, resolution, reencoded, dolbyVision: !!dvEligible && dolbyVision };
+  const invalidName = versionNameError(versionName);
+  const estimate = selectedOutputEstimate(source, selected, settings);
+  const reason = compositionReason(selected) ?? (!availability?.available ? "Transcode Engine is unavailable." : !availability.explicitVideoSelection ? "Update Transcode Engine to use track selection." : null);
+  const submit = useMutation({
     mutationFn: () => {
-      const isCopy = mode === "copy";
-      const mergeStreamIds = sidecars.filter((stream) => merged.has(stream.id)).map((stream) => stream.id);
-      const keptAudio = audioStreams.filter((stream) => audioKept.has(stream.index)).map((stream) => stream.index);
-      const keptSubtitles = subtitleStreams.filter((stream) => subtitleKept.has(stream.index)).map((stream) => stream.index);
-      const audioDefaultChanged = defaultAudio != null && defaultAudio !== sourceDefaultAudio;
-      const subtitleDefaultChanged = defaultSubtitle != null && defaultSubtitle !== sourceDefaultSubtitle;
-      // Only send an explicit list when the selection is a subset or the default moved — otherwise let the
-      // backend copy every track (the robust "0:a?" path).
-      //
-      // A merge is the exception: an appended track's output position is only knowable when the primary
-      // list is explicit, so the engine refuses to relabel one otherwise. Sending the full list costs
-      // nothing (it maps to exactly the same streams) and keeps a merged dub's name editable.
-      const merging = mergeStreamIds.length > 0;
-      const audioChanged = merging || keptAudio.length !== audioStreams.length || audioDefaultChanged;
-      const subtitlesChanged = merging || keptSubtitles.length !== subtitleStreams.length || subtitleDefaultChanged;
-
-      // Only tracks that end up in the output can carry an edit: an unchecked sidecar has no output stream
-      // to write to, and the API refuses the edit rather than dropping it silently.
-      const editable = new Set([
-        ...audioStreams.filter(isKept).map((stream) => stream.id),
-        ...subtitleStreams.filter(isKept).map((stream) => stream.id),
-        ...mergeStreamIds,
-      ]);
-      const metadataEdits = [...editable]
-        .map((streamId) => {
-          const stream = source.streams.find((candidate) => candidate.id === streamId);
-          const title = titles[streamId]?.trim();
-          const language = languages[streamId]?.trim().toLowerCase();
-          return {
-            streamId,
-            // Undefined is "keep what the source has" — so only a value that actually differs is sent, and
-            // correcting one field never freezes the other.
-            title: title !== undefined && title !== (stream?.title ?? "") ? title : undefined,
-            // A cleared language is "keep", not "erase". The job carries overrides, and there is no override
-            // that removes a tag — sending "" would just be refused as not a language, failing the whole
-            // submit over a field the operator emptied rather than filled.
-            language:
-              language !== undefined && language !== "" && language !== (stream?.language ?? "")
-                ? language
-                : undefined,
-          };
-        })
-        .filter((edit) => edit.title !== undefined || edit.language !== undefined);
-
-      const input: CreateTranscodeInput = {
-        sourceId: source.id,
-        videoCodec: isCopy ? "copy" : codec,
-        hardwareAcceleration: isCopy ? undefined : hardware,
-        // A level is meaningless without an encode, and the API refuses it alongside a copied video.
-        qualityLevel: isCopy ? null : quality,
-        maxHeight: !isCopy && resolution !== "source" ? Number(resolution) : null,
-        // Only on a copy, only when offered, only when ticked — the API refuses every other combination.
-        dolbyVision: isCopy && canConvertDolbyVision && convertDolbyVision ? "toProfile81" : undefined,
-        audioStreamIndexes: audioChanged ? keptAudio : undefined,
-        subtitleStreamIndexes: subtitlesChanged ? keptSubtitles : undefined,
-        defaultAudioStreamIndex: audioDefaultChanged ? defaultAudio : undefined,
-        defaultSubtitleStreamIndex: subtitleDefaultChanged ? defaultSubtitle : undefined,
-        mergeStreamIds: merging ? mergeStreamIds : undefined,
-        metadataEdits,
-        // Only tracks that survive: re-encoding one the job drops is contradictory, and the API refuses it.
-        audioTargets: audioStreams
-          .filter((stream) => audioReEncoded.has(stream.id) && audioKept.has(stream.index))
-          .map((stream) => ({ streamId: stream.id, codec: "eac3", bitrate: audioBitrateFor(stream.channels) })),
-      };
-      return mediaServer.createTranscodeJob(input);
+      if (reason) throw new Error(reason);
+      if (invalidName) throw new Error(invalidName);
+      return mediaServer.createTranscodeJob(trackJobInput(source, selected, settings));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
-      onOpenChange(false);
-      toast.success("Transcode started", { description: "The new version will appear here when it’s ready." });
+      onSubmitted();
+      toast.success(`${label} started`, { description: "The new version will appear when it’s ready." });
     },
-    onError: (error) => toast.error("Couldn’t start transcode", { description: errorMessage(error) }),
   });
-
-  const isCopy = mode === "copy";
-  const mergeCount = sidecars.filter((stream) => merged.has(stream.id)).length;
-
+  const serverNameError = submit.error instanceof ApiError && submit.error.code === "invalid_version_name" ? submit.error.message : null;
+  const nameError = invalidName ?? serverNameError;
+  useEffect(() => { if (serverNameError) versionInput.current?.focus(); }, [serverNameError]);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Wider than the default: a release with three dubs and two subtitle tracks is eight rows of
-          controls, each carrying a name and a language field. */}
-      <DialogContent className="sm:max-w-2xl">
+    <Dialog open onOpenChange={open => { if (!open && !submit.isPending) onClose(); }}>
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Convert version</DialogTitle>
-          <DialogDescription>Create a new version of this title. The original stays until you delete it.</DialogDescription>
+          <DialogTitle>{label} selected tracks</DialogTitle>
+          <DialogDescription>{copy ? "Copy the selected tracks into a new MKV." : "Re-encode the selected video and include the selected audio and subtitles."} The original files stay unchanged.</DialogDescription>
         </DialogHeader>
-
-        <form
-          // The scroll container reaches the dialog's edge (-mr-6 cancels its padding) and re-pads its own
-          // content, so the scrollbar gets a gutter of its own instead of running down the side of the
-          // inputs — while the fields stay inset the same 24px as the header above them.
-          className="-mr-6 flex max-h-[70vh] flex-col gap-3 overflow-y-auto pr-6 text-sm"
-          onSubmit={(e) => {
-            e.preventDefault();
-            convert.mutate();
-          }}
-        >
-          <p className="text-muted-foreground text-xs">
-            Source: <span className="font-mono">{source.container}</span> · {formatBytes(source.sizeBytes)}
-            {source.versionName ? ` · ${source.versionName}` : ""}
-          </p>
-
-          {/* Before the video controls on purpose. Re-encoding the picture is the expensive, lossy, day-long
-              option and it is the one this dialog opens on; when the dubs are the larger half, the operator
-              should learn that before scrolling past it. */}
-          {audioOutweighsVideo ? (
-            <div className="text-muted-foreground flex items-start gap-2 rounded-md border p-2 text-xs">
-              <Info className="mt-0.5 size-3.5 shrink-0" />
-              <span>
-                Audio is the larger half of this file: {formatBytes(audioBytes)} across{" "}
-                {plural(sizedAudio.length, "track")}, against {formatBytes(videoBytes ?? 0)} of video. Dropping
-                tracks and re-encoding the ones you keep is the bigger win, and it leaves the picture untouched.
-              </span>
-            </div>
-          ) : null}
-
-          <Field>
-            <FieldLabel htmlFor={modeId}>Video</FieldLabel>
-            <Select value={mode} onValueChange={(value) => setMode((value as string | null) ?? "encode")} items={MODES}>
-              <SelectTrigger id={modeId} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MODES.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <form className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto" onSubmit={event => { event.preventDefault(); if (!submit.isPending && !reason && !nameError) submit.mutate(); }}>
+          <p className="break-words text-xs text-muted-foreground">{source.fileName} · {selected.length} tracks</p>
+          <Field data-invalid={!!nameError}>
+            <FieldLabel htmlFor={`${id}-version`}>Version name</FieldLabel>
+            <Input ref={versionInput} id={`${id}-version`} value={versionName} maxLength={120} disabled={submit.isPending}
+              aria-invalid={!!nameError} aria-describedby={`${id}-version-help`}
+              onChange={event => { setVersionName(event.target.value); if (serverNameError) submit.reset(); }} />
+            {nameError ? <FieldError id={`${id}-version-help`}>{nameError}</FieldError>
+              : <FieldDescription id={`${id}-version-help`}>Used after the title in the new .mkv filename.</FieldDescription>}
           </Field>
-
-          {!isCopy && hdrWarning ? (
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-500" role="alert">
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              <span>{hdrWarning}</span>
-            </div>
-          ) : null}
-
-          {isCopy && canConvertDolbyVision ? (
-            <div className="rounded-md border p-2">
-              <label htmlFor={dolbyVisionId} className="flex items-start gap-2 text-sm">
-                <Checkbox
-                  id={dolbyVisionId}
-                  checked={convertDolbyVision}
-                  onCheckedChange={(value) => setConvertDolbyVision(value === true)}
-                  className="mt-0.5"
-                />
-                <span className="min-w-0">
-                  <span className="block leading-6">Convert Dolby Vision to profile 8.1 (single layer)</span>
-                  <span className="text-muted-foreground block text-xs">
-                    This source is {dolbyVisionLabel(picture?.dolbyVision)}, a dual layer that no Apple device decodes, so Apple TV and Infuse play its HDR10 base layer. The rewrite keeps every frame of picture, carries the Dolby Vision metadata over as profile 8.1 — which they play as Dolby Vision — and drops the enhancement layer, about 1.6 % of the file.
-                  </span>
-                </span>
-              </label>
-            </div>
-          ) : null}
-
-          {!isCopy && (
-            <>
+          {!copy && <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: "Codec", value: codec, set: setCodec, items: CODECS },
+              { label: "Resolution", value: resolution, set: setResolution, items: RESOLUTIONS },
+              { label: "Quality", value: quality, set: setQuality, items: QUALITY },
+              { label: "Encoder", value: hardware, set: setHardware, items: HARDWARE },
+            ].map(field => <Field key={field.label}>
+              <FieldLabel htmlFor={`${id}-${field.label}`}>{field.label}</FieldLabel>
+              <Select value={field.value} onValueChange={value => field.set(value ?? field.value)} items={field.items}>
+                <SelectTrigger id={`${id}-${field.label}`} className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>{field.items.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </Field>)}
+          </div>}
+          {warning && <p className="flex gap-2 rounded-md bg-warning/10 p-2 text-xs text-warning-foreground"><AlertTriangle className="size-4 shrink-0" />{warning}</p>}
+          <div className="divide-y rounded-md border">
+            {selected.map(stream => <div key={stream.id} className="space-y-1.5 p-2">
               <Field>
-                <FieldLabel htmlFor={codecId}>Codec</FieldLabel>
-                <Select value={codec} onValueChange={(value) => setCodec((value as string | null) ?? "hevc")} items={CODECS}>
-                  <SelectTrigger id={codecId} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CODECS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <FieldLabel htmlFor={`${id}-${stream.id}`}>{trackLabel(stream)}{stream.language ? ` · ${stream.language}` : ""}{stream.codec ? ` · ${stream.codec.toUpperCase()}` : ""}</FieldLabel>
+                <Input id={`${id}-${stream.id}`} aria-label={`Name of ${trackLabel(stream)}`} value={titles[stream.id] ?? stream.title ?? ""} placeholder="Track name" disabled={submit.isPending} onChange={event => setTitles(current => ({ ...current, [stream.id]: event.target.value }))} />
               </Field>
-
-              <Field>
-                <FieldLabel htmlFor={resolutionId}>Resolution</FieldLabel>
-                <Select value={resolution} onValueChange={(value) => setResolution((value as string | null) ?? "source")} items={RESOLUTIONS}>
-                  <SelectTrigger id={resolutionId} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RESOLUTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">Only downscales — a smaller source is left as-is.</p>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor={hardwareId}>Encoder</FieldLabel>
-                <Select value={hardware} onValueChange={(value) => setHardware((value as string | null) ?? "auto")} items={HARDWARE}>
-                  <SelectTrigger id={hardwareId} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {HARDWARE.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor={qualityId}>Quality</FieldLabel>
-                <Select value={quality} onValueChange={(value) => setQuality((value as string | null) ?? "high")} items={QUALITY}>
-                  <SelectTrigger id={qualityId} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {QUALITY.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {/* "Level 3" means nothing to someone deciding whether to spend a day of CPU on a file;
-                    what it costs does. Absent — rather than guessed at — when the source never recorded a
-                    video bitrate, which is the only figure this can honestly come from. */}
-                {videoBytes !== null ? (
-                  <p className="text-xs">
-                    About {formatBytes(videoBytes * QUALITY_SHARE[quality])} of video
-                    {resolution !== "source" ? ` or less at ${resolution}p` : ""}, from {formatBytes(videoBytes)}.
-                  </p>
-                ) : null}
-                <p className="text-muted-foreground text-xs">
-                  The same level on every encoder — the engine translates it for whichever one runs the job.
-                  {videoBytes !== null
-                    ? " The size is an anchor rather than a promise: a level asks for a picture, and what that costs follows the content."
-                    : ""}
-                </p>
-              </Field>
-            </>
-          )}
-
-          <TrackList
-            title="Audio"
-            streams={audioStreams}
-            isKept={(stream) => audioKept.has(stream.index)}
-            onToggle={(stream, checked) => toggleAudio(stream.index, checked)}
-            defaultIndex={defaultAudio}
-            onDefault={setDefaultAudio}
-            titles={titles}
-            onTitle={setTitles}
-            languages={languages}
-            onLanguage={setLanguages}
-            isBadLanguage={isBadLanguage}
-            isReEncoded={(stream) => audioReEncoded.has(stream.id)}
-            onReEncode={(stream, checked) =>
-              setAudioReEncoded((current) => {
-                const next = new Set(current);
-                if (checked) next.add(stream.id);
-                else next.delete(stream.id);
-                return next;
-              })
-            }
-            reEncodeHint={(stream) => audioReEncodeHint(stream, durationSeconds)}
-          />
-          <TrackList
-            title="Subtitles"
-            streams={subtitleStreams}
-            isKept={(stream) => subtitleKept.has(stream.index)}
-            onToggle={(stream, checked) => toggleSubtitle(stream.index, checked)}
-            defaultIndex={defaultSubtitle}
-            onDefault={setDefaultSubtitle}
-            titles={titles}
-            onTitle={setTitles}
-            languages={languages}
-            onLanguage={setLanguages}
-            isBadLanguage={isBadLanguage}
-          />
-          <TrackList
-            title="Files beside this version"
-            description="Each is folded into the output as an extra track. The files stay on disk."
-            streams={sidecars}
-            isKept={(stream) => merged.has(stream.id)}
-            onToggle={(stream, checked) => toggleSidecar(stream.id, checked)}
-            titles={titles}
-            onTitle={setTitles}
-            languages={languages}
-            onLanguage={setLanguages}
-            isBadLanguage={isBadLanguage}
-          />
-
-          <DialogFooter className="mt-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" disabled={convert.isPending || badLanguages.length > 0}>
-              {convert.isPending
-                ? "Starting…"
-                : mergeCount > 0
-                  ? `Start convert + merge ${mergeCount}`
-                  : "Start convert"}
-            </Button>
+              {!copy && stream.type === "Audio" && !stream.isExternal && <>
+                <label className="flex items-center gap-2 text-xs"><Checkbox checked={reencoded.includes(stream.id)} disabled={submit.isPending} onCheckedChange={checked => setReencoded(current => checked ? [...current, stream.id] : current.filter(value => value !== stream.id))} />Re-encode {trackLabel(stream)} to E-AC-3</label>
+                {reencoded.includes(stream.id) && <p className="text-xs text-muted-foreground">{audioReEncodeHint(stream, source.durationTicks / 10_000_000)}</p>}
+              </>}
+            </div>)}
+          </div>
+          {copy && profile7 && <div className="space-y-1.5 text-xs">
+            <label className="flex items-center gap-2"><Checkbox checked={dolbyVision} disabled={!dvEligible || submit.isPending} onCheckedChange={checked => setDolbyVision(!!checked)} />Convert Dolby Vision to profile 8.1</label>
+            <p className="text-muted-foreground">{dvEligible ? "Copies the HDR10 base layer and rewrites Dolby Vision metadata. The enhancement layer is discarded." : "Requires a Matroska source and an engine with Dolby Vision conversion tools."}</p>
+          </div>}
+          <p className="text-xs text-muted-foreground">Output: MKV · {copy ? "Video copied" : `${codec.toUpperCase()} video`}{estimate !== null ? ` · approximately ${formatBytes(estimate)}` : " · size estimate unavailable"}{!copy && estimate !== null ? ". Actual size depends on the content." : ""}</p>
+          {(reason || (submit.isError && !serverNameError)) && <p role="alert" className="text-sm text-destructive">{reason ?? errorMessage(submit.error)}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={submit.isPending} onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={!!reason || !!nameError || submit.isPending}>{submit.isPending ? "Starting…" : `Start ${label.toLowerCase()}`}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -616,158 +202,18 @@ export function TranscodeDialog({
   );
 }
 
-/** One stream type's tracks: a checkbox to copy each, and a toggle to mark one kept track the default. */
-function TrackList({
-  title,
-  description,
-  streams,
-  isKept,
-  onToggle,
-  defaultIndex,
-  onDefault,
-  titles,
-  onTitle,
-  languages,
-  onLanguage,
-  isBadLanguage,
-  isReEncoded,
-  onReEncode,
-  reEncodeHint,
-}: {
-  title: string;
-  description?: string;
-  streams: MediaStream[];
-  /** Whether a track is kept. A predicate rather than a set, because an embedded track is selected by its
-   *  index inside the container and a sidecar — a file, with no index here — by its id. */
-  isKept: (stream: MediaStream) => boolean;
-  onToggle: (stream: MediaStream, checked: boolean) => void;
-  defaultIndex?: number | null;
-  onDefault?: (index: number) => void;
-  titles: Record<string, string>;
-  onTitle: (update: (current: Record<string, string>) => Record<string, string>) => void;
-  languages: Record<string, string>;
-  onLanguage: (update: (current: Record<string, string>) => Record<string, string>) => void;
-  /** The submit gate's own rule, passed down so a row cannot flag by a different one than it blocks by. */
-  isBadLanguage: (value: string) => boolean;
-  /** Audio only: re-encode this track instead of copying it. Absent for the lists where it has no meaning. */
-  isReEncoded?: (stream: MediaStream) => boolean;
-  onReEncode?: (stream: MediaStream, checked: boolean) => void;
-  /** What the operator gets for it — the resulting codec, layout and size. */
-  reEncodeHint?: (stream: MediaStream) => string;
-}) {
-  if (!streams.length) {
-    return null;
-  }
-
-  return (
-    <Field>
-      <FieldLabel>{title}</FieldLabel>
-      {description ? <p className="text-muted-foreground text-xs">{description}</p> : null}
-      <ul className="flex flex-col gap-2">
-        {streams.map((stream) => {
-          const checked = isKept(stream);
-          // A sidecar routinely carries neither codec nor language — its release name is all it has.
-          const label = stream.displayTitle ?? stream.codec ?? stream.title?.trim() ?? stream.fileName ?? "—";
-          const language = languages[stream.id] ?? stream.language ?? "";
-          // Only while the track is kept: a dropped track carries no edit, so flagging its field would point
-          // at something that is not blocking anything.
-          const badLanguage = checked && isBadLanguage(language);
-          const objects = objectAudioFormat(stream.profile);
-          return (
-            <li key={stream.id} className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <Checkbox checked={checked} onCheckedChange={(value) => onToggle(stream, value === true)} aria-label={`Copy ${label}`} />
-                <span className="min-w-0 truncate leading-6">{label}</span>
-                {/* Atmos and DTS:X are invisible in the summary beside it — the codec reads TrueHD either
-                    way — and they are the one reason to leave a track alone. Flagged here rather than only
-                    in the re-encode hint, which is not shown until the track is already being re-encoded. */}
-                {objects ? (
-                  <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 text-[11px] leading-5">
-                    {objects}
-                  </span>
-                ) : null}
-                <span className="flex-1" />
-                {stream.fileName ? (
-                  <span className="text-muted-foreground hidden shrink-0 font-mono text-xs sm:inline">{stream.fileName}</span>
-                ) : null}
-                {onReEncode ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={isReEncoded?.(stream) ? "secondary" : "ghost"}
-                    className="h-6 shrink-0 px-2 text-xs"
-                    disabled={!checked}
-                    aria-pressed={isReEncoded?.(stream) ?? false}
-                    onClick={() => onReEncode(stream, !(isReEncoded?.(stream) ?? false))}
-                  >
-                    Re-encode
-                  </Button>
-                ) : null}
-                {onDefault ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={defaultIndex === stream.index ? "secondary" : "ghost"}
-                    className="h-6 shrink-0 px-2 text-xs"
-                    disabled={!checked}
-                    aria-pressed={defaultIndex === stream.index}
-                    onClick={() => onDefault(stream.index)}
-                  >
-                    Default
-                  </Button>
-                ) : null}
-              </div>
-              {/* Stated on the row rather than once for the dialog, because the downmix is a real loss and
-                  it is this track that takes it. */}
-              {checked && isReEncoded?.(stream) && reEncodeHint ? (
-                <p className="text-muted-foreground pl-6 text-xs">{reEncodeHint(stream)}</p>
-              ) : null}
-              {/* The name and language written into the output. Editing is offered here because a job is
-                  being submitted anyway — changing metadata alone would still rewrite the whole file.
-                  Indented under the checkbox with padding rather than a margin: a w-full input plus a margin
-                  is wider than its row, which is what used to push these past the dialog's edge. */}
-              <div className="flex gap-2 pl-6">
-                <Input
-                  value={titles[stream.id] ?? stream.title ?? ""}
-                  onChange={(event) => onTitle((current) => ({ ...current, [stream.id]: event.target.value }))}
-                  disabled={!checked}
-                  placeholder="Track name"
-                  aria-label={`Name for ${label}`}
-                  className="h-7 min-w-0 flex-1 text-xs"
-                />
-                <Input
-                  value={language}
-                  onChange={(event) => onLanguage((current) => ({ ...current, [stream.id]: event.target.value }))}
-                  disabled={!checked}
-                  aria-invalid={badLanguage}
-                  placeholder="Language"
-                  aria-label={`Language for ${label}`}
-                  className="h-7 w-28 shrink-0 text-xs"
-                />
-              </div>
-              {badLanguage ? (
-                <p className="text-destructive pl-6 text-xs">
-                  “{language.trim()}” isn’t an ISO 639-2 tag — try “rus”, “eng”.
-                </p>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-    </Field>
-  );
-}
-
-/** One transcode job card: live progress while running, an outcome + dismiss once terminal. Built from the
- * shared Activity card pieces so a conversion reads exactly like a download or a move. */
-export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
+export function TranscodeJobRow({ job, showManagementLink = true }: { job: TranscodeJob; showManagementLink?: boolean }) {
   const queryClient = useQueryClient();
+  const [cancelOpen, setCancelOpen] = useState(false);
   const active = isTranscodeActive(job);
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
 
   const cancel = useMutation({
     mutationFn: () => mediaServer.cancelTranscodeJob(job.id),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setCancelOpen(false);
+      return invalidate();
+    },
     onError: (error) => toast.error("Couldn’t cancel", { description: errorMessage(error) }),
   });
   const remove = useMutation({
@@ -812,9 +258,9 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
         meta={meta}
         // Waiting for an encoder slot — the queued line replaces the bar and stats below, like a queued move.
         note={job.state === "Queued" ? <ActivityQueued /> : undefined}
-        actions={<><ManagementJobLink id={job.mediaItemId} sourceId={job.mediaSourceId} />{
+        actions={<>{showManagementLink && <ManagementJobLink id={job.mediaItemId} sourceId={job.mediaSourceId} />}{
           active ? (
-            <IconAction label="Cancel" icon={<X />} pending={cancel.isPending} onClick={() => cancel.mutate()} />
+            <IconAction label="Cancel" icon={<X />} pending={cancel.isPending} onClick={() => setCancelOpen(true)} />
           ) : (
             <IconAction label="Dismiss" icon={<Trash2 />} destructive pending={remove.isPending} onClick={() => remove.mutate()} />
           )
@@ -836,6 +282,23 @@ export function TranscodeJobRow({ job }: { job: TranscodeJob }) {
         </ActivityStats>
       )}
       {job.state === "Failed" && job.error && <p className="text-destructive text-xs">{job.error}</p>}
+      <AlertDialog open={cancelOpen && active} onOpenChange={setCancelOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this conversion?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Stop <span className="text-foreground font-medium break-words">{title}</span>?
+              {" "}You will need to start a new job to try again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm" disabled={cancel.isPending}>Keep running</AlertDialogCancel>
+            <AlertDialogAction size="sm" variant="destructive" disabled={cancel.isPending || !active} onClick={() => cancel.mutate()}>
+              {cancel.isPending ? "Cancelling…" : "Cancel conversion"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ActivityCard>
   );
 }

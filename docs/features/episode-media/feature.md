@@ -1,6 +1,6 @@
 ---
 created: 2026-09-08
-updated: 2026-10-11
+updated: 2026-10-12
 summary: Episodes get the same media surface as movies, with versions, tracks, sidecars and conversions.
 ---
 
@@ -21,7 +21,7 @@ gates were what was left of "for now".
 
 ## One surface
 
-The version cards, stream sections, sidecar list, the rename and delete dialogs and
+The container and track table, the rename and delete dialogs and
 the Conversions block live in `media-sources.tsx`, owned by an item — its id, kind
 and title. Expanded movie and episode rows in
 [Library Management](../library-management/feature.md) render this component
@@ -71,8 +71,9 @@ border around the list.
   Management pages the episode list and lazily fetches detail when an episode
   expands, exposing every version, track and applicable source operation.
 - A **Conversions** block in the expanded management episode lists its related
-  jobs. Completion refreshes both the episode summary and open source detail;
-  Activity remains the shared job list.
+  active or failed jobs. Cancellation requires confirmation. Completed and cancelled
+  jobs disappear automatically; completion refreshes both the episode summary and
+  open source detail. Activity retains the shared job history.
 - **Refresh media data** in the series management menu fans out over the series' episodes
   on the server: a series row holds no file of its own, so a refresh asked of it is a
   refresh of its episodes' — one gesture per title, as on a movie. There is no
@@ -168,7 +169,7 @@ were never probed carries none.
   locked stem for a movie, an episode, no label, a drifted label, no extension.
 - `detail.spec.ts` and `management.spec.ts` — browsing season accordions and
   personal controls, management episode paging and lazy versions, retained
-  seasons, deletion, conversion/extraction dialogs and episode rename stems.
+  seasons, deletion, fixed conversion confirmations and grid extraction and episode rename stems.
 - `catalog-browsing.spec.ts` — a series card carrying its badges, and none for a
   series with no probed episode.
 - `LibrarySourceDeletionTests` and `last-version-deletion.spec.ts` — last-version

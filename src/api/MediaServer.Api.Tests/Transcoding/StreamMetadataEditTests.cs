@@ -23,6 +23,28 @@ public sealed class StreamMetadataEditTests
         new(Guid.NewGuid(), null, null, null, MetadataEdits: edits);
 
     [Fact]
+    public void Only_selected_video_and_audio_can_receive_names()
+    {
+        var video = Embedded(4, StreamType.Video);
+        var audio = Embedded(2);
+        var source = SourceWith(video, audio);
+        var request = Request(new StreamMetadataEdit(video.Id, Title: "Selected")) with { VideoStreamIndex = 4, AudioStreamIndexes = [2], SubtitleStreamIndexes = [] };
+        Assert.Equal(4, Assert.Single(TranscodeService.ResolveMetadataOverrides(request, source, [])!).StreamIndex);
+        Assert.Throws<TranscodeRequestException>(() => TranscodeService.ResolveMetadataOverrides(request with { VideoStreamIndex = 0 }, source, []));
+        Assert.Throws<TranscodeRequestException>(() => TranscodeService.ResolveMetadataOverrides(request with { AudioStreamIndexes = [], MetadataEdits = [new(audio.Id, Title: "Dropped")] }, source, []));
+    }
+
+    [Fact]
+    public void Dolby_vision_eligibility_uses_the_selected_picture()
+    {
+        var first = Embedded(0, StreamType.Video); first.Codec = "hevc"; first.DvProfile = 8;
+        var selected = Embedded(4, StreamType.Video); selected.Codec = "hevc"; selected.DvProfile = 7;
+        var request = Request() with { VideoStreamIndex = 4, DolbyVision = "toProfile81" };
+        Assert.Equal("toProfile81", TranscodeService.ResolveDolbyVision(request, "copy", [first, selected]));
+        Assert.Throws<TranscodeRequestException>(() => TranscodeService.ResolveDolbyVision(request with { VideoStreamIndex = 0 }, "copy", [first, selected]));
+    }
+
+    [Fact]
     public void No_edits_produce_no_overrides() =>
         Assert.Null(TranscodeService.ResolveMetadataOverrides(
             new CreateTranscodeRequest(Guid.NewGuid(), null, null, null), SourceWith(), []));
