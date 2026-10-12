@@ -83,8 +83,11 @@ silently pick its first video. Extraction keeps its existing engine contract.
 Legacy API requests without explicit video selection retain their previous behavior.
 
 The API checks video ownership/type, explicit audio/subtitle lists, move locks,
-selected-video height and Dolby Vision eligibility. The engine probes the actual
-file to verify stream indexes and types. Both retain output conflict protection;
+selected-video height and Dolby Vision eligibility. It rejects an image-codec
+video selection when the container also has a non-image video track, matching
+playback's cover-art rule. A container whose only video is MJPEG remains selectable.
+The engine probes the actual file to verify stream indexes and types. Both retain
+output conflict protection;
 errors stay in the confirmation with the selected tracks and edited names intact.
 The normal output importer probes the new file and persists its facts.
 
@@ -102,7 +105,8 @@ dialogs edit names only. See [stream titles](../stream-title-editing/feature.md)
   codec/resolution/quality/encoder controls and capability/Dolby Vision gates.
 - `TranscodeServiceConversionTests`, `StreamMetadataEditTests` and
   `RemoteTranscodeEngineWireTests`: source ownership, video selection, selected
-  metadata, selected resolution, old-engine refusal and exact wire names. Custom
+  metadata, selected resolution, cover-art refusal, single-video MJPEG acceptance,
+  old-engine refusal and exact wire names. Custom
   version names survive job reload and output import; conflicting labels, paths,
   existing files and active jobs cannot be overwritten. Movie and episode names
   retain their normal title prefix without stacking the input version's suffix.

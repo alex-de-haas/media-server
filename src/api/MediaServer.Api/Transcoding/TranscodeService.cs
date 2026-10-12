@@ -324,6 +324,12 @@ public sealed class TranscodeService(
         if (request.VideoStreamIndex is not { } index) return null;
         var video = source.Streams.FirstOrDefault(s => !s.IsExternal && s.StreamType == StreamType.Video && s.Index == index)
             ?? throw new TranscodeRequestException("The selected video stream does not belong to this container.");
+        // Some muxers expose unflagged cover art as ordinary video. Match playback's picture rule,
+        // while retaining containers whose only video uses an image codec (for example MJPEG).
+        if (NativePlaybackResolver.StillImages.Contains(video.Codec ?? string.Empty)
+            && source.Streams.Any(s => !s.IsExternal && s.StreamType == StreamType.Video
+                && !NativePlaybackResolver.StillImages.Contains(s.Codec ?? string.Empty)))
+            throw new TranscodeRequestException("The selected video track is cover art. Select the film's video track.");
         if (request.AudioStreamIndexes is null || request.SubtitleStreamIndexes is null)
             throw new TranscodeRequestException("Explicit video selection requires explicit audio and subtitle selections.");
         if (request.AudioStreamIndexes.Count == 0 && !mergeStreams.Any(s => s.StreamType == StreamType.Audio))

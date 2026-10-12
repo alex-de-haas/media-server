@@ -104,6 +104,48 @@ public sealed class TranscodeServiceConversionTests : IDisposable
         Assert.Null(_engine.Seen);
     }
 
+    [Theory]
+    [InlineData("mjpeg", "copy")]
+    [InlineData("PNG", "copy")]
+    [InlineData("bmp", "copy")]
+    [InlineData("gif", "hevc")]
+    [InlineData("webp", "hevc")]
+    [InlineData("mjpeg", "hevc")]
+    public async Task Cover_art_cannot_replace_the_film_video(string imageCodec, string outputCodec)
+    {
+        _engine.Tooling = new(false, ExplicitVideoSelection: true);
+        _context.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = _episodeSourceId, StreamType = StreamType.Video,
+            Index = 4, Codec = imageCodec,
+        });
+        await _context.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ConvertAsync(new(
+            _episodeSourceId, outputCodec, null, null,
+            AudioStreamIndexes: [1], SubtitleStreamIndexes: [], VideoStreamIndex: 4)));
+
+        Assert.Contains("cover art", error.Message);
+        Assert.Null(_engine.Seen);
+        Assert.Empty(await _context.TranscodeJobs.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("copy")]
+    [InlineData("hevc")]
+    public async Task Mjpeg_is_selectable_when_it_is_the_only_video(string outputCodec)
+    {
+        _engine.Tooling = new(false, ExplicitVideoSelection: true);
+        var video = await _context.MediaStreams.SingleAsync(s => s.MediaSourceId == _episodeSourceId && s.Index == 0);
+        video.Codec = "mjpeg";
+        await _context.SaveChangesAsync();
+
+        await ConvertAsync(new(_episodeSourceId, outputCodec, null, null,
+            AudioStreamIndexes: [1], SubtitleStreamIndexes: [], VideoStreamIndex: 0));
+
+        Assert.Equal(0, _engine.Seen!.VideoStreamIndex);
+    }
+
     private void Seed()
     {
         var now = DateTimeOffset.UtcNow;
