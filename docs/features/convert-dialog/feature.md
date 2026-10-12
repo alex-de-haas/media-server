@@ -24,7 +24,10 @@ Both confirmations include a required **Version name**, initially `Remux` or
 `Convert`. The name becomes the new version's label and the suffix of its MKV
 filename beside the input, using the title's normal naming convention. It does not
 change when encoding settings change. Names are trimmed, limited to 120 characters
-and reject filename separators/control characters. Name and path collisions with
+and reject filename separators/control characters. The complete generated filename
+must also fit a 216-byte UTF-8 budget, reserving 39 bytes for the engine's temporary
+output name within a 255-byte filesystem component. Overlong output names are refused
+before a job is submitted and reported beside the name field. Name and path collisions with
 existing versions, files or active jobs appear beside the field; editing the name
 clears that error without losing track names or settings. API clients that omit
 `versionName` retain automatic naming.

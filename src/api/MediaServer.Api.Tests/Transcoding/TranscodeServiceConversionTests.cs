@@ -1,3 +1,4 @@
+using System.Text;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -348,6 +349,50 @@ public sealed class TranscodeServiceConversionTests : IDisposable
     {
         await Assert.ThrowsAsync<TranscodeVersionNameException>(() => ConvertAsync(new(_episodeSourceId, "copy", null, null, VersionName: new string('x', 121))));
         Assert.Null(_engine.Seen);
+    }
+
+    [Theory]
+    [InlineData(MediaKind.Movie, false, 216)]
+    [InlineData(MediaKind.Movie, false, 217)]
+    [InlineData(MediaKind.Movie, true, 216)]
+    [InlineData(MediaKind.Movie, true, 217)]
+    [InlineData(MediaKind.Episode, false, 216)]
+    [InlineData(MediaKind.Episode, false, 217)]
+    [InlineData(MediaKind.Episode, true, 216)]
+    [InlineData(MediaKind.Episode, true, 217)]
+    public async Task Named_output_reserves_filename_bytes_for_the_engine_temporary_file(MediaKind kind, bool unicode, int outputBytes)
+    {
+        var name = new string(unicode ? 'я' : 'x', 80);
+        // Movie: "title - name.mkv"; episode: "title S01E01 - name.mkv".
+        var title = new string('T', outputBytes - Encoding.UTF8.GetByteCount(name) - (kind == MediaKind.Movie ? 7 : 14));
+        var item = await _context.MediaItems.SingleAsync(item => item.Id == _episodeId);
+        if (kind == MediaKind.Movie)
+        {
+            item.Kind = kind;
+            item.Title = title;
+            item.SeriesId = null;
+            item.ParentId = null;
+            item.LibraryPath = $"{title}/source.mkv";
+            (await _context.MediaSources.SingleAsync(source => source.Id == _episodeSourceId)).Path = item.LibraryPath;
+            WriteFile(item.LibraryPath);
+        }
+        else (await _context.MediaItems.SingleAsync(series => series.Id == item.SeriesId)).Title = title;
+        await _context.SaveChangesAsync();
+
+        var request = new CreateTranscodeRequest(_episodeSourceId, "copy", null, null, VersionName: name);
+        if (outputBytes == 216)
+        {
+            var job = await ConvertAsync(request);
+            Assert.Equal(outputBytes, Encoding.UTF8.GetByteCount(Path.GetFileName(job.OutputPath!)));
+            Assert.NotNull(_engine.Seen);
+        }
+        else
+        {
+            var error = await Assert.ThrowsAsync<TranscodeVersionNameException>(() => ConvertAsync(request));
+            Assert.Contains("filename is too long", error.Message);
+            Assert.Null(_engine.Seen);
+            Assert.Empty(await _context.TranscodeJobs.ToListAsync());
+        }
     }
 
     [Theory]

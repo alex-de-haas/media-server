@@ -1,3 +1,4 @@
+using System.Text;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -287,9 +288,14 @@ public sealed class TranscodeService(
             canonical = LibraryNaming.ForEpisode(series, item, ".mkv", name);
         }
         else canonical = LibraryNaming.ForMovie(catalog, item, ".mkv", name);
+        var fileName = Path.GetFileName(canonical);
+        // Keep the complete UTF-8 filename within the common 255-byte component limit, including
+        // the engine's hidden .{stem}.{32-character job ID}.part.mkv output (39 extra ASCII bytes).
+        if (Encoding.UTF8.GetByteCount(fileName) > 255 - 39)
+            throw new TranscodeVersionNameException("The resulting filename is too long. Use a shorter version name.");
         // Keep the physical folder, but do not accumulate the input version's suffix in the new name.
         var directory = Path.GetDirectoryName(inputPath.Replace('\\', '/'))?.Replace('\\', '/');
-        return string.IsNullOrEmpty(directory) ? Path.GetFileName(canonical) : $"{directory}/{Path.GetFileName(canonical)}";
+        return string.IsNullOrEmpty(directory) ? fileName : $"{directory}/{fileName}";
     }
 
     /// <summary>Output is a sibling of the input with a descriptive version suffix (codec + resolution, or
