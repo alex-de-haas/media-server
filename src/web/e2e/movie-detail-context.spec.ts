@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { aMovie, aUserData, movieDetail, setupApp } from "./support";
+import { aMovie, aRemovedTitle, aUserData, movieDetail, setupApp } from "./support";
 
 const dates = ["2026-08-03T20:00:00Z", "2026-07-02T19:00:00Z", "2026-06-01T18:00:00Z", "2026-05-01T17:00:00Z"];
 
@@ -175,14 +175,13 @@ test("related recommendations appear before tags and navigate to available title
 });
 
 test("admin removed actions offer permanent deletion without file operations", async ({ page }) => {
-  await setupApp(page, { role: "admin", detail: { g1: { ...movieDetail("g1", "Arrival"), removedAt: dates[0], catalogId: null } } });
-  await page.goto("/manage/movies/g1");
-  await page.getByRole("button", { name: "More actions" }).click();
+  await setupApp(page, { role: "admin", detail: { g1: { ...movieDetail("g1", "Arrival"), removedAt: dates[0], catalogId: null } }, removedTitles: [aRemovedTitle("g1", "Arrival")] });
+  await page.goto("/manage/movies/g1?removed=1");
   await expect(page.getByRole("menuitem", { name: /Refresh|Move to|Fix match|Choose poster/ })).toHaveCount(0);
-  await page.getByRole("menuitem", { name: /Delete permanently/ }).click();
-  await expect(page.getByRole("alertdialog")).toContainText("every user’s history");
-  const deleted = page.waitForRequest((request) => request.url().endsWith("/library/removed/g1") && request.method() === "DELETE");
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toContainText("for every user");
+  const deleted = page.waitForRequest((request) => request.url().endsWith("/library/removed/g1") && request.method() === "DELETE");
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete permanently", exact: true }).click();
   await deleted;
   await expect(page).toHaveURL(/\/manage\/movies$/);
 });

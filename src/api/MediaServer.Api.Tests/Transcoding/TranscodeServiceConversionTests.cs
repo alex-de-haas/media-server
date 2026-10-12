@@ -1,3 +1,4 @@
+using System.Text;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Data;
@@ -5,6 +6,9 @@ using MediaServer.Api.Library;
 using MediaServer.Api.Tests.Jellyfin;
 using MediaServer.Api.Transcoding;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.EntityFrameworkCore;
+using MediaServer.Api.Probe;
+using Imposter.Abstractions;
 
 namespace MediaServer.Api.Tests.Transcoding;
 
@@ -59,6 +63,88 @@ public sealed class TranscodeServiceConversionTests : IDisposable
 
     private Task<TranscodeJobResponse> ConvertAsync(CreateTranscodeRequest request) =>
         Service().CreateAsync(request, CancellationToken.None);
+
+    [Theory]
+    [InlineData("copy")]
+    [InlineData("hevc")]
+    public async Task Explicit_video_and_name_reach_engine_with_exact_audio_and_subtitles(string codec)
+    {
+        _engine.Tooling = new(false, ExplicitVideoSelection: true);
+        var video = new MediaStream { Id = Guid.NewGuid(), MediaSourceId = _episodeSourceId, StreamType = StreamType.Video, Index = 4, Height = 480 };
+        _context.MediaStreams.Add(video);
+        await _context.SaveChangesAsync();
+        await ConvertAsync(new(_episodeSourceId, codec, null, null, MaxHeight: codec == "copy" ? null : 720,
+            AudioStreamIndexes: [1], SubtitleStreamIndexes: [], VideoStreamIndex: 4,
+            MetadataEdits: [new(video.Id, Title: "Selected picture")]));
+        Assert.Equal(4, _engine.Seen!.VideoStreamIndex);
+        Assert.Null(_engine.Seen.MaxHeight);
+        Assert.Equal([1], _engine.Seen.AudioStreamIndexes);
+        Assert.Empty(_engine.Seen.SubtitleStreamIndexes!);
+        Assert.Equal(new EngineMetadataOverride(0, 4, null, "Selected picture"), Assert.Single(_engine.Seen.MetadataOverrides!));
+    }
+
+    [Fact]
+    public async Task Old_engine_cannot_silently_ignore_explicit_video()
+    {
+        var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ConvertAsync(new(_episodeSourceId, "copy", null, null,
+            AudioStreamIndexes: [1], SubtitleStreamIndexes: [], VideoStreamIndex: 0)));
+        Assert.Contains("Update Transcode Engine", error.Message);
+        Assert.Null(_engine.Seen);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1)]
+    [InlineData(999)]
+    public async Task Wrong_or_missing_video_is_rejected(int index)
+    {
+        _engine.Tooling = new(false, ExplicitVideoSelection: true);
+        await Assert.ThrowsAsync<TranscodeRequestException>(() => ConvertAsync(new(_episodeSourceId, "copy", null, null,
+            AudioStreamIndexes: [1], SubtitleStreamIndexes: [], VideoStreamIndex: index)));
+        Assert.Null(_engine.Seen);
+    }
+
+    [Theory]
+    [InlineData("mjpeg", "copy")]
+    [InlineData("PNG", "copy")]
+    [InlineData("bmp", "copy")]
+    [InlineData("gif", "hevc")]
+    [InlineData("webp", "hevc")]
+    [InlineData("mjpeg", "hevc")]
+    public async Task Cover_art_cannot_replace_the_film_video(string imageCodec, string outputCodec)
+    {
+        _engine.Tooling = new(false, ExplicitVideoSelection: true);
+        _context.MediaStreams.Add(new MediaStream
+        {
+            Id = Guid.NewGuid(), MediaSourceId = _episodeSourceId, StreamType = StreamType.Video,
+            Index = 4, Codec = imageCodec,
+        });
+        await _context.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ConvertAsync(new(
+            _episodeSourceId, outputCodec, null, null,
+            AudioStreamIndexes: [1], SubtitleStreamIndexes: [], VideoStreamIndex: 4)));
+
+        Assert.Contains("cover art", error.Message);
+        Assert.Null(_engine.Seen);
+        Assert.Empty(await _context.TranscodeJobs.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("copy")]
+    [InlineData("hevc")]
+    public async Task Mjpeg_is_selectable_when_it_is_the_only_video(string outputCodec)
+    {
+        _engine.Tooling = new(false, ExplicitVideoSelection: true);
+        var video = await _context.MediaStreams.SingleAsync(s => s.MediaSourceId == _episodeSourceId && s.Index == 0);
+        video.Codec = "mjpeg";
+        await _context.SaveChangesAsync();
+
+        await ConvertAsync(new(_episodeSourceId, outputCodec, null, null,
+            AudioStreamIndexes: [1], SubtitleStreamIndexes: [], VideoStreamIndex: 0));
+
+        Assert.Equal(0, _engine.Seen!.VideoStreamIndex);
+    }
 
     private void Seed()
     {
@@ -166,6 +252,75 @@ public sealed class TranscodeServiceConversionTests : IDisposable
         Assert.Equal(sidecarRelative, input.RelativePath);
     }
 
+    [Theory]
+    [InlineData("copy", MediaKind.Movie, true)]
+    [InlineData("copy", MediaKind.Episode, false)]
+    [InlineData("hevc", MediaKind.Movie, false)]
+    [InlineData("hevc", MediaKind.Episode, true)]
+    public async Task Another_versions_external_tracks_can_join_the_selected_container(string codec, MediaKind kind, bool embeddedAudio)
+    {
+        _engine.Tooling = new(false, ExplicitVideoSelection: true);
+        (await _context.MediaItems.FindAsync(_episodeId))!.Kind = kind;
+        var sibling = new MediaSource { Id = Guid.NewGuid(), MediaItemId = _episodeId, Container = "mkv", Path = SeasonFolder + "/Original.mkv" };
+        var audioPath = SeasonFolder + "/Original.eng.mka";
+        var subtitlePath = SeasonFolder + "/Original.eng.srt";
+        WriteFile(audioPath);
+        WriteFile(subtitlePath);
+        var audio = new MediaStream { Id = Guid.NewGuid(), MediaSourceId = sibling.Id, StreamType = StreamType.Audio, Index = 1000, IsExternal = true, ExternalPath = audioPath };
+        var subtitle = new MediaStream { Id = Guid.NewGuid(), MediaSourceId = sibling.Id, StreamType = StreamType.Subtitle, Index = 1001, IsExternal = true, ExternalPath = subtitlePath };
+        _context.MediaSources.Add(sibling);
+        _context.MediaStreams.AddRange(audio, subtitle);
+        await _context.SaveChangesAsync();
+
+        var job = await ConvertAsync(new(_episodeSourceId, codec, null, null,
+            VideoStreamIndex: 0, AudioStreamIndexes: embeddedAudio ? [1] : [], SubtitleStreamIndexes: [],
+            MergeStreamIds: [subtitle.Id, audio.Id],
+            MetadataEdits: [new(audio.Id, Title: "Dub"), new(subtitle.Id, Title: "Translation")]));
+
+        Assert.Equal(_episodeId, job.MediaItemId);
+        Assert.Equal(0, _engine.Seen!.VideoStreamIndex);
+        Assert.Equal(embeddedAudio ? [1] : [], _engine.Seen.AudioStreamIndexes);
+        Assert.Collection(_engine.Seen.AdditionalInputs!, input =>
+        {
+            Assert.Equal("catalogs", input.MountLabel);
+            Assert.Equal(audioPath, input.RelativePath);
+            Assert.Equal([0], input.AudioStreamIndexes);
+            Assert.Null(input.SubtitleStreamIndexes);
+        }, input =>
+        {
+            Assert.Equal("catalogs", input.MountLabel);
+            Assert.Equal(subtitlePath, input.RelativePath);
+            Assert.Equal([0], input.SubtitleStreamIndexes);
+            Assert.Null(input.AudioStreamIndexes);
+        });
+        Assert.Equal(new EngineMetadataOverride(1, 0, null, "Dub"), _engine.Seen.MetadataOverrides![0]);
+        Assert.Equal(new EngineMetadataOverride(2, 0, null, "Translation"), _engine.Seen.MetadataOverrides[1]);
+        Assert.True(File.Exists(Path.Combine(_root, audioPath)));
+        Assert.True(File.Exists(Path.Combine(_root, subtitlePath)));
+    }
+
+    [Theory]
+    [InlineData(true, StreamType.Audio, true)]
+    [InlineData(false, StreamType.Audio, false)]
+    [InlineData(false, StreamType.Video, true)]
+    public async Task Merge_refuses_another_title_embedded_tracks_and_external_video(bool foreignTitle, StreamType type, bool external)
+    {
+        _engine.Tooling = new(false, ExplicitVideoSelection: true);
+        var path = SeasonFolder + "/Rejected.mka";
+        WriteFile(path);
+        var track = new MediaStream { Id = Guid.NewGuid(), MediaSourceId = foreignTitle ? _extraSourceId : _episodeSourceId,
+            StreamType = type, Index = 1000, IsExternal = external, ExternalPath = path };
+        _context.MediaStreams.Add(track);
+        await _context.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<TranscodeRequestException>(() => ConvertAsync(new(_episodeSourceId, "copy", null, null,
+            VideoStreamIndex: 0, AudioStreamIndexes: [1], SubtitleStreamIndexes: [], MergeStreamIds: [track.Id])));
+
+        Assert.Contains("external audio or subtitle file of this title", error.Message);
+        Assert.Null(_engine.Seen);
+        Assert.Empty(await _context.TranscodeJobs.ToListAsync());
+    }
+
     [Fact]
     public async Task A_series_extra_is_refused_by_name()
     {
@@ -190,10 +345,134 @@ public sealed class TranscodeServiceConversionTests : IDisposable
         });
         await _context.SaveChangesAsync();
 
-        var error = await Assert.ThrowsAsync<TranscodeRequestException>(() =>
+        var error = await Assert.ThrowsAsync<TranscodeVersionNameException>(() =>
             ConvertAsync(new CreateTranscodeRequest(_episodeSourceId, "copy", null, null)));
 
-        Assert.StartsWith("This title already has a version", error.Message);
+        Assert.Equal("A version with this name already exists. Choose another name.", error.Message);
         Assert.DoesNotContain("movie", error.Message);
+    }
+
+    [Theory]
+    [InlineData("copy")]
+    [InlineData("hevc")]
+    public async Task Custom_version_name_survives_job_reload_and_output_import(string codec)
+    {
+        var response = await ConvertAsync(new(_episodeSourceId, codec, null, null, VersionName: "  My   cut.  "));
+        Assert.Equal(SeasonFolder + "/Breaking Bad S01E01 - My cut.mkv", response.OutputPath);
+        Assert.Equal(response.OutputPath, _engine.Seen!.OutputRelativePath);
+        _context.ChangeTracker.Clear();
+        var job = await _context.TranscodeJobs.SingleAsync();
+        Assert.Equal("My cut", job.VersionName);
+        WriteFile(job.OutputPath!);
+        var probe = IMediaProbe.Imposter();
+        probe.ProbeAsync(Arg<string>.Any(), Arg<CancellationToken>.Any())
+            .Returns(Task.FromResult(new ProbeResult("mkv", 1, null, 1000, [])));
+        var importer = new TranscodeOutputImporter(_context, new CatalogPathSandbox(), probe.Instance(), NullLogger<TranscodeOutputImporter>.Instance);
+        Assert.True(await importer.ImportAsync(job, CancellationToken.None));
+        Assert.Equal("My cut", (await _context.MediaSources.SingleAsync(source => source.Path == job.OutputPath)).VersionName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("../outside")]
+    [InlineData("folder\\name")]
+    [InlineData("bad:name")]
+    [InlineData("...")]
+    [InlineData("name\u0000")]
+    public async Task Invalid_version_names_are_refused_before_engine_submission(string name)
+    {
+        await Assert.ThrowsAsync<TranscodeVersionNameException>(() => ConvertAsync(new(_episodeSourceId, "copy", null, null, VersionName: name)));
+        Assert.Null(_engine.Seen);
+    }
+
+    [Fact]
+    public async Task Too_long_name_is_refused()
+    {
+        await Assert.ThrowsAsync<TranscodeVersionNameException>(() => ConvertAsync(new(_episodeSourceId, "copy", null, null, VersionName: new string('x', 121))));
+        Assert.Null(_engine.Seen);
+    }
+
+    [Theory]
+    [InlineData(MediaKind.Movie, false, 216)]
+    [InlineData(MediaKind.Movie, false, 217)]
+    [InlineData(MediaKind.Movie, true, 216)]
+    [InlineData(MediaKind.Movie, true, 217)]
+    [InlineData(MediaKind.Episode, false, 216)]
+    [InlineData(MediaKind.Episode, false, 217)]
+    [InlineData(MediaKind.Episode, true, 216)]
+    [InlineData(MediaKind.Episode, true, 217)]
+    public async Task Named_output_reserves_filename_bytes_for_the_engine_temporary_file(MediaKind kind, bool unicode, int outputBytes)
+    {
+        var name = new string(unicode ? 'я' : 'x', 80);
+        // Movie: "title - name.mkv"; episode: "title S01E01 - name.mkv".
+        var title = new string('T', outputBytes - Encoding.UTF8.GetByteCount(name) - (kind == MediaKind.Movie ? 7 : 14));
+        var item = await _context.MediaItems.SingleAsync(item => item.Id == _episodeId);
+        if (kind == MediaKind.Movie)
+        {
+            item.Kind = kind;
+            item.Title = title;
+            item.SeriesId = null;
+            item.ParentId = null;
+            item.LibraryPath = $"{title}/source.mkv";
+            (await _context.MediaSources.SingleAsync(source => source.Id == _episodeSourceId)).Path = item.LibraryPath;
+            WriteFile(item.LibraryPath);
+        }
+        else (await _context.MediaItems.SingleAsync(series => series.Id == item.SeriesId)).Title = title;
+        await _context.SaveChangesAsync();
+
+        var request = new CreateTranscodeRequest(_episodeSourceId, "copy", null, null, VersionName: name);
+        if (outputBytes == 216)
+        {
+            var job = await ConvertAsync(request);
+            Assert.Equal(outputBytes, Encoding.UTF8.GetByteCount(Path.GetFileName(job.OutputPath!)));
+            Assert.NotNull(_engine.Seen);
+        }
+        else
+        {
+            var error = await Assert.ThrowsAsync<TranscodeVersionNameException>(() => ConvertAsync(request));
+            Assert.Contains("filename is too long", error.Message);
+            Assert.Null(_engine.Seen);
+            Assert.Empty(await _context.TranscodeJobs.ToListAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData("label")]
+    [InlineData("path")]
+    [InlineData("file")]
+    [InlineData("job")]
+    public async Task Existing_names_and_outputs_cannot_be_overwritten(string conflict)
+    {
+        var target = SeasonFolder + "/Breaking Bad S01E01 - My cut.mkv";
+        if (conflict == "file") WriteFile(target);
+        else if (conflict == "job") await ConvertAsync(new(_episodeSourceId, "copy", null, null, VersionName: "MY CUT"));
+        else
+        {
+            _context.MediaSources.Add(new MediaSource { Id = Guid.NewGuid(), MediaItemId = _episodeId, Container = "mkv",
+                Path = conflict == "path" ? target : SeasonFolder + "/other-file.mkv", VersionName = conflict == "label" ? "MY CUT" : null,
+                CreatedAt = DateTimeOffset.UtcNow });
+            await _context.SaveChangesAsync();
+        }
+        var before = _engine.Seen;
+        var error = await Assert.ThrowsAsync<TranscodeVersionNameException>(() => ConvertAsync(new(_episodeSourceId, "copy", null, null, VersionName: "My cut")));
+        Assert.Contains("Choose another name", error.Message);
+        Assert.Same(before, _engine.Seen);
+        if (conflict == "file") Assert.Equal("video", File.ReadAllText(Path.Combine(_root, target)));
+    }
+
+    [Fact]
+    public async Task Naming_a_movie_version_uses_its_title_without_stacking_source_suffixes()
+    {
+        var item = await _context.MediaItems.SingleAsync(item => item.Id == _episodeId);
+        item.Kind = MediaKind.Movie;
+        item.Title = "Arrival"; item.Year = 2016; item.SeriesId = null;
+        item.LibraryPath = "Arrival (2016)/Arrival (2016) - Old.mkv";
+        var source = await _context.MediaSources.SingleAsync(source => source.Id == _episodeSourceId);
+        source.Path = item.LibraryPath; source.VersionName = "Old";
+        WriteFile(source.Path);
+        await _context.SaveChangesAsync();
+        var job = await ConvertAsync(new(_episodeSourceId, "copy", null, null, VersionName: "Remux"));
+        Assert.Equal("Arrival (2016)/Arrival (2016) - Remux.mkv", job.OutputPath);
     }
 }

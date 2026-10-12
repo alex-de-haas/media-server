@@ -34,6 +34,8 @@ export function useSession(): Session {
  * around the active page. Settings is available to every user; its Catalogs tab is admin-only.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isManagement = pathname === "/manage" || pathname.startsWith("/manage/");
   const session = useQuery({
     queryKey: ["session"],
     queryFn: () => apiJson<Session>("/api/auth/session"),
@@ -67,7 +69,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           TabBar below keeps sticking to the viewport. */}
       <div className="flex min-h-full flex-col overflow-x-clip">
         <TabBar />
-        <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">{children}</main>
+        <main className={cn("mx-auto flex w-full flex-col gap-6 p-6", !isManagement && "max-w-5xl")}>
+          {children}
+        </main>
       </div>
     </SessionContext.Provider>
   );

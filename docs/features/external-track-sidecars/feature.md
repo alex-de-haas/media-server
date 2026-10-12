@@ -1,6 +1,6 @@
 ---
 created: 2026-07-27
-updated: 2026-09-23
+updated: 2026-10-12
 summary: A release's separate audio and subtitle files stay beside their library file as external streams.
 ---
 
@@ -126,12 +126,16 @@ Merging submits a job to the transcode engine with the sidecars as additional
 inputs, and produces a new version alongside them. It reuses the transcode job
 machinery: same queue, same progress, same import of the result as a version.
 
-**It is composed in the [Convert dialog](../convert-dialog/feature.md), not started
-from here.** The Media tab's Merge button opens that dialog with the checked
-sidecars already selected; more can be added there, each track's name and language
-corrected, and the video re-encoded in the same pass if wanted. Merging used to
-submit a job on the click, with no way to see what the result would carry or fix a
-mislabelled dub before gigabytes started moving.
+The Management grid selects sidecars together with tracks from one container of
+the same movie or episode, including a different version from the sidecar's owner.
+Sidecars retain their original ownership for file management and deletion. The API
+accepts only external audio/subtitle files of that exact title; embedded tracks
+still come from the selected container. Sidecars can be selected before or after
+the container's tracks without losing the selection.
+**Remux** copies the selected video; **Convert** re-encodes it. Both open a
+[fixed-selection confirmation](../convert-dialog/feature.md) where track names,
+including video, can be changed. Selection stays in the grid and is cleared only
+after successful submission. Languages and default flags remain unchanged.
 
 A merge no longer implies a stream copy — it says what joins the output, not what
 happens to the picture. It keeps only the *default*: with no codec named the video
@@ -204,27 +208,22 @@ why their names follow the convention those clients match on. Serving them over
 the Jellyfin API additionally needs a delivery endpoint this app does not have; it
 is parked in [external-subtitle-delivery](../external-subtitle-delivery/plan.md).
 
-## In the Media tab
+## In Management
 
-Sidecars are listed apart from the container's own tracks, because they behave
-differently: each is a file that can be removed on its own, and an external audio
-track is inert until merged. Selecting some opens the Convert dialog on them; each
-row offers a removal. The merge control follows the transcode engine's availability,
-since it has nothing to talk to without it.
+Sidecars stay visible beside their container in the compact
+[Management table](../library-management/feature.md), including when its embedded
+tracks are collapsed. Each is a file that can be removed on its own, and external
+audio carries a Merge for playback hint. Their checkboxes share the embedded-track
+selection and the header's Remux/Convert actions. Individual removal remains
+available. Engine availability and explicit video selection capability gate the
+composition actions; extraction never includes a sidecar that is already a file.
 
-They are then **grouped by kind** — audio under an audio heading, subtitles under
-theirs, each with an icon — and every row carries **its own file name** under the
-label. Neither is decoration. A sidecar routinely has no language and no codec to
-show: an `.ac3` dub named only after its voice-over group leaves the row with
-nothing that says whether it is a dub or a subtitle, and four of them read as one
-undifferentiated list. The kind answers that, the file name is what an operator
-sees when they open the folder, and the extension answers it a second time. For
-the same reason the label leads the row when there is nothing else to lead it —
-`Гаврилов`, not `— "Гаврилов"`.
-
-The icons are the **same marks the container's own tracks carry** in the list
-above — video, audio, subtitles — so the two lists read as one vocabulary rather
-than as a labelled list above an iconned one.
+They are ordered by kind and share the embedded tracks' file/track, type,
+format/details, size/rate, status and action columns. Each row carries its own
+filename and a Separate file origin label. Audio and subtitle icons match those
+inside the container. An unprobed `.ac3` dub still has its type, filename and
+release label; a missing codec or language does not introduce an empty prefix
+before that label.
 
 A sidecar also carries **its codec, channel count and sample rate**, so it reads
 like any other track — `rus AC3 5.1 · 48 kHz` with its release name in quotes —

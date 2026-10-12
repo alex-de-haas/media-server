@@ -6,8 +6,8 @@ namespace MediaServer.Api.Transcoding;
 /// merge its sidecars in.
 /// <para>
 /// <see cref="MergeStreamIds"/> names external streams of this source — sidecar dubs and subtitles sitting
-/// beside the file — whose tracks join the output. Naming any makes the job a merge: the video is copied
-/// untouched, so the encode-only options must be left unset. The sidecar files themselves are not consumed;
+/// beside the file — whose tracks join the output. Naming any makes the job a merge: omitted video codec
+/// defaults to copying; an explicit codec can encode while merging. The sidecar files themselves are not consumed;
 /// the merge produces a new version alongside them.
 /// </para>
 /// <see cref="VideoCodec"/>
@@ -39,7 +39,11 @@ public sealed record CreateTranscodeRequest(
     /// <summary><c>keep</c> (default) or <c>toProfile81</c>: rewrite a dual-layer Dolby Vision profile 7
     /// picture to single-layer profile 8.1 while it is copied — the form Apple TV and Infuse play as Dolby
     /// Vision. Refused with a re-encode, and on a version whose video is not profile 7.</summary>
-    string? DolbyVision = null);
+    string? DolbyVision = null,
+    /// <summary>Absolute embedded video index. Explicit selection requires engine support and explicit audio/subtitle lists.</summary>
+    int? VideoStreamIndex = null,
+    /// <summary>Output version label and filename suffix. Omission keeps automatic naming.</summary>
+    string? VersionName = null);
 
 /// <summary>
 /// Request to write chosen tracks of a version out as files beside it — the inverse of merging.
@@ -143,6 +147,8 @@ public sealed record TranscodeJobResponse(
 
 /// <summary>Raised for invalid transcode requests (bad source, wrong kind of item, missing file, no mount) — a 400.</summary>
 public class TranscodeRequestException(string message) : Exception(message);
+
+public sealed class TranscodeVersionNameException(string message) : TranscodeRequestException(message);
 
 /// <summary>
 /// Which items' versions a job may read: a movie's and an episode's. Conversion and extraction share the

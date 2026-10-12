@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTable, type ColumnDef, type ExpandedState, type SortingState } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ChevronDown, Columns3, ExternalLink, Search } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, Columns3, Search } from "lucide-react";
 import { useSession } from "@/components/app-shell";
 import { RemovedTitleDialog } from "@/components/removed-title-dialog";
 import { ManagedItem, ManagementTitleActions, SeasonDeleteControl } from "@/components/media-detail";
+import { ManagementAvailability } from "@/components/management-status";
 import { DataGrid, DataGridContainer, dataGridFeatures, type DataGridFeatures } from "@/components/reui/data-grid/data-grid";
 import { DataGridTable } from "@/components/reui/data-grid/data-grid-table";
 import { DataGridPagination } from "@/components/reui/data-grid/data-grid-pagination";
@@ -19,7 +20,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { mediaServer } from "@/lib/media-server";
-import { availabilityLabels, managementApi, managementQuery, quickViews, technicalFields, type ManagementItem } from "@/lib/management";
+import { managementApi, managementHref, managementQuery, quickViews, technicalFields, type ManagementItem } from "@/lib/management";
 import { episodeLabel, formatBytes } from "@/lib/format";
 import { errorMessage } from "@/lib/ui";
 
@@ -45,16 +46,18 @@ export function ManagementGuard({ children }: { children: React.ReactNode }) {
 
 export function LibraryManagement({ kind, id }: { kind: "Movie" | "Series"; id?: string }) {
   const search = useSearchParams();
-  return <ManagementGuard>{id && search.get("removed") === "1" && kind === "Series"
-    ? <RemovedManagement id={id} /> : <ManagementContent kind={kind} id={id} />}</ManagementGuard>;
+  const removedId = kind === "Movie" ? search.get("focus") : id;
+  return <ManagementGuard>{removedId && search.get("removed") === "1"
+    ? <RemovedManagement id={removedId} kind={kind} /> : <ManagementContent kind={kind} id={id} />}</ManagementGuard>;
 }
 
-function RemovedManagement({ id }: { id: string }) {
+function RemovedManagement({ id, kind }: { id: string; kind: "Movie" | "Series" }) {
   const router = useRouter();
+  const listHref = kind === "Movie" ? "/manage/movies" : "/manage/series";
   const removed = useQuery({ queryKey: ["removed-titles"], queryFn: mediaServer.listRemovedTitles });
   const item = removed.data?.find(item => item.id === id);
-  return <div className="flex flex-col gap-3"><h1 className="text-xl font-semibold">Removed title management</h1><Link className="underline" href="/manage/series">Back to series management</Link>
-    {removed.isPending ? <p>Loading retained title…</p> : removed.isError ? <div role="alert"><p>{errorMessage(removed.error)}</p><Button variant="outline" onClick={() => removed.refetch()}>Retry</Button></div> : item ? <RemovedTitleDialog management title={item} onOpenChange={open => { if (!open) router.push("/manage/series"); }} />
+  return <div className="flex flex-col gap-3"><h1 className="text-xl font-semibold">Removed title management</h1><Link className="underline" href={listHref}>Back to {kind === "Movie" ? "movie" : "series"} management</Link>
+    {removed.isPending ? <p>Loading retained title…</p> : removed.isError ? <div role="alert"><p>{errorMessage(removed.error)}</p><Button variant="outline" onClick={() => removed.refetch()}>Retry</Button></div> : item ? <RemovedTitleDialog management title={item} onOpenChange={open => { if (!open) router.push(listHref); }} />
       : <p>This title is no longer in your removed list.</p>}
   </div>;
 }
@@ -69,13 +72,25 @@ function ManagementContent({ kind, id }: { kind: "Movie" | "Series"; id?: string
   const currentHref = pathname + (search.size ? `?${search}` : "");
   const episodeId = kind === "Series" && id ? search.get("episode") ?? undefined : undefined;
   const tableKind = kind === "Series" && id ? "Episode" : kind;
-  const query = managementQuery(new URLSearchParams(search), tableKind, tableKind === "Episode" ? episodeId : id, tableKind === "Episode" ? id : undefined);
+  const focusId = kind === "Movie" ? search.get("focus") : null;
+  const query = managementQuery(new URLSearchParams(search), tableKind, episodeId, tableKind === "Episode" ? id : undefined);
   const result = useQuery({ queryKey: ["management", "list", query], queryFn: () => managementApi.list(query), refetchInterval: 30_000 });
+  useEffect(() => {
+    if (!focusId || !result.data?.items.some(item => item.id === focusId)) return;
+    // Once located, ordinary paging/Back/reload use the concrete page rather than resolving the focus again.
+    const next = new URLSearchParams(search);
+    next.delete("focus");
+    if (result.data.offset) next.set("offset", String(result.data.offset)); else next.delete("offset");
+    if (!next.has("expanded")) next.set("expanded", focusId);
+    window.history.replaceState(null, "", `${pathname}?${next}`);
+    document.getElementById(`management-title-${focusId}`)?.scrollIntoView({ block: "nearest" });
+  }, [focusId, result.data, search, pathname]);
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: mediaServer.listCatalogs });
   const series = useQuery({ queryKey: ["library-detail", id], queryFn: () => mediaServer.getLibraryDetail(id!), enabled: kind === "Series" && !!id, retry: false });
   const [searchDraft, setSearchDraft] = useState<string | null>(null);
   const update = (patch: Record<string, string | null>, resetPage = true) => {
     const next = new URLSearchParams(window.location.search);
+    next.delete("focus");
     if (resetPage) { next.delete("offset"); next.delete("expanded"); }
     for (const [key, value] of Object.entries(patch)) { if (value) next.set(key, value); else next.delete(key); }
     window.history.pushState(null, "", `${pathname}${next.size ? `?${next}` : ""}`);
@@ -99,12 +114,11 @@ function ManagementContent({ kind, id }: { kind: "Movie" | "Series"; id?: string
     }
     update(patch);
   };
-  const expansion: ExpandedState = Object.fromEntries((search.get("expanded")?.split(",") ?? (id && kind === "Movie" ? [id] : episodeId ? [episodeId] : [])).map(key => [key, true]));
+  const expansion: ExpandedState = Object.fromEntries((search.get("expanded")?.split(",") ?? (focusId ? [focusId] : episodeId ? [episodeId] : [])).map(key => [key, true]));
   const pagination = { pageIndex: Math.floor(Number(search.get("offset") || 0) / Number(search.get("limit") || 25)), pageSize: Number(search.get("limit") || 25) };
   const sorting: SortingState = [{ id: search.get("sort") || (tableKind === "Episode" ? "episode" : "title"), desc: search.get("descending") === "true" }];
   const hidden = search.get("hidden")?.split(",") ?? ["year"];
-  const focused = !!id && kind === "Movie";
-  const backHref = tableKind === "Episode" ? `/manage/series/${id}` : focused ? listHref : currentHref;
+  const backHref = tableKind === "Episode" ? `/manage/series/${id}` : currentHref;
   const seriesParams = new URLSearchParams([...search.entries()].filter(([key]) => !["offset", "expanded", "sort", "descending"].includes(key)));
   const affectedParams = new URLSearchParams(seriesParams);
   if (!affectedParams.has("view") || affectedParams.get("view") === "all") affectedParams.set("view", "attention");
@@ -112,11 +126,11 @@ function ManagementContent({ kind, id }: { kind: "Movie" | "Series"; id?: string
   const columns: ColumnDef<DataGridFeatures, ManagementItem>[] = [
     { id: "expand", header: "", size: 42, enableHiding: false, enableSorting: false,
       cell: ({ row }) => tableKind === "Series" ? null : <Button variant="ghost" size="icon-sm" aria-label={`${row.getIsExpanded() ? "Hide" : "Show"} versions of ${row.original.title}`} aria-expanded={row.getIsExpanded()} onClick={() => row.toggleExpanded()}><ChevronDown className={row.getIsExpanded() ? "" : "-rotate-90"} /></Button>,
-      meta: { expandedContent: (row: ManagementItem) => <div className="max-w-full p-4"><ManagedItem showActions={false} id={row.id} query={query} sourceId={search.get("source") ?? undefined} seriesId={tableKind === "Episode" ? id : undefined} backHref={backHref} /></div> } },
+      meta: { expandedContent: (row: ManagementItem) => <div className="max-w-full p-3"><ManagedItem showActions={false} id={row.id} query={query} sourceId={search.get("source") ?? undefined} seriesId={tableKind === "Episode" ? id : undefined} backHref={backHref} /></div> } },
     { id: "title", accessorKey: "title", size: 240, minSize: 180, enableHiding: false,
       header: ({ column }) => <SortHeader label="Title" column={column} />,
       cell: ({ row }) => <div className="flex min-w-0 flex-col gap-1">
-        {tableKind === "Series" ? <Link className="font-medium underline-offset-4 hover:underline" href={`/manage/series/${row.original.id}?${seriesParams}`}>{row.original.title}</Link> : <span className="font-medium">{row.original.title}</span>}
+        {tableKind === "Series" ? <Link className="font-medium underline-offset-4 hover:underline" href={`/manage/series/${row.original.id}?${seriesParams}`}>{row.original.title}</Link> : <span id={`management-title-${row.original.id}`} className="font-medium">{row.original.title}</span>}
         <span className="text-muted-foreground text-xs">{tableKind === "Episode" ? episodeLabel(row.original.parentIndexNumber, row.original.indexNumber, row.original.indexNumberEnd) : row.original.year ?? "Year unknown"}</span>
       </div> },
     { id: "year", accessorKey: "year", header: ({ column }) => <SortHeader label="Year" column={column} />, size: 80 },
@@ -125,15 +139,15 @@ function ManagementContent({ kind, id }: { kind: "Movie" | "Series"; id?: string
       cell: ({ row }) => tableKind === "Series" ? <span>{row.original.seasonCount} seasons · {row.original.episodeCount} episodes · {row.original.versionCount} versions</span> : row.original.versionCount },
     { id: "size", accessorKey: "sizeBytes", header: ({ column }) => <SortHeader label="Size" column={column} />, size: 110, cell: ({ row }) => row.original.sizeBytes == null ? "Unknown" : formatBytes(row.original.sizeBytes) },
     { id: "availability", accessorKey: "availability", header: "Availability", size: 120, enableSorting: false,
-      cell: ({ row }) => <Badge variant="outline">{availabilityLabels[row.original.availability]}</Badge> },
+      cell: ({ row }) => <ManagementAvailability value={row.original.availability} /> },
     { id: "issues", accessorKey: "issueCount", header: ({ column }) => <SortHeader label={tableKind === "Series" ? "Affected episodes" : "Source issues"} column={column} />, size: 145,
-      cell: ({ row }) => tableKind === "Series" ? <Link className="underline underline-offset-4" href={`/manage/series/${row.original.id}?${affectedParams}`}>{row.original.affectedEpisodes}</Link>
-        : row.original.issueCount || <span className="text-muted-foreground">—</span> },
+      cell: ({ row }) => tableKind === "Series" ? <Link className="underline underline-offset-4" href={`/manage/series/${row.original.id}?${affectedParams}`}>{row.original.affectedEpisodes > 0 ? <Badge variant="warning"><AlertTriangle aria-hidden />{row.original.affectedEpisodes}</Badge> : 0}</Link>
+        : row.original.issueCount > 0 ? <Badge variant="warning"><AlertTriangle aria-hidden />{row.original.issueCount}</Badge> : <span className="text-muted-foreground">—</span> },
     { id: "operations", accessorKey: "activeOperations", header: "Operations", size: 110, enableSorting: false,
       cell: ({ row }) => row.original.activeOperations ? <Link href="/activity" className="underline">{row.original.activeOperations} active</Link> : "—" },
     { id: "actions", header: "Actions", size: 100, enableHiding: false, enableSorting: false,
-      cell: ({ row }) => <div className="flex items-center gap-1"><ManagementTitleActions id={row.original.id} seriesId={tableKind === "Episode" ? id : undefined} backHref={backHref} />
-        <Link className={buttonVariants({ variant: "ghost", size: "icon-sm" })} aria-label={`Open ${row.original.title} in library`} href={tableKind === "Episode" ? `/series/${id}` : `/${kind === "Movie" ? "movies" : "series"}/${row.original.id}`}><ExternalLink /></Link></div> },
+      cell: ({ row }) => <ManagementTitleActions id={row.original.id} seriesId={tableKind === "Episode" ? id : undefined} backHref={backHref}
+        libraryHref={tableKind === "Episode" ? `/series/${id}` : `/${kind === "Movie" ? "movies" : "series"}/${row.original.id}`} /> },
   ];
   const table = useTable({
     features: dataGridFeatures, data: result.data?.items ?? [], columns, getRowId: row => row.id,
@@ -150,8 +164,14 @@ function ManagementContent({ kind, id }: { kind: "Movie" | "Series"; id?: string
   return <div className="flex min-w-0 flex-col gap-5">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">Library management</h1><p className="text-muted-foreground mt-1 text-sm">Versions, source diagnostics and media operations</p></div><Link className={buttonVariants({ variant: "outline" })} href={kind === "Movie" ? "/movies" : "/series"}>Open library</Link></div>
     <Tabs value={kind} onValueChange={value => router.push(value === "Movie" ? "/manage/movies" : "/manage/series")}><TabsList><TabsTrigger value="Movie">Movies</TabsTrigger><TabsTrigger value="Series">Series</TabsTrigger></TabsList></Tabs>
+    {returnTo && listHref !== baseListHref && <Link href={listHref} className="text-primary text-sm underline">Back to previous list</Link>}
+    {focusId && result.isSuccess && !result.data.items.some(item => item.id === focusId) && <div role="status" className="flex flex-wrap items-center gap-3 text-sm">
+      <span>This movie is no longer in the published list or does not match these filters.</span>
+      <Link className="underline" href={managementHref("Movie", focusId, undefined, { removed: "1" })}>View retained title</Link>
+      <Button variant="ghost" size="sm" onClick={() => update({ focus: null }, false)}>Dismiss</Button>
+    </div>}
     {id && <div className="flex flex-col gap-3"><Link href={listHref} className="text-primary text-sm underline">All {kind === "Movie" ? "movies" : "series"}</Link>
-      {kind === "Series" && series.data && <div className="flex flex-wrap items-center gap-3"><h2 className="text-xl font-semibold">{series.data.title}</h2><ManagementTitleActions id={id} backHref={listHref} /><Link href={`/series/${id}`} className="text-sm underline">Open in library</Link></div>}
+      {kind === "Series" && series.data && <div className="flex flex-wrap items-center gap-3"><h2 className="text-xl font-semibold">{series.data.title}</h2><ManagementTitleActions id={id} backHref={listHref} libraryHref={`/series/${id}`} /></div>}
       {kind === "Series" && series.isError && <p role="alert">This series is unavailable or has been merged. <Button variant="link" onClick={() => series.refetch()}>Retry</Button></p>}
       {kind === "Series" && series.data && <div className="flex flex-wrap gap-2" aria-label="Seasons"><Button size="sm" variant={!search.has("season") ? "secondary" : "outline"} onClick={() => update({ season: null, episode: null })}>All seasons</Button>{(series.data.seasons ?? []).map(season => <div key={season.id} className="flex items-center gap-1"><Button size="sm" variant={search.get("season") === String(season.seasonNumber ?? 0) ? "secondary" : "outline"} onClick={() => update({ season: String(season.seasonNumber ?? 0), episode: null })}>Season {season.seasonNumber ?? 0}</Button><SeasonDeleteControl season={season.seasonNumber ?? 0} seasonId={season.id} episodeCount={season.episodeCount} seriesId={id} backHref={listHref} /></div>)}</div>}
       {episodeId && <Button variant="link" className="self-start" onClick={() => update({ episode: null })}>Show all matching episodes</Button>}
@@ -165,7 +185,6 @@ function ManagementContent({ kind, id }: { kind: "Movie" | "Series"; id?: string
       <DataGridContainer className="rounded-lg border"><div className="overflow-x-auto"><DataGridTable /></div></DataGridContainer>
       <DataGridPagination sizes={[25, 50, 100]} />
     </DataGrid>}
-    {focused && result.isSuccess && result.data.total === 0 && ![...technicalFields, "search", "view"].some(key => search.has(key)) && <ManagedItem id={id} backHref={listHref} />}
   </div>;
 }
 // Keep the registry's draft and rule identities while a selection updates the URL.

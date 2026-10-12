@@ -15,6 +15,26 @@ namespace MediaServer.Api.Tests.Transcoding;
 /// </summary>
 public sealed class RemoteTranscodeEngineWireTests
 {
+    [Fact]
+    public async Task Explicit_video_and_name_have_the_engine_wire_names()
+    {
+        var handler = new StubHandler();
+        using var engine = new RemoteTranscodeEngine(new HttpClient(handler) { BaseAddress = new Uri("http://engine.local/") }, new MediaServerSettings(), NullLogger<RemoteTranscodeEngine>.Instance);
+        await engine.CreateAsync(new TranscodeJobRequest("movies", "in.mkv", "movies", "out.mkv", "copy", null, null,
+            VideoStreamIndex: 4, MetadataOverrides: [new(0, 4, null, "Picture")]), CancellationToken.None);
+        Assert.Contains("\"videoStreamIndex\":4", handler.RequestBody);
+        Assert.Contains("\"title\":\"Picture\"", handler.RequestBody);
+    }
+
+    [Theory]
+    [InlineData("{}", false)]
+    [InlineData("{\"explicitVideoSelection\":true}", true)]
+    public async Task Capability_is_opt_in_for_older_engines(string report, bool expected)
+    {
+        using var engine = new RemoteTranscodeEngine(new HttpClient(new HardwareHandler(report)) { BaseAddress = new Uri("http://engine.local/") }, new MediaServerSettings(), NullLogger<RemoteTranscodeEngine>.Instance);
+        Assert.Equal(expected, (await engine.GetToolingAsync(CancellationToken.None)).ExplicitVideoSelection);
+    }
+
     private sealed class StubHandler : HttpMessageHandler
     {
         public string? RequestBody { get; private set; }

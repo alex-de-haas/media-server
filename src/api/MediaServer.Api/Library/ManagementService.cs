@@ -273,6 +273,20 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
         var counts = new Dictionary<string, int>();
         foreach (var view in Views) counts[view] = await View(rows, view).CountAsync(ct);
         var filtered = View(rows, q.View);
+        var offset = q.Offset;
+        // Movie deep links select the containing page of the ordinary title-ordered list, not an item filter.
+        // Resolve the rank in SQL so a link into a large library does not load all titles into memory.
+        if (q.FocusId is { } focusId)
+        {
+            var target = await filtered.Where(r => r.Id == focusId).Select(r => new { r.Id, r.Title }).SingleOrDefaultAsync(ct);
+            if (target != null)
+            {
+                var key = target.Id.ToString().ToUpperInvariant();
+                var preceding = await filtered.CountAsync(r => string.Compare(r.Title, target.Title) < 0
+                    || (r.Title == target.Title && string.Compare(r.Id.ToString().ToUpper(), key) < 0), ct);
+                offset = preceding / q.Limit * q.Limit;
+            }
+        }
         IOrderedQueryable<ItemRow> ordered = q.Sort switch
         {
             "size" => q.Descending ? filtered.OrderByDescending(r => r.Size) : filtered.OrderBy(r => r.Size),
@@ -285,10 +299,10 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
                 : filtered.OrderBy(r => r.Season).ThenBy(r => r.Number),
             _ => q.Descending ? filtered.OrderByDescending(r => r.Title) : filtered.OrderBy(r => r.Title),
         };
-        var page = await ordered.ThenBy(r => r.Id).Skip(q.Offset).Take(q.Limit).ToListAsync(ct);
+        var page = await ordered.ThenBy(r => r.Id).Skip(offset).Take(q.Limit).ToListAsync(ct);
         return new(page.Select(r => new ManagementItemDto(r.Id, r.Kind.ToString(), r.Title, r.Year, r.CatalogId, r.CatalogName,
             r.Versions, r.SizeUnknown || r.Versions == 0 ? null : r.Size, State(r), r.Issues,
-            r.Affected, r.Episodes, r.Seasons, r.Active, r.Number, r.End, r.Season)).ToList(), counts[q.View], q.Limit, q.Offset, counts, Reference);
+            r.Affected, r.Episodes, r.Seasons, r.Active, r.Number, r.End, r.Season)).ToList(), counts[q.View], q.Limit, offset, counts, Reference);
     }
 
     private static string State(ItemRow r) => r.Available > 0 ? "available" : r.Unknown > 0 ? "unknown" : r.Pending > 0 ? "pending" : "blocked";
@@ -326,6 +340,7 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
             || q.Offset < 0 || q.Limit is < 1 or > 100 || q.MinVersions < 0 || q.MaxVersions < 0
             || (q.MinVersions != null && q.MaxVersions != null && q.MinVersions > q.MaxVersions)
             || q.Search?.Length > 200 || q.Season < 0
+            || (q.FocusId != null && (q.Kind != "Movie" || q.Sort != "title" || q.Descending || q.ItemId != null))
             || Values(q.SourceKind).Any(v => v is not ("file" or "bluray"))
             || Values(q.Resolution).Any(v => v is not ("2160p" or "1080p" or "720p" or "480p" or "unknown"))
             || Values(q.State).Any(v => v is not ("available" or "blocked" or "pending" or "unknown"))

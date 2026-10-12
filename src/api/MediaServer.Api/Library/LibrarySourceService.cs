@@ -227,7 +227,7 @@ public sealed class LibrarySourceService(
     // Trims, treats blank as "clear the suffix", rejects filename-unsafe characters (explicit error rather
     // than silent sanitize), and collapses to the exact form LibraryNaming.Sanitize would keep so the stored
     // label equals the on-disk suffix.
-    private static bool TryNormalizeEdition(string? input, out string? edition, out string error)
+    internal static bool TryNormalizeEdition(string? input, out string? edition, out string error)
     {
         edition = null;
         error = string.Empty;

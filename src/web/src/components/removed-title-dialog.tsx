@@ -137,7 +137,7 @@ export function RemovedTitleDialog({
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {role === "admin" && !management && <Link className="text-primary text-sm underline" href={`${managementHref(title.kind, title.id)}?removed=1`}>Manage</Link>}
+                {role === "admin" && !management && <Link className="text-primary text-sm underline" href={managementHref(title.kind, title.id, undefined, { removed: "1" })}>Manage</Link>}
                 {!management && title.isFavorite && (
                   <Button
                     variant="outline"

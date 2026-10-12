@@ -39,11 +39,18 @@ export function managementQuery(search: URLSearchParams, kind: string, itemId?: 
   }
   if (itemId) query.set("itemId", itemId);
   if (seriesId) query.set("seriesId", seriesId);
+  if (kind === "Movie" && search.get("focus")) query.set("focusId", search.get("focus")!);
   return query.toString();
 }
-export function managementHref(kind: string, id: string, seriesId?: string) {
-  return kind === "Episode" && seriesId ? `/manage/series/${seriesId}?episode=${id}`
-    : `/manage/${kind === "Series" ? "series" : "movies"}/${id}`;
+export function managementHref(kind: string, id: string, seriesId?: string, extra?: Record<string, string>) {
+  const query = new URLSearchParams(extra);
+  if (kind === "Movie") {
+    query.set("focus", id);
+    query.set("expanded", id);
+    return `/manage/movies?${query}`;
+  }
+  if (kind === "Episode" && seriesId) query.set("episode", id);
+  return `/manage/series/${seriesId ?? id}${query.size ? `?${query}` : ""}`;
 }
 export const availabilityLabels: Record<Availability, string> = {
   available: "Available", blocked: "Unavailable", pending: "Preparing", unknown: "Not assessed",

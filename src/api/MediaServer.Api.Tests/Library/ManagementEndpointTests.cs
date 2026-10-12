@@ -53,5 +53,21 @@ public sealed class ManagementEndpointTests
         context.Response.Body = new MemoryStream();
         await list.RequestDelegate!(context);
         Assert.Equal(400, context.Response.StatusCode);
+
+        var target = new MediaItem { Id = Guid.NewGuid(), PublicId = "target", Title = "B", Kind = MediaKind.Movie };
+        database.Context.MediaItems.AddRange(
+            new MediaItem { Id = Guid.NewGuid(), PublicId = "first", Title = "A", Kind = MediaKind.Movie }, target);
+        await database.Context.SaveChangesAsync();
+        context = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        context.Request.Method = "GET";
+        context.Request.QueryString = new QueryString($"?focusId={target.Id}&limit=1");
+        context.Response.Body = new MemoryStream();
+        await list.RequestDelegate!(context);
+        Assert.Equal(200, context.Response.StatusCode);
+        context.Response.Body.Position = 0;
+        using var focused = await JsonDocument.ParseAsync(context.Response.Body);
+        Assert.Equal(2, focused.RootElement.GetProperty("total").GetInt32());
+        Assert.Equal(1, focused.RootElement.GetProperty("offset").GetInt32());
+        Assert.Equal(target.Id, Assert.Single(focused.RootElement.GetProperty("items").EnumerateArray()).GetProperty("id").GetGuid());
     }
 }

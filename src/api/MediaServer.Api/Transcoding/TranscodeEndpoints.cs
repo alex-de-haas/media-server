@@ -23,7 +23,7 @@ public static class TranscodeEndpoints
         {
             var available = engine is not DisabledTranscodeEngine;
             var tooling = available ? await engine.GetToolingAsync(cancellationToken) : TranscodeTooling.None;
-            return Results.Ok(new { available, dolbyVisionConversion = tooling.DolbyVisionConversion, videoPartJoining = tooling.VideoPartJoining, blurayImport = tooling.BlurayImport });
+            return Results.Ok(new { available, dolbyVisionConversion = tooling.DolbyVisionConversion, videoPartJoining = tooling.VideoPartJoining, blurayImport = tooling.BlurayImport, explicitVideoSelection = tooling.ExplicitVideoSelection });
         });
 
         // Every language tag a track edit may carry — the canonical forms plus the spellings that fold onto
@@ -42,6 +42,11 @@ public static class TranscodeEndpoints
             {
                 var job = await service.CreateAsync(request, cancellationToken);
                 return Results.Created($"/api/transcode/{job.Id}", job);
+            }
+            catch (TranscodeVersionNameException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status400BadRequest,
+                    extensions: new Dictionary<string, object?> { ["error"] = "invalid_version_name" });
             }
             catch (TranscodeConflictException exception)
             {

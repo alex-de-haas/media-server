@@ -202,7 +202,7 @@ Plans: 5 In Progress · 2 Draft · 3 On Hold.
 - [Catalog Maintenance](features/catalog-maintenance/feature.md) — Scan for media and Refresh metadata keep each catalog in step with its disk and its metadata sources.
 - [Catalogs](features/catalogs/feature.md) — Operator-configured catalogs that drive parsing, target paths, naming, seeding policy and metadata language.
 - [Collections (Movie Franchises)](features/collections/feature.md) — Owned movies grouped into TMDb franchise collections in the web UI and as a Jellyfin boxsets library.
-- [Convert Dialog](features/convert-dialog/feature.md) — The dialog that composes a new version from one video file as a single transcode-engine job.
+- [Remux and Convert Dialogs](features/convert-dialog/feature.md) — Fixed-selection Remux and Convert confirmations with track names, video encoding controls and optional Dolby Vision rewriting.
 - [Dolby Vision Profile](features/dolby-vision-profile/feature.md) — Distinguishes playable Dolby Vision from Dolby Vision shown as HDR10 and converts the latter losslessly.
 - [Domain Model](features/domain-model/feature.md) — The persistent EF Core entities and the core pipeline and metadata extension contracts.
 - [Episode Media](features/episode-media/feature.md) — Episodes get the same media surface as movies, with versions, tracks, sidecars and conversions.
@@ -232,7 +232,7 @@ Plans: 5 In Progress · 2 Draft · 3 On Hold.
 - [Security](features/security/feature.md) — Protection of catalogs, torrents, settings and streams across Hosty identity and Jellyfin client credentials.
 - [Single Catalog per Title](features/single-catalog-per-title/feature.md) — A movie or series exists in at most one catalog, a deliberate constraint until multi-catalog membership exists.
 - [Storage and Data](features/storage-and-data/feature.md) — Backed-up app data in an embedded SQLite database, separate from the large catalog roots that hold media.
-- [Stream Title Editing](features/stream-title-editing/feature.md) — Correct a track's name and language while submitting a conversion or a merge.
+- [Stream Title Editing](features/stream-title-editing/feature.md) — Edit selected video, audio and subtitle names while producing a new version; language edits remain available through the API.
 - [Title Preview](features/title-preview/feature.md) — A dialog that describes titles the instance does not hold, from recommendations, the calendar and search.
 - [Torrents and Organizer](features/torrents-and-organizer/feature.md) — Torrents download through the external torrent-engine app and each file runs through one ingest pipeline into the catalog. · [plan](features/torrents-and-organizer/plan.md): In Progress, 9/11, updated 2026-10-01
 - [Track Extraction](features/track-extraction/feature.md) — Write a version's embedded audio and subtitle tracks out as files beside it, recorded as external streams.

@@ -1,6 +1,6 @@
 ---
 created: 2026-08-07
-updated: 2026-09-10
+updated: 2026-10-12
 summary: Write a version's embedded audio and subtitle tracks out as files beside it, recorded as external streams.
 ---
 
@@ -35,8 +35,7 @@ drops the embedded track.
 supports it by no route, and Jellyfin has no delivery for it either. Extracting a
 dub is therefore an **archival** act: it is how a track is kept before the container
 is rebuilt without it. That is a real workflow (a 141 GB remux in the development
-library is 87.5 GB of audio), but it is a two-step one, and the dialog says so on
-the audio heading rather than in a footnote.
+library is 87.5 GB of audio), but it is a two-step one, and the grid marks separate audio as needing a merge for playback.
 
 ## The container is not touched
 
@@ -60,7 +59,7 @@ discovered:
   collision, so nothing else would notice.
 - **Merging an extracted sidecar back into its own version is left alone.** It
   would produce a container carrying that track twice, and nothing guards against
-  it, because the Convert dialog already holds the controls to avoid it: the
+  it, because the Management grid already holds the controls to avoid it: the
   embedded track can be dropped in the same job that folds the sidecar in. A guard
   would refuse a combination the operator can already compose correctly.
 - **Nothing in the UI says a sidecar was extracted.** The Media tab makes no
@@ -106,8 +105,7 @@ index line.
 `dvb_subtitle` and `xsub` are refused. They already reach the viewer by Direct Play
 from the container, no client reads them better as a file, and VobSub needs an
 `.idx`/`.sub` *pair*, which breaks the one-track-one-file assumption in both the
-sidecar model and the engine's publish protocol. The dialog shows such a row as
-unselectable and says why, rather than letting a composed job come back as a 400.
+sidecar model and the engine's publish protocol. The grid disables extraction for such a row and explains why, rather than letting a composed job come back as a 400.
 
 A subtitle whose codec the library does not know is refused too, naming the fix:
 there is no telling what file it should become, and guessing would write an `.srt`
@@ -185,28 +183,24 @@ waiting on.
 missing. Leaving a produced file with no row pointing at it is the one outcome the
 sidecar model exists to prevent.
 
-## In the Media tab
+## In Management
 
-A version's action row carries an **Extract** control beside Convert, and it opens a
-dialog rather than submitting on the click — the reason the Convert dialog exists:
-gigabytes start moving, and an operator should see what the result will be. It also
-gives the audio caveat somewhere to sit.
+Each embedded audio or supported text-subtitle row has an Extract action. Track
+checkboxes enable batch extraction from the action row beneath the table header.
+The container chevron reveals its embedded tracks. There is no separate
+track-selection dialog. Requests contain exactly the chosen IDs.
 
-The dialog lists the container's own audio and subtitle tracks with the file each
-becomes. Sidecars are not offered: one is already a file, so there is nothing to
-extract it from. The whole surface follows the engine's availability, since it has
-nothing to talk to without it, and a job refused because the item is mid-move comes
-back as a 409 through the same `LibraryMoveGuard` a conversion uses.
+Video, sidecars, bitmap subtitles and unknown subtitle formats cannot be extracted;
+disabled controls explain the restriction. The frontend mirrors the server's
+supported text-codec set. Audio sidecars carry a Merge for playback hint because
+they need to be merged into a container to play.
 
-The client-side bitmap check names only codecs known to be pictures; an unrecognised
-one stays selectable on purpose. The server owns the rule, and a client stricter than
-the API blocks a submit the API would have accepted — the one direction such a check
-must never be wrong in. A codec the dialog does not recognise says so instead of
-naming a file: guessing `.srt` would promise an outcome the server refuses.
-
-An extraction appears in the same conversion list as a conversion, reading
-`Extract · N files` where a conversion states its codec and quality: it encodes
-nothing, so those columns would only ever say "Remux".
+Engine availability, administrator role and move locks gate the actions. Errors
+retain the grid selection and show a notification; successful submission clears
+selection and refreshes jobs. Active jobs use the inline Conversions section;
+completed/cancelled jobs disappear there and remain in Activity. A failed job keeps
+its diagnostic visible. Output naming, duplicate detection and sidecar import use
+the existing extraction service.
 
 ## Over the API
 
@@ -243,6 +237,6 @@ the folder directly (SMB/NFS) do get it. This feature does not narrow that gap.
   `outputPath`, audio and subtitle extractions sending null picture settings, a text
   conversion naming its codec, and an ordinary job keeping its video settings and
   sending no outputs.
-- `detail.spec.ts` — the Extract control opening the dialog, the audio caveat on its
-  heading, the file each track becomes, a picture-based subtitle unselectable with
-  its reason, sidecars not offered, and the submitted payload.
+- `detail.spec.ts` and `track-actions.test.ts` — exact single/batch selection,
+  supported text codecs, disabled unsupported formats, sidecar exclusion and
+  successful selection cleanup without another picker.
