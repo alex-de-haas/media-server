@@ -199,6 +199,9 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
         var sources = Sources(); var matching = FilterSources(sources, q);
         var hasSourceFilters = new[] { q.SourceKind, q.Resolution, q.Codec, q.Hdr, q.DvProfile, q.State }.Any(v => !string.IsNullOrEmpty(v));
         var kind = Enum.Parse<MediaKind>(q.Kind);
+        // Fold the series-only branch out of leaf queries before SQL translation. An unconditional
+        // OR EXISTS over child episodes prevents indexed source lookups for every movie/episode.
+        var includeEpisodes = kind == MediaKind.Series;
         var items = db.MediaItems.AsNoTracking().Where(i => i.PublicId != null && i.RemovedAt == null && i.Kind == kind);
         if (q.ItemId is { } id) items = items.Where(i => i.Id == id);
         if (q.CatalogId is { } catalog) items = items.Where(i => i.CatalogId == catalog);
@@ -211,7 +214,7 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
                 || db.MetadataRecords.Any(m => m.MediaItemId == i.Id && m.Title != null && EF.Functions.Like(m.Title, pattern, "\\")));
         }
         var leaves = db.MediaItems.Where(i => i.PublicId != null && i.RemovedAt == null && (i.Kind == MediaKind.Movie || i.Kind == MediaKind.Episode));
-        if (hasSourceFilters) items = items.Where(i => matching.Any(s => s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)));
+        if (hasSourceFilters) items = items.Where(i => matching.Any(s => s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))));
         var affectedEpisodes = leaves.Where(e => !hasSourceFilters || matching.Any(s => s.ItemId == e.Id));
         affectedEpisodes = q.View switch
         {
@@ -231,22 +234,22 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
             Id = i.Id, Kind = i.Kind, Year = i.Year, CatalogId = i.CatalogId, CatalogName = i.Catalog == null ? "" : i.Catalog.Name,
             Title = db.MetadataRecords.Where(m => m.MediaItemId == i.Id && m.Title != null)
                 .OrderBy(m => m.Language == preferred ? 0 : 1).ThenBy(m => m.Id).Select(m => m.Title).FirstOrDefault() ?? i.Title,
-            Versions = sources.Count(s => s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)),
-            Size = sources.Where(s => s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)).Sum(s => s.Size),
-            SizeUnknown = sources.Any(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && s.Size <= 0),
-            Available = sources.Count(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && s.State == "available"),
-            AvailableWithoutFallback = sources.Count(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && s.State == "available" && !s.DvFallback),
-            MatchesAttention = matching.Any(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && (s.State == "blocked" || s.DvFallback))
-                || (!hasSourceFilters && leaves.Any(e => e.SeriesId == i.Id && !sources.Any(s => s.ItemId == e.Id))),
-            Unknown = sources.Count(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && s.State == "unknown"),
-            Pending = sources.Count(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && s.State == "pending"),
-            Issues = sources.Count(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && (s.State == "blocked" || s.DvFallback)),
-            Disc = matching.Any(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && s.Disc),
-            Dv = matching.Any(s => (s.ItemId == i.Id || leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id)) && s.DvFallback),
-            Episodes = leaves.Count(e => e.SeriesId == i.Id),
-            Seasons = db.MediaItems.Count(e => e.ParentId == i.Id && e.Kind == MediaKind.Season && e.PublicId != null),
-            Affected = affectedEpisodes.Count(e => e.SeriesId == i.Id),
-            Active = db.TranscodeJobs.Count(j => (j.MediaItemId == i.Id || leaves.Any(e => e.Id == j.MediaItemId && e.SeriesId == i.Id))
+            Versions = sources.Count(s => s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))),
+            Size = sources.Where(s => s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))).Sum(s => s.Size),
+            SizeUnknown = sources.Any(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && s.Size <= 0),
+            Available = sources.Count(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && s.State == "available"),
+            AvailableWithoutFallback = sources.Count(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && s.State == "available" && !s.DvFallback),
+            MatchesAttention = matching.Any(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && (s.State == "blocked" || s.DvFallback))
+                || (includeEpisodes && !hasSourceFilters && leaves.Any(e => e.SeriesId == i.Id && !sources.Any(s => s.ItemId == e.Id))),
+            Unknown = sources.Count(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && s.State == "unknown"),
+            Pending = sources.Count(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && s.State == "pending"),
+            Issues = sources.Count(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && (s.State == "blocked" || s.DvFallback)),
+            Disc = matching.Any(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && s.Disc),
+            Dv = matching.Any(s => (s.ItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == s.ItemId && e.SeriesId == i.Id))) && s.DvFallback),
+            Episodes = includeEpisodes ? leaves.Count(e => e.SeriesId == i.Id) : 0,
+            Seasons = includeEpisodes ? db.MediaItems.Count(e => e.ParentId == i.Id && e.Kind == MediaKind.Season && e.PublicId != null) : 0,
+            Affected = includeEpisodes ? affectedEpisodes.Count(e => e.SeriesId == i.Id) : 0,
+            Active = db.TranscodeJobs.Count(j => (j.MediaItemId == i.Id || (includeEpisodes && leaves.Any(e => e.Id == j.MediaItemId && e.SeriesId == i.Id)))
                     && (j.State == TranscodeJobState.Queued || j.State == TranscodeJobState.Running))
                 + db.Jobs.Count(j => j.Type == LibraryMoveService.JobType && j.RelatedId != null && (j.RelatedId == i.Id || j.RelatedId == i.SeriesId)
                     && (j.Status == JobStatus.Queued || j.Status == JobStatus.Running)),
