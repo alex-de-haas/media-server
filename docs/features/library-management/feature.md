@@ -220,6 +220,39 @@ polling provides a 30-second reconciliation fallback. Expanded conversion
 completion refreshes source details without requiring collapse/reopen. A created
 MKV can remain unknown/preparing until background indexing observes it.
 
+## Request diagnostics
+
+Management reads and viewer availability emit always-on, compact diagnostic
+records to the normal `web` and `api` logs. The web proxy creates a fresh
+`X-Management-Request-Id`, forwards it to the API and returns it in the response.
+Both services include that ID in every diagnostic record. The proxy also records
+a validated Cloudflare Ray ID when supplied, so an error page can be matched to
+its request. Unrelated proxy traffic is not instrumented.
+
+The proxy records arrival, the start of the upstream request, receipt of upstream
+headers, and response-body completion or cancellation, with status, elapsed time
+and byte count. The API records arrival before authentication, authorization,
+catalog availability, query construction, each quick count (`count.all`,
+`count.attention`, `count.unavailable`, `count.bluray`, `count.dolby-vision`,
+`count.active`), optional focus lookup/rank, page selection and response writing.
+Source diagnostics and each media kind in the availability batch are timed too.
+Every ten seconds, an unfinished request logs its current stage and elapsed time;
+failures and caller disconnects retain the last stage. Timers stop when the
+request finishes or the proxy observes a disconnect.
+
+Query context includes validated kind/view/sort, page bounds and filter-presence
+flags; query results include counts and the indexing snapshot includes its size.
+Records omit search/filter values, SQL, titles, paths, identities, credentials,
+request/response bodies and exception messages. No setting needs to be enabled.
+
+To investigate a timeout, find its Ray ID in the web log, then follow the shared
+request ID through both logs. A proxy waiting for upstream without an API start
+locates the gap before API dispatch. An API stuck in `authentication` precedes the
+handler; a named count or page stage identifies the query still executing. An API
+completion followed by a proxy waiting in `body` locates the remaining wait in
+response transfer. Stage timings include EF translation and execution, and do not
+claim to distinguish those two costs.
+
 ## Testing Expectations
 
 - xUnit SQLite tests cover mixed disc/file versions, DV alternatives, missing
@@ -229,6 +262,10 @@ MKV can remain unknown/preparing until background indexing observes it.
   literal search, focused movie pagination with equal-title ties and missing or
   excluded targets, bounded SQL command counts, and indexed source lookups on
   large movie/episode lists, both with and without technical filters.
+- Diagnostic tests cover cross-service correlation, progress during an unfinished
+  query, cleanup on completion/failure/cancellation, last-stage attribution and
+  omission of private query values and exception messages. Proxy tests preserve
+  status, headers, streamed bytes, backpressure and body cancellation.
 - Endpoint tests assert administrator versus authenticated-viewer policy metadata,
   query-default and focus binding, and rejection of invalid page windows.
 - Indexing snapshot tests cover expiry, restart and preservation of known failure.

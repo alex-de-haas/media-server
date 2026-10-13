@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hostyServerEnv } from "@/lib/hosty";
 import { readIdentityToken } from "@/lib/host-auth";
+import { ManagementRequestDiagnostics, managementRequestIdHeader } from "@/lib/management-request-diagnostics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,9 +24,21 @@ type RouteContext = { params: Promise<{ path: string[] }> };
  * token, which `api` re-validates against Core. Keeps the browser same-origin and iframe-safe.
  */
 async function proxy(request: NextRequest, path: string[]): Promise<Response> {
+  const diagnostics = ManagementRequestDiagnostics.start(request, path);
+  try {
+    return await forward(request, path, diagnostics);
+  } catch (error) {
+    diagnostics?.finish("failed", undefined, error);
+    throw error;
+  }
+}
+
+async function forward(request: NextRequest, path: string[], diagnostics: ManagementRequestDiagnostics | null): Promise<Response> {
   const token = readIdentityToken(request);
   if (!token) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    diagnostics?.finish("unauthenticated", 401);
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401,
+      headers: diagnostics ? { [managementRequestIdHeader]: diagnostics.requestId } : undefined });
   }
 
   const env = hostyServerEnv();
@@ -38,6 +51,7 @@ async function proxy(request: NextRequest, path: string[]): Promise<Response> {
     }
   });
   headers.set("authorization", `Bearer ${token}`);
+  if (diagnostics) headers.set(managementRequestIdHeader, diagnostics.requestId);
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   const init: RequestInit & { duplex?: "half" } = {
@@ -53,9 +67,12 @@ async function proxy(request: NextRequest, path: string[]): Promise<Response> {
 
   let upstream: Response;
   try {
+    diagnostics?.upstreamStarted();
     upstream = await fetch(target, init);
-  } catch {
-    return NextResponse.json({ error: "upstream_unreachable" }, { status: 502 });
+  } catch (error) {
+    diagnostics?.finish("upstream_failed", 502, error);
+    return NextResponse.json({ error: "upstream_unreachable" }, { status: 502,
+      headers: diagnostics ? { [managementRequestIdHeader]: diagnostics.requestId } : undefined });
   }
 
   const responseHeaders = new Headers();
@@ -64,8 +81,9 @@ async function proxy(request: NextRequest, path: string[]): Promise<Response> {
       responseHeaders.set(key, value);
     }
   });
+  if (diagnostics) responseHeaders.set(managementRequestIdHeader, diagnostics.requestId);
 
-  return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
+  return new NextResponse(diagnostics ? diagnostics.responseBody(upstream) : upstream.body, { status: upstream.status, headers: responseHeaders });
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
