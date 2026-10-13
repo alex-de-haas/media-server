@@ -531,6 +531,8 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.HasIndex("RelatedType", "RelatedId");
 
+                    b.HasIndex("Type", "Status", "RelatedId");
+
                     b.ToTable("Jobs");
                 });
 

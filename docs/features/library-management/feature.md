@@ -145,6 +145,10 @@ sizes labeled explicitly. Lists do not load tracks or probe the filesystem.
 Movie and episode summaries look up their own sources through the item index;
 only series summaries traverse child episodes. The same distinction applies to
 source filters, quick counts, active conversions and viewer availability.
+Active move counts use the covering `Jobs(Type, Status, RelatedId)` index in both
+quick counts and page projections. Completed job history is excluded by the
+indexed type/status lookup instead of scanned once per title. The index is
+installed by the database migration when an existing installation is upgraded.
 
 `GET /api/management/items/{id}/sources` returns diagnostics for all published
 sources plus a match flag under the current filters. The location endpoint
@@ -262,6 +266,9 @@ claim to distinguish those two costs.
   literal search, focused movie pagination with equal-title ties and missing or
   excluded targets, bounded SQL command counts, and indexed source lookups on
   large movie/episode lists, both with and without technical filters.
+- SQLite query-plan tests cover indexed job lookups for active counts and page
+  projections with a large completed-job history. Migration tests preserve job
+  records through index creation and rollback.
 - Diagnostic tests cover cross-service correlation, progress during an unfinished
   query, cleanup on completion/failure/cancellation, last-stage attribution and
   omission of private query values and exception messages. Proxy tests preserve
