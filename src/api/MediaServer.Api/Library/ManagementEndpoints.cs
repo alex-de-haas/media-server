@@ -1,5 +1,6 @@
 using MediaServer.Api.Hosty;
 using MediaServer.Api.Data;
+using MediaServer.Api.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,6 +13,12 @@ public static class ManagementEndpoints
         var group = routes.MapGroup("/api/management").RequireAuthorization(AppRoles.AdminPolicy);
         group.AddEndpointFilter(async (context, next) =>
         {
+            if (context.HttpContext.Items.TryGetValue(typeof(ManagementRequestDiagnostics), out var value)
+                && value is ManagementRequestDiagnostics diagnostics)
+            {
+                diagnostics.EndStage();
+                diagnostics.BeginStage("endpoint");
+            }
             try { return await next(context); }
             catch (ManagementValidationException error) { return Results.Problem(error.Message, statusCode: 400); }
         });

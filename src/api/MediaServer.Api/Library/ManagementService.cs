@@ -1,6 +1,7 @@
 using MediaServer.Api.Configuration;
 using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
+using MediaServer.Api.Diagnostics;
 using MediaServer.Api.Native.Playback;
 using MediaServer.Api.Remux;
 using Microsoft.EntityFrameworkCore;
@@ -8,17 +9,32 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.Library;
 
 /// <summary>SQL-filtered management summaries. No media I/O or playback URLs are produced here.</summary>
-public sealed class ManagementService(MediaServerDbContext db, MediaServerSettings settings, IndexingProgress? indexing = null)
+public sealed class ManagementService(MediaServerDbContext db, MediaServerSettings settings, IndexingProgress? indexing = null,
+    ManagementRequestDiagnostics? diagnostics = null)
 {
     private Guid[] unanchoredCatalogs = [];
     private async Task ReadCatalogAvailability(CancellationToken ct)
     {
-        if (settings.CatalogMountRoots.Count == 0) return;
+        diagnostics?.BeginStage("catalog-availability");
+        if (settings.CatalogMountRoots.Count == 0)
+        {
+            diagnostics?.EndStage(0);
+            return;
+        }
         var catalogs = await db.Catalogs.AsNoTracking().ToListAsync(ct);
         unanchoredCatalogs = catalogs.Where(c => string.IsNullOrEmpty(c.MountLabel)
             ? CatalogRootResolver.ToMountRelative(settings.CatalogMountRoots, c.Root) == null
             : CatalogRootResolver.Resolve(settings.CatalogMountRoots, c.MountLabel, c.MountRelativePath) == null)
             .Select(c => c.Id).ToArray();
+        diagnostics?.EndStage(catalogs.Count);
+    }
+
+    private async Task<T> MeasureAsync<T>(string stage, Func<Task<T>> action, Func<T, int?>? count = null)
+    {
+        diagnostics?.BeginStage(stage);
+        var result = await action();
+        diagnostics?.EndStage(count?.Invoke(result));
+        return result;
     }
     public const string Reference = "Apple/tvOS · HDR10 and Dolby Vision · stored media facts";
     internal static readonly NativeCapabilityProfile Profile = new(
@@ -69,6 +85,7 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
         var observed = snapshot.Keys.ToArray();
         var failed = snapshot.Where(p => p.Value == "failed").Select(p => p.Key).ToArray();
         var ready = snapshot.Where(p => p.Value == "ready").Select(p => p.Key).ToArray();
+        diagnostics?.IndexSnapshot(snapshot.Count, ready.Length, failed.Length);
         var images = NativePlaybackResolver.StillImages.ToArray();
         var audio = Profile.AudioCodecs.ToArray();
         var video = Profile.VideoCodecs.ToArray();
@@ -270,23 +287,30 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
 
     public async Task<ManagementPage> ListAsync(ManagementQuery q, CancellationToken ct)
     {
+        diagnostics?.BeginStage("validate");
         Validate(q);
+        diagnostics?.Query(q);
+        diagnostics?.EndStage();
         await ReadCatalogAvailability(ct);
+        diagnostics?.BeginStage("build-query");
         var rows = Rows(q);
+        diagnostics?.EndStage();
         var counts = new Dictionary<string, int>();
-        foreach (var view in Views) counts[view] = await View(rows, view).CountAsync(ct);
+        foreach (var view in Views)
+            counts[view] = await MeasureAsync("count." + view, () => View(rows, view).CountAsync(ct), count => count);
         var filtered = View(rows, q.View);
         var offset = q.Offset;
         // Movie deep links select the containing page of the ordinary title-ordered list, not an item filter.
         // Resolve the rank in SQL so a link into a large library does not load all titles into memory.
         if (q.FocusId is { } focusId)
         {
-            var target = await filtered.Where(r => r.Id == focusId).Select(r => new { r.Id, r.Title }).SingleOrDefaultAsync(ct);
+            var target = await MeasureAsync("focus.lookup", () => filtered.Where(r => r.Id == focusId)
+                .Select(r => new { r.Id, r.Title }).SingleOrDefaultAsync(ct));
             if (target != null)
             {
                 var key = target.Id.ToString().ToUpperInvariant();
-                var preceding = await filtered.CountAsync(r => string.Compare(r.Title, target.Title) < 0
-                    || (r.Title == target.Title && string.Compare(r.Id.ToString().ToUpper(), key) < 0), ct);
+                var preceding = await MeasureAsync("focus.rank", () => filtered.CountAsync(r => string.Compare(r.Title, target.Title) < 0
+                    || (r.Title == target.Title && string.Compare(r.Id.ToString().ToUpper(), key) < 0), ct), count => count);
                 offset = preceding / q.Limit * q.Limit;
             }
         }
@@ -302,7 +326,8 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
                 : filtered.OrderBy(r => r.Season).ThenBy(r => r.Number),
             _ => q.Descending ? filtered.OrderByDescending(r => r.Title) : filtered.OrderBy(r => r.Title),
         };
-        var page = await ordered.ThenBy(r => r.Id).Skip(offset).Take(q.Limit).ToListAsync(ct);
+        var page = await MeasureAsync("page", () => ordered.ThenBy(r => r.Id).Skip(offset).Take(q.Limit).ToListAsync(ct), result => result.Count);
+        diagnostics?.BeginStage("response");
         return new(page.Select(r => new ManagementItemDto(r.Id, r.Kind.ToString(), r.Title, r.Year, r.CatalogId, r.CatalogName,
             r.Versions, r.SizeUnknown || r.Versions == 0 ? null : r.Size, State(r), r.Issues,
             r.Affected, r.Episodes, r.Seasons, r.Active, r.Number, r.End, r.Season)).ToList(), counts[q.View], q.Limit, offset, counts, Reference);
@@ -312,12 +337,19 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
 
     public async Task<IReadOnlyList<ManagementSourceDto>> SourcesAsync(Guid id, ManagementQuery q, CancellationToken ct)
     {
+        diagnostics?.BeginStage("validate");
         Validate(q);
+        diagnostics?.Query(q);
+        diagnostics?.EndStage();
         await ReadCatalogAvailability(ct);
+        diagnostics?.BeginStage("build-query");
         var sources = Sources().Where(s => s.ItemId == id);
         var matches = IssueSources(FilterSources(sources, q), q.View);
-        return await sources.Select(s => new ManagementSourceDto(s.Id, s.State, s.Reason, s.DvFallback, s.DvUnknown,
-            matches.Any(m => m.Id == s.Id))).ToListAsync(ct);
+        diagnostics?.EndStage();
+        var result = await MeasureAsync("sources", () => sources.Select(s => new ManagementSourceDto(s.Id, s.State, s.Reason, s.DvFallback, s.DvUnknown,
+            matches.Any(m => m.Id == s.Id))).ToListAsync(ct), rows => rows.Count);
+        diagnostics?.BeginStage("response");
+        return result;
     }
 
     public async Task<IReadOnlyList<LibraryAvailabilityDto>> AvailabilityAsync(Guid[] ids, CancellationToken ct)
@@ -327,12 +359,13 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
         var result = new List<LibraryAvailabilityDto>();
         foreach (var kind in new[] { "Movie", "Series", "Episode" })
         {
-            var rows = await Rows(new(Kind: kind)).Where(r => ids.Contains(r.Id))
-                .Select(r => new { r.Id, r.Available, r.Unknown, r.Pending, r.AvailableWithoutFallback, r.Dv }).ToListAsync(ct);
+            var rows = await MeasureAsync("availability." + kind, () => Rows(new(Kind: kind)).Where(r => ids.Contains(r.Id))
+                .Select(r => new { r.Id, r.Available, r.Unknown, r.Pending, r.AvailableWithoutFallback, r.Dv }).ToListAsync(ct), result => result.Count);
             result.AddRange(rows.Select(r => new LibraryAvailabilityDto(r.Id,
                 r.Available > 0 ? "available" : r.Unknown > 0 ? "unknown" : r.Pending > 0 ? "pending" : "blocked",
                 r.Dv && r.Available > 0 && r.AvailableWithoutFallback == 0)));
         }
+        diagnostics?.BeginStage("response");
         return result;
     }
 

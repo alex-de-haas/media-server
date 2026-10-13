@@ -294,6 +294,8 @@ builder.Services.AddHostedService<DatabaseSnapshotWorker>();
 // Surface-neutral: it shares the domain + UserDataService with Jellyfin but never the Jellyfin DTOs.
 builder.Services.AddScoped<LibraryReadService>();
 builder.Services.AddScoped<ManagementService>();
+builder.Services.AddScoped<ManagementRequestDiagnostics>();
+builder.Services.AddTransient<IStartupFilter, ManagementRequestLoggingStartupFilter>();
 builder.Services.AddScoped<MovieWatchHistoryService>();
 builder.Services.AddScoped<RelatedMoviesService>();
 builder.Services.AddScoped<PersonReadService>();
@@ -570,6 +572,16 @@ app.UsePublicSurfaceAllowlist(hosty);
 app.UseWhen(
     context => !context.Request.Path.StartsWithSegments(McpEndpoints.Path),
     branch => branch.UseAuthentication());
+app.Use(async (context, next) =>
+{
+    if (context.Items.TryGetValue(typeof(ManagementRequestDiagnostics), out var value)
+        && value is ManagementRequestDiagnostics diagnostics)
+    {
+        diagnostics.EndStage();
+        diagnostics.BeginStage("authorization");
+    }
+    await next(context);
+});
 app.UseAuthorization();
 app.UseRateLimiter();
 
