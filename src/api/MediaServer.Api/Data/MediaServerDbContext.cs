@@ -547,6 +547,8 @@ public sealed class MediaServerDbContext(DbContextOptions<MediaServerDbContext> 
         job.Property(entity => entity.Type).IsRequired();
         job.Property(entity => entity.Status).HasConversion<int>();
         job.HasIndex(entity => new { entity.RelatedType, entity.RelatedId });
+        // Management counts active moves per item; exclude completed history before resolving item/series IDs.
+        job.HasIndex(entity => new { entity.Type, entity.Status, entity.RelatedId });
     }
 
     private static void ConfigureJellyfinCredential(ModelBuilder modelBuilder)

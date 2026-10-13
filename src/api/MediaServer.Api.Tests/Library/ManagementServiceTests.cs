@@ -345,6 +345,61 @@ public sealed class ManagementServiceTests : IDisposable
         Assert.Empty(commands.SourceScans);
     }
 
+    [Theory]
+    [InlineData("Movie")]
+    [InlineData("Episode")]
+    [InlineData("Series")]
+    public async Task Active_counts_and_pages_use_indexed_jobs_with_large_completed_history(string kind)
+    {
+        var mediaKind = Enum.Parse<MediaKind>(kind);
+        var parent = mediaKind == MediaKind.Episode ? Item("Parent", MediaKind.Series) : null;
+        var items = Enumerable.Range(0, 164).Select(n => Item($"Title {n:000}", mediaKind, parent?.Id)).ToArray();
+        for (var n = 0; n < 5000; n++)
+            AddJob(items[n % items.Length].Id, JobStatus.Completed);
+        AddJob(items[0].Id, JobStatus.Queued);
+        AddJob(items[0].Id, JobStatus.Running);
+        AddJob(items[1].Id, JobStatus.Running);
+        AddJob(items[2].Id, JobStatus.Failed);
+        AddJob(items[2].Id, JobStatus.Running, "metadata:refresh");
+        AddJob(null, JobStatus.Running);
+        await database.Context.SaveChangesAsync();
+
+        var commands = new CommandCounter { Explain = true };
+        await using var reads = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>()
+            .UseSqlite(database.Context.Database.GetDbConnection()).AddInterceptors(commands).Options);
+        var reader = new ManagementService(reads, new MediaServerSettings());
+        var page = await reader.ListAsync(new(Kind: kind, Limit: 25), default);
+
+        Assert.Equal(164, page.Total);
+        Assert.Equal(25, page.Items.Count);
+        Assert.Equal(2, page.Counts["active"]);
+        Assert.Equal(2, page.Items[0].ActiveOperations);
+        Assert.Equal(1, page.Items[1].ActiveOperations);
+        Assert.All(page.Items.Skip(2), row => Assert.Equal(0, row.ActiveOperations));
+        Assert.Contains(commands.JobPlans, plan => plan.CountQuery);
+        Assert.Contains(commands.JobPlans, plan => !plan.CountQuery);
+        AssertIndexedJobs();
+
+        commands.JobPlans.Clear();
+        var active = await reader.ListAsync(new(Kind: kind, View: "active"), default);
+        Assert.Equal(2, active.Total);
+        Assert.Equal(new[] { items[0].Id, items[1].Id }, active.Items.Select(row => row.Id));
+        AssertIndexedJobs();
+
+        void AddJob(Guid? id, JobStatus status, string type = LibraryMoveService.JobType) =>
+            database.Context.Jobs.Add(new Job { Id = Guid.NewGuid(), Type = type, RelatedType = "media-item", RelatedId = id, Status = status });
+
+        void AssertIndexedJobs()
+        {
+            Assert.NotEmpty(commands.JobPlans);
+            Assert.All(commands.JobPlans, plan =>
+            {
+                Assert.StartsWith("SEARCH ", plan.Detail);
+                Assert.Contains("IX_Jobs_Type_Status_RelatedId", plan.Detail);
+            });
+        }
+    }
+
     [Fact]
     public async Task Movie_focus_resolves_the_containing_page_without_filtering_the_list()
     {
@@ -401,6 +456,7 @@ public sealed class ManagementServiceTests : IDisposable
         public int Count { get; private set; }
         public bool Explain { get; init; }
         public List<string> SourceScans { get; } = [];
+        public List<(bool CountQuery, string Detail)> JobPlans { get; } = [];
         public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
             CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
         {
@@ -418,12 +474,16 @@ public sealed class ManagementServiceTests : IDisposable
                 }
                 var aliases = Regex.Matches(command.CommandText, "(?:FROM|JOIN) \"MediaSources\" AS \"([^\"]+)\"")
                     .Select(match => match.Groups[1].Value).ToHashSet();
+                var jobAliases = Regex.Matches(command.CommandText, "(?:FROM|JOIN) \"Jobs\" AS \"([^\"]+)\"")
+                    .Select(match => match.Groups[1].Value).ToHashSet();
                 using var plan = explain.ExecuteReader();
                 while (plan.Read())
                 {
                     var detail = plan.GetString(3);
                     if (aliases.Any(alias => detail == $"SCAN {alias}" || detail.StartsWith($"SCAN {alias} ")))
                         SourceScans.Add(detail);
+                    if (jobAliases.Any(alias => detail == $"SCAN {alias}" || detail.StartsWith($"SCAN {alias} ") || detail.StartsWith($"SEARCH {alias} ")))
+                        JobPlans.Add((command.CommandText.StartsWith("SELECT COUNT(*)"), detail));
                 }
             }
             return ValueTask.FromResult(result);
