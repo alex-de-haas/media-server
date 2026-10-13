@@ -4,6 +4,9 @@ using MediaServer.Api.Native.Playback;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
+using System.Diagnostics;
+using System.Text.RegularExpressions;
+using Xunit.Abstractions;
 using MediaServer.Api.Realtime;
 using Microsoft.Extensions.Logging.Abstractions;
 using MediaServer.Api.Data;
@@ -17,9 +20,11 @@ public sealed class ManagementServiceTests : IDisposable
     private readonly JellyfinDatabase database = new();
     private readonly Guid catalogId = Guid.NewGuid();
     private readonly ManagementService service;
+    private readonly ITestOutputHelper output;
 
-    public ManagementServiceTests()
+    public ManagementServiceTests(ITestOutputHelper output)
     {
+        this.output = output;
         database.Context.Catalogs.Add(new Catalog { Id = catalogId, Name = "Movies", Root = "/media", Type = CatalogType.Movie });
         database.Context.SaveChanges();
         service = new(database.Context, new MediaServerSettings { SupportedLanguages = ["en-US"] });
@@ -306,6 +311,40 @@ public sealed class ManagementServiceTests : IDisposable
         Assert.Empty(reads.ChangeTracker.Entries());
     }
 
+    [Theory]
+    [InlineData("Movie", false)]
+    [InlineData("Movie", true)]
+    [InlineData("Episode", false)]
+    [InlineData("Episode", true)]
+    public async Task Leaf_lists_use_indexed_source_lookups(string kind, bool filtered)
+    {
+        var mediaKind = Enum.Parse<MediaKind>(kind);
+        var series = Item("Show", MediaKind.Series);
+        for (var n = 0; n < 1000; n++)
+        {
+            var item = Item($"Film {n:0000}", mediaKind, mediaKind == MediaKind.Episode ? series.Id : null);
+            Source(item); Source(item, "bdmv");
+        }
+        await database.Context.SaveChangesAsync();
+        var commands = new CommandCounter { Explain = true };
+        await using var reads = new MediaServerDbContext(new DbContextOptionsBuilder<MediaServerDbContext>()
+            .UseSqlite(database.Context.Database.GetDbConnection()).AddInterceptors(commands).Options);
+        var timer = Stopwatch.StartNew();
+        var page = await new ManagementService(reads, new MediaServerSettings()).ListAsync(
+            new(Kind: kind, SourceKind: filtered ? "file" : null, State: filtered ? "available" : null,
+                Limit: 25, Offset: 25), default);
+        output.WriteLine($"{kind}, filtered={filtered}: {timer.ElapsedMilliseconds} ms");
+        Assert.Equal(1000, page.Total);
+        Assert.Equal(25, page.Items.Count);
+        Assert.Equal("Film 0025", page.Items[0].Title);
+        Assert.Equal(filtered ? 0 : 1000, page.Counts["attention"]);
+        Assert.Equal(0, page.Counts["unavailable"]);
+        Assert.All(page.Items, row => Assert.Equal(2, row.VersionCount));
+        Assert.InRange(commands.Count, 1, 8);
+        Assert.Empty(reads.ChangeTracker.Entries());
+        Assert.Empty(commands.SourceScans);
+    }
+
     [Fact]
     public async Task Movie_focus_resolves_the_containing_page_without_filtering_the_list()
     {
@@ -360,10 +399,33 @@ public sealed class ManagementServiceTests : IDisposable
     private sealed class CommandCounter : DbCommandInterceptor
     {
         public int Count { get; private set; }
+        public bool Explain { get; init; }
+        public List<string> SourceScans { get; } = [];
         public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
             CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
         {
             Count++;
+            if (Explain)
+            {
+                using var explain = command.Connection!.CreateCommand();
+                explain.CommandText = "EXPLAIN QUERY PLAN " + command.CommandText;
+                foreach (DbParameter parameter in command.Parameters)
+                {
+                    var copy = explain.CreateParameter();
+                    copy.ParameterName = parameter.ParameterName;
+                    copy.Value = parameter.Value;
+                    explain.Parameters.Add(copy);
+                }
+                var aliases = Regex.Matches(command.CommandText, "(?:FROM|JOIN) \"MediaSources\" AS \"([^\"]+)\"")
+                    .Select(match => match.Groups[1].Value).ToHashSet();
+                using var plan = explain.ExecuteReader();
+                while (plan.Read())
+                {
+                    var detail = plan.GetString(3);
+                    if (aliases.Any(alias => detail == $"SCAN {alias}" || detail.StartsWith($"SCAN {alias} ")))
+                        SourceScans.Add(detail);
+                }
+            }
             return ValueTask.FromResult(result);
         }
     }

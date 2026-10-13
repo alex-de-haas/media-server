@@ -1,6 +1,6 @@
 ---
 created: 2026-10-11
-updated: 2026-10-12
+updated: 2026-10-13
 summary: Administrator movie and series tables with expandable versions, source diagnostics and filters, separated from personal library browsing.
 components: [src/api, src/web]
 ---
@@ -142,6 +142,9 @@ direction; equal numbers retain the same ID tie-breaker across pages.
 Quick counts use the current technical/search filters before the selected view;
 they overlap and are not additive. Size sums each stored source once, with unknown
 sizes labeled explicitly. Lists do not load tracks or probe the filesystem.
+Movie and episode summaries look up their own sources through the item index;
+only series summaries traverse child episodes. The same distinction applies to
+source filters, quick counts, active conversions and viewer availability.
 
 `GET /api/management/items/{id}/sources` returns diagnostics for all published
 sources plus a match flag under the current filters. The location endpoint
@@ -224,7 +227,8 @@ MKV can remain unknown/preparing until background indexing observes it.
   parity, cover-art selection, removed exclusion, same-source filters, distinct
   episode counts, ascending/descending episode chronology, stable paging,
   literal search, focused movie pagination with equal-title ties and missing or
-  excluded targets, and bounded SQL command counts.
+  excluded targets, bounded SQL command counts, and indexed source lookups on
+  large movie/episode lists, both with and without technical filters.
 - Endpoint tests assert administrator versus authenticated-viewer policy metadata,
   query-default and focus binding, and rejection of invalid page windows.
 - Indexing snapshot tests cover expiry, restart and preservation of known failure.
