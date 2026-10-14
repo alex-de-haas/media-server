@@ -15,7 +15,7 @@ namespace MediaServer.Api.Native;
 /// its lifetime is meant to cover a whole playback rather than a single request. A token that can
 /// expire between two <c>Range</c> requests of one file is a broken token.
 /// </summary>
-public sealed class NativeUrlTokenService(NativeUrlSigningKey key, TimeProvider time)
+public sealed class NativeUrlTokenService(NativeUrlSigningKey key, TimeProvider time, string purpose = "v1")
 {
     /// <summary>
     /// Default validity. Long enough that a film plus pauses cannot outlive it; short enough that a
@@ -23,7 +23,6 @@ public sealed class NativeUrlTokenService(NativeUrlSigningKey key, TimeProvider 
     /// </summary>
     public static readonly TimeSpan DefaultLifetime = TimeSpan.FromHours(12);
 
-    private const string Version = "v1";
 
     /// <summary>
     /// A ceiling on what we will even look at. These routes are anonymous by design — the token is the
@@ -74,7 +73,7 @@ public sealed class NativeUrlTokenService(NativeUrlSigningKey key, TimeProvider 
         }
 
         var parts = payload.Split('.');
-        if (parts.Length != 5 || parts[0] != Version
+        if (parts.Length != 5 || parts[0] != purpose
             || !int.TryParse(parts[1], out var appUserId)
             || !Guid.TryParseExact(parts[2], "N", out var tokenSourceId)
             || !long.TryParse(parts[4], out var expiresUnix))
@@ -100,8 +99,8 @@ public sealed class NativeUrlTokenService(NativeUrlSigningKey key, TimeProvider 
         return NativeUrlTokenResult.Valid(appUserId);
     }
 
-    private static string Payload(int appUserId, Guid mediaSourceId, NativeUrlTokenMethods methods, long expires) =>
-        $"{Version}.{appUserId}.{mediaSourceId:N}.{methods}.{expires}";
+    private string Payload(int appUserId, Guid mediaSourceId, NativeUrlTokenMethods methods, long expires) =>
+        $"{purpose}.{appUserId}.{mediaSourceId:N}.{methods}.{expires}";
 
     private string Sign(string payload) =>
         Convert.ToHexStringLower(HMACSHA256.HashData(key.Value, Encoding.UTF8.GetBytes(payload)));

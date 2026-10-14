@@ -161,6 +161,7 @@ else
 
 builder.Services.AddHostedService<TranscodeCoordinator>();
 builder.Services.AddScoped<TranscodeService>();
+builder.Services.AddSingleton<ExportDownloadTokens>();
 builder.Services.AddScoped<TrackExtractionService>();
 builder.Services.AddScoped<VideoPartJoinService>();
 builder.Services.AddScoped<TranscodeOutputImporter>();

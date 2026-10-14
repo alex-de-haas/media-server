@@ -156,6 +156,7 @@ public sealed class LibraryDeleteService(
     private async Task<ChildDeleteResult?> DeleteWithinSeriesAsync(
         Guid id, MediaKind kind, bool deleteFiles, bool deleteUserData, CancellationToken cancellationToken)
     {
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
         var item = await database.MediaItems.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.PublicId != null &&
                 candidate.Kind == kind && candidate.SeriesId != null, cancellationToken);
@@ -352,6 +353,7 @@ public sealed class LibraryDeleteService(
     internal async Task<bool> DeleteSourceWithinMutationAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
     {
         await LibraryFileMutation.RequireSourceAvailableAsync(database, sourceId, cancellationToken);
+        await LibraryFileMutation.RequireExportsRemovedAsync(database.TranscodeJobs.Where(job => job.MediaSourceId == sourceId), cancellationToken);
         var source = await database.MediaSources.AsNoTracking()
             .Where(candidate => candidate.Id == sourceId)
             .Select(candidate => new { candidate.Id, candidate.Path, candidate.SourceFileId, candidate.MediaItemId })
@@ -439,6 +441,7 @@ public sealed class LibraryDeleteService(
     /// </summary>
     internal async Task<RemovalOutcome> RemoveItemsAsync(IReadOnlyList<Guid> ids, bool deleteUserData, CancellationToken cancellationToken)
     {
+        await LibraryFileMutation.RequireExportsRemovedAsync(database.TranscodeJobs.Where(job => ids.Contains(job.MediaItemId)), cancellationToken);
         var idSet = ids.ToHashSet();
         var tombstoneIds = deleteUserData
             ? new HashSet<Guid>()

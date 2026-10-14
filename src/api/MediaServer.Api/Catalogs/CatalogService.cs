@@ -215,6 +215,7 @@ public sealed class CatalogService(
     {
         using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
         await LibraryFileMutation.RequireCatalogAvailableAsync(database, id, cancellationToken);
+        await LibraryFileMutation.RequireExportsRemovedAsync(database.TranscodeJobs.Where(job => job.CatalogId == id), cancellationToken);
         var exists = await database.Catalogs.AnyAsync(candidate => candidate.Id == id, cancellationToken);
         if (!exists)
         {

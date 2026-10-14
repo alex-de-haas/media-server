@@ -53,7 +53,23 @@ public sealed class TranscodeExports(MediaServerSettings settings)
 
     private bool IsSeparate(CatalogMount mount) => !settings.CatalogMountRoots.Any(input =>
         string.Equals(input.Label, mount.Label, StringComparison.OrdinalIgnoreCase) ||
-        Contains(input.Path, mount.Path) || Contains(mount.Path, input.Path));
+        Contains(PhysicalPath(input.Path), PhysicalPath(mount.Path)) || Contains(PhysicalPath(mount.Path), PhysicalPath(input.Path)));
+
+    private static string PhysicalPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full)!;
+        var current = root;
+        foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+            var directory = new DirectoryInfo(current);
+            if (directory.LinkTarget is not null)
+                current = directory.ResolveLinkTarget(returnFinalTarget: true)?.FullName
+                    ?? throw new TranscodeRequestException("A mount contains an unresolved symbolic link.");
+        }
+        return current;
+    }
 
     private static bool Contains(string parent, string child)
     {
@@ -62,6 +78,6 @@ public sealed class TranscodeExports(MediaServerSettings settings)
         parent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(parent));
         child = Path.TrimEndingDirectorySeparator(Path.GetFullPath(child));
         return child.Equals(parent, comparison) ||
-            child.StartsWith(parent + Path.DirectorySeparatorChar, comparison);
+            child.StartsWith(Path.EndsInDirectorySeparator(parent) ? parent : parent + Path.DirectorySeparatorChar, comparison);
     }
 }

@@ -75,6 +75,12 @@ public sealed class TranscodeCoordinator(
         var completed = new List<TranscodeJob>();
         foreach (var job in active)
         {
+            if (job.OutputMountLabel is not null)
+            {
+                await scope.ServiceProvider.GetRequiredService<TranscodeService>().ReconcileExportAsync(job,
+                    scope.ServiceProvider.GetRequiredService<TranscodeOutputImporter>(), cancellationToken);
+                continue;
+            }
             if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray))
             {
                 await scope.ServiceProvider.GetRequiredService<VideoPartJoinService>().ReconcileAsync(job, cancellationToken);
@@ -110,7 +116,7 @@ public sealed class TranscodeCoordinator(
         }
 
         // Joins reconcile on the timer under the same mutation gate as submit/cancel/delete.
-        if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray)) return;
+        if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) || job.OutputMountLabel is not null) return;
         var before = job.State;
         Apply(job, engine.GetSnapshot(engineJobId));
         await database.SaveChangesAsync();

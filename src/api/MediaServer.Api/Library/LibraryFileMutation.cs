@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 namespace MediaServer.Api.Library;
 
 /// <summary>A source used by a join cannot move or disappear before the engine releases it.</summary>
-public sealed class LibraryFileBusyException() : Exception("This file is used by a join. Wait for it to finish, or cancel the join first.");
+public sealed class LibraryFileBusyException(string message = "This file is used by a join. Wait for it to finish, or cancel the join first.") : Exception(message);
 
 /// <summary>Serializes join admission with destructive library mutations. Persisted jobs hold the long-lived reservation.</summary>
 public static class LibraryFileMutation
@@ -20,6 +20,12 @@ public static class LibraryFileMutation
     private sealed class Lease : IDisposable
     {
         public void Dispose() => Gate.Release();
+    }
+
+    public static async Task RequireExportsRemovedAsync(IQueryable<TranscodeJob> jobs, CancellationToken ct)
+    {
+        if (await jobs.AnyAsync(job => job.OutputMountLabel != null, ct))
+            throw new LibraryFileBusyException("This selection owns transcode exports. Delete or dismiss those export jobs before removing it.");
     }
 
     private static IQueryable<TranscodeJob> ActiveJoins(MediaServerDbContext db) => db.TranscodeJobs.Where(job =>

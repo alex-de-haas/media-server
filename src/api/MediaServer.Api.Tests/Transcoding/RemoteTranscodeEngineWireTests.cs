@@ -16,6 +16,60 @@ namespace MediaServer.Api.Tests.Transcoding;
 public sealed class RemoteTranscodeEngineWireTests
 {
     [Fact]
+    public async Task Lost_create_response_is_recovered_by_authoritative_lookup_of_the_wire_id()
+    {
+        var handler = new LostExportResponse();
+        using var engine = new RemoteTranscodeEngine(new HttpClient(handler) { BaseAddress = new Uri("http://engine.local/") }, new(), NullLogger<RemoteTranscodeEngine>.Instance);
+        var id = Guid.NewGuid();
+        await Assert.ThrowsAsync<HttpRequestException>(() => engine.CreateAsync(new("movies", "in.mkv", "results", "out.mkv", "copy", null, null, ClientJobId: id), default));
+        Assert.Null(engine.GetSnapshot(id.ToString("N")));
+        var snapshot = await engine.InspectAsync(id.ToString("N"), default);
+        Assert.Equal(id.ToString("N"), snapshot!.JobId);
+        Assert.Equal("Running", snapshot.State);
+        Assert.Equal(1, handler.Creates);
+    }
+
+    private sealed class LostExportResponse : HttpMessageHandler
+    {
+        public int Creates { get; private set; }
+        private Guid accepted;
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                Creates++;
+                using var body = System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+                accepted = body.RootElement.GetProperty("clientJobId").GetGuid();
+                throw new HttpRequestException("Connection lost after acceptance.");
+            }
+            Assert.Equal($"/jobs/{accepted:N}", request.RequestUri!.AbsolutePath);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = System.Net.Http.Json.JsonContent.Create(
+                new JobSnapshot(accepted.ToString("N"), "export", "Running", false, 5, 0, 0, 0, null)) };
+        }
+    }
+
+    [Fact]
+    public async Task Ordinary_export_forwards_client_id_to_jobs()
+    {
+        var handler = new StubHandler();
+        using var engine = new RemoteTranscodeEngine(new HttpClient(handler) { BaseAddress = new Uri("http://engine.local/") }, new(), NullLogger<RemoteTranscodeEngine>.Instance);
+        var id = Guid.NewGuid();
+        await engine.CreateAsync(new("movies", "in.mkv", "results", "out.mkv", "copy", null, null, ClientJobId: id), default);
+        Assert.Equal("/jobs", handler.RequestPath);
+        using var body = System.Text.Json.JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(id, body.RootElement.GetProperty("clientJobId").GetGuid());
+    }
+
+    [Theory]
+    [InlineData("{}", false)]
+    [InlineData("{\"idempotentTranscodes\":true}", true)]
+    public async Task Export_capability_is_explicit(string report, bool expected)
+    {
+        using var engine = new RemoteTranscodeEngine(new HttpClient(new HardwareHandler(report)) { BaseAddress = new Uri("http://engine.local/") }, new(), NullLogger<RemoteTranscodeEngine>.Instance);
+        Assert.Equal(expected, (await engine.GetToolingAsync(default)).IdempotentTranscodes);
+    }
+
+    [Fact]
     public async Task Explicit_video_and_name_have_the_engine_wire_names()
     {
         var handler = new StubHandler();

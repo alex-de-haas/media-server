@@ -405,7 +405,8 @@ test("remux confirms the grid selection, names video and sidecars, and never pic
   await page.getByRole("button", { name: "Remux", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Remux selected tracks" })).toBeVisible();
-  await expect(dialog.getByRole("combobox")).toHaveCount(0);
+  await expect(dialog.getByRole("combobox")).toHaveCount(1);
+  await expect(dialog.getByRole("combobox", { name: "Output destination" })).toBeVisible();
   await expect(dialog.getByRole("checkbox")).toHaveCount(0);
   await expect(dialog.getByRole("textbox", { name: /Language/ })).toHaveCount(0);
   await expect(dialog.getByRole("textbox")).toHaveCount(4);
@@ -447,7 +448,8 @@ test("Convert exposes encoding controls and selected audio settings; cancelled o
   await page.getByRole("button", { name: "Convert", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await page.screenshot({ path: testInfo.outputPath("fixed-convert.png"), fullPage: false });
-  await expect(dialog.getByRole("combobox")).toHaveCount(4);
+  await expect(dialog.getByRole("combobox")).toHaveCount(5);
+  await expect(dialog.getByRole("combobox", { name: "Output destination" })).toBeVisible();
   await expect(dialog.getByRole("textbox", { name: "Version name", exact: true })).toHaveValue("Convert");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

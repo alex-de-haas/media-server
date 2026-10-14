@@ -15,7 +15,7 @@ namespace MediaServer.Api.Transcoding;
 /// persisted row), list, cancel, remove. Delegates the actual encode to the external transcode-engine app;
 /// persists only durable facts and state transitions — live progress stays in the engine.
 /// </summary>
-public sealed class TranscodeService(
+public sealed partial class TranscodeService(
     MediaServerDbContext database,
     ITranscodeEngine engine,
     ICatalogPathSandbox sandbox,
@@ -50,6 +50,8 @@ public sealed class TranscodeService(
         var jobId = Guid.NewGuid();
         var exportLabel = request.OutputMountLabel;
         if (exportLabel is null) CatalogAccess.RequireWritable(catalog);
+        else if (!(await engine.GetToolingAsync(cancellationToken)).IdempotentTranscodes)
+            throw new TranscodeRequestException("Update Transcode Engine to 0.14.0 or newer to use recoverable exports.");
 
         var mergeStreams = await ResolveMergeStreamsAsync(request, source, cancellationToken);
         var selectedVideo = ResolveVideoSelection(request, source, mergeStreams);
@@ -177,33 +179,22 @@ public sealed class TranscodeService(
             State = TranscodeJobState.Queued,
             CreatedAt = DateTimeOffset.UtcNow,
         };
+        var engineRequest = new TranscodeJobRequest(
+            input.Label, input.Relative, output.Label, output.Relative, codec, hardware, qualityLevel,
+            targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
+            additionalInputs, metadataOverrides, audioTargets,
+            DolbyVision: dolbyVision, VideoStreamIndex: request.VideoStreamIndex, ClientJobId: exportLabel is null ? null : jobId);
         if (exportLabel is not null)
         {
+            job.ExportSubmissionJson = System.Text.Json.JsonSerializer.Serialize(engineRequest);
             database.TranscodeJobs.Add(job);
             await database.SaveChangesAsync(cancellationToken);
+            await SubmitExportAsync(job, cancellationToken);
+            return TranscodeJobResponse.From(job, engine.GetSnapshot(job.EngineJobId));
         }
         JobDescriptor descriptor;
-        try
-        {
-            descriptor = await engine.CreateAsync(
-                new TranscodeJobRequest(
-                    input.Label, input.Relative, output.Label, output.Relative, codec, hardware, qualityLevel,
-                    targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
-                    additionalInputs, metadataOverrides, audioTargets,
-                    DolbyVision: dolbyVision, VideoStreamIndex: request.VideoStreamIndex, ClientJobId: exportLabel is null ? null : jobId),
-                cancellationToken);
-        }
-        catch (InvalidOperationException exception)
-        {
-            if (exportLabel is not null)
-            {
-                job.State = TranscodeJobState.Failed;
-                job.Error = exception.Message;
-                await database.SaveChangesAsync(cancellationToken);
-            }
-            // The engine is disabled (no dependency) or rejected the job — surface it as a 400.
-            throw new TranscodeRequestException(exception.Message);
-        }
+        try { descriptor = await engine.CreateAsync(engineRequest, cancellationToken); }
+        catch (InvalidOperationException exception) { throw new TranscodeRequestException(exception.Message); }
 
         job.EngineJobId = descriptor.JobId;
         if (exportLabel is null) database.TranscodeJobs.Add(job);
@@ -247,6 +238,12 @@ public sealed class TranscodeService(
                 return false;
             }
 
+            if (job.OutputMountLabel is not null)
+            {
+                job.CancellationRequested = true;
+                await database.SaveChangesAsync(cancellationToken);
+                return true; // Reconcile confirms the same job before cancelling an uncertain submission.
+            }
             if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray))
             {
                 job.CancellationRequested = true;

@@ -31,8 +31,6 @@ public sealed class SidecarPlacementService(
 {
     public async Task PlaceAsync(IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken)
     {
-        // Read-only imports preserve companion filenames; placement must never rename them.
-        if (catalog.ReadOnly) return;
         var groups = sourceFiles
             .Where(file => file.MediaItemId is not null)
             .GroupBy(file => file.MediaItemId!.Value);
@@ -116,13 +114,14 @@ public sealed class SidecarPlacementService(
         foreach (var named in SidecarNaming.For(Path.GetFileName(video.RelativePath), forNaming, alreadyPlaced))
         {
             var (file, language, title, track) = labelled.First(entry => entry.File.Id == named.Id);
-            var target = file.PlacementPath ?? (folder.Length == 0 ? named.FileName : $"{folder}/{named.FileName}");
+            var target = catalog.ReadOnly ? file.RelativePath :
+                file.PlacementPath ?? (folder.Length == 0 ? named.FileName : $"{folder}/{named.FileName}");
             if (existing.Any(stream => string.Equals(stream.ExternalPath, target, StringComparison.Ordinal)))
             {
                 continue; // Already placed by an earlier drive.
             }
 
-            if (!await TryMoveAsync(catalog, file, file.PlacementPath ?? target, cancellationToken))
+            if (!catalog.ReadOnly && !await TryMoveAsync(catalog, file, file.PlacementPath ?? target, cancellationToken))
             {
                 continue;
             }

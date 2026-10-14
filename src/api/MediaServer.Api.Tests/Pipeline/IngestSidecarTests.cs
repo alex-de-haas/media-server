@@ -45,6 +45,47 @@ public sealed class IngestSidecarTests
     }
 
     [Fact]
+    public async Task Read_only_companions_are_probed_and_registered_at_original_paths_once()
+    {
+        using var harness = new PipelineTestHarness();
+        ProbeCompanionsAs(harness, _ => TaggedAudioProbe("rus", "Original dub"));
+        using var verify = harness.CreateScope();
+        var database = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        var catalogId = Guid.NewGuid();
+        var catalog = new Catalog { Id = catalogId, Name = "Original library", Root = harness.Root, ReadOnly = true };
+        var item = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalogId, Kind = MediaKind.Movie, Title = "Movie" };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalogId };
+        var source = new MediaSource { Id = Guid.NewGuid(), MediaItemId = item.Id, Path = "original.mkv", Container = "mkv" };
+        var files = new[] { "original.mkv", "dub/track.rus.mka", "subs/track.eng.srt" }.Select(path => new SourceFile
+        { Id = Guid.NewGuid(), IngestItemId = ingest.Id, MediaItemId = item.Id, RelativePath = path,
+          AssignmentStatus = SourceFileAssignmentStatus.Confirmed, SizeBytes = 1024 }).ToList();
+        database.AddRange(catalog, item, ingest, source);
+        database.AddRange(files);
+        foreach (var file in files)
+        {
+            var path = Path.Combine(harness.Root, file.RelativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, file.RelativePath);
+        }
+        await database.SaveChangesAsync();
+        var companions = files.Where(f => f.RelativePath.EndsWith(".mka") || f.RelativePath.EndsWith(".srt")).ToList();
+        foreach (var file in companions) { file.MediaItemId = source.MediaItemId; file.AssignmentStatus = SourceFileAssignmentStatus.Confirmed; }
+        var originalPaths = companions.Select(f => f.RelativePath).ToArray();
+        var before = originalPaths.Select(path => File.ReadAllBytes(Path.Combine(catalog.Root, path))).ToArray();
+        await database.SaveChangesAsync();
+        var placement = verify.ServiceProvider.GetRequiredService<MediaServer.Api.Sidecars.SidecarPlacementService>();
+        await placement.PlaceAsync(files, catalog, default);
+        await placement.PlaceAsync(files, catalog, default);
+        var streams = await database.MediaStreams.Where(stream => stream.IsExternal).ToListAsync();
+        Assert.Equal(2, streams.Count);
+        Assert.Equal(originalPaths.Order(), streams.Select(stream => stream.ExternalPath).Order());
+        Assert.All(streams, stream => { Assert.Equal("ac3", stream.Codec); Assert.Equal("Original dub", stream.Title); });
+        Assert.All(companions, file => Assert.Equal(SourceFileAssignmentStatus.Sidecar, file.AssignmentStatus));
+        for (var index = 0; index < originalPaths.Length; index++)
+            Assert.Equal(before[index], File.ReadAllBytes(Path.Combine(catalog.Root, originalPaths[index])));
+    }
+
+    [Fact]
     public async Task Tracks_match_their_episodes_and_land_beside_them()
     {
         using var harness = new PipelineTestHarness();

@@ -236,6 +236,11 @@ export function TranscodeJobRow({ job, showManagementLink = true }: { job: Trans
     onError: (error) => toast.error("Couldn’t dismiss", { description: errorMessage(error) }),
   });
 
+  const downloadExport = useMutation({
+    mutationFn: () => mediaServer.downloadTranscodeExport(job.id),
+    onSuccess: (url) => window.location.assign(url),
+    onError: (error) => toast.error(errorMessage(error)),
+  });
   const deleteExport = useMutation({
     mutationFn: () => mediaServer.deleteTranscodeExport(job.id),
     onSuccess: invalidate,
@@ -302,7 +307,7 @@ export function TranscodeJobRow({ job, showManagementLink = true }: { job: Trans
       )}
       {job.state === "Failed" && job.error && <p className="text-destructive text-xs">{job.error}</p>}
       {job.outputMountLabel && !active && <div className="flex items-center gap-3 text-sm">
-        {job.state === "Completed" && <a className="underline" href={mediaServer.transcodeOutputUrl(job.id)}>Download export</a>}
+        {job.state === "Completed" && <Button variant="link" size="sm" disabled={downloadExport.isPending} onClick={() => downloadExport.mutate()}>Download export</Button>}
         <Button size="sm" variant="outline" onClick={() => setDeleteExportOpen(true)}>Delete export</Button>
       </div>}
       <AlertDialog open={deleteExportOpen} onOpenChange={setDeleteExportOpen}>

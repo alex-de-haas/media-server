@@ -1050,7 +1050,10 @@ export const mediaServer = {
   }),
 
   transcodeDestinations: () => apiJson<string[]>(BASE + "/transcode/destinations"),
-  transcodeOutputUrl: (id: string) => BASE + "/transcode/" + encodeURIComponent(id) + "/output",
+  downloadTranscodeExport: async (id: string) => {
+    const { token } = await apiJson<{ token: string }>(BASE + "/transcode/" + encodeURIComponent(id) + "/download", { method: "POST" });
+    return "/api/transcode-download/" + encodeURIComponent(id) + "?token=" + encodeURIComponent(token);
+  },
   deleteTranscodeExport: (id: string) => send("/transcode/" + id + "?deleteOutput=true", "DELETE"),
   listTranscodeJobs: () => apiJson<TranscodeJob[]>(`${BASE}/transcode`),
   createTranscodeJob: (input: CreateTranscodeInput) =>

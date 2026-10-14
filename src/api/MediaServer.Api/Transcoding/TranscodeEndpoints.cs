@@ -43,6 +43,21 @@ public static class TranscodeEndpoints
             catch (TranscodeRequestException exception) { return Results.Problem(exception.Message, statusCode: 409); }
         });
 
+        group.MapPost("/{id:guid}/download", async (Guid id, TranscodeService service, ExportDownloadTokens tokens, CancellationToken ct) =>
+        {
+            var path = await service.ExportFileAsync(id, ct);
+            return path is null ? Results.NotFound() : Results.Ok(new { token = tokens.Mint(id) });
+        });
+        group.MapMethods("/{id:guid}/download", ["GET", "HEAD"], async (
+            Guid id, string? token, HttpContext context, ExportDownloadTokens tokens, TranscodeService service, CancellationToken ct) =>
+        {
+            if (!tokens.Validate(token, id, context.Request.Method)) return Results.NotFound();
+            context.Response.Headers.CacheControl = "private, no-store";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            var path = await service.ExportFileAsync(id, ct);
+            return path is null ? Results.NotFound() : Results.File(path, "video/x-matroska", Path.GetFileName(path), enableRangeProcessing: true);
+        }).AllowAnonymous();
+
         group.MapGet("/languages", () => Results.Ok(LanguageTags.Accepted));
 
         group.MapGet("/", async (TranscodeService service, CancellationToken cancellationToken) =>

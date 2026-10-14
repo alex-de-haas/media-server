@@ -1635,6 +1635,9 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<double?>("ExpectedDurationSeconds")
                         .HasColumnType("REAL");
 
+                    b.Property<string>("ExportSubmissionJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("HardwareAcceleration")
                         .IsRequired()
                         .HasColumnType("TEXT");

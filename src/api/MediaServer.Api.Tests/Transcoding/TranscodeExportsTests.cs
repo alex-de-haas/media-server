@@ -27,6 +27,28 @@ public sealed class TranscodeExportsTests : IDisposable
     }
 
     [Fact]
+    public void Filesystem_root_overlaps_every_descendant()
+    {
+        var service = new TranscodeExports(new() { CatalogMountRoots = [new("media", Path.GetPathRoot(root)!)],
+            TranscodeOutputRoots = [new("results", root)] });
+        Assert.Empty(service.Destinations);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Catalog_side_alias_cannot_hide_overlapping_output(bool ancestor)
+    {
+        var library = Path.Combine(root, "library"); Directory.CreateDirectory(library);
+        var alias = Path.Combine(root, "alias"); Directory.CreateSymbolicLink(alias, library);
+        var service = new TranscodeExports(new() {
+            CatalogMountRoots = [new("media", ancestor ? Path.Combine(alias, "nested") : alias)],
+            TranscodeOutputRoots = [new("results", library)] });
+        try { Assert.Empty(service.Destinations); }
+        finally { Directory.Delete(alias); }
+    }
+
+    [Fact]
     public void Rejects_overlapping_mounts_and_shared_labels()
     {
         Assert.Empty(Service(Path.Combine(root, "library", "out")).Destinations);
