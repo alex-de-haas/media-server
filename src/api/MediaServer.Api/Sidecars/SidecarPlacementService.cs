@@ -31,6 +31,8 @@ public sealed class SidecarPlacementService(
 {
     public async Task PlaceAsync(IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken)
     {
+        // Read-only imports preserve companion filenames; placement must never rename them.
+        if (catalog.ReadOnly) return;
         var groups = sourceFiles
             .Where(file => file.MediaItemId is not null)
             .GroupBy(file => file.MediaItemId!.Value);

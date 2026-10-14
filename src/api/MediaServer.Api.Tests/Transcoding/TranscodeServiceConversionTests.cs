@@ -64,6 +64,61 @@ public sealed class TranscodeServiceConversionTests : IDisposable
     private Task<TranscodeJobResponse> ConvertAsync(CreateTranscodeRequest request) =>
         Service().CreateAsync(request, CancellationToken.None);
 
+
+    [Fact]
+    public async Task Read_only_input_requires_an_export_before_contacting_engine()
+    {
+        (await _context.Catalogs.SingleAsync()).ReadOnly = true;
+        await _context.SaveChangesAsync();
+        await Assert.ThrowsAsync<ReadOnlyCatalogException>(() =>
+            ConvertAsync(new(_episodeSourceId, "copy", null, null)));
+        Assert.Null(_engine.Seen);
+        Assert.Empty(_context.TranscodeJobs);
+    }
+
+    [Fact]
+    public async Task Export_reads_original_mount_and_owns_separate_output_without_adding_a_library_version()
+    {
+        var outputRoot = Path.Combine(OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath(), "ms-export-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputRoot);
+        try
+        {
+            (await _context.Catalogs.SingleAsync()).ReadOnly = true;
+            await _context.SaveChangesAsync();
+            var settings = new MediaServerSettings
+            {
+                CatalogMountRoots = Settings.CatalogMountRoots,
+                TranscodeOutputRoots = [new("results", outputRoot)],
+            };
+            var service = new TranscodeService(_context, _engine, new CatalogPathSandbox(), settings,
+                new LibraryMoveGuard(_context, new LibraryMoveQueue()), NullLogger<TranscodeService>.Instance);
+            var count = await _context.MediaSources.CountAsync();
+            var response = await service.CreateAsync(new(_episodeSourceId, "copy", null, null, OutputMountLabel: "results"), default);
+            Assert.Equal("catalogs", _engine.Seen!.InputMountLabel);
+            Assert.Equal("results", _engine.Seen.OutputMountLabel);
+            Assert.StartsWith(response.Id.ToString("N") + "/", _engine.Seen.OutputRelativePath);
+            var job = await _context.TranscodeJobs.SingleAsync();
+            var path = new TranscodeExports(settings).Resolve(job);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, "export");
+            var probe = IMediaProbe.Imposter();
+            probe.ProbeAsync(Arg<string>.Any(), Arg<CancellationToken>.Any())
+                .Returns(Task.FromResult(new ProbeResult("mkv", 6, null, 1000, [])));
+            var importer = new TranscodeOutputImporter(_context, new CatalogPathSandbox(), probe.Instance(),
+                NullLogger<TranscodeOutputImporter>.Instance, settings);
+            Assert.True(await importer.ImportAsync(job, default));
+            Assert.Equal(count, await _context.MediaSources.CountAsync());
+            job.State = TranscodeJobState.Completed;
+            await _context.SaveChangesAsync();
+            Assert.Equal(path, await service.ExportFileAsync(job.Id, default));
+            Assert.True(await service.RemoveAsync(job.Id, true, default));
+            Assert.False(File.Exists(path));
+            Assert.Empty(Directory.GetFileSystemEntries(outputRoot));
+            Assert.True(File.Exists(Path.Combine(_root, EpisodeRelative)));
+        }
+        finally { Directory.Delete(outputRoot, true); }
+    }
+
     [Theory]
     [InlineData("copy")]
     [InlineData("hevc")]

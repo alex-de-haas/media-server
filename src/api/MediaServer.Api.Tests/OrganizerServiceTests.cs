@@ -31,6 +31,32 @@ public sealed class OrganizerServiceTests : IDisposable
         CatalogPaths.For(_root).EnsureCreated();
     }
 
+
+    [Fact]
+    public async Task Read_only_organize_adopts_noncanonical_files_in_place()
+    {
+        Directory.Delete(Path.Combine(_root, ".incoming"));
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Originals", Root = _root, ReadOnly = true };
+        var movie = new MediaItem { Id = Guid.NewGuid(), CatalogId = catalog.Id, Kind = MediaKind.Movie, Title = "Renamed title" };
+        var ingest = new IngestItem { Id = Guid.NewGuid(), CatalogId = catalog.Id };
+        var file = new SourceFile { Id = Guid.NewGuid(), IngestItemId = ingest.Id, MediaItemId = movie.Id,
+            RelativePath = "original.mkv", SizeBytes = 5, AssignmentStatus = SourceFileAssignmentStatus.Confirmed };
+        _database.AddRange(catalog, movie, ingest, file);
+        await _database.SaveChangesAsync();
+        var absolute = Path.Combine(_root, file.RelativePath);
+        await File.WriteAllTextAsync(absolute, "movie");
+        var before = File.GetLastWriteTimeUtc(absolute);
+        var organizer = new OrganizerService(_database, new CatalogPathSandbox(), NullLogger<OrganizerService>.Instance,
+            new FilePlacementService(_database, new FilesystemInspector(), new PlacementOutput()));
+        var adopted = Assert.Single(await organizer.OrganizeAsync([file], catalog, default));
+        Assert.Equal("original.mkv", adopted.LibraryRelativePath);
+        Assert.Equal("original.mkv", movie.LibraryPath);
+        Assert.Equal("movie", await File.ReadAllTextAsync(absolute));
+        Assert.Equal(before, File.GetLastWriteTimeUtc(absolute));
+        Assert.False(Directory.Exists(Path.Combine(_root, ".incoming")));
+        Assert.Single(Directory.GetFiles(_root, "*", SearchOption.AllDirectories));
+    }
+
     [Fact]
     public async Task Organize_moves_the_file_and_leaves_unowned_staging_for_inspection()
     {

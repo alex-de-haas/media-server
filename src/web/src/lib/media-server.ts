@@ -9,6 +9,7 @@ const BASE = "/api/proxy/api";
 export type CatalogType = "Movie" | "Series" | "Anime";
 
 export interface Catalog {
+  readOnly?: boolean;
   id: string;
   name: string;
   type: CatalogType;
@@ -58,6 +59,7 @@ export interface CatalogVolumeUsage {
 // Location is given either as a mount (`mountLabel` + `relativePath`, the normal case) or as a
 // free-text absolute `root` for standalone runs where no mounts are injected.
 export interface CreateCatalogInput {
+  readOnly?: boolean;
   name: string;
   type: CatalogType;
   root?: string;
@@ -879,6 +881,7 @@ async function send(path: string, method: string, body?: unknown): Promise<void>
 // transcode-engine. Persisted facts plus the live engine snapshot (fps/speed/eta/outputSize are null
 // unless the job is running).
 export interface TranscodeJob {
+  outputMountLabel?: string | null;
   id: string;
   engineJobId: string;
   mediaSourceId: string;
@@ -914,6 +917,7 @@ export interface TranscodeJob {
 }
 
 export interface CreateTranscodeInput {
+  outputMountLabel?: string;
   /** Output version label and filename suffix; omission keeps automatic naming. */
   versionName?: string;
   videoStreamIndex?: number;
@@ -1045,6 +1049,9 @@ export const mediaServer = {
     method: "POST", body: JSON.stringify({ sourceIds }), headers: { "content-type": "application/json" },
   }),
 
+  transcodeDestinations: () => apiJson<string[]>(BASE + "/transcode/destinations"),
+  transcodeOutputUrl: (id: string) => BASE + "/transcode/" + encodeURIComponent(id) + "/output",
+  deleteTranscodeExport: (id: string) => send("/transcode/" + id + "?deleteOutput=true", "DELETE"),
   listTranscodeJobs: () => apiJson<TranscodeJob[]>(`${BASE}/transcode`),
   createTranscodeJob: (input: CreateTranscodeInput) =>
     apiJson<TranscodeJob>(`${BASE}/transcode`, {

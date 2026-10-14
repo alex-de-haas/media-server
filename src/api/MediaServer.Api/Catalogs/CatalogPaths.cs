@@ -14,7 +14,9 @@ public sealed record CatalogPaths(string Root, string IncomingDir)
 {
     public const string IncomingDirName = ".incoming";
 
-    public static CatalogPaths For(Catalog catalog) => For(catalog.Root);
+    public bool ReadOnly { get; init; }
+
+    public static CatalogPaths For(Catalog catalog) => For(catalog.Root) with { ReadOnly = catalog.ReadOnly };
 
     public static CatalogPaths For(string root)
     {
@@ -36,6 +38,7 @@ public sealed record CatalogPaths(string Root, string IncomingDir)
     /// <summary>Creates the catalog root and its <c>.incoming/</c> staging directory if missing.</summary>
     public void EnsureCreated()
     {
+        if (ReadOnly) return;
         Directory.CreateDirectory(Root);
         Directory.CreateDirectory(IncomingDir);
     }

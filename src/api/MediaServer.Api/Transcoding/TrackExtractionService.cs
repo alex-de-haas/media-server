@@ -49,6 +49,7 @@ public sealed class TrackExtractionService(
         }
 
         var catalog = item.Catalog ?? throw new TranscodeRequestException("Source's catalog is unavailable.");
+        CatalogAccess.RequireWritable(catalog);
 
         var targets = ResolveTargets(request, source);
 

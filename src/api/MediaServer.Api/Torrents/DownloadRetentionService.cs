@@ -60,6 +60,7 @@ public sealed class DownloadRetentionService(
                 return false;
             }
             var catalog = await database.Catalogs.SingleAsync(x => x.Id == download.CatalogId, ct);
+            CatalogAccess.RequireWritable(catalog);
             var root = ResolveOwnedRoot(download, catalog);
             var prefix = CatalogPaths.IncomingRelative(download.Id) + "/";
             if (await database.SourceFiles.AnyAsync(x => !ids.Contains(x.IngestItemId) &&

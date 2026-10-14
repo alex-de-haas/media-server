@@ -91,6 +91,7 @@ public sealed class LibrarySourceService(
             return RenameVersionResult.NotFound;
         }
 
+        CatalogAccess.RequireWritable(catalog);
         if (source.Kind == MediaSourceKind.Bluray) edition ??= "Blu-ray";
         var oldRelative = source.Path;
         var newRelative = await CanonicalPathAsync(catalog, item, source.Kind == MediaSourceKind.Bluray ? "" : Path.GetExtension(oldRelative), edition, cancellationToken);

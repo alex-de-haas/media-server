@@ -1,3 +1,4 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -41,6 +42,7 @@ public sealed class LibraryDeleteService(
 
         // Capture file targets before the rows are gone (DB rows are the source of truth for paths).
         var files = deleteFiles ? await GatherLibraryFilesAsync(ids, cancellationToken) : [];
+        foreach (var (catalog, _) in files) CatalogAccess.RequireWritable(catalog);
 
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
@@ -173,6 +175,7 @@ public sealed class LibraryDeleteService(
             : [item.Id];
 
         var files = deleteFiles ? await GatherLibraryFilesAsync(ids, cancellationToken) : [];
+        foreach (var (catalog, _) in files) CatalogAccess.RequireWritable(catalog);
 
         var (result, _) = await RemoveWithinSeriesAsync(item, kind, ids, deleteUserData, cancellationToken);
 
@@ -300,6 +303,7 @@ public sealed class LibraryDeleteService(
             ? await database.Catalogs.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == catalogId, cancellationToken)
             : null;
 
+        if (deleteFile && catalog is not null) CatalogAccess.RequireWritable(catalog);
         await database.MediaStreams.Where(candidate => candidate.Id == streamId).ExecuteDeleteAsync(cancellationToken);
 
         // The staged file row, if the ingest that placed it is still around, goes back to being unassigned
@@ -374,6 +378,7 @@ public sealed class LibraryDeleteService(
                 .Join(database.Catalogs.AsNoTracking(), item => item.CatalogId, candidate => (Guid?)candidate.Id, (_, candidate) => candidate)
                 .FirstOrDefaultAsync(cancellationToken)
             : null;
+        if (catalog is not null) CatalogAccess.RequireWritable(catalog);
         var sidecarPaths = await database.MediaStreams.AsNoTracking()
             .Where(stream => stream.MediaSourceId == sourceId && stream.IsExternal && stream.ExternalPath != null)
             .Select(stream => stream.ExternalPath!)

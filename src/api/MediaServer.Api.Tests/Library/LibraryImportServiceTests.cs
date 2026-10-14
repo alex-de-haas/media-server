@@ -41,6 +41,23 @@ public sealed class LibraryImportServiceTests : IDisposable
         File.WriteAllBytes(absolute, new byte[bytes]);
     }
 
+
+    [Fact]
+    public async Task Read_only_scan_queues_original_paths_without_creating_staging()
+    {
+        var catalog = SeedCatalog();
+        catalog.ReadOnly = true;
+        await _database.SaveChangesAsync();
+        Directory.Delete(Path.Combine(_root, ".incoming"));
+        WriteFile("Unorganized/movie.mkv");
+        var before = Directory.GetFiles(_root, "*", SearchOption.AllDirectories);
+        var report = await Service().ImportAsync(catalog.Id, default);
+        Assert.Equal(1, report!.Imported);
+        Assert.Equal("Unorganized/movie.mkv", (await _database.SourceFiles.SingleAsync()).RelativePath);
+        Assert.Equal(before, Directory.GetFiles(_root, "*", SearchOption.AllDirectories));
+        Assert.False(Directory.Exists(Path.Combine(_root, ".incoming")));
+    }
+
     [Fact]
     public async Task Scan_follows_the_configured_root_link_but_ignores_linked_children()
     {

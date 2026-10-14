@@ -861,6 +861,7 @@ public sealed class McpToolInvoker(
                 ["id"] = catalog.Id,
                 ["name"] = catalog.Name,
                 ["type"] = catalog.Type.ToString(),
+                ["readOnly"] = catalog.ReadOnly,
                 ["usedBytes"] = used,
                 ["neverScanned"] = scan?.NeverScanned ?? true,
                 ["scanning"] = scan?.Scanning ?? false,

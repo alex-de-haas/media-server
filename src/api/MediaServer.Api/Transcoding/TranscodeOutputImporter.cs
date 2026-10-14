@@ -17,13 +17,24 @@ public sealed class TranscodeOutputImporter(
     MediaServerDbContext database,
     ICatalogPathSandbox sandbox,
     IMediaProbe probe,
-    ILogger<TranscodeOutputImporter> logger)
+    ILogger<TranscodeOutputImporter> logger,
+    MediaServer.Api.Configuration.MediaServerSettings? settings = null)
 {
     /// <summary>Probes the job's output and attaches it as a new version of the job's item. Returns false when the
     /// output file is missing on disk (the caller should mark the job failed). Idempotent: a second call for
     /// the same output is a no-op.</summary>
     public async Task<bool> ImportAsync(TranscodeJob job, CancellationToken cancellationToken)
     {
+        if (job.OutputMountLabel is not null)
+        {
+            var path = new TranscodeExports(settings ?? new()).Resolve(job);
+            if (!File.Exists(path)) return false;
+            var exported = await probe.ProbeAsync(path, cancellationToken);
+            if (exported.DurationTicks <= 0 || exported.SizeBytes <= 0) return false;
+            job.OutputImported = true;
+            await database.SaveChangesAsync(cancellationToken);
+            return true;
+        }
         var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == job.CatalogId, cancellationToken);
         if (catalog is null)
         {

@@ -1,10 +1,13 @@
 ---
 created: 2026-06-15
-updated: 2026-10-05
+updated: 2026-10-14
 summary: Operator-configured catalogs that drive parsing, target paths, naming, seeding policy and metadata language.
 ---
 
 # Catalogs
+
+
+Catalogs also support immutable [read-only libraries](../read-only-catalogs/feature.md). Set `readOnly: true` when creating a catalog to index existing files in place without staging or renaming. These catalogs are not torrent or move destinations; file mutations are rejected by the server.
 
 ## Description
 

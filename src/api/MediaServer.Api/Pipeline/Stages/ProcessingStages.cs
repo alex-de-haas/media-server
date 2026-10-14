@@ -163,6 +163,7 @@ public sealed class OrganizeStage(IOrganizer organizer, MediaServerDbContext dat
     {
         if (context.Download is { } download)
         {
+            CatalogAccess.RequireWritable(context.Catalog);
             if (download.KeepSeeding && !download.StopRequested && engine.GetSnapshot(download.InfoHash)?.Complete != true)
                 return new StageResult.Deferred(TimeSpan.FromSeconds(15));
             download.PlacementStarted = true;

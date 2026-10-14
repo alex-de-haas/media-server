@@ -59,7 +59,7 @@ export function MoveToCatalogDialog({
   // Only offer online catalogs of a compatible type (excluding the current one) — an offline root would
   // just be rejected with a 409.
   const targets = (catalogs.data ?? []).filter(
-    (catalog) => catalog.id !== currentCatalogId && catalog.online && allowed.includes(catalog.type),
+    (catalog) => !catalog.readOnly && catalog.id !== currentCatalogId && catalog.online && allowed.includes(catalog.type),
   );
   const selected = targets.find((catalog) => catalog.id === targetId);
 

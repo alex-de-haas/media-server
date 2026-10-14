@@ -34,7 +34,8 @@ export function AddTorrentDialog() {
   const [keepSeeding, setKeepSeeding] = useState<boolean | undefined>(undefined);
   const [files, setFiles] = useState<TorrentFile[]>([]);
 
-  const selectedCatalog = catalogs.data?.find((catalog) => catalog.id === catalogId);
+  const writableCatalogs = (catalogs.data ?? []).filter(catalog => !catalog.readOnly);
+  const selectedCatalog = writableCatalogs.find((catalog) => catalog.id === catalogId);
   const sourceCount = (magnet.trim() ? 1 : 0) + files.length;
 
   // Each source is its own request (the backend takes one per call); run them sequentially so adds of the
@@ -115,13 +116,13 @@ export function AddTorrentDialog() {
                 <Select
                   value={catalogId || null}
                   onValueChange={(value) => { setCatalogId((value as string | null) ?? ""); setKeepSeeding(undefined); }}
-                  items={(catalogs.data ?? []).map((catalog) => ({ value: catalog.id, label: `${catalog.name} (${catalog.type})` }))}
+                  items={writableCatalogs.map((catalog) => ({ value: catalog.id, label: `${catalog.name} (${catalog.type})` }))}
                 >
                   <SelectTrigger id={catalogSelectId} className="w-full max-w-xs">
                     <SelectValue placeholder="Select a catalog…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {catalogs.data?.map((catalog) => (
+                    {writableCatalogs.map((catalog) => (
                       <SelectItem key={catalog.id} value={catalog.id}>
                         {catalog.name} ({catalog.type})
                       </SelectItem>

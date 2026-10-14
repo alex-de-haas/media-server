@@ -47,6 +47,9 @@ public sealed class TranscodeService(
         }
 
         var catalog = item.Catalog ?? throw new TranscodeRequestException("Source's catalog is unavailable.");
+        var jobId = Guid.NewGuid();
+        var exportLabel = request.OutputMountLabel;
+        if (exportLabel is null) CatalogAccess.RequireWritable(catalog);
 
         var mergeStreams = await ResolveMergeStreamsAsync(request, source, cancellationToken);
         var selectedVideo = ResolveVideoSelection(request, source, mergeStreams);
@@ -104,7 +107,14 @@ public sealed class TranscodeService(
             : BuildOutputRelative(
             source.Path,
             VersionLabel(codec, targetHeight, isMerge, qualityLevel, audioTargets?.Select(target => target.Codec).ToList(), dolbyVision is not null));
-        if (!sandbox.TryResolve(catalog, outputRelative, out var outputAbsolute))
+        string outputAbsolute;
+        if (exportLabel is not null)
+        {
+            var export = new TranscodeExports(settings).Resolve(jobId, exportLabel, Path.GetFileName(outputRelative));
+            outputRelative = export.Relative;
+            outputAbsolute = export.Absolute;
+        }
+        else if (!sandbox.TryResolve(catalog, outputRelative, out outputAbsolute))
         {
             throw new TranscodeRequestException("Could not place the output inside the catalog.");
         }
@@ -116,7 +126,7 @@ public sealed class TranscodeService(
                 (candidate.MediaItemId == item.Id || EF.Functions.Collate(candidate.Path, "NOCASE") == outputRelative))
             .Select(candidate => new { candidate.MediaItemId, candidate.Path, candidate.VersionName })
             .ToListAsync(cancellationToken);
-        if (existingVersions.Any(candidate =>
+        if (exportLabel is null && existingVersions.Any(candidate =>
                 string.Equals(candidate.Path, outputRelative, StringComparison.OrdinalIgnoreCase) ||
                 (versionName is not null && candidate.MediaItemId == item.Id &&
                     string.Equals(candidate.VersionName, versionName, StringComparison.OrdinalIgnoreCase))))
@@ -125,11 +135,11 @@ public sealed class TranscodeService(
         }
 
         var activeJobs = await database.TranscodeJobs.AsNoTracking()
-            .Where(candidate => candidate.CatalogId == catalog.Id &&
+            .Where(candidate => candidate.CatalogId == catalog.Id && candidate.OutputMountLabel == exportLabel &&
                 (candidate.State == TranscodeJobState.Queued || candidate.State == TranscodeJobState.Running))
             .Select(candidate => new { candidate.MediaItemId, candidate.OutputPath, candidate.VersionName })
             .ToListAsync(cancellationToken);
-        if (activeJobs.Any(candidate =>
+        if (exportLabel is null && activeJobs.Any(candidate =>
                 string.Equals(candidate.OutputPath, outputRelative, StringComparison.OrdinalIgnoreCase) ||
                 (versionName is not null && candidate.MediaItemId == item.Id &&
                     string.Equals(candidate.VersionName, versionName, StringComparison.OrdinalIgnoreCase))))
@@ -141,33 +151,17 @@ public sealed class TranscodeService(
 
         var input = ToMount(inputAbsolute)
             ?? throw new TranscodeRequestException("The catalog root is not bound as a media mount; transcoding needs the same host path bound into the transcode-engine.");
-        var output = ToMount(outputAbsolute)
-            ?? throw new TranscodeRequestException("The output path is not under a configured media mount.");
+        var output = exportLabel is not null ? (Label: exportLabel, Relative: outputRelative) :
+            ToMount(outputAbsolute) ?? throw new TranscodeRequestException("The output path is not under a configured media mount.");
 
         var additionalInputs = ResolveMergeInputs(mergeStreams, catalog);
         var metadataOverrides = ResolveMetadataOverrides(request, source, mergeStreams);
 
-        JobDescriptor descriptor;
-        try
-        {
-            descriptor = await engine.CreateAsync(
-                new TranscodeJobRequest(
-                    input.Label, input.Relative, output.Label, output.Relative, codec, hardware, qualityLevel,
-                    targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
-                    additionalInputs, metadataOverrides, audioTargets,
-                    DolbyVision: dolbyVision, VideoStreamIndex: request.VideoStreamIndex),
-                cancellationToken);
-        }
-        catch (InvalidOperationException exception)
-        {
-            // The engine is disabled (no dependency) or rejected the job — surface it as a 400.
-            throw new TranscodeRequestException(exception.Message);
-        }
-
         var job = new TranscodeJob
         {
-            Id = Guid.NewGuid(),
-            EngineJobId = descriptor.JobId,
+            Id = jobId,
+            OutputMountLabel = exportLabel,
+            EngineJobId = jobId.ToString("N"),
             MediaSourceId = source.Id,
             MediaItemId = item.Id,
             CatalogId = catalog.Id,
@@ -183,7 +177,36 @@ public sealed class TranscodeService(
             State = TranscodeJobState.Queued,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        database.TranscodeJobs.Add(job);
+        if (exportLabel is not null)
+        {
+            database.TranscodeJobs.Add(job);
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        JobDescriptor descriptor;
+        try
+        {
+            descriptor = await engine.CreateAsync(
+                new TranscodeJobRequest(
+                    input.Label, input.Relative, output.Label, output.Relative, codec, hardware, qualityLevel,
+                    targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
+                    additionalInputs, metadataOverrides, audioTargets,
+                    DolbyVision: dolbyVision, VideoStreamIndex: request.VideoStreamIndex, ClientJobId: exportLabel is null ? null : jobId),
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            if (exportLabel is not null)
+            {
+                job.State = TranscodeJobState.Failed;
+                job.Error = exception.Message;
+                await database.SaveChangesAsync(cancellationToken);
+            }
+            // The engine is disabled (no dependency) or rejected the job — surface it as a 400.
+            throw new TranscodeRequestException(exception.Message);
+        }
+
+        job.EngineJobId = descriptor.JobId;
+        if (exportLabel is null) database.TranscodeJobs.Add(job);
         await database.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation("Created transcode job {JobId} for source {SourceId} → {Output}.", descriptor.JobId, source.Id, outputRelative);
@@ -201,6 +224,16 @@ public sealed class TranscodeService(
             .ToListAsync(cancellationToken);
 
         return jobs.Select(job => TranscodeJobResponse.From(job, engine.GetSnapshot(job.EngineJobId))).ToList();
+    }
+
+    public IReadOnlyList<string> OutputDestinations => new TranscodeExports(settings).Destinations;
+
+    public async Task<string?> ExportFileAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var job = await database.TranscodeJobs.AsNoTracking().FirstOrDefaultAsync(job => job.Id == id, cancellationToken);
+        if (job is null || job.State != TranscodeJobState.Completed || !job.OutputImported || job.OutputMountLabel is null) return null;
+        var path = new TranscodeExports(settings).Resolve(job);
+        return File.Exists(path) ? path : null;
     }
 
     public async Task<bool> CancelAsync(Guid id, CancellationToken cancellationToken)
@@ -244,6 +277,17 @@ public sealed class TranscodeService(
                 return false;
             }
 
+            if (job.OutputMountLabel is not null)
+            {
+                if (job.State is TranscodeJobState.Queued or TranscodeJobState.Running)
+                    throw new LibraryFileBusyException();
+                // Keep ownership in the database until cleanup succeeds, including after engine restarts.
+                await engine.RemoveAsync(job.EngineJobId, deleteOutput: false, cancellationToken);
+                if (deleteOutput) new TranscodeExports(settings).Delete(job);
+                database.TranscodeJobs.Remove(job);
+                await database.SaveChangesAsync(cancellationToken);
+                return true;
+            }
             if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) &&
                 (job.State is TranscodeJobState.Queued or TranscodeJobState.Running ||
                  job.State == TranscodeJobState.Completed && !job.OutputImported))

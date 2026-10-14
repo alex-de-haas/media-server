@@ -140,14 +140,17 @@ public sealed class CatalogService(
             throw new CatalogValidationException($"A catalog already exists for root: {root}");
         }
 
+        if (request.ReadOnly && !filesystem.DirectoryExists(root))
+            throw new CatalogValidationException("A read-only catalog must already exist.");
         var paths = CatalogPaths.For(root);
-        paths.EnsureCreated();
+        if (!request.ReadOnly) paths.EnsureCreated();
 
         var now = DateTimeOffset.UtcNow;
         var catalog = new Catalog
         {
             Id = Guid.NewGuid(),
             Name = request.Name.Trim(),
+            ReadOnly = request.ReadOnly,
             Type = request.Type,
             Root = root,
             MountLabel = mountLabel,

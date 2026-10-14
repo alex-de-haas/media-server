@@ -11,6 +11,40 @@ namespace MediaServer.Api.Tests.Pipeline;
 
 public sealed class OriginalMovieNamingTests
 {
+
+    [Fact]
+    public async Task Read_only_manual_match_publishes_in_place_without_folder_naming_metadata()
+    {
+        using var harness = Harness("Manual title", () => null, allowSearch: false, metadataAvailable: () => false);
+        var ingestId = Guid.NewGuid();
+        var path = Path.Combine(harness.Root, "original.mkv");
+        await File.WriteAllBytesAsync(path, new byte[1024]);
+        var before = File.GetLastWriteTimeUtc(path);
+        using (var scope = harness.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+            var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Read only", Root = harness.Root, ReadOnly = true };
+            var ingest = new IngestItem { Id = ingestId, CatalogId = catalog.Id, Stage = IngestStage.Identify,
+                Status = IngestStatus.NeedsReview, StagesCompleted = ["intake", "download"] };
+            var file = new SourceFile { Id = Guid.NewGuid(), IngestItemId = ingestId, RelativePath = "original.mkv", SizeBytes = 1024 };
+            db.AddRange(catalog, ingest, file);
+            await db.SaveChangesAsync();
+            var outcome = await scope.ServiceProvider.GetRequiredService<IngestService>().MatchAsync(ingestId,
+                new MatchRequest(MediaKind.Movie, "tmdb", "562", "Manual title", 1988,
+                    [new MatchFileRequest(file.Id, null, null)]), default);
+            Assert.Equal(MatchOutcome.Matched, outcome);
+        }
+        await harness.Orchestrator.DriveAsync(ingestId, default);
+        using var verify = harness.CreateScope();
+        var database = verify.ServiceProvider.GetRequiredService<MediaServerDbContext>();
+        Assert.Equal(IngestStatus.Done, (await database.IngestItems.SingleAsync()).Status);
+        Assert.Equal("original.mkv", (await database.MediaSources.SingleAsync()).Path);
+        Assert.NotNull((await database.MediaItems.SingleAsync()).PublicId);
+        Assert.Equal(before, File.GetLastWriteTimeUtc(path));
+        Assert.Single(Directory.GetFiles(harness.Root, "*", SearchOption.AllDirectories));
+        Assert.False(Directory.Exists(Path.Combine(harness.Root, ".incoming")));
+    }
+
     [Theory]
     [InlineData("Крепкий орешек", "Die Hard", "Die Hard")]
     [InlineData("Die Hard", "Die Hard", "Die Hard")]

@@ -8,6 +8,9 @@ namespace MediaServer.Api.Data;
 /// </summary>
 public sealed class Catalog
 {
+    /// <summary>Files are indexed in place; no operation may mutate this catalog.</summary>
+    public bool ReadOnly { get; set; }
+
     public Guid Id { get; set; }
 
     public required string Name { get; set; }

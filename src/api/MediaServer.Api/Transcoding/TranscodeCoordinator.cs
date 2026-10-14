@@ -69,7 +69,7 @@ public sealed class TranscodeCoordinator(
 
         var active = await database.TranscodeJobs
             .Where(job => job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running ||
-                (job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) && job.State == TranscodeJobState.Completed && !job.OutputImported)
+                (job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray || job.OutputMountLabel != null) && job.State == TranscodeJobState.Completed && !job.OutputImported)
             .ToListAsync(cancellationToken);
 
         var completed = new List<TranscodeJob>();
@@ -82,7 +82,7 @@ public sealed class TranscodeCoordinator(
             }
             var before = job.State;
             Apply(job, engine.GetSnapshot(job.EngineJobId));
-            if (before is not TranscodeJobState.Completed && job.State is TranscodeJobState.Completed)
+            if (job.State is TranscodeJobState.Completed && (before is not TranscodeJobState.Completed || job.OutputMountLabel is not null && !job.OutputImported))
             {
                 completed.Add(job);
             }
@@ -115,7 +115,7 @@ public sealed class TranscodeCoordinator(
         Apply(job, engine.GetSnapshot(engineJobId));
         await database.SaveChangesAsync();
 
-        if (before is not TranscodeJobState.Completed && job.State is TranscodeJobState.Completed)
+        if (job.State is TranscodeJobState.Completed && (before is not TranscodeJobState.Completed || job.OutputMountLabel is not null && !job.OutputImported))
         {
             await PromoteAsync(scope, database, job, CancellationToken.None);
         }
