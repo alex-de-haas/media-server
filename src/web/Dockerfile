@@ -7,7 +7,7 @@
 # To update, re-pin with:
 #   docker buildx imagetools inspect node:24-bookworm-slim --format '{{.Manifest.Digest}}'
 
-FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS base
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 # Pin pnpm via corepack so installs match CI (no packageManager field in package.json).
@@ -28,7 +28,7 @@ COPY . .
 RUN pnpm build
 
 # ---- runner ----
-FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runner
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
