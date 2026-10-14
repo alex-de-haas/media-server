@@ -19,7 +19,7 @@ internal sealed class RecordingTranscodeEngine : ITranscodeEngine
         // A fresh id per call, because EngineJobId is unique: a test that extracts twice is testing the
         // second attempt, not the index.
         return Task.FromResult(new JobDescriptor(
-            $"engine-{++_created}", request.InputRelativePath, request.OutputRelativePath, 120, 1000,
+            request.ClientJobId?.ToString("N") ?? $"engine-{++_created}", request.InputRelativePath, request.OutputRelativePath, 120, 1000,
             request.Outputs?.Select(output => output.RelativePath).ToList()));
     }
 

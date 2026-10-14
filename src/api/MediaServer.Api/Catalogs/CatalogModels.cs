@@ -16,7 +16,8 @@ public sealed record CreateCatalogRequest(
     string? RelativePath,
     string? NamingTemplate,
     bool DefaultKeepSeeding,
-    string? MetadataLanguage);
+    string? MetadataLanguage,
+    bool ReadOnly = false);
 
 /// <summary>Re-points an existing catalog at a (possibly different) mount — see
 /// <see cref="CatalogAnchorService.AnchorAsync"/>.</summary>
@@ -49,7 +50,8 @@ public sealed record CatalogResponse(
     bool Online,
     bool Unanchored,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt)
+    DateTimeOffset UpdatedAt,
+    bool ReadOnly = false)
 {
     public static CatalogResponse From(Catalog catalog, long freeBytes, bool online, bool unanchored) => new(
         catalog.Id,
@@ -65,7 +67,8 @@ public sealed record CatalogResponse(
         online,
         unanchored,
         catalog.CreatedAt,
-        catalog.UpdatedAt);
+        catalog.UpdatedAt,
+        catalog.ReadOnly);
 }
 
 /// <summary>

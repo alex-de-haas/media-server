@@ -35,7 +35,12 @@ public sealed class LocalWatchHistoryMigrationTests
             Id = Guid.NewGuid(), PublicId = "movie", CatalogId = catalog.Id, Kind = MediaKind.Movie,
             Title = "Movie", AddedAt = now, UpdatedAt = now,
         };
-        database.AddRange(user, catalog, item);
+        // Seed the historical schema explicitly: current Catalog properties include later migrations.
+        await database.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Catalogs" ("Id", "Name", "Type", "Root", "NamingTemplate", "DefaultKeepSeeding", "CreatedAt", "UpdatedAt")
+            VALUES ({catalog.Id}, {catalog.Name}, {(int)catalog.Type}, {catalog.Root}, {"{Title} ({Year})"}, 0, {storedNow}, {storedNow});
+            """);
+        database.AddRange(user, item);
         await database.SaveChangesAsync();
 
         var expected = new List<(Guid Id, PlaybackHistoryOrigin Origin, DateTimeOffset? WatchedAt)>();

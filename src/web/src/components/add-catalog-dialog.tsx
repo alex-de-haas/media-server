@@ -33,6 +33,7 @@ export function AddCatalogDialog() {
 
   const [name, setName] = useState("");
   const [type, setType] = useState<CatalogType>("Movie");
+  const [readOnly, setReadOnly] = useState(false);
   const [defaultKeepSeeding, setDefaultKeepSeeding] = useState(false);
   // Mount-anchored entry (used when Hosty injects catalog-root mounts). The label is what gets stored:
   // it is the same under every runtime, while the mount's absolute path is not.
@@ -48,8 +49,8 @@ export function AddCatalogDialog() {
     mutationFn: () =>
       mediaServer.createCatalog(
         hasMounts
-          ? { name: name.trim(), type, mountLabel: selectedLabel, relativePath: normalizeRelativePath(relativePath), defaultKeepSeeding }
-          : { name: name.trim(), type, root: freeRoot.trim(), defaultKeepSeeding },
+          ? { name: name.trim(), type, mountLabel: selectedLabel, relativePath: normalizeRelativePath(relativePath), defaultKeepSeeding: !readOnly && defaultKeepSeeding, readOnly }
+          : { name: name.trim(), type, root: freeRoot.trim(), defaultKeepSeeding: !readOnly && defaultKeepSeeding, readOnly },
       ),
     onSuccess: () => {
       setName("");
@@ -76,7 +77,7 @@ export function AddCatalogDialog() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add catalog</DialogTitle>
-            <DialogDescription>A destination on one filesystem; it holds files/ and library/.</DialogDescription>
+            <DialogDescription>A media library on one filesystem. Existing files can be indexed without changing them.</DialogDescription>
           </DialogHeader>
 
           <form
@@ -128,7 +129,12 @@ export function AddCatalogDialog() {
             )}
 
             <label className="flex items-center gap-2">
-              <Checkbox checked={defaultKeepSeeding} onCheckedChange={(checked) => setDefaultKeepSeeding(checked === true)} />
+              <Checkbox checked={readOnly} onCheckedChange={checked => setReadOnly(checked === true)} />
+              <span>Read-only library — keep all original files unchanged</span>
+            </label>
+            <p className="text-xs text-muted-foreground">Read-only mode is fixed when the catalog is created. Conversions require a separate output folder.</p>
+            <label className="flex items-center gap-2">
+              <Checkbox disabled={readOnly} checked={!readOnly && defaultKeepSeeding} onCheckedChange={(checked) => setDefaultKeepSeeding(checked === true)} />
               <span>Keep seeding by default</span>
             </label>
 

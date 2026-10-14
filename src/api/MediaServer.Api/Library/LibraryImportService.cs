@@ -55,7 +55,7 @@ public sealed class LibraryImportService(
         // and the organizer renames it onto the original's canonical path, destroying the original. Keep every
         // known transcode output off-limits so a scan never re-ingests it.
         var transcodeOutputs = await database.TranscodeJobs.AsNoTracking()
-            .Where(job => job.CatalogId == catalogId)
+            .Where(job => job.CatalogId == catalogId && job.OutputMountLabel == null)
             .Select(job => job.OutputPath)
             .ToListAsync(cancellationToken);
         var known = new HashSet<string>(publishedPaths.Concat(queuedPaths).Concat(transcodeOutputs.OfType<string>()), PathComparer);

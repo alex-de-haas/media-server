@@ -50,6 +50,7 @@ public sealed partial class VideoPartJoinService
                     .SingleOrDefaultAsync(s => s.Id == request.SourceId, ct);
                 if (source is not { Kind: MediaSourceKind.Bluray, MediaItem: { Kind: MediaKind.Movie, PublicId: not null, Catalog: { } catalog } item })
                     throw new TranscodeRequestException("Choose a published movie's Blu-ray source.");
+                CatalogAccess.RequireWritable(catalog);
                 await LibraryFileMutation.RequireItemAvailableAsync(database, item.Id, ct);
                 if (await moveGuard.IsItemMovingAsync(item.Id, ct)) throw new TranscodeConflictException(LibraryMoveGuard.MoveInProgressError);
                 var output = LibraryNaming.ForMovie(catalog, item, ".mkv", label);

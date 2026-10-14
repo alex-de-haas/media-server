@@ -562,6 +562,8 @@ public sealed class IngestService(
             return RetargetOutcome.NotFound;
         }
 
+        CatalogAccess.RequireWritable(source);
+        CatalogAccess.RequireWritable(target);
         if (!LibraryMoveService.SameVolume(filesystem, source.Root, target.Root))
         {
             return RetargetOutcome.CrossVolume;

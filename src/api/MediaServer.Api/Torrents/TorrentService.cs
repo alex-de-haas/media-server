@@ -29,6 +29,7 @@ public sealed class TorrentService(
 
         var catalog = await database.Catalogs.FirstOrDefaultAsync(candidate => candidate.Id == request.CatalogId, cancellationToken)
             ?? throw new TorrentRequestException("Catalog not found.");
+        CatalogAccess.RequireWritable(catalog);
 
         TorrentDescriptor descriptor;
         try

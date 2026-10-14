@@ -361,8 +361,8 @@ public sealed class IdentifyService(
     {
         // Organize runs before Enrich. Resolve the language-independent name here for automatic,
         // pinned and manual matches (including remaps), without changing the localized display title.
-        // An already placed movie retains its folder and needs no extra metadata request.
-        if (!string.IsNullOrWhiteSpace(movie.OriginalTitle) || !string.IsNullOrWhiteSpace(movie.LibraryPath) ||
+        // Read-only inputs and already placed movies retain their path; neither needs a naming lookup.
+        if (catalog.ReadOnly || !string.IsNullOrWhiteSpace(movie.OriginalTitle) || !string.IsNullOrWhiteSpace(movie.LibraryPath) ||
             movie.IdentityProvider is null || movie.IdentityProviderId is null)
         {
             return;

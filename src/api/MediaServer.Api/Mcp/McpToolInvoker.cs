@@ -379,7 +379,7 @@ public sealed class McpToolInvoker(
             // Passed through unchanged: this is a refusal about the request, not about its syntax.
             return Failure(id, refusal.Message);
         }
-        catch (Exception exception) when (exception is FormatException or InvalidOperationException)
+        catch (Exception exception) when (exception is FormatException or InvalidOperationException or ReadOnlyCatalogException)
         {
             // The model's own arguments were wrong. Reported as a tool failure so it can correct them.
             return Failure(id, $"Those arguments could not be read: {exception.Message}");
@@ -861,6 +861,7 @@ public sealed class McpToolInvoker(
                 ["id"] = catalog.Id,
                 ["name"] = catalog.Name,
                 ["type"] = catalog.Type.ToString(),
+                ["readOnly"] = catalog.ReadOnly,
                 ["usedBytes"] = used,
                 ["neverScanned"] = scan?.NeverScanned ?? true,
                 ["scanning"] = scan?.Scanning ?? false,

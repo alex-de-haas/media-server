@@ -1,10 +1,13 @@
 ---
 created: 2026-06-15
-updated: 2026-08-11
+updated: 2026-10-14
 summary: Backed-up app data in an embedded SQLite database, separate from the large catalog roots that hold media.
 ---
 
 # Storage and Data
+
+
+An optional `transcodeOutput` external mount holds [explicit conversion exports](../read-only-catalogs/feature.md), separately from catalog roots. Output paths are owned by persisted job IDs. These external files are not part of the app-data backup and are not implicitly deleted with a sandbox.
 
 ## Description
 

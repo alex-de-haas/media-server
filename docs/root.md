@@ -226,6 +226,7 @@ Plans: 5 In Progress · 2 Draft · 3 On Hold.
 - [Multi-Movie Ingest (Franchise Packs)](features/multi-movie-ingest/feature.md) — A franchise pack download imports as separate movies, each with its own folder and metadata.
 - [Native Client API](features/native-client-api/feature.md) — The /native/v1 HTTP surface for Media Server's own clients, carrying what the domain actually holds.
 - [Native Playback](features/native-playback/feature.md) — Native playback negotiation, initial track selection and watch recording under /native/v1/playback.
+- [Read-only catalogs and transcode exports](features/read-only-catalogs/feature.md) — Immutable catalog imports and explicit transcode exports in separate operator-configured output mounts.
 - [Recommendations](features/recommendation-providers/feature.md) — A what-to-watch-next surface built from the viewer's history and ratings and the library, with TMDb for similarity.
 - [Release Tracking](features/release-tracking/feature.md) — A per-user calendar of TMDb release dates with reminders, without any downloading.
 - [Remux Streaming](features/remux-streaming/feature.md) — Matroska sources served to native clients as computed MP4 containers without a second copy on disk. · [plan](features/remux-streaming/plan.md): In Progress, 34/52, updated 2026-10-10

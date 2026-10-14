@@ -118,6 +118,9 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("OfflineSince")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("ReadOnly")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Root")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1632,6 +1635,9 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<double?>("ExpectedDurationSeconds")
                         .HasColumnType("REAL");
 
+                    b.Property<string>("ExportSubmissionJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("HardwareAcceleration")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1657,6 +1663,9 @@ namespace MediaServer.Api.Data.Migrations
 
                     b.Property<bool>("OutputImported")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("OutputMountLabel")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("OutputPath")
                         .HasColumnType("TEXT");

@@ -69,12 +69,18 @@ public sealed class TranscodeCoordinator(
 
         var active = await database.TranscodeJobs
             .Where(job => job.State == TranscodeJobState.Queued || job.State == TranscodeJobState.Running ||
-                (job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) && job.State == TranscodeJobState.Completed && !job.OutputImported)
+                (job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray || job.OutputMountLabel != null) && job.State == TranscodeJobState.Completed && !job.OutputImported)
             .ToListAsync(cancellationToken);
 
         var completed = new List<TranscodeJob>();
         foreach (var job in active)
         {
+            if (job.OutputMountLabel is not null)
+            {
+                await scope.ServiceProvider.GetRequiredService<TranscodeService>().ReconcileExportAsync(job,
+                    scope.ServiceProvider.GetRequiredService<TranscodeOutputImporter>(), cancellationToken);
+                continue;
+            }
             if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray))
             {
                 await scope.ServiceProvider.GetRequiredService<VideoPartJoinService>().ReconcileAsync(job, cancellationToken);
@@ -82,7 +88,7 @@ public sealed class TranscodeCoordinator(
             }
             var before = job.State;
             Apply(job, engine.GetSnapshot(job.EngineJobId));
-            if (before is not TranscodeJobState.Completed && job.State is TranscodeJobState.Completed)
+            if (job.State is TranscodeJobState.Completed && (before is not TranscodeJobState.Completed || job.OutputMountLabel is not null && !job.OutputImported))
             {
                 completed.Add(job);
             }
@@ -110,12 +116,12 @@ public sealed class TranscodeCoordinator(
         }
 
         // Joins reconcile on the timer under the same mutation gate as submit/cancel/delete.
-        if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray)) return;
+        if ((job.Kind == TranscodeJobKind.Join || job.Kind == TranscodeJobKind.Bluray) || job.OutputMountLabel is not null) return;
         var before = job.State;
         Apply(job, engine.GetSnapshot(engineJobId));
         await database.SaveChangesAsync();
 
-        if (before is not TranscodeJobState.Completed && job.State is TranscodeJobState.Completed)
+        if (job.State is TranscodeJobState.Completed && (before is not TranscodeJobState.Completed || job.OutputMountLabel is not null && !job.OutputImported))
         {
             await PromoteAsync(scope, database, job, CancellationToken.None);
         }

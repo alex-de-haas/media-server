@@ -108,6 +108,10 @@ export function TranscodeDialog({ source, selected, operation, onClose, onSubmit
   const copy = operation === "remux";
   const label = copy ? "Remux" : "Convert";
   const [versionName, setVersionName] = useState(label);
+  const [outputMountLabel, setOutputMountLabel] = useState("");
+  const destinations = useQuery({ queryKey: ["transcode-destinations"], queryFn: mediaServer.transcodeDestinations });
+  const destinationItems = [{ value: "", label: "New library version (writable catalogs only)" },
+    ...(destinations.data ?? []).map(value => ({ value, label: "Export to " + value }))];
   const versionInput = useRef<HTMLInputElement>(null);
   const [codec, setCodec] = useState("hevc");
   const [hardware, setHardware] = useState("auto");
@@ -131,12 +135,12 @@ export function TranscodeDialog({ source, selected, operation, onClose, onSubmit
     mutationFn: () => {
       if (reason) throw new Error(reason);
       if (invalidName) throw new Error(invalidName);
-      return mediaServer.createTranscodeJob(trackJobInput(source, selected, settings));
+      return mediaServer.createTranscodeJob({ ...trackJobInput(source, selected, settings), outputMountLabel: outputMountLabel || undefined });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
       onSubmitted();
-      toast.success(`${label} started`, { description: "The new version will appear when it’s ready." });
+      toast.success(`${label} started`, { description: outputMountLabel ? "Download the export from its job when it is ready." : "The new version will appear when it’s ready." });
     },
   });
   const serverNameError = submit.error instanceof ApiError && submit.error.code === "invalid_version_name" ? submit.error.message : null;
@@ -151,6 +155,15 @@ export function TranscodeDialog({ source, selected, operation, onClose, onSubmit
         </DialogHeader>
         <form className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto" onSubmit={event => { event.preventDefault(); if (!submit.isPending && !reason && !nameError) submit.mutate(); }}>
           <p className="break-words text-xs text-muted-foreground">{source.fileName} · {selected.length} tracks</p>
+          <Field>
+            <FieldLabel htmlFor={id + "-destination"}>Output destination</FieldLabel>
+            <Select value={outputMountLabel} onValueChange={value => setOutputMountLabel(value ?? "")} items={destinationItems}>
+              <SelectTrigger id={id + "-destination"}><SelectValue /></SelectTrigger>
+              <SelectContent>{destinationItems.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+            </Select>
+            <FieldDescription>Read-only libraries require a separate export folder. Exports do not add a version to the library.</FieldDescription>
+            {destinations.isError && <FieldError>Could not load output folders. Reopen this dialog to retry.</FieldError>}
+          </Field>
           <Field data-invalid={!!nameError}>
             <FieldLabel htmlFor={`${id}-version`}>Version name</FieldLabel>
             <Input ref={versionInput} id={`${id}-version`} value={versionName} maxLength={120} disabled={submit.isPending}
@@ -205,6 +218,7 @@ export function TranscodeDialog({ source, selected, operation, onClose, onSubmit
 export function TranscodeJobRow({ job, showManagementLink = true }: { job: TranscodeJob; showManagementLink?: boolean }) {
   const queryClient = useQueryClient();
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [deleteExportOpen, setDeleteExportOpen] = useState(false);
   const active = isTranscodeActive(job);
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["transcode-jobs"] });
 
@@ -222,6 +236,16 @@ export function TranscodeJobRow({ job, showManagementLink = true }: { job: Trans
     onError: (error) => toast.error("Couldn’t dismiss", { description: errorMessage(error) }),
   });
 
+  const downloadExport = useMutation({
+    mutationFn: () => mediaServer.downloadTranscodeExport(job.id),
+    onSuccess: (url) => window.location.assign(url),
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+  const deleteExport = useMutation({
+    mutationFn: () => mediaServer.deleteTranscodeExport(job.id),
+    onSuccess: invalidate,
+    onError: error => toast.error("Couldn’t delete export", { description: errorMessage(error) }),
+  });
   const extraction = job.kind === "Extract";
   const joining = job.kind === "Join";
   const title = job.name ?? job.outputPath ?? job.inputPath;
@@ -255,7 +279,7 @@ export function TranscodeJobRow({ job, showManagementLink = true }: { job: Trans
       <ActivityCardHeader
         title={title}
         titleAttr={title}
-        meta={meta}
+        meta={job.outputMountLabel ? meta + " · Export to " + job.outputMountLabel : meta}
         // Waiting for an encoder slot — the queued line replaces the bar and stats below, like a queued move.
         note={job.state === "Queued" ? <ActivityQueued /> : undefined}
         actions={<>{showManagementLink && <ManagementJobLink id={job.mediaItemId} sourceId={job.mediaSourceId} />}{
@@ -282,6 +306,18 @@ export function TranscodeJobRow({ job, showManagementLink = true }: { job: Trans
         </ActivityStats>
       )}
       {job.state === "Failed" && job.error && <p className="text-destructive text-xs">{job.error}</p>}
+      {job.outputMountLabel && !active && <div className="flex items-center gap-3 text-sm">
+        {job.state === "Completed" && <Button variant="link" size="sm" disabled={downloadExport.isPending} onClick={() => downloadExport.mutate()}>Download export</Button>}
+        <Button size="sm" variant="outline" onClick={() => setDeleteExportOpen(true)}>Delete export</Button>
+      </div>}
+      <AlertDialog open={deleteExportOpen} onOpenChange={setDeleteExportOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Delete this export?</AlertDialogTitle>
+            <AlertDialogDescription>Removes the exported file and its job. The original library file stays unchanged.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={deleteExport.isPending} onClick={() => deleteExport.mutate()}>Delete export</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog open={cancelOpen && active} onOpenChange={setCancelOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

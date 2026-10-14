@@ -159,7 +159,9 @@ public sealed class CatalogAnchorService(
         }
 
         await EnsureNoDownloadIsWritingAsync(catalog, resolved, cancellationToken);
-        EnsureRootUsable(resolved);
+        if (catalog.ReadOnly && !filesystem.DirectoryExists(resolved))
+            throw new CatalogValidationException("A read-only catalog must already exist.");
+        if (!catalog.ReadOnly) EnsureRootUsable(resolved);
 
         catalog.MountLabel = canonicalLabel;
         catalog.MountRelativePath = relative;

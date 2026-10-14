@@ -31,6 +31,33 @@ public static class TranscodeEndpoints
         // accepts. Served rather than duplicated in the web bundle: the two copies would drift, and the half
         // that drifts is the one that lets an operator submit a value this service then refuses — after they
         // have filled in the whole dialog.
+        group.MapGet("/destinations", (TranscodeService service) => Results.Ok(service.OutputDestinations));
+        group.MapGet("/{id:guid}/output", async (Guid id, TranscodeService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var path = await service.ExportFileAsync(id, ct);
+                return path is null ? Results.NotFound() :
+                    Results.File(path, "video/x-matroska", Path.GetFileName(path), enableRangeProcessing: true);
+            }
+            catch (TranscodeRequestException exception) { return Results.Problem(exception.Message, statusCode: 409); }
+        });
+
+        group.MapPost("/{id:guid}/download", async (Guid id, TranscodeService service, ExportDownloadTokens tokens, CancellationToken ct) =>
+        {
+            var path = await service.ExportFileAsync(id, ct);
+            return path is null ? Results.NotFound() : Results.Ok(new { token = tokens.Mint(id) });
+        });
+        group.MapMethods("/{id:guid}/download", ["GET", "HEAD"], async (
+            Guid id, string? token, HttpContext context, ExportDownloadTokens tokens, TranscodeService service, CancellationToken ct) =>
+        {
+            if (!tokens.Validate(token, id, context.Request.Method)) return Results.NotFound();
+            context.Response.Headers.CacheControl = "private, no-store";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            var path = await service.ExportFileAsync(id, ct);
+            return path is null ? Results.NotFound() : Results.File(path, "video/x-matroska", Path.GetFileName(path), enableRangeProcessing: true);
+        }).AllowAnonymous();
+
         group.MapGet("/languages", () => Results.Ok(LanguageTags.Accepted));
 
         group.MapGet("/", async (TranscodeService service, CancellationToken cancellationToken) =>
@@ -108,6 +135,10 @@ public static class TranscodeEndpoints
             await service.CancelAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound());
 
         group.MapDelete("/{id:guid}", async (Guid id, bool? deleteOutput, TranscodeService service, CancellationToken cancellationToken) =>
-            await service.RemoveAsync(id, deleteOutput ?? false, cancellationToken) ? Results.NoContent() : Results.NotFound());
+        {
+            try { return await service.RemoveAsync(id, deleteOutput ?? false, cancellationToken) ? Results.NoContent() : Results.NotFound(); }
+            catch (Library.LibraryFileBusyException exception) { return Results.Problem(exception.Message, statusCode: 409); }
+            catch (TranscodeRequestException exception) { return Results.Problem(exception.Message, statusCode: 409); }
+        });
     }
 }

@@ -24,3 +24,15 @@ it("never sends the remembered grant to a different origin", async () => {
   await expect(apiJson("https://another.test/api")).rejects.toThrow("origin");
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it("obtains an export-only ticket with the remembered grant when cookies are absent", async () => {
+  const fetch = vi.fn(async () => Response.json({ token: "export-only-ticket" })); vi.stubGlobal("fetch", fetch);
+  rememberAppGrant("hostyg_popup");
+  const { mediaServer } = await import("./media-server");
+  const url = await mediaServer.downloadTranscodeExport("job-id");
+  expect(url).toBe("/api/transcode-download/job-id?token=export-only-ticket");
+  const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  expect(init.method).toBe("POST");
+  expect(new Headers(init.headers).get("authorization")).toBe("Bearer hostyg_popup");
+  expect(url).not.toContain("hostyg_");
+});

@@ -43,7 +43,8 @@ public sealed record CreateTranscodeRequest(
     /// <summary>Absolute embedded video index. Explicit selection requires engine support and explicit audio/subtitle lists.</summary>
     int? VideoStreamIndex = null,
     /// <summary>Output version label and filename suffix. Omission keeps automatic naming.</summary>
-    string? VersionName = null);
+    string? VersionName = null,
+    string? OutputMountLabel = null);
 
 /// <summary>
 /// Request to write chosen tracks of a version out as files beside it — the inverse of merging.
@@ -109,7 +110,8 @@ public sealed record TranscodeJobResponse(
     double? EtaSeconds,
     long? OutputSizeBytes,
     // "toProfile81" when the copy also rewrote the picture's Dolby Vision to profile 8.1; null otherwise.
-    string? DolbyVision = null)
+    string? DolbyVision = null,
+    string? OutputMountLabel = null)
 {
     public static TranscodeJobResponse From(TranscodeJob job, JobSnapshot? snapshot)
     {
@@ -141,7 +143,8 @@ public sealed record TranscodeJobResponse(
             snapshot?.Speed,
             snapshot?.EtaSeconds,
             snapshot?.OutputSizeBytes,
-            job.DolbyVision);
+            job.DolbyVision,
+            job.OutputMountLabel);
     }
 }
 

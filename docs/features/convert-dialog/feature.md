@@ -1,6 +1,6 @@
 ---
 created: 2026-07-29
-updated: 2026-10-12
+updated: 2026-10-14
 summary: Fixed-selection Remux and Convert confirmations with track names, video encoding controls and optional Dolby Vision rewriting.
 ---
 
@@ -31,6 +31,9 @@ before a job is submitted and reported beside the name field. Name and path coll
 existing versions, files or active jobs appear beside the field; editing the name
 clears that error without losing track names or settings. API clients that omit
 `versionName` retain automatic naming.
+
+
+Both dialogs include an **Output destination** selector. Writable catalogs can keep the ordinary sibling version behavior; [read-only catalogs](../read-only-catalogs/feature.md) require a separately configured export mount. An export keeps its result in a job-owned folder and offers download and deletion from the job card, without adding a library version.
 
 ## Remux
 

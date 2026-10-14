@@ -13,6 +13,7 @@ public sealed class LibraryFileEraser(ICatalogPathSandbox sandbox, ILogger<Libra
 {
     public void Erase(Catalog catalog, string relativePath)
     {
+        CatalogAccess.RequireWritable(catalog);
         // Defense in depth: never delete inside the transient staging area.
         if (CatalogPaths.IsIncoming(relativePath))
         {

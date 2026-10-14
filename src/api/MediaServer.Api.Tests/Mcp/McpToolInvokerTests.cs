@@ -57,6 +57,20 @@ public sealed class McpToolInvokerTests : IDisposable
     }
 
     [Fact]
+    public async Task Read_only_torrent_refusal_remains_an_MCP_tool_result()
+    {
+        var catalog = new Catalog { Id = Guid.NewGuid(), Name = "Read only", Root = _harness.Root, ReadOnly = true };
+        _database.Catalogs.Add(catalog);
+        await _database.SaveChangesAsync();
+        var result = await CallAsync("add_torrent", new JsonObject {
+            ["catalogId"] = catalog.Id.ToString(), ["magnet"] = "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
+        });
+        Assert.True(result["result"]!["isError"]!.GetValue<bool>());
+        Assert.Null(result["error"]);
+        Assert.Contains("read-only", Text(result), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task An_unknown_tool_fails_as_a_result_rather_than_ending_the_turn()
     {
         // isError on a normal result is the protocol's own signal: the model reads why and picks

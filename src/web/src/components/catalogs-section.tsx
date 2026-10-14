@@ -96,7 +96,7 @@ export function CatalogsSection() {
     <Card>
       <CardHeader className="flex flex-col gap-2 sm:grid sm:gap-1">
         <CardTitle>Catalogs</CardTitle>
-        <CardDescription>Destinations on one filesystem; each holds files/ and library/.</CardDescription>
+        <CardDescription>Media libraries with managed files or read-only originals.</CardDescription>
         <CardAction className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" size="sm" disabled={scanAll.isPending} onClick={() => scanAll.mutate()}>
             {scanAll.isPending ? <Loader2 className="animate-spin" /> : <FolderSearch />}
@@ -271,6 +271,7 @@ function CatalogRow({
             />
             <span className="font-medium">{catalog.name}</span>
             <Badge variant="secondary">{catalog.type}</Badge>
+            {catalog.readOnly && <Badge variant="outline">Read-only</Badge>}
             {/* Unanchored subsumes offline: the root is unreachable *because* no mount of this runtime
                 holds it, and pointing at a volume to reconnect would send the operator the wrong way. */}
             {catalog.unanchored ? (

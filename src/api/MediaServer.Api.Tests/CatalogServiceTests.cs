@@ -39,6 +39,31 @@ public sealed class CatalogServiceTests : IDisposable
     private static CreateCatalogRequest MountRequest(string label, string? relativePath) =>
         new("Movies", CatalogType.Movie, null, label, relativePath, null, false, null);
 
+
+    [Fact]
+    public async Task Read_only_catalog_does_not_create_staging_or_change_files()
+    {
+        var path = Path.Combine(_tempRoot, "original.mkv");
+        await File.WriteAllTextAsync(path, "original");
+        var before = File.GetLastWriteTimeUtc(path);
+        var result = await CreateService().CreateAsync(Request(_tempRoot) with { ReadOnly = true }, default);
+        Assert.True(result.ReadOnly);
+        Assert.True((await _database.Catalogs.SingleAsync()).ReadOnly);
+        Assert.False(Directory.Exists(Path.Combine(_tempRoot, ".incoming")));
+        Assert.Equal("original", await File.ReadAllTextAsync(path));
+        Assert.Equal(before, File.GetLastWriteTimeUtc(path));
+    }
+
+    [Fact]
+    public async Task Read_only_catalog_requires_an_existing_directory()
+    {
+        var path = Path.Combine(_tempRoot, "missing");
+        await Assert.ThrowsAsync<CatalogValidationException>(() =>
+            CreateService().CreateAsync(Request(path) with { ReadOnly = true }, default));
+        Assert.False(Directory.Exists(path));
+        Assert.Empty(_database.Catalogs);
+    }
+
     [Theory]
     [InlineData(true, false, true)]
     [InlineData(true, true, false)]

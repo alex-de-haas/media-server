@@ -51,6 +51,7 @@ public sealed partial class VideoPartJoinService(MediaServerDbContext database, 
             if (await LibraryFileMutation.HasJoinAsync(database, item.Id, ct))
                 throw new TranscodeConflictException("This movie already has an active join.");
             var catalog = item.Catalog ?? throw new TranscodeRequestException("The movie's catalog is unavailable.");
+            CatalogAccess.RequireWritable(catalog);
             foreach (var path in new[] { first.Path, second.Path })
                 if (!sandbox.TryResolve(catalog, path, out var absolute) || !File.Exists(absolute))
                     throw new TranscodeRequestException("A selected part is missing from the catalog.");

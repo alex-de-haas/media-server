@@ -140,14 +140,17 @@ public sealed class CatalogService(
             throw new CatalogValidationException($"A catalog already exists for root: {root}");
         }
 
+        if (request.ReadOnly && !filesystem.DirectoryExists(root))
+            throw new CatalogValidationException("A read-only catalog must already exist.");
         var paths = CatalogPaths.For(root);
-        paths.EnsureCreated();
+        if (!request.ReadOnly) paths.EnsureCreated();
 
         var now = DateTimeOffset.UtcNow;
         var catalog = new Catalog
         {
             Id = Guid.NewGuid(),
             Name = request.Name.Trim(),
+            ReadOnly = request.ReadOnly,
             Type = request.Type,
             Root = root,
             MountLabel = mountLabel,
@@ -212,6 +215,7 @@ public sealed class CatalogService(
     {
         using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
         await LibraryFileMutation.RequireCatalogAvailableAsync(database, id, cancellationToken);
+        await LibraryFileMutation.RequireExportsRemovedAsync(database.TranscodeJobs.Where(job => job.CatalogId == id), cancellationToken);
         var exists = await database.Catalogs.AnyAsync(candidate => candidate.Id == id, cancellationToken);
         if (!exists)
         {

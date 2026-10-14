@@ -161,6 +161,7 @@ else
 
 builder.Services.AddHostedService<TranscodeCoordinator>();
 builder.Services.AddScoped<TranscodeService>();
+builder.Services.AddSingleton<ExportDownloadTokens>();
 builder.Services.AddScoped<TrackExtractionService>();
 builder.Services.AddScoped<VideoPartJoinService>();
 builder.Services.AddScoped<TranscodeOutputImporter>();
@@ -436,6 +437,17 @@ builder.Services.AddAuthorization(options =>
 });
 
 var app = builder.Build();
+
+// The same domain guard protects HTTP, MCP and background service entry points.
+app.Use(async (context, next) =>
+{
+    try { await next(context); }
+    catch (ReadOnlyCatalogException exception) when (!context.Response.HasStarted)
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { error = exception.Message });
+    }
+});
 
 // Apply schema migrations on startup, wrapped in an on-demand Core backup so a failed migration is
 // recoverable (POST /api/internal/apps/{appId}/backups). The backup is requested only when there is

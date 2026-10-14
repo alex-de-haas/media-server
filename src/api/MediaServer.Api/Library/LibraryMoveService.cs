@@ -88,6 +88,8 @@ public sealed class LibraryMoveService(
             return MoveResult.NotFound;
         }
 
+        CatalogAccess.RequireWritable(source);
+        CatalogAccess.RequireWritable(target);
         if (source.Id == target.Id)
         {
             return MoveResult.SameCatalog;

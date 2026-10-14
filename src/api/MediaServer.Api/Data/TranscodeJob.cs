@@ -14,6 +14,12 @@ namespace MediaServer.Api.Data;
 /// </summary>
 public sealed class TranscodeJob
 {
+    /// <summary>Null for a library version; otherwise a job-owned export in this reviewed mount.</summary>
+    public string? OutputMountLabel { get; set; }
+
+    /// <summary>The exact mounted export request retained for retry after an unconfirmed submission.</summary>
+    public string? ExportSubmissionJson { get; set; }
+
     public Guid Id { get; set; }
 
     public string? BluraySelectionJson { get; set; }

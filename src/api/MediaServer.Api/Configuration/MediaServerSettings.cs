@@ -68,6 +68,9 @@ public sealed class MediaServerSettings
     /// </summary>
     public IReadOnlyList<CatalogMount> CatalogMountRoots { get; init; } = [];
 
+    /// <summary>Explicit writable export destinations, separate from all library mounts.</summary>
+    public IReadOnlyList<CatalogMount> TranscodeOutputRoots { get; init; } = [];
+
     public static MediaServerSettings FromConfiguration(IConfiguration configuration)
     {
         string? Read(string key) => configuration[key] is { Length: > 0 } value ? value.Trim() : null;
@@ -98,6 +101,7 @@ public sealed class MediaServerSettings
             TorrentEngineUrl = Read("HOSTY_DEPENDENCY_TORRENT_ENGINE_URL"),
             TranscodeEngineUrl = Read("HOSTY_DEPENDENCY_TRANSCODE_ENGINE_URL"),
             CatalogMountRoots = ParseMountRoots(Read("HOSTY_MOUNT_CATALOGROOTS")),
+            TranscodeOutputRoots = ParseMountRoots(Read("HOSTY_MOUNT_TRANSCODEOUTPUT")),
         };
     }
 

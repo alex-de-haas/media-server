@@ -23,6 +23,23 @@ public sealed class OrganizerService(
     public async Task<IReadOnlyList<OrganizedFile>> OrganizeAsync(
         IReadOnlyList<SourceFile> sourceFiles, Catalog catalog, CancellationToken cancellationToken)
     {
+        if (catalog.ReadOnly)
+        {
+            var adopted = new List<OrganizedFile>();
+            foreach (var file in sourceFiles.Where(file => file.MediaItemId != null && BlurayPaths.IsImportable(file)))
+            {
+                if (file.DownloadId != null || CatalogPaths.IsIncoming(file.RelativePath))
+                    throw new ReadOnlyCatalogException(catalog.Name);
+                if (!sandbox.TryResolve(catalog, file.RelativePath, out var absolute) || !BlurayPaths.Exists(absolute))
+                    continue;
+                var item = await database.MediaItems.FindAsync([file.MediaItemId!.Value], cancellationToken);
+                if (item is null) continue;
+                item.LibraryPath ??= file.RelativePath;
+                adopted.Add(new OrganizedFile(file.Id, item.Id, file.RelativePath, absolute));
+            }
+            await database.SaveChangesAsync(cancellationToken);
+            return adopted;
+        }
         var paths = CatalogPaths.For(catalog);
         paths.EnsureCreated();
 

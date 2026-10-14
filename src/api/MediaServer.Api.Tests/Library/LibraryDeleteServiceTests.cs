@@ -38,6 +38,23 @@ public sealed class LibraryDeleteServiceTests : IDisposable
     private LibraryDeleteService Service() =>
         new(_context, new LibraryFileEraser(new CatalogPathSandbox(), NullLogger<LibraryFileEraser>.Instance));
 
+
+    [Fact]
+    public async Task Read_only_delete_rejects_before_changing_rows_but_forget_is_allowed()
+    {
+        var catalog = await _context.Catalogs.SingleAsync(c => c.Id == _catalogId);
+        catalog.ReadOnly = true;
+        await _context.SaveChangesAsync();
+        var paths = Directory.GetFiles(_root, "*", SearchOption.AllDirectories);
+        var count = await _context.MediaSources.CountAsync();
+        await Assert.ThrowsAsync<ReadOnlyCatalogException>(() =>
+            Service().DeleteEpisodeAsync(_episode1Id, true, false, default));
+        Assert.Equal(count, await _context.MediaSources.CountAsync());
+        Assert.Equal(paths, Directory.GetFiles(_root, "*", SearchOption.AllDirectories));
+        Assert.NotNull(await Service().DeleteEpisodeAsync(_episode1Id, false, false, default));
+        Assert.Equal(paths, Directory.GetFiles(_root, "*", SearchOption.AllDirectories));
+    }
+
     [Fact]
     public async Task Deleting_one_episode_keeps_its_siblings_and_the_containers()
     {

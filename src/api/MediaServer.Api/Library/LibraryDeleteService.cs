@@ -1,3 +1,4 @@
+using MediaServer.Api.Catalogs;
 using MediaServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -41,6 +42,7 @@ public sealed class LibraryDeleteService(
 
         // Capture file targets before the rows are gone (DB rows are the source of truth for paths).
         var files = deleteFiles ? await GatherLibraryFilesAsync(ids, cancellationToken) : [];
+        foreach (var (catalog, _) in files) CatalogAccess.RequireWritable(catalog);
 
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
@@ -154,6 +156,7 @@ public sealed class LibraryDeleteService(
     private async Task<ChildDeleteResult?> DeleteWithinSeriesAsync(
         Guid id, MediaKind kind, bool deleteFiles, bool deleteUserData, CancellationToken cancellationToken)
     {
+        using var mutation = await LibraryFileMutation.EnterAsync(cancellationToken);
         var item = await database.MediaItems.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.PublicId != null &&
                 candidate.Kind == kind && candidate.SeriesId != null, cancellationToken);
@@ -173,6 +176,7 @@ public sealed class LibraryDeleteService(
             : [item.Id];
 
         var files = deleteFiles ? await GatherLibraryFilesAsync(ids, cancellationToken) : [];
+        foreach (var (catalog, _) in files) CatalogAccess.RequireWritable(catalog);
 
         var (result, _) = await RemoveWithinSeriesAsync(item, kind, ids, deleteUserData, cancellationToken);
 
@@ -300,6 +304,7 @@ public sealed class LibraryDeleteService(
             ? await database.Catalogs.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == catalogId, cancellationToken)
             : null;
 
+        if (deleteFile && catalog is not null) CatalogAccess.RequireWritable(catalog);
         await database.MediaStreams.Where(candidate => candidate.Id == streamId).ExecuteDeleteAsync(cancellationToken);
 
         // The staged file row, if the ingest that placed it is still around, goes back to being unassigned
@@ -348,6 +353,7 @@ public sealed class LibraryDeleteService(
     internal async Task<bool> DeleteSourceWithinMutationAsync(Guid sourceId, bool deleteFile, CancellationToken cancellationToken)
     {
         await LibraryFileMutation.RequireSourceAvailableAsync(database, sourceId, cancellationToken);
+        await LibraryFileMutation.RequireExportsRemovedAsync(database.TranscodeJobs.Where(job => job.MediaSourceId == sourceId), cancellationToken);
         var source = await database.MediaSources.AsNoTracking()
             .Where(candidate => candidate.Id == sourceId)
             .Select(candidate => new { candidate.Id, candidate.Path, candidate.SourceFileId, candidate.MediaItemId })
@@ -374,6 +380,7 @@ public sealed class LibraryDeleteService(
                 .Join(database.Catalogs.AsNoTracking(), item => item.CatalogId, candidate => (Guid?)candidate.Id, (_, candidate) => candidate)
                 .FirstOrDefaultAsync(cancellationToken)
             : null;
+        if (catalog is not null) CatalogAccess.RequireWritable(catalog);
         var sidecarPaths = await database.MediaStreams.AsNoTracking()
             .Where(stream => stream.MediaSourceId == sourceId && stream.IsExternal && stream.ExternalPath != null)
             .Select(stream => stream.ExternalPath!)
@@ -434,6 +441,7 @@ public sealed class LibraryDeleteService(
     /// </summary>
     internal async Task<RemovalOutcome> RemoveItemsAsync(IReadOnlyList<Guid> ids, bool deleteUserData, CancellationToken cancellationToken)
     {
+        await LibraryFileMutation.RequireExportsRemovedAsync(database.TranscodeJobs.Where(job => ids.Contains(job.MediaItemId)), cancellationToken);
         var idSet = ids.ToHashSet();
         var tombstoneIds = deleteUserData
             ? new HashSet<Guid>()

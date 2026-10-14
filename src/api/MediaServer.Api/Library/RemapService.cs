@@ -50,6 +50,7 @@ public sealed class RemapService(
             return RemapResult.NotFound;
         }
 
+        CatalogAccess.RequireWritable(catalog);
         // The library files to relink. Without a source there is nothing on disk to point at the new item.
         var sources = await database.MediaSources.Where(source => source.MediaItemId == current.Id).ToListAsync(cancellationToken);
         if (sources.Count == 0)

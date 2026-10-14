@@ -1,3 +1,4 @@
+using MediaServer.Api.Catalogs;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
@@ -132,6 +133,8 @@ public sealed class LibraryMoveCoordinator(
             return new LibraryMoveRequestResult(LibraryMoveRequestStatus.NotFound, null);
         }
 
+        CatalogAccess.RequireWritable(source);
+        CatalogAccess.RequireWritable(target);
         if (target.Id == source.Id)
         {
             return new LibraryMoveRequestResult(LibraryMoveRequestStatus.SameCatalog, null);
