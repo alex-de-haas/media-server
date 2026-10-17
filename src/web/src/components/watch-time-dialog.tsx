@@ -12,11 +12,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
 /**
- * "When did you watch this?" — the one field shared by logging a play by hand, by giving an undated
+ * "When did you watch this?" — the fields shared by logging a play by hand, by giving an undated
  * mark its time, and by correcting a time that is wrong. All three answer the same question, so they
  * ask it the same way; only the wording, the instant it opens on, and what happens on submit differ,
  * and those are the caller's.
@@ -89,34 +89,55 @@ function WatchTimeFields({
   const [value, setValue] = useState(() =>
     toLocalInputValue(initialInstant ? new Date(initialInstant) : openedAt),
   );
+  const [date, time] = value.split("T");
 
   const instant = toUtcInstant(value);
   // Checked here as well as on the server, so the refusal arrives while the field is still in front of
   // the user rather than as a toast after a round trip.
   const error = !instant
-    ? "Pick a date and time."
+    ? "Enter a date and a 24-hour time (HH:mm)."
     : isFutureInstant(instant)
       ? "That is in the future."
       : null;
 
   return (
     <>
-      <Field>
-        <FieldLabel htmlFor={fieldId}>Watched at</FieldLabel>
-        <div className="flex gap-2">
-          <Input
-            id={fieldId}
-            type="datetime-local"
-            value={value}
-            // Carries the same allowance the validation does. A max pinned to the exact opening instant
-            // would let the native picker block a time both the dialog and the server would accept —
-            // including, on a browser clock running fast, the "now" the field opens with.
-            max={toLocalInputValue(new Date(openedAt.getTime() + FUTURE_ALLOWANCE_MS))}
-            onChange={(event) => setValue(event.target.value)}
-            aria-invalid={error != null}
-            aria-describedby={error ? `${fieldId}-error` : undefined}
-            className="flex-1"
-          />
+      <FieldSet className="block" disabled={pending}>
+        <FieldLegend variant="label">Watched at</FieldLegend>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          {/* Native date validation can collapse descendants of a size container. These fields use
+              viewport breakpoints, so they do not need FieldGroup's container-query containment. */}
+          <FieldGroup className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_7rem] gap-2" style={{ container: "none" }}>
+            <Field className="min-w-0" data-invalid={error != null}>
+              <FieldLabel htmlFor={`${fieldId}-date`}>Date</FieldLabel>
+              <Input
+                id={`${fieldId}-date`}
+                type="date"
+                value={date}
+                // Include the same clock allowance as the instant validation, even across midnight.
+                max={toLocalInputValue(new Date(openedAt.getTime() + FUTURE_ALLOWANCE_MS)).slice(0, 10)}
+                onChange={(event) => setValue(`${event.target.value}T${time}`)}
+                aria-invalid={error != null}
+                aria-describedby={error ? `${fieldId}-error` : undefined}
+              />
+            </Field>
+            <Field data-invalid={error != null}>
+              <FieldLabel htmlFor={`${fieldId}-time`}>Time (24-hour)</FieldLabel>
+              <Input
+                id={`${fieldId}-time`}
+                // Native time controls can force AM/PM in Safari regardless of the system preference.
+                type="text"
+                value={time}
+                placeholder="HH:mm"
+                maxLength={5}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => setValue(`${date}T${event.target.value}`)}
+                aria-invalid={error != null}
+                aria-describedby={error ? `${fieldId}-error` : undefined}
+              />
+            </Field>
+          </FieldGroup>
           <Button
             type="button"
             variant="outline"
@@ -125,15 +146,15 @@ function WatchTimeFields({
             onClick={() => setValue(toLocalInputValue(new Date()))}
             aria-label="Set to now"
           >
-            <Clock className="size-4" aria-hidden /> Now
+            <Clock data-icon="inline-start" aria-hidden /> Now
           </Button>
         </div>
         {error && (
-          <p id={`${fieldId}-error`} className="text-destructive text-xs">
+          <FieldError id={`${fieldId}-error`} className="mt-2">
             {error}
-          </p>
+          </FieldError>
         )}
-      </Field>
+      </FieldSet>
 
       <DialogFooter>
         <Button variant="outline" onClick={onCancel} disabled={pending}>

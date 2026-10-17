@@ -1,6 +1,6 @@
 ---
 created: 2026-08-09
-updated: 2026-09-22
+updated: 2026-10-17
 summary: Users can log, date or re-date a viewing in their own watch history.
 ---
 
@@ -85,7 +85,10 @@ the same name leave a screen reader unable to say which row it is on.
 beside that play's delete control. It is named down to the timestamp for the same
 reason: a day can hold two plays of one movie.
 
-All three open the same dialog: one field and a `Now` button. Logging a watch and
+All three open the same dialog: a native date picker, a **Time (24-hour)** field
+and a `Now` button. Time uses explicit `HH:mm` text in every browser, including
+Safari, independently of the browser's 12/24-hour locale. Invalid or incomplete
+times cannot be submitted. `Now` resets both date and time. Logging a watch and
 dating a mark open on the current local time, re-stamped each time so "now" means
 now; changing a time opens on the time on record instead, because the common
 correction is an hour out rather than a different evening, and starting from now
@@ -229,7 +232,11 @@ published-item requirement.
   including that an unknown and a foreign entry are indistinguishable.
 - `watch-time.test.ts` covers the conversion: a local ⇄ UTC round trip on both
   sides of a daylight-saving boundary, an empty or unparseable field refused
-  rather than turned into a time, and the future allowance.
+  rather than turned into a time, strict 24-hour input and the future allowance.
+- `e2e/watch-time.spec.ts` covers 24-hour display in a 12-hour locale, local-to-UTC
+  submission, invalid/future times, Now, reopening and mobile layout. Run it in
+  Chromium with the default Playwright config and in WebKit with
+  `pnpm exec playwright test --config=playwright.webkit.config.ts`.
 - `e2e/detail.spec.ts` covers the movie surface: logging a watch from the
   overflow menu sends the instant it was given, and a non-admin sees `Log watch…`
   in that menu and none of the admin items.

@@ -202,7 +202,7 @@ Plans: 5 In Progress · 2 Draft · 3 On Hold.
 - [Catalog Maintenance](features/catalog-maintenance/feature.md) — Scan for media and Refresh metadata keep each catalog in step with its disk and its metadata sources.
 - [Catalogs](features/catalogs/feature.md) — Operator-configured catalogs that drive parsing, target paths, naming, seeding policy and metadata language.
 - [Collections (Movie Franchises)](features/collections/feature.md) — Owned movies grouped into TMDb franchise collections in the web UI and as a Jellyfin boxsets library.
-- [Remux and Convert Dialogs](features/convert-dialog/feature.md) — Fixed-selection Remux and Convert confirmations with track names, video encoding controls and optional Dolby Vision rewriting.
+- [Remux and Convert Dialogs](features/convert-dialog/feature.md) — Fixed-selection Remux and Convert confirmations with track names, optional E-AC-3 audio, video encoding controls and Dolby Vision rewriting.
 - [Dolby Vision Profile](features/dolby-vision-profile/feature.md) — Distinguishes playable Dolby Vision from Dolby Vision shown as HDR10 and converts the latter losslessly.
 - [Domain Model](features/domain-model/feature.md) — The persistent EF Core entities and the core pipeline and metadata extension contracts.
 - [Episode Media](features/episode-media/feature.md) — Episodes get the same media surface as movies, with versions, tracks, sidecars and conversions.

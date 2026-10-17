@@ -83,7 +83,7 @@ export function trackJobInput(source: LibraryMediaSource, selected: MediaStream[
       return title !== undefined && title !== (stream.title ?? "") ? [{ streamId: stream.id, title }] : [];
     }),
     dolbyVision: copy && settings.dolbyVision && video.dolbyVision?.profile === 7 ? "toProfile81" : undefined,
-    audioTargets: copy ? [] : selected.filter(stream => !stream.isExternal && stream.type === "Audio" && settings.reencoded.includes(stream.id))
+    audioTargets: selected.filter(stream => !stream.isExternal && stream.type === "Audio" && settings.reencoded.includes(stream.id))
       .map(stream => ({ streamId: stream.id, codec: "eac3", bitrate: audioBitrateFor(stream.channels) })),
   };
 }
@@ -105,7 +105,7 @@ export function selectedOutputEstimate(source: LibraryMediaSource, selected: Med
   const shares: Record<string, number> = { highest: .44, high: .3, balanced: .18, small: .1 };
   let total = 0;
   for (const stream of selected) {
-    const audioEncode = settings.operation === "convert" && !stream.isExternal && stream.type === "Audio" && settings.reencoded.includes(stream.id);
+    const audioEncode = !stream.isExternal && stream.type === "Audio" && settings.reencoded.includes(stream.id);
     let bitrate = audioEncode ? audioBitrateFor(stream.channels) * 1000 : stream.bitrate;
     if (!bitrate) return null;
     if (settings.operation === "convert" && stream.type === "Video") {

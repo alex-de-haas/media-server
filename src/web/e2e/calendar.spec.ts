@@ -309,7 +309,8 @@ test("an undated mark is given its time and leaves the list", async ({ page }) =
   await page.getByRole("dialog").getByRole("button", { name: "Set the time of this undated mark: Solaris" }).click();
 
   const timeDialog = page.getByRole("dialog").filter({ hasText: "When did you watch it?" });
-  await timeDialog.getByLabel("Watched at").fill("2026-07-04T21:15");
+  await timeDialog.getByLabel("Date", { exact: true }).fill("2026-07-04");
+  await timeDialog.getByLabel("Time (24-hour)").fill("21:15");
   await timeDialog.getByRole("button", { name: "Set time" }).click();
 
   expect(dated).toHaveLength(1);
@@ -341,10 +342,11 @@ test("a play recorded at the wrong time is moved to the right one", async ({ pag
   await dialog.getByRole("button", { name: /^Change the time of this play: Arrival/ }).click();
 
   const timeDialog = page.getByRole("dialog").filter({ hasText: "When did you really watch it?" });
-  const field = timeDialog.getByLabel("Watched at");
+  const dateField = timeDialog.getByLabel("Date", { exact: true });
+  const timeField = timeDialog.getByLabel("Time (24-hour)");
   // Opens on the time on record rather than on now. Compared as an instant, because the field holds
   // wall-clock text and the machine's zone is not the test's business.
-  const prefilled = await field.inputValue();
+  const prefilled = `${await dateField.inputValue()}T${await timeField.inputValue()}`;
   expect(await page.evaluate((value) => new Date(value).toISOString(), prefilled)).toBe(
     "2026-07-10T21:00:00.000Z",
   );
@@ -352,7 +354,8 @@ test("a play recorded at the wrong time is moved to the right one", async ({ pag
   // Six days earlier, same wall-clock time: a different day in every zone, without the test having to
   // know which day the recorded instant fell on locally.
   const corrected = prefilled.replace(/-\d{2}T/, "-04T");
-  await field.fill(corrected);
+  await dateField.fill(corrected.split("T")[0]);
+  await timeField.fill(corrected.split("T")[1]);
   await timeDialog.getByRole("button", { name: "Save time" }).click();
 
   expect(retimed).toHaveLength(1);
@@ -379,7 +382,8 @@ test("a time in the future is refused before the request is sent", async ({ page
   await page.getByRole("dialog").getByRole("button", { name: "Set the time of this undated mark: Solaris" }).click();
 
   const timeDialog = page.getByRole("dialog").filter({ hasText: "When did you watch it?" });
-  await timeDialog.getByLabel("Watched at").fill("2099-01-01T12:00");
+  await timeDialog.getByLabel("Date", { exact: true }).fill("2099-01-01");
+  await timeDialog.getByLabel("Time (24-hour)").fill("12:00");
 
   await expect(timeDialog.getByText("That is in the future.")).toBeVisible();
   await expect(timeDialog.getByRole("button", { name: "Set time" })).toBeDisabled();
