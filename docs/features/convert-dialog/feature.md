@@ -1,7 +1,7 @@
 ---
 created: 2026-07-29
-updated: 2026-10-14
-summary: Fixed-selection Remux and Convert confirmations with track names, video encoding controls and optional Dolby Vision rewriting.
+updated: 2026-10-17
+summary: Fixed-selection Remux and Convert confirmations with track names, optional E-AC-3 audio, video encoding controls and Dolby Vision rewriting.
 ---
 
 # Remux and Convert Dialogs
@@ -17,7 +17,7 @@ track facts closes the confirmation rather than submitting stale data.
 
 Both dialogs list the selected video, audio, subtitles and separate files with
 editable names. They show a read-only MKV output summary, and leave original files
-untouched. There are no language, default-track or copy/encode mode controls.
+untouched. There are no language or default-track controls.
 Sequential [Join parts](../video-part-joining/feature.md) remains separate.
 
 Both confirmations include a required **Version name**, initially `Remux` or
@@ -37,7 +37,9 @@ Both dialogs include an **Output destination** selector. Writable catalogs can k
 
 ## Remux
 
-Remux copies all selected tracks. On a selected Dolby Vision profile 7 video in
+Remux copies the selected video and subtitles. Each selected embedded audio track
+has an optional **Re-encode to E-AC-3** checkbox, initially off; unmarked audio and
+separate audio files are copied. On a selected Dolby Vision profile 7 video in
 Matroska, it offers **Convert Dolby Vision to profile 8.1**, initially off. This
 requires the engine's Dolby Vision tooling capability. The explanation states that
 the HDR10 base layer is copied, RPU metadata is rewritten and the enhancement layer
@@ -58,16 +60,19 @@ maps it to its selected encoder's rate control. The selected video's dynamic-ran
 warning distinguishes Dolby Vision profiles, HDR10+ and unknown profile data.
 Dolby Vision profile rewriting is offered only by Remux.
 
-Selected embedded audio tracks can optionally become E-AC-3, at 640 kbps above
-stereo, 256 for stereo and 128 for mono. Rows explain the 7.1-to-5.1 downmix and
-Atmos/DTS:X loss when applicable. Separate audio remains copied. The API retains
-its legacy audio-only re-encode contract, but these two UI operations do not expose
-copy-video plus re-encoded audio.
+## Audio conversion and size estimates
+
+In both Remux and Convert, selected embedded audio tracks can optionally become
+E-AC-3, at 640 kbps above stereo, 256 for stereo and 128 for mono. Rows explain the 7.1-to-5.1 downmix and
+Atmos/DTS:X loss when applicable. Separate audio remains copied. Remux sends these
+audio targets with the video codec set to copy, including when Dolby Vision
+profile rewriting is selected.
 
 The size estimate uses only selected tracks and their recorded bitrates. Encoding
 applies the quality share and target-resolution ratio to the selected video.
-Missing track bitrate or duration yields an unavailable estimate; container
-bitrate is never substituted. Audio re-encode estimates use the target bitrate.
+Missing copied-track bitrate or duration yields an unavailable estimate; container
+bitrate is never substituted. Audio re-encode estimates use the target bitrate,
+even when the source track's bitrate is unknown.
 The UI describes the result as approximate because content determines actual size.
 
 ## Request and compatibility
@@ -102,10 +107,13 @@ dialogs edit names only. See [stream titles](../stream-title-editing/feature.md)
 ## Testing Expectations
 
 - `track-actions.test.ts`: exact selections, eligibility, ownership, stale IDs,
-  name edits, copy/encode payloads, selected audio settings and size estimates.
+  name edits, copy/encode payloads, selected audio settings and size estimates
+  for both operations, including unknown source audio bitrates.
 - `detail.spec.ts`: keyboard selection, collapse persistence, one-container scope,
   fixed dialogs, video/sidecar names, fresh defaults, errors, movie/episode parity,
   codec/resolution/quality/encoder controls and capability/Dolby Vision gates.
+  Remux audio conversion preserves video copy, targets only checked embedded audio,
+  shows downmix/object-audio warnings, updates estimates and resets on reopening.
 - `TranscodeServiceConversionTests`, `StreamMetadataEditTests` and
   `RemoteTranscodeEngineWireTests`: source ownership, video selection, selected
   metadata, selected resolution, cover-art refusal, single-video MJPEG acceptance,

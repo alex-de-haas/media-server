@@ -31,7 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldContent, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -151,7 +151,7 @@ export function TranscodeDialog({ source, selected, operation, onClose, onSubmit
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{label} selected tracks</DialogTitle>
-          <DialogDescription>{copy ? "Copy the selected tracks into a new MKV." : "Re-encode the selected video and include the selected audio and subtitles."} The original files stay unchanged.</DialogDescription>
+          <DialogDescription>{copy ? "Copy the selected tracks into a new MKV, with optional E-AC-3 audio conversion." : "Re-encode the selected video and include the selected audio and subtitles."} The original files stay unchanged.</DialogDescription>
         </DialogHeader>
         <form className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto" onSubmit={event => { event.preventDefault(); if (!submit.isPending && !reason && !nameError) submit.mutate(); }}>
           <p className="break-words text-xs text-muted-foreground">{source.fileName} · {selected.length} tracks</p>
@@ -188,22 +188,27 @@ export function TranscodeDialog({ source, selected, operation, onClose, onSubmit
           </div>}
           {warning && <p className="flex gap-2 rounded-md bg-warning/10 p-2 text-xs text-warning-foreground"><AlertTriangle className="size-4 shrink-0" />{warning}</p>}
           <div className="divide-y rounded-md border">
-            {selected.map(stream => <div key={stream.id} className="space-y-1.5 p-2">
+            {selected.map(stream => <div key={stream.id} className="flex flex-col gap-1.5 p-2">
               <Field>
                 <FieldLabel htmlFor={`${id}-${stream.id}`}>{trackLabel(stream)}{stream.language ? ` · ${stream.language}` : ""}{stream.codec ? ` · ${stream.codec.toUpperCase()}` : ""}</FieldLabel>
                 <Input id={`${id}-${stream.id}`} aria-label={`Name of ${trackLabel(stream)}`} value={titles[stream.id] ?? stream.title ?? ""} placeholder="Track name" disabled={submit.isPending} onChange={event => setTitles(current => ({ ...current, [stream.id]: event.target.value }))} />
               </Field>
-              {!copy && stream.type === "Audio" && !stream.isExternal && <>
-                <label className="flex items-center gap-2 text-xs"><Checkbox checked={reencoded.includes(stream.id)} disabled={submit.isPending} onCheckedChange={checked => setReencoded(current => checked ? [...current, stream.id] : current.filter(value => value !== stream.id))} />Re-encode {trackLabel(stream)} to E-AC-3</label>
-                {reencoded.includes(stream.id) && <p className="text-xs text-muted-foreground">{audioReEncodeHint(stream, source.durationTicks / 10_000_000)}</p>}
-              </>}
+              {stream.type === "Audio" && !stream.isExternal && <Field orientation="horizontal" data-disabled={submit.isPending}>
+                <Checkbox id={`${id}-${stream.id}-eac3`} checked={reencoded.includes(stream.id)} disabled={submit.isPending}
+                  aria-describedby={reencoded.includes(stream.id) ? `${id}-${stream.id}-eac3-hint` : undefined}
+                  onCheckedChange={checked => setReencoded(current => checked ? [...current, stream.id] : current.filter(value => value !== stream.id))} />
+                <FieldContent>
+                  <FieldLabel htmlFor={`${id}-${stream.id}-eac3`}>Re-encode {trackLabel(stream)} to E-AC-3</FieldLabel>
+                  {reencoded.includes(stream.id) && <FieldDescription id={`${id}-${stream.id}-eac3-hint`}>{audioReEncodeHint(stream, source.durationTicks / 10_000_000)}</FieldDescription>}
+                </FieldContent>
+              </Field>}
             </div>)}
           </div>
           {copy && profile7 && <div className="space-y-1.5 text-xs">
             <label className="flex items-center gap-2"><Checkbox checked={dolbyVision} disabled={!dvEligible || submit.isPending} onCheckedChange={checked => setDolbyVision(!!checked)} />Convert Dolby Vision to profile 8.1</label>
             <p className="text-muted-foreground">{dvEligible ? "Copies the HDR10 base layer and rewrites Dolby Vision metadata. The enhancement layer is discarded." : "Requires a Matroska source and an engine with Dolby Vision conversion tools."}</p>
           </div>}
-          <p className="text-xs text-muted-foreground">Output: MKV · {copy ? "Video copied" : `${codec.toUpperCase()} video`}{estimate !== null ? ` · approximately ${formatBytes(estimate)}` : " · size estimate unavailable"}{!copy && estimate !== null ? ". Actual size depends on the content." : ""}</p>
+          <p className="text-xs text-muted-foreground">Output: MKV · {copy ? "Video copied" : `${codec.toUpperCase()} video`}{estimate !== null ? ` · approximately ${formatBytes(estimate)}` : " · size estimate unavailable"}{(!copy || reencoded.length > 0) && estimate !== null ? ". Actual size depends on the content." : ""}</p>
           {(reason || (submit.isError && !serverNameError)) && <p role="alert" className="text-sm text-destructive">{reason ?? errorMessage(submit.error)}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" disabled={submit.isPending} onClick={onClose}>Cancel</Button>

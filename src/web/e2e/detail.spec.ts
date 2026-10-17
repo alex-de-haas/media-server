@@ -87,7 +87,8 @@ test("logs a watch at a time the user picks, from the overflow menu", async ({ p
   await page.getByRole("menuitem", { name: "Log watch…" }).click();
 
   const dialog = page.getByRole("dialog").filter({ hasText: "Log a watch" });
-  await dialog.getByLabel("Watched at").fill("2026-07-04T21:15");
+  await dialog.getByLabel("Date", { exact: true }).fill("2026-07-04");
+  await dialog.getByLabel("Time (24-hour)").fill("21:15");
   await dialog.getByRole("button", { name: "Log watch" }).click();
 
   expect(logged).toHaveLength(1);
@@ -108,14 +109,15 @@ test("the time field starts fresh on every open, not where it was left", async (
   await page.getByRole("button", { name: "More actions" }).click();
   await page.getByRole("menuitem", { name: "Log watch…" }).click();
 
-  const field = page.getByRole("dialog").getByLabel("Watched at");
-  await field.fill("2019-01-05T20:00");
+  const field = page.getByRole("dialog").getByLabel("Date", { exact: true });
+  await field.fill("2019-01-05");
+  await page.getByRole("dialog").getByLabel("Time (24-hour)").fill("20:00");
   await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
 
   await page.getByRole("button", { name: "More actions" }).click();
   await page.getByRole("menuitem", { name: "Log watch…" }).click();
 
-  await expect(page.getByRole("dialog").getByLabel("Watched at")).not.toHaveValue("2019-01-05T20:00");
+  await expect(field).not.toHaveValue("2019-01-05");
 });
 
 test("a viewer who is not an admin gets personal actions without administration", async ({ page }) => {
@@ -407,7 +409,8 @@ test("remux confirms the grid selection, names video and sidecars, and never pic
   await expect(dialog.getByRole("heading", { name: "Remux selected tracks" })).toBeVisible();
   await expect(dialog.getByRole("combobox")).toHaveCount(1);
   await expect(dialog.getByRole("combobox", { name: "Output destination" })).toBeVisible();
-  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(1);
+  await expect(dialog.getByRole("checkbox", { name: /Re-encode Audio track 2/ })).not.toBeChecked();
   await expect(dialog.getByRole("textbox", { name: /Language/ })).toHaveCount(0);
   await expect(dialog.getByRole("textbox")).toHaveCount(4);
   await expect(dialog.getByRole("textbox", { name: "Version name", exact: true })).toHaveValue("Remux");
@@ -417,10 +420,54 @@ test("remux confirms the grid selection, names video and sidecars, and never pic
   await page.screenshot({ path: testInfo.outputPath("fixed-remux.png"), fullPage: false });
   const submitted = page.waitForRequest(request => request.url().endsWith("/transcode") && request.method() === "POST");
   await dialog.getByRole("button", { name: "Start remux" }).click();
-  expect((await submitted).postDataJSON()).toMatchObject({ versionName: "Cinema cut", videoCodec: "copy", videoStreamIndex: 0, audioStreamIndexes: [1], subtitleStreamIndexes: [], mergeStreamIds: ["x1"], metadataEdits: [{ streamId: "v0", title: "Cinema picture" }, { streamId: "x1", title: "Dub" }] });
+  expect((await submitted).postDataJSON()).toMatchObject({ versionName: "Cinema cut", videoCodec: "copy", videoStreamIndex: 0, audioStreamIndexes: [1], subtitleStreamIndexes: [], mergeStreamIds: ["x1"], audioTargets: [], metadataEdits: [{ streamId: "v0", title: "Cinema picture" }, { streamId: "x1", title: "Dub" }] });
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole("button", { name: "Clear selection" })).toHaveCount(0);
 });
+
+for (const profile of ["DTS:X", "Dolby TrueHD + Dolby Atmos"]) {
+  test(`Remux re-encodes only checked audio and explains ${profile} loss`, async ({ page }, testInfo) => {
+    const detail = escapeFromNewYork();
+    const source = detail.mediaSources[0];
+    Object.assign(source.streams[1], { channels: 8, profile });
+    source.streams.push({ ...source.streams[1], id: "a1", index: 3 });
+    await setupApp(page, { library: [aMovie("m1", detail.title)], detail: { m1: detail }, transcodeAvailable: true });
+    await openTrackGrid(page);
+    await page.getByRole("checkbox", { name: /Select Subtitle track 3/ }).uncheck();
+    await page.getByRole("checkbox", { name: /Select Audio track 4/ }).check();
+    await page.getByRole("button", { name: "Remux", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const encode = dialog.getByRole("checkbox", { name: /Re-encode Audio track 2/ });
+    const output = dialog.getByText(/^Output: MKV/);
+    const originalEstimate = await output.textContent();
+    await expect(encode).not.toBeChecked();
+    await encode.check();
+    await expect(dialog.getByText(/8 channels → 5.1, 640 kbps/)).toBeVisible();
+    await expect(dialog.getByText(profile === "DTS:X" ? /drops DTS:X/ : /drops Atmos/)).toBeVisible();
+    await expect(output).toContainText("Video copied");
+    await expect(output).not.toHaveText(originalEstimate!);
+    await encode.uncheck();
+    await expect(output).toHaveText(originalEstimate!);
+    await expect(dialog.getByText(/drops /)).toHaveCount(0);
+    await encode.check();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Remux", exact: true }).click();
+    await expect(encode).not.toBeChecked();
+    await encode.check();
+    await expect(dialog.getByRole("checkbox", { name: /Re-encode Audio track 4/ })).not.toBeChecked();
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("remux-eac3-mobile.png"), fullPage: false });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({ path: testInfo.outputPath("remux-eac3.png"), fullPage: false });
+    const submitted = page.waitForRequest(request => request.url().endsWith("/transcode") && request.method() === "POST");
+    await dialog.getByRole("button", { name: "Start remux" }).click();
+    expect((await submitted).postDataJSON()).toMatchObject({ versionName: "Remux", videoCodec: "copy", videoStreamIndex: 0,
+      audioStreamIndexes: [1, 3], subtitleStreamIndexes: [], qualityLevel: null, maxHeight: null,
+      audioTargets: [{ streamId: "a0", codec: "eac3", bitrate: 640 }] });
+    await expect(dialog).not.toBeVisible();
+  });
+}
 
 test("single and batch extraction use the exact grid tracks, with unsupported formats disabled", async ({ page }) => {
   const detail = escapeFromNewYork();
@@ -462,7 +509,7 @@ test("Convert exposes encoding controls and selected audio settings; cancelled o
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Remux", exact: true }).click();
-  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox", { name: /Re-encode Audio track 2/ })).not.toBeChecked();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Convert", exact: true }).click();
   await expect(dialog.getByLabel("Quality", { exact: true })).toContainText("High — recommended");
@@ -503,9 +550,11 @@ for (const tooling of [true, false]) {
     await expect(rewrite).toBeEnabled({ enabled: tooling });
     if (tooling) {
       await rewrite.check();
+      await dialog.getByRole("checkbox", { name: /Re-encode Audio track 2/ }).check();
       const submitted = page.waitForRequest(request => request.url().endsWith("/transcode") && request.method() === "POST");
       await dialog.getByRole("button", { name: "Start remux" }).click();
-      expect((await submitted).postDataJSON().dolbyVision).toBe("toProfile81");
+      expect((await submitted).postDataJSON()).toMatchObject({ videoCodec: "copy", dolbyVision: "toProfile81",
+        audioTargets: [{ streamId: "a0", codec: "eac3", bitrate: 640 }] });
       await expect(dialog).not.toBeVisible();
       await selectMovieTracks(page);
     } else await page.keyboard.press("Escape");

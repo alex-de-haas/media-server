@@ -24,7 +24,8 @@ test("inline history expands, corrects an undated watch and deletes an individua
   await history.getByRole("button", { name: /Show all/ }).click();
   await expect(history.getByRole("listitem")).toHaveCount(5);
   await history.getByRole("button", { name: /Set time for/ }).click();
-  await page.getByLabel("Watched at").fill("2026-08-04T19:45");
+  await page.getByLabel("Date", { exact: true }).fill("2026-08-04");
+  await page.getByLabel("Time (24-hour)").fill("19:45");
   await page.getByRole("button", { name: "Save time", exact: true }).click();
   await expect(history.getByText("Date unknown", { exact: true })).toHaveCount(0);
   await history.getByRole("button", { name: /Delete viewing/ }).first().click();
@@ -123,12 +124,12 @@ test("movie history stays usable on a narrow viewport", async ({ page }, testInf
   const lastEdit = watches.getByRole("button", { name: /Change time for/ }).last();
   await lastEdit.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByLabel("Watched at")).toBeVisible();
+  await expect(page.getByLabel("Time (24-hour)")).toBeVisible();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(history.getByRole("button", { name: "Log watch", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("movie-history-mobile.png"), fullPage: true });
   await history.getByRole("button", { name: "Log watch", exact: true }).click();
-  await expect(page.getByLabel("Watched at")).toBeVisible();
+  await expect(page.getByLabel("Time (24-hour)")).toBeVisible();
   await expect(page.getByRole("button", { name: "Log watch", exact: true }).last()).toBeVisible();
 });
 
@@ -154,7 +155,8 @@ test("long history pages without losing unknown dates and logs a watch on a remo
   await expect(history.getByRole("listitem")).toHaveCount(24);
   await expect(history.getByText("Date unknown", { exact: true })).toHaveCount(1);
   await history.getByRole("button", { name: "Log watch", exact: true }).click();
-  await page.getByLabel("Watched at").fill("2026-08-03T18:00");
+  await page.getByLabel("Date", { exact: true }).fill("2026-08-03");
+  await page.getByLabel("Time (24-hour)").fill("18:00");
   await page.getByRole("dialog").getByRole("button", { name: "Log watch", exact: true }).click();
   await expect.poll(() => logged).toBe(true);
 });

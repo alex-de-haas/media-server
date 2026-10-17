@@ -63,6 +63,30 @@ describe("grid track actions", () => {
     expect(body).toMatchObject({ videoCodec: "hevc", videoStreamIndex: 3, maxHeight: 720, qualityLevel: "small", audioTargets: [{ streamId: "a", codec: "eac3", bitrate: 256 }] });
     expect(body.dolbyVision).toBeUndefined();
   });
+  it.each([1, 2, 6, 8, null])("remux can re-encode %s-channel audio while copying video and other tracks", channels => {
+    const dub = stream("dub", "Audio", 6, { channels, codec: "dts" });
+    const dvVideo = { ...video, dolbyVision: { profile: 7 } } as MediaStream;
+    const withDub = { ...source, streams: [dvVideo, audio, dub, sidecar, sub] };
+    const body = trackJobInput(withDub, withDub.streams, {
+      ...settings, reencoded: ["dub", "x", "v", "s", "excluded"], dolbyVision: true,
+      resolution: "720", quality: "small", titles: { dub: "Dub" },
+    });
+    expect(body).toMatchObject({ videoCodec: "copy", videoStreamIndex: 3, maxHeight: null, qualityLevel: null,
+      audioStreamIndexes: [1, 6], subtitleStreamIndexes: [5], mergeStreamIds: ["x"],
+      dolbyVision: "toProfile81", metadataEdits: [{ streamId: "dub", title: "Dub" }],
+      audioTargets: [{ streamId: "dub", codec: "eac3", bitrate: channels === 1 ? 128 : channels === null || channels === 2 ? 256 : 640 }] });
+    expect(body.hardwareAcceleration).toBeUndefined();
+    expect(trackJobInput(withDub, [dvVideo, audio], { ...settings, reencoded: ["dub"] }).audioTargets).toEqual([]);
+    expect(trackJobInput(withDub, withDub.streams, settings).audioTargets).toEqual([]);
+  });
+  it.each(["remux", "convert"] as const)("%s estimates encoded audio even when its source bitrate is unknown", operation => {
+    const unknownAudio = { ...audio, bitrate: null, channels: 6 };
+    const selected = [video, unknownAudio, sidecar];
+    const encoding = { ...settings, operation, reencoded: ["a", "x"] };
+    expect(selectedOutputEstimate(source, selected, encoding)).toBe(operation === "remux" ? 80250 : 80162.5);
+    expect(selectedOutputEstimate(source, selected, { ...encoding, reencoded: [] })).toBeNull();
+    expect(selectedOutputEstimate(source, [video, unknownAudio, { ...sidecar, bitrate: null }], encoding)).toBeNull();
+  });
   it("estimates the selected video and preserves unknown bitrates", () => {
     expect(selectedOutputEstimate(source, [video, audio], settings)).toBe(250);
     expect(selectedOutputEstimate(source, [video, audio], { ...settings, operation: "convert" })).toBe(162.5);

@@ -30,6 +30,22 @@ describe("toUtcInstant", () => {
     expect(toUtcInstant("2026-08-09T21:30")).toMatch(/Z$/);
   });
 
+  it.each(["00:00", "12:00", "15:50", "23:59"])("preserves %s in 24-hour time", time => {
+    const typed = `2026-10-17T${time}`;
+    expect(toLocalInputValue(new Date(toUtcInstant(typed)!))).toBe(typed);
+  });
+
+  it.each(["24:00", "25:50", "12:60", "3:50", "03:5", "03:50 PM", "15:50:00", ""])("refuses invalid or incomplete 24-hour time: %s", time => {
+    expect(toUtcInstant(`2026-10-17T${time}`)).toBeNull();
+  });
+
+  it("rejects incomplete dates and dates that the parser would roll into another month", () => {
+    for (const date of ["", "2026-02-30", "2026-02-29", "2026-13-01"]) {
+      expect(toUtcInstant(`${date}T15:50`)).toBeNull();
+    }
+    expect(toUtcInstant("2024-02-29T15:50")).not.toBeNull();
+  });
+
   it("refuses an empty or unparseable field rather than inventing a time", () => {
     expect(toUtcInstant("")).toBeNull();
     expect(toUtcInstant("not a date")).toBeNull();
