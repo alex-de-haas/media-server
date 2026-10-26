@@ -18,7 +18,9 @@ public sealed class AgentSkillTests
     public void The_manifest_points_at_a_skill_that_is_there()
     {
         var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepositoryRoot(), "manifest.json")));
-        var skillFile = manifest.RootElement.GetProperty("agent").GetProperty("skillFile").GetString();
+        var skill = Assert.Single(manifest.RootElement.GetProperty("agent").GetProperty("skills").EnumerateArray());
+        Assert.Equal("default", skill.GetProperty("key").GetString());
+        var skillFile = Path.Combine(skill.GetProperty("path").GetString()!, "SKILL.md");
 
         Assert.False(string.IsNullOrWhiteSpace(skillFile));
         Assert.True(
@@ -65,7 +67,7 @@ public sealed class AgentSkillTests
         "keepSeeding", "file_not_found",
     };
 
-    private static string SkillText() => File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", "agent.md"));
+    private static string SkillText() => File.ReadAllText(Path.Combine(RepositoryRoot(), "skills", "media-server", "SKILL.md"));
 
     private static string RepositoryRoot()
     {

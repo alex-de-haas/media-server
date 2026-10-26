@@ -1,3 +1,8 @@
+---
+name: media-server
+description: Inspect and manage this Hosty media library, downloads, ingest pipeline and release tracking through its MCP tools.
+---
+
 # Media Server
 
 This host's film and television library, the pipeline that fills it, and the release dates it

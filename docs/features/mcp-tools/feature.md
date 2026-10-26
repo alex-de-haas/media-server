@@ -1,6 +1,6 @@
 ---
 created: 2026-09-01
-updated: 2026-10-10
+updated: 2026-10-26
 summary: Media Server use cases as MCP tools, plus the agent skill that teaches the server's vocabulary.
 ---
 
@@ -8,8 +8,10 @@ summary: Media Server use cases as MCP tools, plus the agent skill that teaches 
 
 This server's use cases as MCP tools, so an agent on the host can answer *"do I have this?"*,
 *"why has this not appeared?"*, *"get me this"*, and repair a bad identification without the
-operator opening the web UI. `agent.skillFile` hands the agent [the skill](../../agent.md) that
-teaches it this server's vocabulary.
+operator opening the web UI. `agent.skills` contributes the portable [media-server skill](../../../skills/media-server/SKILL.md)
+to Core's shared library under the stable app-local key `default`. The package teaches this server's
+vocabulary. Core 0.157 or later delivers the current package through native skill exports; selection
+is independent of MCP tool permissions.
 
 ## How Core Finds The Surface
 
