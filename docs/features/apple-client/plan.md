@@ -1,7 +1,7 @@
 ---
 status: In Progress
 created: 2026-08-02
-updated: 2026-10-10
+updated: 2026-10-26
 summary: Umbrella epic for the Apple client, owning its decisions, platform split and the playback spike the other features depend on.
 ---
 
@@ -31,7 +31,7 @@ invisible or expressed as workarounds:
 | What the server holds | What the Jellyfin projection can carry |
 | --- | --- |
 | [Sidecar audio tracks](../external-track-sidecars/feature.md) (`.mka` dubs) | Nothing — Infuse cannot use external audio by any route |
-| Sidecar subtitles | The stream is announced with no delivery URL (see [external-subtitle-delivery](../external-subtitle-delivery/plan.md)) |
+| Sidecar subtitles | The stream is announced with no delivery URL (see [Jellyfin compatibility](../jellyfin-compatibility/feature.md)) |
 | Named editions (`MediaSource.VersionName`) | A `MediaSources` array Infuse plays position-0 of; the default-version pin is a reordering workaround |
 | [People](../metadata/feature.md) with biography, photos, filmography | A flat `/Persons` list, no pages |
 | [Recommendations](../recommendation-providers/feature.md) with per-title provenance | A synthetic `CollectionFolder` with a null `CollectionType` and a flat list |

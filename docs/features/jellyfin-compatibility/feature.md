@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-09-22
+updated: 2026-10-26
 summary: A Jellyfin-compatible API subset that lets clients such as Infuse browse, Direct Play and sync progress.
 ---
 
@@ -235,7 +235,7 @@ Playback state:
 - HLS (`/Videos/{itemId}/master.m3u8`, `main.m3u8`, `/hls/{playlistId}/…`) —
   excluded by the no-conversion design above, not merely unbuilt.
 - `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` —
-  see [external subtitle delivery](../external-subtitle-delivery/plan.md).
+  external subtitle delivery is not supported.
 - Jellyfin's own recommendation endpoints (`/Movies/Recommendations`,
   `/Items/{itemId}/Similar` and its per-type variants, `/Items/Suggestions`).
   Infuse never requests them: six weeks of this app's own request log contain
@@ -377,8 +377,7 @@ design.
   request.)
 - External sidecar `.srt` / `.vtt` files alongside the media are surfaced as
   external subtitle streams, but no delivery URL is emitted yet, so a client is
-  told the stream exists and given no way to fetch it. Closing that gap is
-  [external subtitle delivery](../external-subtitle-delivery/plan.md).
+  told the stream exists and given no way to fetch it.
 - Subtitle stream metadata is reported in `MediaSources[].MediaStreams` from
   whatever the probe providers could determine.
 
