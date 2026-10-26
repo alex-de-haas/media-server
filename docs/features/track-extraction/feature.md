@@ -1,6 +1,6 @@
 ---
 created: 2026-08-07
-updated: 2026-10-12
+updated: 2026-10-26
 summary: Write a version's embedded audio and subtitle tracks out as files beside it, recorded as external streams.
 ---
 
@@ -205,9 +205,8 @@ the existing extraction service.
 ## Over the API
 
 An extracted subtitle is visible in `MediaSources[].MediaStreams` but not fetchable,
-which is the gap every sidecar subtitle has — parked in
-[external-subtitle-delivery](../external-subtitle-delivery/plan.md). Clients reading
-the folder directly (SMB/NFS) do get it. This feature does not narrow that gap.
+as with every sidecar subtitle. Clients reading the folder directly (SMB/NFS) do
+get it.
 
 ## Testing Expectations
 

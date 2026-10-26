@@ -1,6 +1,6 @@
 ---
 created: 2026-07-27
-updated: 2026-10-12
+updated: 2026-10-26
 summary: A release's separate audio and subtitle files stay beside their library file as external streams.
 ---
 
@@ -205,8 +205,7 @@ usable**, not an optional nicety, and the Media tab says so.
 
 **Subtitles are the opposite.** Clients read sidecar subtitles from disk, which is
 why their names follow the convention those clients match on. Serving them over
-the Jellyfin API additionally needs a delivery endpoint this app does not have; it
-is parked in [external-subtitle-delivery](../external-subtitle-delivery/plan.md).
+the Jellyfin API additionally needs a delivery endpoint this app does not have.
 
 ## In Management
 
