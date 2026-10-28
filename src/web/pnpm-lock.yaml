@@ -24,8 +24,8 @@ importers:
         specifier: ^3.2.2
         version: 3.2.2(react@19.3.0)
       '@hosty-sdk/app':
-        specifier: ^0.24.0
-        version: 0.24.0(next@16.4.1(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: ^0.34.1
+        version: 0.34.2(next@16.4.1(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -405,10 +405,10 @@ packages:
     peerDependencies:
       hono: ^4
 
-  '@hosty-sdk/app@0.24.0':
-    resolution: {integrity: sha512-AiwE291crM14joDRxzryLwFW7T+LK7z0Z6z4saaiqepiZHxGBPNSL53VFqBL/hsMH3RSZ8MBZcEuxjjC64e0/Q==}
+  '@hosty-sdk/app@0.34.2':
+    resolution: {integrity: sha512-mLOTPL2cZdX/gZwmMH+cDkEfFaGeO/QyhdRNMiluKpftd0SNzWKDTGxx88Jx2qGkIDAT9LnYiiC+k1Mtv7Fung==}
     peerDependencies:
-      next: ^16.3.8
+      next: ^16.4.0
       react: ^19.2.8
       react-dom: ^19.2.8
     peerDependenciesMeta:
@@ -3945,7 +3945,7 @@ snapshots:
     dependencies:
       hono: 4.13.13
 
-  '@hosty-sdk/app@0.24.0(next@16.4.1(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@hosty-sdk/app@0.34.2(next@16.4.1(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@noble/hashes': 2.4.0
       server-only: 0.0.1
