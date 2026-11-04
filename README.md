@@ -19,7 +19,7 @@ scripts/
   validate-manifest.sh
 .github/workflows/
   ci.yml                   # build + test both services, validate manifest
-  publish.yml              # build + push api/web images to GHCR (docker delivery)
+  ready-releases.yml       # validated builds and ready daily releases
 docs/                      # planning documentation
 ```
 
@@ -80,7 +80,7 @@ For a non-development install, point Hosty Core straight at the published
 `manifest.json` — no clone, no local checkout. Because `defaultRuntime` is
 `docker`, Core pulls the prebuilt images from GHCR (`media-server-api` +
 `media-server-web`, published by
-[`.github/workflows/publish.yml`](.github/workflows/publish.yml)) instead of
+[`.github/workflows/ready-releases.yml`](.github/workflows/ready-releases.yml)) instead of
 building from source.
 
 ```bash
@@ -98,8 +98,7 @@ hosty apps open com.haas.media-server --user <you@example.com>
 - A Docker install can switch to `dev` through Core's reviewed runtime-switch
   flow. Stop the app before switching; Core preserves its data and settings and
   prepares the declared source checkout.
-- The `main` manifest tracks the `:latest` images — swap `main` for a release tag
-  (e.g. `v0.1.0`) to pin a specific build.
+- Production updates use the [ready daily index](https://raw.githubusercontent.com/alex-de-haas/media-server/app-releases/apps/com.haas.media-server/feeds.json); select its immutable `manifestRef`. The raw main manifest is an authoring input.
 
 Before the app is functional, configure the required pieces through the Shell
 (Core does not enforce them at `start`):
@@ -126,3 +125,5 @@ the `web` BFF uses `@vercel/otel` for traces/metrics plus a `console`→OTLP log
 (`src/web/src/instrumentation.ts`, `src/web/src/otel-logs.ts`). With no endpoint — the `dev` runtime,
 or observability off — both emit nothing. Opt-in is the `telemetry` block in `manifest.json`. See
 `docs/features/observability.md` in the Hosty Core platform repo (not this one).
+
+Ready-release publication and migration are documented in [Ready app releases](docs/features/ready-releases/feature.md).

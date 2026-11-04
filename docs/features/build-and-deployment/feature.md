@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-10-05
+updated: 2026-11-04
 summary: How Media Server is developed under the dev profile and delivered as docker images through GitHub Actions.
 ---
 
@@ -60,7 +60,7 @@ hosty apps logs com.haas.media-server
 
 ### Base images
 
-Both images pin their base by digest, the same discipline `publish.yml` applies to
+Both images pin their base by digest, the same discipline `ready-releases.yml` applies to
 GitHub Actions: an unpinned tag lets two builds of one commit ship different
 userland. The re-pin command is recorded in each Dockerfile.
 
@@ -89,23 +89,7 @@ not happen to own.
 
 ## GitHub Actions CI/CD
 
-The v1 workflow must:
-
-- Run on pushes to the main branch and on PRs requiring validation.
-- Restore and build the .NET solution; run backend unit tests (xUnit).
-- Install frontend dependencies and build the Next.js app.
-- Validate the Hosty manifest and `dev` runtime commands.
-
-Image build and GHCR publish land with M4 (Docker delivery); the workflow then also:
-
-- Build `api` and `web` Docker images.
-- Publish to GHCR, tagged with at least the commit SHA and optionally `latest`.
-- Use `GITHUB_TOKEN` with `packages: write`.
-
-Example image names:
-
-- `ghcr.io/<owner>/media-server-api:<sha>`
-- `ghcr.io/<owner>/media-server-web:<sha>`
+CI validates the API, web, manifest and documentation. The separate [ready-release publisher](../ready-releases/feature.md) qualifies that exact successful source, builds selected images and publishes digest-pinned daily releases. Stable promotion is manual.
 
 ### Dependency updates
 
