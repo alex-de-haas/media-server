@@ -63,3 +63,8 @@ src/apple/**/.build/
 src/apple/**/xcuserdata/
 src/apple/**/*.xcworkspace/xcuserdata/
 DerivedData/
+
+# Ready-release build outputs and pinned consumer validator
+/release-plan/
+/release-artifacts/
+/.hosty-validator/
