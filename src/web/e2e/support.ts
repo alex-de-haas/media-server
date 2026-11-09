@@ -30,12 +30,13 @@ export function aUserData(overrides: Record<string, unknown> = {}) {
 
 /**
  * A payload that may change between requests. Pass a function when a test mutates state and then
- * relies on a refetch showing it — a fixed object replays the old answer and hides the bug.
+ * relies on a refetch showing it — a fixed object replays the old answer and hides the bug. The
+ * query lets tests distinguish users, calendar ranges and kind filters at the network boundary.
  */
-type Served<T> = T | (() => T);
+type Served<T> = T | ((query: URLSearchParams) => T);
 
-function serve<T>(value: Served<T> | undefined, fallback: T): T {
-  if (typeof value === "function") return (value as () => T)();
+function serve<T>(value: Served<T> | undefined, fallback: T, query: URLSearchParams): T {
+  if (typeof value === "function") return (value as (query: URLSearchParams) => T)(query);
   return value ?? fallback;
 }
 
@@ -65,6 +66,7 @@ export interface AppMock {
   releaseCalendar?: unknown[]; // GET /watchlist/calendar
   watchlist?: unknown[]; // GET /watchlist
   titlePreview?: Record<string, unknown>; // GET /metadata/{provider}/{id}, keyed by provider id
+  watchHistoryUsers?: Served<Array<{ id: number; displayName: string; isCurrentUser: boolean }>>; // GET /watch-history/users
   watchHistoryCalendar?: Served<Record<string, unknown>>; // GET /watch-history/calendar (an envelope, not a list)
   watchHistoryUndated?: Served<Record<string, unknown>>; // GET /watch-history/calendar/undated ({ entries, total })
   deleteWatchHistoryEntry?: (entryId: string) => void; // DELETE /watch-history/entries/{id} — runs before the 204
@@ -207,8 +209,13 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
       return route.fulfill({ status: 204, body: "" });
     }
 
+    if (path === "/watch-history/users") {
+      return route.fulfill({
+        json: serve(mock.watchHistoryUsers, [{ id: 1, displayName: "Tester", isCurrentUser: true }], requestUrl.searchParams),
+      });
+    }
     if (path === "/watch-history/calendar/undated") {
-      return route.fulfill({ json: serve(mock.watchHistoryUndated, { entries: [], total: 0 }) });
+      return route.fulfill({ json: serve(mock.watchHistoryUndated, { entries: [], total: 0 }, requestUrl.searchParams) });
     }
     if (path === "/watch-history/calendar") {
       return route.fulfill({
@@ -216,7 +223,7 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
           events: [],
           undated: { movies: 0, episodes: 0 },
           latestWatchedAt: null,
-        }),
+        }, requestUrl.searchParams),
       });
     }
     // Matched explicitly rather than left to the catch-all below, which answers 200 to anything — a

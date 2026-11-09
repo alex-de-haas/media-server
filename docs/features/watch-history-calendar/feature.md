@@ -1,7 +1,7 @@
 ---
 created: 2026-07-24
-updated: 2026-09-22
-summary: The calendar's Watched view, a screening diary over each user's play history.
+updated: 2026-11-09
+summary: The Watched calendar shows personal play history and lets administrators browse other users' history.
 ---
 
 # Watch-History Calendar
@@ -11,8 +11,8 @@ summary: The calendar's Watched view, a screening diary over each user's play hi
 `/calendar` answers two questions behind one `Watched | Releases` switch.
 **Releases** is unchanged: tracked release dates, reminders, and the Add-title
 and Tracked/Reminders actions. **Watched** is a screening diary over the per-play
-history in `PlaybackHistoryEntries` — what the signed-in user finished, and when.
-It is a read view with two exceptions: a single play that should not be there can
+history in `PlaybackHistoryEntries` — what the selected user finished, and when.
+It defaults to the signed-in user's own history. In that history a single play that should not be there can
 be deleted from it (see
 [watch-history-deletion](../watch-history-deletion/feature.md)), and a play can be
 put on the day and time it really happened — an undated mark given the time it was
@@ -40,6 +40,21 @@ yields nothing until hydration, and a click landing in that window navigated
 from the current month instead of the linked one.
 
 ## Watched mode
+
+### Administrator user selection
+
+Administrators see a **History user** selector, initially **My history**. Choosing
+another app user shows only that user's dated plays, undated counts and marks,
+and last watched month. The selection survives month navigation and applies to
+both the desktop grid and phone agenda. Releases retain their personal behavior.
+
+Another user's history is labelled **Read-only history**. Day details and undated
+marks retain their title links, but have no deletion or time-edit controls. Returning
+to **My history** restores those controls. Switching users closes open history
+dialogs and isolates cached results by signed-in identity and selected user.
+
+Ordinary users have no selector and never request the user list. A failed user
+list offers **Retry users** while leaving personal history available.
 
 ### Grouping
 
@@ -72,7 +87,7 @@ The poster and title link to the movie detail page, or the parent series page fo
 an episode. These links also appear in the undated list. An episode without a
 parent series retains plain text. Time and delete controls remain separate.
 
-Each play carries two controls. One deletes it, behind a confirmation naming that
+Each play in the caller's own history carries two controls. One deletes it, behind a confirmation naming that
 exact play; the day's own card follows — deleting one episode of a binge takes the
 card from `2 episodes` to `1 episode`. The semantics live in
 [watch-history-deletion](../watch-history-deletion/feature.md).
@@ -98,7 +113,7 @@ control, whose count follows the active filter. The counts must come from the
 server per kind: those rows are absent from `events` by design, so a single
 total could not be re-filtered in the browser.
 
-Marks in that list carry the same two controls. One deletes. The other,
+Marks in the caller's own list carry the same two controls. One deletes. The other,
 `Set time…`, gives a mark the time it should have had — for a play that really
 happened but reached the server undated — after which it leaves the list for that
 day of the grid; the semantics live in
@@ -133,13 +148,24 @@ a deliberate trade, not an oversight.
 ```http
 GET /api/watch-history/calendar?from=<utc-instant>&toExclusive=<utc-instant>
 GET /api/watch-history/calendar/undated?kind=Movie|Episode
+GET /api/watch-history/users
 ```
 
-Both are authenticated and scoped to the caller; every query filters on the
-caller's `AppUserId`.
+Both calendar reads are authenticated and accept an optional numeric `userId`.
+Omitting it, or selecting the caller's own app-user ID, returns personal history.
+Selecting another user requires the validated administrator role. Ordinary users
+receive `403` for any foreign ID before its existence is checked; administrators
+receive `404` for an unknown user. Each query filters on the authorized user's
+`AppUserId`.
 
-The calendar range is capped at **62 days** — a month grid spans six weeks at
-most — and is served by a `(AppUserId, WatchedAt)` index; the pre-existing
+`/users` requires the administrator policy and returns an array of
+`{ id, displayName, isCurrentUser }` for app users. The name falls back to the
+stored email, then `User <id>`. Host identity IDs are not included. Entry deletion
+and time correction remain owner-only, including for administrators; native
+calendar routes remain caller-scoped.
+
+The calendar returns at most **5,000 events**, with `truncated` indicating more
+dated plays in the requested range, and uses a `(AppUserId, WatchedAt)` index; the pre-existing
 `(AppUserId, MediaItemId, WatchedAt)` index leads with the item and cannot serve
 a user's time-range scan.
 
@@ -174,7 +200,10 @@ viewing-duration or streak analytics, and an activity heatmap.
   ungrouped plays, range filtering with an exclusive end, series title/poster/canonical numbering
   on episodes, per-kind undated counts, `latestWatchedAt` reaching beyond the
   requested range, the undated list naming its items, and — twice over — that
-  another user's history is never returned.
+  a query for one user never returns another user's history.
+- `WatchHistoryEndpointTests` covers administrator discovery and foreign
+  reads, personal defaults and explicit self-selection, authentication and role
+  refusals, missing target users, undated filtering, and owner-only mutations.
 - `watch-history-calendar.test.ts` covers the grouping the UI depends on: a
   ten-episode binge collapsing to one card while retaining every play, distinct
   series and movies staying apart, a rewatched episode counting once, an orphan
@@ -192,3 +221,6 @@ viewing-duration or streak analytics, and an activity heatmap.
   tracking the filter, the empty-month jump, the phone agenda replacing the
   grid, and the delete affordance described in
   [watch-history-deletion](../watch-history-deletion/feature.md).
+- Administrator browser coverage verifies switching personal and foreign dated
+  and undated history, read-only day details, returning to editable personal
+  history, month persistence, phone agenda, and no discovery for ordinary users.

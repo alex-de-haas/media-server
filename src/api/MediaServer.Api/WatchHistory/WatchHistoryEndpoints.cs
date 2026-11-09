@@ -1,31 +1,60 @@
 using System.Security.Claims;
 using MediaServer.Api.Data;
 using MediaServer.Api.Hosty;
+using Microsoft.EntityFrameworkCore;
 
 namespace MediaServer.Api.WatchHistory;
 
 /// <summary>The instant to stamp on a recorded play.</summary>
 public sealed record SetWatchedAtRequest(DateTimeOffset? WatchedAt);
 
-/// <summary>Authenticated endpoints for the caller's local watch history.</summary>
+/// <summary>A selectable app user, without exposing their Host identity.</summary>
+public sealed record WatchHistoryUser(int Id, string DisplayName, bool IsCurrentUser);
+
+/// <summary>Authenticated watch-history reads, with owner-only entry edits.</summary>
 public static class WatchHistoryEndpoints
 {
     public static void MapWatchHistoryEndpoints(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/watch-history").RequireAuthorization();
 
+        group.MapGet("/users", async (
+            ClaimsPrincipal principal,
+            MediaServerDbContext database,
+            CancellationToken cancellationToken) =>
+        {
+            var currentUserId = await principal.ResolveAppUserIdAsync(database, cancellationToken);
+            if (currentUserId is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            var users = await database.AppUsers.AsNoTracking()
+                .Select(user => new { user.Id, user.DisplayName, user.Email })
+                .ToListAsync(cancellationToken);
+            return Results.Ok(users.Select(user => new WatchHistoryUser(
+                    user.Id,
+                    !string.IsNullOrWhiteSpace(user.DisplayName) ? user.DisplayName
+                        : !string.IsNullOrWhiteSpace(user.Email) ? user.Email : $"User {user.Id}",
+                    user.Id == currentUserId))
+                .OrderBy(user => user.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(user => user.Id)
+                .ToArray());
+        }).RequireAuthorization(AppRoles.AdminPolicy);
+
         group.MapGet("/calendar", async (
             DateTimeOffset from,
             DateTimeOffset toExclusive,
+            int? userId,
             ClaimsPrincipal principal,
             WatchHistoryCalendarService calendar,
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
-            if (user is null)
+            var (selectedUserId, error) = await ResolveReadUserAsync(principal, userId, database, cancellationToken);
+            if (error is not null)
             {
-                return Results.Unauthorized();
+                return error;
             }
 
             if (toExclusive <= from)
@@ -33,20 +62,19 @@ public static class WatchHistoryEndpoints
                 return Results.BadRequest(new { error = "'toExclusive' must be after 'from'." });
             }
 
-            return Results.Ok(await calendar.LoadAsync(user.Id, from, toExclusive, cancellationToken));
+            return Results.Ok(await calendar.LoadAsync(selectedUserId, from, toExclusive, cancellationToken));
         });
 
         group.MapGet("/calendar/undated", async (
             MediaKind? kind,
+            int? userId,
             ClaimsPrincipal principal,
             WatchHistoryCalendarService calendar,
             MediaServerDbContext database,
             CancellationToken cancellationToken) =>
         {
-            var user = await principal.ResolveAppUserAsync(database, cancellationToken);
-            return user is null
-                ? Results.Unauthorized()
-                : Results.Ok(await calendar.LoadUndatedAsync(user.Id, kind, cancellationToken));
+            var (selectedUserId, error) = await ResolveReadUserAsync(principal, userId, database, cancellationToken);
+            return error ?? Results.Ok(await calendar.LoadUndatedAsync(selectedUserId, kind, cancellationToken));
         });
 
         // Sets when a play happened: a mark that was never timed takes its instant, and one timed
@@ -94,6 +122,33 @@ public static class WatchHistoryEndpoints
                 : Results.NotFound();
         });
 
+    }
+
+    private static async Task<(int UserId, IResult? Error)> ResolveReadUserAsync(
+        ClaimsPrincipal principal,
+        int? requestedUserId,
+        MediaServerDbContext database,
+        CancellationToken cancellationToken)
+    {
+        if (await principal.ResolveAppUserIdAsync(database, cancellationToken) is not { } currentUserId)
+        {
+            return (0, Results.Unauthorized());
+        }
+
+        if (requestedUserId is not { } selectedUserId || selectedUserId == currentUserId)
+        {
+            return (currentUserId, null);
+        }
+
+        // Authorize before looking up the target, so ordinary users cannot probe app membership.
+        if (!principal.IsInRole(AppRoles.Admin))
+        {
+            return (0, Results.Forbid());
+        }
+
+        return await database.AppUsers.AnyAsync(user => user.Id == selectedUserId, cancellationToken)
+            ? (selectedUserId, null)
+            : (0, Results.NotFound());
     }
 
     internal static IResult ToResult(SetWatchedAtStatus status) => status switch

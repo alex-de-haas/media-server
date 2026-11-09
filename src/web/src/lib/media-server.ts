@@ -786,6 +786,13 @@ export interface WatchHistoryCalendarResponse {
   latestWatchedAt: string | null;
 }
 
+/** An app user whose watch history an administrator can view. */
+export interface WatchHistoryUser {
+  id: number;
+  displayName: string;
+  isCurrentUser: boolean;
+}
+
 /**
  * What one catalog's scan found and did. `offline` means its storage could not be read at all — the
  * counts are then zero because the scan declined to act, not because there was nothing to do.
@@ -1254,13 +1261,19 @@ export const mediaServer = {
   // groups them by its own local days.
   // The kind is applied server-side so the list and the toolbar's count answer the same question,
   // and `total` lets the dialog admit when it is showing only the most recent marks.
-  watchHistoryUndated: (kind?: "Movie" | "Episode") =>
-    apiJson<WatchHistoryUndatedPage>(
-      `${BASE}/watch-history/calendar/undated${kind ? `?kind=${kind}` : ""}`,
-    ),
-  watchHistoryCalendar: (from: string, toExclusive: string) =>
+  watchHistoryUsers: () => apiJson<WatchHistoryUser[]>(`${BASE}/watch-history/users`),
+  watchHistoryUndated: (kind?: "Movie" | "Episode", userId?: number) => {
+    const query = new URLSearchParams();
+    if (kind) query.set("kind", kind);
+    if (userId !== undefined) query.set("userId", String(userId));
+    const suffix = query.toString();
+    return apiJson<WatchHistoryUndatedPage>(
+      `${BASE}/watch-history/calendar/undated${suffix ? `?${suffix}` : ""}`,
+    );
+  },
+  watchHistoryCalendar: (from: string, toExclusive: string, userId?: number) =>
     apiJson<WatchHistoryCalendarResponse>(
-      `${BASE}/watch-history/calendar?from=${encodeURIComponent(from)}&toExclusive=${encodeURIComponent(toExclusive)}`,
+      `${BASE}/watch-history/calendar?from=${encodeURIComponent(from)}&toExclusive=${encodeURIComponent(toExclusive)}${userId !== undefined ? `&userId=${userId}` : ""}`,
     ),
   // Delete one of the caller's recorded plays; an unknown or foreign entry returns 404.
   deleteWatchHistoryEntry: (entryId: string) =>
