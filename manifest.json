@@ -3,7 +3,7 @@
   "id": "com.haas.media-server",
   "name": "Media Server",
   "description": "Self-hosted media server: torrent ingest, automatic organize/identify/probe, and a Jellyfin-compatible streaming surface for native clients (Infuse).",
-  "version": "0.94.0",
+  "version": "0.95.0",
   "source": {
     "type": "git",
     "repository": "https://github.com/alex-de-haas/media-server.git",
@@ -34,7 +34,7 @@
           "type": "docker",
           "image": {
             "repository": "ghcr.io/alex-de-haas/media-server-api",
-            "tag": "0.94.0",
+            "tag": "0.95.0",
             "pullPolicy": "always"
           },
           "ports": [
@@ -83,7 +83,7 @@
           "type": "docker",
           "image": {
             "repository": "ghcr.io/alex-de-haas/media-server-web",
-            "tag": "0.94.0",
+            "tag": "0.95.0",
             "pullPolicy": "always"
           },
           "ports": [

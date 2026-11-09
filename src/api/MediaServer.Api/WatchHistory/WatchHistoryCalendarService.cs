@@ -83,8 +83,8 @@ public sealed record WatchHistoryCalendarResponse(
 /// Reads one user's dated play history for a bounded range.
 /// </summary>
 /// <remarks>
-/// Read-only and user-scoped: every query filters on the caller's <c>AppUserId</c>, so no request can
-/// surface another user's viewing.
+/// Read-only and user-scoped: every query filters on the supplied user's <c>AppUserId</c>. Endpoints
+/// authorize which user the caller may select before passing the id to this service.
 /// </remarks>
 public sealed class WatchHistoryCalendarService(
     MediaServerDbContext database, MediaServerSettings settings)

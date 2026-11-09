@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSameMonth, startOfMonth } from "date-fns";
@@ -28,6 +28,9 @@ import {
   type WatchedKindFilter,
 } from "@/lib/watch-history-calendar";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useSession } from "@/components/app-shell";
 import { DeleteWatchDialog } from "@/components/delete-watch-dialog";
 import {
   Dialog,
@@ -43,6 +46,7 @@ import { WatchTimeDialog } from "@/components/watch-time-dialog";
 
 /** How many cards fit a day cell before the rest collapse into "+N". */
 const MAX_CARDS = 3;
+const MY_HISTORY = "__my_history__";
 
 const FILTERS: Array<{ value: WatchedKindFilter; label: string }> = [
   { value: "all", label: "All" },
@@ -73,17 +77,106 @@ export function WatchedCalendar({
   onModeChange: (mode: CalendarMode) => void;
   onMonthChange: (month: Date) => void;
 }) {
+  const { userId: sessionUserId, role } = useSession();
+  const [selectedUserId, setSelectedUserId] = useState<number | undefined>();
+  const userSelectId = useId();
+  const isAdmin = role === "admin";
+  const userId = isAdmin ? selectedUserId : undefined;
+  const users = useQuery({
+    queryKey: ["watch-history-users", sessionUserId],
+    queryFn: mediaServer.watchHistoryUsers,
+    enabled: isAdmin,
+    retry: false,
+  });
+  const otherUsers = (users.data ?? []).filter((user) => !user.isCurrentUser);
+  const userItems = [
+    { value: MY_HISTORY, label: "My history" },
+    ...otherUsers.map((user) => ({ value: String(user.id), label: user.displayName })),
+  ];
+
+  const userControl = isAdmin ? (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <Label htmlFor={userSelectId} className="text-muted-foreground shrink-0 text-xs">History user</Label>
+        <Select
+          value={userId === undefined ? MY_HISTORY : String(userId)}
+          onValueChange={(value) => {
+            if (value !== null) setSelectedUserId(value === MY_HISTORY ? undefined : Number(value));
+          }}
+          items={userItems}
+          disabled={users.isPending}
+        >
+          <SelectTrigger id={userSelectId} size="sm" className="min-w-32 max-w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {userItems.map((user) => <SelectItem key={user.value} value={user.value}>{user.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      {userId !== undefined && <span className="text-muted-foreground text-xs">Read-only history</span>}
+      {users.isError && (
+        <div role="status" className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Couldn’t load history users.</span>
+          <Button variant="outline" size="sm" onClick={() => void users.refetch()} disabled={users.isFetching}>
+            Retry users
+          </Button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  return (
+    <WatchedCalendarContent
+      key={sessionUserId}
+      month={month}
+      onModeChange={onModeChange}
+      onMonthChange={onMonthChange}
+      sessionUserId={sessionUserId}
+      userId={userId}
+      userControl={userControl}
+    />
+  );
+}
+
+function WatchedCalendarContent({
+  month,
+  onModeChange,
+  onMonthChange,
+  sessionUserId,
+  userId,
+  userControl,
+}: {
+  month: Date;
+  onModeChange: (mode: CalendarMode) => void;
+  onMonthChange: (month: Date) => void;
+  sessionUserId: string;
+  userId?: number;
+  userControl: ReactNode;
+}) {
   const [filter, setFilter] = useState<WatchedKindFilter>("all");
   const [dayDetail, setDayDetail] = useState<string | null>(null);
   const [undatedOpen, setUndatedOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [timeTarget, setTimeTarget] = useState<TimeTarget | null>(null);
+  const [dialogUserId, setDialogUserId] = useState(userId);
   const queryClient = useQueryClient();
+  const readOnly = userId !== undefined;
+
+  // Reset the dialogs before committing another user's data, while keeping the selector mounted
+  // so keyboard focus and the kind filter survive a history change.
+  if (dialogUserId !== userId) {
+    setDialogUserId(userId);
+    setDayDetail(null);
+    setUndatedOpen(false);
+    setDeleteTarget(null);
+    setTimeTarget(null);
+  }
 
   const range = monthGridInstants(month);
   const history = useQuery({
-    queryKey: ["watch-history-calendar", range.from, range.toExclusive],
-    queryFn: () => mediaServer.watchHistoryCalendar(range.from, range.toExclusive),
+    queryKey: ["watch-history-calendar", sessionUserId, userId ?? "self", range.from, range.toExclusive],
+    queryFn: () => mediaServer.watchHistoryCalendar(range.from, range.toExclusive, userId),
   });
 
   const remove = useMutation({
@@ -132,7 +225,8 @@ export function WatchedCalendar({
   const latest = history.data?.latestWatchedAt ?? null;
 
   const toolbar = (
-    <div className="flex items-center gap-1.5">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {userControl}
       <div className="bg-secondary/60 flex items-center gap-0.5 rounded-md p-0.5">
         {FILTERS.map((option) => (
           <button
@@ -244,21 +338,23 @@ export function WatchedCalendar({
         dayKey={dayDetail}
         groups={detailGroups}
         onClose={() => setDayDetail(null)}
-        onDelete={setDeleteTarget}
-        onEditTime={setTimeTarget}
+        onDelete={readOnly ? undefined : setDeleteTarget}
+        onEditTime={readOnly ? undefined : setTimeTarget}
       />
 
       <UndatedDialog
         open={undatedOpen}
         filter={filter}
+        sessionUserId={sessionUserId}
+        userId={userId}
         onClose={() => setUndatedOpen(false)}
-        onDelete={setDeleteTarget}
-        onDate={setTimeTarget}
+        onDelete={readOnly ? undefined : setDeleteTarget}
+        onDate={readOnly ? undefined : setTimeTarget}
       />
 
       {/* One dialog for both claims: the question is the same, so only the wording and the instant it
           opens on differ. */}
-      <WatchTimeDialog
+      {!readOnly && <WatchTimeDialog
         open={timeTarget !== null}
         onOpenChange={(open) => !open && setTimeTarget(null)}
         heading={timeTarget?.watchedAt ? "When did you really watch it?" : "When did you watch it?"}
@@ -287,13 +383,13 @@ export function WatchedCalendar({
             correction: timeTarget.watchedAt !== null,
           })
         }
-      />
+      />}
 
-      <DeleteWatchDialog
+      {!readOnly && <DeleteWatchDialog
         open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={deleteTarget?.heading} detail={deleteTarget?.detail} pending={remove.isPending}
         onConfirm={() => deleteTarget && remove.mutate(deleteTarget.entryId)}
-      />
+      />}
     </>
   );
 
@@ -351,8 +447,8 @@ function DayDetailDialog({
   dayKey: string | null;
   groups: WatchedGroup[];
   onClose: () => void;
-  onDelete: (target: DeleteTarget) => void;
-  onEditTime: (target: TimeTarget) => void;
+  onDelete?: (target: DeleteTarget) => void;
+  onEditTime?: (target: TimeTarget) => void;
 }) {
   const plays = groups.flatMap((group) => group.plays).sort((a, b) => a.watchedAt.localeCompare(b.watchedAt));
 
@@ -384,8 +480,8 @@ function PlayRow({
   onEditTime,
 }: {
   event: WatchHistoryCalendarEvent;
-  onDelete: (target: DeleteTarget) => void;
-  onEditTime: (target: TimeTarget) => void;
+  onDelete?: (target: DeleteTarget) => void;
+  onEditTime?: (target: TimeTarget) => void;
 }) {
   const code = episodeLabel(event);
   const heading = event.kind === "Episode" ? (event.seriesTitle ?? event.title) : event.title;
@@ -417,11 +513,11 @@ function PlayRow({
       {/* Named down to the timestamp, like the delete control beside it: a day can hold two plays of
           one movie, and two controls with the same accessible name leave a screen reader unable to
           say which one it is on. */}
-      <EntryTimeButton
+      {onEditTime && <EntryTimeButton
         label={`Change the time of this play: ${label}`}
         onClick={() => onEditTime({ entryId: event.entryId, title: label, watchedAt: event.watchedAt })}
-      />
-      <DeleteEntryButton
+      />}
+      {onDelete && <DeleteEntryButton
         label={`Delete this play: ${label}`}
         onClick={() =>
           onDelete({
@@ -430,7 +526,7 @@ function PlayRow({
             detail: [secondary, formatTime(event.watchedAt)].filter(Boolean).join(" · "),
           })
         }
-      />
+      />}
     </div>
   );
 }
@@ -475,20 +571,24 @@ function DeleteEntryButton({ label, onClick }: { label: string; onClick: () => v
 function UndatedDialog({
   open,
   filter,
+  sessionUserId,
+  userId,
   onClose,
   onDelete,
   onDate,
 }: {
   open: boolean;
   filter: WatchedKindFilter;
+  sessionUserId: string;
+  userId?: number;
   onClose: () => void;
-  onDelete: (target: DeleteTarget) => void;
-  onDate: (target: TimeTarget) => void;
+  onDelete?: (target: DeleteTarget) => void;
+  onDate?: (target: TimeTarget) => void;
 }) {
   const kind = filter === "movies" ? "Movie" : filter === "episodes" ? "Episode" : undefined;
   const undated = useQuery({
-    queryKey: ["watch-history-undated", kind ?? "all"],
-    queryFn: () => mediaServer.watchHistoryUndated(kind),
+    queryKey: ["watch-history-undated", sessionUserId, userId ?? "self", kind ?? "all"],
+    queryFn: () => mediaServer.watchHistoryUndated(kind, userId),
     enabled: open,
   });
 
@@ -508,6 +608,7 @@ function UndatedDialog({
         </DialogHeader>
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {undated.isPending && <Skeleton className="h-14 w-full" />}
+          {undated.isError && <ErrorState onRetry={() => void undated.refetch()} />}
           {/* Fixable rather than merely listed: a mark lands here when the play was real but its time
               never reached the server, and only the viewer knows what that time was. */}
           {/* Reachable by deleting the last mark: the `Undated N` control that opened this is already
@@ -535,8 +636,8 @@ function UndatedRow({
   onDate,
 }: {
   entry: WatchHistoryUndatedEntry;
-  onDelete: (target: DeleteTarget) => void;
-  onDate: (target: TimeTarget) => void;
+  onDelete?: (target: DeleteTarget) => void;
+  onDate?: (target: TimeTarget) => void;
 }) {
   const heading = entry.kind === "Episode" ? (entry.seriesTitle ?? entry.title) : entry.title;
   const secondary =
@@ -567,7 +668,7 @@ function UndatedRow({
       </WatchTitleLink>
       {/* Named down to the title, like the delete control beside it: a list of marks with two identical
           accessible names leaves a screen reader unable to say which row it is on. */}
-      <EntryTimeButton
+      {onDate && <EntryTimeButton
         label={`Set the time of this undated mark: ${[heading, secondary].filter(Boolean).join(" · ")}`}
         onClick={() =>
           onDate({
@@ -577,11 +678,11 @@ function UndatedRow({
             watchedAt: null,
           })
         }
-      />
-      <DeleteEntryButton
+      />}
+      {onDelete && <DeleteEntryButton
         label={`Delete this undated mark: ${[heading, secondary].filter(Boolean).join(" · ")}`}
         onClick={() => onDelete({ entryId: entry.entryId, heading, detail: secondary })}
-      />
+      />}
     </div>
   );
 }

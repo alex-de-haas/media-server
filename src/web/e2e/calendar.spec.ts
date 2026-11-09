@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { movieDetail, seriesDetail, setupApp } from "./support";
 
 // The calendar's two modes share one shell, so the risks are structural: that switching modes loses
@@ -191,6 +191,213 @@ const undatedMarks = {
   ],
   total: 1,
 };
+
+const historyUsers = [
+  { id: 1, displayName: "Tester", isCurrentUser: true },
+  { id: 2, displayName: "Alex", isCurrentUser: false },
+];
+
+const foreignHistory = {
+  events: [
+    {
+      ...watchedHistory.events[2],
+      entryId: "foreign-play",
+      mediaItemId: "movie-3",
+      publicId: "movie-3",
+      title: "Contact",
+    },
+  ],
+  undated: { movies: 1, episodes: 0 },
+  latestWatchedAt: "2026-07-10T21:00:00.000Z",
+};
+
+const foreignUndated = {
+  entries: [
+    {
+      ...undatedMarks.entries[0],
+      entryId: "foreign-undated",
+      mediaItemId: "movie-4",
+      publicId: "movie-4",
+      title: "Moon",
+    },
+  ],
+  total: 1,
+};
+
+async function selectHistoryUser(page: Page, name: string) {
+  await page.getByRole("combobox", { name: "History user", exact: true }).click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
+
+test("an administrator switches dated and undated history to read-only and back to their own", async ({ page }) => {
+  const calendarUsers: Array<string | null> = [];
+  const undatedUsers: Array<string | null> = [];
+  const mutations: string[] = [];
+  await setupApp(page, {
+    watchHistoryUsers: historyUsers,
+    watchHistoryCalendar: (query) => {
+      calendarUsers.push(query.get("userId"));
+      return query.get("userId") === "2"
+        ? foreignHistory
+        : { ...watchedHistory, undated: { movies: 1, episodes: 0 } };
+    },
+    watchHistoryUndated: (query) => {
+      undatedUsers.push(query.get("userId"));
+      return query.get("userId") === "2" ? foreignUndated : undatedMarks;
+    },
+    deleteWatchHistoryEntry: (entryId) => mutations.push(`delete:${entryId}`),
+    setWatchHistoryEntryTime: (entryId) => mutations.push(`retime:${entryId}`),
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  const selector = page.getByRole("combobox", { name: "History user", exact: true });
+  const grid = page.getByTestId("calendar-grid");
+  await expect(selector).toContainText("My history");
+  await grid.getByRole("button", { name: /Arrival/ }).click();
+  let dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: /^Delete this play: Arrival/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Change the time of this play: Arrival/ })).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  await page.getByRole("button", { name: "Undated 1", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: "Delete this undated mark: Solaris" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Set the time of this undated mark: Solaris" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  await selectHistoryUser(page, "Alex");
+  await expect(grid.getByRole("button", { name: /Contact/ })).toBeVisible();
+  await expect(grid.getByRole("button", { name: /Arrival/ })).toHaveCount(0);
+  await grid.getByRole("button", { name: /Contact/ }).click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("link", { name: /Contact/ })).toHaveAttribute("href", "/movies/movie-3");
+  await expect(dialog.getByRole("button", { name: /^Delete this play:/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /^Change the time of this play:/ })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  await page.getByRole("button", { name: "Undated 1", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Moon", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Solaris", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /^Delete this undated mark:/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /^Set the time of this undated mark:/ })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  await selectHistoryUser(page, "My history");
+  await expect(grid.getByRole("button", { name: /Arrival/ })).toBeVisible();
+  await expect(grid.getByRole("button", { name: /Contact/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Undated 1", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Moon", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Delete this undated mark: Solaris" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Set the time of this undated mark: Solaris" })).toBeVisible();
+  expect(calendarUsers).toEqual(expect.arrayContaining([null, "2"]));
+  expect(undatedUsers).toEqual(expect.arrayContaining([null, "2"]));
+  expect(mutations).toEqual([]);
+});
+
+test("a selected user's latest-month jump and month navigation keep that user", async ({ page }) => {
+  const foreignRanges: string[] = [];
+  await setupApp(page, {
+    watchHistoryUsers: historyUsers,
+    watchHistoryCalendar: (query) => {
+      if (query.get("userId") === "2") {
+        foreignRanges.push(query.get("from")!);
+        return { events: [], undated: { movies: 0, episodes: 0 }, latestWatchedAt: "2026-03-02T18:00:00.000Z" };
+      }
+      return watchedHistory;
+    },
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+  await selectHistoryUser(page, "Alex");
+  await page.getByRole("button", { name: "Jump to last watched month" }).click();
+
+  await expect(page).toHaveURL(/month=2026-03/);
+  await expect(page.getByRole("combobox", { name: "History user", exact: true })).toContainText("Alex");
+  await expect.poll(() => new Set(foreignRanges).size).toBe(2);
+  await page.getByRole("button", { name: "Next month", exact: true }).click();
+
+  await expect(page).toHaveURL(/month=2026-04/);
+  await expect(page.getByRole("combobox", { name: "History user", exact: true })).toContainText("Alex");
+  await expect.poll(() => new Set(foreignRanges).size).toBe(3);
+  await expect(page.getByTestId("calendar-grid").getByRole("button", { name: /Arrival/ })).toHaveCount(0);
+});
+
+test("an ordinary user gets their editable history without requesting the administrator user list", async ({ page }) => {
+  let userListRequests = 0;
+  const calendarUsers: Array<string | null> = [];
+  await setupApp(page, {
+    role: "user",
+    watchHistoryUsers: () => {
+      userListRequests++;
+      return historyUsers;
+    },
+    watchHistoryCalendar: (query) => {
+      calendarUsers.push(query.get("userId"));
+      return watchedHistory;
+    },
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+  await page.getByTestId("calendar-grid").getByRole("button", { name: /Arrival/ }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: /^Delete this play: Arrival/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Change the time of this play: Arrival/ })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "History user", exact: true })).toHaveCount(0);
+  expect(userListRequests).toBe(0);
+  expect(calendarUsers.length).toBeGreaterThan(0);
+  expect(calendarUsers.every((userId) => userId === null)).toBe(true);
+});
+
+test("a failed administrator user list leaves own history editable and can be retried", async ({ page }) => {
+  let userListAvailable = false;
+  let userListRequests = 0;
+  await setupApp(page, {
+    watchHistoryCalendar: (query) => query.get("userId") === "2" ? foreignHistory : watchedHistory,
+  });
+  await page.route("**/api/proxy/api/watch-history/users", (route) => {
+    userListRequests++;
+    return userListAvailable
+      ? route.fulfill({ json: historyUsers })
+      : route.fulfill({ status: 503, json: { error: "temporarily unavailable" } });
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+
+  await expect(page.getByText("Couldn’t load history users.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "History user", exact: true })).toContainText("My history");
+  await page.getByTestId("calendar-grid").getByRole("button", { name: /Arrival/ }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: /^Delete this play: Arrival/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Change the time of this play: Arrival/ })).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  userListAvailable = true;
+  await page.getByRole("button", { name: "Retry users", exact: true }).click();
+  await expect(page.getByText("Couldn’t load history users.", { exact: true })).toHaveCount(0);
+  await selectHistoryUser(page, "Alex");
+  await expect(page.getByTestId("calendar-grid").getByRole("button", { name: /Contact/ })).toBeVisible();
+  expect(userListRequests).toBe(2);
+});
+
+test("a phone's agenda shows the selected user's plays with read-only details", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setupApp(page, {
+    watchHistoryUsers: historyUsers,
+    watchHistoryCalendar: (query) => query.get("userId") === "2" ? foreignHistory : watchedHistory,
+  });
+  await page.goto("/calendar?view=watched&month=2026-07");
+  await selectHistoryUser(page, "Alex");
+
+  const agenda = page.getByTestId("calendar-agenda");
+  await expect(agenda).toBeVisible();
+  await expect(agenda.getByRole("button", { name: /Contact/ })).toBeVisible();
+  await expect(agenda.getByRole("button", { name: /Arrival/ })).toHaveCount(0);
+  await agenda.getByRole("button", { name: /Contact/ }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("link", { name: /Contact/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Delete this play:/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /^Change the time of this play:/ })).toHaveCount(0);
+});
 
 test("a play is deleted from the day detail, once confirmed", async ({ page }) => {
   const events = [...watchedHistory.events];
