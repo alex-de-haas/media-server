@@ -1,0 +1,1 @@
+{"appId":"com.haas.media-server","digest":"sha256:384d1de92a453abff14dfb2488be4a65a1b034b5cc7159e0142a1f6e89813612","platforms":["linux/amd64","linux/arm64"],"repository":"ghcr.io/alex-de-haas/media-server-web","version":"0.95.0"}
