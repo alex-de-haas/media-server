@@ -24,8 +24,8 @@ importers:
         specifier: ^3.2.2
         version: 3.2.2(react@19.3.1)
       '@hosty-sdk/app':
-        specifier: ^0.24.0
-        version: 0.24.0(next@16.4.5(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.10.0)(@playwright/test@1.65.0)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: ^0.46.1
+        version: 0.46.1(@types/react@19.3.0)(next@16.4.5(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.10.0)(@playwright/test@1.65.0)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@opentelemetry/api':
         specifier: ^1.10.0
         version: 1.10.0
@@ -399,10 +399,10 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@hosty-sdk/app@0.24.0':
-    resolution: {integrity: sha512-AiwE291crM14joDRxzryLwFW7T+LK7z0Z6z4saaiqepiZHxGBPNSL53VFqBL/hsMH3RSZ8MBZcEuxjjC64e0/Q==}
+  '@hosty-sdk/app@0.46.1':
+    resolution: {integrity: sha512-E/AZ/WDObNwagxAhWkUxBqBATLi9ekZQ15430M63nek7lvp04LJoe1Z/MhMhJjvXyPyPrnyLWg3SVGyMgzpqVg==}
     peerDependencies:
-      next: ^16.3.8
+      next: ^16.4.0
       react: ^19.2.8
       react-dom: ^19.2.8
     peerDependenciesMeta:
@@ -3649,14 +3649,17 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hosty-sdk/app@0.24.0(next@16.4.5(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.10.0)(@playwright/test@1.65.0)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@hosty-sdk/app@0.46.1(@types/react@19.3.0)(next@16.4.5(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.10.0)(@playwright/test@1.65.0)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@noble/hashes': 2.4.0
+      lucide-react: 1.70.0(@types/react@19.3.0)(react@19.3.1)
       server-only: 0.0.1
     optionalDependencies:
       next: 16.4.5(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.10.0)(@playwright/test@1.65.0)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
+    transitivePeerDependencies:
+      - '@types/react'
 
   '@humanfs/core@0.19.2':
     dependencies:
