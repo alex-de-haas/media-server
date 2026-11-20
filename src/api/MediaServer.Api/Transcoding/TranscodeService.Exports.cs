@@ -55,13 +55,15 @@ public sealed partial class TranscodeService
         {
             if (job.State != TranscodeJobState.Completed)
             {
+                var inspectionStartedAt = _time.GetUtcNow();
                 var snapshot = await engine.InspectAsync(job.EngineJobId, ct);
                 if (snapshot is null)
                 {
-                    var now = DateTimeOffset.UtcNow;
-                    // An admission may still be settling after a lost response, even if GET returns 404.
+                    var now = _time.GetUtcNow();
+                    // A delayed 404 can describe a point before admission finished.
+                    var graceReferenceTime = job.CancellationRequested ? inspectionStartedAt : now;
                     var grace = job.CancellationRequested ? ExportCancellationGrace : ExportSubmissionRetryDelay;
-                    if (job.LastSubmissionAt is { } submittedAt && now - submittedAt <= grace)
+                    if (job.LastSubmissionAt is { } submittedAt && graceReferenceTime - submittedAt <= grace)
                         return;
                     if (job.CancellationRequested)
                     {

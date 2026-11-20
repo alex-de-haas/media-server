@@ -21,8 +21,11 @@ public sealed partial class TranscodeService(
     ICatalogPathSandbox sandbox,
     MediaServerSettings settings,
     LibraryMoveGuard moveGuard,
-    ILogger<TranscodeService> logger)
+    ILogger<TranscodeService> logger,
+    TimeProvider? timeProvider = null)
 {
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
     public async Task<TranscodeJobResponse> CreateAsync(CreateTranscodeRequest request, CancellationToken cancellationToken)
     {
         // Serialize name admission with other library writers until the job owns its output path.

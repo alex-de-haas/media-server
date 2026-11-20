@@ -325,8 +325,9 @@ public sealed class TranscodeServiceConversionTests : IDisposable
                     return Task.FromException<JobDescriptor>(new HttpRequestException("lost response"));
                 });
 
+            var clock = new Clock();
             var service = new TranscodeService(_context, engine.Instance(), new CatalogPathSandbox(), settings,
-                new LibraryMoveGuard(_context, new LibraryMoveQueue()), NullLogger<TranscodeService>.Instance);
+                new LibraryMoveGuard(_context, new LibraryMoveQueue()), NullLogger<TranscodeService>.Instance, clock);
             var response = await service.CreateAsync(new(_episodeSourceId, "hevc", "none", null,
                 OutputMountLabel: "results", EncoderQuality: 14.5), default);
             var job = await _context.TranscodeJobs.SingleAsync();
@@ -334,10 +335,12 @@ public sealed class TranscodeServiceConversionTests : IDisposable
                 NullLogger<TranscodeOutputImporter>.Instance, settings);
 
             var inspectionUnavailable = false;
+            var inspectionDelay = TimeSpan.FromSeconds(25);
             engine.InspectAsync(Arg<string>.Any(), Arg<CancellationToken>.Any())
                 .Returns((string id, CancellationToken _) =>
                 {
                     Assert.Equal(job.EngineJobId, id);
+                    clock.UtcNow += inspectionDelay;
                     return inspectionUnavailable
                         ? Task.FromException<JobSnapshot>(new HttpRequestException("engine unavailable"))
                         : Task.FromResult<JobSnapshot>(null!);
@@ -353,7 +356,7 @@ public sealed class TranscodeServiceConversionTests : IDisposable
                 });
 
             options = newerEngine ? [] : null;
-            job.LastSubmissionAt = DateTimeOffset.UtcNow.AddSeconds(-45);
+            job.LastSubmissionAt = clock.UtcNow.AddSeconds(-45);
             await _context.SaveChangesAsync();
             Assert.True(await service.CancelAsync(response.Id, default));
             await service.ReconcileExportAsync(job, importer, default);
@@ -361,10 +364,9 @@ public sealed class TranscodeServiceConversionTests : IDisposable
             Assert.Null(job.CompletedAt);
             Assert.Single(submissions);
 
-            job.LastSubmissionAt = DateTimeOffset.UtcNow.AddSeconds(-75);
-            await _context.SaveChangesAsync();
+            inspectionDelay = TimeSpan.Zero;
             var disabledService = new TranscodeService(_context, new DisabledTranscodeEngine(), new CatalogPathSandbox(), settings,
-                new LibraryMoveGuard(_context, new LibraryMoveQueue()), NullLogger<TranscodeService>.Instance);
+                new LibraryMoveGuard(_context, new LibraryMoveQueue()), NullLogger<TranscodeService>.Instance, clock);
             await disabledService.ReconcileExportAsync(job, importer, default);
             Assert.Equal(TranscodeJobState.Queued, job.State);
             inspectionUnavailable = true;
@@ -377,7 +379,7 @@ public sealed class TranscodeServiceConversionTests : IDisposable
             inspectionUnavailable = false;
             await service.ReconcileExportAsync(job, importer, default);
             Assert.Equal(TranscodeJobState.Cancelled, job.State);
-            Assert.NotNull(job.CompletedAt);
+            Assert.Equal(clock.UtcNow, job.CompletedAt);
             Assert.Null(job.Error);
             Assert.Single(submissions);
             Assert.True(await service.RemoveAsync(response.Id, true, default));
@@ -386,6 +388,13 @@ public sealed class TranscodeServiceConversionTests : IDisposable
             Assert.Empty(output.GetFileSystemInfos());
         }
         finally { output.Delete(true); }
+    }
+
+    private sealed class Clock : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.UtcNow;
+
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 
     [Theory]
