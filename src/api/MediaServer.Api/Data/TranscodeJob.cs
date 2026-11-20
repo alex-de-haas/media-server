@@ -70,18 +70,21 @@ public sealed class TranscodeJob
     /// <summary><c>h264</c> or <c>hevc</c>.</summary>
     public required string VideoCodec { get; set; }
 
-    /// <summary><c>auto</c>, <c>vaapi</c>, or <c>none</c>.</summary>
+    /// <summary>The requested encoder, or <c>auto</c> for automatic selection.</summary>
     public required string HardwareAcceleration { get; set; }
 
     /// <summary>The quality level asked for (<c>highest</c>/<c>high</c>/<c>balanced</c>/<c>small</c>).
     /// Stored rather than the CRF it resolved to, because the number depends on which encoder the host
     /// reached and the level is what the operator actually chose.
     /// <para>
-    /// Null means the video was copied — or, for a job predating levels, that it ran on the encoder's own
+    /// Null means the job used the encoder's native quality value, copied the video or ran on the encoder's own
     /// default. The migration that introduced this column mapped the CRFs it could and left the rest null
     /// rather than crediting them with a level nobody chose.
     /// </para></summary>
     public string? QualityLevel { get; set; }
+
+    /// <summary>The explicit native quality value for the job's encoder.</summary>
+    public double? EncoderQuality { get; set; }
 
     /// <summary>How many audio tracks this job re-encoded rather than copied, so a finished job can explain
     /// where its size went without keeping a row per track.</summary>

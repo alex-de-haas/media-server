@@ -1,5 +1,5 @@
 import type { ManagementItem, ManagementPage, SourceDiagnostic, LibraryAvailability } from "../src/lib/management";
-import type { LibraryDetail, Episode } from "../src/lib/media-server";
+import type { EncoderQualityOption, LibraryDetail, Episode } from "../src/lib/media-server";
 import type { Page } from "@playwright/test";
 
 // Mocks the same-origin BFF (`/api/auth/session`, `/api/proxy/api/**`) so the UI can be driven without
@@ -77,6 +77,7 @@ export interface AppMock {
   recommendations?: Record<string, unknown>;
   videoPartJoining?: boolean;
   explicitVideoSelection?: boolean;
+  encoderQualityOptions?: EncoderQualityOption[] | null;
   dolbyVisionConversion?: boolean;
   transcodeAvailable?: boolean; // GET /transcode/availability — gates the Convert, Merge and backfill controls
   transcodeJobs?: unknown[]; // GET /transcode — the Conversions block above a movie's versions or a series' seasons
@@ -247,7 +248,7 @@ export async function setupApp(page: Page, mock: AppMock = {}): Promise<void> {
     // The engine is an optional dependency, so it is off unless a test says otherwise — the Convert and
     // Merge controls follow it.
     if (path === "/transcode/availability") {
-      return route.fulfill({ json: { available: mock.transcodeAvailable ?? false, explicitVideoSelection: mock.explicitVideoSelection ?? true, dolbyVisionConversion: mock.dolbyVisionConversion ?? false, videoPartJoining: mock.videoPartJoining ?? false } });
+      return route.fulfill({ json: { available: mock.transcodeAvailable ?? false, explicitVideoSelection: mock.explicitVideoSelection ?? true, dolbyVisionConversion: mock.dolbyVisionConversion ?? false, videoPartJoining: mock.videoPartJoining ?? false, encoderQualityOptions: mock.encoderQualityOptions } });
     }
     if (path === "/transcode/languages") {
       return route.fulfill({ json: mock.transcodeLanguages ?? ["eng", "ger", "rus", "ukr"] });

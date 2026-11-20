@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cleanTrackSelection, compositionReason, extractionReason, selectedOutputEstimate, toggleTrackSelection, trackSelectionSource, trackJobInput, versionNameError, type TrackJobSettings } from "./track-actions";
-import type { LibraryMediaSource, MediaStream } from "./media-server";
+import type { EncoderQualityOption, LibraryMediaSource, MediaStream } from "./media-server";
 const stream = (id: string, type: string, index: number, extra: Partial<MediaStream> = {}) => ({ id, type, index, isExternal: false, title: null, bitrate: 1000, codec: "aac", ...extra }) as MediaStream;
 const video = stream("v", "Video", 3, { codec: "hevc", height: 1080 });
 const audio = stream("a", "Audio", 1);
@@ -8,6 +8,8 @@ const sidecar = stream("x", "Audio", 1000, { isExternal: true });
 const sub = stream("s", "Subtitle", 5, { codec: "subrip" });
 const source = { id: "source", container: "mkv", streams: [video, audio, sidecar, sub], durationTicks: 10_000_000 } as LibraryMediaSource;
 const settings: TrackJobSettings = { operation: "remux", versionName: "Remux", titles: {}, codec: "hevc", hardware: "auto", quality: "high", resolution: "source", reencoded: [], dolbyVision: false };
+const crfOption: EncoderQualityOption = { videoCodec: "hevc", hardwareAcceleration: "none", parameter: "crf", min: 0, max: 51, step: 0.01, defaultValue: 20 };
+const qpOption: EncoderQualityOption = { videoCodec: "h264", hardwareAcceleration: "vaapi", parameter: "qp", min: 0, max: 51, step: 1, defaultValue: 22 };
 describe("grid track actions", () => {
   it("validates a version name and submits it independently of codec and track titles", () => {
     for (const name of ["", "   ", "../escape", "folder\\name", "bad:name", "...", "a\u0000b", "x".repeat(121)]) expect(versionNameError(name)).not.toBeNull();
@@ -62,6 +64,30 @@ describe("grid track actions", () => {
     const body = trackJobInput(source, [video, audio, sidecar], { ...settings, operation: "convert", reencoded: ["a", "x"], resolution: "720", quality: "small", dolbyVision: true });
     expect(body).toMatchObject({ videoCodec: "hevc", videoStreamIndex: 3, maxHeight: 720, qualityLevel: "small", audioTargets: [{ streamId: "a", codec: "eac3", bitrate: 256 }] });
     expect(body.dolbyVision).toBeUndefined();
+  });
+  it.each([0, 14.5, 14.09, 51])("sends CRF %s for software HEVC at the original resolution", value => {
+    const body = trackJobInput(source, [video, audio, sub], { ...settings, operation: "convert", hardware: "none", encoderQuality: { option: crfOption, value } });
+    expect(body).toMatchObject({ videoCodec: "hevc", hardwareAcceleration: "none", encoderQuality: value,
+      maxHeight: null, audioStreamIndexes: [1], subtitleStreamIndexes: [5] });
+    expect(JSON.parse(JSON.stringify(body))).not.toHaveProperty("qualityLevel");
+  });
+  it.each([-1, 14.555, 51.5, NaN, Infinity])("rejects invalid CRF %s", value => {
+    expect(() => trackJobInput(source, [video, audio], {
+      ...settings, operation: "convert", hardware: "none", encoderQuality: { option: crfOption, value },
+    })).toThrow(/quality value/);
+  });
+  it("sends an integer hardware quality value only for its own codec and encoder", () => {
+    const matching: TrackJobSettings = {
+      ...settings, operation: "convert", codec: "h264", hardware: "vaapi", encoderQuality: { option: qpOption, value: 19 },
+    };
+    expect(trackJobInput(source, [video, audio], matching))
+      .toMatchObject({ videoCodec: "h264", hardwareAcceleration: "vaapi", encoderQuality: 19, qualityLevel: undefined });
+    for (const mismatch of [
+      { ...matching, codec: "hevc" }, { ...matching, hardware: "auto" }, { ...matching, operation: "remux" } as const,
+      { ...matching, encoderQuality: { option: qpOption, value: 19.5 } },
+    ]) {
+      expect(() => trackJobInput(source, [video, audio], mismatch)).toThrow(/quality value/);
+    }
   });
   it.each([1, 2, 6, 8, null])("remux can re-encode %s-channel audio while copying video and other tracks", channels => {
     const dub = stream("dub", "Audio", 6, { channels, codec: "dts" });

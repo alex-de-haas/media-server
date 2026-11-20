@@ -7,6 +7,10 @@ namespace MediaServer.Api.Transcoding;
 
 public sealed partial class TranscodeService
 {
+    private static readonly TimeSpan ExportSubmissionRetryDelay = TimeSpan.FromSeconds(30);
+    // Explicit video selection can run two 30-second probes before the engine records admission.
+    private static readonly TimeSpan ExportCancellationGrace = TimeSpan.FromSeconds(65);
+
     private async Task SubmitExportAsync(TranscodeJob job, CancellationToken ct)
     {
         var request = JsonSerializer.Deserialize<TranscodeJobRequest>(job.ExportSubmissionJson!)
@@ -51,11 +55,37 @@ public sealed partial class TranscodeService
         {
             if (job.State != TranscodeJobState.Completed)
             {
+                var inspectionStartedAt = _time.GetUtcNow();
                 var snapshot = await engine.InspectAsync(job.EngineJobId, ct);
-                if (snapshot is null && job.ExportSubmissionJson is not null &&
-                    (job.CancellationRequested || job.LastSubmissionAt is null ||
-                     DateTimeOffset.UtcNow - job.LastSubmissionAt > TimeSpan.FromSeconds(30)))
+                if (snapshot is null)
                 {
+                    var now = _time.GetUtcNow();
+                    // A delayed 404 can describe a point before admission finished.
+                    var graceReferenceTime = job.CancellationRequested ? inspectionStartedAt : now;
+                    var grace = job.CancellationRequested ? ExportCancellationGrace : ExportSubmissionRetryDelay;
+                    if (job.LastSubmissionAt is { } submittedAt && graceReferenceTime - submittedAt <= grace)
+                        return;
+                    if (job.CancellationRequested)
+                    {
+                        // An unconfigured engine's empty local snapshot cannot confirm absence.
+                        if (engine is DisabledTranscodeEngine) return;
+                        job.State = TranscodeJobState.Cancelled;
+                        job.CompletedAt = now;
+                        job.Error = null;
+                        await database.SaveChangesAsync(ct);
+                        return;
+                    }
+                    if (job.ExportSubmissionJson is null) return;
+                    if (job.EncoderQuality is { } value &&
+                        EncoderQualityError(value, job.VideoCodec, job.HardwareAcceleration, await engine.GetToolingAsync(ct), out _) is { } error)
+                    {
+                        if (job.Error != error)
+                        {
+                            job.Error = error;
+                            await database.SaveChangesAsync(ct);
+                        }
+                        return;
+                    }
                     await SubmitExportAsync(job, ct);
                     if (job.State == TranscodeJobState.Failed) return;
                     snapshot = await engine.InspectAsync(job.EngineJobId, ct);

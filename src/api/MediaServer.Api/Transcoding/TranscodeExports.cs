@@ -44,9 +44,17 @@ public sealed class TranscodeExports(MediaServerSettings settings)
     public void Delete(TranscodeJob job)
     {
         var absolute = Resolve(job);
-        if (Directory.Exists(absolute)) throw new TranscodeRequestException("An export file was replaced by a directory.");
-        File.Delete(absolute);
         var directory = Path.GetDirectoryName(absolute)!;
+        if (Directory.Exists(absolute)) throw new TranscodeRequestException("An export file was replaced by a directory.");
+        try
+        {
+            File.Delete(absolute);
+        }
+        catch (DirectoryNotFoundException) when (Directory.Exists(Path.GetDirectoryName(directory)!) && !Directory.Exists(directory))
+        {
+            // A job cancelled before admission may never have created its directory.
+            return;
+        }
         if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
             Directory.Delete(directory);
     }

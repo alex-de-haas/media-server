@@ -108,7 +108,7 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
                 .Select(entry => new WireOutput(
                     entry.MountLabel, entry.RelativePath, entry.StreamIndex, entry.Codec, entry.Language, entry.Title))
                 .ToList(),
-            request.DolbyVision, request.VideoStreamIndex, request.ClientJobId);
+            request.DolbyVision, request.VideoStreamIndex, request.ClientJobId, request.EncoderQuality);
 
         using var cts = ControlCts(cancellationToken);
         using var response = request.Bluray is { } selection
@@ -192,7 +192,13 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         {
             using var cts = ControlCts(cancellationToken);
             var hardware = await _http.GetFromJsonAsync<WireHardware>("/hardware", Json, cts.Token);
-            return new TranscodeTooling(hardware?.Tools?.DolbyVisionConversion == true, hardware?.VideoPartJoining == true, hardware?.Tools?.BlurayImport == true, hardware?.ExplicitVideoSelection == true, hardware?.IdempotentTranscodes == true);
+            return new TranscodeTooling(
+                hardware?.Tools?.DolbyVisionConversion == true,
+                hardware?.VideoPartJoining == true,
+                hardware?.Tools?.BlurayImport == true,
+                hardware?.ExplicitVideoSelection == true,
+                hardware?.IdempotentTranscodes == true,
+                hardware?.EncoderQualityOptions);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -362,10 +368,12 @@ public sealed class RemoteTranscodeEngine : ITranscodeEngine, IHostedService, ID
         IReadOnlyList<WireMetadataOverride>? MetadataOverrides = null,
         IReadOnlyList<WireAudioTarget>? AudioTargets = null,
         IReadOnlyList<WireOutput>? Outputs = null,
-        string? DolbyVision = null, int? VideoStreamIndex = null, Guid? ClientJobId = null);
+        string? DolbyVision = null, int? VideoStreamIndex = null, Guid? ClientJobId = null, double? EncoderQuality = null);
 
-    /// <summary>The engine's <c>GET /hardware</c>, read for its <c>tools</c> block alone.</summary>
-    private sealed record WireHardware(WireTools? Tools, bool VideoPartJoining = false, bool ExplicitVideoSelection = false, bool IdempotentTranscodes = false);
+    /// <summary>The engine's tooling and capabilities from <c>GET /hardware</c>.</summary>
+    private sealed record WireHardware(
+        WireTools? Tools, bool VideoPartJoining = false, bool ExplicitVideoSelection = false, bool IdempotentTranscodes = false,
+        IReadOnlyList<EncoderQualityOption>? EncoderQualityOptions = null);
 
     private sealed record WireTools(bool DolbyVisionConversion, string? DoviTool, string? Mkvtoolnix, bool BlurayImport = false);
 
