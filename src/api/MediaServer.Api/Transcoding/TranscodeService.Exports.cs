@@ -7,7 +7,9 @@ namespace MediaServer.Api.Transcoding;
 
 public sealed partial class TranscodeService
 {
-    private static readonly TimeSpan ExportSubmissionGrace = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ExportSubmissionRetryDelay = TimeSpan.FromSeconds(30);
+    // Explicit video selection can run two 30-second probes before the engine records admission.
+    private static readonly TimeSpan ExportCancellationGrace = TimeSpan.FromSeconds(65);
 
     private async Task SubmitExportAsync(TranscodeJob job, CancellationToken ct)
     {
@@ -58,7 +60,8 @@ public sealed partial class TranscodeService
                 {
                     var now = DateTimeOffset.UtcNow;
                     // An admission may still be settling after a lost response, even if GET returns 404.
-                    if (job.LastSubmissionAt is { } submittedAt && now - submittedAt <= ExportSubmissionGrace)
+                    var grace = job.CancellationRequested ? ExportCancellationGrace : ExportSubmissionRetryDelay;
+                    if (job.LastSubmissionAt is { } submittedAt && now - submittedAt <= grace)
                         return;
                     if (job.CancellationRequested)
                     {

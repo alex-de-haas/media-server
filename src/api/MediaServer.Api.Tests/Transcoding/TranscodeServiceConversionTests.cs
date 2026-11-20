@@ -256,7 +256,7 @@ public sealed class TranscodeServiceConversionTests : IDisposable
             Assert.NotNull(job.ExportSubmissionJson);
             await Assert.ThrowsAsync<LibraryFileBusyException>(() => service.RemoveAsync(job.Id, true, default));
             if (cancel) await service.CancelAsync(job.Id, default);
-            job.LastSubmissionAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            job.LastSubmissionAt = DateTimeOffset.UtcNow.AddSeconds(cancel ? 0 : -45);
             await _context.SaveChangesAsync();
             var probe = IMediaProbe.Imposter();
             probe.ProbeAsync(Arg<string>.Any(), Arg<CancellationToken>.Any())
@@ -353,13 +353,15 @@ public sealed class TranscodeServiceConversionTests : IDisposable
                 });
 
             options = newerEngine ? [] : null;
+            job.LastSubmissionAt = DateTimeOffset.UtcNow.AddSeconds(-45);
+            await _context.SaveChangesAsync();
             Assert.True(await service.CancelAsync(response.Id, default));
             await service.ReconcileExportAsync(job, importer, default);
             Assert.Equal(TranscodeJobState.Queued, job.State);
             Assert.Null(job.CompletedAt);
             Assert.Single(submissions);
 
-            job.LastSubmissionAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            job.LastSubmissionAt = DateTimeOffset.UtcNow.AddSeconds(-75);
             await _context.SaveChangesAsync();
             var disabledService = new TranscodeService(_context, new DisabledTranscodeEngine(), new CatalogPathSandbox(), settings,
                 new LibraryMoveGuard(_context, new LibraryMoveQueue()), NullLogger<TranscodeService>.Instance);
