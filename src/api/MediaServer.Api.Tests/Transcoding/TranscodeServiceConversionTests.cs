@@ -219,7 +219,6 @@ public sealed class TranscodeServiceConversionTests : IDisposable
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
-    [InlineData(false, true)]
     [InlineData(true, true)]
     public async Task Unconfirmed_exports_reconcile_the_same_id_before_completion_or_cancellation(bool accepted, bool cancel)
     {
@@ -264,6 +263,7 @@ public sealed class TranscodeServiceConversionTests : IDisposable
                 .Returns(Task.FromResult(new ProbeResult("mkv", 10, null, 100, [])));
             var importer = new TranscodeOutputImporter(_context, new CatalogPathSandbox(), probe.Instance(),
                 NullLogger<TranscodeOutputImporter>.Instance, settings);
+            if (cancel) options = [];
             if (!accepted)
             {
                 options = null;
@@ -298,6 +298,90 @@ public sealed class TranscodeServiceConversionTests : IDisposable
                 Assert.True(job.OutputImported);
                 Assert.Equal(path, await service.ExportFileAsync(job.Id, default));
             }
+        }
+        finally { output.Delete(true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cancelling_an_absent_export_waits_for_admission_and_authoritative_inspection(bool newerEngine)
+    {
+        var output = Directory.CreateDirectory(Path.Combine(OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath(),
+            "export-cancel-" + Guid.NewGuid().ToString("N")));
+        try
+        {
+            var settings = new MediaServerSettings { CatalogMountRoots = Settings.CatalogMountRoots,
+                TranscodeOutputRoots = [new("results", output.FullName)] };
+            var engine = ITranscodeEngine.Imposter();
+            IReadOnlyList<EncoderQualityOption>? options = AvailableEncoderQualityOptions;
+            engine.GetToolingAsync(Arg<CancellationToken>.Any()).Returns((CancellationToken _) =>
+                Task.FromResult(new TranscodeTooling(false, IdempotentTranscodes: true, EncoderQualityOptions: options)));
+            var submissions = new List<TranscodeJobRequest>();
+            engine.CreateAsync(Arg<TranscodeJobRequest>.Any(), Arg<CancellationToken>.Any())
+                .Returns((TranscodeJobRequest request, CancellationToken _) =>
+                {
+                    submissions.Add(request);
+                    return Task.FromException<JobDescriptor>(new HttpRequestException("lost response"));
+                });
+
+            var service = new TranscodeService(_context, engine.Instance(), new CatalogPathSandbox(), settings,
+                new LibraryMoveGuard(_context, new LibraryMoveQueue()), NullLogger<TranscodeService>.Instance);
+            var response = await service.CreateAsync(new(_episodeSourceId, "hevc", "none", null,
+                OutputMountLabel: "results", EncoderQuality: 14.5), default);
+            var job = await _context.TranscodeJobs.SingleAsync();
+            var importer = new TranscodeOutputImporter(_context, new CatalogPathSandbox(), IMediaProbe.Imposter().Instance(),
+                NullLogger<TranscodeOutputImporter>.Instance, settings);
+
+            var inspectionUnavailable = false;
+            engine.InspectAsync(Arg<string>.Any(), Arg<CancellationToken>.Any())
+                .Returns((string id, CancellationToken _) =>
+                {
+                    Assert.Equal(job.EngineJobId, id);
+                    return inspectionUnavailable
+                        ? Task.FromException<JobSnapshot>(new HttpRequestException("engine unavailable"))
+                        : Task.FromResult<JobSnapshot>(null!);
+                });
+            var removals = 0;
+            engine.RemoveAsync(Arg<string>.Any(), Arg<bool>.Any(), Arg<CancellationToken>.Any())
+                .Returns((string id, bool deleteOutput, CancellationToken _) =>
+                {
+                    Assert.Equal(job.EngineJobId, id);
+                    Assert.False(deleteOutput);
+                    removals++;
+                    return Task.CompletedTask;
+                });
+
+            options = newerEngine ? [] : null;
+            Assert.True(await service.CancelAsync(response.Id, default));
+            await service.ReconcileExportAsync(job, importer, default);
+            Assert.Equal(TranscodeJobState.Queued, job.State);
+            Assert.Null(job.CompletedAt);
+            Assert.Single(submissions);
+
+            job.LastSubmissionAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await _context.SaveChangesAsync();
+            var disabledService = new TranscodeService(_context, new DisabledTranscodeEngine(), new CatalogPathSandbox(), settings,
+                new LibraryMoveGuard(_context, new LibraryMoveQueue()), NullLogger<TranscodeService>.Instance);
+            await disabledService.ReconcileExportAsync(job, importer, default);
+            Assert.Equal(TranscodeJobState.Queued, job.State);
+            inspectionUnavailable = true;
+            await service.ReconcileExportAsync(job, importer, default);
+            Assert.Equal(TranscodeJobState.Queued, job.State);
+            Assert.Null(job.CompletedAt);
+            Assert.Contains("unconfirmed", job.Error);
+            await Assert.ThrowsAsync<LibraryFileBusyException>(() => service.RemoveAsync(response.Id, true, default));
+
+            inspectionUnavailable = false;
+            await service.ReconcileExportAsync(job, importer, default);
+            Assert.Equal(TranscodeJobState.Cancelled, job.State);
+            Assert.NotNull(job.CompletedAt);
+            Assert.Null(job.Error);
+            Assert.Single(submissions);
+            Assert.True(await service.RemoveAsync(response.Id, true, default));
+            Assert.Equal(1, removals);
+            Assert.Empty(await _context.TranscodeJobs.ToListAsync());
+            Assert.Empty(output.GetFileSystemInfos());
         }
         finally { output.Delete(true); }
     }

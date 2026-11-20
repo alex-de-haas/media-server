@@ -512,7 +512,7 @@ test("Convert exposes encoding controls and selected audio settings; cancelled o
   await expect(dialog.getByRole("checkbox", { name: /Re-encode Audio track 2/ })).not.toBeChecked();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Convert", exact: true }).click();
-  await expect(dialog.getByLabel("Quality", { exact: true })).toHaveText("High");
+  await expect(dialog.getByLabel("Quality", { exact: true }).locator('[data-slot="select-value"]')).toHaveText("High");
   await expect(dialog.getByRole("checkbox", { name: /Re-encode Audio track 2/ })).not.toBeChecked();
   await dialog.getByLabel("Codec", { exact: true }).click();
   await page.getByRole("option", { name: /H.264 —/ }).click();
@@ -618,7 +618,7 @@ test("software HEVC keeps quality presets on older transcode engines", async ({ 
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Encoder", { exact: true }).click();
   await page.getByRole("option", { name: "Software — CPU" }).click();
-  await expect(dialog.getByLabel("Quality", { exact: true })).toHaveText("High");
+  await expect(dialog.getByLabel("Quality", { exact: true }).locator('[data-slot="select-value"]')).toHaveText("High");
   await expect(dialog.getByRole("slider")).toHaveCount(0);
 });
 

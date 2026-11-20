@@ -7,6 +7,8 @@ namespace MediaServer.Api.Transcoding;
 
 public sealed partial class TranscodeService
 {
+    private static readonly TimeSpan ExportSubmissionGrace = TimeSpan.FromSeconds(30);
+
     private async Task SubmitExportAsync(TranscodeJob job, CancellationToken ct)
     {
         var request = JsonSerializer.Deserialize<TranscodeJobRequest>(job.ExportSubmissionJson!)
@@ -52,10 +54,23 @@ public sealed partial class TranscodeService
             if (job.State != TranscodeJobState.Completed)
             {
                 var snapshot = await engine.InspectAsync(job.EngineJobId, ct);
-                if (snapshot is null && job.ExportSubmissionJson is not null &&
-                    (job.CancellationRequested || job.LastSubmissionAt is null ||
-                     DateTimeOffset.UtcNow - job.LastSubmissionAt > TimeSpan.FromSeconds(30)))
+                if (snapshot is null)
                 {
+                    var now = DateTimeOffset.UtcNow;
+                    // An admission may still be settling after a lost response, even if GET returns 404.
+                    if (job.LastSubmissionAt is { } submittedAt && now - submittedAt <= ExportSubmissionGrace)
+                        return;
+                    if (job.CancellationRequested)
+                    {
+                        // An unconfigured engine's empty local snapshot cannot confirm absence.
+                        if (engine is DisabledTranscodeEngine) return;
+                        job.State = TranscodeJobState.Cancelled;
+                        job.CompletedAt = now;
+                        job.Error = null;
+                        await database.SaveChangesAsync(ct);
+                        return;
+                    }
+                    if (job.ExportSubmissionJson is null) return;
                     if (job.EncoderQuality is { } value &&
                         EncoderQualityError(value, job.VideoCodec, job.HardwareAcceleration, await engine.GetToolingAsync(ct), out _) is { } error)
                     {
