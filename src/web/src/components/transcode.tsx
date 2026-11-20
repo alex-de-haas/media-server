@@ -429,7 +429,11 @@ export function TranscodeJobRow({ job, showManagementLink = true }: { job: Trans
           <span>{stateLabel(job)}</span>
         </ActivityStats>
       )}
-      {job.state === "Failed" && job.error && <p className="text-destructive text-xs">{job.error}</p>}
+      {job.error && (job.state === "Failed" || (active && job.outputMountLabel)) && (
+        <p role={active ? "status" : undefined} className={`break-words text-xs ${active ? "text-muted-foreground" : "text-destructive"}`}>
+          {job.error}
+        </p>
+      )}
       {job.outputMountLabel && !active && <div className="flex items-center gap-3 text-sm">
         {job.state === "Completed" && <Button variant="link" size="sm" disabled={downloadExport.isPending} onClick={() => downloadExport.mutate()}>Download export</Button>}
         <Button size="sm" variant="outline" onClick={() => setDeleteExportOpen(true)}>Delete export</Button>

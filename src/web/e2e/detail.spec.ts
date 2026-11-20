@@ -525,11 +525,17 @@ test("Convert exposes encoding controls and selected audio settings; cancelled o
 });
 
 test("native encoder quality requires an explicit codec and accepts fractional CRF", async ({ page }) => {
+  const retryError = "The selected encoder is unavailable for this video codec.";
   await setupApp(page, { detail: { m1: escapeFromNewYork() }, transcodeAvailable: true,
     encoderQualityOptions: [{ videoCodec: "hevc", hardwareAcceleration: "none", parameter: "crf", min: 0, max: 51, step: 0.01, defaultValue: 20 }],
-    transcodeJobs: [{ ...aTranscodeJob("job-crf", "m1", "Existing conversion"), qualityLevel: null, encoderQuality: 0, encoderQualityParameter: "crf" }] });
+    transcodeJobs: [{
+      ...aTranscodeJob("job-crf", "m1", "Existing conversion", "Queued"),
+      hardwareAcceleration: "none", qualityLevel: null, encoderQuality: 0, encoderQualityParameter: "crf",
+      outputMountLabel: "results", percentComplete: 0, error: retryError,
+    }] });
   await openTrackGrid(page);
   await expect(page.getByText(/HEVC · CRF 0/)).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: retryError })).toBeVisible();
   await page.getByRole("button", { name: "Convert", exact: true }).click();
   const dialog = page.getByRole("dialog");
   const slider = dialog.getByRole("slider", { name: "CRF slider" });
