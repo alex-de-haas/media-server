@@ -56,6 +56,16 @@ public sealed partial class TranscodeService
                     (job.CancellationRequested || job.LastSubmissionAt is null ||
                      DateTimeOffset.UtcNow - job.LastSubmissionAt > TimeSpan.FromSeconds(30)))
                 {
+                    if (job.EncoderQuality is { } value &&
+                        EncoderQualityError(value, job.VideoCodec, job.HardwareAcceleration, await engine.GetToolingAsync(ct), out _) is { } error)
+                    {
+                        if (job.Error != error)
+                        {
+                            job.Error = error;
+                            await database.SaveChangesAsync(ct);
+                        }
+                        return;
+                    }
                     await SubmitExportAsync(job, ct);
                     if (job.State == TranscodeJobState.Failed) return;
                     snapshot = await engine.InspectAsync(job.EngineJobId, ct);

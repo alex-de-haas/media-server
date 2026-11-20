@@ -1625,6 +1625,9 @@ namespace MediaServer.Api.Data.Migrations
                     b.Property<string>("DolbyVision")
                         .HasColumnType("TEXT");
 
+                    b.Property<double?>("EncoderQuality")
+                        .HasColumnType("REAL");
+
                     b.Property<string>("EngineJobId")
                         .IsRequired()
                         .HasColumnType("TEXT");

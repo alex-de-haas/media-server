@@ -49,19 +49,32 @@ public sealed partial class TranscodeService(
         var catalog = item.Catalog ?? throw new TranscodeRequestException("Source's catalog is unavailable.");
         var jobId = Guid.NewGuid();
         var exportLabel = request.OutputMountLabel;
+        TranscodeTooling? tooling = null;
         if (exportLabel is null) CatalogAccess.RequireWritable(catalog);
-        else if (!(await engine.GetToolingAsync(cancellationToken)).IdempotentTranscodes)
+        else if (!(tooling = await engine.GetToolingAsync(cancellationToken)).IdempotentTranscodes)
             throw new TranscodeRequestException("Update Transcode Engine to 0.14.0 or newer to use recoverable exports.");
 
         var mergeStreams = await ResolveMergeStreamsAsync(request, source, cancellationToken);
         var selectedVideo = ResolveVideoSelection(request, source, mergeStreams);
-        if (selectedVideo is not null && !(await engine.GetToolingAsync(cancellationToken)).ExplicitVideoSelection)
+        if (selectedVideo is not null && !(tooling ??= await engine.GetToolingAsync(cancellationToken)).ExplicitVideoSelection)
             throw new TranscodeRequestException("Update Transcode Engine to use explicit video selection and video track names.");
 
         var isMerge = request.MergeStreamIds is { Count: > 0 };
         var codec = ResolveCodec(request, isMerge);
         var hardware = NormalizeHardware(request.HardwareAcceleration);
-        var qualityLevel = codec == "copy" ? null : NormalizeQualityLevel(request.QualityLevel);
+        var encoderQuality = request.EncoderQuality;
+        if (encoderQuality is { } value)
+        {
+            if (string.IsNullOrWhiteSpace(request.VideoCodec) || codec == "copy" || hardware == "auto")
+                throw new TranscodeRequestException("Choose a video codec and a specific encoder to use a native quality value.");
+            if (!string.IsNullOrWhiteSpace(request.QualityLevel))
+                throw new TranscodeRequestException("Choose either a native encoder quality value or a quality preset.");
+            tooling ??= await engine.GetToolingAsync(cancellationToken);
+            if (EncoderQualityError(value, codec, hardware, tooling, out var canonicalQuality) is { } error)
+                throw new TranscodeRequestException(error);
+            encoderQuality = canonicalQuality;
+        }
+        var qualityLevel = codec == "copy" || encoderQuality is not null ? null : NormalizeQualityLevel(request.QualityLevel);
         var dolbyVision = ResolveDolbyVision(request, codec, source.Streams);
 
         // Resolve track selection and target resolution against the source's probed streams.
@@ -107,8 +120,9 @@ public sealed partial class TranscodeService(
         var outputRelative = versionName is not null
             ? await NamedOutputRelativeAsync(catalog, item, source.Path, versionName, cancellationToken)
             : BuildOutputRelative(
-            source.Path,
-            VersionLabel(codec, targetHeight, isMerge, qualityLevel, audioTargets?.Select(target => target.Codec).ToList(), dolbyVision is not null));
+                source.Path,
+                VersionLabel(codec, targetHeight, isMerge, qualityLevel, audioTargets?.Select(target => target.Codec).ToList(),
+                    dolbyVision is not null, encoderQuality is { } nativeQuality ? FormatEncoderQuality(hardware, nativeQuality) : null));
         string outputAbsolute;
         if (exportLabel is not null)
         {
@@ -174,6 +188,7 @@ public sealed partial class TranscodeService(
             VideoCodec = codec,
             HardwareAcceleration = hardware,
             QualityLevel = qualityLevel,
+            EncoderQuality = encoderQuality,
             ReEncodedAudioTracks = audioTargets?.Count ?? 0,
             DolbyVision = dolbyVision,
             State = TranscodeJobState.Queued,
@@ -183,7 +198,8 @@ public sealed partial class TranscodeService(
             input.Label, input.Relative, output.Label, output.Relative, codec, hardware, qualityLevel,
             targetHeight, audioSelection, subtitleSelection, defaultAudio, defaultSubtitle,
             additionalInputs, metadataOverrides, audioTargets,
-            DolbyVision: dolbyVision, VideoStreamIndex: request.VideoStreamIndex, ClientJobId: exportLabel is null ? null : jobId);
+            DolbyVision: dolbyVision, VideoStreamIndex: request.VideoStreamIndex, ClientJobId: exportLabel is null ? null : jobId,
+            EncoderQuality: encoderQuality);
         if (exportLabel is not null)
         {
             job.ExportSubmissionJson = System.Text.Json.JsonSerializer.Serialize(engineRequest);
@@ -480,7 +496,8 @@ public sealed partial class TranscodeService(
         bool isMerge = false,
         string? qualityLevel = null,
         IReadOnlyCollection<string>? audioCodecs = null,
-        bool dolbyVision = false)
+        bool dolbyVision = false,
+        string? encoderQualityLabel = null)
     {
         var parts = new List<string>(4);
 
@@ -495,7 +512,12 @@ public sealed partial class TranscodeService(
 
         // Two jobs differing only by quality must not collide. The default is left out: it never varies, and
         // adding a word to every existing path would rename versions that are already on disk.
-        if (codec != "copy" && qualityLevel is not null && qualityLevel != DefaultQualityLevel)
+        if (encoderQualityLabel is not null)
+        {
+            // q:v is the FFmpeg option name, but a colon cannot go in an output filename.
+            parts.Add(encoderQualityLabel.Replace(':', '-'));
+        }
+        else if (codec != "copy" && qualityLevel is not null && qualityLevel != DefaultQualityLevel)
         {
             parts.Add($"{char.ToUpperInvariant(qualityLevel[0])}{qualityLevel[1..]}");
         }
@@ -775,6 +797,42 @@ public sealed partial class TranscodeService(
     /// equal, so omitting it behaves the same whichever encoder the host reaches.</summary>
     internal const string DefaultQualityLevel = "high";
 
+    private static string? EncoderQualityError(
+        double value, string codec, string hardware, TranscodeTooling tooling, out double canonicalQuality)
+    {
+        canonicalQuality = value;
+        if (tooling.EncoderQualityOptions is not { } options)
+            return "Update Transcode Engine to use a native encoder quality value.";
+        var option = options.FirstOrDefault(option => option.VideoCodec == codec && option.HardwareAcceleration == hardware);
+        if (option is null)
+            return "The selected encoder is unavailable for this video codec.";
+        if (!double.IsFinite(value) || value < option.Min || value > option.Max)
+            return FormattableString.Invariant($"The selected encoder's {option.Parameter} value must be between {option.Min} and {option.Max}.");
+        if (option.Step == 1 && value != Math.Truncate(value))
+            return $"The selected encoder's {option.Parameter} value must be a whole number.";
+        if (option.Step == 0.01)
+        {
+            // Ignore binary floating-point noise and persist the value that the encoder applies.
+            canonicalQuality = Math.Round(value, 2);
+            if (Math.Abs(value - canonicalQuality) > 1e-9)
+                return $"The selected encoder's {option.Parameter} value accepts up to two decimal places.";
+        }
+        return null;
+    }
+
+    internal static string FormatEncoderQuality(string hardware, double value)
+    {
+        var label = hardware switch
+        {
+            "none" => "CRF",
+            "vaapi" => "VAAPI QP",
+            "amf" => "AMF QP",
+            "videotoolbox" => "VideoToolbox q:v",
+            _ => throw new ArgumentOutOfRangeException(nameof(hardware)),
+        };
+        return FormattableString.Invariant($"{label} {value}");
+    }
+
     private static string NormalizeQualityLevel(string? raw) => raw?.Trim().ToLowerInvariant() switch
     {
         null or "" => DefaultQualityLevel,
@@ -797,7 +855,9 @@ public sealed partial class TranscodeService(
     {
         null or "" or "auto" => "auto",
         "vaapi" => "vaapi",
+        "amf" => "amf",
+        "videotoolbox" => "videotoolbox",
         "none" or "software" or "cpu" => "none",
-        _ => throw new TranscodeRequestException($"hardwareAcceleration '{raw}' is not supported (use 'auto', 'vaapi' or 'none')."),
+        _ => throw new TranscodeRequestException($"hardwareAcceleration '{raw}' is not supported (use 'auto', 'none', 'vaapi', 'amf' or 'videotoolbox')."),
     };
 }

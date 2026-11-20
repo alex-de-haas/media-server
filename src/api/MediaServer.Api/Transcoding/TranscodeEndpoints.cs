@@ -23,7 +23,15 @@ public static class TranscodeEndpoints
         {
             var available = engine is not DisabledTranscodeEngine;
             var tooling = available ? await engine.GetToolingAsync(cancellationToken) : TranscodeTooling.None;
-            return Results.Ok(new { available, dolbyVisionConversion = tooling.DolbyVisionConversion, videoPartJoining = tooling.VideoPartJoining, blurayImport = tooling.BlurayImport, explicitVideoSelection = tooling.ExplicitVideoSelection });
+            return Results.Ok(new
+            {
+                available,
+                dolbyVisionConversion = tooling.DolbyVisionConversion,
+                videoPartJoining = tooling.VideoPartJoining,
+                blurayImport = tooling.BlurayImport,
+                explicitVideoSelection = tooling.ExplicitVideoSelection,
+                encoderQualityOptions = tooling.EncoderQualityOptions,
+            });
         });
 
         // Every language tag a track edit may carry — the canonical forms plus the spellings that fold onto

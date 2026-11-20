@@ -12,10 +12,11 @@ namespace MediaServer.Api.Transcoding;
 /// </para>
 /// <see cref="VideoCodec"/>
 /// (<c>h264</c>/<c>hevc</c>, default <c>hevc</c>, or <c>copy</c> to remux the video untouched — lossless and
-/// HDR-safe), <see cref="HardwareAcceleration"/> (<c>auto</c>/<c>vaapi</c>/<c>none</c>, default <c>auto</c>)
+/// HDR-safe), <see cref="HardwareAcceleration"/> (default <c>auto</c>)
 /// and <see cref="QualityLevel"/> (<c>highest</c>/<c>high</c>/<c>balanced</c>/<c>small</c>, default
-/// <c>high</c>) fall back to defaults when omitted. A level is not a CRF: the engine maps it onto whichever
-/// encoder the host can reach, so the same level means the same picture on every one of them.
+/// <c>high</c>) fall back to defaults when omitted. The engine maps quality presets onto the selected
+/// encoder. A request with <see cref="EncoderQuality"/> needs an explicit codec and encoder and leaves
+/// <see cref="QualityLevel"/> empty.
 /// <see cref="MaxHeight"/>
 /// downscales to that height (ignored for <c>copy</c> or when the source is already smaller).
 /// <see cref="AudioStreamIndexes"/>/<see cref="SubtitleStreamIndexes"/> are the source stream indexes to copy
@@ -44,7 +45,8 @@ public sealed record CreateTranscodeRequest(
     int? VideoStreamIndex = null,
     /// <summary>Output version label and filename suffix. Omission keeps automatic naming.</summary>
     string? VersionName = null,
-    string? OutputMountLabel = null);
+    string? OutputMountLabel = null,
+    double? EncoderQuality = null);
 
 /// <summary>
 /// Request to write chosen tracks of a version out as files beside it — the inverse of merging.
@@ -111,7 +113,9 @@ public sealed record TranscodeJobResponse(
     long? OutputSizeBytes,
     // "toProfile81" when the copy also rewrote the picture's Dolby Vision to profile 8.1; null otherwise.
     string? DolbyVision = null,
-    string? OutputMountLabel = null)
+    string? OutputMountLabel = null,
+    double? EncoderQuality = null,
+    string? EncoderQualityParameter = null)
 {
     public static TranscodeJobResponse From(TranscodeJob job, JobSnapshot? snapshot)
     {
@@ -144,7 +148,9 @@ public sealed record TranscodeJobResponse(
             snapshot?.EtaSeconds,
             snapshot?.OutputSizeBytes,
             job.DolbyVision,
-            job.OutputMountLabel);
+            job.OutputMountLabel,
+            job.EncoderQuality,
+            job.EncoderQuality is not null ? EncoderQualityOption.ParameterFor(job.HardwareAcceleration) : null);
     }
 }
 

@@ -89,6 +89,43 @@ public sealed class RemoteTranscodeEngineWireTests
         Assert.Equal(expected, (await engine.GetToolingAsync(CancellationToken.None)).ExplicitVideoSelection);
     }
 
+    [Fact]
+    public async Task Native_quality_options_are_absent_for_older_engines()
+    {
+        using var engine = new RemoteTranscodeEngine(new HttpClient(new HardwareHandler("{}"))
+            { BaseAddress = new Uri("http://engine.local/") }, new(), NullLogger<RemoteTranscodeEngine>.Instance);
+        Assert.Null((await engine.GetToolingAsync(default)).EncoderQualityOptions);
+    }
+
+    [Fact]
+    public async Task Native_quality_options_preserve_the_engine_pair_and_range()
+    {
+        const string report = """
+            {"encoderQualityOptions":[{"videoCodec":"hevc","hardwareAcceleration":"videotoolbox","parameter":"q:v","min":1,"max":100,"step":1,"defaultValue":62}]}
+            """;
+        using var engine = new RemoteTranscodeEngine(new HttpClient(new HardwareHandler(report))
+            { BaseAddress = new Uri("http://engine.local/") }, new(), NullLogger<RemoteTranscodeEngine>.Instance);
+        var option = Assert.Single((await engine.GetToolingAsync(default)).EncoderQualityOptions!);
+        Assert.Equal(new EncoderQualityOption("hevc", "videotoolbox", "q:v", 1, 100, 1, 62), option);
+    }
+
+    [Theory]
+    [InlineData("h264", "none", 14.25)]
+    [InlineData("hevc", "amf", 14)]
+    public async Task Native_quality_reaches_the_jobs_wire_request(string codec, string hardware, double quality)
+    {
+        var handler = new StubHandler();
+        using var engine = new RemoteTranscodeEngine(new HttpClient(handler)
+            { BaseAddress = new Uri("http://engine.local/") }, new(), NullLogger<RemoteTranscodeEngine>.Instance);
+        await engine.CreateAsync(new("movies", "in.mkv", "movies", "out.mkv", codec, hardware, null, EncoderQuality: quality), default);
+
+        using var body = System.Text.Json.JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(quality, body.RootElement.GetProperty("encoderQuality").GetDouble());
+        Assert.Equal(codec, body.RootElement.GetProperty("videoCodec").GetString());
+        Assert.Equal(hardware, body.RootElement.GetProperty("hardwareAcceleration").GetString());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, body.RootElement.GetProperty("qualityLevel").ValueKind);
+    }
+
     private sealed class StubHandler : HttpMessageHandler
     {
         public string? RequestBody { get; private set; }
