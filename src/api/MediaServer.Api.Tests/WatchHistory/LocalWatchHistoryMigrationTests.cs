@@ -36,7 +36,7 @@ public sealed class LocalWatchHistoryMigrationTests
             Title = "Movie", AddedAt = now, UpdatedAt = now,
         };
         // Seed the historical schema explicitly: current Catalog properties include later migrations.
-        await database.Database.ExecuteSqlInterpolatedAsync($"""
+        await database.Database.ExecuteSqlAsync($"""
             INSERT INTO "Catalogs" ("Id", "Name", "Type", "Root", "NamingTemplate", "DefaultKeepSeeding", "CreatedAt", "UpdatedAt")
             VALUES ({catalog.Id}, {catalog.Name}, {(int)catalog.Type}, {catalog.Root}, {"{Title} ({Year})"}, 0, {storedNow}, {storedNow});
             """);
@@ -52,7 +52,7 @@ public sealed class LocalWatchHistoryMigrationTests
                 expected.Add((id, origin, watchedAt));
                 // The fixture names the old required columns explicitly. The current entity cannot
                 // represent them, and an upgrade must not discard imported or unresolved entries.
-                await database.Database.ExecuteSqlInterpolatedAsync($"""
+                await database.Database.ExecuteSqlAsync($"""
                     INSERT INTO "PlaybackHistoryEntries"
                         ("Id", "AppUserId", "MediaItemId", "CreatedAt", "WatchedAt", "Origin",
                          "PlaySessionId", "IdentitySnapshot", "LinkStatus", "ProviderEntryOwned", "ProviderKey", "ProviderHistoryId")
@@ -76,7 +76,7 @@ public sealed class LocalWatchHistoryMigrationTests
         await database.SaveChangesAsync();
         var stateBefore = await database.UserItemData.AsNoTracking().SingleAsync();
         var oldConnection = Guid.NewGuid();
-        await database.Database.ExecuteSqlInterpolatedAsync($"""
+        await database.Database.ExecuteSqlAsync($"""
             INSERT INTO "WatchHistoryConnections"
                 ("Id", "AppUserId", "ProviderKey", "SecretKey", "Status", "ConnectedAt")
             VALUES ({oldConnection}, {user.Id}, 'external', 'old-key', 0, {storedNow});

@@ -309,7 +309,7 @@ public sealed class HeaderMediaProbeTests : IDisposable
     {
         var file = Write(".avi", Avi(microsecondsPerFrame: 41_667, totalFrames: 195_354));
 
-        Assert.Equal(8139.815, Seconds(Probe().TryProbe(file)!), 2);
+        Assert.Equal(8139.815118, Seconds(Probe().TryProbe(file)!), 6);
     }
 
     [Fact]

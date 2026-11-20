@@ -36,6 +36,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -73,6 +74,8 @@ builder.Services.AddScoped<NativeSyncService>();
 // of it deliberately, since it is a BFF contract and not a published one.
 builder.Services.AddOpenApi(NativeSurface.OpenApiDocumentName, options =>
 {
+    // Keep the document on the OpenAPI version supported by the Swift generator.
+    options.OpenApiVersion = OpenApiSpecVersion.OpenApi3_1;
     options.ShouldInclude = description =>
         description.RelativePath?.StartsWith("native/v1", StringComparison.OrdinalIgnoreCase) == true;
     // ASP.NET writes two shapes no code generator can read: a nullable reference as a union with

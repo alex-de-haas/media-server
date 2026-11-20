@@ -25,7 +25,7 @@ public sealed class ManagementJobsIndexMigrationTests
         var storedNow = (string)new UtcDateTimeOffsetConverter()
             .ConvertToProvider(DateTimeOffset.Parse("2026-10-13T00:00:00Z"))!;
         // Seed the previous schema directly so later Job properties cannot change this upgrade fixture.
-        await database.Database.ExecuteSqlInterpolatedAsync($"""
+        await database.Database.ExecuteSqlAsync($"""
             INSERT INTO "Jobs" ("Id", "Type", "RelatedType", "RelatedId", "Status", "Progress", "AttemptCount", "UpdatedAt")
             VALUES ({jobId}, 'library:move', 'media-item', {relatedId}, {(int)JobStatus.Completed}, 100, 2, {storedNow});
             """);

@@ -3,10 +3,10 @@
 
 # Bases pinned by digest for reproducible builds, matching how this repo pins its GitHub Actions.
 # To update, re-pin with:
-#   docker buildx imagetools inspect mcr.microsoft.com/dotnet/<repo>:10.0 --format '{{.Manifest.Digest}}'
+#   docker buildx imagetools inspect mcr.microsoft.com/dotnet/<repo>:11.0 --format '{{.Manifest.Digest}}'
 
 # ---- build ----
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0@sha256:65f3c7c6a25a239ab3e6719f2896147e7b68242ff2d8818dd70498bde6ef8bea AS build
 WORKDIR /src
 
 # Restore against the project file alone first so the package layer caches across source-only changes.
@@ -17,7 +17,7 @@ COPY MediaServer.Api/ MediaServer.Api/
 RUN dotnet publish MediaServer.Api/MediaServer.Api.csproj -c Release -o /app/publish --no-restore
 
 # ---- runtime ----
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0@sha256:bc0d6653979efba491ab3d6f589d691f96c309c3c3ef81325efa6978e7b7f242 AS runtime
 WORKDIR /app
 
 # No ffmpeg. This image used to install the whole package for one binary — ffprobe — which dragged in the

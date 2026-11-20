@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-11-04
+updated: 2026-11-20
 summary: How Media Server is developed under the dev profile and delivered as docker images through GitHub Actions.
 ---
 
@@ -45,8 +45,9 @@ hosty apps logs com.haas.media-server
 
 ## Production Images (`docker` profile, v1 delivery target)
 
-- `api` image: ASP.NET Core app exposing internal `/api` + the realtime (SSE)
-  stream and the public `jellyfin` surface, with `ffprobe` available in the image.
+- `api` image: ASP.NET Core 11 app exposing internal `/api`, the realtime (SSE)
+  stream and the public `jellyfin` surface. Its .NET SDK and runtime bases use
+  Ubuntu 26.04. The amd64 image requires an x86-64-v2 CPU.
   Downloading is delegated to the external `torrent-engine` app (a required cross-app
   dependency), so this image binds **no** raw torrent listener.
 - `web` image: Next.js production server (or static export if later converted),
@@ -98,15 +99,9 @@ minor and patch bumps arrive grouped per ecosystem, majors individually. Hosty
 App SDK bumps form their own group and auto-merge once the required checks pass
 (`.github/workflows/dependabot-auto-merge.yml`).
 
-`Microsoft.OpenApi` is held on the 2.x line, and the bound applies to hand-written
-bumps as much as to Dependabot's. Upstream aligns its major versions with
-ASP.NET Core: 2.x is the line for AspNetCore OpenAPI 10 and is supported until
-November 2028, while 3.x lists no released AspNetCore OpenAPI as supported. Under
-3.x the API does not merely go untested — it does not compile: the
-`Microsoft.AspNetCore.OpenApi` 10 source generator emits an assignment to
-`IOpenApiMediaType.Example`, which 3.x made read-only, so the generated
-`OpenApiXmlCommentSupport.generated.cs` fails with `CS0200`. The bound lifts when
-a released `Microsoft.AspNetCore.OpenApi` adopts 3.x.
+ASP.NET Core OpenAPI 11 uses `Microsoft.OpenApi` 3.x. The API declares the
+dependency directly for its schema transformer, and Dependabot stays on the
+compatible 3.x line.
 
 ### Pull request review
 
