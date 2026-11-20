@@ -29,7 +29,8 @@ public sealed record TranscodeJobRequest(
     IReadOnlyList<EngineJoinInput>? JoinInputs = null,
     Guid? ClientJobId = null,
     MediaServer.Api.Bluray.BluraySelection? Bluray = null,
-    int? VideoStreamIndex = null);
+    int? VideoStreamIndex = null,
+    double? EncoderQuality = null);
 
 /// <summary>A mounted video part, in playback order.</summary>
 public sealed record EngineJoinInput(string? MountLabel, string Path);
@@ -37,9 +38,34 @@ public sealed record EngineJoinInput(string? MountLabel, string Path);
 /// <summary>Optional engine tooling and versioned workflow capabilities. <see cref="DolbyVisionConversion"/> is whether it carries the
 /// tools a profile 7 → 8.1 rewrite runs on (<c>dovi_tool</c> and MKVToolNix); a consumer offers the option
 /// only when it does, because an engine without them refuses the job rather than copying silently.</summary>
-public sealed record TranscodeTooling(bool DolbyVisionConversion, bool VideoPartJoining = false, bool BlurayImport = false, bool ExplicitVideoSelection = false, bool IdempotentTranscodes = false)
+public sealed record TranscodeTooling(
+    bool DolbyVisionConversion,
+    bool VideoPartJoining = false,
+    bool BlurayImport = false,
+    bool ExplicitVideoSelection = false,
+    bool IdempotentTranscodes = false,
+    IReadOnlyList<EncoderQualityOption>? EncoderQualityOptions = null)
 {
     public static readonly TranscodeTooling None = new(false);
+}
+
+/// <summary>The native quality control for one codec and encoder currently available at the engine.</summary>
+public sealed record EncoderQualityOption(
+    string VideoCodec,
+    string HardwareAcceleration,
+    string Parameter,
+    double Min,
+    double Max,
+    double Step,
+    double DefaultValue)
+{
+    internal static string? ParameterFor(string hardwareAcceleration) => hardwareAcceleration switch
+    {
+        "none" => "crf",
+        "vaapi" or "amf" => "qp",
+        "videotoolbox" => "q:v",
+        _ => null,
+    };
 }
 
 /// <summary>

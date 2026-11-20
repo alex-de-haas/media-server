@@ -1,4 +1,4 @@
-import { isBluraySource, type CreateTranscodeInput, type LibraryMediaSource, type MediaStream } from "./media-server";
+import { isBluraySource, type CreateTranscodeInput, type EncoderQualityOption, type EncoderQualityParameter, type LibraryMediaSource, type MediaStream } from "./media-server";
 
 export type TrackSelection = { sourceId: string; streamIds: string[] };
 export type TrackOperation = "remux" | "convert";
@@ -50,6 +50,16 @@ export function compositionReason(streams: MediaStream[]): string | null {
 export const trackLabel = (stream: MediaStream) => stream.isExternal ? stream.fileName ?? stream.type : `${stream.type === "Subtitle" ? "Subtitle" : stream.type} track ${stream.index + 1}`;
 export const audioBitrateFor = (channels: number | null) => (channels ?? 2) > 2 ? 640 : channels === 1 ? 128 : 256;
 
+export function isValidEncoderQuality(option: EncoderQualityOption, value: number | undefined): value is number {
+  if (value === undefined || !Number.isFinite(value) || value < option.min || value > option.max) return false;
+  const steps = (value - option.min) / option.step;
+  return Math.abs(steps - Math.round(steps)) < 1e-9;
+}
+
+export function encoderQualityLabel(parameter: EncoderQualityParameter): string {
+  return parameter === "q:v" ? parameter : parameter.toUpperCase();
+}
+
 export interface TrackJobSettings {
   versionName: string;
   operation: TrackOperation;
@@ -57,6 +67,7 @@ export interface TrackJobSettings {
   codec: string;
   hardware: string;
   quality: string;
+  encoderQuality?: { option: EncoderQualityOption; value: number };
   resolution: string;
   dolbyVision: boolean;
   reencoded: string[];
@@ -66,6 +77,11 @@ export function trackJobInput(source: LibraryMediaSource, selected: MediaStream[
   const reason = compositionReason(selected);
   if (reason || selected.some(stream => !source.streams.includes(stream))) throw new Error(reason ?? "The selected tracks have changed. Select them again.");
   const copy = settings.operation === "remux";
+  const encoderQuality = settings.encoderQuality;
+  if (encoderQuality && (copy || settings.codec !== encoderQuality.option.videoCodec
+    || settings.hardware !== encoderQuality.option.hardwareAcceleration || !isValidEncoderQuality(encoderQuality.option, encoderQuality.value))) {
+    throw new Error("Choose a valid quality value for the selected codec and encoder.");
+  }
   const video = selected.find(stream => stream.type === "Video")!;
   return {
     versionName: settings.versionName.trim(),
@@ -73,7 +89,8 @@ export function trackJobInput(source: LibraryMediaSource, selected: MediaStream[
     videoStreamIndex: video.index,
     videoCodec: copy ? "copy" : settings.codec,
     hardwareAcceleration: copy ? undefined : settings.hardware,
-    qualityLevel: copy ? null : settings.quality,
+    qualityLevel: copy ? null : encoderQuality ? undefined : settings.quality,
+    encoderQuality: encoderQuality?.value,
     maxHeight: copy || settings.resolution === "source" ? null : Number(settings.resolution),
     audioStreamIndexes: selected.filter(stream => !stream.isExternal && stream.type === "Audio").map(stream => stream.index),
     subtitleStreamIndexes: selected.filter(stream => !stream.isExternal && stream.type === "Subtitle").map(stream => stream.index),

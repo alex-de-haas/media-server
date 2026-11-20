@@ -1,6 +1,6 @@
 ---
 created: 2026-07-29
-updated: 2026-10-17
+updated: 2026-11-19
 summary: Fixed-selection Remux and Convert confirmations with track names, optional E-AC-3 audio, video encoding controls and Dolby Vision rewriting.
 ---
 
@@ -48,15 +48,24 @@ The selected video's index, metadata and edited name survive the rewrite pipelin
 
 ## Convert
 
-Convert always re-encodes the selected video. Its controls are:
+Convert always re-encodes the selected video. The operator selects HEVC or H.264
+and chooses a compatible encoder reported by the engine. The source resolution
+is the default. The smaller resolution choices are 2160p, 1080p, 720p and 480p,
+and the API prevents upscaling.
 
-- Codec: HEVC or H.264.
-- Resolution: original, 2160p, 1080p, 720p or 480p; the API prevents upscaling.
-- Quality: highest, high (default), balanced or small.
-- Encoder: Auto, VAAPI or Software; hardware fallback remains the engine's job.
+With native encoder quality support, the encoder choice is explicit. The slider
+and numeric input show the chosen parameter and value using that encoder's
+reported limits and default. For software H.264 and HEVC the parameter is CRF.
+For VAAPI or AMD AMF it is QP. For VideoToolbox it is `q:v`. Higher detail is to
+the right. CRF and QP decrease in that direction, while `q:v` increases. Guidance
+describes the controls and practical reference values. For example, HEVC on the
+CPU used CRF 18 for the former Highest preset, and CRF 16 or 14 allows a comparison
+at lighter compression.
 
-A quality level travels to every encoder; it is not a software-only CRF. The engine
-maps it to its selected encoder's rate control. The selected video's dynamic-range
+Native requests send `encoderQuality` with the requested codec and encoder.
+The selected parameter and value appear on the job and survive export retries.
+A job whose chosen encoder is unavailable reports an error. Engines that omit
+`encoderQualityOptions` use the older preset control. The selected video's dynamic-range
 warning distinguishes Dolby Vision profiles, HDR10+ and unknown profile data.
 Dolby Vision profile rewriting is offered only by Remux.
 
@@ -68,12 +77,13 @@ Atmos/DTS:X loss when applicable. Separate audio remains copied. Remux sends the
 audio targets with the video codec set to copy, including when Dolby Vision
 profile rewriting is selected.
 
-The size estimate uses only selected tracks and their recorded bitrates. Encoding
+Remux and preset-based conversion estimate size from selected tracks and their recorded bitrates. Encoding
 applies the quality share and target-resolution ratio to the selected video.
 Missing copied-track bitrate or duration yields an unavailable estimate; container
 bitrate is never substituted. Audio re-encode estimates use the target bitrate,
 even when the source track's bitrate is unknown.
 The UI describes the result as approximate because content determines actual size.
+Native quality controls show the chosen setting. The resulting file size depends on the material.
 
 ## Request and compatibility
 
@@ -108,10 +118,12 @@ dialogs edit names only. See [stream titles](../stream-title-editing/feature.md)
 
 - `track-actions.test.ts`: exact selections, eligibility, ownership, stale IDs,
   name edits, copy/encode payloads, selected audio settings and size estimates
-  for both operations, including unknown source audio bitrates.
+  for both operations, including unknown source audio bitrates. Native quality
+  sends the selected number with the chosen encoder.
 - `detail.spec.ts`: keyboard selection, collapse persistence, one-container scope,
   fixed dialogs, video/sidecar names, fresh defaults, errors, movie/episode parity,
-  codec/resolution/quality/encoder controls and capability/Dolby Vision gates.
+  codec/resolution/quality/encoder controls, native parameter direction, valid
+  input bounds, and capability/Dolby Vision gates.
   Remux audio conversion preserves video copy, targets only checked embedded audio,
   shows downmix/object-audio warnings, updates estimates and resets on reopening.
 - `TranscodeServiceConversionTests`, `StreamMetadataEditTests` and

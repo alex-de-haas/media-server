@@ -164,6 +164,9 @@ public sealed class TranscodeOutputImporter(
         }
 
         var codec = string.Equals(video?.Codec, "h264", StringComparison.OrdinalIgnoreCase) ? "H.264" : "HEVC";
-        return height is { } encodeHeight ? $"{codec} {encodeHeight}p" : codec;
+        var label = height is { } encodeHeight ? $"{codec} {encodeHeight}p" : codec;
+        return job.EncoderQuality is { } quality
+            ? $"{label} {TranscodeService.FormatEncoderQuality(job.HardwareAcceleration, quality)}"
+            : label;
     }
 }

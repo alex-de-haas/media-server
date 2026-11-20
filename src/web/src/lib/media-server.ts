@@ -884,7 +884,19 @@ async function send(path: string, method: string, body?: unknown): Promise<void>
   });
 }
 
-// A transcode job: re-encode one movie source into a smaller sibling version, run by the external
+export type EncoderQualityParameter = "crf" | "qp" | "q:v";
+
+export interface EncoderQualityOption {
+  videoCodec: "hevc" | "h264";
+  hardwareAcceleration: "none" | "vaapi" | "amf" | "videotoolbox";
+  parameter: EncoderQualityParameter;
+  min: number;
+  max: number;
+  step: number;
+  defaultValue: number;
+}
+
+// A transcode job: re-encode one movie source into a sibling version, run by the external
 // transcode-engine. Persisted facts plus the live engine snapshot (fps/speed/eta/outputSize are null
 // unless the job is running).
 export interface TranscodeJob {
@@ -906,8 +918,10 @@ export interface TranscodeJob {
   outputPaths: string[];
   videoCodec: string;
   hardwareAcceleration: string;
-  /** "highest" | "high" | "balanced" | "small"; null when the video was copied. */
+  /** "highest" | "high" | "balanced" | "small"; null when using a native quality value or copying video. */
   qualityLevel: string | null;
+  encoderQuality?: number | null;
+  encoderQualityParameter?: EncoderQualityParameter | null;
   /** How many audio tracks this job re-encoded rather than copied. */
   reEncodedAudioTracks: number;
   /** "toProfile81" when the copy also rewrote the picture's Dolby Vision to profile 8.1; null otherwise. */
@@ -931,12 +945,10 @@ export interface CreateTranscodeInput {
   sourceId: string;
   videoCodec?: string;
   hardwareAcceleration?: string;
-  /**
-   * How much picture to spend bits on: "highest" | "high" (default) | "balanced" | "small". Not a CRF — the
-   * engine maps it onto whichever encoder the host reaches, so the same level means the same picture on all
-   * of them. Rejected when videoCodec is "copy".
-   */
+  /** Legacy presets mapped to each encoder by the engine. Rejected when videoCodec is "copy". */
   qualityLevel?: string | null;
+  /** Native quality value for the selected codec and encoder. Mutually exclusive with qualityLevel. */
+  encoderQuality?: number | null;
   /** Downscale target height; omit to keep the source resolution. Ignored when videoCodec is "copy". */
   maxHeight?: number | null;
   /** Source stream indexes to copy; omit to copy all of that type. */
@@ -1044,7 +1056,14 @@ export const mediaServer = {
 
   // Whether the transcode-engine dependency is attached. The Media tab works without it — versions and the
   // default-version pick are database-side — so only the conversion controls key off this.
-  transcodeAvailability: () => apiJson<{ available: boolean; dolbyVisionConversion: boolean; videoPartJoining?: boolean; blurayImport?: boolean; explicitVideoSelection?: boolean }>(`${BASE}/transcode/availability`),
+  transcodeAvailability: () => apiJson<{
+    available: boolean;
+    dolbyVisionConversion: boolean;
+    videoPartJoining?: boolean;
+    blurayImport?: boolean;
+    explicitVideoSelection?: boolean;
+    encoderQualityOptions?: EncoderQualityOption[] | null;
+  }>(`${BASE}/transcode/availability`),
   // The language tags a track edit may carry, from the service that validates them — so the dialog cannot
   // accept a value the API then refuses.
   transcodeLanguages: () => apiJson<string[]>(`${BASE}/transcode/languages`),

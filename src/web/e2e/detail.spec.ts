@@ -512,7 +512,7 @@ test("Convert exposes encoding controls and selected audio settings; cancelled o
   await expect(dialog.getByRole("checkbox", { name: /Re-encode Audio track 2/ })).not.toBeChecked();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Convert", exact: true }).click();
-  await expect(dialog.getByLabel("Quality", { exact: true })).toContainText("High — recommended");
+  await expect(dialog.getByLabel("Quality", { exact: true }).locator('[data-slot="select-value"]')).toHaveText("High");
   await expect(dialog.getByRole("checkbox", { name: /Re-encode Audio track 2/ })).not.toBeChecked();
   await dialog.getByLabel("Codec", { exact: true }).click();
   await page.getByRole("option", { name: /H.264 —/ }).click();
@@ -522,6 +522,115 @@ test("Convert exposes encoding controls and selected audio settings; cancelled o
   const submitted = page.waitForRequest(request => request.url().endsWith("/transcode") && request.method() === "POST");
   await dialog.getByRole("button", { name: "Start convert" }).click();
   expect((await submitted).postDataJSON()).toMatchObject({ versionName: "Convert", videoCodec: "h264", videoStreamIndex: 0, maxHeight: 720, qualityLevel: "high", audioTargets: [{ streamId: "a0", codec: "eac3", bitrate: 640 }] });
+});
+
+test("native encoder quality requires an explicit codec and accepts fractional CRF", async ({ page }) => {
+  const retryError = "The selected encoder is unavailable for this video codec.";
+  await setupApp(page, { detail: { m1: escapeFromNewYork() }, transcodeAvailable: true,
+    encoderQualityOptions: [{ videoCodec: "hevc", hardwareAcceleration: "none", parameter: "crf", min: 0, max: 51, step: 0.01, defaultValue: 20 }],
+    transcodeJobs: [{
+      ...aTranscodeJob("job-crf", "m1", "Existing conversion", "Queued"),
+      hardwareAcceleration: "none", qualityLevel: null, encoderQuality: 0, encoderQualityParameter: "crf",
+      outputMountLabel: "results", percentComplete: 0, error: retryError,
+    }] });
+  await openTrackGrid(page);
+  await expect(page.getByText(/HEVC · CRF 0/)).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: retryError })).toBeVisible();
+  await page.getByRole("button", { name: "Convert", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const slider = dialog.getByRole("slider", { name: "CRF slider" });
+  const manual = dialog.getByRole("spinbutton", { name: "Quality (CRF)" });
+  const start = dialog.getByRole("button", { name: "Start convert" });
+  await expect(slider).toHaveCount(0);
+  await expect(start).toBeDisabled();
+  await expect(dialog.getByLabel("Encoder", { exact: true })).toBeDisabled();
+  await dialog.getByLabel("Codec", { exact: true }).click();
+  await expect(page.getByRole("option", { name: /H.264 —/ })).toHaveCount(0);
+  await page.getByRole("option", { name: /HEVC/ }).click();
+  await dialog.getByLabel("Encoder", { exact: true }).click();
+  await expect(page.getByRole("option", { name: /Auto/ })).toHaveCount(0);
+  await page.getByRole("option", { name: "Software — CPU" }).click();
+  await expect(manual).toHaveValue("20");
+  await expect(dialog.getByText(/CRF 18 was the previous Highest preset/)).toBeVisible();
+  await expect(dialog.getByLabel("Quality", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel("Resolution", { exact: true })).toContainText("Keep original");
+  await expect(dialog.getByText(/approximately|size estimate unavailable/)).toHaveCount(0);
+  await slider.press("Home");
+  await expect(manual).toHaveValue("51");
+  await slider.press("End");
+  await expect(manual).toHaveValue("0");
+  await manual.fill("52");
+  await expect(start).toBeDisabled();
+  await expect(dialog.getByText(/Enter a value for CRF from 0 to 51/)).toBeVisible();
+  await manual.fill("14.555");
+  await expect(start).toBeDisabled();
+  await manual.fill("14.5");
+  const submitted = page.waitForRequest(request => request.url().endsWith("/transcode") && request.method() === "POST");
+  await start.click();
+  const payload = (await submitted).postDataJSON();
+  expect(payload).toMatchObject({ videoCodec: "hevc", hardwareAcceleration: "none", encoderQuality: 14.5,
+    maxHeight: null, audioStreamIndexes: [1], subtitleStreamIndexes: [2] });
+  expect(payload).not.toHaveProperty("qualityLevel");
+});
+
+test("native encoder quality filters choices by codec and uses the selected hardware scale", async ({ page }) => {
+  await setupApp(page, { detail: { m1: escapeFromNewYork() }, transcodeAvailable: true, encoderQualityOptions: [
+    { videoCodec: "hevc", hardwareAcceleration: "vaapi", parameter: "qp", min: 0, max: 51, step: 1, defaultValue: 24 },
+    { videoCodec: "h264", hardwareAcceleration: "videotoolbox", parameter: "q:v", min: 1, max: 100, step: 1, defaultValue: 67 },
+  ] });
+  await openTrackGrid(page);
+  await page.getByRole("button", { name: "Convert", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const codec = dialog.getByLabel("Codec", { exact: true });
+  const encoder = dialog.getByLabel("Encoder", { exact: true });
+  const start = dialog.getByRole("button", { name: "Start convert" });
+  await codec.click();
+  await page.getByRole("option", { name: /HEVC/ }).click();
+  await encoder.click();
+  await expect(page.getByRole("option", { name: /VideoToolbox/ })).toHaveCount(0);
+  await page.getByRole("option", { name: "VAAPI — GPU" }).click();
+  const qp = dialog.getByRole("spinbutton", { name: "Quality (QP)" });
+  await expect(qp).toHaveValue("24");
+  await dialog.getByRole("slider", { name: "QP slider" }).press("ArrowRight");
+  await expect(qp).toHaveValue("23");
+  await qp.fill("23.5");
+  await expect(start).toBeDisabled();
+  await codec.click();
+  await page.getByRole("option", { name: /H.264 —/ }).click();
+  await expect(qp).toHaveCount(0);
+  await expect(start).toBeDisabled();
+  await encoder.click();
+  await expect(page.getByRole("option", { name: /VAAPI/ })).toHaveCount(0);
+  await page.getByRole("option", { name: "VideoToolbox — GPU" }).click();
+  const qv = dialog.getByRole("spinbutton", { name: "Quality (q:v)" });
+  await expect(qv).toHaveValue("67");
+  await dialog.getByRole("slider", { name: "q:v slider" }).press("ArrowRight");
+  await expect(qv).toHaveValue("68");
+  const submitted = page.waitForRequest(request => request.url().endsWith("/transcode") && request.method() === "POST");
+  await start.click();
+  expect((await submitted).postDataJSON()).toMatchObject({ videoCodec: "h264", hardwareAcceleration: "videotoolbox", encoderQuality: 68 });
+});
+
+test("software HEVC keeps quality presets on older transcode engines", async ({ page }) => {
+  await setupApp(page, { detail: { m1: escapeFromNewYork() }, transcodeAvailable: true });
+  await openTrackGrid(page);
+  await page.getByRole("button", { name: "Convert", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Encoder", { exact: true }).click();
+  await page.getByRole("option", { name: "Software — CPU" }).click();
+  await expect(dialog.getByLabel("Quality", { exact: true }).locator('[data-slot="select-value"]')).toHaveText("High");
+  await expect(dialog.getByRole("slider")).toHaveCount(0);
+});
+
+test("native encoder quality does not offer legacy Auto when the engine has no encoder", async ({ page }) => {
+  await setupApp(page, { detail: { m1: escapeFromNewYork() }, transcodeAvailable: true, encoderQualityOptions: [] });
+  await openTrackGrid(page);
+  await page.getByRole("button", { name: "Convert", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Codec", { exact: true })).toBeDisabled();
+  await expect(dialog.getByLabel("Encoder", { exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("alert")).toContainText("No video encoder is available.");
+  await expect(dialog.getByRole("button", { name: "Start convert" })).toBeDisabled();
 });
 
 for (const available of [true, false]) {
