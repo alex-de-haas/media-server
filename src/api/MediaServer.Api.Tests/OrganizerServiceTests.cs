@@ -445,8 +445,8 @@ public sealed class OrganizerServiceTests : IDisposable
         foreach (var path in new[] { canonical, version2, firstFile.RelativePath, secondFile.RelativePath })
         {
             var read = Assert.Single(_commands.Reads, read => read.Parameters.Contains(path));
-            Assert.Contains("\"Path\" COLLATE organizer_path =", read.Sql);
-            Assert.Contains("\"RelativePath\" COLLATE organizer_path =", read.Sql);
+            Assert.Contains("\"Path\" COLLATE \"organizer_path\" =", read.Sql);
+            Assert.Contains("\"RelativePath\" COLLATE \"organizer_path\" =", read.Sql);
         }
 
         _commands.Reads.Clear();

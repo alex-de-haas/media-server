@@ -12,7 +12,7 @@ Feature documentation and plans live in [`docs/`](docs/root.md).
 ```text
 manifest.json              # Hosty app manifest (app.0.1)
 src/
-  api/                     # .NET 10 backend (api service): Minimal API, EF Core + SQLite
+  api/                     # .NET 11 backend (api service): Minimal API, EF Core + SQLite
   web/                     # Next.js 16 frontend + BFF (web service): App Router, Tailwind, shadcn/ui
 scripts/
   dev.sh                   # one-shot dev launch via Hosty Core
@@ -35,7 +35,7 @@ Two services run under Hosty Core:
 
 ## Local development (dev runtime)
 
-Requires the [Hosty CLI](../docker-host), .NET 10 SDK, Node 24, and pnpm 11.
+Requires the [Hosty CLI](../docker-host), .NET 11 SDK, Node 24, and pnpm 11.
 
 The app runs **only** under Hosty Core — it needs Core for identity, catalog mounts,
 and `web`→`api` discovery. Do not run `next dev` / `dotnet run` standalone (Core

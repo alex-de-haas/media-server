@@ -92,13 +92,13 @@ public sealed class ManagementService(MediaServerDbContext db, MediaServerSettin
         var containers = Profile.Containers.ToArray();
         var facts = db.MediaSources.AsNoTracking()
             .Where(s => s.MediaItem!.PublicId != null && s.MediaItem.RemovedAt == null)
-            .Select(s => new
-            {
-                Source = s,
-                Picture = s.Streams.Where(t => t.StreamType == StreamType.Video && !t.IsExternal)
+            // Keep the top-ranked stream lookup scalar so SQLite can translate the left join.
+            .LeftJoin(db.MediaStreams,
+                s => s.Streams.Where(t => t.StreamType == StreamType.Video && !t.IsExternal)
                     .OrderBy(t => images.Contains((t.Codec ?? "").ToLower()) ? 1 : 0)
-                    .ThenBy(t => t.Index).Select(t => new { t.Codec, t.Width, t.Height, t.HdrFormat, t.DvProfile }).FirstOrDefault(),
-            })
+                    .ThenBy(t => t.Index).Select(t => (Guid?)t.Id).FirstOrDefault(),
+                t => (Guid?)t.Id,
+                (source, picture) => new { Source = source, Picture = picture })
             .Select(s => new SourceFacts
             {
                 Id = s.Source.Id, ItemId = s.Source.MediaItemId, Container = s.Source.Container.ToLower(),
