@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-10-12
+updated: 2026-11-21
 summary: The Next.js web app embedded in Hosty Shell that acts as a backend-for-frontend for the api service.
 ---
 
@@ -19,10 +19,10 @@ iframe-safe.
 
 Navigation is a **top tab bar**: primary tabs available to all users, with
 admin-only media management linked from contextual movie/series toolbars. Detail pages are push
-routes, not tabs. (Decisions recorded 2026-06-18.) The tab bar renders only in `standalone` launches;
-under a shell it is hidden as duplicated chrome — the shell renders the manifest
-`ui.navigation` pages instead (see the hosty-runtime-app feature's Launch Mode
-section).
+routes, not tabs. (Decisions recorded 2026-06-18.) Media Server renders its own tab bar when the Hosty SDK’s
+navigation policy makes it visible. Standalone launches show the bar by default.
+Shell can hide it when it renders the manifest’s `ui.navigation` pages.
+See [Launch Mode](../hosty-runtime-app/feature.md#launch-mode).
 
 - **Management** (`/manage/movies`, `/manage/series`) — administrator tables with
   source diagnostics, technical filters and expandable versions. See

@@ -9,7 +9,7 @@ import { apiJson, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RealtimeBridge } from "@/components/realtime-bridge";
 import type { SessionFailureStatus } from "@/lib/host-auth";
-import { SHELL_DUPLICATED_CHROME_CLASS } from "@hosty-sdk/app";
+import { HostyNavigationBoundary } from "@hosty-sdk/app/react";
 
 export interface Session {
   userId: string;
@@ -68,7 +68,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           horizontal scrollbar. `clip` (not `hidden`) doesn't create a scroll container, so the sticky
           TabBar below keeps sticking to the viewport. */}
       <div className="flex min-h-full flex-col overflow-x-clip">
-        <TabBar />
+        <HostyNavigationBoundary>
+          <TabBar />
+        </HostyNavigationBoundary>
         <main className={cn("mx-auto flex w-full flex-col gap-6 p-6", !isManagement && "max-w-5xl")}>
           {children}
         </main>
@@ -124,10 +126,8 @@ function TabBar() {
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   return (
-    // Wordmark plus the manifest `ui.navigation` pages — both drawn by a surrounding shell, so
-    // the whole header is marked as duplicated chrome and hidden there by globals.css.
-    <header className={cn("bg-background/80 sticky top-0 z-10 border-b backdrop-blur", SHELL_DUPLICATED_CHROME_CLASS)}>
-      <nav className="mx-auto flex w-full max-w-5xl items-center gap-5 overflow-x-auto px-4">
+    <header className="bg-background/80 sticky top-0 z-10 border-b backdrop-blur">
+      <nav aria-label="Media Server" className="mx-auto flex w-full max-w-5xl items-center gap-5 overflow-x-auto px-4">
         <span className="border-b-2 border-transparent py-3 pr-1 font-semibold tracking-tight">Media Server</span>
         {PRIMARY_TABS.map((tab) => (
           <TabLink key={tab.href} href={tab.href} label={tab.label} icon={tab.icon} active={isActive(tab.href)} />

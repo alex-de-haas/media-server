@@ -18,7 +18,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <HostyOverlay>
+      <HostyOverlay navigation={{ renderer: "custom" }}>
         <TooltipProvider>{children}</TooltipProvider>
         <Toaster />
       </HostyOverlay>

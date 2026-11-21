@@ -1,6 +1,6 @@
 ---
 created: 2026-09-01
-updated: 2026-10-26
+updated: 2026-11-21
 summary: Media Server use cases as MCP tools, plus the agent skill that teaches the server's vocabulary.
 ---
 
@@ -34,7 +34,7 @@ It is separate from ordinary app-session authentication; an app login grant alon
 not authorize tools. Legacy delegated tokens are validated locally with
 `HOSTY_DELEGATED_TOKEN_PUBLIC_KEY` and retain their existing tool permissions.
 
-Other bearers use `HostyScopedTokenClient.IntrospectMcpAsync` from HostySdk.App 0.8.0.
+Other bearers use `HostyScopedTokenClient.IntrospectMcpAsync` from `HostySdk.App` 0.20.0.
 The app asks Core on **every request**, including initialization and discovery, using
 its own service credential. There is no positive-token cache: revocation, disabled users,
 and removed app access take effect on the next request. Tool calls include the tool

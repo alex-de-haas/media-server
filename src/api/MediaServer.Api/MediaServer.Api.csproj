@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="HostySdk.App" Version="0.8.0" />
+    <PackageReference Include="HostySdk.App" Version="0.20.0" />
     <InternalsVisibleTo Include="MediaServer.Api.Tests" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0" />
     <PackageReference Include="Microsoft.OpenApi" Version="3.11.0" />

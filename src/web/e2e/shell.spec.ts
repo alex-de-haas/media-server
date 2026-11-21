@@ -12,6 +12,20 @@ test("renders the shell and navigates between tabs", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Movies" })).toBeVisible();
 });
 
+test("the host navigation hint controls the app tabs independently of launch mode", async ({ page }) => {
+  await setupApp(page);
+  const navigation = page.getByRole("navigation", { name: "Media Server" });
+  const heading = page.getByRole("heading", { name: "Movies", exact: true });
+
+  await page.goto("/movies?hosty_launch=standalone&hosty_navigation=hide");
+  await expect(heading).toBeVisible();
+  await expect(navigation).toBeHidden();
+
+  await page.goto("/movies?hosty_launch=embedded&hosty_navigation=show");
+  await expect(heading).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "Movies", exact: true })).toHaveAttribute("aria-current", "page");
+});
+
 test("direct navigation and refresh survive", async ({ page }) => {
   await setupApp(page, { library: [aMovie("m1", "Arrival")] });
 
