@@ -1,6 +1,6 @@
 ---
 created: 2026-06-15
-updated: 2026-10-08
+updated: 2026-11-21
 summary: The Hosty manifest, runtime profiles, environment, identity, user directory and backups of Media Server.
 ---
 
@@ -154,10 +154,10 @@ only after identity and required-permission readiness. The existing `/api/auth/s
 continues to provide the app-owned profile and role for page queries. JSON API requests and SSE connections use SDK
 `appFetch` on the same app origin and refuse credential-bearing redirects.
 
-The web dependency is `@hosty-sdk/app: ^0.22.1`, with published SDK 0.22.1 resolved
-in the registry lockfile. The [Hosty Overlay](../hosty-overlay/feature.md) owns the
-access presentation. The app retains proof-aware exchange, asynchronous
-recovery and its existing session/profile API.
+The web app depends on `@hosty-sdk/app` at `^0.54.0`. Its pnpm lockfile resolves
+version `0.54.0`. The .NET API uses `HostySdk.App` version `0.20.0`. The SDK owns
+the access overlay. The app retains proof-aware exchange, asynchronous recovery and
+its session/profile API. See [Hosty Overlay](../hosty-overlay/feature.md).
 
 1. Every sign-in attempt has an independent cryptographically random private
    verifier and public state. The SDK derives a public S256 challenge using the
@@ -364,18 +364,20 @@ The `web` UI runs inside the Hosty Shell sandboxed iframe. It must:
 
 ### Launch Mode
 
-The root layout runs the app SDK's `launchModeBootstrapScript` in `<head>` and mounts
-`HostLaunchBridge`, which resolve the launch mode — a shell-declared `hosty_launch`
-query parameter (`embedded`, `native`, or `standalone`) first, then the value
-persisted for the tab, then the frame heuristic — and stamp it onto `<html>` as
-`data-hosty-launch`. The top tab bar (wordmark plus the manifest `ui.navigation`
-pages) carries the SDK's `hosty-shell-chrome` class and is hidden by an unlayered
-CSS rule whenever the mode is not `standalone`, because a surrounding shell already
-renders that navigation. Session recovery follows the resolved embedded, native
-or standalone launch mode: embedded initial-load silent recovery and popup
-renewal, native intercepted proof navigation and correlated in-place completion,
-or standalone guarded Core navigation. Shell does not mint or exchange app grants
-on behalf of the frame.
+The root layout runs `launchModeBootstrapScript` in `<head>` and mounts
+`HostLaunchBridge`. The SDK resolves `hosty_launch` from the query parameter,
+then from the value stored for the tab, then from the frame context. It records
+the result in `data-hosty-launch`. Session recovery follows that mode. Embedded
+launches use initial silent recovery and popup renewal, native launches use
+intercepted proof navigation and correlated in-place completion, and standalone
+launches use guarded navigation to Core.
+
+The app renders its own top tab bar. In `<head>`, `chromeBootstrapScript` sets
+initial navigation visibility from the launch hints. `HostyNavigationBoundary`
+then applies the SDK’s effective navigation policy to the tab bar as the host
+sends updates. For example, `hosty_navigation=hide` hides the bar on a standalone
+launch and `hosty_navigation=show` displays it on an embedded launch when the
+host supplies no overriding policy.
 
 ## Capabilities
 
@@ -417,9 +419,9 @@ browser sign-in flow.
   Core materializing the declared Git source and the web setup installing from
   the checked-in pnpm lockfile. Preserve the complete Docker runtime, API dev
   runtime and production default; the web dev runtime changes only its setup.
-- After changes to the tab bar or the launch bridges, verify a plain tab shows
-  the tab bar while `?hosty_launch=embedded` hides it, and that the parameter is
-  cleaned from the URL.
+- Verify tab-bar visibility with the standalone and embedded defaults and with
+  explicit navigation hints. Check that the SDK removes consumed hints from the
+  URL and that session recovery still follows the launch mode.
 
 - Cover the app identity probe status, asynchronous recovery protocol metadata
   and activity metadata, plus bearer transport for JSON and SSE requests and

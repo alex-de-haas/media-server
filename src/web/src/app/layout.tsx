@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { launchModeBootstrapScript } from "@hosty-sdk/app";
+import { chromeBootstrapScript, launchModeBootstrapScript } from "@hosty-sdk/app";
 import { HostLaunchBridge, HostThemeBridge } from "@hosty-sdk/app/react";
 import { themeBootstrapScript } from "@hosty-sdk/app/theme";
 import { Providers } from "@/components/providers";
@@ -38,6 +38,7 @@ export default function RootLayout({
       <head>
         {/* Ahead of any body markup, so chrome a shell already renders is never painted, and the
             first paint is already in the shell's theme. */}
+        <script dangerouslySetInnerHTML={{ __html: chromeBootstrapScript() }} />
         <script dangerouslySetInnerHTML={{ __html: launchModeBootstrapScript }} />
         <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
       </head>

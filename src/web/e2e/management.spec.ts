@@ -265,7 +265,7 @@ test("technical filters, server ordering and paging preserve URL context", async
   await expect(page).toHaveURL(/sort=title/);
   await page.getByRole("button", { name: "Go to next page", exact: true }).click();
   await expect(page).toHaveURL(/offset=25/);
-  expect(requests.some(query => query.includes("resolution=2160p") && query.includes("offset=25"))).toBe(true);
+  await expect.poll(() => requests.some(query => query.includes("resolution=2160p") && query.includes("offset=25"))).toBe(true);
   await page.reload();
   await expect(page.getByRole("button", { name: "2 selected", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "2 selected", exact: true }).click();
